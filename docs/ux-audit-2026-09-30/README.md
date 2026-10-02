@@ -1,7 +1,9 @@
 # Lightwork UX audit implementation
 
-This register tracks the requested consolidation into draft PR #2528. It is an
-implementation worklist, not acceptance or release evidence.
+This register was assembled for draft PR #2528 and is now included in the
+consolidated draft PR #2529. It is an implementation worklist, not acceptance
+or release evidence. The qualification notes below preserve their dated
+checkpoints; the current integrated results and blockers are in PR #2529.
 
 Start with the [review guide](review-guide.md) and
 [195-entry checklist](implementation-checklist.md); the complete
@@ -16,13 +18,13 @@ focused and full-suite checkpoints.
   Library parts, each checked for its expected entry count and end marker.
   `source-provenance.json` records the resolved source parts.
 - Local tests and synthetic application journeys were authorized after the
-  earlier test deferral. The user subsequently said "okay stop testing it";
-  active testing is stopped and all queued phases are cancelled. Completed and
-  interrupted results are preserved in the local qualification record.
-  Live provider calls remain excluded. Historical
-  slice validation notes describe their original checkpoints, not a prohibition
-  on subsequent local verification.
-- No merge, deployment, credential changes, or production changes are authorized.
+  earlier test deferral. At the PR #2528 checkpoint, the user said "okay stop
+  testing it"; that run stopped and its queued phases were cancelled.
+  Completed and interrupted results are preserved in the local qualification
+  record. Subsequent authorized local verification for PR #2529 is tracked
+  separately. Live provider calls remain excluded.
+- No merge, deployment, credential changes, or production changes are recorded
+  by this UX-audit register.
 
 ## Work sequence
 

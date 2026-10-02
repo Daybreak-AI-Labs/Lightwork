@@ -680,6 +680,12 @@ def _workspace_options(request: Request) -> tuple[list[dict], str]:
             for rec in list_tenants()
             if rec.active and (visible is None or rec.id in visible)
         ]
+        from .workspace_display import duplicate_workspace_ids
+
+        duplicates = duplicate_workspace_ids((row["id"], row["name"]) for row in options)
+        for row in options:
+            if row["id"] in duplicates:
+                row["name"] += f" (Reference: {row['id']})"
     except Exception:
         options = []
     try:

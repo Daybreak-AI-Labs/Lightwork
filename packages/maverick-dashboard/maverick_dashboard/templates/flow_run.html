@@ -491,7 +491,10 @@
     var meta = document.getElementById('fr-meta');
     if (meta) {
       var bits = [];
-      if (run.origin && run.origin !== 'manual') bits.push(ORIGIN[run.origin] || human(run.origin));
+      if (run.origin && run.origin !== 'manual') bits.push(
+        run.origin.indexOf('event:v2:') === 0
+          ? 'Started by ' + human(run.origin.split(':').slice(4).join(':'))
+          : (ORIGIN[run.origin] || human(run.origin)));
       else bits.push('Started by hand');
       if (run.cost_dollars) bits.push('cost $' + Number(run.cost_dollars).toFixed(2));
       meta.textContent = bits.join(' · ');

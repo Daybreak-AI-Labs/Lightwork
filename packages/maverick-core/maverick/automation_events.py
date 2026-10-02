@@ -20,6 +20,7 @@ polling reaches out to third-party endpoints, so the operator opts in
 from __future__ import annotations
 
 import json
+import re
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -668,25 +669,40 @@ def _fetch_imap(config: dict, since_uid: int | None,
     import email
     import imaplib
     import os
-    from email.utils import parseaddr
+    import ssl
+
+    from maverick.mail_auth import authenticated_from, valid_trusted_mail_server
 
     host = str((config or {}).get("host") or "").strip()
     user = str((config or {}).get("username") or "").strip()
     pw_env = str((config or {}).get("password_env") or "").strip()
     if not (host and user and pw_env):
         raise EventSourceError("imap_email source needs 'host', 'username', 'password_env'")
+    trusted_server = str((config or {}).get("trusted_authserv_id") or "").strip()
+    if not valid_trusted_mail_server(trusted_server):
+        raise EventSourceError("Choose the server that checks incoming mail before this automation can start work")
+    raw_senders = (config or {}).get("allowed_senders") or ""
+    senders = (raw_senders.split(",") if isinstance(raw_senders, str) else raw_senders)
+    if not isinstance(senders, list) or not 1 <= len(senders) <= 200 or not any(
+        str(sender).strip() for sender in senders
+    ):
+        raise EventSourceError("Choose permitted email senders before this automation can start work")
+    allowed_senders = {str(sender).strip().lower() for sender in senders}
+    if any(not re.fullmatch(r"[^@\s,]+@[A-Za-z0-9.-]+", sender) or ".." in sender
+           for sender in allowed_senders):
+        raise EventSourceError("Permitted email senders must be full email addresses")
     password = os.environ.get(pw_env) or ""
     if not password:
         raise EventSourceError(f"imap_email: env var {pw_env} is unset")
     mailbox = str((config or {}).get("mailbox") or "INBOX")
     port = int((config or {}).get("port") or 993)
-    use_ssl = bool((config or {}).get("use_ssl", True))
+    if (config or {}).get("use_ssl", True) is not True:
+        raise EventSourceError("An encrypted mail connection is required before this automation can start work")
     include_body = bool((config or {}).get("include_body", False))
     # Headers-only is cheaper; fetch the full message only when the flow needs the
     # body to act on (opt-in), then extract the text/plain part (bounded).
     fetch_spec = "(RFC822)" if include_body else "(RFC822.HEADER)"
-    cls = imaplib.IMAP4_SSL if use_ssl else imaplib.IMAP4
-    conn = cls(host, port)
+    conn = imaplib.IMAP4_SSL(host, port, ssl_context=ssl.create_default_context(), timeout=30)
     try:
         typ, _ = conn.login(user, password)
         if typ != "OK":
@@ -718,9 +734,14 @@ def _fetch_imap(config: dict, since_uid: int | None,
             if typ != "OK" or not mdata or not isinstance(mdata[0], tuple):
                 raise EventSourceError("IMAP message fetch failed; cursor retained")
             msg = email.message_from_bytes(mdata[0][1])
+            sender = authenticated_from(msg, trusted_server)
+            highest = max(highest, uid)
+            if not sender or sender.lower() not in allowed_senders:
+                continue
             rec = {
                 "id": f"{validity}:{uid}", "uid": uid,
-                "from": parseaddr(msg.get("From", ""))[1],
+                "from": sender,
+                "_sender_auth": "trusted_dmarc_pass",
                 "subject": str(msg.get("Subject", "")),
                 "date": str(msg.get("Date", "")),
                 "message_id": str(msg.get("Message-ID", "")),
@@ -728,7 +749,6 @@ def _fetch_imap(config: dict, since_uid: int | None,
             if include_body:
                 rec["body"] = _email_body_text(msg)
             msgs.append(rec)
-            highest = max(highest, uid)
         return msgs, highest, validity
     finally:
         try:

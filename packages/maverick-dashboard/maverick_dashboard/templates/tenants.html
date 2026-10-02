@@ -88,13 +88,14 @@
         </thead>
         <tbody>
           {% for t in tenants %}
-            {% set name = t.display_name or (t.id | humanize) %}
-            <tr data-tenant-row="{{ t.id }}" data-tenant-name="{{ name }}">
-              <td>{{ name }}</td>
+            {% set name = t.display_name or t.id %}
+            {% set action_name = name ~ (' (' ~ t.id ~ ')' if t.id in duplicate_ids else '') %}
+            <tr data-tenant-row="{{ t.id }}" data-tenant-name="{{ action_name }}">
+              <td>{{ name }}{% if t.id in duplicate_ids %}<br><span class="muted">Reference: {{ t.id }}</span>{% endif %}</td>
               <td><span class="badge {{ 'active' if t.status == 'active' else 'blocked' }}">{{ 'Active' if t.status == 'active' else ('Paused' if t.status == 'suspended' else t.status | humanize) }}</span></td>
               {% if billing_on %}
               <td>
-                <label class="sr-only" for="plan-{{ loop.index }}">Plan for {{ name }}</label>
+                  <label class="sr-only" for="plan-{{ loop.index }}">Plan for {{ action_name }}</label>
                 <select class="select" id="plan-{{ loop.index }}" data-tenant-plan="{{ t.id }}" data-current="{{ t.plan }}">
                   {% for p in ('free', 'pro', 'enterprise') %}<option value="{{ p }}"{% if t.plan == p %} selected{% endif %}>{{ p | capitalize }}</option>{% endfor %}
                 </select>
@@ -103,22 +104,22 @@
               <td>
                 <form class="tenant-quota" data-tenant="{{ t.id }}">
                   <label><input type="checkbox" name="no_limit" data-limit-toggle{% if not t.max_daily_dollars %} checked{% endif %}
-                                aria-label="No daily limit for {{ name }}"> No limit</label>
+                                aria-label="No daily limit for {{ action_name }}"> No limit</label>
                   <input class="input tenants-amount" name="max_daily_dollars" type="number" min="0.01" step="0.01" data-limit-amount
                          value="{{ '%g' % t.max_daily_dollars if t.max_daily_dollars else '' }}"
-                         aria-label="Daily limit for {{ name }} in US dollars"{% if not t.max_daily_dollars %} disabled{% endif %}>
-                  <button type="submit" class="btn" aria-label="Save daily limit for {{ name }}">Save</button>
+                         aria-label="Daily limit for {{ action_name }} in US dollars"{% if not t.max_daily_dollars %} disabled{% endif %}>
+                  <button type="submit" class="btn" aria-label="Save daily limit for {{ action_name }}">Save</button>
                   <span class="muted">{% if t.max_daily_dollars %}${{ '%g' % t.max_daily_dollars }}/day{% else %}No limit{% endif %}</span>
                 </form>
               </td>
               <td class="tenants-actions">
-                <a class="btn btn--ghost" href="/tenants/{{ t.id | urlencode }}/features" aria-label="Manage features for {{ name }}">Features</a>
+                <a class="btn btn--ghost" href="/tenants/{{ t.id | urlencode }}/features" aria-label="Manage features for {{ action_name }}">Features</a>
                 {% if t.status == 'active' %}
-                <button type="button" class="btn" data-tenant-action="suspend" aria-label="Pause {{ name }}">Pause</button>
+                <button type="button" class="btn" data-tenant-action="suspend" aria-label="Pause {{ action_name }}">Pause</button>
                 {% else %}
-                <button type="button" class="btn" data-tenant-action="resume" aria-label="Resume {{ name }}">Resume</button>
+                <button type="button" class="btn" data-tenant-action="resume" aria-label="Resume {{ action_name }}">Resume</button>
                 {% endif %}
-                <button type="button" class="btn btn--danger" data-tenant-action="delete" aria-label="Remove {{ name }}">Remove</button>
+                <button type="button" class="btn btn--danger" data-tenant-action="delete" aria-label="Remove {{ action_name }}">Remove</button>
               </td>
             </tr>
           {% endfor %}

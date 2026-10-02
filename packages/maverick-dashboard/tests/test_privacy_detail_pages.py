@@ -110,6 +110,28 @@ def test_vendor_detail_shows_checked_reply_state_and_read_failure(monkeypatch):
     assert "private storage detail" not in unavailable.text
 
 
+def test_vendor_detail_offers_link_replacement_without_exposing_old_address():
+    from maverick import form_store
+    from maverick import vendor_management as vm
+
+    sent = _vendor()
+    old_token = sent["questionnaires"][0]["token"]
+    form_store.append(old_token, {"vr_q1": "yes"})
+    replaced = vm.replace_questionnaire_link(
+        sent["id"], vm.lookup_digest(old_token), actor="ops",
+        expected_revision=sent["revision"],
+    )
+    new_token = replaced["questionnaires"][0]["token"]
+    page = client.get(f"/privacy/vendors/{sent['id']}")
+    assert page.status_code == 200
+    assert "Replace link" in page.text
+    assert "Copy link" in page.text
+    assert "View replies" in page.text
+    assert "1 earlier reply retained" in page.text
+    assert old_token not in page.text
+    assert new_token not in page.text
+
+
 def test_vendor_detail_404_and_403(tmp_path):
     from maverick import config
 

@@ -88,6 +88,10 @@ class QuestionnaireResponsesUnavailable(VendorManagementError):
     """A questionnaire's stored replies could not be checked."""
 
 
+class QuestionnaireLinkUnavailable(VendorManagementError):
+    """An existing public link could not be safely retired."""
+
+
 def get_vendor_management_config() -> dict[str, Any]:
     from .config import load_global_config
 
@@ -314,6 +318,72 @@ def request_questionnaire(
     return {**dict(saved), "form_path": f"/form/{token}"}
 
 
+def replace_questionnaire_link(
+    vendor_id: str,
+    request_id: str,
+    *,
+    actor: str,
+    expected_revision: int,
+) -> dict[str, Any]:
+    """Replace one full or compromised form link without losing earlier replies.
+
+    The request ID is the digest of the current token, never the token itself.
+    Closing the old form happens inside the governed record's CAS mutation.
+    Its closure marker is durable and checked by append under the form lock, so
+    an in-flight submission cannot land *after* closure. A failed record write
+    can leave the old link closed; retrying this action repairs that safe state.
+    """
+    _require_enabled()
+    from . import form_store
+
+    if not isinstance(request_id, str) or len(request_id) != 64 or any(
+        char not in "0123456789abcdef" for char in request_id
+    ):
+        raise ValueError("questionnaire selection is invalid")
+    operator = _text(actor, "actor", 256)
+    token = secrets.token_urlsafe(24)
+
+    def mutate(value: dict[str, Any]) -> None:
+        rows = list(value.get("questionnaires") or [])
+        matches = [row for row in rows if isinstance(row, dict) and hmac.compare_digest(
+            lookup_digest(str(row.get("token") or "")), request_id,
+        )]
+        if len(matches) != 1:
+            raise KeyError("questionnaire link is no longer active")
+        current = matches[0]
+        old_token = str(current.get("token") or "")
+        previous = current.get("previous_links") or []
+        if not isinstance(previous, list) or any(
+            not isinstance(entry, dict) or not form_store.valid_token(entry.get("token"))
+            for entry in previous
+        ):
+            raise QuestionnaireLinkUnavailable("questionnaire history is unavailable")
+        try:
+            form_store.close_token(old_token)
+        except (OSError, form_store.FormStoreUnavailable, ValueError) as exc:
+            raise QuestionnaireLinkUnavailable("questionnaire link could not be replaced") from exc
+        now = time.time()
+        previous.append({
+            "token": old_token,
+            "requested_by": current.get("requested_by"),
+            "requested_at": current.get("requested_at"),
+            "replaced_by": operator,
+            "replaced_at": now,
+        })
+        current.update(token=token, status="sent", requested_by=operator,
+                       requested_at=now, previous_links=previous)
+        value["questionnaires"] = rows
+
+    saved = _VENDORS.update(
+        _text(vendor_id, "vendor_id", 64), mutate,
+        expected_revision=int(expected_revision),
+        action="replace_questionnaire_link", actor=operator,
+    )
+    if saved is None:
+        raise KeyError(f"vendor is not registered: {vendor_id}")
+    return {**dict(saved), "form_path": f"/form/{token}"}
+
+
 def questionnaire_responses(vendor_id: str) -> list[dict[str, Any]]:
     """The vendor's questionnaire requests with any hosted-form submissions."""
 
@@ -336,14 +406,46 @@ def questionnaire_responses(vendor_id: str) -> list[dict[str, Any]]:
                 "questionnaire replies could not be checked"
             ) from exc
         kind = str(row.get("assessment_type") or "")
+        previous_links = []
+        saved_history = row.get("previous_links") or []
+        if not isinstance(saved_history, list) or any(
+            not isinstance(previous, dict) or not form_store.valid_token(previous.get("token"))
+            for previous in saved_history
+        ):
+            raise QuestionnaireResponsesUnavailable("questionnaire history is unavailable")
+        for previous in saved_history:
+            previous_token = str(previous.get("token") or "")
+            try:
+                old_submissions, _cursor = form_store.since(previous_token, "0")
+            except Exception as exc:
+                raise QuestionnaireResponsesUnavailable(
+                    "questionnaire replies could not be checked"
+                ) from exc
+            previous_links.append({
+                "request_id": lookup_digest(previous_token),
+                "status": "replaced",
+                "requested_at": previous.get("requested_at"),
+                "requested_by": previous.get("requested_by"),
+                "replaced_at": previous.get("replaced_at"),
+                "replaced_by": previous.get("replaced_by"),
+                "reply_count": len(old_submissions),
+                "submissions": old_submissions[-10:],
+                "score": _score_submission(kind, old_submissions[-1]) if old_submissions else None,
+            })
         out.append(
             {
+                "request_id": lookup_digest(token),
                 "assessment_type": kind,
-                "status": "answered" if submissions else row.get("status"),
+                "questions": [{"id": question.id, "text": question.text}
+                              for question in _template_questions(kind)],
+                "status": "replaced" if form_store.is_closed(token) else
+                          "answered" if submissions else row.get("status"),
                 "requested_at": row.get("requested_at"),
                 "requested_by": row.get("requested_by"),
                 "form_path": f"/form/{token}",
-                "submissions": submissions[:10],
+                "reply_count": len(submissions),
+                "submissions": submissions[-10:],
+                "previous_links": previous_links,
                 # Latest submission scored against the template's risk
                 # answers -- the questionnaire's inherent-risk read-back.
                 "score": (
@@ -570,6 +672,8 @@ def questionnaire_for_token(token: str) -> dict[str, Any] | None:
         raise RecordLookupUnavailable("vendor questionnaire association is ambiguous")
     kind = str(matches[0].get("assessment_type") or "")
     from . import form_store
+    if form_store.is_closed(needle):
+        return None
     questions = _template_questions(kind)
     if len(questions) > int(getattr(form_store, "_MAX_FIELDS", 50)) - 1:
         raise RecordLookupUnavailable("vendor questionnaire exceeds the current submission field bound")

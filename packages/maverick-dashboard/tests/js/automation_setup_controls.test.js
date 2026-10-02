@@ -71,8 +71,15 @@ test("guided source fields keep typed values, tucked-away options and per-source
   assert.equal(ui.get("auto-source-recursive").checked, true);
   assert.equal(ui.get("auto-source-path").value, "inbound");
   ui.get("auto-event-source").value = "imap_email"; ui.context.changeSource();
+  assert.equal(ui.get("auto-source-trusted_authserv_id").required, true);
+  assert.equal(ui.get("auto-source-allowed_senders").required, true);
+  ui.get("auto-source-trusted_authserv_id").value = "mx.example.org";
+  ui.get("auto-source-trusted_authserv_id").listeners.input();
+  ui.get("auto-source-allowed_senders").value = "alice@example.org";
+  ui.get("auto-source-allowed_senders").listeners.input();
   ui.get("auto-source-port").value = "1993"; ui.get("auto-source-port").listeners.input();
   assert.equal(ui.context.readSourceConfig().port, 1993);
+  assert.equal(ui.context.readSourceConfig().allowed_senders, "alice@example.org");
 });
 
 test("extra settings are name and value rows, never a code box", async () => {
@@ -272,8 +279,51 @@ test("forms with waiting or unknown submissions cannot replace their links", asy
   vm.runInContext(source.slice(source.indexOf("    async function loadEventTriggers("),
     source.indexOf("    async function delEventTrigger(name)")), ui.context);
   await ui.context.loadEventTriggers();
-  assert.equal(ui.get("auto-event-list").children[0].children[1].children[3].disabled, true);
-  assert.equal(ui.get("auto-event-list").children[1].children[1].children[3].disabled, true);
+  for (const row of ui.get("auto-event-list").children) {
+    const replace = row.children[1].children.find(button => button.textContent === "Replace link");
+    assert.equal(replace.disabled, true);
+  }
+});
+
+test("a form owner can review received answers and record a do-not-run decision", async () => {
+  const ui = eventFixture(); await settle();
+  ui.context.loadRuns = () => {};
+  ui.context.mvConfirm = async () => true;
+  let decided = false, requestBody;
+  ui.context.fetch = async (url, options) => {
+    if (url === "/api/v1/event-triggers") return ui.reply({sources: ["form"], triggers: [
+      {name: "intake", source: "form", flow: "review", pending_submissions: 1,
+        binding_revision: "rev-1", config: {token: "link"}}
+    ]});
+    if (url.endsWith("/history?limit=500")) return ui.reply({history: []});
+    if (url.endsWith("/outcomes")) return ui.reply({outcomes: {}});
+    if (url === "/api/v1/event-triggers/intake/form-submissions") return ui.reply({
+      binding_revision: "rev-1", waiting_total: 1,
+      submissions: [{sequence: 1, received_at: 1, fields: {name: "Ada"},
+        fields_sha256: "digest", do_not_run: decided, reason: decided ? "Already handled by the team." : ""}]
+    });
+    if (url.endsWith("/form-submissions/1/do-not-run")) {
+      requestBody = JSON.parse(options.body); decided = true; return ui.reply({do_not_run: true});
+    }
+    throw new Error("Unexpected request " + url);
+  };
+  vm.runInContext(source.slice(source.indexOf("    async function loadEventTriggers("),
+    source.indexOf("    async function delEventTrigger(name)")), ui.context);
+  await ui.context.loadEventTriggers();
+  const entry = ui.get("auto-event-list").children[0];
+  const review = entry.children[1].children.find(button => button.textContent === "Review waiting submissions");
+  assert.ok(review);
+  await review.listeners.click();
+  await settle();
+  const panel = entry.children[0].children.at(-1);
+  assert.match(panel.textContent, /Ada/);
+  const form = panel.children[1].children[2];
+  form.children[0].children[0].value = "Already handled by the team.";
+  await form.listeners.submit({preventDefault() {}});
+  assert.equal(requestBody.expected_generation, "rev-1");
+  assert.equal(requestBody.expected_fields_sha256, "digest");
+  assert.match(panel.textContent, /Will not run/);
+  assert.match(ui.get("auto-event-msg").textContent, /Decision recorded/);
 });
 
 test("catalog picker offers only published flows and retains exact template parameter names", async () => {

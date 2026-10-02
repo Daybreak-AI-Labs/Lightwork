@@ -1847,7 +1847,10 @@
     var head = run.status === 'completed' ? '✓ Finished' : (run.status === 'rejected' ? '✋ Rejected' : '⚠ The run stopped with a problem');
     var cost = run.cost_dollars ? ' · $' + Number(run.cost_dollars).toFixed(2) : '';
     var ORIGINS = { webhook: 'started by another app', schedule: 'started on schedule', event_trigger: 'started by a new item' };
-    var origin = (run.origin && run.origin !== 'manual') ? ' · ' + (ORIGINS[run.origin] || human(run.origin)) : '';
+    var origin = (run.origin && run.origin !== 'manual')
+      ? ' · ' + (run.origin.indexOf('event:v2:') === 0
+        ? 'Started by ' + human(run.origin.split(':').slice(4).join(':'))
+        : (ORIGINS[run.origin] || human(run.origin))) : '';
     return head + ' · ' + ok + ' step' + (ok === 1 ? '' : 's') + ' worked' + (err ? ', ' + err + ' failed' : '') + cost + origin;
   }
   async function draft() {

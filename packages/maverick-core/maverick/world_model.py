@@ -31,6 +31,7 @@ from typing import Any
 from .attachment_submissions import SQLITE_SCHEMA as _ATTACHMENT_SUBMISSION_SCHEMA
 from .deadline_alerts import SQLITE_SCHEMA as _DEADLINE_ALERT_SCHEMA
 from .event_admission import SQLITE_SCHEMA as _EVENT_ADMISSION_SCHEMA
+from .event_admission import LegacyEventGoalHeld, compatible_event_goal
 from .file_lock import (
     atomic_create_bytes,
     cross_process_lock,
@@ -2114,20 +2115,42 @@ class WorldModel:
         # coarse/repeated or backwards wall time cannot reauthorize stale
         # bytes, even when independent connections mutate the same goal.
         now = time.time()
+        legacy_refused = False
         with self._writing() as conn:
-            cur = conn.execute(
+            if status in {"active", "running"}:
+                prior = conn.execute(
+                    "SELECT g.status,g.owner,o.kind,o.ref,a.trigger_key FROM goals g "
+                    "JOIN goal_origins o ON o.goal_id=g.id "
+                    "LEFT JOIN event_goal_admissions a ON a.goal_id=g.id "
+                    "WHERE g.id=? AND o.kind IN ('event','event_v2')", (int(goal_id),),
+                ).fetchone()
+                if (prior is not None and prior[0] not in {"active", "running"}
+                        and not compatible_event_goal(prior[2], prior[3], prior[1], prior[4])):
+                    legacy_refused = True
+                    if prior[0] == "pending":
+                        conn.execute(
+                            "UPDATE goals SET status='blocked', completed_at=NULL, "
+                            "updated_at=MAX(updated_at + 0.000001, ?), result=? "
+                            "WHERE id=? AND status='pending'",
+                            (now, _enc_field("Earlier event request held for review"), int(goal_id)),
+                        )
+                        conn.execute("DELETE FROM signoffs WHERE goal_id=?", (int(goal_id),))
+            if not legacy_refused:
+                cur = conn.execute(
                 "UPDATE goals SET completed_at = CASE WHEN ? <> 'done' THEN NULL "
                 "WHEN status = 'done' THEN completed_at "
                 "ELSE MAX(updated_at + 0.000001, ?) END, "
                 "status = ?, updated_at = MAX(updated_at + 0.000001, ?), "
                 "result = COALESCE(?, result) WHERE id = ?",
                 (status, now, status, now, _enc_field(result), goal_id),
-            )
+                )
             # A sign-off is authority over one immutable terminal payload, not
             # over a goal id forever.  Reruns, failures, and any result rewrite
             # revoke it atomically so old approval cannot authorize new bytes.
-            if cur.rowcount == 1 and (status != "done" or result is not None):
+            if not legacy_refused and cur.rowcount == 1 and (status != "done" or result is not None):
                 conn.execute("DELETE FROM signoffs WHERE goal_id = ?", (int(goal_id),))
+        if legacy_refused:
+            raise LegacyEventGoalHeld("Earlier event request held for review")
 
     def block_goal_admission(self, goal_id: int, *, result: str) -> bool:
         """Record a pre-dispatch refusal without replacing a terminal outcome."""
@@ -2236,6 +2259,26 @@ class WorldModel:
             sql += " AND owner = ?"
             params += (str(expected_owner),)
         with self._writing() as conn:
+            owner_clause = " AND g.owner=?" if expected_owner is not None else ""
+            legacy = conn.execute(
+                "SELECT g.owner,o.kind,o.ref,a.trigger_key FROM goals g "
+                "JOIN goal_origins o ON o.goal_id=g.id "
+                "LEFT JOIN event_goal_admissions a ON a.goal_id=g.id "
+                "WHERE g.id=? AND g.status='pending' "
+                "AND o.kind IN ('event','event_v2')" + owner_clause,
+                (int(goal_id), *((str(expected_owner),) if expected_owner is not None else ())),
+            ).fetchone()
+            if legacy is not None and not compatible_event_goal(
+                    legacy[1], legacy[2], legacy[0], legacy[3]):
+                conn.execute(
+                    "UPDATE goals SET status='blocked', completed_at=NULL, "
+                    "updated_at=MAX(updated_at + 0.000001, ?), result=? "
+                    "WHERE id=? AND status='pending'",
+                    (time.time(), _enc_field("Earlier event request held for review"),
+                     int(goal_id)),
+                )
+                conn.execute("DELETE FROM signoffs WHERE goal_id=?", (int(goal_id),))
+                return False
             cur = conn.execute(sql, params)
             return cur.rowcount == 1
 

@@ -1,6 +1,8 @@
 """The public POST /form/{token} endpoint that records hosted-form submissions."""
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 
 import pytest
@@ -545,10 +547,12 @@ def test_form_backlog_drains_in_bounded_polls(monkeypatch, tmp_path):
     monkeypatch.setattr(dashboard_app, "_goal_times", {})
     monkeypatch.setattr(dashboard_app, "_goal_times_global", deque())
     dispatched = []
+    enqueue = automation_queue.enqueue_published_flow_run
 
     def record_run(*args, **kwargs):
+        run_id = enqueue(*args, **kwargs)
         dispatched.append(args)
-        return f"run-{len(dispatched)}"
+        return run_id
 
     monkeypatch.setattr(automation_queue, "enqueue_published_flow_run", record_run)
     client = _client()
@@ -677,6 +681,198 @@ def test_unavailable_original_form_flow_keeps_accepted_submission_pending(monkey
         event_triggers_store.get_trigger("intake", tenant="")
     ) == 1
     assert client.delete("/api/v1/event-triggers/intake").status_code == 409
+
+
+def test_owner_can_record_exact_waiting_form_submission_without_losing_original(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    monkeypatch.setenv("MAVERICK_AUDIT_SIGN", "1")
+    monkeypatch.setenv("MAVERICK_AUDIT_SIGNING_KEY", hashlib.sha256(str(tmp_path).encode()).hexdigest())
+    _register_form("stale", name="intake")
+    from maverick import form_store
+    from maverick.flow import store as flow_store
+    from maverick_dashboard import event_triggers_store
+
+    client = _client()
+    assert client.post("/form/stale", json={"name": "customer answer"}).status_code == 201
+    original = form_store._path("stale").read_bytes()
+    published = flow_store.load_published_bundle("published-form-flow")
+    assert published is not None
+    flow = published[0]
+    assert flow_store.unpublish_flow(
+        flow.id, expected_version=flow.version, expected_revision=flow.revision,
+    )
+    waiting = client.get("/api/v1/event-triggers/intake/form-submissions")
+    assert waiting.status_code == 200
+    snapshot = waiting.json()
+    assert snapshot["waiting_total"] == 1
+    assert snapshot["submissions"][0]["fields"] == {"name": "customer answer"}
+    row = snapshot["submissions"][0]
+    body = {
+        "expected_generation": snapshot["binding_revision"],
+        "expected_fields_sha256": row["fields_sha256"],
+        "reason": "Handled outside this workflow after direct customer review.",
+    }
+    assert client.post(
+        "/api/v1/event-triggers/intake/form-submissions/1/do-not-run",
+        json={**body, "expected_fields_sha256": "0" * 64},
+    ).status_code == 409
+    decision = client.post(
+        "/api/v1/event-triggers/intake/form-submissions/1/do-not-run", json=body,
+    )
+    assert decision.status_code == 200, decision.text
+    assert form_store._path("stale").read_bytes() == original
+    assert client.post(
+        "/api/v1/event-triggers/intake/form-submissions/1/do-not-run", json=body,
+    ).status_code == 409
+    listed = client.get("/api/v1/event-triggers/intake/form-submissions").json()
+    assert listed["submissions"][0]["do_not_run"] is True
+    assert listed["submissions"][0]["reason"] == body["reason"]
+    polled = client.post("/api/v1/event-triggers/poll?name=intake")
+    result = polled.json()["triggers"][0]
+    assert result["poll_error"] is False
+    assert result["fired_flows"] == []
+    assert result["abandoned_submissions"] == 1
+    assert event_triggers_store.pending_form_submissions(
+        event_triggers_store.get_trigger("intake", tenant="")
+    ) == 0
+    assert form_store._path("stale").read_bytes() == original
+
+
+def test_form_decision_refuses_failed_audit_and_damaged_journal(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    monkeypatch.setenv("MAVERICK_AUDIT_SIGN", "1")
+    monkeypatch.setenv("MAVERICK_AUDIT_SIGNING_KEY", hashlib.sha256(str(tmp_path).encode()).hexdigest())
+    _register_form("stale", name="intake")
+    from maverick import audit, form_store
+    from maverick_dashboard import event_triggers_store, form_recovery
+
+    client = _client()
+    assert client.post("/form/stale", json={"name": "customer answer"}).status_code == 201
+    waiting = client.get("/api/v1/event-triggers/intake/form-submissions").json()
+    body = {
+        "expected_generation": waiting["binding_revision"],
+        "expected_fields_sha256": waiting["submissions"][0]["fields_sha256"],
+        "reason": "Handled outside this workflow after direct customer review.",
+    }
+    real_record = audit.record
+    monkeypatch.setattr(audit, "record", lambda *args, **kwargs: False)
+    refused = client.post(
+        "/api/v1/event-triggers/intake/form-submissions/1/do-not-run", json=body,
+    )
+    assert refused.status_code == 503
+    assert not form_recovery._path("stale").exists()
+    from maverick.audit.errors import AuditRefused
+
+    def reject_signed_record(*_args, **_kwargs):
+        raise AuditRefused("signed activity record refused")
+
+    monkeypatch.setattr(audit, "record", reject_signed_record)
+    refused = client.post(
+        "/api/v1/event-triggers/intake/form-submissions/1/do-not-run", json=body,
+    )
+    assert refused.status_code == 503
+    assert not form_recovery._path("stale").exists()
+    monkeypatch.setattr(audit, "record", real_record)
+    accepted = client.post(
+        "/api/v1/event-triggers/intake/form-submissions/1/do-not-run", json=body,
+    )
+    assert accepted.status_code == 200, accepted.text
+    journal = form_recovery._path("stale")
+    original = journal.read_text(encoding="utf-8")
+    forged = json.loads(original)
+    forged["reason"] = "Changed locally without an owner decision."
+    forged["hash"] = form_recovery.fields_digest({
+        key: value for key, value in forged.items() if key not in {"hash", "signature"}
+    })
+    journal.write_text(json.dumps(forged) + "\n", encoding="utf-8")
+    assert client.get("/api/v1/event-triggers/intake/form-submissions").status_code == 503
+    before = event_triggers_store.get_trigger("intake", tenant="")["cursor"]
+    polled = client.post("/api/v1/event-triggers/poll?name=intake")
+    assert polled.json()["triggers"][0]["poll_error"] is True
+    assert event_triggers_store.get_trigger("intake", tenant="")["cursor"] == before
+    assert form_store._path("stale").exists()
+    journal.write_text(original, encoding="utf-8")
+    journal.unlink()
+    assert client.get("/api/v1/event-triggers/intake/form-submissions").status_code == 503
+
+
+def test_form_decision_skips_only_selected_row_and_refuses_started_work(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    monkeypatch.setenv("MAVERICK_AUDIT_SIGN", "1")
+    monkeypatch.setenv("MAVERICK_AUDIT_SIGNING_KEY", hashlib.sha256(str(tmp_path).encode()).hexdigest())
+    _register_form("mixed", name="intake")
+    from maverick.flow import store as flow_store
+    from maverick_dashboard import event_triggers_store
+    from maverick_dashboard.event_poll import _trigger_key
+
+    client = _client()
+    assert client.post("/form/mixed", json={"name": "handled separately"}).status_code == 201
+    assert client.post("/form/mixed", json={"name": "run this one"}).status_code == 201
+    waiting = client.get("/api/v1/event-triggers/intake/form-submissions").json()
+    first = waiting["submissions"][0]
+    assert client.post(
+        "/api/v1/event-triggers/intake/form-submissions/1/do-not-run",
+        json={"expected_generation": waiting["binding_revision"],
+              "expected_fields_sha256": first["fields_sha256"],
+              "reason": "Handled separately by the team with the customer."},
+    ).status_code == 200
+    polled = client.post("/api/v1/event-triggers/poll?name=intake").json()["triggers"][0]
+    assert polled["poll_error"] is False
+    assert polled["abandoned_submissions"] == 1
+    assert len(polled["fired_flows"]) == 1
+    run = flow_store.load_run(polled["fired_flows"][0])
+    assert run.data["name"] == "run this one"
+    assert event_triggers_store.pending_form_submissions(
+        event_triggers_store.get_trigger("intake", tenant="")
+    ) == 0
+    # An uncertain cursor rollback must not let the owner dispose of a run
+    # that already started, even though the row appears pending again.
+    current = event_triggers_store.get_trigger("intake", tenant="")
+    assert event_triggers_store.set_cursor(
+        "intake", "0", tenant="", expected_cursor=current["cursor"],
+        expected_generation=_trigger_key(current), cursor_format=0,
+    )
+    waiting_again = client.get("/api/v1/event-triggers/intake/form-submissions").json()
+    second = waiting_again["submissions"][1]
+    refused = client.post(
+        "/api/v1/event-triggers/intake/form-submissions/2/do-not-run",
+        json={"expected_generation": waiting_again["binding_revision"],
+              "expected_fields_sha256": second["fields_sha256"],
+              "reason": "This row must be refused because a run exists."},
+    )
+    assert refused.status_code == 409
+    assert "already started" in refused.json()["detail"]
+
+
+def test_truncated_form_decision_tail_never_replays_as_unanswered(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    monkeypatch.setenv("MAVERICK_AUDIT_SIGN", "1")
+    monkeypatch.setenv("MAVERICK_AUDIT_SIGNING_KEY", hashlib.sha256(str(tmp_path).encode()).hexdigest())
+    _register_form("truncation", name="intake")
+    from maverick_dashboard import event_triggers_store, form_recovery
+
+    client = _client()
+    for name in ("first", "second"):
+        assert client.post("/form/truncation", json={"name": name}).status_code == 201
+    waiting = client.get("/api/v1/event-triggers/intake/form-submissions").json()
+    for row in waiting["submissions"]:
+        decided = client.post(
+            f"/api/v1/event-triggers/intake/form-submissions/{row['sequence']}/do-not-run",
+            json={"expected_generation": waiting["binding_revision"],
+                  "expected_fields_sha256": row["fields_sha256"],
+                  "reason": f"Handled {row['fields']['name']} outside the workflow."},
+        )
+        assert decided.status_code == 200, decided.text
+    journal = form_recovery._path("truncation")
+    lines = journal.read_text(encoding="utf-8").splitlines(keepends=True)
+    assert len(lines) == 2
+    journal.write_text(lines[0], encoding="utf-8")
+    assert client.get("/api/v1/event-triggers/intake/form-submissions").status_code == 503
+    before = event_triggers_store.get_trigger("intake", tenant="")["cursor"]
+    result = client.post("/api/v1/event-triggers/poll?name=intake").json()["triggers"][0]
+    assert result["poll_error"] is True
+    assert result["fired_flows"] == []
+    assert event_triggers_store.get_trigger("intake", tenant="")["cursor"] == before
 
 
 def test_empty_form_can_be_changed_and_deleted_before_a_first_submission(monkeypatch, tmp_path):

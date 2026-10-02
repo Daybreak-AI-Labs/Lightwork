@@ -1788,7 +1788,16 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
         log.warning("goal #%s not started: %s", goal_id, _risk_refusal)
         return _risk_refusal
     _lifecycle.started = True
-    world.set_goal_status(goal_id, "active")
+    try:
+        world.set_goal_status(goal_id, "active")
+    except Exception as exc:
+        from .event_admission import EventRegistryUnavailable
+
+        if isinstance(exc, EventRegistryUnavailable):
+            # The registry read failed before the pending goal was claimed.
+            # No execution began; preserve the reservation for a queue retry.
+            _lifecycle.started = False
+        raise
     # Success-path audit: a tamper-evident GOAL_START on the signed chain so the
     # audit trail records the run beginning, not just denials. audit_event
     # swallows write errors; a REFUSAL propagates, because a deployment whose

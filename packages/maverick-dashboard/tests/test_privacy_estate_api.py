@@ -104,6 +104,60 @@ def test_vendor_questionnaire_lifecycle_over_the_api():
     assert back.json()["questionnaires"][0]["status"] == "sent"
 
 
+def test_admin_can_replace_vendor_link_without_losing_replies(monkeypatch):
+    import maverick_dashboard.api as api
+    from maverick import form_store
+
+    vendor = client.post("/api/v1/vendors", json={
+        "name": "Link rotation", "category": "hosting",
+        "criticality": "high", "owner": "it",
+    }).json()
+    sent = client.post(
+        f"/api/v1/vendors/{vendor['id']}/questionnaires",
+        json={"assessment_type": "vendor_risk", "revision": vendor["revision"]},
+    ).json()
+    old_path = sent["form_path"]
+    assert client.post(old_path, json={"vr_q1": "yes"}).status_code == 201
+    rows = client.get(f"/api/v1/vendors/{vendor['id']}/questionnaires").json()["questionnaires"]
+    request_id = rows[0]["request_id"]
+    url = f"/api/v1/vendors/{vendor['id']}/questionnaires/{request_id}/replace"
+
+    original_permission = api.require_permission
+
+    def operator_only(request, permission):
+        if permission == "admin":
+            from fastapi import HTTPException
+            raise HTTPException(status_code=403, detail="Administrator access required.")
+        return original_permission(request, permission)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(api, "require_permission", operator_only)
+        assert client.post(url, json={"revision": sent["revision"]}).status_code == 403
+    assert client.get(old_path).status_code == 200
+
+    stale = client.post(url, json={"revision": vendor["revision"]})
+    assert stale.status_code == 409
+    assert client.post(old_path, json={"vr_q1": "no"}).status_code == 201
+
+    replaced = client.post(url, json={"revision": sent["revision"]})
+    assert replaced.status_code == 200, replaced.text
+    assert replaced.headers["cache-control"] == "no-store"
+    new_path = replaced.json()["form_path"]
+    assert new_path != old_path
+    assert client.get(old_path).status_code == 404
+    assert client.post(old_path, json={"vr_q1": "no"}).status_code == 404
+    assert client.get(new_path).status_code == 200
+    assert client.post(new_path, json={"vr_q1": "no"}).status_code == 201
+    readback = client.get(f"/api/v1/vendors/{vendor['id']}/questionnaires")
+    assert readback.headers["cache-control"] == "no-store"
+    history = readback.json()["questionnaires"][0]
+    assert history["previous_links"][0]["reply_count"] == 2
+    assert history["previous_links"][0]["submissions"][0]["vr_q1"] == "yes"
+    assert history["submissions"][0]["vr_q1"] == "no"
+    assert client.post(url, json={"revision": replaced.json()["revision"]}).status_code == 404
+    assert form_store.is_closed(old_path.rsplit("/", 1)[-1])
+
+
 def test_vendor_questionnaire_read_failure_returns_unavailable(monkeypatch):
     from maverick import form_store
 
@@ -315,6 +369,7 @@ def test_questionnaire_page_and_submission_without_automation_events():
     # The vendor's link renders the questionnaire -- no account, no auth.
     page = client.get(form_path)
     assert page.status_code == 200
+    assert page.headers["cache-control"] == "no-store"
     assert "Pied Piper" in page.text
     assert "Submit answers" in page.text
     assert 'class="public-shell ' in page.text

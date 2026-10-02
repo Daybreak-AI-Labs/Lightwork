@@ -70,6 +70,9 @@
         {% if c.via %}Settings are {{ c.via | source_label }}.{% endif %}
         {% if c.help_link %}<a href="{{ c.help_link }}" target="_blank" rel="noopener noreferrer">Where do I find these details?</a>{% endif %}</p>
       {% if c.name == 'email' %}
+      <p class="muted ch-help">Email can start work only when your mail server confirms the sender's address
+        and the address is on your <a href="/settings/all?id=channels.email.allowed_user_ids">permitted-people list</a>.
+        Messages without that confirmation are refused.</p>
       <label class="ch-field">Your email provider
         <select class="select" data-email-preset>
           <option value="">Choose to fill in the servers…</option>

@@ -1454,6 +1454,82 @@ def _initial_delivery_is_executable(run) -> bool:
     return run.status in {"queued", STATUS_CLAIMED}
 
 
+def _legacy_event_flow_compatible(run, current: dict, generation: str) -> bool:
+    """Prove an old run was reserved by today's non-mail trigger generation."""
+    import re
+
+    from .event_poll import _event_key
+
+    source = current.get("source")
+    if (source not in {"http_json", "rss", "oauth_http_json", "github_issues", "file_dir", "form"}
+            or current.get("owner") != run.owner
+            or current.get("flow") != run.flow_id
+            or current.get("flow_revision") != run.release_id
+            or not isinstance(run.input_data, dict)):
+        return False
+    if source == "file_dir":
+        # Current file events carry the content identity, not their old path
+        # display ID. A legacy file cursor cannot reconstruct that identity.
+        field = "id"
+    elif source == "github_issues":
+        field = "number"
+    elif source == "form":
+        field = "_seq"
+    else:
+        field = str((current.get("config") or {}).get("id_field") or "id")
+    value = run.input_data.get(field)
+    if (not isinstance(value, (str, int, float)) or isinstance(value, bool)
+            or not 0 < len(str(value)) < 2000
+            or value == "***redacted***"
+            or (source == "file_dir" and not re.fullmatch(r"[a-f0-9]{64}", str(value)))):
+        return False
+    return run.idem_key == _event_key(generation, {}, str(value))
+
+
+def _event_flow_start_problem(run) -> str:
+    """Fail closed unless an event run still has source/binding proof."""
+    import re
+
+    origin = str(run.origin or "")
+    if not origin.startswith("event:"):
+        return ""
+    from maverick.paths import current_tenant_id
+
+    from . import event_triggers_store
+    from .event_poll import _trigger_key
+
+    if origin.startswith("event:") and not origin.startswith("event:v2:"):
+        name = origin.removeprefix("event:")
+        current = event_triggers_store.get_trigger(
+            name, tenant=current_tenant_id() or "", strict=True,
+        )
+        if current is not None and _legacy_event_flow_compatible(
+            run, current, _trigger_key(current),
+        ):
+            return ""
+        return "This earlier automation run needs review before it can start"
+    parts = origin.split(":", 4)
+    if (len(parts) != 5 or parts[1] != "v2" or not parts[2]
+            or not re.fullmatch(r"[a-f0-9]{64}", parts[3]) or not parts[4]):
+        return "This earlier automation run needs review before it can start"
+    source, generation, name = parts[2:]
+    if source != "imap_email":
+        return ""
+    # The producer only writes v2 IMAP provenance after verifying the received
+    # event. Flow input data is credential-redacted before storage, so it cannot
+    # be used as an independent provenance receipt here.
+    current = event_triggers_store.get_trigger(
+        name, tenant=current_tenant_id() or "", strict=True,
+    )
+    if (current is None or current.get("source") != source
+            or current.get("owner") != run.owner
+            or current.get("flow") != run.flow_id
+            or current.get("flow_revision") != run.release_id
+            or _trigger_key(current) != generation):
+        return "Email automation changed before this run started; review and create a new run"
+    return ""
+
+
 def _reserve_initial_flow_slot(flow, payload: dict, run_id: str, dry_run: bool) -> bool:
     """Claim a live concurrency slot, defer, or terminally skip this delivery."""
     if (
@@ -1502,6 +1578,10 @@ def _handle_flow_run(job=None) -> None:
                 _mark_flow_run_failed(run_id, "queue reservation does not match flow")
                 return
             if not _initial_delivery_is_executable(placeholder):
+                return
+            event_problem = _event_flow_start_problem(placeholder)
+            if event_problem:
+                _mark_flow_run_failed(run_id, event_problem)
                 return
             if not placeholder.definition_digest:
                 _mark_flow_run_failed(

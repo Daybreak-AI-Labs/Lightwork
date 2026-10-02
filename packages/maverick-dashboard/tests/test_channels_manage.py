@@ -117,7 +117,7 @@ def test_voice_inventory_and_settings_explain_required_caller_list(tmp_path):
 
     config_path = tmp_path / "config.toml"
     config_path.write_text(
-        '[channels.voice]\nenabled = true\napi_key = "fixture"\n'
+        '[channels.voice]\nenabled = true\napi_key = "fixture"\n'  # pragma: allowlist secret
         'webhook_token = "fixture"\n', encoding="utf-8",
     )
     config.reset_config_cache()
@@ -137,6 +137,37 @@ def test_voice_inventory_and_settings_explain_required_caller_list(tmp_path):
     configured = {"enabled": True, "api_key": "fixture", "webhook_token": "fixture",
                   "allowed_callers": ["+12025550111"]}
     assert integration_readiness.channel_readiness("voice", configured)["runtime"]["status"] == "passed"
+
+
+def test_email_sender_check_is_configurable_and_required_from_the_page():
+    from maverick_dashboard import integration_readiness, settings_store
+
+    client = _client()
+    page = client.get("/channels")
+    assert page.status_code == 200
+    assert 'name="trusted_authserv_id"' in page.text
+    assert "Messages without that confirmation are refused" in page.text
+    bad = client.post("/channels/save", headers=_ORIGIN, data={
+        "channel": "email", "enabled": "on", "trusted_authserv_id": "not a server",
+    })
+    assert bad.status_code == 400
+    saved = client.post("/channels/save", headers=_ORIGIN, data={
+        "channel": "email", "enabled": "on", "trusted_authserv_id": "mx.example.com",
+    }, follow_redirects=False)
+    assert saved.status_code == 303
+    assert settings_store.load_overlay()["channels"]["email"]["trusted_authserv_id"] == "mx.example.com"
+    required = {"enabled": True, "imap_host": "imap.example.com", "imap_user": "bot@example.com",
+                "imap_password": "fixture", "smtp_host": "smtp.example.com",
+                "smtp_user": "bot@example.com", "smtp_password": "fixture"}
+    assert integration_readiness.channel_readiness("email", required)["runtime"]["status"] == "failed"
+    assert integration_readiness.channel_readiness("email", {
+        **required, "trusted_authserv_id": "mx.example.com",
+        "allowed_user_ids": [],
+    })["runtime"]["status"] == "failed"
+    assert integration_readiness.channel_readiness("email", {
+        **required, "trusted_authserv_id": "mx.example.com",
+        "allowed_user_ids": ["owner@example.com"],
+    })["runtime"]["status"] == "passed"
 
 
 def test_save_channel_enables_and_hides_secret():

@@ -216,6 +216,9 @@ def environment(tmp_path, monkeypatch):
             return await call_next(request)
 
     app.include_router(companion.router)
+    from maverick_dashboard import product_operations
+
+    app.include_router(product_operations.router)
     with TestClient(app, headers={"Origin": "http://testserver"}) as client:
         yield Environment(client, worlds, features, memberships, active, suites)
     for world in worlds.values():
@@ -383,7 +386,8 @@ def test_stale_account_or_workspace_context_rejected_for_reads_and_writes(enviro
         BASE + "/messages", headers=wrong_context,
         json={"message": "Private stale-tab message", "expected_revision": 1},
     ).status_code == 409
-    assert environment.client.delete(BASE + "/history", headers=wrong_context).status_code == 409
+    assert environment.client.request("DELETE", BASE + "/history", headers=wrong_context,
+                                      json={"expected_revision": environment.view()["history_revision"]}).status_code == 409
     assert environment.view(actor, tenant)["history"] == []
     assert all(event["action"] != "reply" for event in environment.admin(tenant)["events"])
 
@@ -397,7 +401,8 @@ def test_writes_require_context_from_current_get(environment, operation):
             json={"message": "what is running?", "expected_revision": 1},
         )
     elif operation == "clear":
-        response = environment.client.delete(BASE + "/history", headers=_headers())
+        response = environment.client.request("DELETE", BASE + "/history", headers=_headers(),
+                                              json={"expected_revision": environment.view()["history_revision"]})
     else:
         response = environment.client.put(
             BASE + "/admin/policy", headers=_headers(ADMIN), json=_policy_body(revision=1),
@@ -417,7 +422,8 @@ def test_foreign_origin_blocked_even_with_valid_context(environment, operation):
             json={"message": "what is running?", "expected_revision": 1},
         )
     elif operation == "clear":
-        response = environment.client.delete(BASE + "/history", headers=headers)
+        response = environment.client.request("DELETE", BASE + "/history", headers=headers,
+                                              json={"expected_revision": environment.view()["history_revision"]})
     else:
         response = environment.client.put(
             BASE + "/admin/policy", headers=headers, json=_policy_body(revision=1),
@@ -575,8 +581,9 @@ def test_clear_only_removes_callers_history_and_works_when_feature_is_off(enviro
         assert environment.message(f"Private text for {actor}", actor=actor).status_code == 200
     view = environment.view()
     environment.features.clear()
-    response = environment.client.delete(
-        BASE + "/history?owner=user:bob", headers=_headers(context=view["context"]),
+    response = environment.client.request(
+        "DELETE", BASE + "/history?owner=user:bob", headers=_headers(context=view["context"]),
+        json={"expected_revision": view["history_revision"]},
     )
     assert _ok(response)["history"] == []
     assert environment.view()["history"] == []
@@ -844,9 +851,11 @@ def test_clearing_history_while_generation_waits_discards_late_answer(
         )
         try:
             assert model_started.wait(timeout=5)
+            current = environment.view()
             clear = workers.submit(
-                environment.client.delete, BASE + "/history",
+                environment.client.request, "DELETE", BASE + "/history",
                 headers=_headers(context=view["context"]),
+                json={"expected_revision": current["history_revision"]},
             )
             assert _ok(clear.result(timeout=5))["history"] == []
         finally:
@@ -1030,3 +1039,65 @@ def test_revoked_history_sources_are_not_sent_into_later_model_context(environme
     assert "sensitive acquisition budget" not in str(draft_generation.calls[-1]["history"])
     assert "Restricted finance plan" not in str(draft_generation.calls[-1])
     assert "sensitive acquisition budget" not in str(response["history"])
+
+
+def test_companion_clear_requires_exact_current_history_revision(environment):
+    environment.policy()
+    before = environment.view()
+    _ok(environment.message("show my tasks"))
+    stale = environment.client.request("DELETE", BASE + "/history",
+        headers=_headers(context=before["context"]),
+        json={"expected_revision": before["history_revision"]})
+    assert stale.status_code == 409
+    current = environment.view()
+    assert current["history"] and current["history_revision"] != before["history_revision"]
+    cleared = environment.client.request("DELETE", BASE + "/history",
+        headers=_headers(context=current["context"]),
+        json={"expected_revision": current["history_revision"]})
+    assert _ok(cleared)["history"] == []
+
+
+def test_copilot_reviews_and_clears_only_owned_current_companion_history(environment, monkeypatch):
+    from maverick.governed_operations import digest
+    from maverick_dashboard import product_operations as operations
+
+    monkeypatch.setattr(operations, "_gate", lambda _request: None)
+    monkeypatch.setattr(operations, "enabled_families", lambda: {"preferences"})
+    monkeypatch.setattr(operations, "_context", lambda request: digest([
+        request.headers.get("X-Test-Principal"), request.headers.get("X-Test-Tenant")]))
+    environment.policy()
+    _ok(environment.message("show my tasks"))
+    headers = _headers()
+    base = "/api/v1/copilot/product-operations"
+    catalog = _ok(environment.client.post(base + "/catalog", headers=headers,
+                                          json={"page": "/companion", "selection": {}}))
+    actions = {row["id"]: row for row in catalog["operations"]}
+    assert actions["companion.status"]["available"]
+    assert actions["companion.clear_history"]["available"]
+    assert actions["companion.clear_history"]["details"]["saved_exchanges"] == 1
+    assert "show my tasks" not in str(catalog)
+    review_body = {"page": "/companion", "selection": {}, "operation": "companion.clear_history",
+                   "context": catalog["context"], "revision": actions["companion.clear_history"]["revision"],
+                   "arguments": {}}
+    prepared = _ok(environment.client.post(base + "/prepare", headers=headers, json=review_body))
+    assert environment.view()["history"]
+    _ok(environment.message("what needs attention"))
+    assert environment.client.post(base + "/execute", headers=headers,
+        json={"token": prepared["token"], "confirmed": True}).status_code == 409
+    assert len(environment.view()["history"]) == 4
+    current = _ok(environment.client.post(base + "/catalog", headers=headers,
+                                         json={"page": "/companion", "selection": {}}))
+    review_body.update(context=current["context"], revision=next(row["revision"] for row in current["operations"]
+                                                                if row["id"] == "companion.clear_history"))
+    prepared = _ok(environment.client.post(base + "/prepare", headers=headers, json=review_body))
+    assert environment.client.post(base + "/execute", headers=headers,
+        json={"token": prepared["token"], "confirmed": False}).status_code == 400
+    payload = {"token": prepared["token"], "confirmed": True}
+    completed = _ok(environment.client.post(base + "/execute", headers=headers, json=payload))
+    assert completed["status"] == "confirmed"
+    assert environment.view()["history"] == []
+    replay = _ok(environment.client.post(base + "/execute", headers=headers, json=payload))
+    assert replay["status"] == "replayed"
+    assert "show my tasks" not in str(completed)
+    environment.memberships["acme"][ALICE] = None
+    assert environment.client.post(base + "/execute", headers=headers, json=payload).status_code == 403

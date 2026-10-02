@@ -20,6 +20,7 @@ import threading
 import time
 
 from maverick import config
+from maverick.event_admission import EventRegistryUnavailable
 
 # Reuse the webhook store's slug (identical charset/length rules) so the two
 # can't drift.
@@ -111,19 +112,28 @@ def _matching(triggers: list[dict], name: str, tenant: str | None) -> list[dict]
     return matches if len(matches) <= 1 else []
 
 
-def list_triggers() -> list[dict]:
+def list_triggers(*, strict: bool = False) -> list[dict]:
     """Every registered event trigger as a dict (params/config decoded)."""
     p = _path()
-    if not p.exists():
-        return []
     try:
         with open(p, "rb") as f:
             raw = _tomllib().load(f)
-    except (OSError, ValueError):
+    except FileNotFoundError:
+        return []
+    except (OSError, ValueError) as exc:
+        if strict:
+            raise EventRegistryUnavailable("Event automations could not be read") from exc
+        return []
+    tables = raw.get("trigger") or {}
+    if not isinstance(tables, dict):
+        if strict:
+            raise EventRegistryUnavailable("Event automations could not be read")
         return []
     out: list[dict] = []
-    for table_key, t in (raw.get("trigger") or {}).items():
+    for table_key, t in tables.items():
         if not isinstance(t, dict):
+            if strict:
+                raise EventRegistryUnavailable("Event automations could not be read")
             continue
         try:
             template_snapshot = json.loads(t.get("template_snapshot") or "null")
@@ -157,8 +167,9 @@ def list_triggers() -> list[dict]:
     return out
 
 
-def get_trigger(name: str, *, tenant: str | None = None) -> dict | None:
-    matches = _matching(list_triggers(), name, tenant)
+def get_trigger(name: str, *, tenant: str | None = None,
+                strict: bool = False) -> dict | None:
+    matches = _matching(list_triggers(strict=strict), name, tenant)
     return matches[0] if len(matches) == 1 else None
 
 

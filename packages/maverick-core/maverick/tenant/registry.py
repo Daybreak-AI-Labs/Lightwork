@@ -113,6 +113,10 @@ class TenantRegistryError(RuntimeError):
     """Tenant control-plane state exists but cannot be trusted."""
 
 
+class DuplicateWorkspaceName(ValueError):
+    """The requested visible name was refused before tenant publication."""
+
+
 def _registry_path():
     return maverick_home() / "tenant_registry.json"
 
@@ -478,16 +482,23 @@ def get_tenant(tenant_id: str) -> TenantRecord | None:
     return None if tid and _retired(tid) else _load().get(tid)
 
 
+def workspace_display_key(name: str) -> str:
+    """Compare names as people see them: case-insensitive with collapsed space."""
+    return " ".join(name.split()).casefold()
+
+
 def create_tenant(
     tenant_id: str, *, plan: str = "free", display_name: str = "",
     max_daily_dollars: float = DEFAULT_TENANT_DAILY_DOLLARS,
     allocate_suffix: bool = False,
 ) -> TenantRecord:
     """Provision a tenant + its workspace. No daily spend cap by default;
-    pass ``max_daily_dollars`` to set one. Raises :class:`ValueError` if the tenant already exists.
+    pass ``max_daily_dollars`` to set one. Refuses an existing identifier or
+    visible workspace name.
     """
     tid = _validate_id(tenant_id)
     quota = _quota_value(max_daily_dollars)
+    display_name = display_name.strip()
     # Provisioning a named tenant IS multi-tenant mode — a paid (Platinum)
     # capability. Fail-open: a no-op unless license enforcement is on and the
     # deployment isn't entitled (a genuine single-tenant box never calls this —
@@ -525,6 +536,19 @@ def create_tenant(
                 raise ValueError(
                     f"tenant id {tid!r} aliases existing tenant {existing!r}"
                 )
+        # Use the final allocated identifier when there is no display name.
+        # Check under the roster lock, including paused workspaces, so two
+        # concurrent creations cannot publish indistinguishable choices.
+        name_key = workspace_display_key(display_name or tid)
+        if any(workspace_display_key(rec.display_name or rec.id) == name_key
+               for rec in records.values()):
+            raise DuplicateWorkspaceName("A workspace with that name already exists. Choose another name.")
+        if name_key == workspace_display_key(DEFAULT_WORKSPACE_DISPLAY_NAME) and not _registry_path().exists():
+            from ..paths import implicit_tenant_id
+
+            implicit = implicit_tenant_id()
+            if implicit and _lookup_id(implicit) != tid:
+                raise DuplicateWorkspaceName("A workspace with that name already exists. Choose another name.")
         # Reserve the portable name and provision the confidentiality boundary
         # BEFORE publishing an active roster entry. The registry lock keeps the
         # admission check, claim, directory creation, and publication atomic to
@@ -1247,8 +1271,8 @@ __all__ = [
     "MAX_FEATURE_OVERRIDES", "TenantRecord",
     "BILLING_CURRENT", "BILLING_PAST_DUE",
     "TenantSuspended", "UnknownTenant",
-    "TenantRegistryError",
-    "list_tenants", "get_tenant", "create_tenant", "suspend_tenant",
+    "TenantRegistryError", "DuplicateWorkspaceName",
+    "list_tenants", "get_tenant", "workspace_display_key", "create_tenant", "suspend_tenant",
     "resume_tenant", "delete_tenant", "set_quota", "set_plan",
     "set_stripe_customer_id", "set_billing_status", "set_byok",
     "set_feature_overrides",

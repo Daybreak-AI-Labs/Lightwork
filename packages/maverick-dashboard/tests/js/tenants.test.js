@@ -31,6 +31,16 @@ test('creating sends a name and no typed id', async (t) => {
   assert.match(ui.doc.getElementById('tenant-add-msg').textContent, /created/);
 });
 
+test('duplicate workspace names show the server explanation', async (t) => {
+  const ui = await fixture();
+  t.after(() => ui.window.close());
+  ui.window.mvPlainDetail = (detail) => detail;
+  ui.window.fetch = async () => new Response(JSON.stringify({detail: 'A workspace with that name already exists. Choose another name.'}), {status: 409});
+  ui.doc.getElementById('tenant-add').dispatchEvent(new ui.window.Event('submit', {cancelable: true}));
+  await ui.settle();
+  assert.equal(ui.doc.getElementById('tenant-add-msg').textContent, 'A workspace with that name already exists. Choose another name.');
+});
+
 test('pausing and removing ask first and do nothing when cancelled', async (t) => {
   const ui = await fixture(false);
   t.after(() => ui.window.close());

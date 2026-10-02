@@ -76,9 +76,7 @@
       } catch (failure) {
         var plain = '';
         try { if (failure && typeof failure.clone === 'function') { var body = await failure.clone().json(); plain = window.mvPlainDetail ? window.mvPlainDetail(body && body.detail) : ''; } } catch (ignored) {}
-        addMsg.textContent = failure && failure.status === 409
-          ? 'A workspace with that name already exists. Choose another name.'
-          : (plain || errorText(failure, 'create the workspace'));
+        addMsg.textContent = plain || errorText(failure, 'create the workspace');
         if (window.mvToast) window.mvToast(addMsg.textContent, {error: true});
       }
     });

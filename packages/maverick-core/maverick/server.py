@@ -639,6 +639,7 @@ def _wire_email(server, cfg):
         smtp_port=cfg.get("smtp_port", 465),
         poll_interval=cfg.get("poll_interval", 30),
         allowed_user_ids={str(v) for v in allowed_user_ids} if allowed_user_ids is not None else None,
+        trusted_authserv_id=cfg.get("trusted_authserv_id") or "",
     ))
 
 

@@ -729,11 +729,15 @@ def test_owner_aware_claim_uses_exact_tenant_compare_and_swap(monkeypatch):
     monkeypatch.setattr(pg.time, "time", lambda: 123.0)
     cursor = _RetentionCursor()
     cursor.rowcount = 1
+    # This goal has no event origin; the execution guard's SELECT must see no
+    # event row before the owner/tenant compare-and-swap UPDATE.
+    cursor.fetchone = lambda: None
     model = pg.PostgresWorldModel.__new__(pg.PostgresWorldModel)
     monkeypatch.setattr(model, "_tx", lambda: _RetentionTx(cursor))
 
     assert model.claim_goal_for_run(42, expected_owner="agent:worker") is True
-    sql, params = cursor.calls[0]
+    assert "goal_origins" in cursor.calls[0][0]
+    sql, params = cursor.calls[1]
     assert "status='pending' AND owner=%s" in sql
     assert "tenant_id = %s" in sql
     assert "OR tenant_id IS NULL" not in sql

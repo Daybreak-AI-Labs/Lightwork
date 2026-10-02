@@ -297,6 +297,26 @@ def _runner_principal_binding(world, goal, execution_principal):
     return True
 
 
+def _goal_run_exception_status(world, goal_id: int, exc: Exception) -> str:
+    """Distinguish an intentional legacy hold from a retryable run crash."""
+    from .event_admission import EventRegistryUnavailable, LegacyEventGoalHeld
+
+    if isinstance(exc, LegacyEventGoalHeld):
+        return "blocked"
+    if isinstance(exc, EventRegistryUnavailable) and _finished_goal_status(world, goal_id) == "pending":
+        # The execution claim rolled back before the goal started. Preserve its
+        # pending status; the durable worker will retry the same reservation.
+        return "error"
+    # The swarm crashed after starting; reclaim the visible goal, but leave a
+    # retryable queue result so the worker's existing policy can decide.
+    log.exception("goal #%s crashed inside run_goal_sync", goal_id)
+    try:
+        world.set_goal_status(goal_id, "blocked", result="internal error")
+    except Exception:  # pragma: no cover
+        log.exception("failed to reclaim goal #%s after crash", goal_id)
+    return "error"
+
+
 def run_goal_in_thread(
     goal_id: int,
     max_dollars: float | None = None,
@@ -441,20 +461,8 @@ def run_goal_in_thread(
                     user_id=user_id, capability=capability,
                     allowed_suites=allowed_suites, resume=True,
                 )
-        except Exception:
-            # If the swarm raises an unexpected exception (anything not
-            # caught by run_goal itself), the goal row is still 'active'.
-            # Mark it 'blocked' so the dashboard doesn't show a ghost.
-            log.exception("goal #%s crashed inside run_goal_sync", goal_id)
-            try:
-                world.set_goal_status(goal_id, "blocked", result="internal error")
-            except Exception:  # pragma: no cover
-                log.exception("failed to reclaim goal #%s after crash", goal_id)
-            # A genuine crash IS retryable -- return a distinct signal. An
-            # intentional 'blocked' read back below (budget cap, killswitch
-            # halt, awaiting-user) is TERMINAL and must not be re-run, or the
-            # worker re-executes the whole swarm and re-spends budget.
-            return "error"
+        except Exception as exc:
+            return _goal_run_exception_status(world, goal_id, exc)
         # Read back the terminal status so the worker can decide retry.
         return _finished_goal_status(world, goal_id)
     except Exception:

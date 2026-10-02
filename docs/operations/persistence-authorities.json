@@ -18819,6 +18819,73 @@
       ]
     },
     {
+      "path": "packages/maverick-dashboard/maverick_dashboard/form_recovery.py",
+      "contract": "execution",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/form_recovery.py",
+      "purpose": "Signed owner decisions to suppress exact accepted public-form rows for an exact trigger generation, without rewriting the original submission queue.",
+      "referenced_store_owners": [
+        "maverick.audit",
+        "maverick.audit.signing",
+        "maverick.event_admission",
+        "maverick.flow.store"
+      ],
+      "review": "Reviewed journal, signed accepted marker, pre-decision audit witness, cross-process lock and delivery filter. Journal and marker must remain intact together; a missing, truncated or mismatched pair blocks delivery. A crash between first marker creation and journal append can leave a safe but unresolved hold. Restored old absence or older copies can revive stopped work, so no automatic restore or multi-host recovery is claimed.",
+      "governed_namespaces": [],
+      "persisted_authorities": [
+        {
+          "sample_path": "form-recovery/example.ndjson",
+          "recovery_policy": "form_decision_authority",
+          "disposition": "Retain the signed decision chain and marker together; a restored copy containing this path blocks startup until current authority is reconciled. A snapshot predating both files has no absence proof and may permit replay."
+        },
+        {
+          "sample_path": "form-recovery/example.ndjson.accepted",
+          "recovery_policy": "form_decision_authority",
+          "disposition": "Retain the signed marker with its journal; missing or inconsistent pairs refuse delivery when either file remains. No automatic repair, post-crash rebind or proof of a missing pair is implemented."
+        }
+      ],
+      "literal_path_hints": [
+        "form-recovery/*.ndjson",
+        "form-recovery/*.ndjson.accepted"
+      ],
+      "observed_mechanism_markers": {
+        "cross_process_lock": 1,
+        "append_fsync": 1,
+        "signed_marker": 1
+      },
+      "source_sites": [
+        {
+          "line": 28,
+          "function": "_path",
+          "kind": "data_dir",
+          "expression": "data_dir('form-recovery')"
+        },
+        {
+          "line": 42,
+          "function": "locked",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(path, strict=True)"
+        },
+        {
+          "line": 200,
+          "function": "abandon",
+          "kind": "atomic_create_bytes",
+          "expression": "atomic_create_bytes(_marker(path), _signed_receipt(0, previous))"
+        },
+        {
+          "line": 201,
+          "function": "abandon",
+          "kind": "open_private_append",
+          "expression": "open_private_append(path, require_private_parent=True)"
+        },
+        {
+          "line": 206,
+          "function": "abandon",
+          "kind": "atomic_write_bytes",
+          "expression": "atomic_write_bytes(_marker(path), _signed_receipt(count + 1, row['hash']))"
+        }
+      ]
+    },
+    {
       "path": "packages/maverick-dashboard/maverick_dashboard/evolution_ledger_api.py",
       "contract": "read_projection",
       "owner": "delegated; inspect source callsites below",

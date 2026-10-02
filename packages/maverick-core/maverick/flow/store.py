@@ -1046,7 +1046,8 @@ class FlowRun:
     # Optional idempotency key (flow_id + a stable event id) so a re-delivered
     # trigger event doesn't spawn a duplicate run.
     idem_key: str = ""
-    # What fired this run: "manual" | "cron:<flow>" | "event:<trigger>" |
+    # What fired this run: "manual" | "cron:<flow>" |
+    # "event:v2:<source>:<generation>:<trigger>" |
     # "form:<token>" | "retry:<run>" -- so a viewer can see why it ran and the
     # loop can learn which triggers produce value.
     origin: str = "manual"

@@ -872,9 +872,20 @@ def _channel_base_cfg(ch_id: str, envs: set[str]) -> dict[str, Any]:
     elif ch_id == "signal":
         cfg["phone_number"] = _q_text("  Signal phone number (e.g., +12345550199)", default="")
     elif ch_id == "email":
+        from maverick.mail_auth import valid_trusted_mail_server
+
         cfg["imap_host"] = _q_text("  IMAP server", default="imap.gmail.com")
         cfg["smtp_host"] = _q_text("  SMTP server", default="smtp.gmail.com")
         cfg["smtp_port"] = _safe_int(_q_text("  SMTP port", default="465"), default=465)
+        trusted_server = _q_text(
+            "  Server that checks incoming senders (ask your mail administrator; blank leaves Email off)",
+            default="",
+        ).strip()
+        if valid_trusted_mail_server(trusted_server):
+            cfg["trusted_authserv_id"] = trusted_server.lower()
+        else:
+            cfg["enabled"] = False
+            console.print("  [yellow]Email stays off until you set the incoming sender-check server on the Channels page.[/yellow]")
         cfg["imap_user"] = "${EMAIL_USER}"
         cfg["imap_password"] = "${EMAIL_APP_PASSWORD}"
         cfg["smtp_user"] = "${EMAIL_USER}"

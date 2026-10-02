@@ -57,10 +57,11 @@
         </span>
         <div class="tsel__row-main">
           <div class="tsel__row-name">{{ t.name }}</div>
+          {% if t.reference %}<div class="tsel__row-meta">Reference: {{ t.reference }}</div>{% endif %}
           {% if t.plan %}<div class="tsel__row-meta">{{ t.plan | capitalize }} plan</div>{% endif %}
         </div>
         {% if can_select and t.active and t.id != selected %}
-        <button type="button" class="btn btn--primary tsel-pick" data-tenant="{{ t.id }}">Work in this workspace</button>
+        <button type="button" class="btn btn--primary tsel-pick" data-tenant="{{ t.id }}" aria-label="Work in {{ t.name }}{% if t.reference %}, reference {{ t.reference }}{% endif %}">Work in this workspace</button>
         {% elif can_select and t.id == selected %}
         <button type="button" class="btn tsel-clear">Clear selection</button>
         {% endif %}
@@ -132,7 +133,8 @@
     if (r.status === 403 || r.status === 404) {
       err.plain = 'You no longer have access to that workspace. Ask a workspace administrator.';
     } else if (r.status === 409 && action === 'create the workspace') {
-      err.plain = 'A workspace with that name already exists. Choose another name.';
+      var body = await r.clone().json().catch(function () { return {}; });
+      err.plain = (typeof window.mvPlainDetail === 'function' && window.mvPlainDetail(body.detail)) || window.mvErrorText(r, action);
     } else {
       err.plain = window.mvErrorText(r, action);
     }

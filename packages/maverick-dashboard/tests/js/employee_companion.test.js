@@ -13,7 +13,8 @@ const tick = () => new Promise(resolve => setImmediate(resolve));
 const policy = overrides => ({owner: "user:employee@example.test", revision: 3, enabled: true,
   allowed_sources: ["own_tasks"], allowed_tools: ["task_status"], retention_days: 0, ...overrides});
 const snapshot = overrides => ({context: CONTEXT, available: true, conversation_available: false,
-  status_available: true, history_generation: 0, active_turn: null, policy: policy(), history: [], tasks: [], ...overrides});
+  status_available: true, history_generation: 0, history_revision: "a".repeat(64),
+  active_turn: null, policy: policy(), history: [], tasks: [], ...overrides});
 const reply = overrides => ({context: CONTEXT, policy: policy(), history: [], history_generation: 0,
   message: {role: "assistant", kind: "task_status", content: "One task is running.", sources: []}, ...overrides});
 const adminSnapshot = overrides => ({context: CONTEXT, available: true,
@@ -139,8 +140,23 @@ test("clearing history is possible when disabled and removes transient page mess
   await tick();
   assert.doesNotMatch(ui.el("ec-messages").textContent, /Previous question/);
   assert.equal(ui.calls[1].options.method, "DELETE");
+  assert.deepEqual(JSON.parse(ui.calls[1].options.body), {expected_revision: "a".repeat(64)});
   assert.equal(ui.calls[1].options.headers["X-Lightwork-Companion-Context"], CONTEXT);
   assert.equal(ui.document.activeElement, ui.el("ec-clear"));
+});
+
+test("a confirmed Copilot clear removes local private text and reads current status", async t => {
+  const ui = await setup([snapshot({history: [{role: "user", content: "Private draft"}]}),
+    snapshot({history: [], history_generation: 1, history_revision: "b".repeat(64)})]);
+  t.after(() => ui.dom.window.close());
+  ui.el("ec-message").value = "Unsent private question";
+  ui.document.dispatchEvent(new ui.window.CustomEvent("lightwork:product-operation-complete",
+    {detail: {operation: "companion.clear_history", status: "confirmed"}}));
+  await tick();
+  assert.doesNotMatch(ui.el("ec-messages").textContent, /Private draft/);
+  assert.equal(ui.el("ec-message").value, "");
+  assert.equal(ui.calls.length, 2);
+  assert.equal(ui.calls[1].options.method, "GET");
 });
 
 test("admin CAS conflict preserves choices and requires explicit reload", async t => {

@@ -398,6 +398,7 @@ CHANNELS: list[dict] = [
     ]},
     {"name": "email", "label": "Email (IMAP/SMTP)", "fields": [
         {"key": "imap_host", "label": "IMAP host", "secret": False},
+        {"key": "trusted_authserv_id", "label": "Incoming mail server identity", "secret": False},
         {"key": "imap_user", "label": "IMAP user", "secret": False},
         {"key": "imap_password", "label": "IMAP password", "secret": True},
         {"key": "smtp_host", "label": "SMTP host", "secret": False},
@@ -2151,6 +2152,12 @@ def set_channel(name: str, enabled: bool, values: dict | None = None) -> None:
                     raise ValueError(f"{field['label']} must be a number") from exc
             elif field.get("type") == "url":
                 ccfg[key] = _channel_server_address(field["label"], val)
+            elif key == "trusted_authserv_id":
+                from maverick.mail_auth import valid_trusted_mail_server
+
+                if not valid_trusted_mail_server(val):
+                    raise ValueError("Incoming mail server identity must be a server name")
+                ccfg[key] = str(val).lower()
             else:
                 ccfg[key] = str(val)
         _write(data)

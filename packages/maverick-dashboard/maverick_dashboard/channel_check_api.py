@@ -14,6 +14,7 @@ goes through the egress-guarded client used by the provider checks.
 from __future__ import annotations
 
 import base64
+import imaplib
 import re
 import smtplib
 import ssl
@@ -79,6 +80,31 @@ def _smtp(cfg: dict[str, Any]):
     return smtp
 
 
+def _check_email(cfg: dict[str, Any]) -> tuple[bool, str]:
+    from .integration_readiness import _email_configuration_problem
+
+    problem = _email_configuration_problem(cfg)
+    if problem:
+        return False, problem
+    with imaplib.IMAP4_SSL(
+        str(cfg.get("imap_host") or ""), ssl_context=ssl.create_default_context(),
+        timeout=_TIMEOUT,
+    ) as inbox:
+        result, _ = inbox.login(str(cfg.get("imap_user") or ""),
+                                str(cfg.get("imap_password") or ""))
+        if result != "OK":
+            return False, "the incoming mail server refused the saved details"
+        result, _ = inbox.select("INBOX", readonly=True)
+        if result != "OK":
+            return False, "the incoming mailbox could not be opened"
+        _kind, validity = inbox.response("UIDVALIDITY")
+        if not validity or not validity[0] or not validity[0].decode("ascii", "ignore").isdigit():
+            return False, "the incoming mailbox did not confirm its identity"
+    smtp = _smtp(cfg)
+    smtp.quit()
+    return True, "incoming and outgoing mail sign-in worked; a live sender check is still needed"
+
+
 def check_credentials(name: str, cfg: dict[str, Any]) -> tuple[bool, str]:
     """Ask the chat service whether the saved credentials work."""
     try:
@@ -101,9 +127,7 @@ def check_credentials(name: str, cfg: dict[str, Any]) -> tuple[bool, str]:
             ok = _get(f"https://api.twilio.com/2010-04-01/Accounts/{quote(sid, safe='')}.json",
                       {"Authorization": _basic(sid, str(cfg.get("auth_token") or ""))}).status_code == 200
         elif name == "email":
-            smtp = _smtp(cfg)
-            smtp.quit()
-            ok = True
+            return _check_email(cfg)
         elif name == "teams":
             return _teams_token_check(cfg)
         else:
@@ -216,7 +240,9 @@ async def channels_test(request: Request, channel: str = Form(...)):
     ok, detail = await run_in_threadpool(check_credentials, name, cfg)
     record("channel", name, cfg, verified=ok, detail=detail, evidence={"kind": "credential_check"})
     return _answer(request, name, cfg, ok=ok, detail=detail, result="tested" if ok else "test_failed",
-                   sentence="Connection test passed: the service accepted the saved details." if ok
+                   sentence=("Mail sign-in passed. This does not verify that your mail server removes forged sender results."
+                             if name == "email" and ok else
+                             "Connection test passed: the service accepted the saved details.") if ok
                    else "The connection test failed. Check the details, save, and test again.")
 
 

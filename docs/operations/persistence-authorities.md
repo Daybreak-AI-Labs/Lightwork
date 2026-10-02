@@ -5,7 +5,7 @@ world model or governed records does not make every queue, file, key, approval,
 audit chain and instruction store shared. This inventory does not enable high
 availability or relax deployment guards.
 
-The machine-readable [inventory](persistence-authorities.json) classifies 627
+The machine-readable [inventory](persistence-authorities.json) classifies 628
 Python source files from the original persistence-seam scan and subsequent
 production-owner reviews, including the shared A2A store, PostgreSQL primitives,
 learning-key schema helper and signed client-erasure receipts. The learning-key
@@ -60,6 +60,15 @@ specific policy: authenticated preservation for supported records/credentials,
 safe retirement or transformation for supported work, explicit discard for
 specified derived inputs, or a global startup block. A blocker is not cleared by
 generic administrator confirmation when no supported reconciliation exists.
+
+Public-form `form-recovery` journals and their signed `.accepted` markers are
+execution authority: an older restored absence could run a submission the owner
+decided to stop. A restored copy containing either file is retained as a
+global-start blocker pending current authority reconciliation. At delivery,
+missing or inconsistent journal/marker pairs refuse the submission; a crash
+between initial marker creation and the first journal append can leave a safe
+hold with no automatic repair path. A snapshot from before both files existed
+has no absence proof and can still replay the submission.
 
 Caller-configured paths, such as the optional benchmark coordinator's state file,
 cannot be assigned a safe bootstrap policy from their extension. They require the

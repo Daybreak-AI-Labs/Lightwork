@@ -30,8 +30,34 @@ def test_create_defaults_to_no_cap_and_a_cap_is_an_explicit_choice():
 
 def test_create_duplicate_rejected():
     tr.create_tenant("acme")
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError) as exc:
         tr.create_tenant("acme")
+    assert not isinstance(exc.value, tr.DuplicateWorkspaceName)
+
+
+def test_visible_workspace_name_is_unique_even_when_paused(tmp_path):
+    tr.create_tenant("acme", display_name="Acme Finance")
+    tr.suspend_tenant("acme")
+    with pytest.raises(tr.DuplicateWorkspaceName, match="workspace with that name"):
+        tr.create_tenant("other", display_name=" acme   FINANCE ", allocate_suffix=True)
+    assert not (tmp_path / "tenants" / "other").exists()
+    assert [rec.id for rec in tr.list_tenants()] == ["acme"]
+    assert tr.create_tenant("other", display_name="Acme Sales").display_name == "Acme Sales"
+
+
+def test_unnamed_workspace_cannot_shadow_an_existing_visible_name(tmp_path):
+    tr.create_tenant("first", display_name="Acme")
+    with pytest.raises(tr.DuplicateWorkspaceName, match="workspace with that name"):
+        tr.create_tenant("acme")
+    assert not (tmp_path / "tenants" / "acme").exists()
+    assert [rec.id for rec in tr.list_tenants()] == ["first"]
+
+
+def test_implicit_default_workspace_name_is_reserved_before_first_roster(monkeypatch):
+    monkeypatch.setenv("MAVERICK_TENANT", "implicit")
+    with pytest.raises(tr.DuplicateWorkspaceName, match="workspace with that name"):
+        tr.create_tenant("other", display_name="Default workspace")
+    assert tr.list_tenants() == []
 
 
 def test_create_rejects_casefold_namespace_alias(tmp_path):

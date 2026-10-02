@@ -77,6 +77,11 @@ def _page_context(
         # A corrupt roster must not turn the picker into a 500: the page is
         # how an operator digs out of exactly this kind of state.
         tenants = []
+    from .workspace_display import duplicate_workspace_ids
+
+    duplicates = duplicate_workspace_ids((tenant["id"], tenant["name"]) for tenant in tenants)
+    for tenant in tenants:
+        tenant["reference"] = tenant["id"] if tenant["id"] in duplicates else ""
     selected = (
         workspace_tenants.get_selection(principal)
         if principal

@@ -41,6 +41,7 @@ from urllib.parse import quote
 from ..attachment_submissions import POSTGRES_SCHEMA as _ATTACHMENT_SUBMISSION_SCHEMA
 from ..deadline_alerts import POSTGRES_SCHEMA as _DEADLINE_ALERT_SCHEMA_PG
 from ..event_admission import POSTGRES_SCHEMA as _EVENT_ADMISSION_SCHEMA
+from ..event_admission import LegacyEventGoalHeld, compatible_event_goal
 from ..goal_mutations import SCHEMA as _GOAL_MUTATION_SCHEMA
 from ..learning_store_pg_schema import LEARNING_TENANT_MIGRATION
 from ..metadata_history import POSTGRES_INDEXES as _HISTORY_INDEXES
@@ -1625,13 +1626,44 @@ class PostgresWorldModel:
         if frag:
             sql += " AND " + frag
             params += fparams
+        legacy_refused = False
         with self._tx() as cur:
-            cur.execute(sql, tuple(params))
+            if status in {"active", "running"}:
+                scoped, scoped_params = _tenant_scope("g.tenant_id")
+                current_sql = (
+                    "SELECT g.status,g.owner,o.kind,o.ref,a.trigger_key FROM goals g "
+                    "JOIN goal_origins o ON o.goal_id=g.id "
+                    "LEFT JOIN event_goal_admissions a ON a.goal_id=g.id "
+                    "AND a.tenant_id=g.tenant_id "
+                    "WHERE g.id=%s AND o.kind IN ('event','event_v2')"
+                )
+                if scoped:
+                    current_sql += " AND " + scoped
+                current_sql += " FOR UPDATE OF g"
+                cur.execute(current_sql, (int(goal_id), *scoped_params))
+                prior = cur.fetchone()
+                if (prior is not None and prior[0] not in {"active", "running"}
+                        and not compatible_event_goal(prior[2], prior[3], prior[1], prior[4])):
+                    legacy_refused = True
+                    if prior[0] == "pending":
+                        cur.execute(
+                            "UPDATE goals SET status='blocked', completed_at=NULL, "
+                            "updated_at=GREATEST(updated_at + 0.000001, %s), "
+                            "result=%s WHERE id=%s AND status='pending'"
+                            + (" AND " + frag if frag else ""),
+                            (now, _seal("Earlier event request held for review"),
+                             int(goal_id), *fparams),
+                        )
+                        cur.execute("DELETE FROM signoffs WHERE goal_id=%s", (int(goal_id),))
+            if not legacy_refused:
+                cur.execute(sql, tuple(params))
             # Approval is bound to one terminal payload.  Invalidate it in the
             # same transaction on every rerun/non-terminal transition or result
             # mutation, after tenant-scoped UPDATE proves this goal is ours.
-            if cur.rowcount == 1 and (status != "done" or result is not None):
+            if not legacy_refused and cur.rowcount == 1 and (status != "done" or result is not None):
                 cur.execute("DELETE FROM signoffs WHERE goal_id=%s", (int(goal_id),))
+        if legacy_refused:
+            raise LegacyEventGoalHeld("Earlier event request held for review")
 
     def block_goal_admission(self, goal_id: int, *, result: str) -> bool:
         """Refuse only an exact-tenant, non-terminal goal before dispatch."""
@@ -1753,6 +1785,31 @@ class PostgresWorldModel:
         sql += " AND " + frag
         params += fparams
         with self._tx() as cur:
+            scoped, scoped_params = _mutation_tenant_scope("g.tenant_id")
+            owner_sql = " AND g.owner=%s" if expected_owner is not None else ""
+            cur.execute(
+                "SELECT g.owner,o.kind,o.ref,a.trigger_key FROM goals g "
+                "JOIN goal_origins o ON o.goal_id=g.id "
+                "LEFT JOIN event_goal_admissions a ON a.goal_id=g.id "
+                "AND a.tenant_id=g.tenant_id "
+                "WHERE g.id=%s AND g.status='pending' "
+                "AND o.kind IN ('event','event_v2') "
+                "AND " + scoped + owner_sql + " FOR UPDATE OF g",
+                (int(goal_id), *scoped_params,
+                 *((str(expected_owner),) if expected_owner is not None else ())),
+            )
+            legacy = cur.fetchone()
+            if legacy is not None and not compatible_event_goal(
+                    legacy[1], legacy[2], legacy[0], legacy[3]):
+                cur.execute(
+                    "UPDATE goals SET status='blocked', completed_at=NULL, "
+                    "updated_at=GREATEST(updated_at + 0.000001, %s), result=%s "
+                    "WHERE id=%s AND status='pending' AND " + frag,
+                    (time.time(), _seal("Earlier event request held for review"),
+                     int(goal_id), *fparams),
+                )
+                cur.execute("DELETE FROM signoffs WHERE goal_id=%s", (int(goal_id),))
+                return False
             cur.execute(sql, tuple(params))
             return cur.rowcount == 1
 

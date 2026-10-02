@@ -44,7 +44,9 @@ def test_lists_provisioned_tenants(monkeypatch, tmp_path):
     assert "acme" in text and "enterprise" in text and "Acme Inc" in text
     assert "$100/day" in text
     # beta is suspended.
-    assert "Beta" in text and "Paused" in text
+    beta_row = text.split('data-tenant-row="beta"', 1)[1].split("</tr>", 1)[0]
+    assert 'data-tenant-name="beta"' in beta_row
+    assert ">beta<" in beta_row and ">Paused<" in beta_row
 
 
 def test_roster_lets_an_admin_change_each_daily_limit_in_place(monkeypatch, tmp_path):

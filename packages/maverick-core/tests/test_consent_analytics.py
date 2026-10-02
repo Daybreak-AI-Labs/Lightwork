@@ -45,7 +45,7 @@ class IdFactory:
 
 @pytest.fixture(autouse=True)
 def analytics_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(config, "config_source_errors", list)
+    monkeypatch.setattr(config, "config_source_errors", lambda **_kwargs: {})
     monkeypatch.setattr(
         config,
         "load_config",

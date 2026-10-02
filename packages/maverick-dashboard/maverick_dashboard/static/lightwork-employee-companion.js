@@ -14,6 +14,7 @@
   var conversationAvailable = false;
   var statusAvailable = false;
   var historyGeneration = 0;
+  var historyRevision = "";
   var conversationVersion = 0;
   var replyPending = false;
   var replyNetworkBusy = "";
@@ -274,6 +275,7 @@
     conversationAvailable = data.conversation_available === true;
     statusAvailable = data.status_available === true;
     if (Number.isInteger(data.history_generation)) { historyGeneration = data.history_generation; }
+    if (typeof data.history_revision === "string") { historyRevision = data.history_revision; }
     if (!policy || !Number.isInteger(policy.revision)) { throw new Error("Your companion policy could not be checked. Refresh to try again."); }
     var days = policy.retention_days;
     el("ec-policy-label").textContent = available ? (conversationAvailable ? "Ready for conversation and drafts" : "Ready for task questions") : "Companion unavailable";
@@ -508,6 +510,25 @@
       finally { setBusy(false); }
     });
   } else {
+    document.addEventListener("lightwork:product-operation-complete", function (event) {
+      var detail = event.detail || {};
+      if (blocked || detail.operation !== "companion.clear_history" ||
+          !["confirmed", "replayed"].includes(detail.status)) { return; }
+      // Invalidate in-flight replies before re-reading the owner-bound source.
+      historyGeneration += 1;
+      historyRevision = "";
+      conversationVersion += 1;
+      messages = [];
+      replyPending = false;
+      replyRequestId = "";
+      newReplyWarning = false;
+      el("ec-message").value = "";
+      el("ec-reply-state").hidden = true;
+      el("ec-clear-confirm").hidden = true;
+      renderMessages();
+      announce("Your companion conversation was cleared. Checking current status.");
+      refresh();
+    });
     el("ec-message-form").addEventListener("submit", async function (event) {
       event.preventDefault();
       if (busy || blocked || stale || replyPending || taskQuestionBusy || !loaded || !available) { return; }
@@ -561,8 +582,10 @@
       setBusy(true);
       announce("Clearing your conversation history.");
       try {
-        var data = await request("/history", "DELETE");
+        if (!historyRevision) { throw new Error("Refresh your companion before clearing its conversation."); }
+        var data = await request("/history", "DELETE", {expected_revision: historyRevision});
         if (Number.isInteger(data.history_generation)) { historyGeneration = data.history_generation; }
+        if (typeof data.history_revision === "string") { historyRevision = data.history_revision; }
         conversationVersion += 1;
         messages = [];
         replyPending = false;

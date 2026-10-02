@@ -55,14 +55,17 @@
     {% if vendor.questionnaires %}
       <table>
         <thead><tr><th scope="col">Questionnaire</th><th scope="col">Status</th>
-          <th scope="col">Sent</th><th scope="col">Sent By</th></tr></thead>
+          <th scope="col">Sent</th><th scope="col">Sent By</th><th scope="col">Link</th></tr></thead>
         <tbody>
         {% for q in vendor.questionnaires %}
           <tr>
             <td>{{ q.title }}</td>
-            <td><span class="badge {{ 'done' if q.status == 'answered' else 'warn' if q.status == 'unavailable' else 'info' }}">{{ 'Replies unavailable' if q.status == 'unavailable' else q.status | humanize }}</span></td>
+            <td><span class="badge {{ 'done' if q.status == 'answered' else 'warn' if q.status in ('unavailable', 'replaced') else 'info' }}">{{ 'Replies unavailable' if q.status == 'unavailable' else 'Link closed' if q.status == 'replaced' else q.status | humanize }}</span>{% if q.previous_count %}<small class="muted">{{ q.past_replies }} earlier {{ 'reply' if q.past_replies == 1 else 'replies' }} retained</small>{% endif %}</td>
             <td>{{ q.requested_at_date }}</td>
             <td class="muted">{{ q.requested_by | identity }}</td>
+            <td>{% if q.current_replies or q.past_replies %}<button type="button" class="btn" data-vd-replies="{{ q.request_id }}">View replies</button>{% endif %}
+              {% if q.status not in ('unavailable', 'replaced') %}<button type="button" class="btn" data-vd-copy-link="{{ q.request_id }}">Copy link</button>{% endif %}
+              {% if can_replace_questionnaire and q.status != 'unavailable' %}<button type="button" class="btn" data-vd-replace="{{ q.request_id }}">Replace link</button>{% endif %}</td>
           </tr>
         {% endfor %}
         </tbody>
@@ -72,6 +75,8 @@
       {% if questionnaire_types %}<button type="button" class="btn btn--primary" data-vd-add="questionnaire">Send a questionnaire</button>{% endif %}
     {% endif %}
   </div>
+
+  <section class="panel" id="vd-replies" hidden aria-live="polite"></section>
 
   <div class="section-head"><h2>Linked Records</h2><button type="button" class="btn btn--primary" data-vd-add="link">Link a record</button></div>
   <div class="panel{% if not vendor.links %} empty{% endif %}">
@@ -136,6 +141,93 @@
   function done() { msg.textContent = 'Saved. Updating the page…'; window.location.reload(); }
   function fail(action) { return function (f) { msg.textContent = window.mvErrorText(f, action); }; }
   function isoIn(days) { return new Date(Date.now() + days * 86400000).toISOString().slice(0, 10); }
+  function showLink(d, message) {
+    var box = document.getElementById('vd-link-box');
+    box.hidden = false; box.textContent = '';
+    box.appendChild(Object.assign(document.createElement('p'), { textContent: message }));
+    var link = window.location.origin + d.form_path;
+    var field = Object.assign(document.createElement('input'), { className: 'input', readOnly: true, value: link });
+    field.setAttribute('aria-label', 'Questionnaire link');
+    var copy = Object.assign(document.createElement('button'), { type: 'button', className: 'btn btn--primary', textContent: 'Copy link' });
+    copy.addEventListener('click', function () { window.mvCopy(link); });
+    box.append(field, copy);
+    revision = d.revision || revision;
+  }
+  function getQuestionnaires() {
+    return fetch(base + '/questionnaires', { headers: { Accept: 'application/json' } }).then(function (r) {
+      if (!r.ok) throw r;
+      return r.json();
+    });
+  }
+  function appendReplies(box, title, group, questions) {
+    var heading = document.createElement('h3');
+    heading.textContent = title + ' · ' + group.reply_count + (group.reply_count === 1 ? ' reply' : ' replies');
+    box.appendChild(heading);
+    if (group.reply_count > group.submissions.length) {
+      box.appendChild(Object.assign(document.createElement('p'), { className: 'muted', textContent: 'Showing the latest 10 replies.' }));
+    }
+    group.submissions.slice().reverse().forEach(function (reply, index) {
+      var detail = document.createElement('details');
+      detail.appendChild(Object.assign(document.createElement('summary'), { textContent: 'Reply ' + (group.reply_count - index) }));
+      var answers = document.createElement('dl');
+      questions.forEach(function (question) {
+        var label = document.createElement('dt'); label.textContent = question.text;
+        var answer = document.createElement('dd');
+        var value = reply[question.id];
+        answer.textContent = value === 'yes' ? 'Yes' : value === 'no' ? 'No' : value || 'No answer recorded';
+        answers.append(label, answer);
+      });
+      if (reply._notes) {
+        var note = document.createElement('dt'); note.textContent = 'Additional context';
+        var value = document.createElement('dd'); value.textContent = reply._notes;
+        answers.append(note, value);
+      }
+      detail.appendChild(answers);
+      box.appendChild(detail);
+    });
+  }
+
+  document.querySelectorAll('[data-vd-replies]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      getQuestionnaires().then(function (d) {
+        var selected = (d.questionnaires || []).find(function (q) { return q.request_id === b.getAttribute('data-vd-replies'); });
+        if (!selected) { msg.textContent = 'That questionnaire changed. Refresh the page.'; return; }
+        var box = document.getElementById('vd-replies');
+        box.textContent = ''; box.hidden = false;
+        var heading = document.createElement('h2');
+        heading.textContent = 'Replies from ' + name;
+        heading.tabIndex = -1;
+        box.appendChild(heading);
+        appendReplies(box, 'Current link', selected, selected.questions || []);
+        (selected.previous_links || []).slice().reverse().forEach(function (older) {
+          appendReplies(box, 'Earlier link', older, selected.questions || []);
+        });
+        heading.focus();
+      }, fail('show questionnaire replies'));
+    });
+  });
+
+  document.querySelectorAll('[data-vd-copy-link]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      getQuestionnaires().then(function (d) {
+        var current = (d.questionnaires || []).find(function (q) { return q.request_id === b.getAttribute('data-vd-copy-link'); });
+        if (!current || current.status === 'replaced') { msg.textContent = 'That link changed. Refresh this page for the current address.'; return; }
+        window.mvCopy(window.location.origin + current.form_path);
+      }, fail('copy the questionnaire link'));
+    });
+  });
+
+  document.querySelectorAll('[data-vd-replace]').forEach(function (b) {
+    b.addEventListener('click', async function () {
+      var selected = b.getAttribute('data-vd-replace');
+      if (!(await window.mvConfirm('Replace this questionnaire link for ' + name + '? The old address will stop accepting answers. Earlier replies will remain available.', { okText: 'Replace link' }))) return;
+      b.disabled = true;
+      post('/questionnaires/' + encodeURIComponent(selected) + '/replace', { revision: revision }).then(function (d) {
+        showLink(d, 'The old link is closed. Send this new link to ' + name + '. Earlier replies remain in their record.');
+        msg.textContent = 'Questionnaire link replaced. Refresh the page to see its latest status.';
+      }, function (error) { b.disabled = false; fail('replace the questionnaire link')(error); });
+    });
+  });
 
   document.querySelectorAll('[data-vd-status]').forEach(function (b) {
     b.addEventListener('click', async function () {
@@ -168,17 +260,8 @@
       ], { okText: 'Create link' });
       if (!v) return;
       post('/questionnaires', { assessment_type: v.type, revision: revision }).then(function (d) {
-        var box = document.getElementById('vd-link-box');
-        box.hidden = false; box.textContent = '';
-        box.appendChild(Object.assign(document.createElement('p'), { textContent: 'Send this link to ' + name + '. They can answer without an account. Reload the page to see the questionnaire in the list.' }));
-        var link = window.location.origin + d.form_path;
-        var field = Object.assign(document.createElement('input'), { className: 'input', readOnly: true, value: link });
-        field.setAttribute('aria-label', 'Questionnaire link');
-        var copy = Object.assign(document.createElement('button'), { type: 'button', className: 'btn btn--primary', textContent: 'Copy link' });
-        copy.addEventListener('click', function () { window.mvCopy(link); });
-        box.append(field, copy);
+        showLink(d, 'Send this link to ' + name + '. They can answer without an account. Reload the page to see the questionnaire in the list.');
         msg.textContent = 'Questionnaire link created.';
-        revision = d.revision || revision;
       }, fail('send the questionnaire'));
     },
     link: async function () {

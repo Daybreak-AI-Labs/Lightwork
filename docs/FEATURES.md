@@ -2366,8 +2366,10 @@ here.
   An owner can replace a form link in Automations after every accepted
   submission has been checked. The old link stops accepting submissions, the
   new link starts with an empty queue, and the old submission file is retained.
-  Replacement refuses pending or unreadable history; stuck accepted rows still
-  need a separate reviewed recovery path.
+  Replacement refuses pending or unreadable history. An owner can review an
+  exact waiting submission and record a signed, reasoned decision that it must
+  not run; that decision is checked again when the queue advances. Repairing a
+  submission for a new target remains unavailable.
 
   The administrator's connected-automation settings show the effective signing
   configuration. Reviewed changes recheck current authority and settings,
@@ -2401,6 +2403,22 @@ here.
   the complete UID high-water without fetching historical message bodies;
   UIDVALIDITY changes establish a new baseline. Provider-wide OAuth vault
   authorizations and token rotations are serialized across local processes.
+
+  The sender-check upgrade holds earlier, unstarted IMAP goals and workflow
+  runs before execution. Older non-email goals continue only when their saved
+  admission receipt proves the current owner and unchanged trigger generation;
+  older non-email workflow runs require the same binding and a source ID that
+  reproduces their generation-scoped reservation key. Missing, deleted, edited,
+  and ambiguous legacy work stays held for review. A run reserved under the
+  older protocol is not proof that its email sender was verified, even when it
+  reached the queue. Owners should review held items and start fresh work from
+  the current trigger after confirming the source. A pre-upgrade IMAP batch tied to an
+  edited trigger configuration may remain retained but cannot be attributed to
+  the new binding or automatically replayed. This requires explicit operator
+  reconciliation; there is no in-product one-click repair for that historical
+  batch. New IMAP work requires the receiving server to remove forged sender
+  results before stamping its own aligned result; a successful mail sign-in
+  test does not prove that server behavior.
 
 - **Migration fidelity** (`automation_import.to_flow`) — a per-source
   `_STRUCTURAL_LOWERERS` registry (register a source in one line): n8n IF/Filter,
@@ -2926,7 +2944,11 @@ carry their platform `message_id` and adapters expose `send_threaded`
 `reply_to_message_id`; base falls back to a plain send) so long-running
 answers land under the message that asked. **Email v2** adds IMAP IDLE (push
 instead of poll) + conversation threading from Message-ID/In-Reply-To/References
-(`email_v2.py`). **Discord Stages voice v2** (`discord_stages.py`): drive Lightwork from a
+(`email_v2.py`). Inbound IMAP/SMTP channel work and IMAP-triggered workflows
+require a configured receiving-server identity, a matching From-aligned
+sender-authentication result, and an explicit permitted-sender list before an
+email can start work. The Channels and Automations pages provide those controls.
+**Discord Stages voice v2** (`discord_stages.py`): drive Lightwork from a
 Stage channel — per-speaker utterance assembly over an injected transcriber,
 the same `DISCORD_ALLOWED_USER_IDS` speaker allowlist as Discord text,
 optional wake-word gating, replies spoken when the bot holds a speaker slot

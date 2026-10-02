@@ -357,6 +357,13 @@ class FormLinkRotationIn(BaseModel):
     expected_generation: str = Field(pattern=r"^[a-f0-9]{64}$")
 
 
+class FormAbandonIn(BaseModel):
+    """An explicit, reviewable decision for one still-pending form submission."""
+    expected_generation: str = Field(pattern=r"^[a-f0-9]{64}$")
+    expected_fields_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    reason: str = Field(min_length=10, max_length=500)
+
+
 class LearningToggleIn(BaseModel):
     """Turn the whole self-learning loop on/off from the dashboard (writes the
     learning knobs to the config overlay), or only the one learning system
@@ -953,6 +960,11 @@ class VendorLinkIn(BaseModel):
 class VendorQuestionnaireIn(BaseModel):
     """Send a hosted-form questionnaire built from a registered template."""
     assessment_type: str = Field(..., min_length=1, max_length=64)
+    revision: int = Field(..., ge=1)
+
+
+class VendorQuestionnaireReplaceIn(BaseModel):
+    """Replace one link against the vendor version currently on screen."""
     revision: int = Field(..., ge=1)
 
 

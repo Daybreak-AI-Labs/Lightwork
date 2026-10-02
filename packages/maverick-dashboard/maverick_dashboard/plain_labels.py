@@ -201,6 +201,7 @@ CHANNEL_FIELDS = {
     ("sms", "from_number"): ("Sending phone number", "Your Twilio number, with country code, like +15551234567.", False),
     ("sms", "port"): ("Listening port", "Only change this if your IT team asks you to.", True),
     ("email", "imap_host"): ("Incoming mail server", "For example imap.gmail.com. Choosing your email provider above fills this in.", False),
+    ("email", "trusted_authserv_id"): ("Server that checks incoming mail", "Ask your mail administrator for the server name on its sender-check result. The server must remove sender-supplied results before mail reaches this inbox. Incoming email cannot start work until this is set and the sender check passes.", False),
     ("email", "imap_user"): ("Incoming mail username", "Usually the full email address.", False),
     ("email", "imap_password"): ("Incoming mail password", "Many providers need an app password rather than your normal password.", False),
     ("email", "smtp_host"): ("Outgoing mail server", "For example smtp.gmail.com.", False),

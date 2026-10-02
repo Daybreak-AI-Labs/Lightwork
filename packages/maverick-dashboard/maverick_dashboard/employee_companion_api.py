@@ -67,6 +67,11 @@ class PolicyIn(BaseModel):
     retention_days: int
 
 
+class HistoryClearIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    expected_revision: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+
 def _enabled() -> bool:
     return config.get_features().get("employee_companions") is True
 
@@ -254,7 +259,8 @@ def _snapshot(store, actor, context):
             "conversation_available": _conversation_available(policy),
             "explanation": _explanation(policy), "history": history,
             "tasks": _tasks(actor) if _available(policy) and "own_tasks" in policy["allowed_sources"] else [],
-            **store.conversation_state(actor)}
+            **store.conversation_state(actor),
+            "history_revision": store.history_review(actor)["revision"]}
 
 
 @router.get(BASE)
@@ -439,10 +445,12 @@ async def request_status(request_id: str, request: Request, response: Response):
 
 
 @router.delete(BASE + "/history")
-async def clear_history(request: Request, response: Response):
+async def clear_history(request: Request, response: Response, body: HistoryClearIn):
     def operation(actor, _tenant, context, store):
-        trace = store.clear_history(actor, actor=actor)
-        return {"context": context, "history": [], "trace": trace, **store.conversation_state(actor)}
+        trace = store.clear_history(actor, actor=actor, expected_revision=body.expected_revision)
+        return {"context": context, "history": [], "trace": trace,
+                **store.conversation_state(actor),
+                "history_revision": store.history_review(actor)["revision"]}
 
     return await _call(request, response, operation, write=True)
 

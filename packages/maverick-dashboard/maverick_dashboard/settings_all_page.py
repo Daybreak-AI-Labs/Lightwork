@@ -418,6 +418,8 @@ def _capability_role_choices() -> list[tuple[str, str]]:
 
 
 def _workspace_choices() -> list[tuple[str, str]]:
+    from .workspace_display import duplicate_workspace_ids
+
     try:
         from maverick.tenant.registry import list_tenants
 
@@ -429,7 +431,12 @@ def _workspace_choices() -> list[tuple[str, str]]:
         tid = str(getattr(tenant, "id", "") or "")
         if tid:
             out.append((tid, str(getattr(tenant, "display_name", "") or "") or tid))
-    return sorted(out, key=lambda c: c[1].lower())
+    duplicates = duplicate_workspace_ids(out)
+    return sorted(
+        [(tid, f"{label} (Reference: {tid})" if tid in duplicates else label)
+         for tid, label in out],
+        key=lambda choice: choice[1].lower(),
+    )
 
 
 def _model_role_choices() -> list[tuple[str, str]]:

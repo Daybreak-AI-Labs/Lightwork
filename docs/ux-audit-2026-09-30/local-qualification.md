@@ -1,12 +1,15 @@
 # Local qualification checkpoints
 
-Local testing was authorized after the earlier deferral, then explicitly stopped
-by the user. Completed results are preserved below; no further tests are queued.
-These results do not certify an installed release or live provider integration. All
-provider, identity-provider and billing boundaries use synthetic data or mocks.
-No deployment configuration or credentials were changed.
+This ledger preserves the UX-audit qualification checkpoints originally assembled
+for PR #2528. The user stopped testing at that checkpoint; later authorized
+local verification for consolidated draft PR #2529 is tracked in that PR's
+description. Present-tense statements below refer to their dated source, not
+the current branch. These results do not certify an installed release or live
+provider integration. Provider, identity-provider and billing boundaries use
+synthetic data or mocks. No deployment configuration or credentials were changed
+in these checkpoints.
 
-## Current evidence snapshot, 2026-10-01
+## UX-audit evidence checkpoint, 2026-10-01
 
 The register has **190 implemented entries awaiting final acceptance and five
 qualification entries**. All five separately approved security repairs are

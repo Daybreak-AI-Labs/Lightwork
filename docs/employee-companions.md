@@ -177,10 +177,14 @@ offboarded employees' retained files are unfinished. A deployment that omits its
 replica-count declaration is not proof of single-host operation. Keep this
 preview disabled in distributed deployments until that storage work is complete.
 
-Global Copilot has page guidance only for this feature. It cannot enroll an
-employee, change policy, answer from companion state, or clear history. These
-missing operations and unverified browser/recovery journeys mean the customer
-experience contract is only partially implemented.
+On Your companion, Global Copilot can now check the owner's saved-exchange
+count, retention and pending-reply state without exposing conversation text.
+It can clear saved history and cancel a pending reply only after a fresh review
+and explicit confirmation. The native page uses the same history revision, and
+an exact Copilot retry reads its saved clear receipt rather than clearing again.
+Copilot still cannot enroll an employee, change policy or converse as that
+person's companion. Installed-app and provider acceptance remain unverified;
+the customer experience contract is only partially implemented.
 
 ## Qualification and remaining checks
 

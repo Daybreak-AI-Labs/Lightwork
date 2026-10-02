@@ -114,6 +114,7 @@ from .api_schemas import (
     FlowRunIn,
     FlowSaveIn,
     FollowupsIn,
+    FormAbandonIn,
     FormLinkRotationIn,
     FulfillmentIdentityIn,
     FulfillmentResponseIn,
@@ -180,6 +181,7 @@ from .api_schemas import (
     VendorLinkIn,
     VendorNoteIn,
     VendorQuestionnaireIn,
+    VendorQuestionnaireReplaceIn,
     VendorStatusIn,
     WorkflowDraftIn,
     WorkflowRefineIn,
@@ -2816,12 +2818,13 @@ async def link_vendor_record(request: Request, vendor_id: str,
 
 
 @router.post("/vendors/{vendor_id}/questionnaires", status_code=201)
-async def request_vendor_questionnaire(request: Request, vendor_id: str,
+async def request_vendor_questionnaire(request: Request, response: Response, vendor_id: str,
                                        body: VendorQuestionnaireIn) -> dict:
     """Mint a hosted-form questionnaire the vendor answers by link -- the
     returned form_path is the platform's public /form/{token} endpoint."""
     require_permission(request, "operate")
     vm = _vendor_management_or_403()
+    response.headers["Cache-Control"] = "no-store"
     return await _estate_call(
         vm.request_questionnaire, vendor_id[:64],
         assessment_type=body.assessment_type,
@@ -2831,10 +2834,11 @@ async def request_vendor_questionnaire(request: Request, vendor_id: str,
 
 
 @router.get("/vendors/{vendor_id}/questionnaires")
-async def vendor_questionnaire_responses(request: Request,
+async def vendor_questionnaire_responses(request: Request, response: Response,
                                          vendor_id: str) -> dict:
     require_permission(request, "operate")
     vm = _vendor_management_or_403()
+    response.headers["Cache-Control"] = "no-store"
     try:
         rows = await run_in_threadpool(vm.questionnaire_responses, vendor_id[:64])
     except vm.QuestionnaireResponsesUnavailable as exc:
@@ -2847,6 +2851,33 @@ async def vendor_questionnaire_responses(request: Request,
     except (ValueError, RuntimeError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return {"questionnaires": rows}
+
+
+@router.post("/vendors/{vendor_id}/questionnaires/{request_id}/replace")
+async def replace_vendor_questionnaire_link(
+    request: Request, response: Response, vendor_id: str, request_id: str,
+    body: VendorQuestionnaireReplaceIn,
+) -> dict:
+    """Admin-only link replacement, retaining the earlier submitted answers."""
+    require_permission(request, "admin")
+    vm = _vendor_management_or_403()
+    response.headers["Cache-Control"] = "no-store"
+    try:
+        return await run_in_threadpool(
+            vm.replace_questionnaire_link, vendor_id[:64], request_id,
+            actor=_request_actor(request), expected_revision=body.revision,
+        )
+    except vm.QuestionnaireLinkUnavailable as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="The old link could not be safely closed. Please try again.",
+        ) from exc
+    except RecordConflict as exc:
+        raise HTTPException(status_code=409, detail="This vendor changed. Refresh and try again.") from exc
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="That questionnaire link is no longer active.") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.post("/vendors/{vendor_id}/notes", status_code=201)
@@ -10986,6 +11017,125 @@ def rotate_event_trigger_form_link(
     return _event_trigger_out(updated)
 
 
+@router.get("/event-triggers/{name}/form-submissions")
+def waiting_form_submissions(request: Request, response: Response, name: str) -> dict:
+    """Owner-only review of received rows still ahead of the delivery cursor."""
+    from maverick import form_store
+    from maverick.automation_events import EventSourceError, _decode_cursor
+    from maverick.paths import current_tenant_id
+
+    from maverick_dashboard import event_triggers_store, form_recovery
+    from maverick_dashboard.event_poll import _trigger_key
+
+    require_permission(request, "operate")
+    _require_event_triggers()
+    tenant = current_tenant_id() or ""
+    current = event_triggers_store.get_trigger(name, tenant=tenant)
+    if (current is None or current.get("source") != "form"
+            or current.get("owner", "") not in _event_trigger_allowed_owners(request)):
+        raise HTTPException(status_code=404, detail="no form automation with that name")
+    token = str((current.get("config") or {}).get("token") or "")
+    try:
+        with form_recovery.locked(token), event_triggers_store.registry_lock():
+            current = event_triggers_store.get_trigger(name, tenant=tenant)
+            if (current is None or current.get("source") != "form"
+                    or current.get("owner", "") not in _event_trigger_allowed_owners(request)
+                    or str((current.get("config") or {}).get("token") or "") != token):
+                raise HTTPException(status_code=409, detail="This form changed. Refresh it.")
+            generation = _trigger_key(current)
+            raw = _decode_cursor(
+                str(current.get("cursor") or "0"), "form",
+                int(current.get("cursor_format") or 0),
+            )
+            rows, _ = form_store.since(token, raw, limit=25)
+            total = form_store.pending(token, raw)
+            decisions = form_recovery.decisions(token, generation)
+            submissions = [{
+                "sequence": row["_seq"], "received_at": row["_ts"],
+                "fields": form_recovery._row_fields(row),
+                "fields_sha256": form_recovery.fields_digest(form_recovery._row_fields(row)),
+                "do_not_run": row["_seq"] in decisions,
+                "reason": decisions.get(row["_seq"], {}).get("reason", ""),
+            } for row in rows]
+    except (form_store.FormStoreUnavailable, form_recovery.FormRecoveryUnavailable,
+            EventSourceError, OSError, ValueError) as exc:
+        raise HTTPException(
+            status_code=503, detail="Waiting submissions cannot be verified right now."
+        ) from exc
+    response.headers["Cache-Control"] = "no-store"
+    return {"submissions": submissions, "waiting_total": total,
+            "binding_revision": generation}
+
+
+@router.post("/event-triggers/{name}/form-submissions/{sequence}/do-not-run")
+def abandon_form_submission(
+    request: Request, response: Response, name: str, sequence: int,
+    payload: FormAbandonIn,
+) -> dict:
+    """Signed, explicit owner disposition for one exact accepted submission."""
+    from maverick import form_store
+    from maverick.audit.errors import AuditRefused
+    from maverick.automation_events import EventSourceError, _decode_cursor
+    from maverick.paths import current_tenant_id
+
+    from maverick_dashboard import event_triggers_store, form_recovery
+    from maverick_dashboard.event_poll import _trigger_key
+
+    require_permission(request, "operate")
+    _require_event_triggers()
+    tenant = current_tenant_id() or ""
+    current = event_triggers_store.get_trigger(name, tenant=tenant)
+    if (current is None or current.get("source") != "form"
+            or current.get("owner", "") not in _event_trigger_allowed_owners(request)):
+        raise HTTPException(status_code=404, detail="no form automation with that name")
+    token = str((current.get("config") or {}).get("token") or "")
+    try:
+        with form_recovery.locked(token), event_triggers_store.registry_lock():
+            current = event_triggers_store.get_trigger(name, tenant=tenant)
+            if (current is None or current.get("source") != "form"
+                    or current.get("owner", "") not in _event_trigger_allowed_owners(request)
+                    or str((current.get("config") or {}).get("token") or "") != token):
+                raise HTTPException(status_code=409, detail="This form changed. Refresh it.")
+            generation = _trigger_key(current)
+            if generation != payload.expected_generation:
+                raise HTTPException(status_code=409, detail="This form changed. Refresh it.")
+            raw = _decode_cursor(
+                str(current.get("cursor") or "0"), "form",
+                int(current.get("cursor_format") or 0),
+            )
+            rows, _ = form_store.since(token, raw, limit=25)
+            row = next((entry for entry in rows if entry["_seq"] == sequence), None)
+            if row is None:
+                raise HTTPException(
+                    status_code=409, detail="This submission is no longer waiting. Refresh it."
+                )
+            if form_recovery.already_started(current, row, _world()):
+                raise HTTPException(
+                    status_code=409, detail="This submission has already started work. Review its run."
+                )
+            decision = form_recovery.abandon(
+                token, generation, row,
+                expected_fields_sha256=payload.expected_fields_sha256,
+                reason=payload.reason, actor=caller_principal(request) or "local",
+            )
+    except form_recovery.FormRecoveryConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except AuditRefused as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="The required signed activity record was refused. No decision was applied.",
+        ) from exc
+    except (form_store.FormStoreUnavailable, form_recovery.FormRecoveryUnavailable,
+            EventSourceError, OSError, ValueError) as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="The decision could not be confirmed. Refresh the form before trying again. "
+                   "Check activity record protection in Settings if the problem continues.",
+        ) from exc
+    response.headers["Cache-Control"] = "no-store"
+    return {"sequence": sequence, "do_not_run": True, "decision_sha256": decision["hash"]}
+
+
 @router.post("/event-triggers/poll")
 async def poll_event_triggers(request: Request, bg: BackgroundTasks, name: str = "") -> dict:
     """Poll event sources and fire the bound template for each new item.
@@ -11084,14 +11234,19 @@ def event_trigger_outcomes(request: Request) -> dict:
     *bad* goal shows up here as a rising ``failed``/``blocked`` count, so an
     operator can see which automations produce work that doesn't land -- and the
     same failed goals are grounded into the learning loop by the run itself.
-    Sourced from the goal-origin join (``origin_status_counts('event', name)``)."""
+    Sourced from the goal-origin join across earlier and current admissions."""
     require_permission(request, "operate")
     _require_event_triggers()
     w = _world()
-    outcomes = {
-        t["name"]: w.origin_status_counts("event", t["name"])
-        for t in _owned_event_triggers(request)
-    }
+    outcomes = {}
+    for trigger in _owned_event_triggers(request):
+        name = trigger["name"]
+        earlier = w.origin_status_counts("event", name)
+        current = w.origin_status_counts("event_v2", name)
+        outcomes[name] = {
+            status: earlier.get(status, 0) + current.get(status, 0)
+            for status in earlier.keys() | current.keys()
+        }
     return {"outcomes": outcomes}
 
 

@@ -29,6 +29,10 @@ class FormStoreFull(RuntimeError):
     """The form cannot accept another submission without losing existing data."""
 
 
+class FormStoreClosed(RuntimeError):
+    """A replaced public link cannot accept another submission."""
+
+
 class FormStoreUnavailable(RuntimeError):
     """Pending submissions cannot be established safely from the stored file."""
 
@@ -50,6 +54,34 @@ def _path(token: str):
 
 def _accepted_marker(p):
     return p.with_name(p.name + ".accepted")
+
+
+def _closed_marker(p):
+    return p.with_name(p.name + ".closed")
+
+
+def is_closed(token: str) -> bool:
+    """Check the durable closure marker without creating a form queue."""
+    return _closed_marker(_path(token)).exists()
+
+
+def close_token(token: str) -> None:
+    """Stop a public link under the same lock used by submission append."""
+    if not valid_token(token):
+        raise ValueError("form token is invalid")
+    p = _path(token)
+    from .file_lock import atomic_create_bytes, cross_process_lock, ensure_private_directory
+
+    try:
+        ensure_private_directory(p.parent)
+        with cross_process_lock(p, strict=True):
+            if not _closed_marker(p).exists():
+                try:
+                    atomic_create_bytes(_closed_marker(p), b"closed\n")
+                except FileExistsError:
+                    pass
+    except OSError as exc:
+        raise FormStoreUnavailable("form link could not be closed") from exc
 
 
 def _mark_accepted(p) -> None:
@@ -86,6 +118,8 @@ def append(token: str, fields: dict, *, ts: float = 0.0) -> int:
         # installation's existing directory as well as newly created ones.
         ensure_private_directory(p.parent)
         with cross_process_lock(p, strict=True):
+            if _closed_marker(p).exists():
+                raise FormStoreClosed("form link was replaced")
             exists = p.exists()
             if _accepted_marker(p).exists() and not exists:
                 raise FormStoreUnavailable("form submissions are unavailable")
@@ -110,7 +144,7 @@ def append(token: str, fields: dict, *, ts: float = 0.0) -> int:
             _mark_accepted(p)
             return seq
     except (OSError, RuntimeError) as exc:
-        if isinstance(exc, FormStoreFull):
+        if isinstance(exc, (FormStoreFull, FormStoreClosed)):
             raise
         return 0
 
@@ -232,5 +266,5 @@ def since(token: str, cursor: str, *, limit: int | None = None) -> tuple[list[di
     return events, str(fresh[-1]["seq"])
 
 
-__all__ = ["FormStoreFull", "FormStoreUnavailable", "append", "pending", "since",
-           "storage_key", "valid_token"]
+__all__ = ["FormStoreFull", "FormStoreClosed", "FormStoreUnavailable", "append",
+           "close_token", "is_closed", "pending", "since", "storage_key", "valid_token"]

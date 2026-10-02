@@ -281,6 +281,10 @@ def authority_policy(relative: str, *, is_sqlite: bool) -> str | None:  # noqa: 
         return "goal_template_authority"
     if "forms" in parts[:-1]:
         return "form_event_authority"
+    if "form-recovery" in parts[:-1]:
+        # Signed owner decisions and their accepted markers suppress execution.
+        # An older restored absence could revive a deliberately stopped form row.
+        return "form_decision_authority"
     if "repl" in parts[:-1]:
         return "repl_execution_authority"
     if "adapters" in parts[:-1]:
@@ -710,6 +714,8 @@ GLOBAL_START_BLOCKED_AUTHORITY_SAMPLES = {
     "task_graphs/recovered.json": "task_graph_authority",
     "templates/recovered.md": "goal_template_authority",
     "forms/recovered.ndjson": "form_event_authority",
+    "form-recovery/example.ndjson": "form_decision_authority",
+    "form-recovery/example.ndjson.accepted": "form_decision_authority",
     "repl/recovered/session.json": "repl_execution_authority",
     "adapters/active.json": "adapter_runtime_authority",
     "adapters/payloads/adapter-a/weights.gguf": "adapter_runtime_authority",

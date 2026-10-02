@@ -692,7 +692,7 @@
       rss: [['url', 'RSS or Atom feed address', 'url', true]],
       oauth_http_json: [['provider', 'Connected account', 'provider', true], ['url', 'Feed address', 'url', true], ['items_path', 'Where the list of items is in the feed (if not at the top)', 'text', false, undefined, true], ['id_field', 'Field that tells items apart', 'text', false, 'id', true]],
       github_issues: [['owner', 'GitHub organization or owner', 'text', true], ['repo', 'Repository name', 'text', true], ['state', 'Which issues', [['open', 'Open issues'], ['closed', 'Closed issues'], ['all', 'All issues']], false, 'open'], ['provider', 'Connected account (optional for public repositories)', 'provider']],
-      imap_email: [['host', 'Mail server', 'text', true], ['username', 'Email account', 'text', true], ['password_env', 'Password name from your administrator', 'text', true], ['mailbox', 'Mailbox', 'text', false, 'INBOX', true], ['port', 'Server port', 'number', false, 993, true], ['use_ssl', 'Use an encrypted connection', 'checkbox', false, true, true], ['include_body', 'Include the message body', 'checkbox', false, false]],
+      imap_email: [['host', 'Mail server', 'text', true], ['username', 'Email account', 'text', true], ['password_env', 'Password name from your administrator', 'text', true], ['trusted_authserv_id', 'Server that checks incoming mail', 'text', true], ['allowed_senders', 'People whose email may start this workflow (separate addresses with commas)', 'text', true], ['mailbox', 'Mailbox', 'text', false, 'INBOX', true], ['port', 'Server port', 'number', false, 993, true], ['include_body', 'Include the message body', 'checkbox', false, false]],
       file_dir: [['path', 'Folder inside the approved incoming-files area', 'text', true], ['glob', 'Which files (for example *.pdf)', 'text', false, '*', true], ['recursive', 'Include subfolders', 'checkbox', false, false]],
       form: []
     };
@@ -701,7 +701,7 @@
       http_json: 'Use a feed that returns a list of items.',
       oauth_http_json: 'Choose an account connected below. Lightwork uses its saved approval; never paste a password or access key.',
       github_issues: 'Watch new issues in a repository. Connect GitHub below for private repositories.',
-      imap_email: 'Your administrator gives you the password name. Passwords are never stored in automation settings.',
+      imap_email: 'Your administrator gives you the password name and the server that verifies incoming senders. Only verified mail from the addresses you list can start this workflow. The mail connection is always encrypted. Passwords are never stored in automation settings.',
       file_dir: 'This folder is on the Lightwork server, inside your organization’s approved incoming-files area. An administrator must set this up.',
       form: 'Lightwork gives this automation a private form link when you save. If you update an existing automation, its link stays the same.'
     };
@@ -878,7 +878,7 @@
           main.appendChild(el('div', 'mv-row__sub', pending === null || pending === undefined
             ? 'Submission status is unavailable. Changes are paused until Lightwork can check it.'
             : pending > 0
-              ? pending + (pending === 1 ? ' submission is' : ' submissions are') + ' waiting. Choose Check now before changing or deleting this automation.'
+              ? pending + (pending === 1 ? ' submission is' : ' submissions are') + ' waiting. Review the received answers or choose Check now.'
               : 'All received submissions have been checked. If this form is full, replace its link and share the new one.'));
         }
         var runs = el('div', 'auto__runs'); main.appendChild(runs); loadRuns('event', t.name, runs);
@@ -889,6 +889,85 @@
         if (t.source === 'form') {
           var formToken = t.config && typeof t.config.token === 'string' ? t.config.token : '';
           if (formToken) {
+            if (pending > 0) {
+              var reviewButton = el('button', 'btn btn--ghost', 'Review waiting submissions');
+              reviewButton.type = 'button';
+              var reviewPanel = el('div', 'auto__runs');
+              reviewPanel.hidden = true;
+              main.appendChild(reviewPanel);
+              async function showWaitingSubmissions() {
+                reviewPanel.hidden = false;
+                reviewPanel.textContent = 'Loading received answers…';
+                var result;
+                try {
+                  var response = await fetch('/api/v1/event-triggers/' + encodeURIComponent(t.name) + '/form-submissions', {cache: 'no-store'});
+                  if (!response.ok) { reviewPanel.textContent = plainError(response, 'review these submissions'); return null; }
+                  result = await response.json();
+                } catch (error) { reviewPanel.textContent = plainError(error, 'review these submissions'); return null; }
+                if (!result || !Array.isArray(result.submissions) || result.binding_revision !== t.binding_revision) {
+                  reviewPanel.textContent = 'This form changed. Refresh the page before making a decision.'; return null;
+                }
+                reviewPanel.textContent = '';
+                reviewPanel.appendChild(el('p', 'muted', 'These answers stay saved. If a submission cannot be used, you can record why it should not start work. This does not undo work already started.'));
+                result.submissions.forEach(function (submission) {
+                  var card = el('div', 'mv-row');
+                  var received = new Date(Number(submission.received_at) * 1000);
+                  card.appendChild(el('strong', '', 'Received ' + (isNaN(received.getTime()) ? 'earlier' : received.toLocaleString())));
+                  var details = document.createElement('dl');
+                  Object.entries(submission.fields || {}).forEach(function (pair) {
+                    details.appendChild(el('dt', '', mvHuman(pair[0])));
+                    details.appendChild(el('dd', '', String(pair[1])));
+                  });
+                  card.appendChild(details);
+                  if (submission.do_not_run) {
+                    card.appendChild(el('p', 'muted', 'Will not run. Reason: ' + (submission.reason || 'Recorded by the owner.')));
+                  } else {
+                    var decide = document.createElement('form');
+                    var label = el('label', '', 'Why should this submission not run?');
+                    var reason = document.createElement('textarea');
+                    reason.className = 'input'; reason.required = true; reason.minLength = 10; reason.maxLength = 500;
+                    label.appendChild(reason); decide.appendChild(label);
+                    var stop = el('button', 'btn btn--ghost', 'Do not run this submission');
+                    stop.type = 'submit'; decide.appendChild(stop);
+                    var status = el('span', 'muted'); status.setAttribute('role', 'status');
+                    decide.appendChild(status);
+                    decide.addEventListener('submit', async function (event) {
+                      event.preventDefault();
+                      if (!decide.reportValidity() || stop.disabled) return;
+                      if (!(await mvConfirm('Keep this received submission on record without starting its workflow? This decision will be recorded and cannot be undone.', {okText: 'Do not run'}))) return;
+                      stop.disabled = true; status.textContent = 'Recording your decision…';
+                      var response = null;
+                      try {
+                        response = await fetch('/api/v1/event-triggers/' + encodeURIComponent(t.name) + '/form-submissions/' + encodeURIComponent(submission.sequence) + '/do-not-run', {
+                          method: 'POST', headers: {'Content-Type': 'application/json'},
+                          body: JSON.stringify({expected_generation: t.binding_revision, expected_fields_sha256: submission.fields_sha256, reason: reason.value.trim()})
+                        });
+                      } catch (error) { /* Read back before interpreting an uncertain response. */ }
+                      var failure = response && !response.ok ? plainError(response, 'record this decision') : '';
+                      var refreshed = await showWaitingSubmissions();
+                      if (!refreshed) return;
+                      var current = refreshed.submissions.find(function (row) { return row.sequence === submission.sequence; });
+                      if (current && current.do_not_run) {
+                        evMsg.textContent = 'Decision recorded. Choose Check now to continue past submissions that should not run.';
+                      } else {
+                        evMsg.textContent = failure || 'The decision could not be confirmed. Refresh the page before trying again.';
+                      }
+                    });
+                    card.appendChild(decide);
+                  }
+                  reviewPanel.appendChild(card);
+                });
+                if (result.waiting_total > result.submissions.length) {
+                  reviewPanel.appendChild(el('p', 'muted', 'More submissions are waiting. Choose Check now after resolving this group to see the next group.'));
+                }
+                return result;
+              }
+              reviewButton.addEventListener('click', function () {
+                if (!reviewPanel.hidden) { reviewPanel.hidden = true; return; }
+                showWaitingSubmissions();
+              });
+              actions.appendChild(reviewButton);
+            }
             var formLink = el('a', 'btn btn--ghost', 'Open form');
             formLink.href = '/form/' + encodeURIComponent(formToken);
             formLink.target = '_blank'; formLink.rel = 'noopener noreferrer';
@@ -1327,7 +1406,10 @@
         title.appendChild(a); main.appendChild(title);
         if (run.prompt) main.appendChild(el('div', 'mv-row__sub', run.prompt));
         var bits = [];
-        if (run.origin && run.origin !== 'manual') bits.push(ORIGIN_WORDS[run.origin] || mvHuman(run.origin));
+        if (run.origin && run.origin !== 'manual') bits.push(
+          run.origin.indexOf('event:v2:') === 0
+            ? 'Started by ' + mvHuman(run.origin.split(':').slice(4).join(':'))
+            : (ORIGIN_WORDS[run.origin] || mvHuman(run.origin)));
         if (run.cost_dollars) bits.push('$' + Number(run.cost_dollars).toFixed(2));
         if (bits.length) main.appendChild(el('div', 'mv-row__sub', bits.join(' · ')));
         if (run.status === 'paused_approval') {

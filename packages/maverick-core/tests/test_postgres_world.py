@@ -240,6 +240,28 @@ def test_goal_execution_claim_is_atomic(world):
     assert world.claim_goal_for_run(gid) is False
 
 
+def test_legacy_event_goal_is_held_at_both_postgres_start_boundaries(world):
+    from maverick.event_admission import LegacyEventGoalHeld
+
+    local = world.create_goal("old local")
+    world.record_goal_origin(local, "event", "orders")
+    with pytest.raises(LegacyEventGoalHeld):
+        world.set_goal_status(local, "active")
+    assert world.get_goal(local).status == "blocked"
+
+    remote = world.create_goal("old remote", owner="user:alice")
+    world.record_goal_origin(remote, "event", "orders")
+    assert not world.claim_goal_for_run(remote, expected_owner="user:bob")
+    assert world.get_goal(remote).status == "pending"
+    assert not world.claim_goal_for_run(remote, expected_owner="user:alice")
+    assert world.get_goal(remote).status == "blocked"
+
+    current = world.create_goal("missing current receipt")
+    world.record_goal_origin(current, "event_v2", "orders")
+    assert not world.claim_goal_for_run(current)
+    assert world.get_goal(current).status == "blocked"
+
+
 @pytest.mark.parametrize("status", ["pending", "active", "running", "blocked", "done", "cancelled"])
 def test_admission_refusal_preserves_terminal_results_and_tenant_authority(world, status):
     from maverick.paths import tenant_scope

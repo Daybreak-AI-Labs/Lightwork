@@ -528,6 +528,39 @@ class EmployeeCompanionStore:
             return {"history_generation": state["history_generation"],
                     "active_turn": _turn_metadata(pending) if pending else None}
 
+    def _history_review(self, state: dict) -> dict:
+        history = state["history"]
+        pending = next((turn for turn in state["turns"] if turn["state"] == "pending"), None)
+        # The opaque revision binds a review to the latest saved exchange,
+        # policy, and pending reply without returning private conversation text.
+        material = [state["policy"]["revision"], state["history_generation"],
+                    state["events"][-1]["id"] if state["events"] else None,
+                    pending["request_id"] if pending else None,
+                    hashlib.sha256(history.encode()).hexdigest() if history else None]
+        return {"revision": hashlib.sha256(json.dumps(material).encode()).hexdigest(),
+                "saved_exchanges": len(self._history(state)),
+                "reply_pending": pending is not None,
+                "retention_days": state["policy"]["retention_days"],
+                "enabled": state["policy"]["enabled"]}
+
+    def history_review(self, owner: str) -> dict:
+        owner = _identity(owner)
+        with self._locked():
+            state = self._read(owner)
+            self._prepare_turns(state)
+            self._prune_history(state)
+            return self._history_review(state)
+
+    def history_clear_receipt(self, owner: str, operation_id: str) -> dict | None:
+        owner = _identity(owner)
+        if not isinstance(operation_id, str) or not _HEX_ID.fullmatch(operation_id):
+            raise CompanionValidationError("Invalid companion operation")
+        with self._locked():
+            state = self._read(owner)
+            return next((copy.deepcopy(event) for event in state["events"]
+                         if event["id"] == operation_id and event["actor"] == owner
+                         and event["action"] == "history_cleared"), None)
+
     def turn_status(self, owner: str, request_id: str) -> dict:
         """Recover request outcome without retrying it or exposing its content."""
         owner = _identity(owner)
@@ -750,14 +783,30 @@ class EmployeeCompanionStore:
             self._save(state)
             return result
 
-    def clear_history(self, owner: str, *, actor: str) -> dict:
+    def clear_history(self, owner: str, *, actor: str, expected_revision: str | None = None,
+                      operation_id: str | None = None) -> dict:
         owner, actor = _identity(owner), _identity(actor)
         if actor != owner:
             raise CompanionPolicyDenied("Only the employee can clear their private history")
+        if operation_id is not None and not _HEX_ID.fullmatch(operation_id):
+            raise CompanionValidationError("Invalid companion operation")
         with self._locked():
             state = self._read(owner)
+            if operation_id is not None:
+                receipt = next((event for event in state["events"] if event["id"] == operation_id), None)
+                if receipt is not None:
+                    if receipt["actor"] != actor or receipt["action"] != "history_cleared":
+                        raise CompanionConflictError("Companion operation was already used")
+                    return copy.deepcopy(receipt)
+            if expected_revision is not None:
+                self._prepare_turns(state)
+                self._prune_history(state)
+                if self._history_review(state)["revision"] != expected_revision:
+                    raise CompanionConflictError("Companion conversation changed; review it again")
             state["history"] = None
             self._invalidate_turns(state)
             event = self._event(state, actor, "history_cleared")
+            if operation_id is not None:
+                event["id"] = operation_id
             self._save(state)
             return copy.deepcopy(event)

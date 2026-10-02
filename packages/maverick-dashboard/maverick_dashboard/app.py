@@ -3856,6 +3856,9 @@ async def tenants_page(request: Request) -> HTMLResponse:
         tenants = list_tenants()
     except Exception:  # pragma: no cover -- never 500 the console
         tenants = []
+    from .workspace_display import duplicate_workspace_ids
+
+    duplicate_ids = duplicate_workspace_ids((t.id, t.display_name or t.id) for t in tenants)
     # Plans (Free / Pro / Enterprise) only mean something when platform billing
     # collects for them; a self-hosted administrator never sees them otherwise.
     try:
@@ -3867,7 +3870,7 @@ async def tenants_page(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(
         request,
         "tenants.html",
-        {"tenants": tenants, "is_admin": True, "billing_on": billing_on},
+        {"tenants": tenants, "duplicate_ids": duplicate_ids, "is_admin": True, "billing_on": billing_on},
     )
 
 
@@ -3939,10 +3942,13 @@ async def tenants_overview_page(request: Request) -> HTMLResponse:
         rows = _tenant_overview_rows()
     except Exception:  # pragma: no cover -- never 500 the console
         rows = []
+    from .workspace_display import duplicate_workspace_ids
+
+    duplicate_ids = duplicate_workspace_ids((row["id"], row["display_name"] or row["id"]) for row in rows)
     return templates.TemplateResponse(
         request,
         "tenants_overview.html",
-        {"rows": rows, "is_admin": True},
+        {"rows": rows, "duplicate_ids": duplicate_ids, "is_admin": True},
     )
 
 
@@ -4345,6 +4351,7 @@ async def vendor_detail_page(request: Request, vendor_id: str) -> HTMLResponse:
     import time as _time
 
     from maverick import vendor_management
+    from maverick.governed_record_lookup import lookup_digest
     if not vendor_management.enabled():
         raise HTTPException(status_code=403,
                             detail="Vendor management is turned off. An administrator can turn it on from the Privacy workspace.")
@@ -4359,7 +4366,7 @@ async def vendor_detail_page(request: Request, vendor_id: str) -> HTMLResponse:
                 vendor_management.questionnaire_responses, vendor_id[:64]
             )
             questionnaire_statuses = {
-                row["form_path"].rsplit("/", 1)[-1]: row["status"]
+                row["request_id"]: row
                 for row in checked
             }
         except vendor_management.QuestionnaireResponsesUnavailable:
@@ -4371,12 +4378,17 @@ async def vendor_detail_page(request: Request, vendor_id: str) -> HTMLResponse:
         c["overdue"] = float(c.get("renews_at") or 0) < now
     for q in record.get("questionnaires") or []:
         token = q.pop("token", None)   # the live form token never reaches a page
-        status = questionnaire_statuses.get(token)
+        q["request_id"] = lookup_digest(str(token or ""))
+        status = questionnaire_statuses.get(q["request_id"])
         if status is None:
             questionnaire_unavailable = True
             q["status"] = "unavailable"
         else:
-            q["status"] = status
+            q["status"] = status["status"]
+            q["current_replies"] = status["reply_count"]
+            q["past_replies"] = sum(old["reply_count"] for old in status["previous_links"])
+            q["previous_count"] = len(status["previous_links"])
+        q.pop("previous_links", None)  # never render earlier addresses either
         q["requested_at_date"] = _date(q.get("requested_at"))
     for n in record.get("monitoring_notes") or []:
         n["recorded_at_date"] = _date(n.get("recorded_at"))
@@ -4411,6 +4423,7 @@ async def vendor_detail_page(request: Request, vendor_id: str) -> HTMLResponse:
         request, "vendor_detail.html",
         {"vendor": record, "questionnaire_types": questionnaire_types, "assessments": assessments,
          "questionnaire_unavailable": questionnaire_unavailable,
+         "can_replace_questionnaire": has_permission(request, "admin"),
          "record_alerts": alerts})
 
 
@@ -6224,11 +6237,17 @@ def billing_page(request: Request, format: str = "", period: str = "", receipt_o
 
 def _invoice_workspaces(current: str, current_label: str) -> list[dict]:
     """Workspaces an administrator can make an invoice for (Billing page)."""
+    from .workspace_display import duplicate_workspace_ids
+
     try:
         from maverick.tenant.registry import list_tenants
         rows = [{"id": t.id, "name": t.display_name or t.id} for t in list_tenants()]
     except Exception:  # noqa: BLE001 - registry optional
         rows = []
+    duplicates = duplicate_workspace_ids((row["id"], row["name"]) for row in rows)
+    for row in rows:
+        if row["id"] in duplicates:
+            row["name"] += f" (Reference: {row['id']})"
     return rows or [{"id": current, "name": current_label}]
 
 
@@ -10443,6 +10462,8 @@ async def form_page(request: Request, token: str) -> HTMLResponse:
     return templates.TemplateResponse(
         request, "form_questionnaire.html",
         {"questionnaire": questionnaire, "token": token},
+        headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer",
+                 "X-Robots-Tag": "noindex, nofollow"},
     )
 
 
@@ -10655,6 +10676,8 @@ async def form_submit(request: Request, token: str) -> JSONResponse:
             status_code=507,
             detail="This form has reached its submission limit. Please contact the form owner.",
         ) from exc
+    except form_store.FormStoreClosed as exc:
+        raise HTTPException(status_code=404, detail="no such form") from exc
     if not seq:
         raise HTTPException(status_code=503, detail="This form could not accept a submission.")
     return JSONResponse({"ok": True, "seq": seq}, status_code=201)

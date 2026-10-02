@@ -75,6 +75,44 @@ def test_send_test_message_validates_the_destination_and_records_result(client, 
     assert client.post("/channels/send-test", data={"channel": "telegram", "to": "x"}).status_code == 400
 
 
+def test_email_check_requires_sender_setup_and_tests_both_mail_signins(monkeypatch):
+    from maverick_dashboard import channel_check_api
+
+    cfg = {"imap_host": "imap.example.test", "imap_user": "bot@example.test",
+           "imap_password": "fixture", "smtp_host": "smtp.example.test",  # pragma: allowlist secret
+           "smtp_user": "bot@example.test", "smtp_password": "fixture",
+           "allowed_user_ids": ["alice@example.test"]}
+    assert channel_check_api.check_credentials("email", cfg)[0] is False
+    steps = []
+    class IMAP:
+        def __init__(self, host, *, ssl_context, timeout):
+            assert host == "imap.example.test" and ssl_context and timeout
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            pass
+        def login(self, user, password):
+            steps.append("incoming sign-in")
+            return "OK", []
+        def select(self, mailbox, *, readonly):
+            assert mailbox == "INBOX" and readonly
+            steps.append("mailbox")
+            return "OK", []
+        def response(self, key):
+            assert key == "UIDVALIDITY"
+            return key, [b"42"]
+    class SMTP:
+        def quit(self):
+            steps.append("outgoing sign-in")
+    monkeypatch.setattr(channel_check_api.imaplib, "IMAP4_SSL", IMAP)
+    monkeypatch.setattr(channel_check_api, "_smtp", lambda _: SMTP())
+    ok, detail = channel_check_api.check_credentials(
+        "email", {**cfg, "trusted_authserv_id": "mx.example.test"},
+    )
+    assert ok is True and "live sender check" in detail
+    assert steps == ["incoming sign-in", "mailbox", "outgoing sign-in"]
+
+
 def test_checks_are_admin_only_same_origin_and_need_a_turned_on_app(client, monkeypatch):
     assert client.post("/channels/test", data={"channel": "slack"}).status_code == 409
     assert TestClient(client.app).post("/channels/test", data={"channel": "slack"}).status_code == 403

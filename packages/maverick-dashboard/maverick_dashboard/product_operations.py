@@ -136,6 +136,7 @@ def _adapter_modules():
     from . import (
         product_operations_activation,
         product_operations_budget,
+        product_operations_companion,
         product_operations_connections,
         product_operations_conversation,
         product_operations_devices,
@@ -159,6 +160,7 @@ def _adapter_modules():
     )
     return (
         product_operations_preferences,
+        product_operations_companion,
         product_operations_tasks,
         product_operations_task_map,
         product_operations_task_views,
