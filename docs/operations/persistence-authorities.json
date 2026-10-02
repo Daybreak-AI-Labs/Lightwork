@@ -183,9 +183,9 @@
     "learning": 58,
     "sqlite_domain": 80,
     "configuration": 70,
-    "read_projection": 21,
+    "read_projection": 22,
     "coordinator": 1,
-    "audit": 24,
+    "audit": 25,
     "transient": 23,
     "business_records": 14,
     "execution": 41,
@@ -3093,6 +3093,47 @@
           "function": "erase_client",
           "kind": "data_dir",
           "expression": "data_dir()"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-core/maverick/client_erasure.py",
+      "contract": "audit",
+      "owner": "packages/maverick-core/maverick/client_erasure.py",
+      "purpose": "Signed client offboarding intent, prepared deletion inventory, and observed final outcome retained outside the erased tenant tree.",
+      "referenced_store_owners": [
+        "maverick.audit.signing",
+        "maverick.client"
+      ],
+      "review": "ErasureReceipt creates an installation-level private receipt and public verification key before deletion, verifies the signed chain around every append, and fails closed if a receipt cannot be confirmed. A requested or prepared event does not prove completed erasure; the local operation does not cover external stores or future writes.",
+      "recovery_disposition": "Retain client-erasure/<receipt-id>/events.ndjson and verification-key.hex outside the deleted tenant root as signed offboarding evidence. Verify the event chain and independently held public key before treating a terminal event as evidence; never restore an erased tenant from these receipts or infer completion from an intent event. Preserve signing custody and retention policy separately; tenant workspace backup does not capture this installation-level folder.",
+      "governed_namespaces": [],
+      "literal_path_hints": [
+        "client-erasure",
+        "events.ndjson",
+        "verification-key.hex"
+      ],
+      "observed_mechanism_markers": {
+        "cross_process_lock": 1
+      },
+      "source_sites": [
+        {
+          "line": 192,
+          "function": "__init__",
+          "kind": "atomic_create_text",
+          "expression": "atomic_create_text(self.path, '')"
+        },
+        {
+          "line": 199,
+          "function": "__init__",
+          "kind": "atomic_create_text",
+          "expression": "atomic_create_text(directory / 'verification-key.hex', self.public_key + '\\n')"
+        },
+        {
+          "line": 219,
+          "function": "_append",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(self.path, strict=True)"
         }
       ]
     },
@@ -20843,6 +20884,33 @@
           "function": "_directory",
           "kind": "data_dir",
           "expression": "data_dir('support-previews', context)"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/system_checks_api.py",
+      "contract": "read_projection",
+      "owner": "delegated to maverick.client_erasure and the owning maintenance modules",
+      "purpose": "Administrator maintenance API; the direct filesystem seam reads a signed client-erasure receipt retained outside the tenant root.",
+      "referenced_store_owners": [
+        "maverick.client_erasure",
+        "maverick.client"
+      ],
+      "review": "The receipt download validates the identifier, installation-home path, size, signature and unchanged bytes before returning a private no-store response. Other checks and mutations delegate to owning kernel functions; this module does not create a separate receipt or persistence authority.",
+      "recovery_disposition": "The client_erasure.py signed receipt and its public verification key remain the canonical offboarding evidence. This read-only projection cannot recreate erased tenant data or turn an intent event into a completed deletion claim.",
+      "governed_namespaces": [],
+      "literal_path_hints": [
+        "client-erasure",
+        "events.ndjson",
+        "verification-key.hex"
+      ],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 711,
+          "function": "client_erase_receipt",
+          "kind": "maverick_home",
+          "expression": "maverick_home()"
         }
       ]
     },
