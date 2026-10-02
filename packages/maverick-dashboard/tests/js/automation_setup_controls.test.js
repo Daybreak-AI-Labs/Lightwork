@@ -50,7 +50,7 @@ function eventFixture() {
   const ui = fixture();
   ui.context.evForm = ui.get("auto-event-form");
   ui.get("auto-event-target-kind").value = "template";
-  vm.runInContext(source.slice(source.indexOf("    var evList ="), source.indexOf("    async function loadEventTriggers()")), ui.context);
+  vm.runInContext(source.slice(source.indexOf("    var evList ="), source.indexOf("    async function loadEventTriggers(")), ui.context);
   ui.context.loadEventTriggers = () => {};
   vm.runInContext(source.slice(source.indexOf("    evForm.addEventListener('submit'"), source.indexOf("\n    loadEventTriggers();\n  }")), ui.context);
   return ui;
@@ -139,7 +139,7 @@ test("form automations show pending and unavailable submission states", async ()
     if (url.endsWith("/outcomes")) return ui.reply({ outcomes: {} });
     throw new Error("Unexpected request " + url);
   };
-  vm.runInContext(source.slice(source.indexOf("    async function loadEventTriggers()"),
+  vm.runInContext(source.slice(source.indexOf("    async function loadEventTriggers("),
     source.indexOf("    async function delEventTrigger(name)")), ui.context);
   await ui.context.loadEventTriggers();
   const entries = ui.get("auto-event-list").children;
@@ -161,7 +161,7 @@ test("saved form automation exposes a usable open and copy link", async () => {
   };
   let copied = "";
   ui.context.window.navigator = {clipboard: {writeText: async value => { copied = value; }}};
-  vm.runInContext(source.slice(source.indexOf("    async function loadEventTriggers()"),
+  vm.runInContext(source.slice(source.indexOf("    async function loadEventTriggers("),
     source.indexOf("    async function delEventTrigger(name)")), ui.context);
   await ui.context.loadEventTriggers();
   const actions = ui.get("auto-event-list").children[0].children[1];
@@ -192,7 +192,7 @@ test("a drained form replaces its link only after the owner reviews the conseque
     }
     throw new Error("Unexpected request " + url);
   };
-  vm.runInContext(source.slice(source.indexOf("    async function loadEventTriggers()"),
+  vm.runInContext(source.slice(source.indexOf("    async function loadEventTriggers("),
     source.indexOf("    async function delEventTrigger(name)")), ui.context);
   await ui.context.loadEventTriggers();
   const actions = ui.get("auto-event-list").children[0].children[1];
@@ -205,6 +205,54 @@ test("a drained form replaces its link only after the owner reviews the conseque
   assert.deepEqual(JSON.parse(submitted.options.body), {expected_generation: "old-generation"});
   assert.match(ui.get("auto-event-msg").textContent, /old link no longer works.*Copy the new link/);
   assert.equal(ui.get("auto-event-list").children[0].children[1].children[0].href, "/form/form-new");
+});
+
+test("a lost replacement response and failed readback cannot expose the stale form link", async () => {
+  const ui = eventFixture(); await settle();
+  ui.context.loadRuns = () => {};
+  ui.context.mvConfirm = async () => true;
+  let token = "legacy.link", readbackFails = false, copied = "";
+  ui.context.window.navigator = {clipboard: {writeText: async value => { copied = value; }}};
+  ui.context.fetch = async url => {
+    if (url === "/api/v1/event-triggers") {
+      const data = {sources: ["form"], triggers: [
+        {name: "intake", source: "form", flow: "review", pending_submissions: 0,
+          binding_revision: "old-generation", config: {token}}
+      ]};
+      // A non-2xx response can still have plausible JSON. It must not be
+      // mistaken for a verified registry read.
+      return readbackFails ? {ok: false, status: 503, json: async () => data} : ui.reply(data);
+    }
+    if (url.endsWith("/history?limit=500")) return ui.reply({history: []});
+    if (url.endsWith("/outcomes")) return ui.reply({outcomes: {}});
+    if (url.endsWith("/rotate-form-link")) {
+      token = "form-new";
+      readbackFails = true;
+      throw new TypeError("Response lost after commit");
+    }
+    throw new Error("Unexpected request " + url);
+  };
+  vm.runInContext(source.slice(source.indexOf("    async function loadEventTriggers("),
+    source.indexOf("    async function delEventTrigger(name)")), ui.context);
+  assert.equal(await ui.context.loadEventTriggers(), true);
+  const oldActions = ui.get("auto-event-list").children[0].children[1];
+  await oldActions.children[3].listeners.click();
+  assert.match(ui.get("auto-event-msg").textContent, /could not be verified.*Refresh this page/);
+  assert.equal(oldActions.children[0].hidden, true);
+  assert.equal(oldActions.children[1].disabled, true);
+  assert.equal(oldActions.children[3].disabled, true);
+  await oldActions.children[1].listeners.click();
+  assert.equal(copied, "");
+  assert.equal(ui.get("auto-event-list").children[0].children[1], oldActions);
+
+  readbackFails = false;
+  assert.equal(await ui.context.loadEventTriggers(), true);
+  const currentActions = ui.get("auto-event-list").children[0].children[1];
+  assert.notEqual(currentActions, oldActions);
+  assert.equal(currentActions.children[0].href, "/form/form-new");
+  assert.equal(currentActions.children[1].disabled, false);
+  await currentActions.children[1].listeners.click();
+  assert.equal(copied, "https://app.example/form/form-new");
 });
 
 test("forms with waiting or unknown submissions cannot replace their links", async () => {
@@ -221,7 +269,7 @@ test("forms with waiting or unknown submissions cannot replace their links", asy
     if (url.endsWith("/outcomes")) return ui.reply({outcomes: {}});
     throw new Error("Unexpected request " + url);
   };
-  vm.runInContext(source.slice(source.indexOf("    async function loadEventTriggers()"),
+  vm.runInContext(source.slice(source.indexOf("    async function loadEventTriggers("),
     source.indexOf("    async function delEventTrigger(name)")), ui.context);
   await ui.context.loadEventTriggers();
   assert.equal(ui.get("auto-event-list").children[0].children[1].children[3].disabled, true);
