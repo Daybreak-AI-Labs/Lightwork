@@ -8292,9 +8292,10 @@ async def voice_transcribe(
         raise HTTPException(
             status_code=503,
             detail=(
-                "Speech-to-text is not ready. Open Settings > Models > Local voice setup "
-                "(/settings#settings-voice) to check or download the local model. "
-                "If a cloud speech provider is selected, check its provider settings."
+                "Voice dictation isn't ready. Finish setup in Settings > Models > "
+                "Voice dictation on this computer "
+                "(/settings?focus=voice-model-setup). If you use a cloud voice "
+                "service, check its connection in Settings."
             ),
         )
     return JSONResponse({"text": text.strip()})

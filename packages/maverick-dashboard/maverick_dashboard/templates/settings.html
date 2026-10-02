@@ -840,8 +840,8 @@
       });
     });
     if (search) search.addEventListener('input', applySearch);
-    selectGroup(active, false);
     var requestedFocus = new URLSearchParams(window.location.search).get('focus');
+    selectGroup(active, false);
     if (requestedFocus) {
       var focusTarget = document.getElementById(requestedFocus);
       if (focusTarget && document.getElementById('settings-sections').contains(focusTarget)) {
@@ -849,7 +849,14 @@
         if (targetGroup) selectGroup(targetGroup.dataset.settingsGroup, false);
         var disclosure = focusTarget.closest('details'); if (disclosure) disclosure.open = true;
         if (!focusTarget.matches('input,select,textarea,button,a')) focusTarget.tabIndex = -1;
-        focusTarget.focus(); focusTarget.scrollIntoView({block:'center'});
+        var focusRequested = function () {
+          if (!focusTarget.isConnected) return;
+          var focused = document.activeElement;
+          if (focused && focused !== document.body && focused !== document.documentElement && focused !== focusTarget) return;
+          focusTarget.focus(); focusTarget.scrollIntoView({block:'center'});
+        };
+        if (document.readyState === 'complete') focusRequested();
+        else window.addEventListener('load', focusRequested, {once:true});
       }
     }
     // A link to /settings#settings-<group> from another page, or from this

@@ -77,8 +77,9 @@ def test_transcribe_503_when_no_backend(monkeypatch, tmp_path):
     )
     r = _post_audio(_client())
     assert r.status_code == 503
-    assert "speech-to-text" in r.json()["detail"].lower()
-    assert "/settings#settings-voice" in r.json()["detail"]
+    assert "Voice dictation isn't ready" in r.json()["detail"]
+    assert "Settings > Models > Voice dictation on this computer" in r.json()["detail"]
+    assert "/settings?focus=voice-model-setup" in r.json()["detail"]
     assert "pip install" not in r.json()["detail"]
 
 
