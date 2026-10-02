@@ -1,6 +1,7 @@
 """QA-023: top-level integration inventories expose closed readiness states."""
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 from types import SimpleNamespace
 from urllib.parse import urlsplit
@@ -21,11 +22,14 @@ def _isolate(monkeypatch, tmp_path: Path):
         "MAVERICK_DASHBOARD_TOKEN",
         "MAVERICK_ENTERPRISE",
         "MAVERICK_TENANT",
+        "MAVERICK_AUDIT_SIGNING_KEY",
+        "MAVERICK_AUDIT_SIGNING_KEY_WRAPPED",
     ):
         monkeypatch.delenv(name, raising=False)
 
     import maverick.runtime_overrides as runtime_overrides
     from maverick import config, world_model
+    from maverick.audit import signing
     from maverick_dashboard import app as dashboard_app
     from maverick_dashboard import integration_readiness
 
@@ -34,6 +38,7 @@ def _isolate(monkeypatch, tmp_path: Path):
     for name in ("GOOGLE_API_KEY", "GROK_API_KEY"):
         monkeypatch.delenv(name, raising=False)
     config.reset_config_cache()
+    signing._reset_injected_keypair_cache()
     integration_readiness._clear_for_testing()
     monkeypatch.setattr(world_model, "DEFAULT_DB", home / "world.db")
     monkeypatch.setattr(
@@ -45,6 +50,7 @@ def _isolate(monkeypatch, tmp_path: Path):
     yield config_path
     integration_readiness._clear_for_testing()
     config.reset_config_cache()
+    signing._reset_injected_keypair_cache()
 
 
 def _client(*, auth_token: str = "") -> TestClient:
@@ -238,6 +244,10 @@ def test_corrupt_config_is_visible_unavailable_not_empty(
     config.reset_config_cache()
     token = "test-dashboard-admin-token"  # pragma: allowlist secret
     monkeypatch.setenv("MAVERICK_DASHBOARD_TOKEN", token)
+    monkeypatch.setenv(
+        "MAVERICK_AUDIT_SIGNING_KEY",
+        hashlib.sha256(str(_isolate).encode()).hexdigest(),
+    )
     client = _client(auth_token=token)
     for path in ("/settings", "/providers", "/mcp", "/channels"):
         response = client.get(path, headers={"Accept": "text/html"})
