@@ -500,12 +500,18 @@ class PatchValidation:
     git_apply_stderr: str = ""
 
 
-def validate_patch(patch: str, workdir: Path) -> PatchValidation:
+def validate_patch(
+    patch: str, workdir: Path, *, allow_checkout_eol: bool = False,
+) -> PatchValidation:
     """Run `git apply --check` to confirm the patch applies cleanly.
 
     The agent uses this BEFORE declaring FINAL. A failing check
     triggers a revision pass with the git_apply_stderr fed back as
     the critique.
+
+    Only agent-rendered SEARCH/REPLACE diffs may request a retry using the
+    local checkout's core.autocrlf setting. Other callers, including candidate
+    scoring, keep the default strict worktree check.
 
     Wave 10: accept new-file diffs (`--- /dev/null`), rename-only diffs
     (`diff --git` without `--- a/`), and normalise CRLF to LF before
@@ -563,6 +569,34 @@ def validate_patch(patch: str, workdir: Path) -> PatchValidation:
         )
     if proc.returncode == 0:
         return PatchValidation(valid=True)
+    if allow_checkout_eol:
+        # The host-side security environment excludes system/user Git config,
+        # but LocalBackend's later git apply uses its own secret-scrubbed env
+        # and therefore honours a checkout's core.autocrlf=true. Read only
+        # that inert boolean from the same environment. Never infer it from
+        # CRLF bytes alone: a hand-written CRLF worktree with autocrlf=false
+        # would pass this retry but fail at the actual apply boundary.
+        from .sandbox.local import scrub_env
+
+        try:
+            configured = subprocess.run(
+                ["git", "-C", str(workdir), "config", "--bool", "--get",
+                 "core.autocrlf"],
+                capture_output=True, timeout=5, env=scrub_env(),
+            )
+            if configured.returncode == 0 and configured.stdout.strip() == b"true":
+                eol_proc = subprocess.run(
+                    ["git", "-c", "core.autocrlf=true", "-C", str(workdir),
+                     "apply", "--check", "-"],
+                    input=normalized.encode("utf-8"),
+                    capture_output=True,
+                    timeout=30,
+                    env=git_env_without_user_config(),
+                )
+                if eol_proc.returncode == 0:
+                    return PatchValidation(valid=True)
+        except (OSError, subprocess.TimeoutExpired):
+            pass
     return PatchValidation(
         valid=False,
         reason="git apply --check rejected the patch",

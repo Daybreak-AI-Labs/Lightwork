@@ -4922,7 +4922,13 @@ class Agent:
                                 f"defensive warnings (accepted anyway): "
                                 f"{def_check.warnings}",
                             )
-                        validation = validate_patch(patch, workdir)
+                        validation = validate_patch(
+                            patch, workdir,
+                            allow_checkout_eol=(
+                                sr_summary is not None
+                                and bool(getattr(self.ctx.sandbox, "host_visible_fs", False))
+                            ),
+                        )
                         if not validation.valid:
                             self._patch_validated = True  # one retry max
                             self._patch_revision_attempts = (

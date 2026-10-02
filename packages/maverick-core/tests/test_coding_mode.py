@@ -258,6 +258,56 @@ class TestValidatePatch:
         v = validate_patch(patch, repo)
         assert v.valid is True
 
+    def test_lf_patch_applies_to_crlf_checkout(self, tmp_path, monkeypatch):
+        repo = self._init_git_repo(tmp_path)
+        system_config = tmp_path / "system.gitconfig"
+        system_config.write_bytes(b"[core]\n\tautocrlf = true\n")
+        monkeypatch.setenv("GIT_CONFIG_SYSTEM", str(system_config))
+        monkeypatch.delenv("GIT_CONFIG_NOSYSTEM", raising=False)
+        (repo / "foo.py").write_bytes(b"old line\r\n")
+        patch = (
+            "--- a/foo.py\n+++ b/foo.py\n"
+            "@@ -1 +1 @@\n-old line\n+new line\n"
+        )
+        # Generic callers remain strict; the explicit agent-rendered path
+        # follows the local checkout's Git EOL conversion.
+        assert validate_patch(patch, repo).valid is False
+        assert validate_patch(patch, repo, allow_checkout_eol=True).valid is True
+        actual = subprocess.run(
+            ["git", "-C", str(repo), "apply", "-"],
+            input=patch.encode("utf-8"), capture_output=True,
+        )
+        assert actual.returncode == 0
+        assert (repo / "foo.py").read_text(encoding="utf-8") == "new line\n"
+
+    def test_crlf_retry_does_not_accept_diverged_worktree(
+        self, tmp_path, monkeypatch,
+    ):
+        repo = self._init_git_repo(tmp_path)
+        system_config = tmp_path / "system.gitconfig"
+        system_config.write_bytes(b"[core]\n\tautocrlf = true\n")
+        monkeypatch.setenv("GIT_CONFIG_SYSTEM", str(system_config))
+        monkeypatch.delenv("GIT_CONFIG_NOSYSTEM", raising=False)
+        (repo / "foo.py").write_bytes(b"different line\r\n")
+        patch = (
+            "--- a/foo.py\n+++ b/foo.py\n"
+            "@@ -1 +1 @@\n-old line\n+new line\n"
+        )
+        assert validate_patch(patch, repo, allow_checkout_eol=True).valid is False
+
+    def test_crlf_retry_requires_checkout_conversion(self, tmp_path):
+        repo = self._init_git_repo(tmp_path)
+        subprocess.run(
+            ["git", "-C", str(repo), "config", "core.autocrlf", "false"],
+            check=True,
+        )
+        (repo / "foo.py").write_bytes(b"old line\r\n")
+        patch = (
+            "--- a/foo.py\n+++ b/foo.py\n"
+            "@@ -1 +1 @@\n-old line\n+new line\n"
+        )
+        assert validate_patch(patch, repo, allow_checkout_eol=True).valid is False
+
     def test_unapplyable_patch_fails(self, tmp_path):
         repo = self._init_git_repo(tmp_path)
         # Patch references content that doesn't exist.
