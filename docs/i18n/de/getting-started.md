@@ -177,8 +177,8 @@ Spezialist von der ersten Ausführung an für seine Aufgabe ausgerüstet ist.
 Der Mikrofon-Button im Dashboard und das Tool `transcribe_audio` funktionieren
 ohne Provider-Schlüssel: Die lokale Whisper-Engine wird mit dem Dashboard-Paket
 ausgeliefert, beim Öffnen der App werden Modelldateien aber standardmäßig nicht
-heruntergeladen. Unter **Settings → Models → Local voice setup** kann ein
-globaler Administrator Quelle und Größe des konfigurierten Modells (beim
+heruntergeladen. Unter **Settings → Models** kann ein globaler Administrator
+im Bereich für Sprachdiktat Quelle und Größe des konfigurierten Modells (beim
 Standardmodell etwa 148 MB) prüfen und es kontrollieren oder herunterladen.
 Der Fortschritt bleibt nach einem Neuladen der Seite erhalten; ein Abbruch
 entfernt den unvollständigen Download, und Fehler lassen sich dort erneut

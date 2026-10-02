@@ -221,9 +221,10 @@ Provisioning never widens its capability envelope.
 
 The dashboard's mic button and the `transcribe_audio` tool work with no
 provider key: the local Whisper engine ships with the dashboard package, and
-opening the app does not download model files by default. In **Settings > Models >
-Local voice setup**, a global administrator can review the configured model's
-source and size (about 148 MB for the default model), then check or download it.
+opening the app does not download model files by default. In **Settings → Models**,
+under **Voice dictation on this computer**, a global administrator can review
+the configured model's source and size (about 148 MB for the default model),
+then check or download it.
 Progress survives a page reload; cancellation removes the unfinished download,
 and failures can be retried in the same screen. Existing files are not labelled
 verified until their exact size and checksum pass. Model verification does not

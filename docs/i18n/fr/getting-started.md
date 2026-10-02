@@ -177,8 +177,9 @@ jamais l'enveloppe verrouillée du pack.)
 Le bouton micro du tableau de bord et l'outil `transcribe_audio` fonctionnent
 sans clé de fournisseur : le moteur Whisper local est livré avec le paquet du
 tableau de bord, mais ouvrir l'application ne télécharge pas les fichiers du
-modèle par défaut. Dans **Settings → Models → Local voice setup**, un
-administrateur global peut examiner la source et la taille du modèle configuré
+modèle par défaut. Dans **Settings → Models**, sous la rubrique de dictée vocale,
+un administrateur global peut examiner la source et la taille du modèle
+configuré
 (environ 148 Mo pour le modèle par défaut), puis le vérifier ou le télécharger.
 La progression persiste après un rechargement de la page ; une annulation
 supprime le téléchargement incomplet, et les échecs peuvent être réessayés

@@ -177,7 +177,8 @@ envelope limitado do pacote.)
 O botão de microfone do painel e a ferramenta `transcribe_audio` funcionam sem
 chave de provedor: o motor Whisper local vem junto com o pacote do painel, mas
 abrir o aplicativo não baixa os arquivos do modelo por padrão. Em
-**Settings → Models → Local voice setup**, um administrador global pode conferir
+**Settings → Models**, na seção de ditado por voz, um administrador global
+pode conferir
 a origem e o tamanho do modelo configurado (cerca de 148 MB no modelo padrão)
 e verificá-lo ou baixá-lo. O progresso persiste após recarregar a página;
 cancelar remove o download incompleto, e falhas podem ser tentadas novamente

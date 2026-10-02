@@ -177,7 +177,8 @@ sobre limitado del pack.)
 El botón de micrófono del panel y la herramienta `transcribe_audio` funcionan
 sin clave de proveedor: el motor Whisper local viene incluido con el paquete
 del panel, pero abrir la aplicación no descarga el modelo por defecto. En
-**Settings → Models → Local voice setup**, un administrador global puede revisar
+**Settings → Models**, en la sección de dictado por voz, un administrador
+global puede revisar
 el origen y el tamaño del modelo configurado (unos 148 MB para el predeterminado)
 y comprobarlo o descargarlo. El progreso continúa tras recargar la página;
 cancelar elimina la descarga incompleta y los errores se pueden reintentar en

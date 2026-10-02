@@ -178,8 +178,8 @@ pack.)
 Il pulsante del microfono nella dashboard e lo strumento `transcribe_audio`
 funzionano senza chiave del provider: il motore Whisper locale è incluso nel
 pacchetto della dashboard, ma aprire l'app non scarica i file del modello per
-impostazione predefinita. In **Settings → Models → Local voice setup**, un
-amministratore globale può esaminare origine e dimensione del modello
+impostazione predefinita. In **Settings → Models**, nella sezione della dettatura
+vocale, un amministratore globale può esaminare origine e dimensione del modello
 configurato (circa 148 MB per quello predefinito) e verificarlo o scaricarlo.
 L'avanzamento rimane dopo il ricaricamento della pagina; l'annullamento
 rimuove il download incompleto e gli errori possono essere ritentati nella
