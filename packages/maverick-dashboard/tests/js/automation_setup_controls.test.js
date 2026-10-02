@@ -90,7 +90,7 @@ test("extra settings are name and value rows, never a code box", async () => {
   assert.equal(source.includes("Exported definitions (JSON)"), false);
 });
 
-test("a form source gets a private random link, not a guessable name", async () => {
+test("a form source asks the server to create its private link", async () => {
   const ui = eventFixture(); await settle();
   ui.get("auto-event-source").value = "form"; ui.context.changeSource();
   ui.get("auto-event-name").value = "Vendor Intake Form";
@@ -98,29 +98,30 @@ test("a form source gets a private random link, not a guessable name", async () 
   let body;
   ui.context.fetch = async (_, options) => { body = JSON.parse(options.body); return ui.reply({ name: "vendor" }); };
   await ui.get("auto-event-form").listeners.submit({ preventDefault() {} });
-  assert.match(body.config.token, /^form-[0-9a-f]{48}$/);
+  assert.deepEqual(body.config, {});
   assert.notEqual(body.config.token, "vendor-intake-form");
 });
 
-test("form creation stops when secure randomness is unavailable", async () => {
+test("form creation works without browser crypto because the server mints the link", async () => {
   const ui = eventFixture(); await settle();
   ui.get("auto-event-source").value = "form"; ui.context.changeSource();
   ui.get("auto-event-template").value = "triage";
   ui.context.window.crypto = null;
   let created = false;
-  ui.context.fetch = async () => { created = true; throw new Error("unexpected save"); };
+  ui.context.fetch = async () => { created = true; return ui.reply({name: "intake"}); };
   await ui.get("auto-event-form").listeners.submit({ preventDefault() {} });
-  assert.equal(created, false);
-  assert.match(ui.get("auto-event-msg").textContent, /Could not make a private form link/);
+  assert.equal(created, true);
+  assert.match(ui.get("auto-event-msg").textContent, /Created/);
 });
 
-test("a custom link code stays inactive until saved", async () => {
+test("a new form cannot silently submit a manually chosen weak link", async () => {
   const ui = eventFixture(); await settle();
   ui.get("auto-event-source").value = "form"; ui.context.changeSource();
-  ui.get("auto-source-token").value = "legacy.link";
-  ui.get("auto-source-token").listeners.input();
+  assert.equal(ui.get("auto-event-config-advanced").hidden, true);
+  ui.context.sourceDrafts.form.token = "legacy.link";
+  assert.deepEqual(JSON.parse(JSON.stringify(ui.context.readSourceConfig())), {});
   const hint = ui.get("auto-event-formurl");
-  assert.match(hint.textContent, /when you save/);
+  assert.match(hint.textContent, /open or copy the private form link/);
   assert.equal(hint.children.length, 0);
 });
 

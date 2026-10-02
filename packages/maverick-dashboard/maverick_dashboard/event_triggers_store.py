@@ -15,6 +15,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import secrets
 import threading
 import time
 
@@ -219,18 +220,57 @@ def pending_form_submissions(trigger: dict) -> int:
         reset_tenant(scope)
 
 
+def _api_form_config(config: dict | None, prior: dict | None, existing: list[dict],
+                     expected_owner: str | None) -> dict:
+    """Reserve a server-generated public link while the registry lock is held."""
+    if (prior is not None and expected_owner is not None
+            and prior.get("owner", "") != expected_owner):
+        raise FormTriggerConflict("This automation belongs to another person.")
+    resolved = dict(config or {})
+    supplied = str(resolved.get("token") or "")
+    old_token = (
+        str((prior.get("config") or {}).get("token") or "")
+        if prior and prior.get("source") == "form" else ""
+    )
+    if old_token:
+        if supplied and supplied != old_token:
+            raise FormTriggerConflict(
+                "Keep the existing form link when updating this automation."
+            )
+        resolved["token"] = old_token
+        return resolved
+    if supplied:
+        raise ValueError(
+            "Leave the form link code blank. Lightwork creates a private link when you save."
+        )
+    for _ in range(8):
+        candidate = "form-" + secrets.token_urlsafe(24)
+        if not any(
+            t.get("source") == "form"
+            and str((t.get("config") or {}).get("token") or "") == candidate
+            for t in existing
+        ):
+            resolved["token"] = candidate
+            return resolved
+    raise FormTriggerConflict("A private form link could not be reserved. Try again.")
+
+
 def set_trigger(name: str, template: str, source: str, *, config: dict | None = None,
                 params: dict | None = None, owner: str = "", cursor: str = "",
                 interval_seconds: int = 0, tenant: str = "", flow: str = "",
                 flow_owner: str = "", flow_revision: str = "",
-                template_snapshot: dict | None = None) -> dict:
+                template_snapshot: dict | None = None,
+                mint_public_form_token: bool = False,
+                expected_owner: str | None = None) -> dict:
     """Create or replace an event trigger (by slugified name). Raises ValueError
     on an un-sluggable name. Preserves the existing cursor on replace unless one
     is passed, so re-saving a trigger doesn't replay its whole backlog.
     ``interval_seconds`` is the per-trigger poll cadence (0 = the scheduler
     default). ``tenant`` binds the trigger to the tenant that created it, so a
     polled OAuth source reads that tenant's vault (never a cross-tenant token).
-    ``flow`` targets a flow instead of a ``template`` (the two are exclusive)."""
+    ``flow`` targets a flow instead of a ``template`` (the two are exclusive).
+    API callers mint new public links under the registry lock; direct-store
+    callers can still load older tokens for migration and recovery."""
     slug = slugify(name)
     if not _NAME_RE.match(slug):
         raise ValueError("trigger name must contain a letter or digit (a-z, 0-9, -)")
@@ -273,11 +313,15 @@ def set_trigger(name: str, template: str, source: str, *, config: dict | None = 
             ),
             None,
         )
+        resolved_config = (
+            _api_form_config(config, prior, existing, expected_owner)
+            if source == "form" and mint_public_form_token else dict(config or {})
+        )
         bound_cursor = cursor
         if source == "form" and not bound_cursor and (
             prior is None
             or prior.get("source") != "form"
-            or (prior.get("config") or {}).get("token") != (config or {}).get("token")
+            or (prior.get("config") or {}).get("token") != resolved_config.get("token")
         ):
             # Form POSTs are admitted only after the trigger exists. Arm at the
             # current high-water mark now, so a submission before the first
@@ -287,7 +331,7 @@ def set_trigger(name: str, template: str, source: str, *, config: dict | None = 
 
             scope = set_tenant(tenant or None)
             try:
-                bound_cursor = form_store.since(str((config or {}).get("token") or ""), "")[1]
+                bound_cursor = form_store.since(str(resolved_config.get("token") or ""), "")[1]
             finally:
                 reset_tenant(scope)
         rec = {
@@ -299,7 +343,7 @@ def set_trigger(name: str, template: str, source: str, *, config: dict | None = 
             "template_snapshot": normalised_snapshot,
             "template_revision": template_rev,
             "source": str(source),
-            "config": dict(config or {}),
+            "config": resolved_config,
             "params": {str(k): str(v) for k, v in (params or {}).items()},
             "cursor": bound_cursor or (prior["cursor"] if prior else ""),
             "cursor_format": 0 if bound_cursor or prior is None else int(prior.get("cursor_format") or 0),
@@ -316,7 +360,7 @@ def set_trigger(name: str, template: str, source: str, *, config: dict | None = 
         if str(source) == "form":
             from maverick import form_store
 
-            new_key = form_store.storage_key((config or {}).get("token"))
+            new_key = form_store.storage_key(resolved_config.get("token"))
             if any(
                 t is not prior and t.get("source") == "form"
                 and str(t.get("tenant") or "") == tenant

@@ -694,7 +694,7 @@
       github_issues: [['owner', 'GitHub organization or owner', 'text', true], ['repo', 'Repository name', 'text', true], ['state', 'Which issues', [['open', 'Open issues'], ['closed', 'Closed issues'], ['all', 'All issues']], false, 'open'], ['provider', 'Connected account (optional for public repositories)', 'provider']],
       imap_email: [['host', 'Mail server', 'text', true], ['username', 'Email account', 'text', true], ['password_env', 'Password name from your administrator', 'text', true], ['mailbox', 'Mailbox', 'text', false, 'INBOX', true], ['port', 'Server port', 'number', false, 993, true], ['use_ssl', 'Use an encrypted connection', 'checkbox', false, true, true], ['include_body', 'Include the message body', 'checkbox', false, false]],
       file_dir: [['path', 'Folder inside the approved incoming-files area', 'text', true], ['glob', 'Which files (for example *.pdf)', 'text', false, '*', true], ['recursive', 'Include subfolders', 'checkbox', false, false]],
-      form: [['token', 'Existing form link code (optional)', 'text', false, undefined, true]]
+      form: []
     };
     var SOURCE_LABELS = { http_json: 'Web feed', rss: 'RSS or Atom feed', oauth_http_json: 'Connected account feed', github_issues: 'GitHub issues', imap_email: 'Email inbox', file_dir: 'Incoming files', form: 'Form submissions' };
     var SOURCE_HINTS = {
@@ -703,11 +703,12 @@
       github_issues: 'Watch new issues in a repository. Connect GitHub below for private repositories.',
       imap_email: 'Your administrator gives you the password name. Passwords are never stored in automation settings.',
       file_dir: 'This folder is on the Lightwork server, inside your organization’s approved incoming-files area. An administrator must set this up.',
-      form: 'Lightwork makes a private form link people can fill in. Share it after you create this automation. Only enter a link code if you are keeping an existing form link.'
+      form: 'Lightwork gives this automation a private form link when you save. If you update an existing automation, its link stays the same.'
     };
     var connectedProviders = [];
     function knownKeys() { return (SOURCE_FIELDS[currentSource] || []).map(function (f) { return f[0]; }); }
     function readSourceConfig() {
+      if (currentSource === 'form') return {};
       var cfg = Object.assign({}, sourceDrafts[currentSource] || {});
       // Extra settings typed as name/value rows (for sources without guided fields).
       if (evExtra) Array.prototype.forEach.call(evExtra.children || [], function (row) {
@@ -716,20 +717,11 @@
       });
       return cfg;
     }
-    function newFormToken() {
-      if (!window.crypto || typeof window.crypto.getRandomValues !== 'function') return null;
-      var bytes = new Uint8Array(24);
-      window.crypto.getRandomValues(bytes);
-      return 'form-' + Array.from(bytes, function (byte) { return byte.toString(16).padStart(2, '0'); }).join('');
-    }
     function showFormUrl() {
       var hint = document.getElementById('auto-event-formurl');
       hint.hidden = evSource.value !== 'form'; hint.textContent = '';
       if (hint.hidden) return;
-      var cfg = readSourceConfig();
-      hint.textContent = cfg.token
-        ? 'This existing link code will become active when you save. Open or copy the form link from the saved automation below.'
-        : 'A private form link will be created when you save. Open or copy it from the saved automation below.';
+      hint.textContent = 'After saving, open or copy the private form link from the saved automation below.';
     }
     function addExtraRow(key, value) {
       var row = el('div', 'auto__extra-row'), n = (evExtra.children || []).length;
@@ -793,6 +785,7 @@
       currentSource = evSource.value;
       document.getElementById('auto-event-source-hint').textContent = SOURCE_HINTS[currentSource] || '';
       evAdvanced.open = !SOURCE_FIELDS[currentSource];
+      evAdvanced.hidden = currentSource === 'form';
       fillSourceFields();
     }
     evSource.addEventListener('change', changeSource);
@@ -957,13 +950,6 @@
       evMsg.textContent = '';
       var config = readSourceConfig();
       if (!evForm.reportValidity()) return;
-      if (evSource.value === 'form' && !config.token) {
-        config.token = newFormToken();
-        if (!config.token) {
-          evMsg.textContent = 'Could not make a private form link in this browser. Try a current browser and save again.';
-          return;
-        }
-      }
       var intervalRaw = String(document.getElementById('auto-event-interval').value || '').trim();
       var body = {
         source: evSource.value, config: config,

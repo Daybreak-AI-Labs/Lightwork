@@ -1,6 +1,8 @@
 """The public POST /form/{token} endpoint that records hosted-form submissions."""
 from __future__ import annotations
 
+import re
+
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
@@ -53,6 +55,86 @@ def _register_form(token: str, *, tenant: str = "", name: str = "", owner: str =
         flow=saved.id, flow_owner=saved.owner,
         flow_revision=release["release_id"], tenant=tenant, owner=owner,
     )
+
+
+def test_new_form_api_mints_a_server_secret_and_returns_the_link(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    _register_form("old-link")  # Publish the flow used by the new automation.
+    client = _client()
+    created = client.post("/api/v1/event-triggers", json={
+        "name": "new-intake", "source": "form", "flow": "published-form-flow",
+        "config": {},
+    })
+    assert created.status_code == 201
+    token = created.json()["config"]["token"]
+    assert re.fullmatch(r"form-[A-Za-z0-9_-]{32}", token)
+    listed = client.get("/api/v1/event-triggers").json()["triggers"]
+    assert next(t for t in listed if t["name"] == "new-intake")["config"]["token"] == token
+    assert client.get(f"/form/{token}").status_code == 200
+    assert client.post(f"/form/{token}", json={"message": "Hello"}).status_code == 201
+
+
+def test_new_form_api_rejects_caller_chosen_tokens_even_if_they_look_strong(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    _register_form("old-link")
+    from maverick_dashboard import event_triggers_store
+
+    for token in ("a", "form-" + "a" * 32, "old-link"):
+        created = _client().post("/api/v1/event-triggers", json={
+            "name": "new-intake", "source": "form", "flow": "published-form-flow",
+            "config": {"token": token},
+        })
+        assert created.status_code == 400
+        assert event_triggers_store.get_trigger("new-intake", tenant="") is None
+
+
+def test_form_api_preserves_exact_legacy_link_on_upsert(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    _register_form("legacy.link", name="intake")
+    client = _client()
+    body = {"name": "intake", "source": "form", "flow": "published-form-flow"}
+    for config in ({}, {"token": "legacy.link"}):
+        updated = client.post("/api/v1/event-triggers", json={**body, "config": config})
+        assert updated.status_code == 201
+        assert updated.json()["config"]["token"] == "legacy.link"
+    changed = client.post("/api/v1/event-triggers", json={
+        **body, "config": {"token": "another.link"},
+    })
+    assert changed.status_code == 409
+    assert client.get("/form/legacy.link").status_code == 200
+
+
+def test_minted_form_link_retries_a_global_tenant_collision(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    from maverick_dashboard import event_triggers_store
+
+    first = "form-" + "A" * 32
+    second = "form-" + "B" * 32
+    event_triggers_store.set_trigger(
+        "first", "", "form", config={"token": first}, flow="flow-id", tenant="tenant-a",
+    )
+    choices = iter(("A" * 32, "B" * 32))
+    monkeypatch.setattr(event_triggers_store.secrets, "token_urlsafe", lambda _: next(choices))
+    saved = event_triggers_store.set_trigger(
+        "second", "", "form", config={}, flow="flow-id", tenant="tenant-b",
+        mint_public_form_token=True,
+    )
+    assert saved["config"]["token"] == second
+
+
+def test_existing_form_link_cannot_be_claimed_by_a_different_owner(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    from maverick_dashboard import event_triggers_store
+
+    event_triggers_store.set_trigger(
+        "intake", "", "form", config={"token": "old-link"},
+        flow="flow-id", owner="user:alice",
+    )
+    with pytest.raises(event_triggers_store.FormTriggerConflict, match="another person"):
+        event_triggers_store.set_trigger(
+            "intake", "", "form", config={}, flow="flow-id", owner="user:bob",
+            mint_public_form_token=True, expected_owner="user:bob",
+        )
 
 
 def test_live_automation_form_page_uses_published_inputs(monkeypatch, tmp_path):
@@ -256,13 +338,14 @@ def test_new_form_delivers_first_submission_before_first_poll(monkeypatch, tmp_p
     client = _client()
     created = client.post("/api/v1/event-triggers", json={
         "name": "first-form", "source": "form", "flow": saved.id,
-        "config": {"token": "first-form-token"},
+        "config": {},
     })
     assert created.status_code == 201
+    token = created.json()["config"]["token"]
     from maverick_dashboard import event_triggers_store
 
     assert event_triggers_store.get_trigger("first-form", tenant="")["cursor"] == "0"
-    assert client.post("/form/first-form-token", json={"name": "first"}).status_code == 201
+    assert client.post(f"/form/{token}", json={"name": "first"}).status_code == 201
     result = client.post("/api/v1/event-triggers/poll?name=first-form")
     assert result.status_code == 200
     fired = result.json()["triggers"][0]["fired_flows"]
