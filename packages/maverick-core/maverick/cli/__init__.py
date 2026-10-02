@@ -60,6 +60,20 @@ def _cli_model(ctx: click.Context, role: str) -> str:
     return (ctx.obj or {}).get("model") or _default_model(role)
 
 
+def _cli_task_budget(title: str, max_dollars: float | None, default_dollars: float):
+    """Apply task budget precedence with a command's historical dollar fallback."""
+    import types
+
+    from ..budget import budget_from_config
+    from ..orchestrator import _budget_task_class
+
+    return budget_from_config(
+        defaults={"max_dollars": default_dollars},
+        task_class=_budget_task_class(types.SimpleNamespace(title=title)),
+        max_dollars=max_dollars,
+    )
+
+
 def _fact_subject_token(channel: str, user: str) -> str:
     """Stable, delimiter-safe token for explicitly user-scoped facts."""
     return f"{quote(channel, safe='')}:{quote(user, safe='')}"
@@ -4300,14 +4314,14 @@ def template_add(name: str) -> None:
 @click.argument("question")
 @click.option("--rounds", default=2, show_default=True, type=int,
               help="Number of debate rounds before the judge decides.")
-@click.option("--max-dollars", default=1.0, show_default=True, type=float,
-              help="Spend cap for the whole debate.")
+@click.option("--max-dollars", default=None, type=float,
+              help="Override the configured spend cap (fallback: $1 per debate).")
 @click.option("--for", "for_stance", default=None,
               help="Stance the proponent defends (default: 'yes / sound').")
 @click.option("--against", "against_stance", default=None,
               help="Stance the skeptic defends (default: 'no / flawed').")
 @click.pass_context
-def debate(ctx, question: str, rounds: int, max_dollars: float,
+def debate(ctx, question: str, rounds: int, max_dollars: float | None,
            for_stance: str | None, against_stance: str | None) -> None:
     """Run a two-sided debate on QUESTION and print the judged verdict.
 
@@ -4315,7 +4329,6 @@ def debate(ctx, question: str, rounds: int, max_dollars: float,
     then an impartial judge declares a winner. Useful for pressure-testing a
     decision before you commit to it.
     """
-    from ..budget import Budget
     from ..debate import DebateParticipant, run_debate
     from ..llm import model_for_role
 
@@ -4341,7 +4354,7 @@ def debate(ctx, question: str, rounds: int, max_dollars: float,
     ]
     result = run_debate(
         question, participants, judge_complete=llm.complete,
-        rounds=rounds, budget=Budget(max_dollars=max_dollars),
+        rounds=rounds, budget=_cli_task_budget(question, max_dollars, 1.0),
     )
     for t in result.transcript:
         click.echo(f"\n[{t.speaker}]\n{t.text}")
@@ -4464,17 +4477,16 @@ def migrate_cmd(do_apply: bool, config_path: str | None) -> None:
 @click.argument("goal")
 @click.option("--max-iterations", default=3, show_default=True, type=int,
               help="Max plan->execute->reflect passes before stopping.")
-@click.option("--max-dollars", default=2.0, show_default=True, type=float,
-              help="Spend cap for the whole loop.")
+@click.option("--max-dollars", default=None, type=float,
+              help="Override the configured spend cap (fallback: $2 per loop).")
 @click.pass_context
-def plan_reflect(ctx, goal: str, max_iterations: int, max_dollars: float) -> None:
+def plan_reflect(ctx, goal: str, max_iterations: int, max_dollars: float | None) -> None:
     """Run the plan-execute-reflect loop on GOAL and print the trace.
 
     A planner breaks GOAL into steps, an executor runs each, and a reflector
     decides DONE / REVISE / CONTINUE -- looping until the goal is met, the
     iteration cap is reached, or the budget runs out.
     """
-    from ..budget import Budget
     from ..llm import model_for_role
     from ..plan_execute_reflect import run_plan_execute_reflect
 
@@ -4491,7 +4503,7 @@ def plan_reflect(ctx, goal: str, max_iterations: int, max_dollars: float) -> Non
         executor_complete=llm.complete,
         reflector_complete=llm.complete,
         max_iterations=max_iterations,
-        budget=Budget(max_dollars=max_dollars),
+        budget=_cli_task_budget(goal, max_dollars, 2.0),
     )
     click.echo(f"Plan ({len(result.plan)} steps): {', '.join(result.plan) or '(empty)'}")
     for r in result.results:
@@ -6363,10 +6375,11 @@ def _watch_goal_allowed(goal_text: str) -> tuple[bool, str | None]:
 @main.command()
 @click.argument("path", type=click.Path(exists=True))
 @click.option("--run", is_flag=True, help="Spawn a goal per match (default: print only).")
-@click.option("--max-dollars", default=2.0, type=float)
+@click.option("--max-dollars", default=None, type=float,
+              help="Override the configured spend cap (fallback: $2 per matched task).")
 @click.pass_context
 @_humane_errors
-def watch(ctx, path: str, run: bool, max_dollars: float) -> None:
+def watch(ctx, path: str, run: bool, max_dollars: float | None) -> None:
     """Scan a file or directory for `# AI: <task>` markers and (optionally)
     run each as a goal. One-shot scan; for a long-running watcher use
     `entr` / `watchman` / `fswatch` and pipe to this command."""
@@ -6422,11 +6435,12 @@ def watch(ctx, path: str, run: bool, max_dollars: float) -> None:
             if not allowed:
                 click.echo(click.style(f"  skipped: {reason}", fg="yellow"), err=True)
                 continue
+            budget = _cli_task_budget(title, max_dollars, 2.0)
             goal_id = world.create_goal(title or "watch-mode goal", goal_text)
             click.echo(click.style(f"  -> goal #{goal_id}", fg="bright_black"))
             try:
                 result = k.run_goal_sync(
-                    llm, world, k.Budget(max_dollars=max_dollars),
+                    llm, world, budget,
                     goal_id, sandbox=sandbox, max_depth=2,
                 )
                 click.echo(result)
