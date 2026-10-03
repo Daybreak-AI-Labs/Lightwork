@@ -100,7 +100,8 @@ test('protected plan sends an explicit learning mode and attributed prior-exposu
 test('improvement pilot chooses a governed candidate and keeps release lift unqualified',async()=>{
   const bound={...report(),release_binding:{candidate_id:'candidate-one'},case_exposure_verified:false,causal_lift_qualified:false};
   const ui=await setup([
-    {context:'alice',available:true,items:[{candidate_id:'candidate-one',target_id:'installed-lightwork',state:'authorized'}]},
+    {context:'alice',available:true,readiness:{status:'ready',next_action:'Choose a candidate. Its deployed baseline is checked again.'},
+      items:[{candidate_id:'candidate-one',target_id:'installed-lightwork',state:'authorized'}]},
     {context:'alice',id:'OPL-test',revision:2},
     {context:'alice',items:[{id:'OPL-test',title:'Pilot',cases:4}]},
     bound,
@@ -129,6 +130,36 @@ test('improvement pilot chooses a governed candidate and keeps release lift unqu
   ui.d.getElementById('op-selected').value='';
   ui.d.getElementById('op-selected').dispatchEvent(new ui.w.Event('change'));await tick();
   assert.equal(Object.keys(selections.at(-1)).length,0);
+  ui.dom.window.close();
+});
+
+test('plan checks release readiness on opening and keeps normal pilots usable through setup changes',async()=>{
+  const unavailable={context:'alice',available:false,
+    items:[{candidate_id:'must-not-render',target_id:'installed-lightwork',state:'authorized'}],
+    readiness:{status:'setup_required',release_decisions:false,deployed_release_check:false,
+      next_action:'Ask an installation administrator to connect release controls. You can still plan a normal workflow pilot.'}};
+  const ready={context:'alice',available:true,items:[{candidate_id:'candidate-one',target_id:'installed-lightwork',state:'authorized'}],
+    readiness:{status:'ready',release_decisions:true,deployed_release_check:true,
+      next_action:'Choose a candidate. Its deployed baseline is checked again when you freeze the plan.'}};
+  const ui=await setup([unavailable,ready,unavailable]);
+  const form=ui.d.getElementById('op-plan'), picker=ui.d.getElementById('op-candidate');
+  form.elements.title.value='Keep my plan';
+  const details=ui.d.getElementById('op-plan-details');Object.defineProperty(details,'open',{value:true});
+  details.dispatchEvent(new ui.w.Event('toggle'));await tick();
+  assert.match(ui.calls[2].url,/release-candidates$/);
+  assert.equal(picker.disabled,true);
+  assert.deepEqual([...picker.options].map(option=>option.value),['']);
+  assert.match(ui.d.getElementById('op-candidate-status').textContent,/normal workflow pilot/);
+  assert.equal(form.elements.title.disabled,false);
+  ui.d.getElementById('op-candidate-refresh').click();await tick();
+  assert.equal(picker.disabled,false);
+  assert.equal(picker.options.length,2);
+  picker.value='candidate-one';picker.dispatchEvent(new ui.w.Event('change'));
+  assert.equal(ui.d.getElementById('op-learning-mode').value,'exclude_local_learning');
+  ui.d.getElementById('op-candidate-refresh').click();await tick();
+  assert.equal(picker.disabled,true);
+  assert.equal(picker.value,'');
+  assert.equal(form.elements.title.value,'Keep my plan');
   ui.dom.window.close();
 });
 

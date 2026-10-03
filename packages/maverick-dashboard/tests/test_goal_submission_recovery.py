@@ -81,7 +81,7 @@ def test_only_the_submitter_can_recover_a_draft(isolated, monkeypatch):
 def test_a_flow_retry_allowance_cannot_exceed_the_deployment_ceiling(monkeypatch):
     import inspect
     source = inspect.getsource(api.retry_flow_run_endpoint)
-    assert "configured_max_dollars()" in source and "per-run ceiling" in source
+    assert "configured_goal_ceiling_dollars()" in source and "per-run ceiling" in source
 
 
 def test_attachment_files_are_published_before_the_admission_lock(tmp_path, monkeypatch):

@@ -1,8 +1,6 @@
-"""Help page: a bug report link for a task that stopped (``report-issue``), and the
+"""Help page: a local draft for a task that stopped, and the
 Savings / Performance additions from ``proof`` and ``charts``."""
 from __future__ import annotations
-
-from urllib.parse import unquote
 
 import pytest
 from fastapi.testclient import TestClient
@@ -47,7 +45,7 @@ def _stopped_task(owner: str, title: str) -> int:
     return goal
 
 
-def test_people_see_only_their_own_stopped_tasks_and_get_a_scrubbed_link(client, monkeypatch):
+def test_people_see_only_their_own_stopped_tasks_and_get_a_local_draft(client, monkeypatch):
     mine = _stopped_task("user:vic@example.com", "Quarterly summary")
     theirs = _stopped_task("user:other@example.com", "Someone else's work")
     _as(monkeypatch, "viewer", "user:vic@example.com")
@@ -57,12 +55,14 @@ def test_people_see_only_their_own_stopped_tasks_and_get_a_scrubbed_link(client,
     assert "url" not in made  # preparation cannot navigate outside Lightwork
     assert "Quarterly summary" in made["title"]
     assert "sk-ant-api03-" + "z" * 40 not in made["body"]
-    assert "Opening GitHub sends" in made["summary"]
+    assert "maverick report-issue" not in made["body"]
+    assert "stopped Lightwork task" in made["body"]
+    assert "Nothing is sent automatically" in made["summary"]
     reviewed = client.post("/api/v1/support/issue-report/review", json={
         "task": mine, "title": "Reviewed title", "body": "Business details removed",
     }).json()
-    assert "Business details removed" in unquote(reviewed["url"])
-    assert "Quarterly summary" not in unquote(reviewed["url"])
+    assert reviewed == {"title": "Reviewed title", "body": "Business details removed"}
+    assert "Quarterly summary" not in str(reviewed)
     assert client.post("/api/v1/support/issue-report", json={"task": theirs}).status_code == 404
     assert client.post("/api/v1/support/issue-report", json={"task": 999999}).status_code == 404
     assert client.post("/api/v1/support/issue-report", json={"task": 0}).status_code == 422
@@ -102,6 +102,9 @@ def test_help_page_offers_the_bug_report(client):
     assert page.status_code == 200
     assert 'id="issue-report-form"' in page.text and "/static/lightwork-support-ops.js" in page.text
     assert "Prepare the bug report" in page.text
+    assert "Copy reviewed draft" in page.text and "Download reviewed draft" in page.text
+    assert "Send reviewed draft to GitHub" not in page.text
+    assert "no support inbox set up" in page.text
     assert client.get("/static/lightwork-support-ops.js").status_code == 200
 
 

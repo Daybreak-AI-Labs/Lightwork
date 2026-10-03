@@ -8,12 +8,31 @@
                      goes ahead until a person approves it, and every decision
                      is recorded in the audit log.') %}
     {{ state('Current state',
-             (approvals | length) ~ (' request waiting' if approvals | length == 1 else ' requests waiting'),
-             badge='Action needed' if approvals else 'All clear',
-             badge_class='warn' if approvals else 'ok',
+             ((approvals | length) + (flow_approvals | length)) ~ (' request waiting' if (approvals | length) + (flow_approvals | length) == 1 else ' requests waiting'),
+             badge='Action needed' if approvals or flow_approvals else ('Check needed' if flow_approval_coverage != 'current' else 'All clear'),
+             badge_class='warn' if approvals or flow_approvals or flow_approval_coverage != 'current' else 'ok',
              copy='Approve, reject, or send a request back with a note saying what should change.') }}
   {% endcall %}
   {% if private_count %}<p class="panel">{{ private_count }} pending request{{ '' if private_count == 1 else 's' }} contain private employee content. <a href="/content-access">Request the exact approval-card read</a> before reviewing. Content access does not grant a vote: your current review role, claim and separation-of-duties checks still apply.</p>{% endif %}
+
+  {% if flow_approval_coverage != 'current' %}<p class="panel" role="status">Some flow approvals could not be checked. Open your <a href="/automations">flows and runs</a> to inspect older requests, or refresh this page.</p>{% endif %}
+  {% if flow_approvals %}<section class="panel" aria-labelledby="flow-approvals-title">
+    <h2 id="flow-approvals-title">Flow approvals</h2>
+    <p class="muted">Review the current approval card and decide on the run page. The run checks your access and the exact operation again before accepting a decision.</p>
+    <div class="approval-list">
+    {% for item in flow_approvals %}<article class="approval-item" id="flow-approval-{{ item.run_id }}">
+      <div class="approval-item__head"><h3 class="approval-item__title">{{ item.title }}</h3><span class="badge {{ 'pending' if item.approval_card_status == 'current' else 'warn' }}">{{ 'Waiting for approval' if item.approval_card_status == 'current' else 'Needs fresh review' }}</span></div>
+      {% if item.approval_card %}<section class="approval-card" aria-label="What you are approving">
+        <p><strong>This is Lightwork's suggestion — the decision is yours.</strong></p>
+        <p>What it changes: {{ item.approval_card.target.label }}</p>
+        {% if item.approval_card.parameters.summary %}<div><strong>What it will do</strong><ul>{% for step in item.approval_card.parameters.summary %}<li>{{ step }}</li>{% endfor %}</ul></div>{% endif %}
+        <p>Before: {{ item.approval_card.preview.before }}</p><p>After: {{ item.approval_card.preview.after }}</p>
+        <p>Decide by: {{ item.approval_card.expires_at | datetime }}</p>
+      </section>{% else %}<p class="muted">The approval details need to be checked again before a decision can be made.</p>{% endif %}
+      <div class="approval-actions"><a class="btn btn--primary" href="{{ item.href }}">Review and decide</a></div>
+    </article>{% endfor %}
+    </div>
+  </section>{% endif %}
 
   <div class="panel">
     {% include "_approvals_queue.html" %}

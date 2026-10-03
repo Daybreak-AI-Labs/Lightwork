@@ -1514,8 +1514,18 @@
   }
   var ACTION_WORDS = { Save: 'save the flow', Publish: 'publish the flow', Run: 'start the run',
     Draft: 'draft the flow', Apply: 'apply the suggestion' };
+  function workflowsOff(response) {
+    var headers = response && response.headers;
+    return headers && typeof headers.get === 'function'
+      ? headers.get('X-Lightwork-Feature-Off') === 'workflows'
+      : fd.dataset.flowEngineOn !== 'true';
+  }
   function failText(response, action) {
     var what = ACTION_WORDS[action] || String(action || 'do that').toLowerCase();
+    if (response && response.status === 403 && workflowsOff(response))
+      return 'Workflows are turned off. ' + (fd.dataset.canManageFlows === 'true'
+        ? 'Turn them on in Learning, then try again.'
+        : 'Ask the person who manages this installation to turn them on.');
     if (window.mvErrorText) return window.mvErrorText(response, what);
     var status = response && response.status;
     if (status === 409) return 'Could not ' + what + '. This flow was changed since you opened it. Reload it and try again.';
@@ -2180,11 +2190,11 @@
         if (r.status === 403) {
           var msg = document.getElementById('fd-msg');
           if (msg && !msg.textContent) {
-            if (fd.dataset.flowEngineOn === 'true') {
+            if (!workflowsOff(r)) {
               msg.textContent = 'You do not have access to workflows. Ask an administrator.';
             } else {
               msg.textContent = 'Workflows are turned off. You can design a flow and download a copy, '
-                + 'but saving and running need an administrator to turn workflows on.';
+                + 'but saving and running need the person who manages this installation to turn workflows on.';
               if (fd.dataset.canManageFlows === 'true') {
                 var on = document.createElement('a'); on.href = '/learning#lrn-flows-on'; on.textContent = ' Turn on workflows';
                 msg.appendChild(on);

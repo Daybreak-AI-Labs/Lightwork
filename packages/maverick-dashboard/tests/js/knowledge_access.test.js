@@ -93,8 +93,9 @@ function response(payload, status = 200) {
   };
 }
 
-async function setup(queue) {
-  const dom = new JSDOM(template, {url: 'https://lightwork.test/knowledge-access', runScripts: 'outside-only'});
+async function setup(queue, {canReview = true} = {}) {
+  const html = canReview ? template : template.replace('data-can-review="true"', 'data-can-review="false"');
+  const dom = new JSDOM(html, {url: 'https://lightwork.test/knowledge-access', runScripts: 'outside-only'});
   const window = dom.window;
   window.TextEncoder = global.TextEncoder;
   const calls = [];
@@ -451,6 +452,135 @@ test('review shows derivative retirement, hashes plain-language rationale, and k
   assert.equal(body.confirm, true);
   assert.match(ui.document.getElementById('ka-requests').textContent, /not yet confirmed deleted at the original source/i);
   assert.match(ui.document.getElementById('ka-requests').textContent, /retire or retrain the model required/i);
+  ui.dom.window.close();
+});
+
+test('finished requests can be archived from the page without losing the retained view', async () => {
+  const finished = rights({status: 'denied', revision: 2, decision: 'deny',
+    decided_by: ACTOR, decision_evidence_sha256: '0'.repeat(64),
+    archive_ready: true});
+  const stored = rights({...finished, archive_ready: false, archived_at: 1700000200});
+  const full = {...requestList([finished]), archived: false,
+    capacity: {active_count: 2048, active_limit: 2048}};
+  const ready = {...requestList([finished]), archived: false, ready_to_archive: true,
+    capacity: {active_count: 2048, active_limit: 2048}};
+  const empty = {...requestList(), archived: false, ready_to_archive: true,
+    capacity: {active_count: 2047, active_limit: 2048}};
+  const history = {...requestList([stored]), archived: true,
+    capacity: {active_count: 2047, active_limit: 2048}};
+  const ui = await setup([full, ready, {context: CONTEXT, ...stored}, empty, history]);
+  ui.window.confirm = () => true;
+  assert.match(ui.document.getElementById('ka-capacity').textContent, /active request list is full/);
+  ui.document.getElementById('ka-show-ready').click();
+  await tick(); await tick();
+  assert.equal(ui.document.getElementById('ka-show-ready').getAttribute('aria-pressed'), 'true');
+  let selected = null;
+  ui.document.addEventListener('lightwork:copilot-selection', event => { selected = event.detail.selection; });
+  [...ui.document.querySelectorAll('.ka-request button')]
+    .find(button => /Work on this with Copilot/.test(button.textContent)).click();
+  assert.deepEqual(JSON.parse(JSON.stringify(selected)), {kind: 'knowledge_request', id: finished.id});
+  const move = [...ui.document.querySelectorAll('.ka-request button')]
+    .find(button => /Move to finished archive/.test(button.textContent));
+  assert.ok(move);
+  move.click();
+  await tick(); await tick();
+  assert.equal(JSON.parse(ui.calls[2].options.body).expected_revision, 2);
+  assert.equal(ui.calls[2].url.endsWith('/archive'), true);
+  assert.match(ui.document.getElementById('ka-requests').textContent, /No finished requests are ready/);
+  ui.document.getElementById('ka-show-archived').click();
+  await tick(); await tick();
+  assert.match(ui.document.getElementById('ka-requests').textContent, /Retained in the finished archive/);
+  assert.equal(ui.document.getElementById('ka-show-archived').getAttribute('aria-pressed'), 'true');
+  assert.equal([...ui.document.querySelectorAll('.ka-request button')]
+    .some(button => /Move to finished archive/.test(button.textContent)), false);
+  ui.dom.window.close();
+});
+
+test('failed request-view switches restore the view that owns the visible cards', async () => {
+  const finished = rights({status: 'denied', revision: 2, decision: 'deny',
+    decided_by: ACTOR, decision_evidence_sha256: '0'.repeat(64), archive_ready: true});
+  const active = {...requestList([finished]), archived: false, ready_to_archive: false};
+  const ready = {...requestList([finished]), archived: false, ready_to_archive: true};
+  const ui = await setup([active, () => response({detail: 'Unavailable'}, 503), ready,
+    new Error('Connection interrupted')]);
+  const archivedButton = ui.document.getElementById('ka-show-archived');
+  const readyButton = ui.document.getElementById('ka-show-ready');
+  const cards = ui.document.getElementById('ka-requests');
+
+  readyButton.click();
+  await tick(); await tick();
+  assert.equal(readyButton.getAttribute('aria-pressed'), 'false');
+  assert.equal(archivedButton.getAttribute('aria-pressed'), 'false');
+  assert.match(cards.textContent, /Move to finished archive/);
+
+  readyButton.click();
+  await tick(); await tick();
+  assert.equal(readyButton.getAttribute('aria-pressed'), 'true');
+  archivedButton.click();
+  await tick(); await tick();
+  assert.equal(readyButton.getAttribute('aria-pressed'), 'true');
+  assert.equal(archivedButton.getAttribute('aria-pressed'), 'false');
+  assert.equal(archivedButton.textContent, 'View finished archive');
+  assert.match(cards.textContent, /Move to finished archive/);
+  ui.dom.window.close();
+});
+
+test('shared storage does not offer finished-request archiving as a capacity remedy', async () => {
+  const finished = rights({status: 'denied', revision: 2, decision: 'deny',
+    decided_by: ACTOR, decision_evidence_sha256: '0'.repeat(64),
+    archive_ready: false});
+  const listing = {...requestList([finished]), archived: false,
+    capacity: {active_count: 2048, active_limit: 2048, archive_available: false}};
+  const ui = await setup([listing]);
+  // The final busy-state reset must not re-enable a control the backend
+  // declared unavailable after the request completed.
+  await tick(); await tick();
+  assert.match(ui.document.getElementById('ka-capacity').textContent, /Archiving is unavailable/);
+  assert.equal(ui.document.getElementById('ka-show-ready').disabled, true);
+  assert.equal([...ui.document.querySelectorAll('.ka-request button')]
+    .some(button => /Move to finished archive/.test(button.textContent)), false);
+  ui.dom.window.close();
+});
+
+test('an older finished request can be found by its shown reference', async () => {
+  const stored = rights({status: 'denied', revision: 2, decision: 'deny',
+    decided_by: ACTOR, decision_evidence_sha256: '0'.repeat(64),
+    archived_at: 1700000200, archive_ready: false});
+  const ui = await setup([requestList(), {
+    context: CONTEXT, schema: 'lightwork.knowledge-rights-request-detail.v1', item: stored
+  }]);
+  const form = ui.document.getElementById('ka-find-archived');
+  form.elements.request_reference.value = stored.id;
+  form.dispatchEvent(new ui.window.Event('submit', {bubbles: true, cancelable: true}));
+  await tick(); await tick();
+  assert.equal(ui.calls[1].url.endsWith('/requests/' + stored.id), true);
+  assert.match(ui.document.getElementById('ka-requests').textContent, /Retained in the finished archive/);
+  assert.match(ui.document.getElementById('ka-requests').textContent, new RegExp(stored.id));
+  ui.dom.window.close();
+});
+
+test('a request owner can find an older archived receipt without review details', async () => {
+  const id = 'knowledge-req-' + '8'.repeat(40);
+  const receipt = {schema: 'lightwork.knowledge-feedback.v1', id,
+    request_type: 'exclusion', status: 'denied', reason: 'My source concern.',
+    proposed_correction: null, source_use_status: 'unchanged_after_denial',
+    raw_record_status: 'not_changed', retention_review_status: 'not_required',
+    created_at: 1700000000, updated_at: 1700000100, archived_at: 1700000200,
+    notice: 'An independent administrator reviewed this request.'};
+  const ui = await setup([{...requestList(), can_review: false, archived: false},
+    {context: CONTEXT, schema: 'lightwork.knowledge-rights-request-detail.v1', item: receipt}],
+  {canReview: false});
+  const form = ui.document.getElementById('ka-find-archived');
+  assert.ok(form);
+  form.elements.request_reference.value = id;
+  form.dispatchEvent(new ui.window.Event('submit', {bubbles: true, cancelable: true}));
+  await tick(); await tick();
+  const shown = ui.document.getElementById('ka-requests').textContent;
+  assert.match(shown, /Retained in the finished archive/);
+  assert.match(shown, /My source concern/);
+  assert.match(shown, new RegExp(id));
+  assert.doesNotMatch(shown, /derivative|decision evidence|review rationale/i);
+  assert.equal(ui.calls[1].url.endsWith('/requests/' + id), true);
   ui.dom.window.close();
 });
 

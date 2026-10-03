@@ -336,5 +336,5 @@ def test_page_is_plain_language_with_a_task_table_and_row_actions(client: TestCl
     for label in ("All tasks", "New task", "Edit task", "Check records are intact", "Delete expired tasks"):
         assert label in text
     source = (PACKAGE / "static" / "lightwork-ai-entity-tasks.js").read_text(encoding="utf-8")
-    assert '"/api/v1/people/assignable"' in source and '"/api/v1/assurance/ai-inventory"' in source
+    assert '"/api/v1/people/assignable"' in source and '"/api/v1/security/assurance/ai-inventory"' in source
     assert "window.mvConfirm" in source

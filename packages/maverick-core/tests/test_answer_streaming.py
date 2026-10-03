@@ -426,7 +426,7 @@ async def test_llm_forwards_on_delta_only_to_anthropic(monkeypatch):
     cb = lambda _t: None  # noqa: E731
     await llm.complete_async("s", [{"role": "user", "content": "hi"}], model="anthropic:claude-sonnet-4-6", on_delta=cb)
     assert clients["anthropic"].kwargs.get("on_delta") is cb
-    await llm.complete_async("s", [{"role": "user", "content": "hi"}], model="openai:gpt-5", on_delta=cb)
+    await llm.complete_async("s", [{"role": "user", "content": "hi"}], model="openai:gpt-5.5", on_delta=cb)
     assert "on_delta" not in clients["openai"].kwargs
 
 

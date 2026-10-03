@@ -18,7 +18,7 @@ def resume_env(monkeypatch, tmp_path):
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     world = world_model.WorldModel(world_model.DEFAULT_DB)
     monkeypatch.setattr(api, "_world", lambda: world)
-    monkeypatch.setattr(api, "configured_max_dollars", lambda: 2.0)
+    monkeypatch.setattr(api, "configured_goal_ceiling_dollars", lambda: 2.0)
     calls = []
 
     async def run(*args, **kwargs):
@@ -68,7 +68,7 @@ def test_ceiling_is_the_deployment_spend_cap_not_the_fallback(resume_env, monkey
     from maverick_dashboard import api
 
     client, world, goal_id, calls = resume_env
-    monkeypatch.setattr(api, "configured_max_dollars", runner.configured_max_dollars)
+    monkeypatch.setattr(api, "configured_goal_ceiling_dollars", runner.configured_goal_ceiling_dollars)
     runtime_overrides.set_budget(25000.01)
     over = client.post(f"/api/v1/goals/{goal_id}/resume", json={"max_dollars": 25000.02})
     assert over.status_code == 400

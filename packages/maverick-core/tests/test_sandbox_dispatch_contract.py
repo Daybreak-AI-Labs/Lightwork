@@ -1,9 +1,11 @@
 """A sandbox failure must never act as a probe that replays its side effects."""
 from __future__ import annotations
 
+import os
 import shlex
 
 import pytest
+from maverick.sandbox import LocalBackend
 from maverick.sandbox.local import ExecResult
 from maverick.tools import sandbox_run
 
@@ -56,3 +58,18 @@ def test_declared_exec_preserves_timeout_quoting_and_input():
     assert calls[1][1] == 4
     assert "untrusted $() input" not in calls[1][0]
     assert "base64 -d" in calls[1][0]
+
+
+def test_windows_local_backend_passes_argv_without_shell_interpolation(tmp_path):
+    if os.name != "nt":
+        pytest.skip("Windows LocalBackend argv dispatch")
+    value = "& echo injected %PATH%"
+
+    code, out, err = sandbox_run(
+        LocalBackend(workdir=tmp_path),
+        ["python", "-c", "import sys; print(sys.argv[1])", value],
+        timeout=10,
+    )
+
+    assert code == 0, err
+    assert out.strip() == value

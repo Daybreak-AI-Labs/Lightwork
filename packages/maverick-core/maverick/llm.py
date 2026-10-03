@@ -29,11 +29,10 @@ from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass
 from typing import Any
 
-from .budget import Budget, BudgetExceeded, _cache_write_mult_from_ttl
+from .budget import Budget, BudgetExceeded, _cache_write_mult_from_ttl, _lookup_price_quote
 from .pricing import (
     ModelPrice,
     PriceUse,
-    UnverifiedRateError,
     VersionedPricingProvider,
     load_pricing_evidence_pack,
 )
@@ -706,19 +705,15 @@ def _allowlist_rank_price(spec: str) -> tuple[float, float] | None:
     an allow-list fallback should not prefer an unverified price over a known
     cheap model.
     """
-    provider, model_id = _parse_spec(spec)
-    if provider == "codex_cli":
-        return 0.0, 0.0
-    for key in (spec, model_id):
-        try:
-            quote = model_price_quote(key)
-        except UnverifiedRateError:
-            return None
-        if quote is not None:
-            return quote.rates
-    if provider in ("ollama", "vllm", "tgi"):
-        return 0.0, 0.0
-    return None
+    from .budget import UnpricedModelError
+
+    try:
+        provider, model_id = _parse_spec(spec)
+        return _lookup_price_quote(
+            f"{provider}:{model_id}", estimate_only=False,
+        ).rates
+    except UnpricedModelError:
+        return None
 
 
 def _allowlist_filter_fallbacks(models: list[str]) -> list[str]:
@@ -1531,16 +1526,8 @@ def _estimate_call_cost(model_id, system, messages, tools, max_tokens,
 
     This is a hold/projection against the budget cap, not the invoice -- the
     real spend is billed afterward from actual usage via
-    ``Budget.record_tokens``, which stays strict. Pricing this estimate with
-    ``estimate_only=True`` matters for any model id without a *verified* rate
-    (an Azure deployment name, a Bedrock model id, an OpenAI-compatible
-    gateway, or a provisional/unverified rate-card entry): without it, the
-    default fail-closed ``[budget] strict_pricing`` policy raised
-    ``UnpricedModelError`` here and refused the call before it was ever
-    dispatched -- even with no ``budget`` passed at all. The estimate falls
-    back to a conservative rate (the verified one when available, otherwise a
-    labeled-unverified estimate) instead of blocking dispatch on pricing
-    verification, which is ``record_tokens``'s job, not this one's."""
+    ``Budget.record_tokens``. Planning may use a labeled estimate; complete()
+    and complete_async() separately require a billable price before dispatch."""
     from .budget import _lookup_price
     try:
         # Price the max_tokens the provider will actually send: the Anthropic
@@ -2003,6 +1990,9 @@ class LLM:
         # EgressBlocked before any prompt is dispatched.
         from .enterprise import assert_provider_allowed
         assert_provider_allowed(provider)
+        # A planning estimate cannot justify a paid call that record_tokens()
+        # will refuse after dispatch under strict pricing.
+        _lookup_price_quote(_price_spec)
         # Outbound data-minimization (opt-in, default off): strip detectable
         # PII/secrets from the prompt before it leaves the box to a cloud
         # provider. No-op unless [privacy] redact_egress is on; skipped for
@@ -2192,6 +2182,7 @@ class LLM:
         # Egress lock (no-op unless enterprise mode is on): see complete().
         from .enterprise import assert_provider_allowed
         assert_provider_allowed(provider)
+        _lookup_price_quote(_price_spec)
         # Outbound data-minimization (opt-in, default off): strip detectable
         # PII/secrets from the prompt before it leaves the box to a cloud
         # provider. No-op unless [privacy] redact_egress is on; skipped for

@@ -28,7 +28,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         return run(fast=args.fast, resume=args.resume)
     except (KeyboardInterrupt, EOFError):
-        print("\nAborted. Re-run `maverick init` any time.")
+        print("\nAborted. If setup is unfinished, you can try again later.")
         return 130
 
 

@@ -146,6 +146,17 @@ def _audit_fields(event: dict, *, kind: str = "") -> dict:
         "actor", "principal", "tenant", "status", "ok", "cost_usd", "input_tokens", "output_tokens",
         "revision", "record_type", "record_id", "record_sha256", "access_request",
     ) if key in event and isinstance(event[key], (str, bool, int, float))}
+    if kind == "setting_changed":
+        # Setting receipts may contain private configuration values. Only
+        # bounded identifiers and the completion state belong in metadata.
+        import re
+
+        for name in ("section", "key"):
+            value = event.get(name)
+            if isinstance(value, str) and len(value) <= 128 and re.fullmatch(r"[A-Za-z0-9_.:-]+", value):
+                safe[name] = value
+        if isinstance(event.get("phase"), str) and event["phase"] in {"prepared", "completed"}:
+            safe["phase"] = event["phase"]
     if isinstance(event.get("stage"), str) and event["stage"] in {"input", "tool", "output"}:
         safe["stage"] = event["stage"]
     if isinstance(event.get("decision"), str) and event["decision"] in {"approve", "deny", "timeout"}:

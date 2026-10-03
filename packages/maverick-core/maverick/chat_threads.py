@@ -116,6 +116,31 @@ class ChatThreads:
         return list(reversed([Turn(r[0], r[1], r[2], r[3], self.store.open(r[4]), r[5])
                               for r in rows[:size]])), len(rows) > size
 
+    def selected_turns(self, goal_id):
+        """Persisted web turns for this member, scoped to its canonical thread."""
+        from .world_model import Turn
+
+        binding = self.binding(goal_id)
+        if binding is None:
+            return []
+        gs, gv = self._scope("g")
+        cs, cv = self._scope("c")
+        rows = self._rows(
+            "SELECT t.id,t.conversation_id,t.goal_id,t.role,t.content,t.ts "
+            "FROM turns t JOIN goals g ON g.id=t.goal_id "
+            "JOIN conversations c ON c.id=t.conversation_id "
+            "WHERE t.conversation_id=? AND t.goal_id=? AND g.owner=? "
+            "AND (g.id=? OR g.parent_id=?) "
+            f"AND {gs} AND {cs} AND t.role IN ('user','assistant') "
+            "ORDER BY t.id LIMIT 101",
+            (binding.conversation_id, goal_id, binding.owner, binding.root_id,
+             binding.root_id, *gv, *cv),
+        )
+        if len(rows) > 100:
+            raise ValueError("The selected message has too many turns to share.")
+        return [Turn(r[0], r[1], r[2], r[3], self.store.open(r[4]), r[5])
+                for r in rows]
+
     def _lock(self, connection, root_id):
         if not self.store.sqlite:
             key = int.from_bytes(hashlib.sha256(

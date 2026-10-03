@@ -295,7 +295,10 @@ class LocalBackend:
         self.workdir = workdir or Path.cwd()
         self.timeout = timeout
 
-    def exec(self, cmd: str, timeout: float | None = None) -> ExecResult:
+    def exec(
+        self, cmd: str | list[str], timeout: float | None = None,
+        stdin: str | None = None,
+    ) -> ExecResult:
         # Wave 10: per-call `timeout` kwarg lets the test runner override
         # the default 60s (too short for real pytest on SWE-bench
         # instances). Falls back to self.timeout when unset, preserving
@@ -323,8 +326,10 @@ class LocalBackend:
             # LocalBackend is the intentional unsandboxed host-exec path
             # (CLAUDE.md rule 4 allowlists shell only under sandbox/); env is
             # scrubbed and operators are warned to use a container backend.
-            shell=True,  # nosec B602
+            # A list runs directly, avoiding cmd.exe interpolation on Windows.
+            shell=isinstance(cmd, str),  # nosec B602
             cwd=str(self.workdir),
+            stdin=subprocess.PIPE if stdin is not None else None,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
@@ -346,7 +351,7 @@ class LocalBackend:
                 proc.kill()
                 proc.wait(timeout=5)
                 raise
-            out, err = proc.communicate(timeout=effective)
+            out, err = proc.communicate(input=stdin, timeout=effective)
             if os.name == "nt":
                 _close_windows_kill_job(windows_job)
                 windows_job = None

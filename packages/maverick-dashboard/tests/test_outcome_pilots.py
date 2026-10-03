@@ -113,6 +113,69 @@ def _deployment(active="a" * 64, *, compatible=True):
         rollback_compatible=compatible, evidence_sha256="f" * 64)
 
 
+@pytest.mark.parametrize(("release_decisions", "deployed_release_check", "expected"), [
+    (False, False, (False, False)),
+    (True, False, (True, False)),
+    (False, True, (False, True)),
+])
+def test_release_choices_explain_missing_setup_without_listing_candidates(
+    monkeypatch, release_decisions, deployed_release_check, expected,
+):
+    service = SimpleNamespace(list=lambda *_args, **_kwargs: pytest.fail("listed before readiness"))
+    adapter = SimpleNamespace(observe=lambda *_args: _deployment())
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(
+        candidate_promotion_deployment_adapter=adapter if deployed_release_check else None,
+    )))
+    monkeypatch.setattr(releases, "_identity", lambda _request: ("tenant-one", "user:alice"))
+    monkeypatch.setattr(releases, "_service", lambda _request, required=False:
+                        service if release_decisions else None)
+    response = releases.choices(request)
+    assert response["available"] is False
+    assert response["items"] == []
+    assert response["readiness"]["status"] == "setup_required"
+    assert (response["readiness"]["release_decisions"],
+            response["readiness"]["deployed_release_check"]) == expected
+    assert "normal workflow pilot" in response["readiness"]["next_action"]
+
+
+def test_release_choices_need_named_account_and_explain_empty_ready_state(monkeypatch):
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(
+        candidate_promotion_deployment_adapter=SimpleNamespace(observe=lambda *_args: _deployment()),
+    )))
+    def unnamed(_request):
+        raise PermissionError("A named account is required.")
+
+    monkeypatch.setattr(releases, "_identity", unnamed)
+    denied = releases.choices(request)
+    assert denied["readiness"]["status"] == "sign_in_required"
+    assert denied["items"] == []
+    monkeypatch.setattr(releases, "_identity", lambda _request: ("tenant-one", "user:alice"))
+    monkeypatch.setattr(releases, "_service", lambda _request, required=False:
+                        SimpleNamespace(list=lambda *_args, **_kwargs: []))
+    ready = releases.choices(request)
+    assert ready["available"] is True
+    assert ready["items"] == []
+    assert ready["readiness"]["status"] == "ready"
+    assert "no candidate" in ready["readiness"]["next_action"]
+
+
+def test_release_readiness_route_explains_missing_setup_without_exposing_candidates(monkeypatch):
+    monkeypatch.setattr(app.state, "candidate_promotion_deployment_adapter", None, raising=False)
+    monkeypatch.setattr(releases, "_identity", lambda _request: ("tenant-one", "user:alice"))
+    monkeypatch.setattr(releases, "_service", lambda _request, required=False: None)
+    monkeypatch.setattr(api, "context_for", lambda _request: "alice")
+    monkeypatch.setattr(api, "require_permission", lambda *_args: None)
+    response = TestClient(app, headers={"Origin": "http://testserver"}).get(
+        "/api/v1/outcome-pilots/release-candidates",
+    )
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "private, no-store"
+    assert response.json()["context"] == "alice"
+    assert response.json()["items"] == []
+    assert response.json()["readiness"]["status"] == "setup_required"
+    assert "normal workflow pilot" in response.json()["readiness"]["next_action"]
+
+
 def test_improvement_plan_freezes_trusted_versions_but_never_claims_causal_lift(records, monkeypatch):
     value = _candidate_release()
     adapter = SimpleNamespace(observe=lambda tenant, target: _deployment())
@@ -215,6 +278,7 @@ def test_improvement_routes_bind_server_observed_release_and_scope_status(record
     choices = client.get("/api/v1/outcome-pilots/release-candidates")
     assert choices.status_code == 200
     assert choices.json()["items"][0]["candidate_id"] == "candidate-one"
+    assert choices.json()["readiness"]["status"] == "ready"
     assert choices.headers["cache-control"] == "private, no-store"
     body = {**protected_plan(), "operation_id": "improvement-route-operation",
         "candidate_id": "candidate-one"}

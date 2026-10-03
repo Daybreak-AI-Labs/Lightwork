@@ -36,6 +36,7 @@ from __future__ import annotations
 import copy
 import json
 import logging
+import math
 import re
 import secrets
 import time
@@ -985,7 +986,7 @@ def start_run(agent_id: str, run: dict, *, shield: Any | None = None) -> dict:
 
     The goal lands ``active`` under ``agent:<id>`` so Oversight sees the work
     while it is happening, and the kill switch can bite mid-flight: the agent
-    must heartbeat within the orphan-reclaim window (default 60s, see
+    must heartbeat well within the orphan-reclaim window (default 60s, see
     ``MAVERICK_ORPHAN_RECLAIM_SECONDS``) or the run is reclaimed to blocked
     with a restart marker. Schema: ``{title, summary?, department?}``."""
     if not enabled():
@@ -1021,8 +1022,16 @@ def start_run(agent_id: str, run: dict, *, shield: Any | None = None) -> dict:
     audit_event(EventKind.EXTERNAL_RUN_STARTED, agent="external_agents",
                 goal_id=gid, external_agent=agent_id)
     from .world_model import reclaim_window_seconds
+    window = reclaim_window_seconds()
+    # The reclaim window is a deadline, not a heartbeat cadence. Returning
+    # that same duration used to race a normal network delay against the
+    # recurring sweep. Leave several beat opportunities inside the window.
+    heartbeat_seconds = (
+        1.0 if not math.isfinite(window) or window < 4.0
+        else min(15.0, window / 4.0)
+    )
     return {"goal_id": gid,
-            "heartbeat_seconds": reclaim_window_seconds()}
+            "heartbeat_seconds": heartbeat_seconds}
 
 
 def heartbeat(agent_id: str, goal_id: int) -> dict:

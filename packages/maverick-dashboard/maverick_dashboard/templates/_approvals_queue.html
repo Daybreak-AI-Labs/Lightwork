@@ -23,7 +23,7 @@
   {% for a in approvals %}
     {% set assessment_id = assessment_ids.get(a.id) if assessment_ids else None %}
     {% set _raw_action = (approval_actions.get(a.id, '') if approval_actions else '') | trim %}
-    {% set action_label = (_raw_action if ' ' in _raw_action else (_raw_action | replace('.', ' ') | humanize)) or 'Reviewed action' %}
+    {% set action_label = 'Review paused action' if a.provenance == 'rehearsal' else ((_raw_action if ' ' in _raw_action else (_raw_action | replace('.', ' ') | humanize)) or 'Reviewed action') %}
     {% set card = cards.get(a.id) if cards else None %}
     {% set card_status = card_statuses.get(a.id, 'legacy') if card_statuses else 'legacy' %}
     {% set scope_text = approval_scopes.get(a.id, '') if approval_scopes and approval_scopes.get(a.id) else 'The item described' %}
@@ -40,7 +40,7 @@
       <dl class="approval-item__meta">
         <div><dt>From</dt><dd>
           {% set _src = sources.get(a.id) if sources else None %}
-          {% if _src %}<span class="badge blocked">{{ _src }}</span>{% else %}<span class="muted">An agent asked for permission</span>{% endif %}
+          {% if a.provenance == 'rehearsal' %}<span class="badge blocked">Lightwork paused this step</span>{% elif _src %}<span class="badge blocked">{{ _src }}</span>{% else %}<span class="muted">An agent asked for permission</span>{% endif %}
         </dd></div>
         <div><dt>Applies to</dt><dd>{{ scope_text }}</dd></div>
         {% if card %}<div><dt>Requested by</dt><dd>{{ card.authority.actor | identity }} · {{ card.authority.role | role_label }}</dd></div>

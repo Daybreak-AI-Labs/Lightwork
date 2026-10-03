@@ -26,6 +26,8 @@ guided_onboarding = true
 project_reviews = true
 outcome_measurement = true
 workspace_recovery = true
+[copilot]
+operation_families = ["learning", "commitments"]
 [vendor_onboarding]
 enable = true
 resource_owner = "procurement"
@@ -41,6 +43,12 @@ enable = true
 enable = true
 [flows]
 enable = true
+action_episode_capture = true
+action_recipes = true
+action_recipe_transforms = true
+action_recipe_lineage = true
+require_action_recipe_lineage = false
+action_evidence_issuer = "synthetic-browser-learning"
 [connections]
 enable = true
 [ai_cost_roi]
@@ -72,6 +80,9 @@ enable = false
 auto_fetch_model = false
 [budget.provider_caps]
 browser-spend = 20.0
+[security.tool_risk]
+browser_learning_lookup = "low"
+browser_learning_create = "high"
 [dashboard.themes.browser-white]
 bg = "#ffffff"
 panel = "#ffffff"
@@ -225,7 +236,8 @@ def build_app(directory):
         project_id = world.create_project("Browser review project", owner=principal)
         review_goal = world.create_goal("Browser captured result", "Synthetic review task", owner=principal, project_id=project_id)
         world.set_goal_status(review_goal, "done", result="Synthetic captured deliverable. Evidence limitations remain explicit.")
-        for member in (principal, "user:browser-colleague", "user:browser-outcome-owner"):
+        for member in (principal, "user:browser-colleague", "user:browser-outcome-owner",
+                       "user:browser-outcome-readiness-owner"):
             rbac.set_tenant_role(tenant, member, "operator", actor=principal)
         with connections.bind_principal(principal):
             connections.set_connection("browser-discovery", connector="servicenow_cmdb", base_url="https://data.example.com", token="synthetic-local-test-token", owner=principal)
@@ -269,7 +281,8 @@ def build_app(directory):
     @dashboard.app.middleware("http")
     async def fixture_principal(request: Request, call_next):
         subject = request.headers.get("X-Browser-Principal", "browser-reviewer")
-        if subject not in {"browser-reviewer", "browser-colleague", "browser-learning-reviewer", "browser-outcome-owner"}:
+        if subject not in {"browser-reviewer", "browser-colleague", "browser-learning-reviewer",
+                           "browser-outcome-owner", "browser-outcome-readiness-owner"}:
             from fastapi.responses import JSONResponse
             return JSONResponse({"detail":"Unknown synthetic browser principal"}, status_code=403)
         request.state.principal = VerifiedPrincipal(
@@ -311,6 +324,12 @@ def build_app(directory):
     install_task_file_fixture(dashboard.app, world, tenant, principal)
     from fixture_approvals import install as install_approvals_fixture
     install_approvals_fixture(dashboard.app, world, tenant, principal)
+    from fixture_flow_approval import install as install_flow_approval_fixture
+    install_flow_approval_fixture(dashboard.app, tenant, principal)
+    from fixture_signed_learning import install as install_signed_learning_fixture
+    install_signed_learning_fixture(dashboard.app, tenant, principal)
+    from fixture_learned_skill import install as install_learned_skill_fixture
+    install_learned_skill_fixture(dashboard.app, world, tenant)
     return dashboard.app
 
 

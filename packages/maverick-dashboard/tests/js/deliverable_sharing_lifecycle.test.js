@@ -9,11 +9,13 @@ const settle=async()=>{for(let i=0;i<15;i++)await new Promise(resolve=>setImmedi
 function response(body,status=200){return {ok:status===200,status,redirected:false,json:async()=>body};}
 function page(handler,{canOperate=true,done=true}={}){
   const panel='<section id="answer-panel" data-status="'+(done?'done':'running')+'">'+(done?'<textarea id="saved-answer-source">Saved result</textarea>':'')+'</section>';
-  const dom=new JSDOM(panel+'<div class="goal-share" data-goal="4" data-can-operate="'+(canOperate?'1':'0')+'"><button id="share-create">Review share link</button><input id="share-url"><button id="share-copy" hidden>Copy link</button><p id="share-msg"></p><ul id="share-list"></ul></div>',{url:'https://lightwork.invalid/chat/goal/4',runScripts:'outside-only',pretendToBeVisual:true});
+  const dom=new JSDOM(panel+'<div class="goal-share" data-goal="4" data-can-operate="'+(canOperate?'1':'0')+'"><select id="share-scope"><option value="result" selected>Saved answer</option><option value="conversation">Full conversation</option></select><button id="share-create">Review share link</button><input id="share-url"><button id="share-copy" hidden>Copy link</button><p id="share-msg"></p><ul id="share-list"></ul></div>',{url:'https://lightwork.invalid/chat/goal/4',runScripts:'outside-only',pretendToBeVisual:true});
   dom.window.fetch=handler;dom.window.mvErrorText=()=> 'Unable to manage link';dom.window.mvRenderError=(node,error)=>{node.textContent=error.message;};dom.window.mvConfirm=async()=>true;dom.window.eval(script);
   return {dom,doc:dom.window.document,stop(){dom.window.dispatchEvent(new dom.window.Event('pagehide'));dom.window.close();}};
 }
 const preview={audience:'Anyone with the link',scope:'Only selected saved result',source:{title:'Private title',result:'Private result',sha256:'digest',artifacts:[]},allowed_lifetimes:[3600,86400,604800]};
+const conversationPreview={audience:'Anyone with the link',scope:'Reviewed conversation',source:{title:'Private title',sha256:'other-digest',transcript:[{role:'user',text:'Private earlier question'},{role:'assistant',text:'Private earlier answer'}],artifacts:[]},allowed_lifetimes:[3600,86400,604800]};
+const isPreview=url=>url.includes('/preview?scope=');
 
 test('a completed saved result makes the sharing review available without reloading',async()=>{
   const p=page(async()=>response({links:[]}),{done:false});await settle();
@@ -38,14 +40,26 @@ test('404 clears private link metadata and disables further disclosure',async()=
   assert.doesNotMatch(p.doc.body.textContent,/Private review/);assert.equal(p.doc.getElementById('share-url').value,'');assert.equal(p.doc.getElementById('share-create').disabled,true);p.stop();
 });
 test('access loss during preview blocks a late private result from repopulating review',async()=>{
-  let finish,signal;const p=page(async(url,options)=>{if(!url.endsWith('/preview'))return response({links:[]});signal=options.signal;return new Promise(resolve=>{finish=resolve;});});await settle();
+  let finish,signal;const p=page(async(url,options)=>{if(!isPreview(url))return response({links:[]});signal=options.signal;return new Promise(resolve=>{finish=resolve;});});await settle();
   p.doc.getElementById('share-create').click();await settle();p.doc.dispatchEvent(new p.dom.window.CustomEvent('lightwork:task-access-lost'));assert.equal(signal.aborted,true);
   finish(response(preview));await settle();assert.doesNotMatch(p.doc.body.textContent,/Private result|Private title/);assert.equal(p.doc.getElementById('share-confirm'),null);assert.equal(p.doc.getElementById('share-create').disabled,true);p.stop();
 });
 test('review alone never creates a link and permission loss removes an already shown preview',async()=>{
-  const calls=[];const p=page(async(url,options)=>{calls.push([url,options.method]);return response(url.endsWith('/preview')?preview:{links:[]});});await settle();p.doc.getElementById('share-create').click();await settle();
-  assert.match(p.doc.body.textContent,/Private result/);assert.equal(calls.filter(([url,method])=>method==='POST'&&!url.endsWith('/preview')).length,0);
+  const calls=[];const p=page(async(url,options)=>{calls.push([url,options.method]);return response(isPreview(url)?preview:{links:[]});});await settle();p.doc.getElementById('share-create').click();await settle();
+  assert.match(p.doc.body.textContent,/Private result/);assert.ok(calls.some(([url])=>url.endsWith('/preview?scope=result')));
+  assert.equal(calls.filter(([url,method])=>method==='POST'&&!isPreview(url)).length,0);
   p.doc.dispatchEvent(new p.dom.window.CustomEvent('lightwork:task-access-lost'));assert.doesNotMatch(p.doc.body.textContent,/Private result/);assert.equal(p.doc.getElementById('share-confirm'),null);p.stop();
+});
+
+test('explicit conversation review also clears on access loss without publishing',async()=>{
+  const calls=[];const p=page(async(url,options)=>{calls.push([url,options.method]);return response(isPreview(url)?conversationPreview:{links:[]});});await settle();
+  p.doc.getElementById('share-scope').value='conversation';p.doc.getElementById('share-create').click();await settle();
+  assert.ok(calls.some(([url])=>url.endsWith('/preview?scope=conversation')));
+  assert.match(p.doc.querySelector('.share-review').textContent,/Private earlier question[\s\S]*Private earlier answer/);
+  assert.equal(calls.filter(([url,method])=>method==='POST'&&!isPreview(url)).length,0);
+  p.doc.dispatchEvent(new p.dom.window.CustomEvent('lightwork:task-access-lost'));
+  assert.doesNotMatch(p.doc.body.textContent,/Private earlier question|Private earlier answer/);
+  assert.equal(p.doc.getElementById('share-confirm'),null);p.stop();
 });
 
 test('a refused revoke shows the error and permits an explicit retry while access remains',async()=>{

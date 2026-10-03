@@ -83,7 +83,7 @@ def _check_config() -> dict:
             tomllib.load(f)
     except Exception as e:
         _row(RED, "config", f"invalid TOML -- your settings are being IGNORED ({e})",
-             fix=f"edit {p} -- fix the TOML syntax, or back it up + re-run `maverick init`")
+             fix="ask an installation administrator to repair the saved settings or restore a known-good backup; setup will not replace them")
         return {}
     _row(GREEN, "config", str(p))
     return load_config(p)
@@ -149,7 +149,7 @@ def _check_anthropic() -> None:
                  fix="fine unless a [models] role routes to an anthropic model")
         else:
             _row(RED, "anthropic", "ANTHROPIC_API_KEY not set",
-                 fix="add to ~/.maverick/.env or `export ANTHROPIC_API_KEY=sk-ant-...`")
+                 fix="open Lightwork Settings > Models to connect an AI service")
         return
     if not key.startswith("sk-ant-"):
         _row(YELLOW, "anthropic", "key doesn't start with sk-ant-",
@@ -168,7 +168,7 @@ def _check_anthropic() -> None:
         _row(GREEN, "anthropic", "key validated")
     except anthropic.AuthenticationError:
         _row(RED, "anthropic", "API rejected the key",
-             fix="generate a new key at https://console.anthropic.com/settings/keys, then `maverick init` to update .env")
+             fix="generate a new key at https://console.anthropic.com/settings/keys, then update it in Lightwork Settings > Models")
     except Exception as e:
         # A real outage (no connection / timeout / 5xx) is RED -- the agent
         # cannot reach the API, so reporting it as a benign YELLOW "skipped"
@@ -204,7 +204,7 @@ def _check_openai() -> None:
         _row(GREEN, "openai", "key validated")
     except AuthenticationError:
         _row(RED, "openai", "API rejected the key",
-             fix="regenerate at https://platform.openai.com/api-keys, then `maverick init`")
+             fix="regenerate at https://platform.openai.com/api-keys, then update it in Lightwork Settings > Models")
     except Exception as e:
         # Real outage (no connection / timeout / 5xx) is RED; everything else
         # stays YELLOW "skipped" -- see _check_anthropic.

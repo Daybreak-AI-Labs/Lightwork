@@ -9,6 +9,7 @@ const read = name => fs.readFileSync(path.join(root, name), 'utf8').replace(/\r\
 const template = read('templates/chat_goal.html');
 const projectionScript = read('static/lightwork-answer-panel.js');
 const shareScript = read('static/lightwork-deliverable-sharing.js');
+const historyScript = read('static/lightwork-thread-history.js');
 const voiceScript = read('static/lightwork-read-aloud.js');
 const settle = async () => { for (let i = 0; i < 15; i++) await new Promise(resolve => setImmediate(resolve)); };
 
@@ -64,6 +65,7 @@ async function projectionHarness(content = '<div id="result">Live answer</div>',
 
 test('answer actions copy only the saved answer once, print, and focus sharing', async t => {
   const p = await projectionHarness(actionMarkup()); t.after(() => p.window.close());
+  p.window.LightworkThreadHistory = {printConversation: () => p.window.print()};
   p.window.eval(inlineScript('// Earlier answers retain'));
   p.doc.getElementById('copy-result').click(); await settle();
   assert.deepEqual(p.copied, ['## Saved answer\n\n- First step']);
@@ -78,10 +80,21 @@ test('answer actions copy only the saved answer once, print, and focus sharing',
 
 test('earlier Copy and Print work while a newer message is still running', async t => {
   const p = await projectionHarness('', 'running'); t.after(() => p.window.close());
+  p.window.LightworkThreadHistory = {printConversation: () => p.window.print()};
   p.window.eval(inlineScript('// Earlier answers retain'));
   p.doc.querySelector('.turn-copy').click(); await settle();
   assert.deepEqual(p.copied, ['An earlier answer']);
   p.doc.querySelector('.turn-print').click(); assert.equal(p.prints, 1);
+});
+
+test('Print refuses a partial conversation while history loading is unavailable', async t => {
+  const p = await projectionHarness(actionMarkup()); t.after(() => p.window.close());
+  p.window.eval(inlineScript('// Earlier answers retain'));
+  p.doc.getElementById('print-result').click();
+  p.doc.querySelector('.turn-print').click();
+  assert.equal(p.prints, 0);
+  assert.match(p.doc.getElementById('answer-action-msg').textContent, /Printing is still loading/);
+  assert.match(p.doc.querySelector('.turn-copy-status').textContent, /Printing is still loading/);
 });
 
 test('newly finished answer actions initialize once after the authorized projection refresh', async t => {
@@ -161,8 +174,99 @@ test('unavailable clipboard exposes a readable selected answer for manual copyin
   assert.match(p.doc.getElementById('answer-action-msg').textContent, /Ctrl\+C or Command\+C/);
 });
 
+test('earlier Copy exposes selectable text even when Download is unavailable', async t => {
+  const p = await projectionHarness(actionMarkup()); t.after(() => p.window.close());
+  p.window.eval(inlineScript('// Earlier answers retain'));
+  Object.defineProperty(p.window.navigator, 'clipboard', {value: undefined});
+  p.doc.querySelector('.turn-copy').click();
+  const source = p.doc.querySelector('.turn-copy-source');
+  assert.equal(source.hidden, false);
+  assert.equal(source.classList.contains('turn-copy-source--visible'), true);
+  assert.equal(p.doc.activeElement, source);
+  assert.equal(source.selectionEnd, source.value.length);
+  assert.match(p.doc.querySelector('.turn-copy-status').textContent, /Ctrl\+C or Command\+C/);
+  assert.equal(p.doc.querySelector('.answer-actions a'), null);
+});
+
+test('Print loads every older page and answered clarification before opening the dialog', async t => {
+  const dom = new JSDOM('<body><div id="earlier-history" data-goal="7" data-before="100"><button id="history-load"></button><p id="history-status"></p><div id="history-turns"></div></div><p id="print-status"></p></body>',
+    {url: 'https://lightwork.invalid/chat/goal/7', runScripts: 'outside-only'});
+  t.after(() => dom.window.close());
+  const w = dom.window, seen = [], pages = [
+    {turns: [{id:51, goal_id:3, role:'user', content:'Middle question', questions:[]},
+      {id:52, goal_id:3, role:'assistant', content:'Middle answer'}], has_more:true, before_id:51},
+    {turns: [{id:1, goal_id:1, role:'user', content:'Oldest question',
+      questions:[{question:'Which year?', answer:'2026'}]},
+      {id:2, goal_id:1, role:'assistant', content:'Oldest answer'}], has_more:false, before_id:1},
+    {turns:[], has_more:false, before_id:1}
+  ];
+  w.fetch = async (url, options) => { seen.push({url, options}); return {ok:true, status:200, redirected:false, json:async()=>pages.shift()}; };
+  let printed = ''; w.print = () => {printed = w.document.getElementById('history-turns').textContent;};
+  w.eval(historyScript);
+  await w.LightworkThreadHistory.printConversation(w.document.getElementById('print-status'));
+  assert.deepEqual(seen.map(call => call.url), [
+    '/api/v1/goals/7/thread-history?before_id=100',
+    '/api/v1/goals/7/thread-history?before_id=51',
+    '/api/v1/goals/7/thread-history?before_id=1'
+  ]);
+  assert.ok(seen.every(call => call.options.credentials === 'same-origin' && call.options.cache === 'no-store'));
+  assert.match(printed, /Oldest question[\s\S]*Which year\?[\s\S]*2026[\s\S]*Oldest answer[\s\S]*Middle question/);
+  assert.equal(w.document.getElementById('history-load').hidden, true);
+});
+
+test('Print refuses a partial conversation and lets a later attempt continue', async t => {
+  const dom = new JSDOM('<body><div id="earlier-history" data-goal="7" data-before="100"><button id="history-load"></button><p id="history-status"></p><div id="history-turns"></div></div><p id="print-status"></p></body>',
+    {url: 'https://lightwork.invalid/chat/goal/7', runScripts: 'outside-only'});
+  t.after(() => dom.window.close());
+  const w = dom.window, calls = [];
+  let fail = true, prints = 0;
+  w.fetch = async url => {
+    calls.push(url);
+    if (url.endsWith('before_id=100')) return {ok:true, status:200, redirected:false,
+      json:async()=>({turns:[{id:51,goal_id:3,role:'user',content:'Saved middle',questions:[]}],has_more:true,before_id:51})};
+    if (url.endsWith('before_id=1')) return {ok:true, status:200, redirected:false,
+      json:async()=>({turns:[],has_more:false,before_id:1})};
+    if (fail) {fail = false; throw Error('offline');}
+    return {ok:true, status:200, redirected:false,
+      json:async()=>({turns:[{id:1,goal_id:1,role:'user',content:'Saved oldest',questions:[]}],has_more:false,before_id:1})};
+  };
+  w.print = () => {prints++;}; w.eval(historyScript);
+  const status = w.document.getElementById('print-status');
+  await w.LightworkThreadHistory.printConversation(status);
+  assert.equal(prints, 0); assert.match(status.textContent, /Nothing was printed/);
+  assert.match(w.document.getElementById('history-turns').textContent, /Saved middle/);
+  await w.LightworkThreadHistory.printConversation(status);
+  assert.equal(prints, 1); assert.deepEqual(calls.slice(-2), [
+    '/api/v1/goals/7/thread-history?before_id=51',
+    '/api/v1/goals/7/thread-history?before_id=1'
+  ]);
+});
+
+test('Print stops at the history limit without opening an incomplete print view', async t => {
+  const dom = new JSDOM('<body><div id="earlier-history" data-goal="7" data-before="1001"><button id="history-load"></button><p id="history-status"></p><div id="history-turns"></div></div><p id="print-status"></p></body>',
+    {url: 'https://lightwork.invalid/chat/goal/7', runScripts: 'outside-only'});
+  t.after(() => dom.window.close());
+  const w = dom.window;
+  let calls = 0, prints = 0;
+  w.fetch = async () => {
+    calls++;
+    const id = 1001 - calls;
+    return {ok:true, status:200, redirected:false, json:async()=>({
+      turns:[{id, goal_id:7, role:'user', content:'Saved turn ' + id, questions:[]}],
+      has_more:true, before_id:id
+    })};
+  };
+  w.print = () => {prints++;}; w.eval(historyScript);
+  await w.LightworkThreadHistory.printConversation(w.document.getElementById('print-status'));
+  assert.equal(calls, 20);
+  assert.equal(prints, 0);
+  assert.match(w.document.getElementById('print-status').textContent, /too long to print at once/);
+  assert.match(w.document.getElementById('history-turns').textContent, /Saved turn 1000/);
+});
+
 function shareHarness({localOnly = false, canCreate = true, existing = false} = {}) {
   const dom = new JSDOM(`<body><section id="answer-panel" data-status="done"><textarea id="saved-answer-source">Reviewed saved answer</textarea></section><div class="goal-share" data-goal="7" data-can-operate="1">
+    <select id="share-scope"><option value="result" selected>Saved answer</option><option value="conversation">Full conversation</option></select>
     ${canCreate ? '<button id="share-create">Review share link</button>' : ''}
     <input id="share-url" readonly style="display:none"><button id="share-copy" hidden>Copy link</button>
     <span id="share-msg"></span><ul id="share-list"></ul></div></body>`,
@@ -176,8 +280,10 @@ function shareHarness({localOnly = false, canCreate = true, existing = false} = 
   window.fetch = async (url, options = {}) => {
     calls.push({url, options});
     let body;
-    if (url.endsWith('/preview')) body = {audience: 'Anyone who has this link.', scope: 'Selected result only', allowed_lifetimes: [3600, 86400, 604800],
-      source: {title: 'Reviewed task', result: 'Reviewed saved answer', artifacts: [], sha256: 'a'.repeat(64)}};
+    if (url.includes('/preview?scope=')) body = {audience: 'Anyone who has this link.', scope: 'Selected content only', allowed_lifetimes: [3600, 86400, 604800],
+      source: url.endsWith('conversation')
+        ? {title: 'Reviewed task', result: 'Reviewed saved answer', transcript: [{role: 'user', text: 'Earlier question'}, {role: 'clarification', question: 'Which year?', answer: '2026'}, {role: 'assistant', text: 'Reviewed saved answer'}], artifacts: [], sha256: 'b'.repeat(64)}
+        : {title: 'Reviewed task', result: 'Reviewed saved answer', artifacts: [], sha256: 'a'.repeat(64)}};
     else if (url.endsWith('/3/revoke')) {revoked = true; body = {};}
     else if (options.method === 'POST') {
       minted = true; body = {id: 3, url: localOnly ? 'http://localhost/share/token' : 'https://lightwork.invalid/share/token',
@@ -190,7 +296,7 @@ function shareHarness({localOnly = false, canCreate = true, existing = false} = 
 }
 async function createShare(p) {
   await settle(); p.doc.getElementById('share-create').click(); await settle();
-  assert.equal(p.calls.filter(call => call.options.method === 'POST' && !call.url.endsWith('/preview')).length, 0, 'preview never creates a link');
+  assert.equal(p.calls.filter(call => call.options.method === 'POST' && !call.url.includes('/preview?scope=')).length, 0, 'preview never creates a link');
   assert.match(p.doc.querySelector('.goal-share pre').textContent, /Reviewed saved answer/);
   p.doc.getElementById('share-confirm').click(); await settle();
 }
@@ -198,7 +304,7 @@ async function createShare(p) {
 test('a reviewed new share link has working Copy link and Revoke actions', async t => {
   const p = shareHarness(); t.after(() => p.window.close()); await createShare(p);
   const write = p.calls.find(call => call.options.method === 'POST' && call.url === '/api/v1/goals/7/share');
-  assert.deepEqual(JSON.parse(write.options.body), {confirm: true, source_sha256: 'a'.repeat(64), lifetime_seconds: 86400, label: 'Read-only deliverable'});
+  assert.deepEqual(JSON.parse(write.options.body), {confirm: true, scope: 'result', source_sha256: 'a'.repeat(64), lifetime_seconds: 86400, label: 'Read-only deliverable'});
   const field = p.doc.getElementById('share-url');
   assert.equal(field.style.display, ''); assert.equal(p.doc.getElementById('share-copy').hidden, false);
   p.doc.getElementById('share-copy').click(); await settle();
@@ -222,6 +328,21 @@ test('existing share links can be revoked without a Create link control', async 
   p.doc.querySelector('.share-revoke').click(); await settle();
   assert.equal(p.calls.filter(call => call.url.endsWith('/3/revoke')).length, 1);
   assert.equal(p.doc.querySelector('#share-list li'), null);
+});
+
+test('full conversation needs an explicit choice and shows the exact messages before minting', async t => {
+  const p = shareHarness(); t.after(() => p.window.close()); await settle();
+  assert.equal(p.doc.getElementById('share-scope').value, 'result');
+  p.doc.getElementById('share-scope').value = 'conversation';
+  p.doc.getElementById('share-create').click(); await settle();
+  assert.ok(p.calls.some(call => call.url.endsWith('/preview?scope=conversation')));
+  assert.equal(p.calls.filter(call => call.url === '/api/v1/goals/7/share' && call.options.method === 'POST').length, 0);
+  assert.match(p.doc.querySelector('.share-review').textContent, /Earlier question[\s\S]*Which year\?[\s\S]*2026[\s\S]*Reviewed saved answer/);
+  assert.equal(p.doc.getElementById('share-scope').disabled, true);
+  p.doc.getElementById('share-confirm').click(); await settle();
+  const write = p.calls.find(call => call.url === '/api/v1/goals/7/share' && call.options.method === 'POST');
+  assert.deepEqual(JSON.parse(write.options.body), {confirm: true, scope: 'conversation', source_sha256: 'b'.repeat(64), lifetime_seconds: 86400, label: 'Read-only conversation'});
+  assert.equal(p.doc.getElementById('share-scope').disabled, false);
 });
 
 function voiceHarness(text, allowed = true) {

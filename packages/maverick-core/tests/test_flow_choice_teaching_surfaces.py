@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 from maverick import audit
-from maverick.flow import Flow, action_recipe, execution, recipe_flow, store
+from maverick.flow import Flow, FlowNode, action_recipe, execution, recipe_flow, store
 from maverick.flow.action_choice import synthesize_choice
 from maverick.flow.recipe_lineage import RecipeLineageService, learn_choice_from_verified_bundles
 from maverick.governed_operations import ServiceContext
@@ -182,8 +182,8 @@ def test_teaching_http_keeps_current_owner_and_permission_checks(signed_package,
         response = harness.client.post(path, json=body)
         assert response.status_code == 403, response.text
     with tenant_scope(tenant=TENANT):
-        target = recipe_flow.make_flow(package["artifact"], flow_id="teaching-target", name="Other owner's target")
-        target.owner = "user:bob"
+        target = Flow(id="teaching-target", name="Other owner's target", owner="user:bob",
+                      start="review", nodes={"review": FlowNode(id="review", kind="approval", prompt="Review")})
         store.save_flow(target)
     response = harness.client.post(path, json=body)
     assert response.status_code == 403, response.text

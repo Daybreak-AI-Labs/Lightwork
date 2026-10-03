@@ -30,9 +30,9 @@ def current(request, goal_id):
 
 
 def limits(request, goal_id, max_dollars):
-    from .api import configured_max_dollars
+    from .api import configured_goal_ceiling_dollars
     _world, _goal, _actor = current(request, goal_id)
-    ceiling = configured_max_dollars()
+    ceiling = configured_goal_ceiling_dollars()
     if max_dollars is not None and ceiling is not None and max_dollars > ceiling:
         raise product_error(400, "budget_ceiling", "The requested spending limit is above the workspace limit. Choose a lower amount.",
                             field_errors={"max_dollars": f"Choose an amount no greater than ${ceiling:,.2f}."},

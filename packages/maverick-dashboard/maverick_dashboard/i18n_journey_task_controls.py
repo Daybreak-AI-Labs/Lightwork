@@ -1,6 +1,14 @@
 """Draft product controls; source text is never translated. Native review pending."""
 
 ROWS = [
+    ("No spending or time limit is set for each task.", "Aucune limite de dépenses ou de durée n’est définie par tâche.", "Für einzelne Aufgaben ist kein Ausgaben- oder Zeitlimit festgelegt.", "各タスクの支出上限や時間制限は設定されていません。", "每项任务均未设置支出或时间限制。"),
+    ("Task limits:", "Limites de la tâche :", "Aufgabenlimits:", "タスクの上限：", "任务限制："),
+    ("up to {amount}", "jusqu’à {amount}", "bis zu {amount}", "最大{amount}", "最高{amount}"),
+    ("no spending limit", "aucune limite de dépenses", "kein Ausgabenlimit", "支出上限なし", "无支出限制"),
+    ("no time limit", "aucune limite de durée", "kein Zeitlimit", "時間制限なし", "无时间限制"),
+    ("up to {minutes} minutes", "jusqu’à {minutes} minutes", "bis zu {minutes} Minuten", "最大{minutes}分", "最长{minutes}分钟"),
+    ("up to {seconds} seconds", "jusqu’à {seconds} secondes", "bis zu {seconds} Sekunden", "最大{seconds}秒", "最长{seconds}秒"),
+    ("Review task limits", "Vérifier les limites des tâches", "Aufgabenlimits prüfen", "タスクの上限を確認", "查看任务限制"),
     ("Access to the saved result changed. Sign in or reopen the authorized task to continue.", "L'accès au résultat enregistré a changé. Connectez-vous ou rouvrez la tâche autorisée pour continuer.", "Der Zugriff auf das gespeicherte Ergebnis hat sich geändert. Melden Sie sich an oder öffnen Sie die berechtigte Aufgabe erneut.", "保存済み結果へのアクセスが変更されました。ログインするか、権限のあるタスクを開き直してください。", "已保存结果的访问权限已更改。请登录或重新打开有权访问的任务。"),
     ("Recording…", "Enregistrement…", "Wird erfasst…", "記録中…", "正在记录…"),
     ("Feedback saved. Learning use follows your organization's policy.", "Avis enregistré. Son utilisation pour l'apprentissage suit la politique de votre organisation.", "Feedback gespeichert. Die Nutzung zum Lernen richtet sich nach den Richtlinien Ihrer Organisation.", "フィードバックを保存しました。学習への利用は組織のポリシーに従います。", "反馈已保存。学习用途遵循您组织的政策。"),

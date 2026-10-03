@@ -67,6 +67,14 @@ _RULES: tuple[tuple[str, re.Pattern[str], str, str, str | None, str | None], ...
         None, None,
     ),
     (
+        "unpriced_model",
+        _rx(r"^unpriced model:", r"\bUnpricedModelError\b"),
+        "Lightwork could not verify this AI model's price.",
+        "Choose a model with a known price, or ask an administrator to review "
+        "Settings > Require known prices.",
+        "/settings", "Open Settings",
+    ),
+    (
         "spending_limit",
         _rx(r"over its daily (spend|token) quota", r"spend cap", r"spending limit",
             r"spending allowance", r"budget exhausted", r"of \$[\d.,]+ cap",

@@ -10,10 +10,11 @@ before dispatch and releases once the spend lands.
 """
 from __future__ import annotations
 
+import asyncio
 import threading
 
 import pytest
-from maverick.budget import Budget, BudgetExceeded
+from maverick.budget import Budget, BudgetExceeded, UnpricedModelError
 
 
 def test_check_projected_refuses_call_that_would_exceed_cap():
@@ -41,36 +42,124 @@ def test_estimate_call_cost_scales_with_input():
     "moonshot:kimi-k2",
     "openrouter:meta-llama/llama-3.3-70b",
 ))
-def test_estimate_call_cost_never_refuses_an_unverified_model_before_dispatch(
+def test_estimate_call_cost_keeps_unverified_rates_for_projection(
     monkeypatch, spec,
 ):
-    """W1-1: with the default fail-closed [budget] strict_pricing policy,
-    _estimate_call_cost used to call budget._lookup_price WITHOUT
-    estimate_only=True, so it enforced the same verified-rate requirement as
-    live billing -- raising UnpricedModelError for any Azure/Bedrock/
-    openai_compatible/Moonshot/OpenRouter id lacking a verified rate-card row,
-    before the call ever dispatched and even with no Budget involved at all.
-    The estimate is a pre-dispatch hold/projection, not the invoice (that is
-    Budget.record_tokens's job, which stays strict); it must fall back to an
-    estimate instead of blocking dispatch."""
+    """A budget hold can use a labeled estimate; dispatch checks the
+    billable rate separately before any provider request."""
     monkeypatch.setenv("MAVERICK_BILLING_STRICT", "1")
     from maverick.llm import _estimate_call_cost
     cost = _estimate_call_cost(spec, "sys", [{"role": "user", "content": "hi"}], None, 100)
     assert cost > 0
 
 
-def test_complete_dispatches_an_unverified_azure_model_instead_of_refusing(monkeypatch):
-    """Same bug, exercised through the real dispatch path: a call to a model
-    id that cannot have a verified rate (an Azure deployment name) must reach
-    the provider client, not die in the pre-dispatch cost estimate."""
+@pytest.mark.parametrize("asynchronous", [False, True])
+@pytest.mark.parametrize("spec", [
+    "azure:gpt-4o-prod",
+    "openai_compatible:custom-gateway-model",
+    "openai_compatible:claude-sonnet-4-6",
+])
+def test_complete_refuses_unpriced_hosted_model_before_provider_setup(
+    monkeypatch, asynchronous, spec,
+):
+    """A projection may use an estimate, but strict live accounting cannot.
+
+    Refuse before creating a client or sending paid traffic that record_tokens
+    would reject after the provider already charged for it.
+    """
     import maverick.llm as llm_mod
 
     monkeypatch.setenv("MAVERICK_BILLING_STRICT", "1")
-    llm = llm_mod.LLM(model="azure:gpt-4o-prod")
-    monkeypatch.setattr(llm, "_get_client", lambda provider: _SelfHostedClient())
-    out = llm.complete(system="s", messages=[{"role": "user", "content": "hi"}],
-                       budget=Budget(), max_tokens=100)
-    assert out.text == "ok"
+    llm = llm_mod.LLM(model=spec)
+    clients = []
+    monkeypatch.setattr(llm, "_get_client", lambda provider: clients.append(provider))
+    budget = Budget()
+    with pytest.raises(UnpricedModelError, match="strict_pricing=false"):
+        result = (llm.complete_async if asynchronous else llm.complete)(
+            system="s", messages=[{"role": "user", "content": "hi"}],
+            budget=budget, max_tokens=100,
+        )
+        if asynchronous:
+            asyncio.run(result)
+    assert clients == []
+    assert budget.dollars == budget._reserved == 0
+
+
+@pytest.mark.parametrize("asynchronous", [False, True])
+@pytest.mark.parametrize("spec", [
+    "openai_compatible:custom-gateway-model",
+    "openai_compatible:claude-sonnet-4-6",
+])
+def test_custom_gateway_can_explicitly_use_estimate_only_accounting(
+    monkeypatch, asynchronous, spec,
+):
+    import maverick.llm as llm_mod
+
+    monkeypatch.delenv("MAVERICK_BILLING_STRICT", raising=False)
+    monkeypatch.setattr("maverick.config.get_budget_overrides",
+                        lambda: {"strict_pricing": False})
+    sends = []
+
+    class Client:
+        def complete(self, *, budget, **kwargs):
+            sends.append(kwargs["model"])
+            budget.record_tokens(10, 5, model=spec)
+            return _SelfHostedClient._resp()
+
+        async def complete_async(self, **kwargs):
+            return self.complete(**kwargs)
+
+    llm = llm_mod.LLM(model=spec)
+    monkeypatch.setattr(llm, "_get_client", lambda provider: Client())
+    budget = Budget()
+    result = (llm.complete_async if asynchronous else llm.complete)(
+        system="s", messages=[{"role": "user", "content": "hi"}],
+        budget=budget, max_tokens=100,
+    )
+    response = asyncio.run(result) if asynchronous else result
+    assert response.text == "ok"
+    assert sends == [spec.split(":", 1)[1]]
+    assert budget.dollars > 0
+    assert budget.pricing_snapshot()[spec]["verified"] is False
+
+
+@pytest.mark.parametrize("asynchronous", [False, True])
+@pytest.mark.parametrize("spec,expected_dollars", [
+    ("anthropic:claude-sonnet-4-6", True),
+    ("openrouter:stealth/union-alpha", False),
+    ("ollama:my-custom-model", False),
+])
+def test_strict_dispatch_keeps_priced_free_and_selfhosted_models(
+    monkeypatch, asynchronous, spec, expected_dollars,
+):
+    import maverick.llm as llm_mod
+    from maverick import model_discovery
+
+    monkeypatch.setenv("MAVERICK_BILLING_STRICT", "1")
+    monkeypatch.setattr(model_discovery, "free_models",
+                        lambda provider: ["stealth/union-alpha"] if provider == "openrouter" else [])
+    sends = []
+
+    class Client:
+        def complete(self, *, budget, **kwargs):
+            sends.append(kwargs["model"])
+            budget.record_tokens(10, 5, model=spec)
+            return _SelfHostedClient._resp()
+
+        async def complete_async(self, **kwargs):
+            return self.complete(**kwargs)
+
+    llm = llm_mod.LLM(model=spec)
+    monkeypatch.setattr(llm, "_get_client", lambda provider: Client())
+    budget = Budget()
+    result = (llm.complete_async if asynchronous else llm.complete)(
+        system="s", messages=[{"role": "user", "content": "hi"}],
+        budget=budget, max_tokens=100,
+    )
+    response = asyncio.run(result) if asynchronous else result
+    assert response.text == "ok"
+    assert len(sends) == 1
+    assert (budget.dollars > 0) is expected_dollars
 
 
 def test_reserve_bounds_total_holds_to_cap():

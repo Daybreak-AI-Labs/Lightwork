@@ -855,6 +855,8 @@ def dispatcher(ledger, monkeypatch):
     monkeypatch.setattr(cap, "_shared_world", lambda: None)
     monkeypatch.setattr(cap, "period_key", lambda now=None, period=None: "2026-09-06")
     monkeypatch.setattr(llm, "_estimate_call_cost", lambda *a, **kw: 2.0)
+    # Capacity tests use a synthetic, non-billable model identity.
+    monkeypatch.setattr(llm, "_lookup_price_quote", lambda _spec: None)
     monkeypatch.setattr(llm, "_run_preflight", lambda *a, **kw: None)
     monkeypatch.setattr(llm, "_enforce_circuit", lambda *a: None)
     monkeypatch.setattr(llm, "_hedge_ms", lambda: None)

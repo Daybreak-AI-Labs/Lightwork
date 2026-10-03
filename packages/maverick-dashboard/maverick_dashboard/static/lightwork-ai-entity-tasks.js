@@ -400,7 +400,7 @@
   }
   async function loadPickers() {
     try {
-      var inventory = await requestAt("/api/v1/assurance/ai-inventory", {}, 4 * 1024 * 1024);
+      var inventory = await requestAt("/api/v1/security/assurance/ai-inventory", {}, 4 * 1024 * 1024);
       entities = (Array.isArray(inventory.assets) ? inventory.assets : []).filter(function (asset) {
         return isRecord(asset) && ID_PATTERN.test(String(asset.asset_id || "")) && asset.status === "present";
       }).map(function (asset) {

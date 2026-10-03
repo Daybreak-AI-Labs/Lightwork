@@ -1460,7 +1460,11 @@ class WorldModel:
     def __exit__(self, exc_type, exc, tb) -> None:
         self.close()
 
-    def reclaim_orphan_goals(self, *, max_age_seconds: float = 60.0) -> int:
+    def reclaim_orphan_goals(
+        self, *, max_age_seconds: float = 60.0,
+        statuses: tuple[str, ...] = ("active", "pending"),
+        resolved_window_seconds: float | None = None,
+    ) -> int:
         """Mark goals stuck in 'active' or 'pending' as 'blocked'.
 
         Called on startup to recover from SIGKILL / OOM / crash mid-run.
@@ -1483,9 +1487,19 @@ class WorldModel:
         goal, even when its monotonic review timestamp is ahead of the wall
         clock. Positive windows continue to require the full stale interval.
 
+        A periodic sweep passes only ``("active",)``; queued ``pending`` goals
+        may legitimately wait longer than the stale window.
+
         Returns rows reclaimed.
         """
-        max_age_seconds = reclaim_window_seconds(default=max_age_seconds)
+        statuses = tuple(statuses)
+        if not statuses or not set(statuses) <= {"active", "pending"}:
+            raise ValueError("orphan reclaim statuses must be active and/or pending")
+        marks = ", ".join("?" for _ in statuses)
+        max_age_seconds = (reclaim_window_seconds(default=max_age_seconds)
+                           if resolved_window_seconds is None else float(resolved_window_seconds))
+        if not math.isfinite(max_age_seconds) or max_age_seconds < 0:
+            raise ValueError("orphan reclaim window must be nonnegative and finite")
         cutoff = time.time() - max_age_seconds
         now = time.time()
         marker = " [process restarted mid-run]"
@@ -1496,8 +1510,8 @@ class WorldModel:
                     "UPDATE goals SET status = 'blocked', "
                     "result = COALESCE(result, '') || ?, "
                     "updated_at = MAX(updated_at + 0.000001, ?) "
-                    "WHERE status IN ('active', 'pending') AND (? = 0 OR updated_at <= ?)",
-                    (marker, now, max_age_seconds, cutoff),
+                    f"WHERE status IN ({marks}) AND (? = 0 OR updated_at <= ?)",
+                    (marker, now, *statuses, max_age_seconds, cutoff),
                 )
                 return cur.rowcount
             # At-rest encryption on: `result` is sealed ciphertext. Appending the
@@ -1508,10 +1522,11 @@ class WorldModel:
             # is negligible.
             rows = conn.execute(
                 "SELECT id, result FROM goals "
-                "WHERE status IN ('active', 'pending') AND (? = 0 OR updated_at <= ?)",
-                (max_age_seconds, cutoff),
+                f"WHERE status IN ({marks}) AND (? = 0 OR updated_at <= ?)",
+                (*statuses, max_age_seconds, cutoff),
             ).fetchall()
             from .crypto_at_rest import EncryptionUnavailable
+            reclaimed = 0
             for row in rows:
                 try:
                     dec = _dec_field(row["result"])
@@ -1532,18 +1547,23 @@ class WorldModel:
                     # mode -- must not abort crash-recovery for every other
                     # stuck goal. Reclaim the status; leave the result intact
                     # rather than corrupting or dropping it.
-                    conn.execute(
+                    cur = conn.execute(
                         "UPDATE goals SET status = 'blocked', updated_at = MAX(updated_at + 0.000001, ?) "
-                        "WHERE id = ?",
-                        (now, row["id"]),
+                        f"WHERE id = ? AND status IN ({marks}) "
+                        "AND (? = 0 OR updated_at <= ?)",
+                        (now, row["id"], *statuses, max_age_seconds, cutoff),
                     )
+                    reclaimed += cur.rowcount
                     continue
-                conn.execute(
+                cur = conn.execute(
                     "UPDATE goals SET status = 'blocked', result = ?, "
-                    "updated_at = MAX(updated_at + 0.000001, ?) WHERE id = ?",
-                    (new_result, now, row["id"]),
+                    "updated_at = MAX(updated_at + 0.000001, ?) "
+                    f"WHERE id = ? AND status IN ({marks}) "
+                    "AND (? = 0 OR updated_at <= ?)",
+                    (new_result, now, row["id"], *statuses, max_age_seconds, cutoff),
                 )
-            return len(rows)
+                reclaimed += cur.rowcount
+            return reclaimed
 
     def _init_schema_version(self) -> None:
         # Fast path: an already-initialized DB only needs a read. WAL readers
@@ -1798,7 +1818,8 @@ class WorldModel:
             sql += (
                 " ON CONFLICT(goal_id) DO UPDATE SET "
                 "decision=excluded.decision, decided_by=excluded.decided_by, "
-                "note=excluded.note, created_at=excluded.created_at "
+                "note=excluded.note, created_at=CASE WHEN excluded.created_at > signoffs.created_at "
+                "THEN excluded.created_at ELSE signoffs.created_at + 0.000001 END "
                 "WHERE signoffs.decision <> excluded.decision"
             )
             cur = conn.execute(sql, tuple(params))

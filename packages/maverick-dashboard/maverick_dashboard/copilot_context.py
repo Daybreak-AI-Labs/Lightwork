@@ -160,6 +160,29 @@ _CONTEXTS = tuple(
     _ensure_read_only(context)
     for context in (
         CopilotPageContext(
+            path="/commitment-reviews", title="Promise reviews",
+            summary="Review whether two accepted orders can still be delivered with the capacity and materials your team reports.",
+            capabilities=(
+                "Compare the reported capacity, materials, deadlines, and conditional options for two orders.",
+                "See which source needs review before its decision window closes.",
+                "Review and confirm a possible shared-resource link before it changes the assessment.",
+            ),
+            boundaries=(
+                "This is a bounded planning model based on information entered by your team; it does not verify supplier stock or reserve anything externally.",
+                "Possible, uncertain, and infeasible are model assessments, not customer delivery guarantees.",
+                "A source or decision that changed needs a fresh review before another action.",
+            ),
+            next_steps=(
+                "Open a review, enter the source and time limits, and check the two orders together.",
+                "Confirm any suggested resource link only after checking it against the actual work.",
+            ),
+            suggested_questions=(
+                "Which order needs attention first?",
+                "What information is still uncertain?",
+                "What happens if these orders share capacity?",
+            ),
+        ),
+        CopilotPageContext(
             path="/workflows", title="Flows",
             summary="Find your saved flows, reusable templates, and specialist instructions.",
             capabilities=(
@@ -176,6 +199,28 @@ _CONTEXTS = tuple(
             suggested_questions=(
                 "How do I create a flow?",
                 "How do I review the results of a flow?",
+            ),
+        ),
+        CopilotPageContext(
+            path="/approvals", title="Approvals",
+            summary="Review work Lightwork has paused for a person's decision.",
+            capabilities=(
+                "Read what a proposed step will do and what remains uncertain.",
+                "Approve, reject, or send back an exact request using the page controls when your role allows it.",
+            ),
+            boundaries=(
+                "A Hold-mode prediction never grants permission by itself.",
+                "Approving a paused step lets it reach its remaining safety checks; it does not prove execution or success.",
+                "Copilot can explain these decisions here, but cannot cast an approval vote.",
+            ),
+            next_steps=(
+                "Open the paused request, read its effects and open questions, then make your decision.",
+                "Check the task result after the decision; another approval or safety check may still stop it.",
+            ),
+            suggested_questions=(
+                "Why did Lightwork pause this step?",
+                "What happens if I approve it?",
+                "What if nobody decides in time?",
             ),
         ),
         CopilotPageContext(

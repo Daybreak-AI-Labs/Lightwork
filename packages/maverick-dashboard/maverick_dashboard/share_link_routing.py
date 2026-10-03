@@ -179,12 +179,14 @@ def register(token: str, *, expires_at: float) -> None:
 
 
 def resolve(token: str) -> ShareRoute | None:
-    """None means a legacy link; invalid/expired/corrupt locators fail closed."""
+    """None means an unprefixed legacy link; new links require their locator."""
     path = _root() / f"{_digest(token)}.json"
     try:
         path.lstat()
     except FileNotFoundError:
         # Missing routing state must not create files or an arbitrary tenant DB.
+        if token.startswith("r1_"):
+            raise ShareRouteError("new share locator is unavailable") from None
         return None
     try:
         record = _record(path)

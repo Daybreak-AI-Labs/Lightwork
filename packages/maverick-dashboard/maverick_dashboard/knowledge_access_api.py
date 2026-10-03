@@ -19,6 +19,8 @@ from maverick.knowledge_access import (
     KnowledgeAccessDenied,
     KnowledgeAccessService,
     KnowledgeActorAuthority,
+    KnowledgeArchiveUnavailable,
+    KnowledgeRequestCapacity,
     KnowledgeRequestConflict,
     KnowledgeRequestNotFound,
 )
@@ -175,6 +177,10 @@ class DecisionIn(_Reviewed):
     evidence_sha256: Sha256
 
 
+class ArchiveIn(_Reviewed):
+    expected_revision: int = Field(ge=1, le=2**31 - 1)
+
+
 class RetentionHoldIn(_Reviewed):
     expected_revision: int = Field(ge=1, le=2**31 - 1)
     hold_id: Identifier
@@ -326,6 +332,10 @@ def call_native(function, *args, **kwargs):
             409,
             "Current source access is unavailable. Request fresh access or evidence.",
         ) from exc
+    except KnowledgeRequestCapacity as exc:
+        raise HTTPException(507, str(exc)) from exc
+    except KnowledgeArchiveUnavailable as exc:
+        raise HTTPException(409, str(exc)) from exc
     except (
         ResearchRegistryConflict,
         KnowledgeRequestConflict,
@@ -448,19 +458,31 @@ async def list_requests(
     request: Request,
     response: Response,
     limit: Annotated[int, Query(ge=1, le=250)] = 100,
+    archived: bool = False,
+    ready_to_archive: bool = False,
 ):
     tenant, actor, context = _binding(request, response)
     service = _service(request)
-    if has_global_permission(request, "admin"):
-        items = await _call(service.list_requests, tenant, limit=limit)
+    admin = has_global_permission(request, "admin")
+    if archived and ready_to_archive:
+        raise HTTPException(422, "Choose one request view")
+    if ready_to_archive and not admin:
+        raise HTTPException(403, "Administrator access is required for this view")
+    if admin:
+        items = await _call(service.list_requests, tenant, limit=limit,
+                            archived=archived, ready_to_archive=ready_to_archive)
     else:
-        items = await _call(service.feedback_requests, tenant, actor, limit=limit)
+        items = await _call(service.feedback_requests, tenant, actor,
+                            limit=limit, archived=archived)
     return {
         "schema": "lightwork.knowledge-rights-requests.v1",
         "context": context,
         "items": items,
         "count": len(items),
-        "can_review": has_global_permission(request, "admin"),
+        "can_review": admin,
+        "archived": archived,
+        "ready_to_archive": ready_to_archive,
+        "capacity": await _call(service.request_capacity, tenant) if admin else None,
     }
 
 
@@ -533,6 +555,20 @@ async def decide_request(
         expected_revision=payload.expected_revision,
         decision=payload.decision,
         evidence_sha256=payload.evidence_sha256,
+    )
+    return {"context": context, **result}
+
+
+@router.post("/requests/{request_id}/archive")
+async def archive_request(
+    request_id: str, payload: ArchiveIn, request: Request, response: Response,
+):
+    tenant, actor, context = _binding(
+        request, response, payload, administrator=True,
+    )
+    result = await _call(
+        _service(request).archive_request, tenant, actor, request_id,
+        expected_revision=payload.expected_revision,
     )
     return {"context": context, **result}
 

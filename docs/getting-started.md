@@ -59,12 +59,20 @@ maverick doctor
 
 The wizard takes ~2 minutes. It writes `~/.maverick/config.toml` and `~/.maverick/.env`.
 
-New setup leaves ordinary task limits unset unless you choose one. Existing
-numeric settings are preserved; **Settings → Task limits** can disable saved
-task defaults reversibly. Usage remains metered, and organization allowances
-remain independent. See [task limits and spend accounting](task-limits.md).
+New consumer setup suggests a $2 and 30-minute task limit and lets you choose
+another limit or none. **Settings → Task limits** can change that choice later.
+Usage remains metered, and organization allowances remain independent. See
+[task limits and spend accounting](task-limits.md).
 
 Then:
+
+The file-writing example below needs an isolated work area. If Docker was not
+running during setup, Lightwork says that file changes and program execution
+are off. Start with a research or writing task. When Docker or Podman is
+running, open **Permissions → Where work runs**, choose its container, then
+confirm **Allow file work** on that page before trying the example. The page
+checks the container service again and shows any other rules that still block
+those tools.
 
 ```bash
 maverick start "Build a CLI that emails me a digest of today's top Hacker News stories — research the API, write it, and verify it runs"
@@ -224,9 +232,9 @@ underlying settings.
 | `~/.maverick/config.toml` | Your config (deployment, models, safety, budget) |
 | `~/.maverick/.env` | API keys (chmod 600) |
 | `~/.maverick/world.db` | Persistent world model: goals, facts, episodes |
-| `~/.maverick/skills/` | Auto-distilled SKILL.md files from successful runs |
+| `~/.maverick/skills/` | Skills available to agents, including administrator-approved suggestions |
 | `~/maverick-workspace/` | Default sandbox working directory |
-| `~/.maverick/learned-skills/` | Skills distilled by the learning loops |
+| `~/.maverick/learned-skills/` | Suggestions distilled from completed work; review and add them on Skills before agents use them |
 | `~/.maverick/dreams/` | Consolidated insights, rehearsal queue, learning snapshots |
 
 Lightwork stores the files listed above in your deployment. If you enable cloud

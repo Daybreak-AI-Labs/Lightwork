@@ -28,6 +28,13 @@
   var submitRequest = document.getElementById("ka-submit-request");
   var requests = document.getElementById("ka-requests");
   var refreshRequests = document.getElementById("ka-refresh-requests");
+  var showArchived = document.getElementById("ka-show-archived");
+  var showReady = document.getElementById("ka-show-ready");
+  var findArchived = document.getElementById("ka-find-archived");
+  var capacityNote = document.getElementById("ka-capacity");
+  var archivedView = false;
+  var readyView = false;
+  var archiveAvailable = true;
   var currentItems = [];
   var selectedReference = null;
   var pending = false;
@@ -196,7 +203,9 @@
       notice:text(value.notice, "request notice", 1000, false),
       source_use_status:text(value.source_use_status, "source use status", 96, false),
       raw_record_status:text(value.raw_record_status, "record status", 96, false),
-      retention_review_status:text(value.retention_review_status, "retention review", 96, false)};
+      retention_review_status:text(value.retention_review_status, "retention review", 96, false),
+      archived_at:value.archived_at === undefined || value.archived_at === null ?
+        null : finiteTime(value.archived_at, "archive time", false)};
   }
 
   function rightsRequest(value) {
@@ -248,6 +257,9 @@
         128
       ).map(derivative),
       lineage_revalidated_before_return: value.lineage_revalidated_before_return === true,
+      archive_ready: value.archive_ready === true,
+      archived_at: value.archived_at === undefined || value.archived_at === null ?
+        null : finiteTime(value.archived_at, "archive time", false),
       weight_influence_notice: text(value.weight_influence_notice, "weight notice", 1000, false),
       training_permission_notice: text(value.training_permission_notice, "training notice", 1000, false),
       created_at: finiteTime(value.created_at, "request time", false),
@@ -337,6 +349,9 @@
   }
 
   function errorDetail(response) {
+    if (response.status === 507) {
+      return "The active request list is full. Ask an administrator to review capacity. Your request was not lost.";
+    }
     if (response.status === 409) {
       return "This changed since you loaded it, or current access couldn't be confirmed. Refresh and try again.";
     }
@@ -348,7 +363,7 @@
     access.assertCurrent(token);
     var policy = {forbiddenScope: readScope, contextMessage: /account or workspace changed|active workspace changed/i};
     var meaning = access.observe(response, null, policy);
-    if (meaning.kind === "transient" && path.startsWith("/requests/")) unconfirmedPaths.add(path);
+    if (meaning.kind === "transient" && !readScope && path.startsWith("/requests/")) unconfirmedPaths.add(path);
     if (["session", "scope", "capability"].includes(meaning.kind)) {
       if (meaning.kind === "capability") deniedPaths.add(path);
       var denial = failure(meaning.kind === "capability" ?
@@ -441,6 +456,9 @@
     searchButton.disabled = value || !searchForm.elements.purpose.value;
     nextButton.disabled = value || !nextCursor;
     refreshRequests.disabled = value;
+    if (showArchived) showArchived.disabled = value;
+    if (showReady) showReady.disabled = value || !archiveAvailable;
+    if (findArchived) findArchived.querySelector("button").disabled = value;
     exportButton.disabled = value || !currentItems.length || deniedPaths.has("/export");
     if (submitRequest) { submitRequest.disabled = value || !selectedReference || deniedPaths.has("/requests"); }
     root.querySelectorAll("[data-access-path]").forEach(function (button) {
@@ -642,9 +660,9 @@
     constraints.appendChild(constraintList);
     detail.appendChild(constraints);
     var history = node("div");
-    history.appendChild(node("h3", "", "Correction and removal history"));
+    history.appendChild(node("h3", "", "Active correction and removal requests"));
     if (!value.correction_history.length) {
-      history.appendChild(node("p", "muted", "No requests are recorded for this exact version."));
+      history.appendChild(node("p", "muted", "No active requests are shown for this version. Review the finished archive for older requests."));
     } else {
       var historyList = node("ul", "ka-detail-list");
       value.correction_history.forEach(function (record) {
@@ -713,6 +731,35 @@
     var clean = payload.items.map(canReview ? rightsRequest : feedback);
     if (payload.count !== clean.length) {
       throw failure("The rights-request count did not match its records.");
+    }
+    if (payload.archived !== undefined && payload.archived !== archivedView) {
+      throw failure("The request view changed. Refresh to see its current status.");
+    }
+    if (payload.ready_to_archive !== undefined && payload.ready_to_archive !== readyView) {
+      throw failure("The request view changed. Refresh to see its current status.");
+    }
+    if (capacityNote && payload.capacity) {
+      var used = payload.capacity.active_count;
+      var maximum = payload.capacity.active_limit;
+      if (!Number.isInteger(used) || !Number.isInteger(maximum) ||
+          used < 0 || maximum < 1 || used > maximum + 1) {
+        throw failure("The request capacity could not be verified.");
+      }
+      var canArchive = payload.capacity.archive_available !== false;
+      archiveAvailable = canArchive;
+      if (showReady) {
+        showReady.disabled = !canArchive;
+        showReady.title = canArchive ? "" : "Finished-request archiving is unavailable on shared storage.";
+      }
+      capacityNote.textContent = !canArchive && used >= maximum ?
+        "The active request list is full. Archiving is unavailable on this installation. Ask an administrator to review capacity; requests and evidence remain in place." :
+        !canArchive && used >= Math.floor(maximum * 0.9) ?
+          "The active request list is nearly full (" + used + " of " + maximum + "). Ask an administrator to review capacity." :
+        used >= maximum ?
+        "The active request list is full. Archive finished requests below to make room. Records and evidence remain available in the archive." :
+        used >= Math.floor(maximum * 0.9) ?
+          "The active request list is nearly full (" + used + " of " + maximum + "). Archive finished requests to make room." :
+          used + " active requests; room for " + (maximum - used) + " more.";
     }
     return clean;
   }
@@ -985,13 +1032,20 @@
   function renderRequests(items) {
     requests.textContent = "";
     if (!items.length) {
-      requests.appendChild(node("p", "muted", "No correction, exclusion, or deletion requests are available in this view."));
+      requests.appendChild(node("p", "muted", archivedView ?
+        "No finished requests are in the archive yet." : readyView ?
+        "No finished requests are ready to archive. Complete a review or release a legal hold first." :
+        "No correction, exclusion, or deletion requests are available in this view."));
       return;
     }
     items.forEach(function (record) {
       var card = node("article", "ka-request");
       if (record.schema === "lightwork.knowledge-feedback.v1") {
         card.appendChild(node("h3", "", friendly(record.request_type) + " request · " + friendly(record.status)));
+        card.appendChild(node("p", "muted", "Request reference: " + record.id));
+        if (record.archived_at !== null) {
+          card.appendChild(node("p", "muted", "Retained in the finished archive " + date(record.archived_at) + "."));
+        }
         card.appendChild(node("p", "", record.reason));
         if (record.proposed_correction) card.appendChild(node("p", "", "Your suggested correction: " + record.proposed_correction));
         card.appendChild(node("p", "muted", "Updated " + date(record.updated_at) + ". Source use: " + friendly(record.source_use_status) + ". Record: " + friendly(record.raw_record_status) + ". Retention review: " + friendly(record.retention_review_status) + "."));
@@ -1004,6 +1058,10 @@
       head.appendChild(badge(friendly(record.status), record.status === "approved" ? "approved" :
         record.status === "denied" ? "denied" : record.status === "applying" ? "warning" : "pending"));
       card.appendChild(head);
+      card.appendChild(node("p", "muted", "Request reference: " + record.id));
+      if (record.archived_at !== null) {
+        card.appendChild(node("p", "muted", "Retained in the finished archive " + date(record.archived_at) + "."));
+      }
       card.appendChild(node("p", "muted", "Source: " + friendly(record.source_reference.asset_id) +
         " (version " + record.source_reference.version + ")"));
       card.appendChild(node("p", "", record.reason));
@@ -1046,13 +1104,49 @@
         card.appendChild(recorded);
       }
       card.appendChild(node("p", "ka-honesty", record.weight_influence_notice));
-      if (canReview && (record.status === "submitted" || record.status === "applying")) {
+      if (canReview && !archivedView && (record.status === "submitted" || record.status === "applying")) {
         card.appendChild(reviewControls(record));
       }
-      if (canReview && record.request_type === "deletion" &&
+      if (canReview && !archivedView && record.request_type === "deletion" &&
           record.status !== "applying" &&
           (!record.retention_hold || record.retention_hold.effective_status !== "released")) {
         card.appendChild(retentionHoldControls(record));
+      }
+      if (canReview) {
+        var copilot = node("button", "btn", "Work on this with Copilot");
+        copilot.type = "button";
+        copilot.addEventListener("click", function () {
+          document.dispatchEvent(new CustomEvent("lightwork:copilot-selection", {
+            detail: {selection: {kind: "knowledge_request", id: record.id}}
+          }));
+          var panel = document.getElementById("mv-copilot");
+          var open = document.getElementById("mv-copilot-fab");
+          if (panel && panel.hidden && open) open.click();
+          announce("Copilot is focused on this request.", false);
+        });
+        card.appendChild(copilot);
+      }
+      if (canReview && !archivedView && record.archive_ready) {
+        var archive = node("button", "btn", "Move to finished archive");
+        archive.type = "button";
+        archive.dataset.accessPath = "/requests/" + encodeURIComponent(record.id) + "/archive";
+        archive.addEventListener("click", async function () {
+          if (pending || !window.confirm(
+            "Move this finished request to the retained archive? Source restrictions and evidence stay in place. This does not delete the original source."
+          )) return;
+          setBusy(true);
+          try {
+            var saved = await api(archive.dataset.accessPath, {
+              context: context, confirm: true, expected_revision: record.revision
+            });
+            if (rightsRequest(saved).archived_at === null) throw failure("The archive could not be verified.");
+            await loadRequests();
+            announce("The finished request is retained in the archive. Its source restrictions remain in force.", true);
+          } catch (error) {
+            announce(error.message || "Could not archive this request. It remains in the active list.", true, error);
+          } finally { setBusy(false); }
+        });
+        card.appendChild(archive);
       }
       requests.appendChild(card);
     });
@@ -1060,7 +1154,8 @@
 
   async function loadRequests() {
     var token = access.capture();
-    var response = await fetch(apiBase + "/requests?limit=100", {
+    var response = await fetch(apiBase + "/requests?limit=100&archived=" + (archivedView ? "true" : "false") +
+      "&ready_to_archive=" + (readyView ? "true" : "false"), {
       method: "GET",
       credentials: "same-origin",
       headers: {Accept: "application/json"}
@@ -1292,6 +1387,86 @@
     } finally {
       setBusy(false);
     }
+  });
+
+  if (showArchived) showArchived.addEventListener("click", async function () {
+    if (pending) return;
+    var priorArchived = archivedView, priorReady = readyView;
+    archivedView = !archivedView;
+    readyView = false;
+    if (showReady) showReady.setAttribute("aria-pressed", "false");
+    showArchived.setAttribute("aria-pressed", archivedView ? "true" : "false");
+    showArchived.textContent = archivedView ? "View active requests" : "View finished archive";
+    setBusy(true);
+    try {
+      await loadRequests();
+      announce(archivedView ? "Showing retained finished requests." : "Showing active requests.", false);
+    } catch (error) {
+      archivedView = priorArchived;
+      readyView = priorReady;
+      if (showReady) showReady.setAttribute("aria-pressed", readyView ? "true" : "false");
+      showArchived.setAttribute("aria-pressed", archivedView ? "true" : "false");
+      showArchived.textContent = archivedView ? "View active requests" : "View finished archive";
+      announce(error.message || "Could not load this request view. Please try again.", true, error);
+    } finally { setBusy(false); }
+  });
+
+  if (showReady) showReady.addEventListener("click", async function () {
+    if (pending) return;
+    var priorArchived = archivedView, priorReady = readyView;
+    readyView = !readyView;
+    archivedView = false;
+    if (showArchived) {
+      showArchived.setAttribute("aria-pressed", "false");
+      showArchived.textContent = "View finished archive";
+    }
+    showReady.setAttribute("aria-pressed", readyView ? "true" : "false");
+    setBusy(true);
+    try {
+      await loadRequests();
+      announce(readyView ? "Showing finished requests ready to archive." : "Showing active requests.", false);
+    } catch (error) {
+      archivedView = priorArchived;
+      readyView = priorReady;
+      if (showArchived) {
+        showArchived.setAttribute("aria-pressed", archivedView ? "true" : "false");
+        showArchived.textContent = archivedView ? "View active requests" : "View finished archive";
+      }
+      showReady.setAttribute("aria-pressed", readyView ? "true" : "false");
+      announce(error.message || "Could not load this request view. Please try again.", true, error);
+    } finally { setBusy(false); }
+  });
+
+  if (findArchived) findArchived.addEventListener("submit", async function (event) {
+    event.preventDefault();
+    if (pending) return;
+    var requestId = findArchived.elements.request_reference.value.trim();
+    if (!/^knowledge-req-[a-f0-9]{40}$/.test(requestId)) {
+      announce("Paste a full request reference from its receipt or card.", true);
+      return;
+    }
+    setBusy(true);
+    try {
+      var result = await api("/requests/" + encodeURIComponent(requestId), undefined, "GET");
+      if (result.schema !== "lightwork.knowledge-rights-request-detail.v1") {
+        throw failure("The retained request could not be verified.");
+      }
+      var record = (canReview ? rightsRequest : feedback)(result.item);
+      if (record.id !== requestId || record.archived_at === null) {
+        throw failure("This request is not in the finished archive. Review active requests.");
+      }
+      archivedView = true;
+      readyView = false;
+      if (showArchived) {
+        showArchived.setAttribute("aria-pressed", "true");
+        showArchived.textContent = "View active requests";
+      }
+      if (showReady) showReady.setAttribute("aria-pressed", "false");
+      renderRequests([record]);
+      announce("Showing the retained request you looked up.", true);
+    } catch (error) {
+      announce(error.message || "Could not find that archived request. Check the reference and try again.", true, error);
+    } finally { setBusy(false); }
   });
 
   loadRequests().catch(function (error) {

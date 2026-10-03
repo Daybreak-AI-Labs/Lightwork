@@ -88,6 +88,18 @@ def test_all_governed_store_declarations_have_semantic_owner_and_recovery_dispos
     assert seen_preferences
 
 
+def test_knowledge_rights_archive_has_an_explicit_retained_owner_and_policy():
+    entries = {entry["path"]: entry for entry in _inventory()["entries"]}
+    knowledge = entries["packages/maverick-core/maverick/knowledge_access.py"]
+    archived = [item for item in knowledge["governed_namespaces"]
+                if item["namespace"] == "knowledge-rights-archive"]
+    assert len(archived) == 1
+    assert archived[0]["recovery_policy"] == "knowledge_access_authority"
+    assert authority_policy("knowledge-rights-archive/recovered.json", is_sqlite=False) == (
+        "knowledge_access_authority"
+    )
+
+
 def test_high_risk_authorities_and_non_authority_counterexamples_stay_distinct():
     entries = {entry["path"]: entry for entry in _inventory()["entries"]}
     core = "packages/maverick-core/maverick/"

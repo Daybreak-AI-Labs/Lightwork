@@ -183,8 +183,28 @@ def _optional_limit(name: str) -> float | None:
     return value
 
 
-DEFAULT_MAX_DOLLARS = _optional_limit("MAVERICK_DEFAULT_MAX_DOLLARS")
-DEFAULT_MAX_WALL_SECONDS = _optional_limit("MAVERICK_DEFAULT_MAX_WALL_SECONDS")
+# Product policy for goals started before an installation config exists. Keep
+# the optional environment defaults separate: older config files with no task
+# caps reflect an operator's existing no-limit choice and must stay that way.
+DEFAULT_MAX_DOLLARS = 2.0
+DEFAULT_MAX_WALL_SECONDS = 1800.0
+_operator_default_dollars = _optional_limit("MAVERICK_DEFAULT_MAX_DOLLARS")
+_operator_default_wall_seconds = _optional_limit("MAVERICK_DEFAULT_MAX_WALL_SECONDS")
+
+
+def goal_budget_defaults() -> dict[str, float | None]:
+    """Per-goal fallbacks, preserving no-cap installations already on disk."""
+    from .config import config_path
+
+    first_install = not config_path().exists()
+    return {
+        "max_dollars": (_operator_default_dollars if _operator_default_dollars is not None
+                        else DEFAULT_MAX_DOLLARS if first_install else None),
+        "max_wall_seconds": (_operator_default_wall_seconds if _operator_default_wall_seconds is not None
+                             else DEFAULT_MAX_WALL_SECONDS if first_install else None),
+    }
+
+
 def _default_max_depth_setting() -> int:
     """``[swarm] default_max_depth`` (env ``MAVERICK_DEFAULT_MAX_DEPTH`` wins)."""
     from .env_setting import env_or_config_int
@@ -211,21 +231,40 @@ def _resolved_cap(field: str, default: float | None) -> float | None:
 
 
 def configured_max_dollars() -> float | None:
-    """The deployment's per-goal spend ceiling, in USD.
+    """The effective spend limit for an omitted goal request, in USD.
 
     The same precedence a run's budget is built with -- the Settings page's
     spend cap, else the ``[budget]`` config section, else
-    ``MAVERICK_BUDGET_DOLLARS``, else ``DEFAULT_MAX_DOLLARS`` -- resolved
-    without reserving tenant allowance.  The dashboard clamps requested
-    per-goal limits to this value; ``DEFAULT_MAX_DOLLARS`` alone is only the
-    fallback for a deployment that configured nothing, so using it as the
-    ceiling rejected the very cap the operator had set.
+    ``MAVERICK_BUDGET_DOLLARS``, else the first-install product default --
+    resolved without reserving tenant allowance. An explicit request may
+    exceed only that first-install default, not an operator-set ceiling.
     """
-    return _resolved_cap("max_dollars", DEFAULT_MAX_DOLLARS)
+    return _resolved_cap("max_dollars", goal_budget_defaults()["max_dollars"])
 
 
 def configured_max_wall_seconds() -> float | None:
-    return _resolved_cap("max_wall_seconds", DEFAULT_MAX_WALL_SECONDS)
+    return _resolved_cap("max_wall_seconds", goal_budget_defaults()["max_wall_seconds"])
+
+
+def configured_goal_ceiling_dollars() -> float | None:
+    """An operator-set ceiling, excluding the first-install product default."""
+    return _resolved_cap("max_dollars", _operator_default_dollars)
+
+
+def configured_goal_ceiling_wall_seconds() -> float | None:
+    return _resolved_cap("max_wall_seconds", _operator_default_wall_seconds)
+
+
+def requested_goal_dollars(requested: float | None) -> float | None:
+    if requested is None:
+        return configured_max_dollars()
+    return clamp_task_limit(requested, configured_goal_ceiling_dollars())
+
+
+def requested_goal_wall_seconds(requested: float | None) -> float | None:
+    if requested is None:
+        return configured_max_wall_seconds()
+    return clamp_task_limit(requested, configured_goal_ceiling_wall_seconds())
 
 
 def clamp_task_limit(requested: float | None, configured: float | None) -> float | None:
@@ -436,10 +475,7 @@ def run_goal_in_thread(
         # background runner's conservative defaults (tighter than the
         # interactive Budget defaults on purpose).
         budget = budget_from_config(
-            defaults={
-                "max_dollars": DEFAULT_MAX_DOLLARS,
-                "max_wall_seconds": DEFAULT_MAX_WALL_SECONDS,
-            },
+            defaults=goal_budget_defaults(),
             max_dollars=max_dollars,
             max_wall_seconds=max_wall_seconds,
         )

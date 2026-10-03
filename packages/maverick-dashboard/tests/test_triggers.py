@@ -539,8 +539,8 @@ def test_webhook_run_clamps_template_to_configured_operator_budget(monkeypatch, 
         "---\nowner: local\ntitle: Huge\nbudget_dollars: 1000\nbudget_wall_seconds: 999999\n---\n"
         "Do a big thing.\n", encoding="utf-8")
     import maverick.runner as runner_mod
-    monkeypatch.setattr(runner_mod, "configured_max_dollars", lambda: 100.0)
-    monkeypatch.setattr(runner_mod, "configured_max_wall_seconds", lambda: 86400.0)
+    monkeypatch.setattr(runner_mod, "configured_goal_ceiling_dollars", lambda: 100.0)
+    monkeypatch.setattr(runner_mod, "configured_goal_ceiling_wall_seconds", lambda: 86400.0)
     seen = {}
 
     def fake_run(

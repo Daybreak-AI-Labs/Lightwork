@@ -1123,6 +1123,7 @@ def get_features() -> dict:
         "project_workspaces": cfg.get("project_workspaces", False) is True,
         "task_handoffs": cfg.get("task_handoffs", False) is True,
         "outcome_measurement": cfg.get("outcome_measurement", False) is True,
+        "commitment_viability": cfg.get("commitment_viability", False) is True,
         "employee_companions": (
             not config_source_errors() and cfg.get("employee_companions", False) is True
         ),
@@ -3129,18 +3130,18 @@ def get_model_improvement_mutation_policy() -> dict[str, bool | int]:
 
 
 def get_rehearsal() -> dict:
-    """Return the ``[rehearsal]`` section (pre-execution rehearsal gate).
+    """Return the ``[rehearsal]`` prediction settings.
 
-    The governance half of the Operating Twin: before a risky plan executes, it
-    is simulated against the learned world-model and gated on the prediction.
-    ON by default and uncertainty escalates. When explicitly disabled,
-    ``gate_action`` is a no-op that proceeds. ``outcome_floor``
-    is the predicted-outcome below which a *confident* rehearsal blocks;
-    ``min_support`` is the (state, action) observations the model needs before it
-    will vouch for a move (below it the action is escalated, never waved through);
-    ``max_uncertainty`` escalates an over-uncertain rollout.
+    Predictions are observed by default: they do not authorize or stop tools.
+    The explicit ``mode = "hold"`` setting retains the old experimental gate,
+    which has no in-product approval route. Shield, capabilities, consent, and
+    other tool policy checks remain independent of this setting.
     """
     cfg = load_config().get("rehearsal", {})
+
+    mode = str(cfg.get("mode", "observe")).strip().lower()
+    if mode not in {"observe", "hold"}:
+        mode = "observe"
 
     def _num(key: str, default: float, cast=float):
         try:
@@ -3151,6 +3152,7 @@ def get_rehearsal() -> dict:
     return {
         "enable": _strict_config_bool(
             cfg, "enable", governed_learning_default()),
+        "mode": mode,
         "outcome_floor": _num("outcome_floor", 0.5),
         "min_support": _num("min_support", 5, int),
         "max_uncertainty": _num("max_uncertainty", 0.25),

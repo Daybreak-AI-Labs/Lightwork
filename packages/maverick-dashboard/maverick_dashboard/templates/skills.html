@@ -140,6 +140,16 @@
     </section>
   </div>
 
+  {% if is_admin %}
+  <section class="panel sk-section" aria-labelledby="to-learned-title" id="to-learned-skills">
+    <div class="section-head"><h2 id="to-learned-title">Suggestions from completed work</h2></div>
+    <p class="muted sk-small">Lightwork drafts these from repeated completed tasks. No suggestion guides an agent until you read its full instructions and choose to add it. You can remove an added suggestion here at any time.</p>
+    <p id="to-learned-status" role="status" aria-live="polite" class="muted">Checking suggestions…</p>
+    <div id="to-learned-list"></div>
+    <div id="to-learned-added"></div>
+  </section>
+  {% endif %}
+
   <section class="panel sk-section" aria-labelledby="to-skill-usage-title">
     <div class="section-head"><h2 id="to-skill-usage-title">How Your Skills Are Doing</h2></div>
     <p class="muted sk-small">Each time agents use a skill, Lightwork notes whether the task went well.</p>

@@ -227,9 +227,9 @@ def test_dispatch_uses_only_configured_budget_ceiling(monkeypatch, tmp_path, cei
     _isolate(monkeypatch, tmp_path)
     _save_fleet()
     calls = _stub_runner(monkeypatch)
-    from maverick_dashboard import api
+    from maverick import runner
 
-    monkeypatch.setattr(api, "configured_max_dollars", lambda: ceiling)
+    monkeypatch.setattr(runner, "configured_goal_ceiling_dollars", lambda: ceiling)
     response = _client().post("/api/v1/fleets/acme/run", json={
         "agent": "coder", "prompt": "run the authorized work", "max_dollars": 10_000.0,
     })

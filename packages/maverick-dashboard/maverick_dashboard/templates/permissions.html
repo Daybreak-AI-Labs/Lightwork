@@ -53,6 +53,12 @@
     <div id="sbx-rows" aria-live="polite"><p class="muted">Checking the container services…</p></div>
     <p id="sbx-err" class="perm-error" role="alert" aria-live="assertive"></p>
   </div>
+  <div id="file-work-card" class="panel" hidden>
+    <h3>Finish file work setup</h3>
+    <p id="file-work-explanation" class="muted"></p>
+    <button id="file-work-enable" class="btn btn--primary" type="button" hidden>Allow file work</button>
+    <p id="file-work-result" role="status" aria-live="polite"></p>
+  </div>
   <script>
   (function () {
     'use strict';
@@ -61,6 +67,58 @@
     var canManageSandbox = {{ 'true' if permissions_can_manage_sandbox else 'false' }};
     var switching = false;
     var labels = { local: 'This computer', docker: 'Docker container', podman: 'Podman container' };
+    var fileCard = document.getElementById('file-work-card');
+    var fileExplanation = document.getElementById('file-work-explanation');
+    var fileButton = document.getElementById('file-work-enable');
+    var fileResult = document.getElementById('file-work-result');
+
+    function showFileWork(state) {
+      var blocked = state.file_work && state.file_work.blocked_tools || [];
+      var other = state.file_work && state.file_work.other_policy_blocks || [];
+      fileCard.hidden = blocked.length === 0 && other.length === 0;
+      fileButton.hidden = true;
+      if (!blocked.length) {
+        if (other.length) fileExplanation.textContent = 'File work is still limited by other organization rules. Review the affected tools below or ask an administrator.';
+        return;
+      }
+      if (state.backend === 'local') {
+        fileExplanation.textContent = 'File work is off while work runs directly on this computer. Start Docker or Podman, then choose its container above.';
+        return;
+      }
+      if (!((state.backends || {})[state.backend] || {}).available) {
+        fileExplanation.textContent = 'Start the selected container service, then reload this page to finish file work setup.';
+        return;
+      }
+      fileExplanation.textContent = 'File work is still blocked by the setup-wide tool rules. Allowing it lets Lightwork run programs and change files inside the selected container. Other organization rules may still apply.';
+      fileButton.textContent = 'Allow file work in ' + (labels[state.backend] || 'the container');
+      fileButton.hidden = !canManageSandbox;
+      if (!canManageSandbox) fileExplanation.textContent += ' Ask an administrator to finish this step.';
+    }
+
+    fileButton.addEventListener('click', async function () {
+      if (fileButton.disabled) return;
+      if (!(await mvConfirm('Allow Lightwork to run programs and change files inside the selected container?', { okText: 'Allow file work' }))) return;
+      fileButton.disabled = true;
+      fileResult.textContent = 'Checking file work setup…';
+      try {
+        var response = await fetch('/api/v1/sandbox/file-work/enable', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ confirm: true }),
+        });
+        if (!response.ok) throw new Error(typeof mvErrorText === 'function'
+          ? mvErrorText(response, 'allow file work') : 'Could not allow file work. Please try again.');
+        var result = await response.json();
+        if (!result || !result.file_work || !Array.isArray(result.file_work.blocked_tools) ||
+            result.file_work.blocked_tools.length ||
+            !['docker', 'podman'].includes(result.backend)) {
+          throw new Error('Could not confirm file work is allowed. Reload this page before retrying.');
+        }
+        location.reload();
+      } catch (error) {
+        fileResult.textContent = error.message || 'Could not reach Lightwork. Please try again.';
+        fileButton.disabled = false;
+      }
+    });
 
     async function pick(backend) {
       if (!canManageSandbox || switching) return;
@@ -147,6 +205,7 @@
       return r.json();
     }).then(function (d) {
       rows.textContent = '';
+      showFileWork(d);
       ['docker', 'podman', 'local'].forEach(function (name) {
         rows.appendChild(row(name, (d.backends || {})[name] || {}, d.backend));
       });

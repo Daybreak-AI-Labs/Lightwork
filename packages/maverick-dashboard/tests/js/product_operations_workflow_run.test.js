@@ -10,7 +10,7 @@ const source = fs.readFileSync(path.resolve(__dirname,
   "../../maverick_dashboard/static/lightwork-product-operations.js"), "utf8");
 const turn = () => new Promise(resolve => setImmediate(resolve));
 
-function setup(release = "a".repeat(64)) {
+function setup(release = "a".repeat(64), config = {}) {
   const dom = new JSDOM('<aside id="mv-copilot"><section id="mv-product-operations">' +
     '<p id="mv-product-operation-status"></p><div id="mv-product-operation-buttons"></div>' +
     '<div id="mv-product-operation-form"></div></section></aside>',
@@ -22,6 +22,7 @@ function setup(release = "a".repeat(64)) {
       summary: "Run the published procedure", confirmation_required: false}]};
   const fetch = async (url, options) => {
     const body = JSON.parse(options.body); calls.push({url, body});
+    if (url.endsWith("/propose") && config.proposeFailure) throw Error("private transport detail");
     const response = url.endsWith("/catalog") ? catalog :
       url.endsWith("/prepare") ? {read_only: true, operation: "learning.workflow_run",
         summary: "Run the published procedure", source: "Current published workflow", checked_at: 1,
@@ -63,4 +64,15 @@ test("Copilot refuses an unconfirmed release instead of opening the input form",
   assert.equal(ui.document.querySelector('#mv-product-operation-form button'), null);
   assert.equal(ui.launched.length, 0);
   assert.match(ui.document.querySelector('#mv-product-operation-status').textContent, /could not be confirmed/);
+});
+
+test("a failed control suggestion does not claim a control opened or expose transport detail", async () => {
+  const ui = setup("a".repeat(64), {proposeFailure: true});
+  ui.window.LightworkProductOperations.open(); await turn();
+  const outcome = await ui.window.LightworkProductOperations.propose('Run this published workflow');
+  assert.equal(outcome, 'unavailable');
+  const message = ui.document.querySelector('#mv-product-operation-status').textContent;
+  assert.match(message, /could not be completed/);
+  assert.doesNotMatch(message, /private transport detail/);
+  assert.equal(ui.document.querySelector('#mv-product-operation-form').textContent, '');
 });

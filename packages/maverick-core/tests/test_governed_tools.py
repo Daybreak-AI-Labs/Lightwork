@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -555,32 +556,66 @@ class TestEnterpriseBoundary:
         assert wrapped.fn({"op": "task_get"}) == "asana:task_get"
         assert calls == [{"op": "task_get"}]
 
-    def test_all_sql_is_governed_because_lexical_reads_are_not_pure(
-        self, monkeypatch,
+    @pytest.mark.parametrize(("name", "operation", "field"), [
+        ("database", "query", "sql"),
+        ("bigquery", "query", "sql"),
+        ("snowflake", "query", "statement"),
+        ("oracle", "sql", "statement"),
+        ("databricks", "sql", "statement"),
+    ])
+    def test_only_exact_constant_sql_probe_passes_without_governed_write(
+        self, monkeypatch, name, operation, field,
     ):
         monkeypatch.delenv("MAVERICK_GOVERNED_APPROVER", raising=False)
         import maverick.config as cfg
 
         monkeypatch.setattr(
             cfg, "get_governed_connectors",
-            lambda: {"enable": True, "connectors": ["database"], "approver": ""},
+            lambda: {"enable": True, "connectors": [name], "approver": ""},
         )
         calls = []
-        tool = _op_tool("database", ["query"], calls)
+        tool = _op_tool(name, [operation], calls)
         wrapped = wrap_connector_tool(tool)
+        assert "only a constant SELECT 1 probe" in wrapped.description
+        assert "Customer table reads and all other SQL are refused" in wrapped.description
+        assert "read runs" not in wrapped.description
+        assert "simple reads run" not in wrapped.description
 
+        for statement in ("SELECT 1", " select\t1; \n"):
+            args = {"op": operation, field: statement}
+            assert wrapped.fn(args) == f"{name}:{operation}"
+            assert calls[-1] == args
+
+        calls.clear()
         for statement in (
-            "SELECT 1",
+            "SELECT 1 FROM customers",
+            "SELECT 1 INTO result",
             "SELECT 'owned' INTO OUTFILE '/tmp/pwn'",
             "DELETE FROM customers",
             "SELECT 1; DELETE FROM customers",
+            "SELECT 1 -- comment",
+            "SELECT 1 + nextval('sequence')",
             "PRAGMA user_version = 7",
             "/*M! DELETE FROM customers */ SELECT 1",
         ):
             assert wrapped.fn({
-                "op": "query", "sql": statement,
+                "op": operation, field: statement,
             }).startswith("REFUSED (governed)"), statement
         assert calls == []
+
+    def test_database_probe_reaches_real_read_path_through_registry(self, monkeypatch):
+        from maverick.tools.database_tool import database_tool
+
+        monkeypatch.setenv("DATABASE_URL", "sqlite:///:memory:")
+        reg = ToolRegistry()
+        reg.register(wrap_connector_tool(database_tool()))
+
+        out = asyncio.run(reg.run("database", {
+            "op": "query", "sql": "SELECT 1", "response_format": "json",
+        }))
+        result = json.loads(out)
+        assert result["rows"] == [[1]]
+        assert result["transaction_status"] == "read_only"
 
     def test_lambda_dryrun_is_non_effecting_but_live_invoke_is_governed(
         self, monkeypatch,

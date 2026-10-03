@@ -1,6 +1,7 @@
 """Exact-source employee feedback never grants independent review or apply rights."""
 from __future__ import annotations
 
+import re
 from typing import Literal
 
 from fastapi import HTTPException, Response
@@ -94,8 +95,94 @@ def status_prepare(request, selection, arguments):
     return Preview("Your request status, including separately retained requests when source use changes.", native={"items": items, "limit": 100})
 
 
+def _archive_scope(request):
+    tenant, actor, context = native._binding(request, Response(), administrator=True)
+    return tenant, actor, context, native.call_native(native._service, request)
+
+
+def _archive_selection(selection):
+    if (set(selection) != {"kind", "id"} or selection.get("kind") != "knowledge_request"
+            or not isinstance(selection.get("id"), str)
+            or re.fullmatch(r"knowledge-req-[A-Za-z0-9_.-]{1,114}", selection["id"]) is None):
+        raise HTTPException(422, "Select a finished rights request in Knowledge first.")
+    return selection["id"]
+
+
+def _archive_record(request, selection):
+    tenant, actor, context, service = _archive_scope(request)
+    request_id = _archive_selection(selection)
+    record = native.call_native(service.get_request, tenant, request_id)
+    return tenant, actor, context, service, request_id, record
+
+
+def archive_snapshot(request, selection):
+    tenant, actor, context, service = _archive_scope(request)
+    if not selection:
+        return Snapshot(digest([context, "no-request"]), "Finished knowledge requests",
+                        "Select a finished request in Knowledge.",
+                        blocked="Select a finished rights request in Knowledge first.")
+    request_id = _archive_selection(selection)
+    record = native.call_native(service.get_request, tenant, request_id)
+    blocked = ("This request is already in the retained archive." if record["archived_at"] is not None else
+               "This request is not yet ready for the finished archive." if not record["archive_ready"] else "")
+    return Snapshot(digest([context, request_id, record["revision"], record["status"],
+                            record["archive_ready"], record["archived_at"]]),
+                    "Finished knowledge request", "Retain this completed rights review in the finished archive."
+                    " Its source restrictions and audit evidence stay in force.",
+                    details={"id": request_id, "status": record["status"], "revision": record["revision"]},
+                    blocked=blocked)
+
+
+def archive_prepare(request, selection, arguments):
+    _, _, context, _, request_id, record = _archive_record(request, selection)
+    if record["archived_at"] is not None or not record["archive_ready"]:
+        raise HTTPException(409, "This request is not ready for the finished archive. Refresh Knowledge.")
+    return Preview("Move this completed rights request to the retained archive. The original source,"
+                   " source restrictions and audit evidence stay in place.",
+                   changes=[{"label": "Request", "before": request_id, "after": "Retained in finished archive"},
+                            {"label": "Active request capacity", "before": "Uses one place", "after": "Frees one place"}],
+                   native={"context": context, "selection": selection, "request_id": request_id,
+                           "expected_revision": record["revision"]})
+
+
+def _archive_outcome(status, record):
+    return Outcome(status, "This finished request is retained in the archive. Its source restrictions remain in force.",
+                   {"id": record["id"], "status": record["status"], "revision": record["revision"],
+                    "archived_at": record["archived_at"]})
+
+
+def archive_recover(request, selection, arguments, prepared, operation):
+    _, _, context, _, request_id, record = _archive_record(request, selection)
+    if context != prepared["context"] or selection != prepared["selection"] or request_id != prepared["request_id"]:
+        raise HTTPException(409, "Account, workspace or request selection changed. Review again.")
+    if record["archived_at"] is None:
+        return None
+    if record["revision"] != prepared["expected_revision"]:
+        raise HTTPException(409, "This request changed after review. Refresh Knowledge.")
+    return _archive_outcome("replayed", record)
+
+
+def archive_execute(request, selection, arguments, prepared, operation):
+    with authority_effect_fence():
+        tenant, actor, context, service, request_id, record = _archive_record(request, selection)
+        if (context != prepared["context"] or selection != prepared["selection"]
+                or request_id != prepared["request_id"]
+                or record["revision"] != prepared["expected_revision"]
+                or record["archived_at"] is not None or not record["archive_ready"]):
+            raise HTTPException(409, "This request changed after review. Refresh Knowledge.")
+        payload = native.ArchiveIn(context=context, confirm=True, expected_revision=prepared["expected_revision"])
+        native._binding(request, Response(), payload, administrator=True)
+        result = native.call_native(service.archive_request, tenant, actor, request_id,
+                                    expected_revision=payload.expected_revision)
+        if result["id"] != request_id or result["revision"] != payload.expected_revision or result["archived_at"] is None:
+            return Outcome("unconfirmed", "The archive result could not be confirmed. Refresh Knowledge before retrying.")
+        return _archive_outcome("confirmed", result)
+
+
 def feedback_entries():
     return (Adapter("knowledge.feedback", "Report an exact source correction or concern", "learning", "/knowledge-access", ("/knowledge-access",),
                     Feedback, feedback_snapshot, feedback_prepare, feedback_execute),
             Adapter("knowledge.my_feedback", "Review my knowledge requests", "learning", "/knowledge-access", ("/knowledge-access",),
-                    EmptyInput, status_snapshot, status_prepare))
+                    EmptyInput, status_snapshot, status_prepare),
+            Adapter("knowledge.archive_request", "Move a finished rights request to the retained archive", "learning", "/knowledge-access", ("/knowledge-access",),
+                    EmptyInput, archive_snapshot, archive_prepare, archive_execute, archive_recover))

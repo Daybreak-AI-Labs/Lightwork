@@ -221,7 +221,8 @@ _LINKED = {
     "observability.prometheus_port": "/settings/all#group-", "queue.backend": "/settings/all#group-",
     "embedded.allow_flash": "/settings/all#group-", "license.enforce": "/settings/all#group-",
     "world_model.dsn": "/settings/all#group-", "lsp.servers": "/settings/all#group-",
-    "ai_bank_mrm.enable": "/settings/all#group-modules", "rehearsal.enable": "/learning",
+    "ai_bank_mrm.enable": "/settings/all#group-modules",
+    "rehearsal.enable": "/settings/all#group-safety",
     "threat_hunt.enable": "/security", "oauth.vault": "/connections",
     "security_ops.enable": "/security", "mcp_servers.x": "/mcp",
 }

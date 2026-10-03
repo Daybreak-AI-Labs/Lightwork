@@ -81,9 +81,9 @@ def test_compose_assembles_brief_and_runs_with_budget(client, world, runner_stub
 def test_compose_budget_clamped_to_configured_server_cap(
     client, world, runner_stub, monkeypatch, ceiling, expected,
 ):
-    from maverick_dashboard import api
+    from maverick import runner
 
-    monkeypatch.setattr(api, "configured_max_dollars", lambda: ceiling)
+    monkeypatch.setattr(runner, "configured_goal_ceiling_dollars", lambda: ceiling)
     r = client.post("/api/v1/goals/compose", json={
         "title": "big spender", "budget_dollars": 10_000.0,
     })
@@ -97,8 +97,8 @@ def test_compose_without_blocks_uses_title_as_brief(client, world, runner_stub):
     assert r.status_code == 201
     g = world.get_goal(r.json()["id"])
     assert g.description == "just do it"
-    # No budget block and no configured ceiling must not invent a task cap.
-    assert runner_stub[0][1] is None
+    # An omitted budget uses the fresh-install goal default.
+    assert runner_stub[0][1] == 2.0
 
 
 def test_compose_drops_blank_steps(client, world, runner_stub):

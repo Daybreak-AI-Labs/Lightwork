@@ -69,6 +69,9 @@ PAGES: tuple[dict, ...] = (
      "floor": "view", "default": "view"},
     {"path": "/outcome-pilots", "label": "Workflow pilots", "group": "Operate",
      "icon": "bench", "floor": "operate", "default": "operate", "in_nav": False},
+    {"path": "/commitment-reviews", "label": "Promise reviews", "group": "Operate",
+     "aliases": "orders capacity deadlines options", "icon": "bench",
+     "floor": "operate", "default": "operate"},
     {"path": "/research", "ready": False, "label": "Research lab", "aliases": "experiments candidates evaluation",
      "group": "Operate", "icon": "bench", "floor": "operate", "default": "operate"},
     {"path": "/project-reviews", "label": "Project team reviews", "group": "Operate",
@@ -1320,7 +1323,14 @@ def _write(data: dict[str, dict[str, bool]]) -> None:
 def clear_overrides() -> None:
     """Reset every page to its default visibility."""
     with _locked(store_path()):
+        from .settings_audit import current_write
+
+        change = current_write()
+        if change is not None:
+            change.prepare(overrides(), {})
         _write({})
+        if change is not None:
+            change.complete()
 
 
 def _permission(page: dict, kind: str) -> str:
@@ -1410,7 +1420,14 @@ def apply_selection(checked: set[str]) -> None:
             if visible != default_visible(page, role):
                 data.setdefault(page["path"], {})[role] = visible
     with _locked(store_path()):
+        from .settings_audit import current_write
+
+        change = current_write()
+        if change is not None:
+            change.prepare(overrides(), data)
         _write(data)
+        if change is not None:
+            change.complete()
 
 
 def page_for(path: str) -> dict | None:

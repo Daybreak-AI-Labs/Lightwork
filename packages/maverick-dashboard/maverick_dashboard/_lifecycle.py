@@ -185,6 +185,7 @@ class ShutdownSupervisor:
 def register_main_components(app, supervisor):
     entries = [
         ("automation", "automation_queue", "stop", "_worker_threads"),
+        ("orphan_recovery", "orphan_sweeper", "stop_orphan_sweeper", "_sweeper_thread"),
         ("security", "security_api", "stop_hunter_scheduler", "_hunter_scheduler_thread"),
         ("finance", "finance_scheduler", "stop_finance_scheduler", "_scheduler_thread"),
         ("red_team", "red_team_scheduler", "stop_red_team_scheduler", "_scheduler_thread"),

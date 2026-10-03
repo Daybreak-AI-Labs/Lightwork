@@ -454,6 +454,11 @@ class ActionEpisodeReviewService:
                    "planned_steps", "episode_sha256", "reason")}
         result.update(status=row["status"], audit_status="delivered", source_current=source_current)
         result.update({key: copy.deepcopy(row[key]) for key in _META_OPTIONAL if key in row})
+        grant = payload.get("training_grant") if type(payload) is dict else None
+        result["training_available"] = bool(
+            row["status"] == "accepted" and not row.get("_audit_pending") and type(grant) is dict
+            and row.get("grant_sha256") == digest(grant)
+            and self.clock() < grant["use_until"] <= row["retain_until"])
         if row.get("_audit_pending"):
             result.update(status="audit_pending", committed_status=row["status"], audit_status="pending")
         elif detail and payload is not None and row["status"] == "withdrawn" and self.clock() < row["retain_until"]:
@@ -634,7 +639,7 @@ class ActionEpisodeReviewService:
             existing = payload.get("training_grant")
             if existing is not None:
                 if existing["request_sha256"] == request_hash:
-                    return self._present(row, source_current=current)
+                    return self._present(row, payload, source_current=current)
                 raise ActionEpisodeConflict("training grant is immutable; changed scope requires new evidence")
             if row["revision"] != revision or not self.clock() < deadline <= row["retain_until"]:
                 raise ActionEpisodeConflict("training grant revision or retention deadline changed")
@@ -648,7 +653,7 @@ class ActionEpisodeReviewService:
                 action="action_episode_training_granted", capability="flow.episode.grant",
                 metadata={"review_revision": row.get("review_revision", row["revision"]),
                           "review_sha256": review_hash, "grant_sha256": digest(grant)})
-            return self._present(saved, source_current=current)
+            return self._present(saved, payload, source_current=current)
 
     def _signed_body(self, ctx, row, payload, current):
         from ..config import get_flows

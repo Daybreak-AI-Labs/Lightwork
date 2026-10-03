@@ -1,4 +1,4 @@
-/* Reviewed task-support drafts stay in memory until an explicit transfer. */
+/* Reviewed task-support drafts stay on this page until a local copy or download. */
 (function () {
   'use strict';
   var form = document.getElementById('issue-report-form');
@@ -9,23 +9,27 @@
   var title = document.getElementById('issue-report-title-input');
   var body = document.getElementById('issue-report-body');
   var confirm = document.getElementById('issue-report-confirm');
-  var open = document.getElementById('issue-report-open');
+  var copy = document.getElementById('issue-report-copy');
+  var download = document.getElementById('issue-report-download');
   var more = document.getElementById('issue-report-more');
   var search = document.getElementById('issue-report-search');
   var query = document.getElementById('issue-report-query');
   var after = document.getElementById('issue-report-after');
   var before = document.getElementById('issue-report-before');
   var BASE = '/api/v1/support/issue-report';
-  var next = null, task = null, busy = false, generation = 0;
+  var next = null, task = null, approved = null, busy = false, generation = 0;
   var selected = new URLSearchParams(window.location.search).get('task');
   function say(text) { status.textContent = text || ''; }
-  function clear() { task = null; title.value = ''; body.value = ''; confirm.checked = false; panel.hidden = true; }
+  function clear() { task = null; approved = null; title.value = ''; body.value = ''; confirm.checked = false; panel.hidden = true; }
+  function ready() { return approved && confirm.checked && approved.task === task && approved.title === title.value && approved.body === body.value; }
   function controls() {
     form.querySelector('button[type="submit"]').disabled = busy || !select.value;
     search.querySelector('button').disabled = busy;
     select.disabled = busy;
     more.disabled = busy || next === null;
-    open.disabled = busy || !task || !confirm.checked;
+    confirm.disabled = busy || !task;
+    copy.disabled = busy || !ready();
+    download.disabled = busy || !ready();
   }
   async function call(path, payload) {
     var controller = new AbortController();
@@ -82,38 +86,58 @@
     } catch (error) { say(error.name === 'AbortError' ? 'Draft preparation timed out. Retry when ready.' : error.message); }
     finally { busy = false; controls(); }
   });
-  [title, body].forEach(function (input) { input.addEventListener('input', function () { confirm.checked = false; controls(); }); });
-  confirm.addEventListener('change', controls);
+  [title, body].forEach(function (input) { input.addEventListener('input', function () {
+    approved = null; confirm.checked = false; controls(); say('Draft changed. Review the exact fields again before copying or downloading.');
+  }); });
   function payload() { return {task: task, title: title.value, body: body.value}; }
   async function reviewed() {
     var data = await call('/review', payload());
+    if (!data || typeof data.title !== 'string' || typeof data.body !== 'string') throw new Error('The draft could not be checked. Try reviewing it again.');
     if (data.title !== title.value || data.body !== body.value) {
       title.value = data.title; body.value = data.body; confirm.checked = false;
       throw new Error('Additional secret text was removed. Review the updated draft before continuing.');
     }
     return data;
   }
-  document.getElementById('issue-report-copy').addEventListener('click', async function () {
-    if (!task || busy) return; busy = true; controls();
-    try { await reviewed(); if (window.mvCopy) await window.mvCopy(title.value + '\n\n' + body.value); else throw new Error('Select the draft text and copy it with your keyboard.'); say('Draft copied. Nothing was sent to GitHub.'); }
-    catch (error) { say(error.message); } finally { busy = false; controls(); }
-  });
-  document.getElementById('issue-report-download').addEventListener('click', async function () {
-    if (!task || busy) return; busy = true; controls();
-    try {
-      await reviewed(); var url = URL.createObjectURL(new Blob([title.value + '\n\n' + body.value], {type: 'text/plain;charset=utf-8'}));
-      var link = document.createElement('a'); link.href = url; link.download = 'Lightwork-task-support.txt'; link.click();
-      window.setTimeout(function () { URL.revokeObjectURL(url); }, 1000); say('Draft downloaded. Nothing was sent to GitHub.');
-    } catch (error) { say(error.message); } finally { busy = false; controls(); }
-  });
-  open.addEventListener('click', async function () {
-    if (!task || busy || !confirm.checked) return; busy = true; controls();
+  confirm.addEventListener('change', async function () {
+    approved = null;
+    if (!confirm.checked || !task || busy) { controls(); return; }
+    busy = true; controls(); say('Checking the exact draft for sharing…');
     try {
       var data = await reviewed();
-      // Same-tab navigation follows the final authority/scrubbing check and
-      // avoids opening an external page before the reviewed payload is ready.
-      window.location.assign(data.url);
-    } catch (error) { say(error.message); } finally { busy = false; controls(); }
+      approved = {task: task, title: data.title, body: data.body};
+      say('Draft checked. Copy or download it, then use your organization’s support channel. Nothing was sent.');
+    } catch (error) { confirm.checked = false; say(error.name === 'AbortError' ? 'Draft review timed out. Try again.' : error.message); }
+    finally { busy = false; controls(); }
+  });
+  async function copyText(text) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      try { await navigator.clipboard.writeText(text); return true; } catch (_) { /* try the browser's older copy command */ }
+    }
+    var field, previous = document.activeElement;
+    try {
+      field = document.createElement('textarea'); field.value = text; field.style.position = 'fixed'; field.style.opacity = '0';
+      document.body.appendChild(field); field.select(); return !!(document.execCommand && document.execCommand('copy'));
+    } catch (_) { return false; }
+    finally { if (field) field.remove(); if (previous && previous.isConnected && previous.focus) previous.focus(); }
+  }
+  copy.addEventListener('click', async function () {
+    if (busy || !ready()) return;
+    busy = true; controls();
+    try {
+      var copied = await copyText(approved.title + '\n\n' + approved.body);
+      say(copied ? 'Reviewed draft copied. Nothing was sent. Share it through your organization’s support channel.' :
+        'Your browser blocked copying. The draft is still here; download it or select and copy the text above.');
+    } finally { busy = false; controls(); }
+  });
+  download.addEventListener('click', function () {
+    if (busy || !ready()) return;
+    try {
+      var url = URL.createObjectURL(new Blob([approved.title + '\n\n' + approved.body], {type: 'text/plain;charset=utf-8'}));
+      var link = document.createElement('a'); link.href = url; link.download = 'Lightwork-task-support.txt'; link.click();
+      window.setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+      say('Reviewed draft downloaded. Nothing was sent. Share the file through your organization’s support channel.');
+    } catch (_) { say('The download could not start. The draft is still here; try copying it instead.'); }
   });
   window.addEventListener('pagehide', function () { ++generation; clear(); });
   controls(); load(false);

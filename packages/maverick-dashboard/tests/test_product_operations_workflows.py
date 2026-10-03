@@ -75,3 +75,26 @@ def test_changed_release_unpublished_or_nonlearned_workflow_cannot_launch(monkey
         state["allowed"] = False
         denied = client.post(BASE + "/catalog", json={"page": PAGE, "selection": SELECTION}).json()
         assert denied["operations"] == []
+
+
+def test_copilot_checks_the_same_recent_examples_without_a_mutation(monkeypatch):
+    from maverick_dashboard import flow_teach_ops_api as teach
+
+    client, _state = _harness(monkeypatch)
+    rows = [{"flow_id": "owned", "run_id": "run-1", "flow_name": "Order review",
+             "status": "awaiting_review", "training_available": False, "audit_status": "delivered"}]
+    monkeypatch.setattr(teach, "learning_examples_inbox", lambda _request: {
+        "examples": rows, "recent_only": False, "available": True})
+    with client:
+        catalog = client.post(BASE + "/catalog", json={"page": "/learning/examples", "selection": {}}).json()
+        item = catalog["operations"][0]
+        assert item["id"] == "learning.examples_review" and item["available"]
+        reviewed = client.post(BASE + "/prepare", json={"page": "/learning/examples", "selection": {},
+            "operation": item["id"], "context": catalog["context"], "revision": item["revision"], "arguments": {}})
+        assert reviewed.status_code == 200, reviewed.text
+        assert reviewed.json()["read_only"] is True
+        assert reviewed.json()["details"]["examples"][0]["href"] == "/flows/owned/runs/run-1"
+        rows[0] = {**rows[0], "status": "accepted", "training_available": True}
+        stale = client.post(BASE + "/prepare", json={"page": "/learning/examples", "selection": {},
+            "operation": item["id"], "context": catalog["context"], "revision": item["revision"], "arguments": {}})
+        assert stale.status_code == 409

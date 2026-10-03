@@ -32,6 +32,25 @@ def _admin_audit(request: Request, action: str, **payload) -> None:
     _audit_event(request, action, **payload)
 
 
+def _setting_write(request: Request, section: str, key: str, project,
+                   *, confirmed: bool = False):
+    from .settings_audit import bind_setting_write
+
+    return bind_setting_write(request, section=section, key=key,
+                              project=project, confirmed=confirmed)
+
+
+def _provider_audit_value(data: dict, name: str) -> dict[str, str]:
+    """Record only credential presence; never put a key or endpoint in Activity."""
+    providers = data.get("providers") or {}
+    value = providers.get(name) if isinstance(providers, dict) else None
+    value = value if isinstance(value, dict) else {}
+    return {
+        "api_key": "set" if value.get("api_key") else "not set",  # pragma: allowlist secret
+        "base_url": "set" if value.get("base_url") else "not set",
+    }
+
+
 def _app():
     """The dashboard app module, resolved lazily.
 
@@ -236,6 +255,7 @@ async def settings_set_model(request: Request) -> RedirectResponse:
     _app()._require_same_origin(request)
     auth.require_global_permission(request, "admin")
     from maverick.runtime_overrides import (
+        RuntimeOverridesSecurityError,
         allowed_models,
         clear_default_model,
         set_default_model,
@@ -247,12 +267,18 @@ async def settings_set_model(request: Request) -> RedirectResponse:
     if model and allow and model not in allow:
         raise HTTPException(status_code=400, detail="model not in the allowed list")
     try:
-        if model:
-            await run_in_threadpool(set_default_model, model)
-        else:
-            await run_in_threadpool(clear_default_model)
+        with _setting_write(request, "models", "default", lambda d:
+                            (d.get("models") or {}).get("default")):
+            if model:
+                await run_in_threadpool(set_default_model, model)
+            else:
+                await run_in_threadpool(clear_default_model)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="invalid model id") from exc
+    except (OSError, RuntimeOverridesSecurityError) as exc:
+        raise HTTPException(status_code=503, detail=(
+            "Model settings could not be confirmed. Refresh Settings and Activity before retrying."
+        )) from exc
     _admin_audit(request, "settings_models")
     return RedirectResponse("/settings?saved=models", status_code=303)
 
@@ -265,7 +291,12 @@ def settings_set_budget(request: Request, max_dollars: str = Form(""),
     config.toml is never written."""
     _app()._require_same_origin(request)
     auth.require_global_permission(request, "admin")
-    from maverick.runtime_overrides import clear_budget, set_budget, set_task_limits
+    from maverick.runtime_overrides import (
+        RuntimeOverridesSecurityError,
+        clear_budget,
+        set_budget,
+        set_task_limits,
+    )
     val = (max_dollars or "").strip()
     try:
         wanted = _budget_choice(mode, val)
@@ -287,19 +318,24 @@ def settings_set_budget(request: Request, max_dollars: str = Form(""),
         if hold is not None:
             return _held(request, hold)
     try:
-        if mode == "disabled":
-            set_task_limits(False)
-        elif mode == "configured" and val:
-            set_budget(float(val))
-        else:
-            # "default" is the page's "use your installation's standard
-            # limits" choice: drop the Settings amount, keep limits on.
-            clear_budget()
-            set_task_limits(True)
+        with _setting_write(request, "budget", "task_limit", lambda d:
+                            d.get("budget") or {}, confirmed=approved is not None):
+            if mode == "disabled":
+                set_task_limits(False)
+            elif mode == "configured" and val:
+                set_budget(float(val))
+            else:
+                # Drop the Settings amount and keep task limits on.
+                clear_budget()
+                set_task_limits(True)
     except ValueError as exc:
         raise HTTPException(
             status_code=400, detail="spend cap must be a positive number",
         ) from exc
+    except (OSError, RuntimeOverridesSecurityError) as exc:
+        raise HTTPException(status_code=503, detail=(
+            "Spending settings could not be confirmed. Refresh Settings and Activity before retrying."
+        )) from exc
     if approved is not None:
         from . import settings_quorum
 
@@ -359,7 +395,11 @@ async def settings_set_role_models(request: Request) -> RedirectResponse:
     form field is named for a role; an empty value clears that role's pin."""
     _app()._require_same_origin(request)
     auth.require_global_permission(request, "admin")
-    from maverick.runtime_overrides import allowed_models, set_role_models
+    from maverick.runtime_overrides import (
+        RuntimeOverridesSecurityError,
+        allowed_models,
+        set_role_models,
+    )
     roles = ("orchestrator", "coder", "researcher", "writer",
              "analyst", "verifier", "summarizer")
     from maverick_dashboard.model_pickers import chosen
@@ -372,9 +412,16 @@ async def settings_set_role_models(request: Request) -> RedirectResponse:
                 raise HTTPException(
                     status_code=400, detail="model not in the allowed list")
     try:
-        await run_in_threadpool(set_role_models, updates)
+        with _setting_write(request, "models", "roles", lambda d:
+                            {k: v for k, v in (d.get("models") or {}).items()
+                             if k != "default"}):
+            await run_in_threadpool(set_role_models, updates)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="invalid model id") from exc
+    except (OSError, RuntimeOverridesSecurityError) as exc:
+        raise HTTPException(status_code=503, detail=(
+            "Role models could not be confirmed. Refresh Settings and Activity before retrying."
+        )) from exc
     _admin_audit(request, "settings_roles")
     return RedirectResponse("/settings?saved=roles", status_code=303)
 
@@ -386,12 +433,18 @@ async def settings_set_allowed_models(request: Request) -> RedirectResponse:
     config.toml; ``llm.model_for_role`` then caps every role to this set."""
     _app()._require_same_origin(request)
     auth.require_global_permission(request, "admin")
-    from maverick.runtime_overrides import set_allowed_models
+    from maverick.runtime_overrides import RuntimeOverridesSecurityError, set_allowed_models
     form = await request.form()
     try:
-        await run_in_threadpool(set_allowed_models, form.getlist("models"))
+        with _setting_write(request, "models", "allowed", lambda d:
+                            (d.get("access") or {}).get("allowed_models", [])):
+            await run_in_threadpool(set_allowed_models, form.getlist("models"))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="invalid model id") from exc
+    except (OSError, RuntimeOverridesSecurityError) as exc:
+        raise HTTPException(status_code=503, detail=(
+            "Allowed models could not be confirmed. Refresh Settings and Activity before retrying."
+        )) from exc
     _admin_audit(request, "settings_allowed")
     return RedirectResponse("/settings?saved=allowed", status_code=303)
 
@@ -475,11 +528,13 @@ def settings_set_model_discovery(request: Request, enabled: str = Form("on")) ->
             detail="Automatic model lists are controlled by your installation, so this can't be changed here.",
         )
     try:
-        settings_store.set_model_discovery(enabled == "on")
+        with _setting_write(request, "models", "discovery", lambda d:
+                            (d.get("models") or {}).get("discovery")):
+            settings_store.set_model_discovery(enabled == "on")
     except (OSError, settings_store.SecuritySuiteConfigUnavailable) as exc:
         raise HTTPException(
             status_code=503,
-            detail="Settings are unavailable. Retry after storage is restored.",
+            detail="Settings could not be confirmed. Refresh Settings and Activity before retrying.",
         ) from exc
     try:
         from maverick import config as _config
@@ -510,12 +565,14 @@ async def settings_set_provider(
     key_value = api_key.strip()
     base_value = base_url.strip()
     try:
-        await run_in_threadpool(
-            settings_store.rotate_provider,
-            provider_name,
-            api_key=key_value,
-            base_url=base_value,
-        )
+        with _setting_write(request, "providers", provider_name, lambda d:
+                            _provider_audit_value(d, provider_name)):
+            await run_in_threadpool(
+                settings_store.rotate_provider,
+                provider_name,
+                api_key=key_value,
+                base_url=base_value,
+            )
     except settings_store.ProviderConfigurationUnavailable as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except settings_store.SecuritySuiteConfigUnavailable as exc:
@@ -536,7 +593,10 @@ def settings_clear_provider(request: Request, provider: str = Form(...)) -> Redi
     auth.require_global_permission(request, "admin")
     from maverick_dashboard import settings_store
     try:
-        settings_store.clear_provider(provider.strip())
+        name = provider.strip()
+        with _setting_write(request, "providers", name, lambda d:
+                            _provider_audit_value(d, name)):
+            settings_store.clear_provider(name)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="unknown provider") from exc
     _admin_audit(request, "settings_providers")
@@ -577,13 +637,15 @@ async def settings_set_capabilities(request: Request) -> RedirectResponse:
     from maverick_dashboard import settings_store
     form = await request.form()
     try:
-        await run_in_threadpool(settings_store.set_toggles, "capabilities", {
-            name: name in form for name in settings_store.CAPABILITY_DEFAULTS
-        })
+        with _setting_write(request, "capabilities", "all", lambda d:
+                            d.get("capabilities") or {}):
+            await run_in_threadpool(settings_store.set_toggles, "capabilities", {
+                name: name in form for name in settings_store.CAPABILITY_DEFAULTS
+            })
     except (OSError, settings_store.SecuritySuiteConfigUnavailable) as exc:
         raise HTTPException(
             status_code=503,
-            detail="Settings are unavailable. Retry after storage is restored.",
+            detail="Settings could not be confirmed. Refresh Settings and Activity before retrying.",
         ) from exc
     _admin_audit(request, "settings_capabilities")
     return RedirectResponse("/settings?saved=capabilities", status_code=303)
@@ -598,7 +660,9 @@ async def settings_set_features(request: Request) -> RedirectResponse:
     form = await request.form()
     selected = {name: name in form for name in settings_store.FEATURE_DEFAULTS}
     try:
-        await run_in_threadpool(settings_store.set_toggles, "features", selected)
+        with _setting_write(request, "features", "all", lambda d:
+                            d.get("features") or {}):
+            await run_in_threadpool(settings_store.set_toggles, "features", selected)
         await run_in_threadpool(
             settings_store.assert_effective_copilot_operations,
             selected["copilot_operations"],
@@ -612,7 +676,7 @@ async def settings_set_features(request: Request) -> RedirectResponse:
     except (OSError, settings_store.SecuritySuiteConfigUnavailable) as exc:
         raise HTTPException(
             status_code=503,
-            detail="Settings are unavailable. Retry after storage is restored.",
+            detail="Settings could not be confirmed. Refresh Settings and Activity before retrying.",
         ) from exc
     _admin_audit(request, "settings_features")
     return RedirectResponse("/settings?saved=features", status_code=303)
@@ -629,7 +693,13 @@ async def settings_set_ui_visibility(request: Request) -> RedirectResponse:
     auth.require_global_permission(request, "admin")
     from maverick_dashboard import ui_visibility
     form = await request.form()
-    await run_in_threadpool(ui_visibility.apply_selection, set(form.getlist("cell")))
+    try:
+        with _setting_write(request, "ui_visibility", "matrix", lambda d: d):
+            await run_in_threadpool(ui_visibility.apply_selection, set(form.getlist("cell")))
+    except OSError as exc:
+        raise HTTPException(status_code=503, detail=(
+            "Page visibility could not be confirmed. Refresh Settings and Activity before retrying."
+        )) from exc
     _admin_audit(request, "settings_visibility")
     return RedirectResponse("/settings?saved=visibility#ui-visibility", status_code=303)
 
@@ -640,7 +710,13 @@ def settings_reset_ui_visibility(request: Request) -> RedirectResponse:
     _app()._require_same_origin(request)
     auth.require_global_permission(request, "admin")
     from maverick_dashboard import ui_visibility
-    ui_visibility.clear_overrides()
+    try:
+        with _setting_write(request, "ui_visibility", "matrix", lambda d: d):
+            ui_visibility.clear_overrides()
+    except OSError as exc:
+        raise HTTPException(status_code=503, detail=(
+            "Page visibility could not be confirmed. Refresh Settings and Activity before retrying."
+        )) from exc
     _admin_audit(request, "settings_visibility_reset")
     return RedirectResponse("/settings?saved=visibility_reset#ui-visibility", status_code=303)
 

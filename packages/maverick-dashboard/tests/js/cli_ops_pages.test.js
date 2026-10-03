@@ -214,6 +214,22 @@ test('teach page learns a rule, and saving the draft needs a confirmation', asyn
   assert.equal(ui.calls.filter(c => c.url === '/api/v1/flows').length, 0, 'declining saves nothing');
 });
 
+test('teach page still loads when reviewed-run learning is unavailable', async t => {
+  const base = read('templates/flow_teach.html').split('{% block content %}')[1].split('<style>')[0];
+  const markup = base.replace(/<section class="panel ft__section" id="teach-recipe"[\s\S]*?<\/section>/,
+    '<section class="panel ft__section" id="teach-recipe">Signed examples are unavailable.</section>');
+  const ui = await page(markup, 'lightwork-flow-teach.js', url => {
+    if (url.endsWith('/teach')) return { flow: { id: 'billing', name: 'Billing', version: 1 }, steps: [], tools: [] };
+    if (url.endsWith('/teach/examples')) return { available: false, runs: [] };
+    return { recipes: [] };
+  });
+  t.after(() => ui.w.close());
+  assert.equal(ui.$('rc-learn'), null);
+  assert.equal(ui.$('rc-draft'), null);
+  assert.match(ui.$('ft-status').textContent, /^$/);
+  assert.equal(ui.d.querySelector('#teach-rules') !== null, true);
+});
+
 test('a run at its first approval is kept as an example with plain, editable data descriptions', async t => {
   const markup = slice('flow_run.html', '<section class="panel fr__example" id="lx-card"', '</section>');
   const object = props => ({ type: 'object', properties: props, required: Object.keys(props), additionalProperties: false });
@@ -251,7 +267,8 @@ test('a finished example is reviewed, then learning is allowed only after a conf
   const ui = await page(markup, 'lightwork-learning-capture.js', (url, options) => {
     if (url.endsWith('/detail')) return { evidence: { inputs: { ref: '<b>A-1</b>' }, slots: [{ tool: 'lookup', arguments: { query: 'A-1' }, result: { customer_id: 'C9' } }] } };
     if (url.endsWith('/review')) return { ...reviewing, status: 'accepted', revision: 5 };
-    if (url.endsWith('/training-grant')) return { ...reviewing, status: 'accepted', revision: 6, grant_sha256: 'g'.repeat(64) };
+    if (url.endsWith('/training-grant')) return { ...reviewing, status: 'accepted', revision: 6,
+      grant_sha256: 'g'.repeat(64), training_available: true };
     return reviewing;
   }, { confirm: true });
   t.after(() => ui.w.close());

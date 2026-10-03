@@ -52,6 +52,8 @@ def dispatcher(tmp_path, monkeypatch):
         lambda now=None, period=None: "2026-09-08",
     )
     monkeypatch.setattr(llm_mod, "_estimate_call_cost", lambda *a, **kw: 2.0)
+    # Receipt mechanics use a synthetic model with no real rate-card entry.
+    monkeypatch.setattr(llm_mod, "_lookup_price_quote", lambda _spec: None)
     monkeypatch.setattr(llm_mod, "_run_preflight", lambda *a, **kw: None)
     monkeypatch.setattr(llm_mod, "_enforce_circuit", lambda *a: None)
     monkeypatch.setattr(llm_mod, "_feed_circuit", lambda *a: None)

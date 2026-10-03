@@ -74,9 +74,13 @@ goals beyond a cap queue (not rejected) up to `MAVERICK_GOAL_ACQUIRE_TIMEOUT`.
 The per-user lane also prevents an attacker / runaway client from draining
 your Anthropic budget by firing 100 POSTs in 30 seconds.
 
-Individual goal budget caps are also bounded server-side:
-`max_dollars` clamped to [0, 100], `max_wall_seconds` to [1, 86400],
-`max_depth` to [1, 5]. Pydantic validates before the goal starts.
+For an installation with no config file, omitted goal limits are $2 and
+30 minutes. A new installer saves those limits. Existing installations with
+unset task limits keep their previous behavior; administrators can choose
+"No limit for each task" in Settings. Requested limits are clamped to the
+configured deployment ceiling, if any. `max_depth` is validated in [1, 5].
+Spend and time values must be finite and non-negative; invalid values receive
+a 422 response before the goal starts.
 
 ## Endpoints
 
@@ -259,6 +263,6 @@ Designed for non-channel frontends:
 - Cron jobs -> a 6am goal to summarize overnight email + slack
 - GitHub Actions -> kick off a Lightwork goal on PR open
 
-Always set explicit `max_dollars` and `max_wall_seconds` from external
-callers -- defaults are conservative ($2, 30min) but every API has
-edge cases.
+External callers should send explicit `max_dollars` and `max_wall_seconds`
+when their own policy requires them. An omitted value uses the installation's
+task limit; on an unconfigured installation, that is $2 and 30 minutes.

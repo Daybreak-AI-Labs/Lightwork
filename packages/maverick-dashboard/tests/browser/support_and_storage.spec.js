@@ -53,6 +53,48 @@ test('Help clears a reviewed private report on HTML access denial and blocks non
   await expect(page.locator('#support-download')).toBeDisabled();
 });
 
+test('Help keeps task reports local after review, copy, and download',async({page,baseURL},info)=>{
+  const external=[];page.on('request',request=>{if(new URL(request.url()).origin!==new URL(baseURL).origin)external.push(request.url());});
+  const reviews=[];
+  await page.route('**/api/v1/support/issue-report**',async route=>{
+    const pathname=new URL(route.request().url()).pathname;
+    let value;
+    if(pathname.endsWith('/tasks'))value={tasks:[{id:7,title:'Stopped task',when:1}],next_offset:null};
+    else if(pathname.endsWith('/review')){
+      reviews.push(route.request().postDataJSON());
+      value={title:'Stopped task',body:'Customer [REDACTED]'};
+    }else value={title:'Stopped task',body:'Customer secret',summary:'Review this local draft.'};
+    await route.fulfill({status:200,contentType:'application/json',body:JSON.stringify(value)});
+  });
+  await page.goto('/help');
+  await expect(page.locator('#issue-report-task option')).toHaveCount(2);
+  await page.locator('#issue-report-task').selectOption('7');
+  await page.getByRole('button',{name:'Prepare the bug report'}).click();
+  await expect(page.locator('#issue-report-preview')).toBeVisible();
+  const copy=page.getByRole('button',{name:'Copy reviewed draft'});
+  const download=page.getByRole('button',{name:'Download reviewed draft'});
+  await expect(copy).toBeDisabled();await expect(download).toBeDisabled();
+  await page.evaluate(()=>{window.__taskDraftCopies=[];Object.defineProperty(navigator,'clipboard',{
+    configurable:true,value:{writeText:async text=>{window.__taskDraftCopies.push(text);}}
+  });});
+  await page.locator('#issue-report-confirm').check();
+  await expect(page.locator('#issue-report-body')).toHaveValue('Customer [REDACTED]');
+  await expect(page.locator('#issue-report-confirm')).not.toBeChecked();
+  await expect(copy).toBeDisabled();
+  await page.locator('#issue-report-confirm').check();
+  await expect(copy).toBeEnabled();await expect(download).toBeEnabled();
+  await copy.click();
+  await expect(page.locator('#issue-report-status')).toContainText('Reviewed draft copied');
+  expect(await page.evaluate(()=>window.__taskDraftCopies)).toEqual(['Stopped task\n\nCustomer [REDACTED]']);
+  const pending=page.waitForEvent('download');await download.click();
+  const file=await pending,path=info.outputPath('reviewed-task-support.txt');await file.saveAs(path);
+  expect(await fs.readFile(path,'utf8')).toBe('Stopped task\n\nCustomer [REDACTED]');
+  await expect(page.locator('#issue-report-preview')).toBeVisible();
+  expect(new URL(page.url()).pathname).toBe('/help');
+  expect(reviews).toHaveLength(2);
+  expect(external).toEqual([]);
+});
+
 test('recovery storage retires discarded copies while retaining saved work and rejecting old tabs',async({page,request})=>{
   await page.goto('/workflow-builder');await expect(page.locator('.draft-recovery')).toBeVisible();
   const context=await page.locator('meta[name="lightwork-draft-context"]').getAttribute('content');

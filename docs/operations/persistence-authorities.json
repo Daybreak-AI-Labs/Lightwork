@@ -7138,12 +7138,17 @@
       "governed_namespaces": [
         {
           "namespace": "knowledge-rights-requests",
-          "line": 317,
+          "line": 332,
+          "recovery_policy": "knowledge_access_authority"
+        },
+        {
+          "namespace": "knowledge-rights-archive",
+          "line": 337,
           "recovery_policy": "knowledge_access_authority"
         },
         {
           "namespace": "knowledge-correction-sources",
-          "line": 322,
+          "line": 342,
           "recovery_policy": "knowledge_correction_authority"
         }
       ],
@@ -7153,13 +7158,19 @@
       },
       "source_sites": [
         {
-          "line": 317,
+          "line": 332,
           "function": "__init__",
           "kind": "GovernedRecordStore",
           "expression": "GovernedRecordStore('knowledge-rights-requests', 'knowledge-req', 'knowledge-rights-request')"
         },
         {
-          "line": 322,
+          "line": 337,
+          "function": "__init__",
+          "kind": "GovernedRecordStore",
+          "expression": "GovernedRecordStore('knowledge-rights-archive', 'knowledge-req', 'knowledge-rights-archive')"
+        },
+        {
+          "line": 342,
           "function": "__init__",
           "kind": "GovernedRecordStore",
           "expression": "GovernedRecordStore('knowledge-correction-sources', 'knowledge-fix', 'knowledge-correction-source')"
@@ -19483,6 +19494,44 @@
       ]
     },
     {
+      "path": "packages/maverick-dashboard/maverick_dashboard/commitment_viability_store.py",
+      "contract": "governed",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/commitment_viability_store.py",
+      "purpose": "Owner-scoped, source-bound customer commitment reviews, decisions and retained archives.",
+      "referenced_store_owners": [
+        "maverick.governed_records"
+      ],
+      "review": "Restored operator assertions, owner decisions and archived copies require current authority review before use; an archive is read-only and no external reservation is implied.",
+      "governed_namespaces": [
+        {
+          "namespace": "commitment_viability",
+          "line": 34,
+          "recovery_policy": "commitment_review_authority"
+        },
+        {
+          "namespace": "commitment_viability_archive",
+          "line": 35,
+          "recovery_policy": "commitment_review_authority"
+        }
+      ],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 34,
+          "function": "module",
+          "kind": "GovernedRecordStore",
+          "expression": "GovernedRecordStore('commitment_viability', 'CMV', 'commitment_viability')"
+        },
+        {
+          "line": 35,
+          "function": "module",
+          "kind": "GovernedRecordStore",
+          "expression": "GovernedRecordStore('commitment_viability_archive', 'CMA', 'commitment_viability_archive')"
+        }
+      ]
+    },
+    {
       "path": "packages/maverick-dashboard/maverick_dashboard/outcome_pilots.py",
       "contract": "governed",
       "owner": "packages/maverick-dashboard/maverick_dashboard/outcome_pilots.py",
@@ -22983,11 +23032,12 @@
       "path": "apps/installer-cli/maverick_installer/wizard.py",
       "contract": "configuration",
       "owner": "apps/installer-cli/maverick_installer/wizard.py",
-      "purpose": "Lightwork interactive installer.",
+      "purpose": "Lightwork interactive installer, including a private exact-answer first-install recovery receipt.",
       "referenced_store_owners": [],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
+      "review": "The private first-install receipt is written before keys/configuration and removed after both files commit. Restart requires exact matching of any existing file and refuses changed keys; a legacy orphan key file without a receipt remains an administrator recovery case. Other persistence seams retain contract-family classification (not every operation tested).",
       "governed_namespaces": [],
       "literal_path_hints": [
+        ".config.toml.lightwork-pending.json",
         "validation-cache.json",
         "wizard-partial.json"
       ],

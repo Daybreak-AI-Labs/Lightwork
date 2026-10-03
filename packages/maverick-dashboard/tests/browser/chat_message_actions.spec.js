@@ -19,9 +19,18 @@ test('a saved answer exposes the product and its print, copy, download and share
   );
 
   await page.getByRole('button', {name: 'Print conversation'}).click();
-  expect(await page.evaluate(() => window.__printed)).toBe(true);
+  await expect.poll(() => page.evaluate(() => window.__printed)).toBe(true);
   await page.emulateMedia({media: 'print'});
   await expect(page.locator('#cs-side')).toHaveCSS('display', 'none');
+  await expect(page.getByRole('link', {name: 'Conversation response style'})).toBeHidden();
+  await expect(page.getByRole('navigation', {name: 'Task pages'})).toBeHidden();
+  await expect(page.getByRole('link', {name: 'View my background work'})).toBeHidden();
+  await expect(page.getByText('Organize this conversation')).toBeHidden();
+  await expect(page.getByRole('link', {name: 'Prepare selected deliverable bundle'})).toBeHidden();
+  await expect(page.locator('#conversation-inbox')).toBeHidden();
+  await expect(page.locator('#answer-refresh-status')).toBeHidden();
+  await expect(page.getByText('Question answers can include documents, PDFs, images and text.')).toBeHidden();
+  await expect(page.locator('.print-heading')).toBeVisible();
   await expect(answer).toBeVisible();
   await info.attach('print-view', {body: await page.screenshot({fullPage: true}), contentType: 'image/png'});
   await page.emulateMedia({media: 'screen'});
@@ -63,6 +72,53 @@ test('a saved answer exposes the product and its print, copy, download and share
   await info.attach('answer-actions-mobile', {body: await page.screenshot(), contentType: 'image/png'});
 });
 
+test('Print waits for both earlier pages and includes answered clarifications', async ({page, request}) => {
+  const {review_goal: goalId} = await (await request.get('/__browser_fixture')).json();
+  await page.addInitScript(() => { window.print = () => { window.__printed = true; }; });
+  const releases = [];
+  await page.route(`**/api/v1/goals/${goalId}/thread-history*`, route => new Promise(resolve => {
+    releases.push(async body => { await route.fulfill({status: 200, contentType: 'application/json', body: JSON.stringify(body)}); resolve(); });
+  }));
+  await page.goto(`/chat/goal/${goalId}`);
+  await page.locator('#earlier-history').evaluate(node => { node.dataset.before = '100'; });
+  await page.getByRole('button', {name: 'Print conversation'}).click();
+  await expect.poll(() => releases.length).toBe(1);
+  expect(await page.evaluate(() => window.__printed === true)).toBe(false);
+  await releases[0]({turns: [
+    {id: 98, goal_id: goalId, role: 'user', content: 'Earlier request A',
+      questions: [{question: 'Which location?', answer: 'Chattanooga'}]},
+    {id: 99, goal_id: goalId, role: 'assistant', content: 'Earlier answer A'},
+  ], has_more: true, before_id: 98});
+  await expect(page.locator('#history-turns')).toContainText('Which location?');
+  await expect(page.locator('#history-turns')).toContainText('Chattanooga');
+  await expect.poll(() => releases.length).toBe(2);
+  expect(await page.evaluate(() => window.__printed === true)).toBe(false);
+  await releases[1]({turns: [
+    {id: 96, goal_id: goalId, role: 'user', content: 'Earlier request B', questions: []},
+    {id: 97, goal_id: goalId, role: 'assistant', content: 'Earlier answer B'},
+  ], has_more: false, before_id: 96});
+  await expect.poll(() => releases.length).toBe(3);
+  expect(await page.evaluate(() => window.__printed === true)).toBe(false);
+  await releases[2]({turns: [], has_more: false, before_id: 96});
+  await expect.poll(() => page.evaluate(() => window.__printed === true)).toBe(true);
+  await expect(page.locator('#history-turns')).toContainText('Earlier answer B');
+  await expect(page.locator('#history-status')).toContainText('Beginning of this conversation');
+});
+
+test('Print refuses a partial long conversation when history cannot load', async ({page, request}) => {
+  const setup = await request.post('/__browser_fixture/long-chat');
+  expect(setup.status(), await setup.text()).toBe(200);
+  const {goal_id: goalId} = await setup.json();
+  await page.addInitScript(() => { window.print = () => { window.__printed = true; }; });
+  await page.route('**/static/lightwork-thread-history.js*', route => route.fulfill({status: 404, body: ''}));
+  await page.goto(`/chat/goal/${goalId}`);
+  await expect(page.locator('#history-load')).toBeVisible();
+  expect(Number(await page.locator('#earlier-history').getAttribute('data-before'))).toBeGreaterThan(1);
+  await page.locator('#print-result').click();
+  await expect(page.locator('#answer-action-msg')).toContainText('Printing is still loading');
+  expect(await page.evaluate(() => window.__printed === true)).toBe(false);
+});
+
 test('message actions arrive after live completion without losing a reply or prior answers', async ({page, context, request}) => {
   const fixture = await (await request.post('/__browser_fixture/chat')).json();
   await context.grantPermissions(['clipboard-read', 'clipboard-write']);
@@ -100,6 +156,9 @@ test('message actions arrive after live completion without losing a reply or pri
   await page.emulateMedia({media: 'print'});
   await expect(page.locator('#qa-thread')).toBeVisible();
   await expect(page.locator('#qa-thread')).toContainText('Which delivery date should I use?');
+  await expect(page.locator('#qa-thread .bubble')).toContainText('Use Friday.');
+  await expect(page.getByRole('paragraph').filter({hasText: 'Earlier answer as originally delivered.'})).toBeVisible();
+  await expect(page.locator('#conversation-inbox')).toBeHidden();
 });
 
 test('a failed action refresh gives a working retry and preserves the next reply', async ({page, request}) => {

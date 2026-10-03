@@ -21,7 +21,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi.testclient import TestClient
 from maverick import config, tools, world_model
-from maverick.flow import Flow, FlowNode, execution, store
+from maverick.flow import Flow, FlowNode, action_recipe, execution, recipe_flow, store
 from maverick.oidc import VerifiedPrincipal
 from maverick.paths import tenant_scope
 from maverick_dashboard import auth
@@ -157,7 +157,7 @@ def _lineage_flags(harness):
                           "action_evidence_revoked_keys": []})
 
 
-def _keep_as_example(harness, index):
+def _keep_as_example(harness, index, *, allow_learning=True, grant_seconds=5 * 86400):
     source, run = _paused(harness, index=index)
     suggestion = harness.client.get(_base(run) + "/suggestion")
     assert suggestion.status_code == 200, suggestion.text
@@ -194,9 +194,11 @@ def _keep_as_example(harness, index):
         "reviewed": True, "accepted": True, "rationale": REASON})
     assert reviewed.status_code == 200 and reviewed.json()["status"] == "accepted", reviewed.text
     accepted = reviewed.json()
+    if not allow_learning:
+        return run
     granted = harness.client.post(_base(run) + "/training-grant", json={
         "expected_revision": accepted["revision"], "expected_episode_sha256": accepted["episode_sha256"],
-        "use_until": time.time() + 5 * 86400, "retain_derived_copies": True, "rationale": REASON})
+        "use_until": time.time() + grant_seconds, "retain_derived_copies": True, "rationale": REASON})
     assert granted.status_code == 200, granted.text
     assert granted.json()["grant_sha256"]
     return run
@@ -210,14 +212,17 @@ def test_fresh_runs_are_captured_reviewed_granted_and_learned_from(harness):
     listed = {row["run_id"]: row for row in examples["runs"]}
     assert all(listed[run.run_id]["can_learn"] and listed[run.run_id]["can_sign"] for run in runs)
 
-    # Build a new flow from the reviewed runs.
+    # The ordinary reviewed-runs route signs each granted run and keeps the
+    # same live lineage checks as the explicit signed-copies route.
     learned = harness.client.post(f"/api/v1/flows/{flow_id}/teach/recipe/learn",
                                   json={"run_ids": [run.run_id for run in runs], "tools": [LOOKUP, CREATE]})
     assert learned.status_code == 200, learned.text
     assert learned.json()["summary"]["runs"] == 2 and learned.json()["summary"]["actions"] == [LOOKUP, CREATE]
+    assert learned.json()["package"]["bundles"]
     draft = harness.client.post(f"/api/v1/flows/{flow_id}/teach/recipe/draft",
-                                json={"artifact": learned.json()["artifact"], "name": "Learned order"})
+                                json={"package": learned.json()["package"], "name": "Learned order"})
     assert draft.status_code == 200 and draft.json()["saved"] is False, draft.text
+    assert draft.json()["draft"]["recipe_lineage"]
 
     # And from their signed copies, through governed approval.
     bundles = []
@@ -230,6 +235,10 @@ def test_fresh_runs_are_captured_reviewed_granted_and_learned_from(harness):
         check = harness.client.post("/api/v1/flow-teach/signed-copy/check", json={"bundle": signed.json()})
         assert check.json()["genuine"] is True, check.text
         bundles.append(signed.json())
+    transformed = harness.client.post("/api/v1/flow-teach/signed/learn", json={
+        "bundles": bundles, "tools": [LOOKUP, CREATE], "style": "transforms", "max_operations": 1})
+    assert transformed.status_code == 200, transformed.text
+    assert transformed.json()["package"]["artifact"]["schema"] == "lightwork.action-recipe.v2"
     package = harness.client.post("/api/v1/flow-teach/signed/learn",
                                   json={"bundles": bundles, "tools": [LOOKUP, CREATE]})
     assert package.status_code == 200, package.text
@@ -243,6 +252,112 @@ def test_fresh_runs_are_captured_reviewed_granted_and_learned_from(harness):
                                    json={"flow_id": "learned-governed-order", "name": "Learned governed order"})
     assert governed.status_code == 200, governed.text
     assert governed.json()["recipe_lineage"]
+
+    # A third, newly granted run refines the exact signed package; the older
+    # signed examples and their lineage remain in the derivation.
+    third = _keep_as_example(harness, 2)
+    refined = harness.client.post(f"/api/v1/flows/{flow_id}/teach/recipe/refine", json={
+        "package": learned.json()["package"], "run_ids": [third.run_id]})
+    assert refined.status_code == 200 and refined.json()["summary"]["runs"] == 3, refined.text
+    assert len(refined.json()["package"]["manifest"]) == 3
+    refined_draft = harness.client.post(f"/api/v1/flows/{flow_id}/teach/recipe/draft", json={
+        "package": refined.json()["package"], "name": "Improved order"})
+    assert refined_draft.status_code == 200 and refined_draft.json()["draft"]["recipe_lineage"], refined_draft.text
+
+
+def test_review_without_training_permission_cannot_be_learned_or_signed(harness):
+    _lineage_flags(harness)
+    run = _keep_as_example(harness, 0, allow_learning=False)
+    other = _keep_as_example(harness, 1)
+    path = f"/api/v1/flows/{run.flow_id}/teach"
+    listed = {row["run_id"]: row for row in harness.client.get(path + "/examples").json()["runs"]}
+    assert listed[run.run_id]["status"] == "accepted"
+    assert listed[run.run_id]["can_learn"] is False and listed[run.run_id]["can_sign"] is False
+    refused = harness.client.post(path + "/recipe/learn", json={
+        "run_ids": [run.run_id, other.run_id], "tools": [LOOKUP, CREATE]})
+    assert refused.status_code == 409 and "not currently allowed" in refused.json()["detail"]
+    assert len(harness.calls) == 4, "denial must not repeat either business run"
+    # The older raw export is still useful outside the Teach route. It cannot
+    # be synthesized into a runnable customer flow while capture is enabled.
+    raw = [harness.client.get(_base(item) + "/export") for item in (run, other)]
+    assert all(result.status_code == 200 for result in raw)
+    artifact = action_recipe.synthesize([result.json()["episode"] for result in raw],
+                                        allowed_tools=[LOOKUP, CREATE])
+    unsigned = recipe_flow.make_flow(artifact, flow_id="unsigned-bypass", name="Unsigned bypass")
+    denied_save = harness.client.post("/api/v1/flows", json={"flow": unsigned.to_dict()})
+    assert denied_save.status_code == 409 and "signed examples" in denied_save.json()["detail"]
+    with tenant_scope(tenant=TENANT):
+        assert store.load_flow("unsigned-bypass") is None
+        nested = Flow(id="nested-bypass", name="Nested bypass", start="scope", owner=OWNER,
+                      nodes={"scope": FlowNode(id="scope", kind="scope", body=unsigned)})
+        with pytest.raises(ValueError, match="admitted signed evidence"):
+            store.save_flow(nested)
+        # A release made before this installation enabled capture must stop at
+        # the next customer entrance once the signed-example rule takes effect.
+        harness.flags.update(action_episode_capture=False, action_recipe_lineage=False)
+        try:
+            unsigned.owner = OWNER
+            legacy = store.save_flow(unsigned)
+            store.publish_flow(legacy.id, expected_version=legacy.version,
+                               expected_revision=legacy.revision)
+        finally:
+            harness.flags.update(action_episode_capture=True, action_recipe_lineage=True)
+    for endpoint, body in (("/api/v1/flows/unsigned-bypass/run", {"data": {"input": {"ref": "new"}}}),
+                           ("/api/v1/flows/unsigned-bypass/publish",
+                            {"version": legacy.version, "revision": legacy.revision})):
+        blocked = harness.client.post(endpoint, json=body)
+        assert blocked.status_code == 409 and "signed examples" in blocked.json()["detail"]
+    assert len(harness.calls) == 4
+    current = harness.client.get(_base(run)).json()
+    grant = harness.client.post(_base(run) + "/training-grant", json={
+        "expected_revision": current["revision"], "expected_episode_sha256": current["episode_sha256"],
+        "use_until": time.time() + 3600, "retain_derived_copies": True, "rationale": REASON})
+    assert grant.status_code == 200 and grant.json()["training_available"] is True, grant.text
+    learned = harness.client.post(path + "/recipe/learn", json={
+        "run_ids": [run.run_id, other.run_id], "tools": [LOOKUP, CREATE]})
+    assert learned.status_code == 200 and learned.json()["package"]["manifest"], learned.text
+    assert len(harness.calls) == 4
+
+
+def test_expired_training_permission_is_not_offered_or_accepted(harness):
+    _lineage_flags(harness)
+    run = _keep_as_example(harness, 0, grant_seconds=1)
+    other = _keep_as_example(harness, 1)
+    time.sleep(1.05)
+    path = f"/api/v1/flows/{run.flow_id}/teach"
+    listed = {row["run_id"]: row for row in harness.client.get(path + "/examples").json()["runs"]}
+    assert listed[run.run_id]["grant"] and listed[run.run_id]["can_learn"] is False
+    assert listed[run.run_id]["can_sign"] is False and listed[other.run_id]["can_learn"] is True
+    refused = harness.client.post(path + "/recipe/learn", json={
+        "run_ids": [run.run_id, other.run_id], "tools": [LOOKUP, CREATE]})
+    assert refused.status_code == 409 and len(harness.calls) == 4
+
+
+def test_withdrawn_source_blocks_admission_and_runtime_of_reviewed_runs_recipe(harness):
+    from maverick.flow import recipe_flow
+    from maverick.flow.action_episode_review import ActionEpisodeConflict
+
+    _lineage_flags(harness)
+    runs = [_keep_as_example(harness, index) for index in range(2)]
+    path = f"/api/v1/flows/{runs[0].flow_id}/teach"
+    learned = harness.client.post(path + "/recipe/learn", json={
+        "run_ids": [run.run_id for run in runs], "tools": [LOOKUP, CREATE]})
+    assert learned.status_code == 200, learned.text
+    package = learned.json()["package"]
+    prepared = harness.client.post(path + "/recipe/draft", json={"package": package, "name": "Bound flow"})
+    assert prepared.status_code == 200, prepared.text
+    draft = prepared.json()["draft"]
+    with tenant_scope(tenant=TENANT):
+        assert recipe_flow.check_lineage(draft["learned_recipe"], draft["recipe_lineage"], owner=OWNER)
+    current = harness.client.get(_base(runs[0])).json()
+    withdrawn = harness.client.post(_base(runs[0]) + "/withdraw", json={
+        "expected_revision": current["revision"], "expected_episode_sha256": current["episode_sha256"],
+        "expected_review_sha256": current["review_sha256"], "withdraw": True, "rationale": "Stop future reuse."})
+    assert withdrawn.status_code == 200 and withdrawn.json()["status"] == "withdrawn", withdrawn.text
+    with tenant_scope(tenant=TENANT), pytest.raises(ActionEpisodeConflict):
+        recipe_flow.check_lineage(draft["learned_recipe"], draft["recipe_lineage"], owner=OWNER)
+    retry = harness.client.post(path + "/recipe/draft", json={"package": package, "name": "Bound flow"})
+    assert retry.status_code in {403, 409} and len(harness.calls) == 4
 
 
 def test_suggestion_refuses_runs_past_their_first_approval_and_other_people(harness):

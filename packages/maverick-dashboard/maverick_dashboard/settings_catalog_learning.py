@@ -474,17 +474,25 @@ def _flows(S) -> tuple:
               "Learned workflows will keep and use running totals on their own."),
         learn("action_episode_capture", "Keep workflow examples for learning",
               "Keep copies of real workflow runs, including business data, to learn from. "
-              "Each run needs enrolment, encrypted storage, an expiry and a person's review.",
-              "Copies of real workflow runs, including business data, will be kept."),
+              "Each run needs enrolment, encrypted storage, an expiry and a person's review. "
+              "Turning this on also requires signed evidence for learned action flows.",
+              "Copies of real workflow runs will be kept. Older learned flows without signed "
+              "examples may stop until rebuilt from reviewed runs allowed for learning."),
         S("flows", "action_recipe_lineage", "Sign reviewed examples",
           "Sign each reviewed example so learned steps can show where they came from. The "
-          "signature confirms the review was recorded, not who reviewed it.", "toggle",
-          group, False, "maverick.config", subgroup=_FLOWS),
-        S("flows", "require_action_recipe_lineage", "Only use learned steps with a signed history",
+          "signature confirms the review was recorded, not who reviewed it. "
+          "Turning this on requires signed evidence for learned action flows.", "toggle",
+          group, False, "maverick.config", subgroup=_FLOWS, weaker=True,
+          warning="Older learned flows without signed examples may stop until rebuilt "
+                  "from reviewed runs allowed for learning."),
+        S("flows", "require_action_recipe_lineage", "Always require signed history for learned steps",
           "Refuse to save, publish or run a learned step without a signed record of its "
-          "reviewed examples.", "toggle", group, False, "maverick.config", subgroup=_FLOWS,
+          "reviewed examples, even when example collection and signing are off. This is "
+          "already required while either of those features is on.", "toggle", group, False,
+          "maverick.config", subgroup=_FLOWS,
           weaker=False,
-          warning="Learned steps without a signed history will be saved and run again."),
+          warning="Unsigned learned steps remain blocked while workflow example capture or "
+                  "signed examples are on. If both are off, older unsigned steps may run again."),
         S("flows", "action_evidence_issuer", "Name that signs reviewed examples",
           "A short, stable name for this installation, used when it signs reviewed examples. "
           "Letters, numbers, dots, dashes, underscores and colons only.", "text", group, "",
@@ -625,6 +633,20 @@ def _benchmarks(S) -> tuple:
 def _elsewhere(S) -> tuple:
     """Learning-related settings that sit with their neighbours in other groups."""
     return (
+        S("rehearsal", "enable", "Observe high-impact action predictions",
+          "Compare high-impact actions with past work. The mode below controls "
+          "whether predictions can stop an action. Shield, permissions, and "
+          "required approvals still apply.",
+          "toggle", "Safety", True, "maverick.rehearsal",
+          env=("MAVERICK_REHEARSAL",), weaker=False,
+          warning="Lightwork will stop recording practice predictions for high-impact actions."),
+        S("rehearsal", "mode", "What practice predictions do",
+          "Watch only lets normal tool checks decide. Hold can stop unfamiliar or "
+          "poorly predicted actions until a person reviews the exact step in Approvals. "
+          "An unanswered or rejected request does not run. Other safety checks still apply.",
+          "select", "Safety", "observe", "maverick.config",
+          choices=(("observe", "Watch only (default)"),
+                   ("hold", "Hold high-impact actions for review"))),
         S("autonomy", "escalate_verification", "Second check on uncertain answers",
           "When agents disagree about a final answer, have other AI models check it too. "
           "Needs extra checks on uncertain work on.", "toggle", "Safety", True,

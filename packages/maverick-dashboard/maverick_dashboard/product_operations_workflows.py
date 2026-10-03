@@ -1,6 +1,8 @@
 """Copilot entry to the native, release-pinned learned workflow run form."""
 from __future__ import annotations
 
+from urllib.parse import quote
+
 from fastapi import HTTPException
 from maverick.governed_operations import digest
 
@@ -48,7 +50,43 @@ def prepare(request, selection, _arguments):
     return Preview(state.summary, native=state.details)
 
 
+def examples_snapshot(request, selection):
+    if selection:
+        raise HTTPException(422, "Open Learning examples to check your recent examples.")
+    from .flow_teach_ops_api import learning_examples_inbox
+
+    inbox = learning_examples_inbox(request)
+    rows = inbox["examples"]
+    needs_review = sum(row["status"] == "awaiting_review" for row in rows)
+    needs_permission = sum(row["status"] == "accepted" and not row["training_available"] for row in rows)
+    ready = sum(row["status"] == "accepted" and row["training_available"] for row in rows)
+    summary = (f"Among recent examples, {needs_review} need review, {needs_permission} need separate "
+               f"learning permission, and {ready} are ready to teach from. Open an example to check its current status.")
+    details = {"needs_review": needs_review, "needs_learning_permission": needs_permission,
+               "ready_to_teach": ready,
+               "examples": [{"label": row["flow_name"] + " · " +
+                             ("Needs review" if row["status"] == "awaiting_review" else
+                              "Ready to teach" if row["training_available"] else "Check example"),
+                             "href": "/flows/" + quote(row["flow_id"], safe="")
+                             + "/runs/" + quote(row["run_id"], safe="")}
+                            for row in rows[:10]],
+               "recent_only": inbox["recent_only"]}
+    revision = digest([[row["flow_id"], row["run_id"], row["status"], row["training_available"],
+                        row["audit_status"]] for row in rows])
+    return Snapshot(revision, "Your recent learning examples", summary, details,
+                    blocked="Example collection is off. Ask an administrator to turn it on in Settings."
+                    if not inbox["available"] else "")
+
+
+def examples_prepare(request, selection, _arguments):
+    state = examples_snapshot(request, selection)
+    return Preview(state.summary, native=state.details)
+
+
 def entries():
     return (Adapter("learning.workflow_run", "Run this published workflow", "learning", "/flows/designer",
                     ("/flows/designer/*",), EmptyInput, snapshot, prepare,
-                    aliases=("run this workflow", "start this workflow", "run published workflow")),)
+                    aliases=("run this workflow", "start this workflow", "run published workflow")),
+            Adapter("learning.examples_review", "Check recent learning examples", "learning", "/learning/examples",
+                    ("/learning/examples",), EmptyInput, examples_snapshot, examples_prepare,
+                    aliases=("which examples need review", "show learning examples")))

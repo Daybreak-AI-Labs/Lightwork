@@ -63,6 +63,46 @@ def test_gate_tool_holds_on_bad_history(tmp_path, monkeypatch):
     assert v.decision == rh.BLOCK and v.predicted_outcome < 0.3
 
 
+def test_old_refused_calls_do_not_train_rehearsal_as_executed(tmp_path, monkeypatch):
+    store = TrajectoryStore(path=tmp_path / "history.ndjson")
+    for episode in range(6):
+        store.record(TrajectoryStep(
+            ts=1.0, goal_id=1, episode_id=episode, step=0,
+            role="coder", tool="shell", domain="ops",
+            tool_succeeded=False,  # old refusal: execution was not recorded
+        ))
+        store.record(TrajectoryStep(
+            ts=1.0, goal_id=1, episode_id=episode, step=1,
+            role="coder", domain="ops", is_final=True, outcome=0.0,
+        ))
+    for episode in range(6, 12):
+        store.record(TrajectoryStep(
+            ts=1.0, goal_id=1, episode_id=episode, step=0,
+            role="coder", tool="shell", domain="ops",
+            tool_succeeded=False, tool_executed=True,
+        ))
+        store.record(TrajectoryStep(
+            ts=1.0, goal_id=1, episode_id=episode, step=1,
+            role="coder", domain="ops", is_final=True, outcome=0.9,
+        ))
+    store.record(TrajectoryStep(
+        ts=1.0, goal_id=1, episode_id=12, step=0,
+        role="coder", tool="shell", domain="ops",
+        tool_succeeded=True, tool_executed=False,
+    ))
+    store.record(TrajectoryStep(
+        ts=1.0, goal_id=1, episode_id=12, step=1,
+        role="coder", domain="ops", is_final=True, outcome=0.0,
+    ))
+    monkeypatch.setattr("maverick.trajectory_store.shared", lambda: store)
+    rt.reset_cache()
+
+    model = rt.world_model()
+
+    assert model is not None
+    assert model.support(("ops", "coder", ""), "shell") == 6
+
+
 def test_model_cache_rebuilds_when_trajectory_source_changes(tmp_path, monkeypatch):
     """A tenant/store switch must not reuse another source's fitted verdict."""
     monkeypatch.setenv("MAVERICK_REHEARSAL", "1")

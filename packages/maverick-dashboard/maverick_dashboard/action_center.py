@@ -335,6 +335,32 @@ def _approval_source(world, principal, approval_allowed):
     return items, coverage
 
 
+def _flow_approval_source(source: Callable[[], dict], principal: str | None):
+    """Put currently authorized flow pauses in the same Approvals filter."""
+    try:
+        result = source()
+        if (not isinstance(result, dict) or not isinstance(result.get("items"), list)
+                or result.get("coverage") not in {"current", "partial", "unavailable"}):
+            raise ValueError("invalid flow approval source")
+        items = []
+        for row in result["items"][:SOURCE_LIMIT]:
+            item = _item(
+                "approval", f"flow:{row['run_id']}", row["title"],
+                href=row["href"], owner=principal or row["owner"],
+                due_at=row["due_at"], updated_at=row["updated_at"],
+                version=[row["approval_binding_sha256"], row["approval_card_status"]],
+                reason=("Flow approval waiting for your decision. Review the card, then approve or reject."
+                        if row["approval_card_status"] == "current"
+                        else "Flow approval details need fresh review before a decision."),
+            )
+            item["flow_run_id"] = row["run_id"]
+            items.append(item)
+        status = "partial" if len(result["items"]) > SOURCE_LIMIT else result["coverage"]
+        return items, [{"kind": "flow_approval", "status": status}]
+    except Exception:
+        return [], [{"kind": "flow_approval", "status": "unavailable"}]
+
+
 def _signoff_source(world, owner, specs):
     items, coverage = [], []
     try:
@@ -390,6 +416,7 @@ def collect(world, *, principal: str | None, owner: str | None,
             project_reviews: Callable[[], list[dict]] | None = None,
             vendor_reconciliations: Callable[[], dict] | None = None,
             connection_attention: Callable[[], dict] | None = None,
+            flow_approvals: Callable[[], dict] | None = None,
             approval_allowed: Callable[[object], bool] | None = None,
             task_allowed: Callable[[object], bool] | None = None,
             now: float | None = None) -> dict:
@@ -406,6 +433,10 @@ def collect(world, *, principal: str | None, owner: str | None,
     ):
         items.extend(source_items)
         coverage.extend(source_coverage)
+    if flow_approvals is not None:
+        flow_items, flow_coverage = _flow_approval_source(flow_approvals, principal)
+        items.extend(flow_items)
+        coverage.extend(flow_coverage)
     if project_reviews is not None:
         try:
             reviews = project_reviews()

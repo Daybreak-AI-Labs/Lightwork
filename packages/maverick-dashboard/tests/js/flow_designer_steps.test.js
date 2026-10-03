@@ -39,7 +39,14 @@ function open(options = {}) {
           : url === "/api/v1/flows" ? { flows: [{ id: "onboard-customer", name: "Onboard a customer", inputs: [{ key: "customer_name", label: "Customer name" }] }] }
           : url.startsWith("/api/v1/flows/gallery") ? { flows: [] } : {};
         if (url.startsWith("/api/v1/flows/gallery") && options.galleryStatus === 403) {
-          return { ok: false, status: 403, json: async () => ({}) };
+          return { ok: false, status: 403,
+            headers: { get: () => (options.galleryFeatureOff ?? !options.flowOn) ? "workflows" : null },
+            json: async () => ({}) };
+        }
+        if (url === "/api/v1/flows/draft" && options.draftStatus === 403) {
+          return { ok: false, status: 403,
+            headers: { get: () => options.draftFeatureOff ? "workflows" : null },
+            json: async () => ({ detail: "Workflows are turned off." }) };
         }
         return { ok: true, status: 200, json: async () => body };
       };
@@ -79,8 +86,19 @@ test("disabled workflows tell non-administrators who can turn them on", async ()
   try {
     await settle();
     const msg = doc.getElementById("fd-msg");
-    assert.match(msg.textContent, /need an administrator/);
+    assert.match(msg.textContent, /person who manages this installation/);
     assert.equal(msg.querySelector("a"), null);
+  } finally { dom.window.close(); }
+});
+
+test("a workflow turned off after opening the editor is not described as a permission problem", async () => {
+  const { dom, doc } = open({ flowOn: true, canManage: true, draftStatus: 403, draftFeatureOff: true });
+  try {
+    await settle();
+    doc.getElementById("fd-nl").value = "Welcome a new customer";
+    doc.getElementById("fd-draft").click();
+    await settle();
+    assert.match(doc.getElementById("fd-msg").textContent, /Workflows are turned off/);
   } finally { dom.window.close(); }
 });
 

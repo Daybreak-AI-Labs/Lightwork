@@ -21,11 +21,13 @@ v0.1.1 additions (council UX feedback):
 from __future__ import annotations
 
 import hashlib
+import json
 import math
 import os
 import re
 import secrets
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -69,6 +71,117 @@ def _resolve_config_paths() -> tuple[Path, Path, Path]:
 
 
 CONFIG_DIR, CONFIG_FILE, ENV_FILE = _resolve_config_paths()
+
+
+def _pending_setup_path() -> Path:
+    return CONFIG_FILE.with_name(f".{CONFIG_FILE.name}.lightwork-pending.json")
+
+
+def _existing_setup() -> bool:
+    """Fail closed when a saved file exists or its absence cannot be verified."""
+    for path in (CONFIG_FILE, ENV_FILE, _pending_setup_path()):
+        try:
+            path.lstat()  # Includes dangling links; never follow one into a key file.
+        except FileNotFoundError:
+            continue
+        except OSError:
+            return True
+        return True
+    return False
+
+
+def _existing_setup_notice() -> None:
+    if not CONFIG_FILE.exists() and ENV_FILE.exists():
+        console.print(
+            Panel.fit(
+                "[bold yellow]Lightwork found saved keys but no completed setup.[/bold yellow]\n\n"
+                "Your keys were left unchanged. Ask your Lightwork administrator or support "
+                "to recover this installation.",
+                border_style="yellow",
+            )
+        )
+        return
+    console.print(
+        Panel.fit(
+            "[bold yellow]Lightwork found saved setup files.[/bold yellow]\n\n"
+            "This setup left your current choices and saved keys unchanged. "
+            "Open Lightwork > Settings to change provider keys or task spending, "
+            "or use All settings for other available controls. Some installation "
+            "choices cannot be changed there yet.",
+            border_style="yellow",
+        )
+    )
+
+
+def _pending_setup_bodies() -> tuple[str, str | None] | None:
+    """Read only a complete first-install receipt; never follow a link to keys."""
+    path = _pending_setup_path()
+    try:
+        metadata = path.lstat()
+    except FileNotFoundError:
+        return None
+    if not stat.S_ISREG(metadata.st_mode) or metadata.st_size > 4_000_000:
+        raise RuntimeError("Interrupted Lightwork setup needs assistance; saved files were not changed.")
+    try:
+        receipt = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(receipt, dict) or set(receipt) != {"version", "config", "env"}:
+            raise ValueError("invalid setup receipt")
+        config_body, env_body = receipt["config"], receipt["env"]
+        if type(receipt["version"]) is not int or receipt["version"] != 1 or not isinstance(config_body, str):
+            raise ValueError("invalid setup receipt")
+        if env_body is not None and not isinstance(env_body, str):
+            raise ValueError("invalid setup receipt")
+        if len(config_body) + len(env_body or "") > 4_000_000:
+            raise ValueError("oversized setup receipt")
+        tomllib.loads(config_body)
+        return config_body, env_body
+    except (OSError, UnicodeError, ValueError, TypeError) as exc:
+        raise RuntimeError("Interrupted Lightwork setup needs assistance; saved files were not changed.") from exc
+
+
+def _resume_pending_setup_locked() -> bool:
+    from maverick.file_lock import atomic_write_text
+
+    bodies = _pending_setup_bodies()
+    if bodies is None:
+        return False
+    config_body, env_body = bodies
+    for path, body in ((CONFIG_FILE, config_body), (ENV_FILE, env_body)):
+        try:
+            metadata = path.lstat()
+        except FileNotFoundError:
+            continue
+        if (not stat.S_ISREG(metadata.st_mode) or body is None
+                or not _wizard_file_unchanged(path, body.encode("utf-8"))):
+            raise RuntimeError("Interrupted Lightwork setup needs assistance; saved files were not changed.")
+    if env_body is not None and not ENV_FILE.exists():
+        atomic_write_text(ENV_FILE, env_body, mode=0o600)
+    if not CONFIG_FILE.exists():
+        atomic_write_text(CONFIG_FILE, config_body, mode=0o600)
+    _pending_setup_path().unlink()
+    return True
+
+
+def recover_pending_setup() -> bool:
+    """Complete an approved first install after a crash, with no new answers."""
+    from maverick.file_lock import cross_process_lock
+
+    with cross_process_lock(CONFIG_FILE, strict=True):
+        return _resume_pending_setup_locked()
+
+
+def _first_setup_guard() -> int | None:
+    try:
+        if recover_pending_setup():
+            console.print("[green]Lightwork finished the interrupted setup.[/green]")
+            return 0
+    except (OSError, RuntimeError):
+        console.print("[red]Interrupted Lightwork setup needs assistance; saved files were not changed.[/red]")
+        return 1
+    if _existing_setup():
+        _existing_setup_notice()
+        return 1
+    return None
 
 
 def _prior_consent_salt() -> str:
@@ -357,7 +470,8 @@ def preflight() -> bool:
         console.print(f"[red]✗[/red] Can't write to {CONFIG_DIR}: {e}")
         all_ok = False
 
-    # Docker (advisory only -- only matters if user picks docker sandbox)
+    # Docker availability determines whether the simple setup can safely
+    # offer file changes and command execution in an isolated work area.
     if shutil.which("docker"):
         try:
             subprocess.run(
@@ -369,12 +483,13 @@ def preflight() -> bool:
             console.print("[green]✓[/green] Docker is running")
         except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
             console.print(
-                "[yellow]![/yellow] Docker installed but daemon isn't responding "
-                "(only matters if you pick the docker sandbox)"
+                "[yellow]![/yellow] Docker isn't running. Simple setup will keep "
+                "file changes and program execution off until an isolated work area is available."
             )
     else:
         console.print(
-            "[yellow]![/yellow] Docker not installed (only matters if you pick the docker sandbox)"
+            "[yellow]![/yellow] Docker is not installed. Simple setup will keep "
+            "file changes and program execution off until an isolated work area is available."
         )
 
     return all_ok
@@ -668,8 +783,8 @@ def welcome() -> None:
             "[bold]Lightwork installer[/bold]\n\n"
             "Next you'll pick a setup mode: a quick consumer flow (a few\n"
             "questions, safe defaults) or advanced (configure every model,\n"
-            "channel, safety level, and budget). Re-run any time with\n"
-            "[bold]maverick init[/bold].",
+            "channel, safety level, and budget). After setup, use Lightwork\n"
+            "Settings for supported changes.",
             border_style="cyan",
         )
     )
@@ -682,8 +797,8 @@ def pick_deployment() -> str:
         "vps      - Remote server you own (always-on)",
         "phone    - Phone companion (Lightwork runs on desktop/VPS; phone is a frontend)",
     ]
-    # Default to the previously recorded target on a re-run of `maverick init`
-    # (what [deployment] type was written for).
+    # Preview the previously recorded target when this step is called directly;
+    # the setup entry points will not replace an existing installation.
     default = None
     try:
         from maverick.config import get_deployment
@@ -1144,21 +1259,24 @@ def pick_approvals() -> dict[str, Any]:
 def pick_budget() -> dict[str, Any]:
     console.print()
     console.print("[dim]Task limits are optional. Organization spending controls still apply.[/dim]")
-    enabled = _q_confirm("  Add spending, time or tool-count limits to each task?", default=False)
+    enabled = _q_confirm(
+        "  Use task limits? Standard goals stop at $2 and 30 minutes; choose No for no task limit.",
+        default=True,
+    )
     budget: dict[str, Any] = {
         "max_dollars": _safe_float(
-            _q_text("  Max $ per run", default="5.0"),
-            default=5.0,
+            _q_text("  Max $ per run", default="2.0"),
+            default=2.0,
         ),
         "max_wall_seconds": _safe_float(
-            _q_text("  Max wall-clock seconds per run", default="3600"),
-            default=3600.0,
+            _q_text("  Max wall-clock seconds per run", default="1800"),
+            default=1800.0,
         ),
         "max_tool_calls": _safe_int(
             _q_text("  Max tool calls per run", default="500"),
             default=500,
         ),
-    } if enabled else {}
+    } if enabled else {"task_limits_enabled": False}
     # Billing-grade accounting is the safe default. Preserve an explicit false
     # for legacy/custom gateways, where estimates remain provenance-labelled.
     budget["strict_pricing"] = _q_confirm(
@@ -1504,13 +1622,15 @@ def _pick_action_recipe_lineage() -> dict[str, Any]:
     enabled = _q_confirm(
         "Enable signed reviewed evidence for action recipes? "
         "Service signatures attest recorded reviews, not personal reviewer signatures. "
-        "Copied business data needs explicit retention consent; current eligibility is checked before actions.",
+        "Copied business data needs explicit retention consent; current eligibility is checked before actions. "
+        "Older unsigned learned flows may stop until rebuilt from permitted signed examples.",
         default=False,
     )
     out: dict[str, Any] = {"action_recipe_lineage": enabled}
     out["require_action_recipe_lineage"] = _q_confirm(
         "Require governed reviewed lineage for every learned action recipe? "
-        "This blocks raw or stripped-lineage recipes at save, publication and execution.",
+        "This blocks raw or stripped-lineage recipes at save, publication and execution. "
+        "Example capture or signed evidence also blocks them even if this choice is off.",
         default=False,
     )
     if out["require_action_recipe_lineage"] and not enabled:
@@ -1591,7 +1711,8 @@ def pick_flows() -> dict[str, Any]:
     )
     out["action_episode_capture"] = _q_confirm(
         "Enable retaining workflow examples for learning? "
-        "Each run needs enrollment, encrypted storage, an expiry and a separate human review.",
+        "Each run needs enrollment, encrypted storage, an expiry and a separate human review. "
+        "Older unsigned learned flows may stop until rebuilt from permitted signed examples.",
         default=False,
     )
     out["action_workflow_learning"] = _q_confirm(
@@ -4467,8 +4588,8 @@ def pick_advanced() -> dict[str, Any]:
     """Configure advanced reasoning, learning, and governance features.
 
     Governed learning choices default on; higher-authority or infrastructure
-    features retain explicit opt-ins. All are editable later in
-    ~/.maverick/config.toml.
+    features retain explicit opt-ins. Many have reviewed in-product controls;
+    deployment-only choices require a separate administrator change.
     """
     console.print()
     advanced: dict[str, Any] = {
@@ -4939,6 +5060,11 @@ def pick_advanced() -> dict[str, Any]:
             "Enable measured workflow pilots with paired baseline observations "
             "and explicit accepted outcomes? No savings are assumed.", default=False,
         ),
+        "allow_commitment_viability": _q_confirm(
+            "Enable a local promise-planning pilot based on the orders, capacity and stock "
+            "your team enters? It suggests decisions but does not reserve anything with suppliers.",
+            default=False,
+        ),
         "allow_signing_identity_transition": _q_confirm(
             "Permit installation administrators to review dual-signed publisher or "
             "update-key bridge releases in isolated recovery mode? This is a new "
@@ -5328,11 +5454,15 @@ def pick_advanced() -> dict[str, Any]:
             "Off by default; leave off for SQLite or single-tenant installs.",
             default=False,
         ),
-        "copilot_operation_families": _q_checkbox(
-            "Which action families may Copilot open when enabled? Native permissions still apply.",
-            ["learning", "preferences", "tasks", "clarifications", "reviews", "schedules",
-             "connections", "artifacts", "notifications", "models", "budget", "plugins"], default=["learning"],
-        ),
+        "copilot_operation_families": [
+            "commitments" if value == "Promise reviews" else value
+            for value in _q_checkbox(
+                "Which action families may Copilot open when enabled? Native permissions still apply.",
+                ["learning", "preferences", "tasks", "clarifications", "reviews", "schedules",
+                 "connections", "artifacts", "notifications", "models", "budget", "plugins",
+                 "Promise reviews"], default=["learning"],
+            )
+        ],
         "allow_copilot_operations": _q_confirm(
             "Let Copilot open the native controls in your selected action families? "
             "Changes require a fresh review and explicit confirmation. Native page "
@@ -5417,7 +5547,7 @@ def pick_advanced() -> dict[str, Any]:
             "Manage a local model server (vLLM / TGI / llama.cpp)? Writes "
             "[local_runtime] so `maverick local-runtime plan` composes the "
             "right batching / KV-cache / precision flags for your engine; "
-            "configure the engine + model in config.toml after the wizard. "
+            "an administrator must prepare the engine and model separately. "
             "Off by default.",
             default=False,
         ),
@@ -5539,7 +5669,8 @@ def pick_advanced() -> dict[str, Any]:
         )
         advanced["flows_action_episode_capture"] = _q_confirm(
             "  Enable retaining workflow examples for learning? "
-            "Each run needs enrollment, encrypted storage, an expiry and a separate human review.",
+            "Each run needs enrollment, encrypted storage, an expiry and a separate human review. "
+            "Older unsigned learned flows may stop until rebuilt from permitted signed examples.",
             default=False,
         )
         advanced["flows_action_workflow_learning"] = _q_confirm(
@@ -6313,7 +6444,7 @@ def pick_plugins() -> list[str]:
     except Exception as e:
         console.print(
             f"[yellow]Plugin discovery skipped: {e}[/yellow] "
-            "(no plugins will be offered; re-run the wizard to retry)"
+            "(no plugins will be offered during setup; review plugins in Lightwork later)"
         )
         return []
     if not discovered:
@@ -6769,8 +6900,8 @@ def pick_connectors() -> dict[str, str]:
     console.print(
         f"[dim]Lightwork ships {len(entries)} enterprise connectors "
         "(ServiceNow, Salesforce, Snowflake, SAP, Workday, Datadog, ...). "
-        "Full list: docs/connectors.md. Connect any now, or add them later in "
-        "~/.maverick/.env.[/dim]"
+        "Connect any now, or add supported systems later on the "
+        "Lightwork Connections page.[/dim]"
     )
     if not _q_confirm("Connect any enterprise systems now?", default=False):
         return {}
@@ -6978,8 +7109,8 @@ def pick_suites() -> dict[str, bool]:
     )
     console.print(
         "[dim]All enabled by default. A disabled suite's agents can't be "
-        "spawned. Editable later in ~/.maverick/config.toml under "
-        "[suites].[/dim]"
+        "spawned. Choose carefully: suite availability is an "
+        "installation-level choice.[/dim]"
     )
     if not _q_confirm("  Customize which suites are enabled? (No = keep all on)", default=False):
         return {}
@@ -7049,7 +7180,7 @@ def _cfg_deployment(deployment: str | None) -> list[str]:
     if not deployment:
         return []
     # Record the chosen deployment topology (laptop / vps / ...) for
-    # provenance + so a later `maverick init` can default to it.
+    # provenance.
     return [
         "[deployment]",
         f"type = {_toml_str(str(deployment))}",
@@ -7065,8 +7196,7 @@ def _cfg_governance(
     # Record the governance level chosen at onboarding. This is a label for
     # humans + dashboards: the enforceable knobs it expanded to ([audit],
     # [quotas], [self_improvement], retention, ...) are written explicitly
-    # elsewhere in this file, so hand-edits keep working. Re-run
-    # `maverick init` to switch levels.
+    # elsewhere in this file. Use the reviewed Settings control to switch levels.
     if profile:
         values.append(
             f"profile = {_toml_str(str(profile))}   "
@@ -8673,7 +8803,8 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
         _feature_locks.append("copilot_operations = true")
         families = advanced.get("copilot_operation_families", ["learning"])
         allowed_families = {"learning", "preferences", "tasks", "clarifications", "reviews", "schedules",
-                            "connections", "artifacts", "notifications", "models", "budget", "plugins"}
+                            "connections", "artifacts", "notifications", "models", "budget", "plugins",
+                            "commitments"}
         if not isinstance(families, list) or any(value not in allowed_families for value in families):
             raise ValueError("Choose registered Copilot action families.")
         lines.append("[copilot]")
@@ -8700,6 +8831,8 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
         _feature_locks.append("employee_departures = true")
     if advanced.get("allow_outcome_measurement") is True:
         _feature_locks.append("outcome_measurement = true")
+    if advanced.get("allow_commitment_viability") is True:
+        _feature_locks.append("commitment_viability = true")
     if advanced.get("allow_workspace_recovery") is True:
         _feature_locks.append("workspace_recovery = true")
     if advanced.get("allow_signing_identity_transition") is True:
@@ -9454,18 +9587,27 @@ def _write_wizard_file(path: Path, body: str) -> None:
     console.print(f"[green]ok[/green] wrote {path} (chmod 600)")
 
 
-def _publish_wizard_configuration(config_body: str, env_body: str | None) -> None:
-    """Publish complete files, rolling environment changes back on config failure.
-
-    Each file is atomic. This does not claim crash-atomic replacement of two
-    directory entries; ordinary save failures restore the previous pair.
-    """
+def _publish_wizard_configuration(
+    config_body: str, env_body: str | None, *, protect_existing: bool = False,
+) -> None:
+    """Publish complete files; first installs can resume after an abrupt exit."""
     from maverick.file_lock import atomic_write_text, cross_process_lock
 
     tomllib.loads(config_body)  # Never replace .env for an invalid configuration.
     with cross_process_lock(CONFIG_FILE, strict=True):
+        if protect_existing and _existing_setup():
+            raise FileExistsError(
+                "Lightwork found saved setup files. Nothing was replaced; "
+                "open Lightwork Settings to make changes."
+            )
         old_env = ENV_FILE.read_text(encoding="utf-8") if ENV_FILE.exists() else None
         env_changed = env_body is not None and not _wizard_file_unchanged(ENV_FILE, env_body.encode("utf-8"))
+        receipt_path = _pending_setup_path()
+        if protect_existing:
+            receipt = json.dumps({"version": 1, "config": config_body, "env": env_body})
+            if len(receipt.encode("utf-8")) > 4_000_000:
+                raise ValueError("Lightwork setup is too large to save safely")
+            atomic_write_text(receipt_path, receipt, mode=0o600)
         try:
             if env_body is not None:
                 _write_wizard_file(ENV_FILE, env_body)
@@ -9476,7 +9618,11 @@ def _publish_wizard_configuration(config_body: str, env_body: str | None) -> Non
                     ENV_FILE.unlink(missing_ok=True)
                 else:
                     atomic_write_text(ENV_FILE, old_env, mode=0o600)
+            if protect_existing and not CONFIG_FILE.exists():
+                receipt_path.unlink(missing_ok=True)
             raise
+        if protect_existing:
+            receipt_path.unlink()
 
 
 def _prepare_wizard_workspace(sandbox: dict[str, Any]) -> dict[str, Any]:
@@ -9554,6 +9700,7 @@ def write_config(
     per_tenant_keys: bool = False,
     first_outcome: dict[str, Any] | None = None,
     approval: dict[str, Any] | None = None,
+    protect_existing: bool = False,
 ) -> None:
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     sandbox = _prepare_wizard_workspace(sandbox)
@@ -9742,7 +9889,7 @@ def write_config(
     # secret-bearing in backups/log redaction. chmod 600 so multi-user hosts
     # don't leak it to other accounts.
     config_body = "\n".join(lines) + "\n"
-    _publish_wizard_configuration(config_body, env_body)
+    _publish_wizard_configuration(config_body, env_body, protect_existing=protect_existing)
 
 
 def smoke_test() -> bool:
@@ -9820,15 +9967,18 @@ def run_fast() -> int:
     Skips every prompt. Writes a minimal config that runs on Anthropic
     Claude (BYOK via ANTHROPIC_API_KEY env), the Docker sandbox when its
     daemon is up (else local), balanced safety, $5/run cap. Users can
-    `maverick init` later to customize.
+    use Lightwork Settings after installation to change supported options.
     """
+    guard = _first_setup_guard()
+    if guard is not None:
+        return guard
     welcome()
     if not preflight():
         console.print("[red]Preflight failed.[/red] Fix the issues above and re-run.")
         return 1
     console.print(
         "[bold]Fast setup:[/bold] using safe defaults. "
-        "Run `maverick init` (no --fast) anytime to customize.\n"
+        "Open Lightwork Settings after setup to make changes.\n"
     )
     providers = ["anthropic"]
     role_models: dict[str, str] = {}  # use ROLE_MODELS defaults
@@ -9856,13 +10006,12 @@ def run_fast() -> int:
     if backend == "local":
         denied_tools.extend(["shell", "write_file", "apply_patch", "str_replace_editor"])
         console.print(
-            "[yellow]![/yellow] Docker daemon not detected — using the "
-            "[bold]local[/bold] sandbox with host-mutating tools disabled. "
-            "Run [bold]maverick init[/bold] to switch to docker once it's up."
+            "[yellow]![/yellow] Docker isn't running. Lightwork can answer questions, "
+            "but it cannot create files or run programs in this setup."
         )
     capabilities = {"computer_use": False, "browser": False, "ros": False}
     # Pick up the API key from the env if it's already there;
-    # otherwise the wizard's later run can populate ~/.maverick/.env.
+    # otherwise a key can be added from Lightwork Settings.
     keys: dict[str, str] = {}
     if os.environ.get("ANTHROPIC_API_KEY"):
         keys["ANTHROPIC_API_KEY"] = os.environ["ANTHROPIC_API_KEY"]
@@ -9876,6 +10025,7 @@ def run_fast() -> int:
         keys,
         capabilities,
         tool_acl={"denied_tools": denied_tools},
+        protect_existing=True,
     )
     # smoke_test() returns a bool and it was discarded, so `maverick init
     # --fast` printed "Fast setup finished" and exited 0 over a broken install
@@ -9889,8 +10039,8 @@ def run_fast() -> int:
                 "[bold red]Fast setup failed its smoke test.[/bold red]\n\n"
                 "The config was written, but the checks above did not pass, so "
                 "this install is not ready to run.\n"
-                "Fix the failures listed above, then re-run "
-                "[bold]maverick init --fast[/bold] (or `maverick doctor`).",
+                "Review the failures above and open Lightwork Settings "
+                "to finish setup.",
                 border_style="red",
             )
         )
@@ -9900,7 +10050,7 @@ def run_fast() -> int:
         Panel.fit(
             "[bold green]Fast setup finished.[/bold green]\n\n"
             'Try: [bold]maverick start "hello"[/bold]\n'
-            "(If ANTHROPIC_API_KEY wasn't set, edit ~/.maverick/.env first.)\n"
+            "(If no provider key was saved, add one in Settings first.)\n"
             "[dim]The maverick command is also available as lightwork.[/dim]",
             border_style="green",
         )
@@ -9984,20 +10134,22 @@ def pick_mode() -> str:
     return pick.split()[0]
 
 
-def _consumer_budget() -> dict[str, float]:
+def _consumer_budget() -> dict[str, Any]:
     """Single-question budget chip picker for consumer mode."""
     pick = _q_select(
-        "Add an optional spending limit to each task?",
-        ["No task limit", "$1", "$5", "$20", "custom"],
-        default="No task limit",
+        "Task limits for each goal? Standard is $2 and 30 minutes.",
+        ["Standard ($2, 30 minutes)", "No task limit", "$1", "$5", "$20", "custom"],
+        default="Standard ($2, 30 minutes)",
     )
     if pick == "No task limit":
-        return {}
+        return {"task_limits_enabled": False}
+    if pick == "Standard ($2, 30 minutes)":
+        return {"max_dollars": 2.0, "max_wall_seconds": 1800.0}
     if pick == "custom":
         dollars = _safe_float(_q_text("  Custom cap ($)", default="5.0"), default=5.0)
     else:
         dollars = float(pick.lstrip("$"))
-    return {"max_dollars": dollars}
+    return {"max_dollars": dollars, "max_wall_seconds": 1800.0}
 
 
 def _consumer_api_key() -> dict[str, str]:
@@ -10005,7 +10157,7 @@ def _consumer_api_key() -> dict[str, str]:
 
     No DevTools paste, no jargon. Three escape hatches:
       1. Paste the key (the default).
-      2. Skip for now (write config without keys; user can re-run later).
+      2. Skip for now (write config without keys; add one in Settings later).
       3. Open the console in a browser to make a key.
     """
     console.print()
@@ -10017,8 +10169,7 @@ def _consumer_api_key() -> dict[str, str]:
     val = _q_secret("  Paste your Anthropic API key (leave blank to skip):")
     if not val.strip():
         console.print(
-            "[yellow]Skipped.[/yellow] You can add one later by running "
-            "[bold]maverick init[/bold] again."
+            "[yellow]Skipped.[/yellow] You can add one later in Lightwork Settings."
         )
         return {}
     # Validate with the 7-day cache.
@@ -10043,10 +10194,11 @@ def write_consumer_config(
     user_name: str,
     keys: dict[str, str],
     workdir: str,
-    budget: dict[str, float],
+    budget: dict[str, Any],
     profile: str | None = None,
     first_outcome: str | None = None,
-) -> None:
+    protect_existing: bool = False,
+) -> str:
     """Write a consumer-mode config with the safety-seat safe defaults.
 
     Single source of truth shared by the CLI consumer flow
@@ -10058,7 +10210,8 @@ def write_consumer_config(
     is identical at every level. Creates the workspace dir, and the sample
     workspace for ``first_outcome`` (a department slug from
     :mod:`maverick.sample_outcomes`) when one was picked. Raises on write
-    failure (caller renders the branded error).
+    failure (caller renders the branded error). Returns the work-area backend
+    actually saved so both installers can explain its capabilities honestly.
     """
     preset = GOVERNANCE_PROFILES.get(profile or "")
     if preset is None:
@@ -10113,18 +10266,23 @@ def write_consumer_config(
         web_search_enabled=True,
         governance_profile=profile,
         first_outcome=first_outcome_table,
+        protect_existing=protect_existing,
     )
+    return backend
 
 
 def run_consumer() -> int:
     """Four-question consumer flow. Writes a minimal config with
     consumer-grade safe defaults, then prints a one-line demo command."""
+    guard = _first_setup_guard()
+    if guard is not None:
+        return guard
     console.print()
     console.print(
         Panel.fit(
             "[bold]Lightwork setup[/bold]\n\n"
-            "Five quick questions. About a minute. You can change anything later\n"
-            "by running [bold]maverick init[/bold] again.",
+            "Five quick questions. About a minute. You can change supported\n"
+            "options later in Lightwork Settings.",
             border_style="cyan",
         )
     )
@@ -10155,17 +10313,25 @@ def run_consumer() -> int:
     department = pick_first_outcome()
 
     try:
-        write_consumer_config(
+        backend = write_consumer_config(
             user_name=user_name,
             keys=keys,
             workdir=workdir,
             budget=budget,
             profile=profile,
             first_outcome=department,
+            protect_existing=True,
         )
     except Exception as e:
         show_install_failure(e)
         return 1
+
+    if backend == "local":
+        console.print(
+            "[yellow]File changes and program execution are off.[/yellow] "
+            "Docker was not running during setup. Lightwork can still answer "
+            "questions and work with the features that do not need a work area."
+        )
 
     # First-outcome nudge. Don't run the task here (the kernel doesn't
     # stream into a wizard window today, and shelling out from inside
@@ -10192,8 +10358,7 @@ def run_consumer() -> int:
         console.print(
             Panel.fit(
                 f"[bold yellow]Setup saved without an API key, {user_name}.[/bold yellow]\n\n"
-                "Add one later by exporting ANTHROPIC_API_KEY or by running\n"
-                "[bold]maverick init[/bold] again.",
+                "Open Lightwork Settings to add a provider key when ready.",
                 border_style="yellow",
             )
         )
@@ -10350,15 +10515,11 @@ GOVERNANCE_CHOICES: list[str] = [
 
 
 def _prior_governance_profile() -> str | None:
-    """The [governance] profile recorded by a previous `maverick init`, if any.
+    """The [governance] profile recorded by a previous installation, if any.
 
-    Same pattern as pick_deployment's prior-choice defaulting: a re-run of the
-    wizard must default to what the operator ALREADY chose. Without this, an
-    operator on a regulated install re-running init to change a name would
-    silently downgrade to essentials -- dropping audit signing, quotas, and
-    signed approvals -- by accepting the default. Reads CONFIG_FILE (the file
-    this wizard writes) rather than the kernel loader so it honors the same
-    path every other wizard read/write uses.
+    Kept for callers that preview the onboarding choice. The active setup
+    entry points refuse to overwrite a saved installation; governance changes
+    belong to Settings > All settings. Reads the wizard's configured path.
     """
     try:
         cfg = tomllib.loads(CONFIG_FILE.read_text())
@@ -10371,7 +10532,7 @@ def _prior_governance_profile() -> str | None:
 def pick_governance_profile() -> str:
     """One onboarding question: how much governance does this business need?
 
-    Defaults to the previously configured level on a re-run, else
+    Defaults to a previously configured level when previewed, else
     :data:`DEFAULT_GOVERNANCE_PROFILE`; falls back to the default on anything
     it doesn't recognise, so an <Enter> or a stubbed answer never lands
     outside the three supported levels.
@@ -10380,7 +10541,7 @@ def pick_governance_profile() -> str:
     console.print(
         "[dim]Every level gets self-learning and self-improvement. The level "
         "sets how much governance wraps it -- you can change it any time by "
-        "re-running maverick init.[/dim]"
+        "using Lightwork > Settings > All settings.[/dim]"
     )
     prior = _prior_governance_profile()
     default = next(
@@ -10401,6 +10562,9 @@ def run_express() -> int:
     single-user feature at once. The shortcut for "I want everything on"
     without sitting through the full advanced wizard. Host-dangerous and
     infra-shaped toggles stay off (and are listed for the user)."""
+    guard = _first_setup_guard()
+    if guard is not None:
+        return guard
     console.print()
     console.print(
         Panel.fit(
@@ -10409,7 +10573,7 @@ def run_express() -> int:
             "the flow engine, named connections, the self-improvement lifecycle\n"
             "(reflexion, dreaming, experience, self-harness, data engine),\n"
             "governed memory, web search, durable execution, and all 53 suites.\n\n"
-            "[dim]Left off (enable later via `maverick init` advanced): computer/\n"
+            "[dim]Left off pending administrator review: computer/\n"
             "browser control, code execution, autonomous self-modification, at-rest\n"
             "encryption + multi-tenancy, messaging channels, and license enforcement\n"
             "(leaving enforcement off is what keeps every paid feature unlocked).[/dim]",
@@ -10488,29 +10652,35 @@ def run_express() -> int:
             ),
             governance_profile=profile,
             tool_acl={"denied_tools": denied_tools},
+            protect_existing=True,
         )
     except Exception as e:
         show_install_failure(e)
         return 1
 
+    if backend == "local":
+        console.print(
+            "[yellow]File changes and program execution are off.[/yellow] "
+            "Docker was not running during setup. Lightwork can still answer "
+            "questions and use features that do not need a work area."
+        )
+
     console.print()
     if keys:
         console.print(
             Panel.fit(
-                f"[bold green]Everything's on, {user_name}.[/bold green]\n\n"
+                f"[bold green]Setup saved, {user_name}.[/bold green]\n\n"
                 "Open the dashboard:\n"
                 "  [bold]maverick dashboard[/bold]   web UI at http://127.0.0.1:8765\n\n"
-                "[dim]Change anything in ~/.maverick/config.toml, or re-run "
-                "maverick init.[/dim]",
+                "[dim]Open Lightwork Settings to change supported options.[/dim]",
                 border_style="green",
             )
         )
     else:
         console.print(
             Panel.fit(
-                f"[bold yellow]Everything's on, but no API key yet, {user_name}.[/bold yellow]\n\n"
-                "Add one by exporting ANTHROPIC_API_KEY or re-running "
-                "[bold]maverick init[/bold].",
+                f"[bold yellow]Setup saved without an API key, {user_name}.[/bold yellow]\n\n"
+                "Open Lightwork Settings to add a provider key.",
                 border_style="yellow",
             )
         )
@@ -10834,7 +11004,22 @@ def _run_plugin_picks(state: dict[str, Any], _announce, channels: dict[str, Any]
     }
 
 
+def _run_short_setup_mode(resume: bool) -> int | None:
+    # A saved partial state belongs to the advanced flow, not the mode picker.
+    if resume:
+        return None
+    mode = pick_mode()
+    if mode == "consumer":
+        return run_consumer()
+    if mode == "express":
+        return run_express()
+    return None
+
+
 def run(fast: bool = False, resume: bool = False) -> int:
+    guard = _first_setup_guard()
+    if guard is not None:
+        return guard
     if fast:
         return run_fast()
     # A non-interactive stdin (CI, Docker build, `... | maverick init`) can't
@@ -10845,20 +11030,14 @@ def run(fast: bool = False, resume: bool = False) -> int:
         console.print(
             "[yellow]maverick init needs an interactive terminal.[/yellow]\n"
             "  - run it in a terminal, or\n"
-            "  - use  [bold]maverick init --fast[/bold]  for recommended defaults, or\n"
-            "  - edit  ~/.maverick/config.toml  by hand (see docs/configuration.md)."
+            "  - use  [bold]maverick init --fast[/bold]  for recommended defaults.\n"
+            "After setup, use Lightwork Settings to make changes."
         )
         return 1
     welcome()
-    # Council round-2: mode picker on every launch. Consumer is default.
-    # Skip the picker on --resume since it implies an in-progress
-    # advanced flow.
-    if not resume:
-        mode = pick_mode()
-        if mode == "consumer":
-            return run_consumer()
-        if mode == "express":
-            return run_express()
+    short_result = _run_short_setup_mode(resume)
+    if short_result is not None:
+        return short_result
     if not preflight():
         console.print(
             "[red]Preflight failed.[/red] Fix the issues above and re-run `maverick init`."
@@ -11117,6 +11296,7 @@ def run(fast: bool = False, resume: bool = False) -> int:
         # as tier-less) or borrowing a level name the knobs may not match.
         governance_profile="custom",
         per_tenant_keys=per_tenant_keys,
+        protect_existing=True,
     )
     _clear_partial()
     ok = smoke_test()

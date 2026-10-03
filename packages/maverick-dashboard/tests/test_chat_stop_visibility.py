@@ -33,6 +33,18 @@ def test_stopped_result_is_not_an_answer_or_download(chat_env):
     assert client.get(f"/chat/goal/{goal_id}/download.md").status_code == 409
 
 
+def test_provider_failure_is_stopped_with_a_working_connection_route(chat_env):
+    client, world = chat_env
+    goal_id = world.create_goal("Prepare the report", "")
+    world.set_goal_status(goal_id, "blocked", result="provider connection refused")
+
+    page = client.get(f"/chat/goal/{goal_id}")
+    assert page.status_code == 200
+    assert 'data-status="blocked" hidden>stopped</span>' in page.text
+    assert 'id="halt-action-link" href="/connections"' in page.text
+    assert "couldn&#39;t reach the AI service" in page.text or "couldn&#x27;t reach the AI service" in page.text
+
+
 def test_stopped_prior_turn_is_sanitized_in_page_and_paged_history(chat_env):
     client, world = chat_env
     root = world.create_goal("First question", "")

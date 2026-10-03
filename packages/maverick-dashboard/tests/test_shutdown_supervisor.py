@@ -227,7 +227,7 @@ def test_actual_composed_dashboard_registers_all_default_components():
     with TestClient(app, headers={"Origin": "http://testserver"}):
         supervisor = app.state.lifecycle_supervisor
         assert set(supervisor.components) == {
-            "automation", "security", "finance", "red_team", "shield_updates", "ai_inventory",
+            "automation", "orphan_recovery", "security", "finance", "red_team", "shield_updates", "ai_inventory",
             "ai_cost", "daily_digest", "identity", "data_use_checks", "deadline_alerts",
             "entitlements", "voice", "privacy_discovery", "privacy_publication", "ai_governance",
             "consent_scan", "trc_evidence", "data_use_audit", "unified_audit", "third_party_feed",

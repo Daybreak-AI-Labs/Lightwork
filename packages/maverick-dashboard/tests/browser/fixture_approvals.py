@@ -19,13 +19,21 @@ def install(app, world, tenant, principal):
     @app.post("/__browser_fixture/approvals/setup", include_in_schema=False)
     async def setup(request: Request):
         owner(request)
+        rehearsal = request.query_params.get("kind") == "rehearsal"
+        if request.query_params.get("kind", "") not in ("", "rehearsal"):
+            raise HTTPException(422, "unsupported fixture kind")
         card = build_approval_card(
-            action="salesforce.update_records",
-            summary="Update 12 Salesforce account records",
-            target_label="Salesforce: 12 account records",
-            target={"object": "Account", "ids": ["001A", "001B"]},
-            parameters={"field": "owner"},
-            parameter_summary=["Change the owner of 12 accounts to Priya"],
+            action="write_file" if rehearsal else "salesforce.update_records",
+            summary=("Lightwork has too little reliable experience with this step. Review it before work continues."
+                     if rehearsal else "Update 12 Salesforce account records"),
+            target_label="Task 42: save a file" if rehearsal else "Salesforce: 12 account records",
+            target=({"goal_id": 42, "tool": "write_file"} if rehearsal
+                    else {"object": "Account", "ids": ["001A", "001B"]}),
+            parameters=({"goal_id": 42, "tool": "write_file", "arguments": {"path": "report.txt"}}
+                        if rehearsal else {"field": "owner"}),
+            parameter_summary=(["Allow Lightwork to save a file once in this task.",
+                                "Other safety checks still apply."] if rehearsal
+                               else ["Change the owner of 12 accounts to Priya"]),
             actor="user:browser-reviewer",
             workspace=tenant,
             role="operator",
@@ -34,16 +42,20 @@ def install(app, world, tenant, principal):
             credential_versions={"salesforce_token_sha256": "a" * 64},
             budget={"currency": "USD", "maximum": 2.0},
             expires_at=time.time() + 3600,
-            known_effects=["Account owners change in Salesforce."],
-            unresolved_assumptions=[],
-            before="The 12 accounts belong to Sam.",
-            after="The 12 accounts belong to Priya.",
+            known_effects=(["Lightwork may try the reviewed step once."] if rehearsal
+                           else ["Account owners change in Salesforce."]),
+            unresolved_assumptions=(["Approval does not guarantee the step will succeed."]
+                                    if rehearsal else []),
+            before="The proposed step has not run." if rehearsal else "The 12 accounts belong to Sam.",
+            after=("The reviewed step is eligible for the remaining safety checks."
+                   if rehearsal else "The 12 accounts belong to Priya."),
             irreversible=True,
         )
         with tenant_scope(tenant=tenant):
             approval_id = world.create_approval(
-                "salesforce.update_records", risk="high", scope="Salesforce accounts",
-                detail=encode_approval_detail(card), provenance="consent",
+                "write_file" if rehearsal else "salesforce.update_records", risk="high",
+                scope="Task 42: save a file" if rehearsal else "Salesforce accounts",
+                detail=encode_approval_detail(card), provenance="rehearsal" if rehearsal else "consent",
                 requested_by=principal,
             )
         return {"synthetic": True, "approval_id": approval_id, "provider_calls": 0}

@@ -15,10 +15,17 @@
   var providerSetup = document.getElementById("mv-copilot-provider-setup");
   var hello = document.getElementById("mv-copilot-hello");
   var sendButton = document.getElementById("mv-copilot-send");
+  var clearButton = document.getElementById("mv-copilot-clear");
   if (!fab || !panel || !closeButton || !tips || !prompts || !log ||
-      !form || !input || !note || !sendButton || !providerSetup) return;
+      !form || !input || !note || !sendButton || !clearButton || !providerSetup) return;
 
   var history = [];
+  var recent = [];
+  var recentLoaded = false;
+  var recentAt = 0;
+  var recentKey = 'lightwork:copilot:recent:v1';
+  var recentAge = 60 * 60 * 1000;
+  var recentTimer = null;
   var clientScope = null, failedMessage = null;
   var opener = null;
   var generation = 0, sending = false, catalog = null, actionBusy = false;
@@ -46,6 +53,77 @@
     while (element.firstChild) element.removeChild(element.firstChild);
   }
 
+  function forgetRecent() {
+    if (recentTimer !== null) { clearTimeout(recentTimer); recentTimer = null; }
+    recent = []; history = []; recentLoaded = false; recentAt = 0;
+    try { sessionStorage.removeItem(recentKey); } catch (_) { /* This tab cannot retain chat. */ }
+  }
+
+  function stopPendingReply() {
+    generation += 1; sending = false; input.readOnly = false;
+    sendButton.disabled = false; sendButton.removeAttribute('aria-busy');
+  }
+
+  function armRecentExpiry() {
+    if (recentTimer !== null) clearTimeout(recentTimer);
+    if (recentAt) recentTimer = setTimeout(expireRecent,
+      Math.max(1, recentAge - (Date.now() - recentAt) + 1));
+  }
+
+  function rememberRecent(question, reply) {
+    if (!clientScope) return;
+    recent.push({role: 'user', text: question}, {role: 'bot', text: reply});
+    recent = recent.slice(-8);
+    recentAt = Date.now();
+    try { sessionStorage.setItem(recentKey, JSON.stringify({scope: clientScope, at: recentAt, turns: recent})); }
+    catch (_) { /* The visible conversation still works in this page. */ }
+    armRecentExpiry();
+  }
+
+  function expireRecent() {
+    if (recentAt && Date.now() - recentAt > recentAge) {
+      stopPendingReply();
+      forgetRecent(); recentLoaded = true; clear(log);
+      failedMessage = null; input.value = '';
+      note.textContent = 'The earlier chat expired after an hour without a reply.';
+    }
+  }
+
+  // Start the expiry clock even if this page loads while Copilot stays closed.
+  // The transcript is not rendered until the current account scope is checked.
+  try {
+    var waiting = JSON.parse(sessionStorage.getItem(recentKey) || 'null');
+    if (waiting && Number.isFinite(waiting.at)) {
+      recentAt = waiting.at;
+      if (waiting.at > Date.now() || Date.now() - waiting.at > recentAge) forgetRecent();
+      else armRecentExpiry();
+    }
+  } catch (_) { forgetRecent(); }
+
+  function restoreRecent(scope) {
+    if (recentLoaded) return;
+    recentLoaded = true;
+    var saved = null;
+    try { saved = JSON.parse(sessionStorage.getItem(recentKey) || 'null'); } catch (_) { /* Ignore malformed local state. */ }
+    if (!saved || saved.scope !== scope || !Number.isFinite(saved.at) ||
+        saved.at > Date.now() || Date.now() - saved.at > recentAge || !Array.isArray(saved.turns) ||
+        saved.turns.length > 8 || saved.turns.some(function (turn) {
+          return !turn || !['user', 'bot'].includes(turn.role) || typeof turn.text !== 'string' ||
+            !turn.text || turn.text.length > 2000;
+        })) {
+      forgetRecent(); recentLoaded = true; return;
+    }
+    recent = saved.turns;
+    recentAt = saved.at;
+    armRecentExpiry();
+    history = recent.filter(function (turn) { return turn.role === 'user'; })
+      .slice(-6).map(function (turn) { return {role: 'user', content: turn.text}; });
+    var pending = Array.from(log.children);
+    clear(log);
+    recent.forEach(function (turn) { addMessage(turn.role, turn.text); });
+    pending.forEach(function (row) { log.appendChild(row); });
+  }
+
   function addMessage(role, text, actionLink) {
     var message = document.createElement("div");
     message.className = "mv-copilot__msg mv-copilot__msg--" + role;
@@ -62,6 +140,16 @@
     log.appendChild(message);
     log.scrollTop = log.scrollHeight;
     return message;
+  }
+
+  function completeReply(question, reply, actionLink) {
+    input.value = '';
+    addMessage('bot', reply, actionLink);
+    rememberRecent(question, reply);
+    // Earlier assistant text is display-only; only user questions become
+    // untrusted context on a later model request.
+    history.push({role: 'user', content: question});
+    history = history.slice(-6);
   }
 
   function renderContext(context) {
@@ -95,13 +183,18 @@
     var setup = payload && payload.provider_setup;
     var readiness = payload && payload.workspace_readiness;
     var next = readiness && readiness.next_action;
+    var routeStatus = payload && payload.model_route_status;
+    var modelBlocked = routeStatus === "pricing" || routeStatus === "model";
     // Not ready: say so plainly, with one button to the place that fixes it,
     // instead of an empty panel. The built-in page guide still answers.
-    if (readiness && readiness.verdict !== "ready" && hello) {
+    if (modelBlocked && hello) {
+      hello.textContent = String(payload.model_route_reason || "Choose an available AI model in Settings.") +
+        " The built-in page guide still answers questions about this page.";
+    } else if (readiness && readiness.verdict !== "ready" && hello) {
       hello.textContent = "Connect an AI service to use Copilot. " + String(readiness.reason || "") +
         " Until then, the built-in page guide answers questions about this page.";
     }
-    if (next && typeof next.href === "string" && setupLinks.indexOf(next.href) !== -1) {
+    if (!modelBlocked && next && typeof next.href === "string" && setupLinks.indexOf(next.href) !== -1) {
       setup = {href: next.href, label: next.label};
     }
     var href = setup && typeof setup.href === "string" ? setup.href : "";
@@ -141,19 +234,20 @@
     var response = await deadlineFetch('/api/v1/copilot/context?page=' + encodeURIComponent(window.location.pathname),
       {headers: {Accept: 'application/json'}, credentials: 'same-origin', cache: 'no-store'});
     if (!response.ok || response.redirected) {
-      if ([401, 403].includes(response.status) || response.redirected) { history = []; input.value = ''; clear(log); clientScope = null; }
+      if ([401, 403].includes(response.status) || response.redirected) { forgetRecent(); input.value = ''; clear(log); clientScope = null; }
       throw new Error('scope unavailable');
     }
     var fresh = await response.json();
     if (started !== generation || panel.hidden) return false;
     if (!fresh || typeof fresh.client_context !== 'string' || !/^[a-f0-9]{64}$/.test(fresh.client_context)) throw new Error('scope unavailable');
     if (clientScope && clientScope !== fresh.client_context) {
-      history = []; input.value = ''; clear(log); catalog = null;
+      forgetRecent(); input.value = ''; clear(log); catalog = null;
       clientScope = fresh.client_context;
       note.textContent = 'Your account or workspace changed. Earlier questions and drafts were cleared. Enter a new question for this workspace.';
       return false;
     }
-    clientScope = fresh.client_context; renderContext(fresh); renderProviderSetup(fresh); return true;
+    clientScope = fresh.client_context; restoreRecent(clientScope);
+    renderContext(fresh); renderProviderSetup(fresh); return true;
   }
 
   function controller() { return window.LightworkLearningExample; }
@@ -199,14 +293,18 @@
       var pending = validCatalog(result.body) && result.body.record && result.body.record.status === 'audit_pending';
       if ((!result.ok && !pending) || !validCatalog(result.body)) {
         var hadContext = !!catalog;
-        if ([401,403,409].includes(result.status)) { history = []; input.value = ""; clear(log); }
+        var code = result.body && result.body.detail && result.body.detail.code;
+        if (result.status === 401 || result.status === 409 ||
+            (result.status === 403 && code !== 'operation_disabled')) {
+          forgetRecent(); input.value = ""; clear(log);
+        }
         catalog = null; clear(operationButtons); operations.hidden = false;
         operationStatus.textContent = 'Actions are unavailable here. Your unsent question is kept unless access changed.';
         if (hadContext || actionHost.contains(document.getElementById('le-card'))) current.invalidate();
         return null;
       }
       if (catalog && catalog.scope !== result.body.scope) {
-        current.invalidate(); history = []; input.value = ""; clear(log);
+        current.invalidate(); forgetRecent(); input.value = ""; clear(log);
         note.textContent = 'Your workspace or access changed. Earlier questions and reviews have been cleared.';
       }
       catalog = result.body; renderOperations(catalog); return catalog;
@@ -219,27 +317,42 @@
     }
   }
   async function openOperation(id) {
-    if (actionBusy || !allowedOperations.includes(id) || !controller() || controller().isBusy()) return;
+    if (actionBusy || !allowedOperations.includes(id) || !controller() || controller().isBusy()) return false;
     actionBusy = true; var started = generation;
     operationStatus.textContent = 'Checking the current example…';
     Array.from(operationButtons.children).forEach(function (button) { button.disabled = true; });
     try {
       var fresh = await loadOperations(started);
-      if (!fresh || started !== generation || panel.hidden) return;
+      if (!fresh || started !== generation || panel.hidden) return false;
       var registered = fresh.operations.find(function (item) { return item.id === id && item.available === true; });
-      if (!registered || !controller().attach(actionHost, fresh)) return;
+      if (!registered || !controller().attach(actionHost, fresh)) return false;
       if (id === 'learning_example.withdraw') await controller().review();
       else { var refresh = document.getElementById('le-refresh'); if (refresh) refresh.focus(); }
+      return true;
     } finally {
       actionBusy = false;
       if (catalog && started === generation && !panel.hidden) renderOperations(catalog);
     }
   }
 
-  document.addEventListener('lightwork:copilot-context-changed', function () { history = []; clear(log); catalog = null; if (controller()) controller().invalidate(); });
+  document.addEventListener('lightwork:copilot-context-changed', function () {
+    stopPendingReply(); forgetRecent(); recentLoaded = true; clear(log);
+    failedMessage = null; input.value = ''; catalog = null;
+    note.textContent = 'The selected work changed. Earlier questions and drafts were cleared.';
+    if (controller()) controller().invalidate();
+  });
+  window.addEventListener('focus', expireRecent);
+  document.addEventListener('visibilitychange', expireRecent);
+
+  clearButton.addEventListener('click', function () {
+    if (sending) stopPendingReply();
+    forgetRecent(); recentLoaded = true; clear(log); failedMessage = null;
+    input.value = ''; note.textContent = 'Recent chat cleared from this tab. An earlier request may still finish, but its reply will not appear here.'; input.focus();
+  });
 
   function open() {
     generation += 1;
+    expireRecent();
     opener = document.activeElement;
     panel.hidden = false;
     fab.setAttribute("aria-expanded", "true");
@@ -272,6 +385,7 @@
 
   form.addEventListener("submit", async function (event) {
     event.preventDefault();
+    expireRecent();
     var message = (input.value || "").trim();
     if (!message || sending || actionBusy || (controller() && controller().isBusy())
         || (window.LightworkProductOperations && window.LightworkProductOperations.isBusy())) return;
@@ -296,24 +410,49 @@
           && proposed.body.record.status === 'audit_pending';
         if ((!proposed.ok && !pendingProposal) || !validCatalog(proposed.body)
             || proposed.body.scope !== catalog.scope) {
-          if ([401,403,409].includes(proposed.status) || (validCatalog(proposed.body) && proposed.body.scope !== catalog.scope)) { controller().invalidate(); history = []; input.value = ""; clear(log); }
+          if ([401,403,409].includes(proposed.status) || (validCatalog(proposed.body) && proposed.body.scope !== catalog.scope)) { controller().invalidate(); forgetRecent(); input.value = ""; clear(log); }
           catalog = null;
           throw new Error('Current operation context could not be confirmed');
         }
         if (pendingProposal) {
-          addMessage('bot', 'This decision is waiting for its audit record. Check the current status before doing anything else.');
-          await openOperation('learning_example.status'); return;
+          if (await openOperation('learning_example.status')) {
+            if (started === generation && !panel.hidden) completeReply(message, 'This decision is waiting for its audit record. Check the current status before doing anything else.');
+          } else if (started === generation && !panel.hidden) {
+            var statusKept = requestRow.isConnected && input.value.trim() === message;
+            failedMessage = statusKept ? requestRow : null;
+            note.textContent = statusKept
+              ? 'The current example status could not be opened. Your question is kept; use the native page to check it before trying again.'
+              : 'Access or selection changed. Earlier questions were cleared. Reopen the native page to check current status.';
+          }
+          return;
         }
         var proposal = proposed.body.proposal;
         if (proposal && allowedOperations.includes(proposal.operation_id)) {
-          addMessage('bot', proposal.operation_id === 'learning_example.withdraw'
-            ? 'Review this example below. Enter your reason in the form and confirm when you are ready.'
-            : 'Here is the current learning example.');
-          await openOperation(proposal.operation_id); return;
+          if (await openOperation(proposal.operation_id)) {
+            if (started === generation && !panel.hidden) completeReply(message, proposal.operation_id === 'learning_example.withdraw'
+              ? 'Review this example below. Enter your reason in the form and confirm when you are ready.'
+              : 'Here is the current learning example.');
+          } else if (started === generation && !panel.hidden) {
+            var proposalKept = requestRow.isConnected && input.value.trim() === message;
+            failedMessage = proposalKept ? requestRow : null;
+            note.textContent = proposalKept
+              ? 'The current example could not be opened. Your question is kept; use the native page or retry after checking access.'
+              : 'Access or selection changed. Earlier questions were cleared. Reopen the native page to check current status.';
+          }
+          return;
         }
       }
-      if (window.LightworkProductOperations && await window.LightworkProductOperations.propose(message)) {
-        if (started === generation && !panel.hidden) addMessage('bot', 'Review the selected control and its current source below. Nothing has been changed.');
+      var productProposal = window.LightworkProductOperations && await window.LightworkProductOperations.propose(message);
+      if (productProposal === 'unavailable') {
+        if (started === generation && !panel.hidden) {
+          failedMessage = requestRow;
+          note.textContent = 'Copilot could not open the current control. Your question is kept. Check the native page or retry after the connection returns.';
+        }
+        return;
+      }
+      if (productProposal) {
+        if (started === generation && !panel.hidden)
+          completeReply(message, 'Review the selected control and its current source below. Nothing has been changed.');
         return;
       }
       var response = await deadlineFetch("/api/v1/copilot", {
@@ -332,13 +471,7 @@
       if (started !== generation || panel.hidden) return;
       if (!response.ok || !payload.reply) throw new Error('unavailable');
       if (!(await verifyScope(started))) return;
-      input.value = "";
-      addMessage("bot", payload.reply, payload.action_link);
-      // Only prior user questions return to the server. Model replies stay in
-      // this browser log and can never be replayed as caller-supplied assistant
-      // authority on a later request.
-      history.push({role: "user", content: message});
-      history = history.slice(-6);
+      completeReply(message, payload.reply, payload.action_link);
       if (payload.page_context) renderContext(payload.page_context);
       renderProviderSetup(payload);
       if (payload.mode === "built_in_fallback") {
@@ -355,7 +488,9 @@
       if (started === generation) {
         sending = false; input.readOnly = false; sendButton.disabled = false;
         sendButton.removeAttribute("aria-busy");
-        if (!panel.hidden && !actionHost.contains(document.activeElement)) input.focus();
+        var productForm = document.getElementById('mv-product-operation-form');
+        if (!panel.hidden && !actionHost.contains(document.activeElement) &&
+            !(productForm && productForm.contains(document.activeElement))) input.focus();
       }
     }
   });

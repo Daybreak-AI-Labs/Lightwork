@@ -127,6 +127,7 @@ FEATURE_DEFAULTS = {
     "project_workspaces": False,
     "task_handoffs": False,
     "outcome_measurement": False,
+    "commitment_viability": False,
     "copilot_operations": False,
     "guided_onboarding": True,
     "action_center": True,
@@ -193,6 +194,7 @@ FEATURE_INFO = {
     "project_workspaces": "Plan project outcomes, reviewed context and live milestones. Explicit planning membership never grants private task, review, or execution access.",
     "task_handoffs": "Offer a named colleague an unstarted continuation with selected evidence and a spending ceiling; acceptance closes the original conversation to new execution.",
     "outcome_measurement": "Plan a paired workflow pilot, record observed baseline and review effort, and compare current accepted outcomes. Unmeasured costs and unreviewed work remain explicit.",
+    "commitment_viability": "Review two accepted orders against the capacity and stock your team reports. Explore expiring options and record observed contention with owner review. This pilot does not connect to a supplier or reserve stock.",
     "guided_onboarding": "Offer a guided path to a reviewed deliverable, privacy assessment, or accepted vendor case. Task creation alone never establishes success.",
     "action_center": "Collect approvals, deliverable sign-offs, assessment reviews, and uncertain external actions in one personal list, with private read and snooze preferences. Overdue items remain visible.",
     "draft_recovery": "Keep encrypted recovery copies of unfinished editor work, private to each account and workspace. Credentials and attachments are excluded; restoring never runs or publishes work.",
@@ -333,9 +335,10 @@ LEARNING_SUBSYSTEMS: list[dict] = [
      "env": "MAVERICK_OPERATIONS_SCIENTIST",
      "how": "[operations_scientist] enable — or MAVERICK_OPERATIONS_SCIENTIST=0"},
     {"key": "rehearsal", "section": "rehearsal", "config_key": "enable",
-     "label": "Rehearse risky plans first",
-     "description": "Try a risky plan in a simulation before it runs, and ask a "
-                    "person when the result is uncertain.",
+     "label": "Risky action predictions",
+     "description": "Compare high-impact actions with past work. The Safety setting "
+                    "decides whether predictions only watch or hold actions; Shield, "
+                    "permissions, and required approvals still apply.",
      "env": "MAVERICK_REHEARSAL",
      "how": "[rehearsal] enable — or MAVERICK_REHEARSAL=0"},
     {"key": "credit", "section": "credit", "config_key": "enable",
@@ -755,7 +758,36 @@ def _write(data: dict) -> None:
         raise SettingsNotStorable(
             "A value could not be saved safely, so the settings were not changed."
         ) from exc
+    from .settings_audit import current_write
+
+    change = current_write()
+    if change is not None:
+        change.prepare(_load_overlay_for_update(), data)
     atomic_write_text(config.dashboard_overrides_path(), text)
+    if change is not None and not change.deferred:
+        change.complete()
+
+
+def _write_provider_with_deferred_audit(data: dict) -> None:
+    """Publish the credential, leaving success unclaimed until verification."""
+    from .settings_audit import current_write
+
+    change = current_write()
+    if change is not None:
+        change.deferred = True
+    try:
+        _write(data)
+    finally:
+        if change is not None:
+            change.deferred = False
+
+
+def _complete_provider_audit() -> None:
+    from .settings_audit import current_write
+
+    change = current_write()
+    if change is not None:
+        change.complete()
 
 
 def set_provider(name: str, api_key: str | None = None, base_url: str | None = None) -> None:
@@ -988,7 +1020,7 @@ def rotate_provider(
                 # or directory-sync error is reported. Treat any attempted
                 # write as published so every failure takes the rollback path.
                 mutation_attempted = True
-                _write(data)
+                _write_provider_with_deferred_audit(data)
                 config.reset_config_cache()
 
                 authority_after = _provider_authority_fingerprint(name)
@@ -1004,6 +1036,7 @@ def rotate_provider(
                     key_value=key_value,
                     base_value=base_value,
                 )
+                _complete_provider_audit()
                 return observed_state
             except Exception as exc:
                 if mutation_attempted:
@@ -1594,6 +1627,9 @@ def _prune_empty_tables(data: dict, tops: set[str]) -> None:
 
 
 SANDBOX_BACKENDS: tuple[str, ...] = ("local", "docker", "podman")
+CONTAINER_FILE_TOOLS: tuple[str, ...] = (
+    "shell", "write_file", "apply_patch", "str_replace_editor",
+)
 
 
 def set_sandbox_backend(backend: str) -> None:
@@ -1611,6 +1647,57 @@ def set_sandbox_backend(backend: str) -> None:
         data = _load_overlay_for_update()
         data.setdefault("sandbox", {})["backend"] = cleaned
         _write(data)
+
+
+def enable_container_file_work() -> None:
+    """Remove only the first-run file-tool blocks after a container is selected.
+
+    The operator must confirm and probe the live daemon at the API boundary.
+    Here the same cross-process lock as other Settings writes protects the
+    read/modify/write. A higher-precedence deployment or tenant denial remains
+    authoritative and is never silently weakened by a latent dashboard value.
+    """
+    with _locked():
+        if config.config_source_errors():
+            raise SecuritySuiteConfigUnavailable(
+                "Settings cannot be read safely; file work was not changed."
+            )
+        effective = config.load_config()
+        backend = str((effective.get("sandbox") or {}).get("backend") or "local").lower()
+        if backend not in ("docker", "podman"):
+            raise ValueError("Choose a running Docker or Podman container first.")
+        higher_paths = []
+        operator_path = os.environ.get(config.CONFIG_OVERLAY_ENV, "").strip()
+        if operator_path:
+            higher_paths.append(Path(operator_path).expanduser())
+        tenant_path = config.tenant_config_path()
+        if tenant_path is not None:
+            higher_paths.append(tenant_path)
+        for path in higher_paths:
+            layer = config._load_config_file(path)
+            policy = (layer.get("security") or {}).get("denied_tools") or []
+            if any(name in policy for name in CONTAINER_FILE_TOOLS):
+                raise ValueError(
+                    "A deployment or workspace rule still blocks file work. "
+                    "Ask its administrator to review that rule."
+                )
+        denied = (effective.get("security") or {}).get("denied_tools") or []
+        if not isinstance(denied, list) or not all(isinstance(name, str) for name in denied):
+            raise SecuritySuiteConfigUnavailable(
+                "Tool rules cannot be read safely; file work was not changed."
+            )
+        remaining = [name for name in denied if name not in CONTAINER_FILE_TOOLS]
+        if remaining == denied:
+            return
+        data = _load_overlay_for_update()
+        security = data.setdefault("security", {})
+        if not isinstance(security, dict):
+            raise SecuritySuiteConfigUnavailable(
+                "Tool rules cannot be read safely; file work was not changed."
+            )
+        security["denied_tools"] = remaining
+        _write(data)
+        config.reset_config_cache()
 
 
 def set_installable_plugins(names) -> None:
@@ -2301,5 +2388,5 @@ __all__ = [
     "set_dgm", "set_ekko", "set_security_suite",
     "set_toggle", "set_toggles", "set_learning", "set_learning_subsystem",
     "set_flow_autonomy", "state", "set_channel", "clear_channel",
-    "channels_state",
+    "channels_state", "CONTAINER_FILE_TOOLS", "enable_container_file_work",
 ]

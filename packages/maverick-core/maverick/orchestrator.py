@@ -2694,6 +2694,9 @@ async def _run_goal_accounted(
     )
     lifecycle = _RunLifecycle(world, goal_id, budget)
     error: BaseException | None = None
+    from .goal_heartbeat import start_goal_heartbeat
+
+    stop_heartbeat = start_goal_heartbeat(world, goal_id)
     try:
         return await _run_goal_impl(
             llm=llm,
@@ -2727,6 +2730,10 @@ async def _run_goal_accounted(
     finally:
         # This boundary starts before setup, closes cancellation as well as
         # ordinary errors, and accounts for paid finalization work.
+        try:
+            stop_heartbeat()
+        except Exception:  # pragma: no cover -- defensive cleanup
+            log.warning("Goal heartbeat did not stop cleanly", exc_info=True)
         try:
             lifecycle.finish(error)
         finally:

@@ -2873,7 +2873,12 @@ class PostgresWorldModel:
             rows = cur.fetchall()
         return [_dec_goal_row(r) for r in rows]
 
-    def reclaim_orphan_goals(self, *, max_age_seconds: float = 60.0) -> int:
+    def reclaim_orphan_goals(
+        self, *, max_age_seconds: float = 60.0,
+        statuses: tuple[str, ...] = ("active", "pending"),
+        resolved_window_seconds: float | None = None,
+        exact_tenant: bool = False,
+    ) -> int:
         """Mark stale active/pending goals as 'blocked' after a crash.
 
         Called on startup to recover from SIGKILL/OOM mid-run. Only rows whose
@@ -2883,23 +2888,39 @@ class PostgresWorldModel:
         A resolved zero window explicitly reclaims every active/pending goal
         in scope, including monotonic review timestamps ahead of the wall clock.
         Positive windows continue to require the full stale interval.
+        The periodic dashboard sweep passes only ``("active",)`` so queued
+        ``pending`` goals are left for their dispatcher. ``exact_tenant``
+        excludes compatibility-mode NULL rows from that background sweep.
         Returns the number of rows reclaimed.
         """
+        statuses = tuple(statuses)
+        if not statuses or not set(statuses) <= {"active", "pending"}:
+            raise ValueError("orphan reclaim statuses must be active and/or pending")
+        marks = ", ".join("%s" for _ in statuses)
         from ..world_model import reclaim_window_seconds
-        max_age_seconds = reclaim_window_seconds(default=max_age_seconds)
+        max_age_seconds = (reclaim_window_seconds(default=max_age_seconds)
+                           if resolved_window_seconds is None else float(resolved_window_seconds))
+        if not math.isfinite(max_age_seconds) or max_age_seconds < 0:
+            raise ValueError("orphan reclaim window must be nonnegative and finite")
         cutoff = time.time() - max_age_seconds
         now = time.time()
         marker = " [process restarted mid-run]"
-        frag, fparams = _tenant_scope()
+        if exact_tenant:
+            tenant = _active_tenant()
+            if tenant is None:
+                raise ValueError("exact orphan reclaim requires a configured tenant")
+            frag, fparams = "tenant_id = %s", [tenant]
+        else:
+            frag, fparams = _tenant_scope()
         from ..crypto_at_rest import at_rest_enabled
         if not at_rest_enabled():
             sql = (
                 "UPDATE goals SET status = 'blocked', "
                 "result = COALESCE(result, '') || %s, "
                 "updated_at = GREATEST(updated_at + 0.000001, %s) "
-                "WHERE status IN ('active', 'pending') AND (%s = 0 OR updated_at <= %s)"
+                f"WHERE status IN ({marks}) AND (%s = 0 OR updated_at <= %s)"
             )
-            params: list = [marker, now, max_age_seconds, cutoff]
+            params: list = [marker, now, *statuses, max_age_seconds, cutoff]
             if frag:
                 sql += " AND " + frag
                 params += fparams
@@ -2913,9 +2934,9 @@ class PostgresWorldModel:
         # set on startup is tiny, so the row-by-row cost is negligible.
         sel = (
             "SELECT id, result FROM goals "
-            "WHERE status IN ('active', 'pending') AND (%s = 0 OR updated_at <= %s)"
+            f"WHERE status IN ({marks}) AND (%s = 0 OR updated_at <= %s)"
         )
-        sparams: list = [max_age_seconds, cutoff]
+        sparams: list = [*statuses, max_age_seconds, cutoff]
         if frag:
             sel += " AND " + frag
             sparams += fparams
@@ -2924,6 +2945,7 @@ class PostgresWorldModel:
             rows = cur.fetchall()
             from ..crypto_at_rest import EncryptionUnavailable
             from ..world_model import _UNSEALED_WITHHELD
+            reclaimed = 0
             for row in rows:
                 try:
                     dec = _unseal(row[1])
@@ -2944,18 +2966,27 @@ class PostgresWorldModel:
                     # mode -- must not abort crash-recovery for every other
                     # stuck goal. Reclaim the status; leave the result intact
                     # rather than corrupting or dropping it.
-                    cur.execute(
+                    update = (
                         "UPDATE goals SET status = 'blocked', updated_at = GREATEST(updated_at + 0.000001, %s) "
-                        "WHERE id = %s",
-                        (now, row[0]),
+                        f"WHERE id = %s AND status IN ({marks}) "
+                        "AND (%s = 0 OR updated_at <= %s)"
                     )
+                    if frag:
+                        update += " AND " + frag
+                    cur.execute(update, (now, row[0], *statuses, max_age_seconds, cutoff, *fparams))
+                    reclaimed += cur.rowcount
                     continue
-                cur.execute(
+                update = (
                     "UPDATE goals SET status = 'blocked', result = %s, "
-                    "updated_at = GREATEST(updated_at + 0.000001, %s) WHERE id = %s",
-                    (new_result, now, row[0]),
+                    "updated_at = GREATEST(updated_at + 0.000001, %s) "
+                    f"WHERE id = %s AND status IN ({marks}) "
+                    "AND (%s = 0 OR updated_at <= %s)"
                 )
-            return len(rows)
+                if frag:
+                    update += " AND " + frag
+                cur.execute(update, (new_result, now, row[0], *statuses, max_age_seconds, cutoff, *fparams))
+                reclaimed += cur.rowcount
+            return reclaimed
 
     # ----- episodes -----
 

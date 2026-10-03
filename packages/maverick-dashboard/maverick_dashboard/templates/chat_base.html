@@ -121,8 +121,9 @@
     }
     .cs-dock .composer__field, .cs-dock .ask__field { border-color: transparent; }
     .composer__field {
-      width: 100%; border: 0; background: transparent; color: var(--text);
-      font: inherit; font-size: var(--text-md); line-height: 1.5; padding: var(--space-2) var(--space-1); outline: none;
+      width: 100%; box-sizing: border-box; border: 0; background: transparent; color: var(--text);
+      font: inherit; font-size: var(--text-md); line-height: 1.5; padding: var(--space-2) var(--space-1);
+      max-height: 14rem; overflow-y: auto; resize: none; outline: none;
     }
     .composer__field::placeholder { color: var(--muted); }
     .composer details { margin: 0 var(--space-1); }

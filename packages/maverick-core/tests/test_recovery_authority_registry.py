@@ -46,6 +46,23 @@ def test_canonical_authority_registry_covers_every_declared_store() -> None:
     assert authority_policy("future-authority.lock", is_sqlite=True) == "unknown_sqlite"
 
 
+def test_retained_knowledge_rights_are_protected_recovery_authority(tmp_path: Path) -> None:
+    relative = "tenants/acme/knowledge-rights-archive/recovered.json"
+    assert authority_policy(relative, is_sqlite=False) == "knowledge_access_authority"
+    stage = file_lock.ensure_private_directory(tmp_path / "stage")
+    record = _write(stage, relative, {"schema": "lightwork.knowledge-rights-archive.v1"})
+    original = record.read_bytes()
+
+    removed, report = recovery._reconcile_bootstrap_stage(stage)
+
+    assert removed == set()
+    assert record.read_bytes() == original
+    item, = [row for row in report["items"] if row["source"] == relative]
+    assert item["prior_state"] == "unclassified:knowledge_access_authority"
+    assert item["safe_state"] == "global_start_blocked"
+    assert item["requires_external_readback"] is True
+
+
 def test_non_authorizing_preferences_and_warnings_restore_as_data(tmp_path: Path) -> None:
     stage = file_lock.ensure_private_directory(tmp_path / "stage")
     originals = {}

@@ -34,8 +34,9 @@ from maverick.governed_records import RecordConflict
 from maverick.runner import (
     DEFAULT_MAX_DEPTH,
     clamp_task_limit,
-    configured_max_dollars,
-    configured_max_wall_seconds,
+    configured_goal_ceiling_dollars,
+    requested_goal_dollars,
+    requested_goal_wall_seconds,
 )
 from starlette.concurrency import run_in_threadpool
 from starlette.responses import (
@@ -99,6 +100,7 @@ from .api_schemas import (
     FactIn,
     FeatureSwitchIn,
     FeedbackIn,
+    FileWorkEnableIn,
     FleetAgentAddIn,
     FleetCreateIn,
     FleetRunIn,
@@ -1486,8 +1488,8 @@ def create_goal(
     idem_key = (request.headers.get("Idempotency-Key") or "").strip()
     # A director autonomy level can only lower the cap (None = no own cap).
     max_dollars = clamp_task_limit(getattr(director, "max_dollars", None),
-                                   clamp_task_limit(payload.max_dollars, configured_max_dollars()))
-    max_wall_seconds = clamp_task_limit(payload.max_wall_seconds, configured_max_wall_seconds())
+                                   requested_goal_dollars(payload.max_dollars))
+    max_wall_seconds = requested_goal_wall_seconds(payload.max_wall_seconds)
     max_depth = min(payload.max_depth, DEFAULT_MAX_DEPTH)
     receipt = None
     if idem_key:
@@ -1608,7 +1610,7 @@ def _api_director(payload: GoalIn, title: str, description: str):
     from maverick_dashboard.app import _director_run
 
     director = _director_run(payload.director_profile, title, description,
-                             clamp_task_limit(payload.max_dollars, configured_max_dollars()))
+                             requested_goal_dollars(payload.max_dollars))
     return director, director.goal_description
 
 
@@ -1857,7 +1859,15 @@ def goal_thread_history(request: Request, goal_id: int, before_id: int | None = 
     if (principal or "") != (goal.owner or ""):
         raise HTTPException(403, "Access to one task does not grant access to the employee conversation.")
     turns, more = ChatThreads(world).history(goal_id, before_id=before_id)
-    return {"turns": public_turns(world, turns), "has_more": more,
+    public = public_turns(world, turns)
+    for turn in public:
+        if turn["role"] == "user":
+            turn["questions"] = [
+                {"question": question.question, "answer": question.answer}
+                for question in world.all_questions(turn["goal_id"])
+                if question.answer is not None
+            ]
+    return {"turns": public, "has_more": more,
             "before_id": turns[0].id if turns else before_id}
 
 
@@ -6302,11 +6312,8 @@ def _require_flows() -> None:
     if not flow.enabled():
         raise HTTPException(
             status_code=403,
-            detail=(
-                "Flows aren't enabled on this server yet — an administrator "
-                "can switch on the flow engine (enable [flows] in the "
-                "server configuration, or set MAVERICK_FLOWS=1)."
-            ),
+            detail="Workflows are turned off. Ask the person who manages this installation to turn them on.",
+            headers={"X-Lightwork-Feature-Off": "workflows"},
         )
 
 
@@ -6346,6 +6353,27 @@ def _flow_publication_fields(flow_id: str) -> dict:
         "published_version": int(release["definition_version"]),
         "published_revision": str(release["release_id"]),
     }
+
+
+def _require_learned_flow_evidence(flow) -> None:
+    """Give the same signed-example policy a useful product recovery message."""
+    from maverick.flow import recipe_flow
+
+    try:
+        recipe_flow.check_persisted_lineage(flow)
+    except ValueError as exc:
+        if "admitted signed evidence" in str(exc):
+            detail = (
+                "This learned flow needs approved signed examples before it can be saved, "
+                "published, or run. Open Teach this flow, review and allow its source "
+                "runs for learning, then build and save a new flow."
+            )
+        else:
+            detail = (
+                "This learned flow's evidence is unavailable or invalid. Open Teach this "
+                "flow and rebuild it from current signed examples."
+            )
+        raise HTTPException(status_code=409, detail=detail) from exc
 
 
 @router.get("/flows")
@@ -6404,6 +6432,7 @@ def save_flow_endpoint(request: Request, payload: FlowSaveIn) -> dict:
                 detail="flow changed or this editor is stale; reload before saving",
             )
     flow.owner = prior.owner if (prior and prior.owner) else (caller_principal(request) or "")
+    _require_learned_flow_evidence(flow)
     try:
         store.save_flow(
             flow,
@@ -6412,6 +6441,8 @@ def save_flow_endpoint(request: Request, payload: FlowSaveIn) -> dict:
         )
     except store.FlowVersionConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail="The flow cannot be saved safely; review its learned examples and try again.") from exc
     return {
         "id": flow.id,
         "nodes": len(flow.nodes),
@@ -6436,6 +6467,7 @@ def publish_flow_endpoint(
     if current is None:
         raise HTTPException(status_code=404, detail="no such flow")
     _assert_flow_access(request, current)
+    _require_learned_flow_evidence(current)
     try:
         release = store.publish_flow(
             flow_id,
@@ -6446,6 +6478,8 @@ def publish_flow_endpoint(
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except store.FlowSnapshotError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail="The flow cannot be published safely; review its learned examples and try again.") from exc
     # Make schedule activation responsive to an explicit publish. The periodic
     # reconcile remains the crash/restart repair path.
     from maverick_dashboard import automation_queue
@@ -6886,6 +6920,23 @@ def _run_out(run) -> dict:
                 except Exception:
                     # Do not surface raw observations or unverified options.
                     pass
+    if getattr(run, "_approval_reviewer_only", False):
+        # A named assignee can review the exact delegated card, not the flow
+        # owner's execution data, graph, node trace or trigger inputs.
+        human = d.get("human") or {}
+        if d.get("approval_card_status") != "current":
+            human = {key: value for key, value in human.items() if key != "approval_card"}
+        return {
+            "run_id": run.run_id, "flow_id": run.flow_id,
+            "status": run.status, "cursor": run.cursor,
+            "updated": run.updated, "resume_at": run.resume_at,
+            "human": {key: human[key] for key in (
+                "assignee", "choices", "form", "approval_card",
+            ) if key in human},
+            "approval_card_status": d.get("approval_card_status", "unavailable"),
+            "approval_binding_sha256": d.get("approval_binding_sha256", ""),
+            "approval_review_only": True,
+        }
     return d
 
 
@@ -6910,7 +6961,7 @@ def _legacy_local_flow_run(request: Request, run) -> bool:
         return False
 
 
-def _load_owned_run(request: Request, run_id: str):
+def _load_owned_run(request: Request, run_id: str, *, allow_assignee: bool = False):
     """A flow run the caller may see, or a 404 (indistinguishable from missing,
     so a run's existence isn't leaked across owners)."""
     from maverick.flow import store
@@ -6928,6 +6979,22 @@ def _load_owned_run(request: Request, run_id: str):
                     run = candidate
                     break
     if run is None:
+        if allow_assignee:
+            from maverick.flow.payloads import FlowPayloadError
+
+            from .flow_approval_inbox import assigned_review_allowed
+
+            try:
+                candidate = store.load_run(run_id)
+            except (FlowPayloadError, store.FlowSnapshotError, ValueError, TypeError, OSError):
+                # A damaged foreign checkpoint cannot establish that this
+                # caller is its assignee; keep it indistinguishable from a
+                # missing run. The owner-scoped read above still reports the
+                # actionable payload failure to the owner.
+                raise HTTPException(status_code=404, detail="no such run") from None
+            if assigned_review_allowed(request, candidate):
+                candidate._approval_reviewer_only = True
+                return candidate
         raise HTTPException(status_code=404, detail="no such run")
     return run
 
@@ -6936,7 +7003,7 @@ def _load_owned_run(request: Request, run_id: str):
 async def get_flow_run_endpoint(request: Request, run_id: str) -> dict:
     require_permission(request, "operate")
     _require_flows()
-    return _run_out(_load_owned_run(request, run_id))
+    return _run_out(_load_owned_run(request, run_id, allow_assignee=True))
 
 
 @router.get("/flows/runs/{run_id}/events")
@@ -6952,7 +7019,7 @@ async def flow_run_events_stream(request: Request, run_id: str) -> StreamingResp
 
     require_permission(request, "operate")
     _require_flows()
-    _load_owned_run(request, run_id)  # 404 before holding a stream slot
+    _load_owned_run(request, run_id, allow_assignee=True)  # 404 before holding a stream slot
     from maverick.flow.payloads import FlowPayloadError
 
     from ._event_stream import LeasedStreamingResponse, StreamCadence, StreamLease
@@ -6997,7 +7064,7 @@ async def flow_run_events_stream(request: Request, run_id: str) -> StreamingResp
                 if await request.is_disconnected():
                     return
                 require_permission(request, "operate")
-                run = await run_in_threadpool(_load_owned_run, request, run_id)
+                run = await run_in_threadpool(_load_owned_run, request, run_id, allow_assignee=True)
                 if run is None:
                     yield 'event: error\ndata: {"detail": "run vanished"}\n\n'
                     return
@@ -7044,7 +7111,7 @@ async def preview_flow_approval_endpoint(
 ) -> dict:
     """Bind the currently visible form values before a final approval click."""
     _require_flows()
-    run = _load_owned_run(request, run_id)
+    run = _load_owned_run(request, run_id, allow_assignee=True)
     if run.status != "paused_approval":
         raise HTTPException(
             status_code=409,
@@ -7078,7 +7145,7 @@ async def preview_flow_approval_endpoint(
 async def resume_flow_run_endpoint(request: Request, run_id: str, payload: FlowResumeIn) -> dict:
     """Resume a paused flow run with a human decision (approve/reject)."""
     _require_flows()
-    run = _load_owned_run(request, run_id)
+    run = _load_owned_run(request, run_id, allow_assignee=True)
     decision_authority = None
     if run.status == "paused_approval":
         from .approval_authority import require_approval_authority
@@ -7196,7 +7263,7 @@ def retry_flow_run_endpoint(
                 detail="only a failed run with a recorded failure node can be "
                 "resumed from its failure; use a plain retry instead",
             )
-        ceiling = configured_max_dollars()
+        ceiling = configured_goal_ceiling_dollars()
         if budget_limit_dollars is not None and ceiling is not None and budget_limit_dollars > ceiling:
             raise HTTPException(
                 status_code=409,
@@ -7715,6 +7782,7 @@ def run_flow_endpoint(request: Request, flow_id: str, payload: FlowRunIn) -> dic
         )
     flow, release = published
     _assert_flow_access(request, flow)
+    _require_learned_flow_evidence(flow)
     expected_release_id = payload.expected_release_id or str(release["release_id"])
     if expected_release_id != str(release["release_id"]):
         raise HTTPException(
@@ -10231,15 +10299,50 @@ def _share_prerequisites(world, goal):
                             next_action=next_action("Review the sign-off", f"/chat/goal/{goal.id}#signoff"))
 
 
+def _share_source(request, world, goal, scope):
+    from .deliverable_sharing import MAX_CONVERSATION_TURNS, conversation_snapshot, snapshot
+
+    if scope == "result":
+        return snapshot(world, goal)
+    if scope != "conversation":
+        raise HTTPException(400, "Choose a supported sharing option.")
+    from maverick.chat_threads import ChatThreads
+
+    chat = ChatThreads(world)
+    binding = chat.binding(goal.id)
+    if binding is None or chat.latest(goal.id) != goal.id:
+        raise HTTPException(409, "Open the latest saved conversation message before sharing it.")
+    # Authorize every canonical member before reading its turn or answer text.
+    members = chat.members(binding, limit=MAX_CONVERSATION_TURNS + 1)
+    if len(members) > MAX_CONVERSATION_TURNS:
+        raise HTTPException(409, "This conversation is too long to share in one link.")
+    for member_id, _status in members:
+        member = world.get_goal(int(member_id))
+        if member is not None:
+            assert_goal_access(request, member)
+    try:
+        source = conversation_snapshot(world, goal, require_latest=True)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    for member_id in source["member_goal_ids"]:
+        member = world.get_goal(member_id)
+        if member is None:
+            raise HTTPException(409, "A message changed. Review the conversation again.")
+        assert_goal_access(request, member)
+    return source
+
+
 @router.post("/goals/{goal_id}/share/preview")
-def preview_goal_share(request: Request, goal_id: int) -> dict:
-    from .deliverable_sharing import LIFETIMES, snapshot
+def preview_goal_share(request: Request, goal_id: int, scope: str = "result") -> dict:
+    from .deliverable_sharing import LIFETIMES
     world, goal = _share_goal(request, goal_id)
     _share_prerequisites(world, goal)
-    source = snapshot(world, goal)
+    source = _share_source(request, world, goal, scope)
     return {"source": source, "allowed_lifetimes": LIFETIMES,
-            "audience": "Anyone holding the link can read this title, saved result and listed artifacts until expiry or revocation. Forwarded or downloaded copies cannot be recalled.",
-            "scope": "Conversation history, attachments, task activity and controls are excluded. Editing this result or its artifacts makes this link unavailable; create a newly reviewed link to release changes."}
+            "audience": "Anyone holding the link can read the reviewed content until expiry or revocation. Forwarded or downloaded copies cannot be recalled.",
+            "scope": ("This link includes the messages and answered clarifications shown below. Attachments, work logs, costs and controls are excluded. If an included message or its review changes, this link stops working."
+                      if scope == "conversation" else
+                      "Conversation history, attachments, task activity and controls are excluded. Editing this result or its artifacts makes this link unavailable; create a newly reviewed link to release changes.")}
 
 
 @router.get("/goals/{goal_id}/share")
@@ -10253,12 +10356,12 @@ def goal_share_links(request: Request, goal_id: int) -> dict:
 def create_goal_share(request: Request, goal_id: int, body: ShareLinkIn) -> dict:
     """Publish a fresh, reviewed result through a resolvable, expiring link."""
     from . import share_link_routing
-    from .deliverable_sharing import LIFETIMES, remember, snapshot
+    from .deliverable_sharing import LIFETIMES, remember
     world, goal = _share_goal(request, goal_id)
     _share_prerequisites(world, goal)
     if body.confirm is not True or body.lifetime_seconds not in LIFETIMES:
         raise HTTPException(409, "Review the audience and choose an allowed lifetime before confirming.")
-    source = snapshot(world, goal)
+    source = _share_source(request, world, goal, body.scope)
     if not hmac.compare_digest(source["sha256"], body.source_sha256):
         raise product_error(409, "stale_version", "The result changed after your preview. Review the new version before creating a link.",
                             next_action=next_action("Review the current result", f"/chat/goal/{goal.id}"))
@@ -10277,6 +10380,7 @@ def create_goal_share(request: Request, goal_id: int, body: ShareLinkIn) -> dict
         world.revoke_share_link(link_id, goal_id=goal_id)
         raise HTTPException(503, "This link could not be published. Review the link list before trying again.") from exc
     return {"id": link_id, "url": base + "/share/" + token, "local_only": local_only,
+            "scope": body.scope,
             "label": body.label.strip(), "expires_at": link["expires_at"]}
 
 
@@ -11802,8 +11906,13 @@ async def set_model_cost_tier_endpoint(request: Request, body: ModelCostTierIn) 
     shapes routing economics deployment-wide."""
     require_global_permission(request, "admin")
     from maverick_dashboard import settings_store
+    from maverick_dashboard.settings_audit import bind_setting_write
 
-    await run_in_threadpool(settings_store.set_model_cost_tier, body.model, body.band)
+    with bind_setting_write(
+        request, section="model_cost_tiers", key=body.model,
+        project=lambda d: (d.get("model_cost_tiers") or {}).get(body.model),
+    ):
+        await run_in_threadpool(settings_store.set_model_cost_tier, body.model, body.band)
     from maverick import config, model_cost_tier
 
     config.reset_config_cache()
@@ -11939,8 +12048,13 @@ async def set_feature_switch(request: Request, body: FeatureSwitchIn) -> dict:
         actual = await run_in_threadpool(_live_feature_switch_states)
         return {"section": body.section, "enabled": actual[body.section]}
     from maverick_dashboard import settings_store
+    from maverick_dashboard.settings_audit import bind_setting_write
 
-    await run_in_threadpool(settings_store.set_section_enable, body.section, bool(body.enabled))
+    with bind_setting_write(
+        request, section="features", key=body.section,
+        project=lambda d: (d.get(body.section) or {}).get("enable"),
+    ):
+        await run_in_threadpool(settings_store.set_section_enable, body.section, bool(body.enabled))
     from maverick import config as _cfg
 
     _cfg.reset_config_cache()
@@ -11950,11 +12064,15 @@ async def set_feature_switch(request: Request, body: FeatureSwitchIn) -> dict:
         # Do not leave an ineffective dashboard value that looks like a pending
         # change. Match the controlling live state and tell the operator why
         # their requested transition was not accepted.
-        await run_in_threadpool(
-            settings_store.set_section_enable,
-            body.section,
-            effective,
-        )
+        with bind_setting_write(
+            request, section="features", key=body.section,
+            project=lambda d: (d.get(body.section) or {}).get("enable"),
+        ):
+            await run_in_threadpool(
+                settings_store.set_section_enable,
+                body.section,
+                effective,
+            )
         _cfg.reset_config_cache()
         raise HTTPException(
             status_code=409,
@@ -12656,8 +12774,22 @@ async def set_module_switch(request: Request, body: FeatureSwitchIn) -> dict:
     paths = (
         [*meta["requires"], body.section] if body.enabled else [body.section]
     )
+    from maverick_dashboard.settings_audit import bind_setting_write
+
+    def _projection(data: dict) -> dict[str, bool | None]:
+        values = {}
+        for path in paths:
+            node = data
+            for part in path.split("."):
+                node = node.get(part) if isinstance(node, dict) else None
+            values[path] = node.get("enable") if isinstance(node, dict) else None
+        return values
+
     try:
-        await run_in_threadpool(settings_store.set_module_enables, paths, bool(body.enabled))
+        with bind_setting_write(
+            request, section="modules", key=body.section, project=_projection,
+        ):
+            await run_in_threadpool(settings_store.set_module_enables, paths, bool(body.enabled))
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     except (
@@ -12690,6 +12822,25 @@ async def set_module_switch(request: Request, body: FeatureSwitchIn) -> dict:
 
 # Product names for the container runtimes, as customers know them.
 _CONTAINER_PRODUCTS = {"docker": "Docker", "podman": "Podman"}
+
+
+def _file_work_status(loaded: dict) -> dict:
+    """Report the effective global tool rules, not a button's optimistic state."""
+    from maverick.runtime_overrides import denied_tools as runtime_denied_tools
+
+    from maverick_dashboard.settings_store import CONTAINER_FILE_TOOLS
+
+    security = loaded.get("security") or {}
+    denied = set(security.get("denied_tools") or [])
+    allowed = set(security.get("allowed_tools") or [])
+    runtime_denied = runtime_denied_tools()
+    return {
+        "blocked_tools": [name for name in CONTAINER_FILE_TOOLS if name in denied],
+        "other_policy_blocks": [
+            name for name in CONTAINER_FILE_TOOLS
+            if (allowed and name not in allowed) or name in runtime_denied
+        ],
+    }
 
 
 def _probe_container_daemon(binary: str) -> dict:
@@ -12744,6 +12895,7 @@ async def sandbox_status(request: Request) -> dict:
         backend = str((loaded.get("sandbox") or {}).get("backend") or "local").strip().lower()
         return {
             "backend": backend,
+            "file_work": _file_work_status(loaded),
             "backends": {
                 "local": {
                     "available": True,
@@ -12789,15 +12941,103 @@ async def set_sandbox_backend(request: Request, body: SandboxBackendIn) -> dict:
                 ),
             )
     from maverick_dashboard import settings_store
+    from maverick_dashboard.settings_audit import bind_setting_write
 
     try:
-        await run_in_threadpool(settings_store.set_sandbox_backend, backend)
+        with bind_setting_write(
+            request, section="sandbox", key="backend",
+            project=lambda d: (d.get("sandbox") or {}).get("backend"),
+        ):
+            await run_in_threadpool(settings_store.set_sandbox_backend, backend)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     from maverick import config as _cfg
 
     _cfg.reset_config_cache()
     return {"backend": backend}
+
+
+@router.post("/sandbox/file-work/enable")
+async def enable_container_file_work(request: Request, body: FileWorkEnableIn) -> dict:
+    """Finish first-run file work setup in a reachable isolated container."""
+    require_global_permission(request, "admin")
+    if not body.confirm:
+        raise HTTPException(status_code=400, detail="Confirm that Lightwork may change files in the container.")
+    from maverick import config as _cfg
+
+    from maverick_dashboard import settings_store
+    from maverick_dashboard.settings_audit import bind_setting_write
+
+    loaded = await run_in_threadpool(_cfg.load_config)
+    backend = str((loaded.get("sandbox") or {}).get("backend") or "local").lower()
+    if backend not in _CONTAINER_PRODUCTS:
+        raise HTTPException(status_code=409, detail="Choose a Docker or Podman container in Permissions first.")
+    probe = await run_in_threadpool(_probe_container_daemon, backend)
+    if not probe["available"]:
+        raise HTTPException(
+            status_code=409,
+            detail=f"{_CONTAINER_PRODUCTS[backend]} is not ready. Start it and try again.",
+        )
+    try:
+        with bind_setting_write(
+            request, section="security", key="denied_tools",
+            project=lambda d: (d.get("security") or {}).get("denied_tools") or [],
+            confirmed=True,
+        ):
+            await run_in_threadpool(settings_store.enable_container_file_work)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except settings_store.SecuritySuiteConfigUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    effective = await run_in_threadpool(_cfg.load_config)
+    state = _file_work_status(effective)
+    if state["blocked_tools"]:
+        raise HTTPException(
+            status_code=409,
+            detail="File work still has a higher-priority block. Review tool rules in Settings.",
+        )
+    return {"backend": backend, "file_work": state}
+
+
+def _copilot_model_route_status() -> str:
+    """Check the selected Copilot route against the same pricing gate as dispatch."""
+    if not _any_provider_key_set():
+        return "provider"
+    try:
+        require_provider_or_400(role="orchestrator")
+    except HTTPException as exc:
+        if exc.status_code == 400:
+            return "provider"
+        raise
+    from maverick.budget import UnpricedModelError, _lookup_price_quote
+    from maverick.llm import (
+        ModelNotAllowedError,
+        _parse_spec,
+        model_for_role,
+        require_model_allowed,
+    )
+
+    try:
+        selected = require_model_allowed(model_for_role("orchestrator"))
+        provider, model_id = _parse_spec(selected)
+    except (ModelNotAllowedError, ValueError):
+        return "model"
+    try:
+        _lookup_price_quote(f"{provider}:{model_id}")
+    except UnpricedModelError:
+        return "pricing"
+    return "ready"
+
+
+def _copilot_model_route_reason(route_status: str) -> str | None:
+    if route_status == "pricing":
+        return (
+            "The selected AI model has no confirmed price. This workspace requires "
+            "known pricing before Copilot can use it."
+        )
+    if route_status == "model":
+        return "The selected AI model is unavailable under this workspace's settings."
+    return None
 
 
 @router.get("/copilot/context")
@@ -12812,13 +13052,18 @@ async def copilot_context_endpoint(request: Request, page: str = "") -> dict[str
     from .draft_api import context_for
 
     result["client_context"] = context_for(request)
-    configured = bool(_any_provider_key_set())
+    route_status = _copilot_model_route_status()
+    configured = route_status == "ready"
     result["model_provider_configured"] = configured
+    result["model_route_status"] = route_status
+    reason = _copilot_model_route_reason(route_status)
+    if reason:
+        result["model_route_reason"] = reason
     from maverick.config import get_features
 
     result["operations_enabled"] = get_features().get("copilot_operations") is True
     if not configured:
-        result["provider_setup"] = _copilot_provider_setup(permissions)
+        result["provider_setup"] = _copilot_provider_setup(permissions, route_status)
     from .provider_readiness import public_verdict, workspace_readiness
 
     # The same verdict every page shows, so the panel can say plainly why AI
@@ -12840,14 +13085,27 @@ def _copilot_permissions(request: Request) -> frozenset[str]:
     return frozenset(permissions)
 
 
-def _copilot_provider_setup(permissions: frozenset[str]) -> dict[str, str]:
+def _copilot_provider_setup(
+    permissions: frozenset[str], route_status: str = "provider",
+) -> dict[str, str]:
     """Return only an in-app recovery destination, qualified by authority."""
 
     if "admin" in permissions:
+        if route_status == "pricing":
+            return {
+                "href": "/settings#settings-models",
+                "label": "Choose a model with known pricing in Settings",
+            }
+        if route_status == "model":
+            return {"href": "/settings#settings-models", "label": "Choose an available model in Settings"}
         return {
             "href": "/settings#settings-integrations",
             "label": "Configure a model provider in Settings",
         }
+    if route_status == "pricing":
+        return {"href": "/start", "label": "Ask an administrator to choose a model with known pricing"}
+    if route_status == "model":
+        return {"href": "/start", "label": "Ask an administrator to choose an available model"}
     return {
         "href": "/start",
         "label": "Open the in-app setup guide",
@@ -12905,15 +13163,19 @@ async def copilot_endpoint(request: Request, payload: CopilotIn) -> dict:
             "action_link": {"href": context.path, "label": f"Open {context.title}"},
         }
 
-    if not _any_provider_key_set():
-        return {
+    route_status = _copilot_model_route_status()
+    if route_status != "ready":
+        result = {
             "reply": built_in_reply(context, msg, permissions),
             "mode": "built_in",
             "page_context": public_context(context, permissions),
-            "provider_setup": _copilot_provider_setup(permissions),
+            "provider_setup": _copilot_provider_setup(permissions, route_status),
+            "model_route_status": route_status,
         }
-
-    require_provider_or_400(role="orchestrator")
+        reason = _copilot_model_route_reason(route_status)
+        if reason:
+            result["model_route_reason"] = reason
+        return result
 
     def _turn() -> str:
         from maverick.budget import Budget
@@ -13886,7 +14148,7 @@ async def enable_tool(request: Request, name: str) -> dict:
 
 
 @router.get("/approvals")
-def list_approvals(request: Request) -> dict:
+def list_approvals(request: Request, response: Response) -> dict:
     """Pending high-risk actions parked by safety.consent (dashboard mode).
 
     This is the operators' collaborative supervision queue (an approval has no
@@ -13896,11 +14158,17 @@ def list_approvals(request: Request) -> dict:
     view-only user, could read every parked action.
     """
     require_permission(request, "operate")
+    response.headers["Cache-Control"] = "private, no-store"
     w = _world()
     from .content_access import can_read_approval
+    from .flow_approval_inbox import pending_for_request
+
     rows = list(w.pending_approvals())
     readable = [a for a in rows if can_read_approval(request, a, w)]
+    flow_approvals = pending_for_request(request)
     return {"approvals": [_approval_api_row(a) for a in readable],
+            "flow_approvals": flow_approvals["items"],
+            "flow_approval_coverage": flow_approvals["coverage"],
             "private_count": len(rows) - len(readable), "content_access_url": "/content-access"}
 
 
@@ -14550,8 +14818,7 @@ def run_fleet_agent(
         prof = available_domains().get(agent.domain)
         if prof is not None:
             cap = domain_capability(prof, cap, agent_principal)
-    spend_ceiling = configured_max_dollars()
-    max_dollars = clamp_task_limit(payload.max_dollars, spend_ceiling)
+    max_dollars = requested_goal_dollars(payload.max_dollars)
 
     w = _world()
     goal_id = w.create_goal(
@@ -15158,8 +15425,7 @@ def compose_goal(request: Request, payload: ComposeIn, bg: BackgroundTasks) -> G
     )
     from maverick.runner import run_goal_in_background_async
 
-    spend_ceiling = configured_max_dollars()
-    max_dollars = clamp_task_limit(payload.budget_dollars, spend_ceiling)
+    max_dollars = requested_goal_dollars(payload.budget_dollars)
     allowed_suites = caller_suites(request)
     user_id = execution_user_id_from_request(request)
     if user_id:

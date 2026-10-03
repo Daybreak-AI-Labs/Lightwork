@@ -54,11 +54,29 @@ def test_feature_setting_reports_when_higher_priority_source_still_controls_it(m
 
 
 def test_installer_action_families_and_employee_guidance_roundtrip():
-    values = {"allow_copilot_operations": True, "copilot_operation_families": ["preferences", "budget"],
+    values = {"allow_copilot_operations": True, "copilot_operation_families": ["preferences", "budget", "commitments"],
               "allow_runtime_configuration_status": False, "allow_employee_task_diagnostics": False,
               "allow_employee_activation": False}
     document = tomllib.loads("\n".join(wizard._cfg_advanced(values, [])))
-    assert document["copilot"]["operation_families"] == ["preferences", "budget"]
+    assert document["copilot"]["operation_families"] == ["preferences", "budget", "commitments"]
     assert document["settings"]["runtime_status"] is False
     assert document["features"]["employee_task_diagnostics"] is False
     assert document["features"]["employee_activation"] is False
+
+
+def test_installer_offers_promise_reviews_with_a_plain_label(monkeypatch):
+    offered = []
+
+    def choose(prompt, choices, default=None):
+        if "action families may Copilot open" in prompt:
+            offered.extend(choices)
+            return ["Promise reviews"]
+        return default or []
+
+    monkeypatch.setattr(wizard, "_q_checkbox", choose)
+    monkeypatch.setattr(wizard, "_q_confirm", lambda *a, default=False, **kw: default)
+    monkeypatch.setattr(wizard, "_q_select", lambda *a, default=None, **kw: default)
+    monkeypatch.setattr(wizard, "_q_text", lambda *a, default="", **kw: default)
+    result = wizard.pick_advanced()
+    assert "Promise reviews" in offered and "commitments" not in offered
+    assert result["copilot_operation_families"] == ["commitments"]

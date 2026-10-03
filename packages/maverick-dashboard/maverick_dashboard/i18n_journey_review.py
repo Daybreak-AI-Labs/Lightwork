@@ -38,6 +38,7 @@ ROWS = [('Review note', 'Note de révision', 'Prüfnotiz', 'レビューのメ�
   '共有前に、権限を持つタスク所有者がこの結果を確認する必要があります。',
   '分享前，具有权限的任务所有者必须检查此结果。'),
  ('Project reviews', 'Révisions de projet', 'Projektprüfungen', 'プロジェクトのレビュー', '项目审阅'),
+ ('Promise reviews', 'Revues des engagements', 'Prüfung von Zusagen', '納期の約束を確認', '交付承诺审核'),
  ('Review inbox', 'Boîte de réception des révisions', 'Prüfeingang', 'レビュー受信箱', '审阅收件箱'),
  ('Request a review', 'Demander une révision', 'Prüfung anfordern', 'レビューを依頼', '请求审阅'),
  ('Project', 'Projet', 'Projekt', 'プロジェクト', '项目'),

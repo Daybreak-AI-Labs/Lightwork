@@ -270,6 +270,74 @@ def test_unknown_rate_fails_billing_and_has_explicit_estimate_fallback():
     assert quote.confidence == 0.1
 
 
+@pytest.mark.parametrize("prefix", ["openai_compatible", "openai-compatible", "custom"])
+def test_generic_gateway_cannot_borrow_a_verified_bare_vendor_rate(prefix):
+    spec = f"{prefix}:claude-sonnet-4-6"
+    with pytest.raises(UnpricedModelError, match="no verified USD price"):
+        Budget().record_tokens(100, 20, model=spec)
+    estimate = _lookup_price_quote(spec, estimate_only=True)
+    assert estimate.verified is False
+    assert estimate.model_id == spec
+
+
+@pytest.mark.parametrize("spec", [
+    "azure:gpt-5.5",
+    "bedrock:claude-sonnet-4-6",
+    "openrouter:gpt-5.5",
+    "openai:claude-sonnet-4-6",
+    "anthropic:gpt-5.5",
+])
+def test_routed_model_cannot_borrow_another_providers_billing_evidence(
+    monkeypatch, spec,
+):
+    import maverick.budget as budget_mod
+    from maverick.llm import _allowlist_rank_price
+
+    monkeypatch.setattr(budget_mod, "_openrouter_advertised_free", lambda _model: False)
+    with pytest.raises(UnpricedModelError):
+        _lookup_price_quote(spec)
+    assert _allowlist_rank_price(spec) is None
+    proxy = _lookup_price_quote(spec, estimate_only=True)
+    assert proxy.model_id == spec
+    assert proxy.verified is False
+
+
+@pytest.mark.parametrize("spec,evidence_prefix", [
+    ("openai:gpt-5.5", "openai-"),
+    ("anthropic:claude-sonnet-4-6", "anthropic-"),
+])
+def test_direct_vendor_route_uses_its_own_billing_evidence(spec, evidence_prefix):
+    from maverick.llm import _allowlist_rank_price
+
+    quote = _lookup_price_quote(spec)
+    assert quote.verified is True
+    assert quote.evidence_id.startswith(evidence_prefix)
+    assert _allowlist_rank_price(spec) == quote.rates
+
+
+def test_bare_openai_name_does_not_rank_as_billable_anthropic_route():
+    from maverick.llm import _allowlist_rank_price
+
+    assert _allowlist_rank_price("gpt-5.5") is None
+
+
+def test_generic_gateway_exact_evidenced_rate_can_be_billed(monkeypatch):
+    import maverick.llm as llm_mod
+
+    quote = _quote(model_id="openai_compatible:claude-sonnet-4-6")
+    monkeypatch.setattr(
+        llm_mod, "MODEL_PRICING_PROVIDER",
+        VersionedPricingProvider(
+            quote.rate_card_version, [quote], evidence_pack=_pack_for(quote),
+        ),
+    )
+    monkeypatch.setattr(llm_mod, "MODEL_PRICES", {quote.model_id: quote.rates})
+    budget = Budget()
+    budget.record_tokens(100, 20, model=quote.model_id)
+    assert budget.dollars > 0
+    assert budget.pricing_snapshot()[quote.model_id]["verified"] is True
+
+
 def test_legacy_strict_false_enables_labeled_estimate_accounting(
     monkeypatch,
     caplog,

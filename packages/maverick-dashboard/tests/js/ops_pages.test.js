@@ -128,32 +128,79 @@ test('stripe send is offered after a preview and confirmed first', async (t) => 
   assert.equal(sent.sha256, 'a'.repeat(64));
 });
 
-test('bug report lists stopped tasks and opens only after confirming', async (t) => {
+test('bug report lists stopped tasks and copies only the reviewed local draft', async (t) => {
   const markup = body('templates/support.html', '<section class="panel" id="issue-report"', '</section>') + '</section>';
   const ui = await fixture(markup, 'lightwork-support-ops.js', (url) => {
     if (url.includes('/tasks?')) return response({tasks: [{id: 7, title: 'Quarterly summary', when: 1}], next_offset: null});
-    return response({title: 'Quarterly summary', body: 'Reviewed local draft.',
-      url: '#reviewed-report', summary: 'The report is ready.'});
+    return response({title: 'Quarterly summary', body: 'Reviewed local draft.', summary: 'The report is ready.'});
   });
   t.after(() => ui.window.close());
+  const copied = [];
+  Object.defineProperty(ui.window.navigator, 'clipboard', {value: {writeText: async (text) => copied.push(text)}});
   const select = ui.document.getElementById('issue-report-task');
   assert.equal(select.options.length, 2);
   select.value = '7';
   submit(ui, ui.document.getElementById('issue-report-form'));
   await ui.settle();
   assert.equal(ui.document.getElementById('issue-report-preview').hidden, false);
-  const open = ui.document.getElementById('issue-report-open');
-  assert.equal(open.disabled, true);
+  const copy = ui.document.getElementById('issue-report-copy');
+  const download = ui.document.getElementById('issue-report-download');
+  assert.equal(copy.disabled, true);
+  assert.equal(download.disabled, true);
   assert.equal(ui.calls.filter((c) => c.url.endsWith('/review')).length, 0);
   assert.deepEqual(ui.opened, []);
   const confirmed = ui.document.getElementById('issue-report-confirm');
   confirmed.checked = true;
   confirmed.dispatchEvent(new ui.window.Event('change'));
-  open.click();
   await ui.settle();
   assert.deepEqual(JSON.parse(ui.calls.find((c) => c.url.endsWith('/review')).options.body),
     {task: 7, title: 'Quarterly summary', body: 'Reviewed local draft.'});
-  assert.equal(ui.window.location.hash, '#reviewed-report');
+  assert.equal(copy.disabled, false);
+  assert.equal(download.disabled, false);
+  copy.click();
+  await ui.settle();
+  assert.deepEqual(copied, ['Quarterly summary\n\nReviewed local draft.']);
+  assert.match(ui.document.getElementById('issue-report-status').textContent, /Reviewed draft copied/);
+  assert.equal(ui.window.location.href, 'https://lightwork.example/');
+  assert.deepEqual(ui.opened, []);
+  assert.equal(ui.calls.filter((c) => c.url.endsWith('/review')).length, 1);
+});
+
+test('bug report keeps changed and uncopied drafts visible for another review or download', async (t) => {
+  const markup = body('templates/support.html', '<section class="panel" id="issue-report"', '</section>') + '</section>';
+  let reviews = 0;
+  const ui = await fixture(markup, 'lightwork-support-ops.js', (url) => {
+    if (url.includes('/tasks?')) return response({tasks: [{id: 7, title: 'Stopped task', when: 1}], next_offset: null});
+    if (url.endsWith('/review')) {
+      reviews++;
+      return response({title: 'Stopped task', body: 'Secret [REDACTED]'});
+    }
+    return response({title: 'Stopped task', body: 'Secret value', summary: 'Review this draft.'});
+  });
+  t.after(() => ui.window.close());
+  Object.defineProperty(ui.window.navigator, 'clipboard', {value: {writeText: async () => { throw new Error('permission denied'); }}});
+  ui.document.execCommand = () => false;
+  const get = (id) => ui.document.getElementById(id);
+  get('issue-report-task').value = '7';
+  submit(ui, get('issue-report-form'));
+  await ui.settle();
+  const check = () => { get('issue-report-confirm').checked = true; get('issue-report-confirm').dispatchEvent(new ui.window.Event('change')); };
+  check(); await ui.settle();
+  assert.equal(reviews, 1);
+  assert.equal(get('issue-report-body').value, 'Secret [REDACTED]');
+  assert.equal(get('issue-report-confirm').checked, false);
+  assert.equal(get('issue-report-copy').disabled, true);
+  assert.match(get('issue-report-status').textContent, /Review the updated draft/);
+  check(); await ui.settle();
+  assert.equal(get('issue-report-copy').disabled, false);
+  get('issue-report-copy').click(); await ui.settle();
+  assert.match(get('issue-report-status').textContent, /browser blocked copying/);
+  assert.equal(get('issue-report-body').value, 'Secret [REDACTED]');
+  assert.equal(get('issue-report-download').disabled, false);
+  get('issue-report-body').value = 'Another edit';
+  get('issue-report-body').dispatchEvent(new ui.window.Event('input'));
+  assert.equal(get('issue-report-copy').disabled, true);
+  assert.equal(get('issue-report-download').disabled, true);
 });
 
 test('savings and performance additions draw plain rows', async (t) => {

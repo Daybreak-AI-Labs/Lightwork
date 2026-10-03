@@ -41,8 +41,8 @@ for false unless noted otherwise.
 | --- | --- | --- |
 | `MAVERICK_BUDGET_DOLLARS` | config `[budget]` | Override the dollar budget cap for a run. |
 | `MAVERICK_BILLING_STRICT` | `true` | Require verified pricing for live accounting. `false` explicitly enables warning-labelled estimate-only accounting for legacy/custom gateways. |
-| `MAVERICK_DEFAULT_MAX_DOLLARS` | unset | Optional deployment task default; Settings and `[budget] max_dollars` take precedence. The task-limits switch can disable these defaults. No dollar limit is generated when omitted. |
-| `MAVERICK_DEFAULT_MAX_WALL_SECONDS` | unset | Optional deployment task wall-clock default, in seconds. No elapsed-time cap is generated when omitted. |
+| `MAVERICK_DEFAULT_MAX_DOLLARS` | unset | Optional deployment goal default; Settings and `[budget] max_dollars` take precedence. Without a config file, omitted goals use $2. Existing config files with no task cap keep that choice. The task-limits switch can disable defaults. |
+| `MAVERICK_DEFAULT_MAX_WALL_SECONDS` | unset | Optional deployment goal wall-clock default, in seconds. Without a config file, omitted goals use 1800 seconds. Existing config files with no time cap keep that choice. |
 | `MAVERICK_DEFAULT_MAX_DEPTH` | `3` | Default max recursion depth for spawned sub-goals. Also `[swarm] default_max_depth` (Settings > All settings; read at startup, this variable wins). |
 
 Task limits and organization allowances are separate. See

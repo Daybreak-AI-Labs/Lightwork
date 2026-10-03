@@ -39,6 +39,20 @@ def test_workspace_failure_is_not_mistaken_for_a_spending_limit():
     assert explain_stop(RAW_TENANT).kind != "spending_limit"
 
 
+def test_unpriced_model_points_to_known_price_setup_without_exposing_the_id():
+    raw = ("unpriced model: no verified USD price for model "
+           "'openai_compatible:private-gateway-id'; refusing to bill at an estimate")
+    stop = explain_stop(raw)
+    assert stop.kind == "unpriced_model"
+    assert "could not verify" in stop.message
+    assert "Choose a model with a known price" in stop.action
+    assert "Settings > Require known prices" in stop.action
+    assert stop.link == "/settings"
+    assert "private-gateway-id" not in stop.message + stop.action
+    assert "strict_pricing=false" not in stop.message + stop.action
+    assert stop.technical == raw
+
+
 @pytest.mark.parametrize("raw", [
     "provider not ready: ANTHROPIC_API_KEY is not set",
     "httpx.ConnectError: [Errno 111] connection refused",

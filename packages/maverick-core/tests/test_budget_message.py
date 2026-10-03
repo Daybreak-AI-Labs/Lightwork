@@ -75,17 +75,14 @@ async def test_organization_allowance_message_survives_agent_and_lifecycle(
 
 
 class _StrictInvoiceClient:
-    """A provider client that dispatches and then invoices through
-    ``Budget.record_tokens`` the way every real client does. W1-1 made the
-    pre-dispatch estimate estimate-only (so Azure/Bedrock/gateway ids can
-    dispatch at all); the invoice stays strict, and it is this call that
-    must raise UnpricedModelError for an unverified model id."""
+    """A provider client that must never be contacted for an unpriced model."""
+
+    def __init__(self):
+        self.calls = 0
 
     async def complete_async(self, *, budget, model, **kwargs):
-        budget.record_tokens(10, 5, model=model)
-        raise AssertionError(
-            "record_tokens must refuse to bill an unverified model id"
-        )
+        self.calls += 1
+        raise AssertionError("unpriced provider request must be refused before dispatch")
 
 
 @pytest.mark.asyncio
@@ -103,7 +100,8 @@ async def test_unpriced_model_gives_pricing_message_not_a_cap_message(
     world = WorldModel(tmp_path / "world.db")
     gid = world.create_goal("goal on an unpriced model", "")
     llm = LLM(model="claude-nonexistent-99")
-    llm._get_client = lambda provider: _StrictInvoiceClient()
+    client = _StrictInvoiceClient()
+    llm._get_client = lambda provider: client
 
     out = await run_goal(
         llm, world, Budget(max_dollars=5.0), gid,
@@ -113,6 +111,7 @@ async def test_unpriced_model_gives_pricing_message_not_a_cap_message(
 
     assert "no verified price" in out
     assert "strict_pricing" in out
+    assert client.calls == 0
     # Must NOT be mistaken for -- or advise the same fix as -- a real cap trip.
     assert "hit your spending or time limit" not in out
     assert "--max-dollars" not in out
@@ -121,3 +120,10 @@ async def test_unpriced_model_gives_pricing_message_not_a_cap_message(
     # Recorded distinctly so it doesn't poison the budget-cap failure class
     # the self-tuning budget learner trains on.
     assert goal.result.startswith("unpriced model:")
+    from maverick.stop_reasons import stop_payload
+
+    stop = stop_payload(goal.status, goal.result)
+    assert stop["kind"] == "unpriced_model"
+    assert "Choose a model with a known price" in stop["action"]
+    assert "Settings > Require known prices" in stop["action"]
+    assert stop["link"] == "/settings"

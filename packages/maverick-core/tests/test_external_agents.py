@@ -645,6 +645,42 @@ def test_live_run_lifecycle_with_heartbeat_and_reclaim():
                                            "summary": "again"})
 
 
+@pytest.mark.parametrize("window", [30, 60, 120])
+def test_advertised_external_heartbeat_has_room_before_active_reclaim(monkeypatch, window):
+    from maverick.world_model import WorldModel
+
+    monkeypatch.setenv("MAVERICK_ORPHAN_RECLAIM_SECONDS", str(window))
+    _enroll(max_wall_seconds=600)
+    out = xa.start_run("sf-quotebot", {"title": "Live quote"})
+    cadence = out["heartbeat_seconds"]
+    assert 0 < cadence <= window / 4
+    world = WorldModel()
+    gid = out["goal_id"]
+    # Normal jitter after the advertised beat still leaves the active run
+    # outside the recurring reclaim cutoff; an interval equal to the window
+    # would already have been blocked before this heartbeat could arrive.
+    with world._writing() as conn:
+        conn.execute(
+            "UPDATE goals SET updated_at = ? WHERE id = ?",
+            (time.time() - cadence - 1, gid),
+        )
+    assert world.reclaim_orphan_goals(
+        statuses=("active",), resolved_window_seconds=window,
+    ) == 0
+    assert xa.heartbeat("sf-quotebot", gid)["continue"] is True
+    assert world.get_goal(gid).status == "active"
+
+
+@pytest.mark.parametrize("window, expected", [("0", 1.0), ("5", 1.25)])
+def test_external_heartbeat_advice_remains_positive_with_disabled_reclaim(
+    monkeypatch, window, expected,
+):
+    monkeypatch.setenv("MAVERICK_ORPHAN_RECLAIM_SECONDS", window)
+    _enroll()
+    out = xa.start_run("sf-quotebot", {"title": "Live quote"})
+    assert out["heartbeat_seconds"] == expected
+
+
 def test_abandoned_live_run_is_reclaimed_and_heartbeat_says_stop():
     from maverick.world_model import WorldModel
     _enroll()

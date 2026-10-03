@@ -26,8 +26,10 @@ type = "desktop"       # desktop | docker | vps | phone
 #               code/weights promotions, WORM audit export, long retention
 # A label for humans + dashboards: the wizard expands it into the concrete
 # knobs ([audit], [quotas], [self_improvement], [retention], ...) below, so
-# hand-edits keep working. Re-run `maverick init` to switch levels (the wizard
-# defaults to your previously recorded level). The advanced wizard writes
+# hand-edits keep working. A later `maverick init` protects saved settings and
+# will not switch levels. Review supported changes in Lightwork Settings;
+# advanced deployment-managed changes require an installation administrator.
+# The advanced first-run wizard writes
 # "custom": the operator hand-picked every knob, no preset applies.
 profile = "essentials"   # essentials | standard | regulated | custom
 
@@ -98,7 +100,8 @@ skill_distiller = "anthropic:claude-sonnet-4-6"
 # default       = "anthropic:claude-sonnet-4-6"
 
 [budget]
-# Omitted task limits stay unset. These examples are explicit opt-in limits.
+# New installs save $2 / 1800 seconds; existing configs with omitted limits
+# retain their prior no-limit behavior. These are explicit override examples.
 task_limits_enabled = true
 # max_dollars       = 25.0
 # max_wall_seconds  = 3600
@@ -223,6 +226,15 @@ enforce           = false                 # or MAVERICK_LICENSE_ENFORCE=1
 # api_url           = "https://api.example/license"   # optional connected refresh
 # api_token         = "${MAVERICK_LICENSE_API_TOKEN}"
 # refresh_interval_seconds = 60
+
+[rehearsal]
+# Predict outcomes for high-impact actions. Predictions are observed by default;
+# they do not stop tool calls or replace Shield, capability, or consent checks.
+# The observation switch and mode are also available under Settings > Safety.
+enable = true
+mode = "observe"       # observe (default) | hold (experimental)
+# "hold" can refuse unfamiliar or poor predicted actions and has no in-product
+# approval path. Do not use it as a customer approval workflow.
 
 [flows]
 # The visual flow-automation engine (a deterministic graph of agent/action/

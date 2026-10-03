@@ -269,7 +269,7 @@ def test_client_uses_raw_file_body_without_persistent_or_html_injection_channels
     assert ".status-card > .governance-details" in css
     assert "Grounded in the current page" not in copilot_source
     assert "AI answers can be wrong" in copilot_source
-    assert 'history.push({role: "user", content: message})' in copilot_source
+    assert "history.push({role: 'user', content: question})" in copilot_source
     assert '{role: "assistant", content: payload.reply}' not in copilot_source
 
 

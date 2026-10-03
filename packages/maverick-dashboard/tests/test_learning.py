@@ -70,6 +70,37 @@ def test_feature_switches_use_live_subsystem_defaults(tmp_path, monkeypatch):
     assert rows["fleet_memory"] is fleet_memory.enabled()
 
 
+def test_rehearsal_safety_controls_and_learning_switch_share_live_state(tmp_path, monkeypatch):
+    monkeypatch.delenv("MAVERICK_REHEARSAL", raising=False)
+    _isolate(tmp_path, monkeypatch)
+    from maverick import rehearsal
+    from maverick.config import reset_config_cache
+    from maverick_dashboard.settings_catalog import BY_ID
+    from maverick_dashboard.settings_store import set_catalog_values
+
+    assert BY_ID["rehearsal.enable"].group == "Safety"
+    assert BY_ID["rehearsal.mode"].default == "observe"
+    reset_config_cache()
+    assert rehearsal.enabled() is True
+    assert rehearsal.enforcing() is False
+
+    set_catalog_values({("rehearsal", "mode"): "hold"})
+    assert rehearsal.enforcing() is True
+    set_catalog_values({("rehearsal", "enable"): False})
+    assert rehearsal.enabled() is False
+    assert rehearsal.enforcing() is False
+    rows = {
+        row["section"]: row["enabled"]
+        for row in client.get("/api/v1/features/switches").json()["switches"]
+    }
+    assert rows["rehearsal"] is False
+
+    set_catalog_values({("rehearsal", "enable"): True,
+                        ("rehearsal", "mode"): "observe"})
+    assert rehearsal.enabled() is True
+    assert rehearsal.enforcing() is False
+
+
 def test_feature_switch_read_after_write_and_environment_pin(tmp_path, monkeypatch):
     monkeypatch.delenv("MAVERICK_DREAMING", raising=False)
     _isolate(tmp_path, monkeypatch)

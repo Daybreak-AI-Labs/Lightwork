@@ -155,3 +155,63 @@ def test_configured_max_dollars_is_the_settings_cap_then_config_then_fallback(se
     assert configured_max_dollars() == pytest.approx(25000.01)
     runtime_overrides.clear_budget()
     assert configured_max_dollars() == pytest.approx(40.0)
+
+
+def test_goal_defaults_bound_unconfigured_runs_and_keep_legacy_no_cap_choice(
+    set_budget_cfg, monkeypatch, tmp_path,
+):
+    from maverick.runner import (
+        configured_max_dollars,
+        configured_max_wall_seconds,
+        goal_budget_defaults,
+        requested_goal_dollars,
+        requested_goal_wall_seconds,
+    )
+
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
+    monkeypatch.delenv("MAVERICK_BUDGET_DOLLARS", raising=False)
+    set_budget_cfg({})
+    assert configured_max_dollars() == 2.0
+    assert configured_max_wall_seconds() == 1800.0
+    assert requested_goal_dollars(9.0) == 9.0
+    assert requested_goal_wall_seconds(3600.0) == 3600.0
+    fresh = budget_from_config(defaults=goal_budget_defaults())
+    assert (fresh.max_dollars, fresh.max_wall_seconds) == (2.0, 1800.0)
+
+    # Older installations saved an empty [budget] after choosing no task cap.
+    (tmp_path / "config.toml").write_text("[budget]\n", encoding="utf-8")
+    assert configured_max_dollars() is None
+    assert configured_max_wall_seconds() is None
+    legacy = budget_from_config(defaults=goal_budget_defaults())
+    assert legacy.max_dollars is None and legacy.max_wall_seconds is None
+
+
+def test_goal_defaults_preserve_config_request_and_explicit_opt_out(
+    set_budget_cfg, monkeypatch, tmp_path,
+):
+    from maverick.runner import (
+        configured_max_dollars,
+        configured_max_wall_seconds,
+        goal_budget_defaults,
+        requested_goal_dollars,
+        requested_goal_wall_seconds,
+    )
+
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
+    (tmp_path / "config.toml").write_text("[budget]\n", encoding="utf-8")
+    set_budget_cfg({"max_dollars": 9.0, "max_wall_seconds": 600.0})
+    assert (configured_max_dollars(), configured_max_wall_seconds()) == (9.0, 600.0)
+    assert requested_goal_dollars(20.0) == 9.0
+    assert requested_goal_wall_seconds(900.0) == 600.0
+    configured = budget_from_config(defaults=goal_budget_defaults())
+    assert (configured.max_dollars, configured.max_wall_seconds) == (9.0, 600.0)
+    requested = budget_from_config(
+        defaults=goal_budget_defaults(), max_dollars=4.0, max_wall_seconds=300.0,
+    )
+    assert (requested.max_dollars, requested.max_wall_seconds) == (4.0, 300.0)
+
+    set_budget_cfg({"task_limits_enabled": False})
+    assert configured_max_dollars() is None and configured_max_wall_seconds() is None
+    disabled = budget_from_config(defaults=goal_budget_defaults())
+    assert disabled.max_dollars is None and disabled.max_wall_seconds is None
+    assert budget_from_config(defaults=goal_budget_defaults(), max_dollars=0.5).max_dollars == 0.5

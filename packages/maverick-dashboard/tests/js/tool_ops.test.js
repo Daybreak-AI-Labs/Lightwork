@@ -50,6 +50,54 @@ const PREVIEW = {name: 'weekly-status', triggers: ['weekly status'], tools: ['ht
   instructions_cut_short: false, signed: false, ok: true, problems: [], suggestions: ['It does not list the tools it uses.'],
   fingerprint: 'f'.repeat(64), technical: [{text: "no 'tools_needed:' declared"}], can_add: true};
 
+test('a completed-work suggestion stays a draft until an administrator reviews and adds it', async (t) => {
+  const markup = slice('skills.html', '<section class="panel sk-section" aria-labelledby="to-learned-title"', '</section>');
+  const candidate = {name: 'renewal-timing', triggers: ['review customer renewals'], tools: [],
+    instructions: '# Steps\n1. Check the renewal date with the account owner.\n2. Report the result.',
+    source_tasks: [17], fingerprint: 'a'.repeat(64), ok: true, problems: [], suggestions: []};
+  let added = false;
+  const ui = await fixture(markup, (url) => {
+    if (url.endsWith('/learned-candidates')) return response({can_add: true, blocked: '',
+      suggestions: added ? [] : [candidate], added: added ? [{name: 'renewal-timing', fingerprint: 'b'.repeat(64)}] : []});
+    if (url.endsWith('/admit')) { added = true; return response({name: 'renewal-timing', triggers: candidate.triggers, tools_needed: []}, 201); }
+    if (url.endsWith('/withdraw')) { added = false; return response({name: 'renewal-timing', removed: true}); }
+    return response({});
+  });
+  t.after(() => ui.window.close());
+  assert.equal(posts(ui.calls, '/admit').length, 0);
+  assert.match(ui.document.getElementById('to-learned-list').textContent, /Check the renewal date/);
+  assert.equal(ui.document.querySelector('#to-learned-list a').getAttribute('href'), '/chat/goal/17');
+  button(ui.document.getElementById('to-learned-list'), 'Add this skill').click();
+  await ui.settle();
+  assert.match(ui.confirms[0], /next matching task/);
+  assert.deepEqual(posts(ui.calls, '/admit')[0].body, {fingerprint: candidate.fingerprint,
+    publish_name: 'renewal-timing', confirm: true});
+  assert.match(ui.document.getElementById('to-learned-added').textContent, /renewal timing/);
+  button(ui.document.getElementById('to-learned-added'), 'Remove').click();
+  await ui.settle();
+  assert.deepEqual(posts(ui.calls, '/withdraw')[0].body, {fingerprint: 'b'.repeat(64), confirm: true});
+  assert.match(ui.document.getElementById('to-learned-status').textContent, /Removed renewal timing/);
+});
+
+test('a lost readback does not claim a suggested skill is ready', async (t) => {
+  const markup = slice('skills.html', '<section class="panel sk-section" aria-labelledby="to-learned-title"', '</section>');
+  const row = {name: 'renewal-timing', triggers: ['review renewal'], tools: [],
+    instructions: '# Steps\n1. Review it.', source_tasks: [17], fingerprint: 'a'.repeat(64),
+    ok: true, problems: [], suggestions: []};
+  let posted = false;
+  const ui = await fixture(markup, (url) => {
+    if (url.endsWith('/learned-candidates')) return posted ? response({detail: 'unavailable'}, 503) :
+      response({can_add: true, blocked: '', suggestions: [row], added: []});
+    if (url.endsWith('/admit')) { posted = true; return response({name: row.name, triggers: row.triggers, tools_needed: []}, 201); }
+    return response({});
+  });
+  t.after(() => ui.window.close());
+  button(ui.document.getElementById('to-learned-list'), 'Add this skill').click();
+  await ui.settle();
+  assert.equal(posts(ui.calls, '/admit').length, 1);
+  assert.match(ui.document.getElementById('to-learned-status').textContent, /could not confirm it/);
+});
+
 test('a skill is checked and shown before it can be added, then added after confirmation', async (t) => {
   const markup = slice('skills.html', '<details class="sk-more" id="to-skill-install">', '</details>');
   const ui = await fixture(markup, (url) => {

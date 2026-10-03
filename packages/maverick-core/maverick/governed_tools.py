@@ -25,6 +25,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import uuid
 from urllib.parse import urlsplit, urlunsplit
 
@@ -170,6 +171,33 @@ _SQL_CONNECTORS = frozenset({
     "bigquery", "database", "databricks", "oracle", "snowflake",
 })
 
+# A constant projection is the only SQL read whose lack of a remote data access
+# or mutation can be established without parsing each provider's SQL dialect.
+# Do not admit comments, expressions, FROM clauses, or stacked statements here.
+_PURE_SQL_PROBE = re.compile(r"[ \t\r\n]*SELECT[ \t\r\n]+1[ \t\r\n]*;?[ \t\r\n]*", re.ASCII | re.IGNORECASE)
+
+
+def _is_pure_sql_probe(tool_name: str, args: dict) -> bool:
+    field = "sql" if tool_name in {"bigquery", "database"} else "statement"
+    statement = args.get(field)
+    return isinstance(statement, str) and _PURE_SQL_PROBE.fullmatch(statement) is not None
+
+
+def _governed_description(tool: Tool) -> str:
+    from .tools._lazy import GOVERNED_DESCRIPTION_NOTE
+
+    if tool.name in _SQL_CONNECTORS:
+        # Raw connector descriptions advertise ordinary SQL reads. The live
+        # governed registry cannot safely offer those reads yet; replacing
+        # that description prevents the model from planning an unusable path.
+        return (
+            f"{tool.name} connection check. Under governance, only a constant "
+            "SELECT 1 probe runs. Customer table reads and all other SQL are "
+            "refused until a remote revision contract exists."
+            + GOVERNED_DESCRIPTION_NOTE
+        )[:1024]
+    return (tool.description + GOVERNED_DESCRIPTION_NOTE)[:1024]
+
 
 def _enterprise_mode() -> bool:
     """Central enterprise predicate, strict on policy-source uncertainty.
@@ -265,10 +293,9 @@ def _is_governed_write(tool: Tool, args: dict) -> bool:
     if tool.name in _SQL_CONNECTORS and op in {"query", "sql"}:
         # SQL cannot be proven side-effect-free from a leading keyword across
         # dialects: SELECT INTO/OUTFILE, locks, sequences, and stored/volatile
-        # functions all mutate. Every credentialed SQL execution therefore
-        # crosses the governed boundary; the approval preview binds the exact
-        # statement before the connector receives ``confirm=True``.
-        return True
+        # functions all mutate. Only an exact constant SELECT 1 probe bypasses
+        # the write boundary; all data reads and writes remain governed.
+        return not _is_pure_sql_probe(tool.name, args)
     if tool.name == "lambda" and op == "invoke":
         return str(args.get("invocation_type") or "RequestResponse").lower() != "dryrun"
     if op in _BESPOKE_WRITE_OPS.get(tool.name, frozenset()):
@@ -481,7 +508,6 @@ def _connector_target(
 
 
 def _wrap_lazy_connector_tool(tool, *, goal_id, actor, enterprise):
-    from .tools._lazy import GOVERNED_DESCRIPTION_NOTE
     # Discovery needs exactly the governed schema/description, but not the
     # thousands of executor/receipt closures. Bind this registry's actor,
     # goal and enterprise snapshot; the existing wrapper is constructed
@@ -491,7 +517,7 @@ def _wrap_lazy_connector_tool(tool, *, goal_id, actor, enterprise):
         lambda resolved: wrap_connector_tool(
             resolved, goal_id=goal_id, actor=actor, enterprise=strict,
         ),
-        description=(tool.description + GOVERNED_DESCRIPTION_NOTE)[:1024],
+        description=_governed_description(tool),
     )
 
 
@@ -815,10 +841,9 @@ def _wrap_connector_executor(
     # scoping checks while the closure still supplies the governed boundary.
     _fn.__module__ = getattr(tool.fn, "__module__", _fn.__module__)
     _fn.__qualname__ = "wrap_connector_tool.<locals>._fn"
-    from .tools._lazy import GOVERNED_DESCRIPTION_NOTE
     return Tool(
         name=tool.name,
-        description=(tool.description + GOVERNED_DESCRIPTION_NOTE)[:1024],
+        description=_governed_description(tool),
         input_schema=tool.input_schema,
         fn=_fn,
         parallel_safe=False,

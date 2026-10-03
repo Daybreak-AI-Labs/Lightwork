@@ -68,6 +68,22 @@ def test_foreign_owner_cannot_distinguish_missing_from_damaged_run(client, monke
     assert listing.status_code == 200 and listing.json()["runs"] == []
 
 
+def test_foreign_owner_cannot_identify_damaged_run_snapshot(client, monkeypatch):
+    from maverick_dashboard import api
+
+    run, _ = checkpoint()
+    saved_path = store._runs_dir() / f"{run.run_id}.json"
+    saved = json.loads(saved_path.read_text("utf-8"))
+    saved["release_digest"] = "f" * 64
+    saved_path.write_text(json.dumps(saved), encoding="utf-8")
+    monkeypatch.setattr(api, "goal_owner_filter", lambda _request: "user:bob")
+
+    damaged = client.get(f"/api/v1/flows/runs/{run.run_id}")
+    missing = client.get("/api/v1/flows/runs/not-a-run")
+    assert damaged.status_code == missing.status_code == 404
+    assert damaged.json() == missing.json()
+
+
 def test_permission_denial_precedes_payload_access(client, monkeypatch):
     from maverick_dashboard import auth
 

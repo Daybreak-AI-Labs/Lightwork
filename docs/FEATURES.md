@@ -243,8 +243,13 @@ here.
   auto-apply, model-weight adoption, and DGM code self-modification retain
   separate gates.
 - **Local continuous learning** — distill successful run trajectories into a
-  reusable, validator-compliant `SKILL.md` under `~/.maverick/learned-skills`
-  (`skill_distillation_local.py`), default-on via `[self_learning] distill_local`.
+  validator-compliant `SKILL.md` suggestion under the active tenant's
+  `learned-skills` store (`skill/distillation_local.py`), default-on via
+  `[self_learning] distill_local`. A suggestion does not enter agent recall
+  automatically. An administrator reviews its full instructions and shared
+  source tasks on Skills, then explicitly admits one exact version into the
+  installed-skill store; the guarded Copilot learning actions use the same
+  admission and withdrawal services.
   **v2** (`skill_distillation_v2.py`) adds two quality gates so the loop stays
   useful: it won't distill from fewer than N successful trajectories (a one-off
   success is noise), and it dedups a candidate against the learned-skills store
@@ -401,16 +406,15 @@ here.
   null-action placebo reads ~0. The tabular learning half of the Operating Twin
   (a generative transition model is a drop-in behind the same interface); same
   `causal_promotion` knob.
-- **Pre-execution rehearsal** — the governance half of the Operating Twin: before
-  a risky plan runs, simulate it against the same learned world-model and gate on
-  the prediction (`rehearsal.py`). Proceed when the model has support and
-  confidently predicts a good outcome (let the agent be bold), **block** a
-  confidently-poor outcome, and **escalate** to a human/canary when the rollout is
-  too uncertain or — crucially — when the model has never seen the move (a
-  simulator that bluffs about the unknown is worse than none). Governance as a
-  capability, not just a brake. Default-on (`[rehearsal] enable`); it fails
-  toward caution (unknown / over-uncertain / error all
-  escalate). The verdict maps onto the existing consent / autonomy-gate surfaces.
+- **Pre-execution rehearsal** — before a high-impact tool runs, compare it with
+  the learned world-model (`rehearsal.py`). It is **observe-only by default**:
+  an unfamiliar or poor prediction is logged but does not stop the action.
+  Shield, capability, consent, and other approval checks still apply. An
+  administrator can change the observation switch and mode under Settings >
+  Safety. The explicit `mode = "hold"` choice retains the experimental refusal
+  behavior, but there is no in-product approval path for that mode;
+  it is not a customer-ready way to govern actions. Held calls are not counted
+  as executed tool experience.
 - **Human-override ingestion** — when a human declines an Art-14 approval
   gate, the refusal is persisted as a recallable lesson
   (`reflexion.record_human_override`, failure class `human_override`,

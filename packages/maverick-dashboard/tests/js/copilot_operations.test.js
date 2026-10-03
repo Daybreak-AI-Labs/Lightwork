@@ -63,6 +63,16 @@ test("a conversational proposal opens review but is never consent or rationale",
   const modelRequests=h.calls.filter(c=>c.url==="/api/v1/copilot"||c.url.endsWith("/propose"));
   assert.doesNotMatch(JSON.stringify(modelRequests),/Never send this reason/);h.close();
 });
+test("a stale learning example does not announce a review that failed to open",async()=>{
+  const h=await harness();await h.open();
+  h.override(c=>c.url.includes('/copilot/operations?'),()=>response({detail:'unavailable'},503));
+  await h.ask("Stop using this example");
+  assert.equal(h.get("mv-copilot-input").value,"Stop using this example");
+  assert.doesNotMatch(h.get("mv-copilot-log").textContent,/Review this example below/);
+  assert.match(h.get("mv-copilot-note").textContent,/could not be opened/);
+  assert.equal(h.get("le-form").hidden,true);
+  h.close();
+});
 test("scope change clears private reason and review, then requires current preparation",async()=>{
   const h=await harness();await h.open();await h.choose();h.get("le-reason").value="Prior account";
   h.state.scope="e".repeat(64);h.get("le-refresh").click();await tick();
@@ -166,6 +176,15 @@ test("an unavailable catalog clears prior questions before legacy guidance",asyn
   h.override(c=>c.url.includes('/copilot/operations?'),()=>response({detail:{code:'operation_denied'}},403));
   await h.open();assert.equal(h.get('mv-copilot-log').textContent,'');await h.ask('Account B question');
   const last=h.calls.filter(c=>c.url==='/api/v1/copilot').at(-1);assert.deepEqual(last.body.history,[]);h.close();
+});
+test("turning off optional actions does not erase the page guide's recent chat",async()=>{
+  const h=await harness();h.state.proposal=null;await h.open();await h.ask('Earlier question');
+  h.get('mv-copilot-close').click();
+  h.override(c=>c.url.includes('/copilot/operations?'),()=>response({detail:{code:'operation_disabled'}},403));
+  await h.open();assert.match(h.get('mv-copilot-log').textContent,/Earlier question/);
+  await h.ask('Follow-up question');
+  const last=h.calls.filter(c=>c.url==='/api/v1/copilot').at(-1);
+  assert.deepEqual(last.body.history,[{role:'user',content:'Earlier question'}]);h.close();
 });
 test("feature-disabled Copilot does not erase a direct-page draft",async()=>{
   const h=await harness();h.get('le-withdraw').click();h.get('le-reason').value='Direct review';

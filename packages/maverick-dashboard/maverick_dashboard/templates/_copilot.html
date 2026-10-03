@@ -20,7 +20,8 @@
   <p class="mv-copilot__egress" id="mv-copilot-egress">
     If an AI provider is set up, this question and your last few questions
     may be sent to that provider. Do not type in document contents, passwords,
-    personal details, or anything else that must stay private.
+    personal details, or anything else that must stay private. Recent chat stays
+    in this tab and is removed after an hour without a reply; you can clear it below.
   </p>
   <ul class="mv-copilot__tips" id="mv-copilot-tips"></ul>
   <div class="mv-copilot__prompts" id="mv-copilot-prompts"
@@ -39,6 +40,7 @@
   </section>
   <div class="mv-copilot__log" id="mv-copilot-log"
        aria-live="polite" aria-relevant="additions text"></div>
+  <button class="btn btn--ghost" id="mv-copilot-clear" type="button">Clear recent chat</button>
   <form id="mv-copilot-form">
     <label class="sr-only" for="mv-copilot-input">Ask Copilot about this page</label>
     <div class="mv-copilot__row">

@@ -8,7 +8,7 @@ const script = fs.readFileSync(path.resolve(__dirname, '../../maverick_dashboard
 const settle = async () => { for (let i = 0; i < 12; i++) await new Promise(resolve => setImmediate(resolve)); };
 
 function page() {
-  const dom = new JSDOM('<button id="mv-copilot-fab"></button><section id="mv-copilot" hidden><button id="mv-copilot-close"></button><ul id="mv-copilot-tips"></ul><div id="mv-copilot-prompts"></div><div id="mv-copilot-log"></div><form id="mv-copilot-form"><textarea id="mv-copilot-input"></textarea><button id="mv-copilot-send"></button></form><p id="mv-copilot-note"></p><a id="mv-copilot-provider-setup"></a><div id="mv-copilot-action"></div></section>', {url: 'https://lightwork.invalid/chat', runScripts: 'outside-only'});
+  const dom = new JSDOM('<button id="mv-copilot-fab"></button><section id="mv-copilot" hidden><button id="mv-copilot-close"></button><ul id="mv-copilot-tips"></ul><div id="mv-copilot-prompts"></div><div id="mv-copilot-log"></div><button id="mv-copilot-clear"></button><form id="mv-copilot-form"><textarea id="mv-copilot-input"></textarea><button id="mv-copilot-send"></button></form><p id="mv-copilot-note"></p><a id="mv-copilot-provider-setup"></a><div id="mv-copilot-action"></div></section>', {url: 'https://lightwork.invalid/chat', runScripts: 'outside-only'});
   let scope = 'a'.repeat(64), calls = 0, answer = async () => ({ok: false, status: 503, json: async () => ({})});
   dom.window.fetch = async url => {
     if (String(url).includes('/copilot/context')) return {ok: true, status: 200, json: async () => ({client_context: scope})};

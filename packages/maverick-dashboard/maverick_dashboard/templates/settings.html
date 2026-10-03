@@ -23,6 +23,10 @@
   <div class="panel settings-saved" role="status" id="settings-notice">{{ notice }}</div>
   {% endif %}
 
+  <p class="muted">Review setting changes and who made them in the
+    <a href="/audit?kind=setting_changed">Activity log</a>. This metadata view does not display the values before and after a change. A prepared entry alone does not confirm a save.
+    If a save reports that its completion record is unavailable, refresh Settings and Activity before retrying.</p>
+
   <section class="settings-index" aria-labelledby="settings-index-title"
            data-initial-group="{{ saved_section or 'general' }}">
     <div>

@@ -33,7 +33,8 @@
   {% endif %}
   {% if can_operate_workflows %}
   <div class="wfx__head">
-    <span style="display:flex;gap:var(--space-2);margin-inline-start:auto;">
+    <span style="display:flex;gap:var(--space-2);margin-inline-start:auto;flex-wrap:wrap;">
+      {% if flows_enabled %}<a class="btn btn--ghost" href="/learning/examples">Learning examples</a>{% endif %}
       {% if flows_enabled %}<a class="btn" href="/flows/designer">New flow</a>{% endif %}
       <a class="btn btn--primary" href="/workflow-builder">New workflow</a>
     </span>

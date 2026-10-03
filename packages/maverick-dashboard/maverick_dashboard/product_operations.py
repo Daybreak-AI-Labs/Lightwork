@@ -136,6 +136,7 @@ def _adapter_modules():
     from . import (
         product_operations_activation,
         product_operations_budget,
+        product_operations_commitments,
         product_operations_companion,
         product_operations_connections,
         product_operations_conversation,
@@ -153,6 +154,7 @@ def _adapter_modules():
         product_operations_preferences,
         product_operations_projects,
         product_operations_record_history,
+        product_operations_skills,
         product_operations_stop,
         product_operations_task_map,
         product_operations_task_views,
@@ -163,6 +165,7 @@ def _adapter_modules():
     return (
         product_operations_preferences,
         product_operations_companion,
+        product_operations_commitments,
         product_operations_tasks,
         product_operations_task_map,
         product_operations_task_views,
@@ -183,6 +186,7 @@ def _adapter_modules():
         product_operations_stop,
         product_operations_identity,
         product_operations_record_history,
+        product_operations_skills,
         product_operations_conversation,
         product_operations_personal_data,
         product_operations_workflows,

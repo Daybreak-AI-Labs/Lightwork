@@ -27,6 +27,10 @@ for(const width of [320,390,768])for(const mode of [
   await menu.focus();await menu.press('Enter');await expect(page.locator('.cs-brand')).toBeFocused();
   await page.keyboard.press('Tab');await expect(close).toBeFocused();
   await expect(close).toHaveAccessibleName('Close menu');await expect(close).toBeVisible();
+  // Visibility and focus are available before the 0.18s drawer entrance finishes.
+  await expect.poll(async()=>page.locator('#cs-side').evaluate(node=>{
+    const side=node.getBoundingClientRect();return side.left>=-1&&side.right<=innerWidth+1;
+  })).toBe(true);
   const geometry=await close.evaluate(node=>{
     const rect=node.getBoundingClientRect(),side=document.getElementById('cs-side').getBoundingClientRect();
     return {left:rect.left,right:rect.right,top:rect.top,bottom:rect.bottom,width:innerWidth,height:innerHeight,

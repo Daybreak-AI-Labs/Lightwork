@@ -81,7 +81,7 @@ def dispatcher(monkeypatch):
     monkeypatch.setattr(provider_cost_cap, "reserve", reserve)
     monkeypatch.setattr(provider_cost_cap, "settle", settle)
     monkeypatch.setattr(llm_module, "_finish_provider_call", finish)
-    llm = LLM(model="openai:guard-test-model")
+    llm = LLM(model="openai:gpt-5.5")
 
     def get_client(provider):
         state.clients.append(provider)
@@ -162,7 +162,7 @@ def test_one_attempt_refuses_replay_after_unknown_provider_failure(dispatcher, a
 def test_guard_denial_does_not_select_a_fallback(dispatcher, monkeypatch, asynchronous):
     llm, state = dispatcher
     allowed = [True]
-    monkeypatch.setattr(llm_module, "_fallback_chain_for_dispatch", lambda *args: ["anthropic:backup"])
+    monkeypatch.setattr(llm_module, "_fallback_chain_for_dispatch", lambda *args: ["anthropic:claude-sonnet-4-6"])
 
     def guard():
         if not allowed[0]:
@@ -178,7 +178,7 @@ def test_guard_denial_does_not_select_a_fallback(dispatcher, monkeypatch, asynch
 def test_attempt_limit_carries_across_model_failover(dispatcher, monkeypatch, asynchronous):
     llm, state = dispatcher
     sends = []
-    monkeypatch.setattr(llm_module, "_fallback_chain_for_dispatch", lambda *args: ["anthropic:backup"])
+    monkeypatch.setattr(llm_module, "_fallback_chain_for_dispatch", lambda *args: ["anthropic:claude-sonnet-4-6"])
     monkeypatch.setattr("maverick.failover_policy.policy_should_retry", lambda exc: not isinstance(exc, ProviderDispatchDenied))
 
     def send():

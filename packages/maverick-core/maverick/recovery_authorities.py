@@ -53,6 +53,8 @@ GLOBAL_START_JSON_AUTHORITY_POLICIES = {
     # consumed operation receipts. They need current authority reconciliation;
     # an authenticated old backup is not evidence of current consent.
     "conversation_inbox": "conversation_intent_authority",
+    "commitment_viability": "commitment_review_authority",
+    "commitment_viability_archive": "commitment_review_authority",
     "deliverable_bundles": "deliverable_release_authority",
     "project_workspaces": "project_workspace_membership_authority",
     "task_handoffs": "task_handoff_authority",
@@ -521,6 +523,7 @@ def authority_policy(relative: str, *, is_sqlite: bool) -> str | None:  # noqa: 
             "conditional_access_authority"
         ),
         "knowledge-correction-sources": "knowledge_correction_authority",
+        "knowledge-rights-archive": "knowledge_access_authority",
         "knowledge-rights-requests": "knowledge_access_authority",
         "llm_gateway": "llm_caller_authority",
         "model_risk_decisions": "model_risk_decision_authority",
@@ -802,6 +805,7 @@ GLOBAL_START_BLOCKED_AUTHORITY_SAMPLES = {
         "conditional_access_authority"
     ),
     "knowledge-correction-sources/KCS-a.json": "knowledge_correction_authority",
+    "knowledge-rights-archive/KRA-a.json": "knowledge_access_authority",
     "knowledge-rights-requests/KRR-a.json": "knowledge_access_authority",
     "llm_gateway/LGC-a.json": "llm_caller_authority",
     "model_risk_decisions/MRD-a.json": "model_risk_decision_authority",

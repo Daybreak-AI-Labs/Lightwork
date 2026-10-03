@@ -651,8 +651,10 @@ Use the enrollment digest from `GET /enrollment`; the ordinary execution
 approval digest includes different authority fields. A `503 audit_pending`
 response can describe an already committed change. Refresh the status or retry
 the identical request; do not rerun the business workflow to recover its receipt.
-The routes use existing authenticated dashboard access. A dedicated enrollment
-and evidence-review screen is not included in this version.
+The routes use existing authenticated dashboard access. The run page now has
+ordinary controls for enrollment at the first approval, review of the actual
+captured work and a separate bounded training grant. It cannot reconstruct a
+run that passed its first approval before enrollment.
 
 Enroll an owned saved run at its **initial approval, before any action**. Declare
 the exact tool allowlist, full input schema, full argument/result schemas for
@@ -722,8 +724,10 @@ action_evidence_revoked_keys = []
 
 `action_recipe_lineage` enables signed export and governed admission.
 `require_action_recipe_lineage` requires a valid governed lineage reference for
-every learned recipe; removing the reference cannot bypass that policy.
-Both settings default to false. Transformed v2 execution additionally needs
+every learned recipe. Capturing workflow examples or enabling signed evidence
+also requires that reference even when `require_action_recipe_lineage = false`;
+removing the reference cannot bypass that effective policy. These settings
+default to false. Transformed v2 execution additionally needs
 `action_recipe_transforms = true`; choice execution needs both that setting and
 `action_recipe_choices = true`. The issuer is a stable deployment identifier
 matching `[A-Za-z0-9][A-Za-z0-9._:-]{0,127}`, not a URL or a discovered identity.
@@ -837,8 +841,23 @@ Existing destination ownership is checked. Draft export grants no authority to
 save, publish or execute. Pending admission audit withholds package and draft
 content, and a fresh authorized retry recovers the same committed admission.
 
+The customer-facing **Build a flow from reviewed runs** path on the Teach page
+uses these signed checks too: it obtains current signed copies only from
+accepted runs with a separate, unexpired training grant; learns a verified
+package; and admits that exact package when the person confirms the new draft.
+Refinement keeps the signed ancestry. The page then offers the normal save and
+publish controls. A withdrawn or expired source blocks later admission and
+native action eligibility; it does not undo an action already dispatched.
+The older unsigned local learner remains available for compatibility outside
+this customer route. Its artifacts cannot be saved, published or run while
+workflow example capture or signed lineage is enabled. If an administrator
+turns both of those features and the explicit require setting off, unsigned
+recipes can run again and do not gain the signed path's revocation guarantee.
+An older unsigned flow must be rebuilt from currently accepted, separately
+granted runs on the Teach page before it can run under customer learning policy.
+
 Saved definitions and snapshots check the structural lineage binding and the
-require-lineage policy. The governed draft service and native recipe proposal/
+effective require-lineage policy. The governed draft service and native recipe proposal/
 dispatch paths perform current source, tenant, owner, review, key and grant checks.
 Each action still requires the ordinary native tool authority, budget and
 execution approval. Decision receipts identify the artifact, lineage admission,

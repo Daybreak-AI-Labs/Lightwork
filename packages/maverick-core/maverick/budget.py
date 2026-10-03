@@ -433,6 +433,28 @@ def _openrouter_advertised_free(model_id: str) -> bool:
         return False
 
 
+def _bare_model_proxy_estimate(
+    requested: str, rates: tuple[float, float], *, has_source: bool,
+) -> ModelPrice:
+    """Label a direct-vendor tuple as a planning proxy for another route."""
+    policy = "bare-model-proxy-estimate" if has_source else "legacy-tuple-estimate"
+    if requested not in _UNPRICED_WARNED:
+        _UNPRICED_WARNED.add(requested)
+        log.warning(
+            "estimate-only accounting is using an unverified proxy rate "
+            "for %r; not suitable for invoices or chargebacks", requested,
+        )
+    return _estimate_policy_price(
+        requested, (float(rates[0]), float(rates[1])),
+        source=f"maverick://pricing-policy/{policy}",
+        confidence=0.25,
+        version=f"{policy}-v1",
+        evidence_id=f"{policy}-v1",
+        pricing_basis="Unverified direct-vendor rate used as a planning proxy",
+        applicability="Estimate only; the selected route may charge a different tariff",
+    )
+
+
 def _lookup_price_quote(
     model: str | None,
     *,
@@ -468,8 +490,18 @@ def _lookup_price_quote(
 
     keys = [requested]
     bare = requested.split(":", 1)[1] if ":" in requested else requested
-    if bare != requested:
-        keys.append(bare)
+    # A bare row can price a qualified route only if its evidence names that
+    # route's own provider. Model spelling alone says nothing about the bill:
+    # OpenRouter, Azure and Bedrock can serve the same model at other tariffs.
+    evidence_prefix = {
+        "anthropic": "anthropic-", "openai": "openai-", "gemini": "google-",
+        "moonshot": "moonshot-", "deepseek": "deepseek-", "xai": "xai-",
+        "openrouter": "openrouter-",
+    }.get(requested.split(":", 1)[0])
+    if bare != requested and evidence_prefix is not None:
+        bare_quote = model_price_quote(bare, estimate_only=True)
+        if bare_quote is not None and bare_quote.evidence_id.startswith(evidence_prefix):
+            keys.append(bare)
 
     for key in keys:
         try:
@@ -564,6 +596,14 @@ def _lookup_price_quote(
             requested,
             (0.0, 0.0),
             evidence_id="openrouter-advertised-free-tier-policy-2026-09-16",
+        )
+
+    # Explicit planning mode may use a bare tuple as a proxy, but the direct
+    # vendor's rate is never evidence for billing through another gateway.
+    if estimate_only and bare != requested and bare in MODEL_PRICES:
+        return _bare_model_proxy_estimate(
+            requested, MODEL_PRICES[bare],
+            has_source=model_price_quote(bare, estimate_only=True) is not None,
         )
 
     if not estimate_only:

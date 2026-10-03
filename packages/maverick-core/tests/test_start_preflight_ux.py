@@ -169,12 +169,16 @@ def test_unknown_hosted_model_fails_closed():
     assert b.input_tokens == 0
 
 
-def test_known_model_via_local_prefix_still_priced():
-    # A REAL priced id behind a local prefix keeps its table rate
-    # (prefix-stripping match has priority over the local-zero rule).
-    b = Budget(max_dollars=10.0)
-    b.record_tokens(1_000_000, 0, model="ollama:deepseek-v4-flash")
-    assert b.dollars > 0
+def test_known_model_via_local_prefix_uses_local_zero_metering():
+    # A self-hosted route does not incur the direct provider's API charge,
+    # even when both routes serve a model with the same name.
+    local = Budget(max_dollars=10.0)
+    local.record_tokens(1_000_000, 0, model="ollama:deepseek-v4-flash")
+    assert local.dollars == 0
+
+    direct = Budget(max_dollars=10.0)
+    direct.record_tokens(1_000_000, 0, model="deepseek:deepseek-v4-flash")
+    assert direct.dollars > 0
 
 
 def test_debate_and_plan_reflect_refuse_cleanly_when_unconfigured(tmp_path, monkeypatch):

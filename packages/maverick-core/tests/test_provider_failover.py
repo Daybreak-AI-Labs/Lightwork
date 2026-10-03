@@ -276,7 +276,7 @@ def test_open_breaker_fast_fails_when_no_chain(monkeypatch):
         lambda self, provider: type("C", (), {"complete": _boom_client})())
     try:
         with pytest.raises(cb.CircuitOpen):
-            LLM(model="anthropic:m1").complete(
+            LLM(model="anthropic:claude-sonnet-4-6").complete(
                 "sys", [{"role": "user", "content": "hi"}])
     finally:
         cb.reset_all()

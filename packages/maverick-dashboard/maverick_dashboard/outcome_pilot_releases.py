@@ -103,10 +103,23 @@ def choices(request):
     try:
         tenant, actor = _identity(request)
     except PermissionError:
-        return {"available": False, "items": [], "detail": "Sign in with a named account to plan a release comparison."}
+        detail = "Sign in with a named account and select a workspace to compare releases. You can still plan a normal workflow pilot."
+        return {"available": False, "items": [], "detail": detail,
+                "readiness": {"status": "sign_in_required", "release_decisions": False,
+                              "deployed_release_check": False, "next_action": detail}}
     service = _service(request, required=False)
-    if service is None:
-        return {"available": False, "items": [], "detail": "Release comparisons need a configured promotion and deployment connection."}
+    adapter = getattr(request.app.state, "candidate_promotion_deployment_adapter", None)
+    observer_ready = callable(getattr(adapter, "observe", None))
+    if service is None or not observer_ready:
+        if service is None and not observer_ready:
+            detail = "Release comparisons need release decisions and a deployed-release check connected by an installation administrator. You can still plan a normal workflow pilot."
+        elif service is None:
+            detail = "Release decisions are not connected. Ask an installation administrator to finish release setup, then check again. You can still plan a normal workflow pilot."
+        else:
+            detail = "The deployed-release check is not connected. Ask an installation administrator to finish release setup, then check again. You can still plan a normal workflow pilot."
+        return {"available": False, "items": [], "detail": detail,
+                "readiness": {"status": "setup_required", "release_decisions": service is not None,
+                              "deployed_release_check": observer_ready, "next_action": detail}}
     rows = service.list(tenant, actor, limit=256)
     items = []
     for value in rows:
@@ -122,8 +135,12 @@ def choices(request):
             "state": value["state"],
             "created_at": value.get("created_at"),
         })
+    detail = ("Choose a candidate. Its deployed baseline is checked again when you freeze the plan."
+              if items else "Release setup is connected, but no candidate is waiting for release in this workspace. You can still plan a normal workflow pilot.")
     return {"available": True, "items": items, "partial": len(rows) == 256,
-        "detail": "The deployed baseline is checked again when you freeze the plan."}
+        "detail": detail,
+        "readiness": {"status": "ready", "release_decisions": True,
+                      "deployed_release_check": True, "next_action": detail}}
 
 
 def bind(request, candidate_id):

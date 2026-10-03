@@ -3,6 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from maverick_dashboard.api_schemas import CopilotIn
 from pydantic import ValidationError
@@ -47,6 +48,136 @@ def test_provider_free_copilot_returns_bounded_page_guide(
     assert "Settings" in payload["provider_setup"]["label"]
     assert "when role and server composition permit" in payload["reply"].lower()
     assert len(payload["reply"].split()) <= 120
+
+
+def test_incomplete_selected_model_route_still_uses_page_guide(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from maverick_dashboard import api
+
+    monkeypatch.setattr(api, "_any_provider_key_set", lambda: True)
+
+    def incomplete_route(*, role: str) -> None:
+        assert role == "orchestrator"
+        raise HTTPException(400, "Private provider configuration detail")
+
+    monkeypatch.setattr(api, "require_provider_or_400", incomplete_route)
+    context = client.get("/api/v1/copilot/context", params={"page": "/goals"})
+    assert context.status_code == 200
+    assert context.json()["model_provider_configured"] is False
+    assert context.json()["model_route_status"] == "provider"
+    assert context.json()["provider_setup"]["href"] == "/settings#settings-integrations"
+
+    response = client.post(
+        "/api/v1/copilot",
+        json={"message": "What can I do on this page?", "page": "/goals", "history": []},
+    )
+    assert response.status_code == 200
+    assert response.json()["mode"] == "built_in"
+    assert "Tasks" in response.json()["reply"]
+    assert "Private provider configuration detail" not in response.text
+
+
+def test_unpriced_selected_model_uses_model_settings_without_dispatch(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from maverick import llm
+    from maverick_dashboard import api
+
+    monkeypatch.setenv("MAVERICK_BILLING_STRICT", "true")
+    monkeypatch.setattr(api, "_any_provider_key_set", lambda: True)
+    monkeypatch.setattr(api, "require_provider_or_400", lambda **_kwargs: None)
+    monkeypatch.setattr(llm, "model_for_role", lambda _role: "openai:private-unpriced-model")
+
+    class NoDispatch:
+        def __init__(self, _model):
+            pytest.fail("Copilot sent an unpriced model request")
+
+    monkeypatch.setattr(llm, "LLM", NoDispatch)
+    context = client.get("/api/v1/copilot/context", params={"page": "/goals"})
+    assert context.status_code == 200
+    assert context.json()["model_provider_configured"] is False
+    assert context.json()["model_route_status"] == "pricing"
+    assert "no confirmed price" in context.json()["model_route_reason"]
+    assert context.json()["provider_setup"] == {
+        "href": "/settings#settings-models",
+        "label": "Choose a model with known pricing in Settings",
+    }
+
+    response = client.post(
+        "/api/v1/copilot",
+        json={"message": "What can I do here?", "page": "/goals", "history": []},
+    )
+    assert response.status_code == 200
+    assert response.json()["mode"] == "built_in"
+    assert response.json()["model_route_status"] == "pricing"
+    assert "no confirmed price" in response.json()["model_route_reason"]
+    assert response.json()["provider_setup"]["href"] == "/settings#settings-models"
+    assert "private-unpriced-model" not in response.text
+
+
+def test_estimate_only_opt_in_and_local_models_remain_route_ready(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from maverick import llm
+    from maverick_dashboard import api
+
+    monkeypatch.setattr(api, "_any_provider_key_set", lambda: True)
+    monkeypatch.setattr(api, "require_provider_or_400", lambda **_kwargs: None)
+    monkeypatch.setattr(llm, "model_for_role", lambda _role: "openai:private-unpriced-model")
+    monkeypatch.setenv("MAVERICK_BILLING_STRICT", "false")
+    estimate = client.get("/api/v1/copilot/context", params={"page": "/goals"})
+    assert estimate.status_code == 200
+    assert estimate.json()["model_provider_configured"] is True
+    assert estimate.json()["model_route_status"] == "ready"
+    assert "provider_setup" not in estimate.json()
+
+    monkeypatch.setenv("MAVERICK_BILLING_STRICT", "true")
+    monkeypatch.setattr(llm, "model_for_role", lambda _role: "ollama:private-local-model")
+    local = client.get("/api/v1/copilot/context", params={"page": "/goals"})
+    assert local.status_code == 200
+    assert local.json()["model_provider_configured"] is True
+    assert local.json()["model_route_status"] == "ready"
+    assert "provider_setup" not in local.json()
+
+
+def test_bare_model_uses_dispatch_provider_for_pricing(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from maverick import llm
+    from maverick.budget import _lookup_price_quote
+    from maverick_dashboard import api
+
+    # The bare name has an OpenAI price, but dispatch interprets a bare spec
+    # as Anthropic. A price for another route cannot make Copilot ready.
+    monkeypatch.setenv("MAVERICK_BILLING_STRICT", "true")
+    assert _lookup_price_quote("gpt-5.5").rates[0] > 0
+    monkeypatch.setattr(api, "_any_provider_key_set", lambda: True)
+    monkeypatch.setattr(api, "require_provider_or_400", lambda **_kwargs: None)
+    monkeypatch.setattr(llm, "model_for_role", lambda _role: "gpt-5.5")
+
+    class NoDispatch:
+        def __init__(self, _model):
+            pytest.fail("Copilot dispatched a model without a price for its selected provider")
+
+    monkeypatch.setattr(llm, "LLM", NoDispatch)
+    context = client.get("/api/v1/copilot/context", params={"page": "/goals"})
+    assert context.status_code == 200
+    assert context.json()["model_route_status"] == "pricing"
+    assert context.json()["provider_setup"]["href"] == "/settings#settings-models"
+
+    response = client.post(
+        "/api/v1/copilot",
+        json={"message": "What can I do here?", "page": "/goals", "history": []},
+    )
+    assert response.status_code == 200
+    assert response.json()["mode"] == "built_in"
+    assert response.json()["model_route_status"] == "pricing"
+    assert "gpt-5.5" not in response.text
 
 
 def test_provider_free_copilot_does_not_claim_to_cancel_a_task(
@@ -160,7 +291,7 @@ def test_model_success_is_unverified_bounded_and_ignores_assistant_history(
     monkeypatch.setattr(api, "_any_provider_key_set", lambda: True)
     monkeypatch.setattr(api, "require_provider_or_400", lambda **_kwargs: None)
     monkeypatch.setattr(llm, "LLM", FakeLlm)
-    monkeypatch.setattr(llm, "model_for_role", lambda _role: "test:model")
+    monkeypatch.setattr(llm, "model_for_role", lambda _role: llm.MODEL_SONNET)
 
     response = client.post(
         "/api/v1/copilot",
@@ -247,7 +378,7 @@ def test_model_completion_claim_is_replaced_with_page_guidance(
     monkeypatch.setattr(api, "_any_provider_key_set", lambda: True)
     monkeypatch.setattr(api, "require_provider_or_400", lambda **_kwargs: None)
     monkeypatch.setattr(llm, "LLM", FakeLlm)
-    monkeypatch.setattr(llm, "model_for_role", lambda _role: "test:model")
+    monkeypatch.setattr(llm, "model_for_role", lambda _role: llm.MODEL_SONNET)
 
     response = client.post(
         "/api/v1/copilot",
@@ -306,7 +437,7 @@ def test_model_can_still_explain_how_to_use_a_control(
     monkeypatch.setattr(api, "_any_provider_key_set", lambda: True)
     monkeypatch.setattr(api, "require_provider_or_400", lambda **_kwargs: None)
     monkeypatch.setattr(llm, "LLM", FakeLlm)
-    monkeypatch.setattr(llm, "model_for_role", lambda _role: "test:model")
+    monkeypatch.setattr(llm, "model_for_role", lambda _role: llm.MODEL_SONNET)
 
     response = client.post(
         "/api/v1/copilot",

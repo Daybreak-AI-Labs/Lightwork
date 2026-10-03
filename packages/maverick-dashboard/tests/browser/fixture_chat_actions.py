@@ -51,3 +51,56 @@ def install(app, world, tenant, principal):
         with tenant_scope(tenant=tenant):
             world.set_goal_status(chat_goal_id, "running", result="")
         return {"synthetic": True, "provider_calls": 0}
+
+    @app.post("/__browser_fixture/chat/{chat_goal_id}/provider-fail", include_in_schema=False)
+    async def fixture_chat_provider_fail(chat_goal_id: int):
+        with tenant_scope(tenant=tenant):
+            world.set_goal_status(chat_goal_id, "blocked", result="provider connection refused")
+        return {"synthetic": True, "provider_calls": 0}
+
+    @app.post("/__browser_fixture/long-chat", include_in_schema=False)
+    async def fixture_long_chat():
+        with tenant_scope(tenant=tenant):
+            root_id = world.create_goal("Long local conversation", owner=principal)
+            conversation = world.get_or_create_conversation("web", f"{principal}/{root_id}")
+            for index in range(26):
+                world.append_turn(conversation.id, "user", f"Earlier request {index + 1}", goal_id=root_id)
+                world.append_turn(conversation.id, "assistant", f"Earlier answer {index + 1}", goal_id=root_id)
+            world.set_goal_status(root_id, "done", result="Earlier answer 26")
+            current_id = world.create_goal("Current request", owner=principal, parent_id=root_id)
+            world.append_turn(conversation.id, "user", "Current request", goal_id=current_id)
+            world.set_goal_status(current_id, "done", result="Current answer")
+            world.append_turn(conversation.id, "assistant", "Current answer", goal_id=current_id)
+        return {"synthetic": True, "goal_id": current_id, "provider_calls": 0}
+
+    @app.post("/__browser_fixture/conversation-share", include_in_schema=False)
+    async def fixture_conversation_share():
+        with tenant_scope(tenant=tenant):
+            root_id = world.create_goal("Prior launch request", "INTERNAL ROOT NOTES", owner=principal,
+                                        domain="finance_cash13w")
+            world.set_goal_status(root_id, "done", result="Approved initial answer.")
+            world.record_signoff(root_id, "approved", decided_by=principal)
+            conversation = world.get_or_create_conversation("web", f"{principal}/{root_id}")
+            world.append_turn(conversation.id, "user", "What can we automate first?", goal_id=root_id)
+            world.append_turn(conversation.id, "assistant", "Approved initial answer.", goal_id=root_id)
+            question_id = world.ask("Which location matters?", goal_id=root_id)
+            world.answer(question_id, "Chattanooga")
+            current_id = world.create_goal("Build the next step", owner=principal, parent_id=root_id)
+            world.set_goal_status(current_id, "done", result="## Current answer\n\nStart with the next step.")
+            world.append_turn(conversation.id, "user", "Build the next step", goal_id=current_id)
+            world.append_turn(conversation.id, "assistant", "## Current answer\n\nStart with the next step.", goal_id=current_id)
+            world.add_artifact(current_id, "text", "Private attachment", "PRIVATE ATTACHMENT BODY")
+        return {"synthetic": True, "root_id": root_id, "goal_id": current_id}
+
+    @app.post("/__browser_fixture/conversation-share/{root_id}/change-source", include_in_schema=False)
+    async def fixture_share_change_source(root_id: int):
+        with tenant_scope(tenant=tenant):
+            world.set_goal_status(root_id, "done", result="Approved initial answer was amended.")
+            world.record_signoff(root_id, "approved", decided_by=principal)
+        return {"synthetic": True}
+
+    @app.post("/__browser_fixture/conversation-share/{root_id}/reject", include_in_schema=False)
+    async def fixture_share_reject(root_id: int):
+        with tenant_scope(tenant=tenant):
+            world.record_signoff(root_id, "rejected", decided_by=principal)
+        return {"synthetic": True}

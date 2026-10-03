@@ -179,6 +179,120 @@
     });
   }
 
+  // ---- Skills suggested by completed work ---------------------------------
+  function learnedSkills() {
+    var panel = $('to-learned-skills');
+    if (!panel) return;
+    var status = $('to-learned-status');
+    var suggestions = $('to-learned-list');
+    var added = $('to-learned-added');
+    async function refresh() {
+      suggestions.textContent = '';
+      added.textContent = '';
+      try {
+        var data = await request('/api/v1/skills/learned-candidates');
+        var rows = data.suggestions || [];
+        say(status, data.blocked || (rows.length ? plural(rows.length, 'suggestion') + ' ready for your review.' :
+          'No new suggestions yet. Lightwork will place repeated successes here for review.'));
+        rows.forEach(function (row) {
+          var card = el('article', 'panel to-card');
+          card.appendChild(el('h3', null, human(row.name)));
+          card.appendChild(el('p', 'muted sk-small', 'Suggested from completed shared tasks. Review those tasks and every step below before adding this skill.'));
+          var sources = el('p', 'muted sk-small');
+          (row.source_tasks || []).forEach(function (id, index) {
+            if (index) sources.appendChild(document.createTextNode(' · '));
+            var link = el('a', null, 'Task ' + id);
+            link.href = '/chat/goal/' + encodeURIComponent(id);
+            sources.appendChild(link);
+          });
+          card.appendChild(sources);
+          card.appendChild(el('p', null, 'Used when a task mentions: ' + (row.triggers || []).join(', ')));
+          card.appendChild(el('p', null, row.tools.length ? 'Tools it asks for: ' + row.tools.map(human).join(', ') : 'It asks for no tools.'));
+          card.appendChild(el('p', 'muted sk-small', 'Full instructions:'));
+          card.appendChild(el('pre', 'to-text', row.instructions || 'No instructions.'));
+          if (row.problems.length) {
+            card.appendChild(el('p', null, 'This suggestion cannot be added yet:'));
+            card.appendChild(list(row.problems));
+          }
+          if (row.ok && data.can_add) {
+            var label = el('label', 'sk-field');
+            label.appendChild(el('span', null, 'Save this skill as'));
+            var name = el('input', 'input');
+            name.type = 'text'; name.maxLength = 96; name.value = human(row.name);
+            name.setAttribute('aria-label', 'Name for ' + human(row.name));
+            label.appendChild(name); card.appendChild(label);
+            var add = button('Add this skill', 'btn--primary');
+            add.addEventListener('click', async function () {
+              var chosen = String(name.value || '').toLowerCase().normalize('NFKD')
+                .replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+              if (!chosen || chosen.length > 96) { say(status, 'Choose a short name with letters or numbers.'); name.focus(); return; }
+              var confirmed = await window.mvConfirm('Add “' + human(chosen) + '” to the agents’ skills? They may follow these reviewed instructions on the next matching task.', {okText: 'Add skill'});
+              if (!confirmed) return;
+              add.disabled = true;
+              try {
+                var saved = await request('/api/v1/skills/learned-candidates/' + encodeURIComponent(row.name) + '/admit',
+                  {method: 'POST', json: {fingerprint: row.fingerprint, publish_name: chosen, confirm: true}});
+                var current = await refresh();
+                if (current && (current.added || []).some(function (item) { return item.name === saved.name; })) {
+                  if (window.lwAppendSkill) window.lwAppendSkill(saved);
+                  say(status, 'Added ' + human(saved.name) + '. Agents can use it on the next matching task.');
+                } else {
+                  say(status, 'The add request returned, but the current skill list could not confirm it. Refresh before trying again.');
+                }
+              } catch (failure) {
+                say(status, await failText(failure, 'add this suggestion'));
+                add.disabled = false;
+              }
+            });
+            card.appendChild(add);
+          }
+          suggestions.appendChild(card);
+        });
+        if (data.added && data.added.length) {
+          added.appendChild(el('h3', null, 'Added suggestions'));
+          added.appendChild(el('p', 'muted sk-small', 'Remove one to stop agents using it on new tasks. Past task records remain.'));
+          data.added.forEach(function (row) {
+            var card = el('div', 'sk-actions');
+            card.appendChild(el('span', null, human(row.name)));
+            if (row.source_shared === false) {
+              card.appendChild(el('span', 'muted sk-small', row.status ||
+                'Paused: source task access is unavailable. Agents cannot use this skill now; you can still remove it.'));
+            }
+            var remove = button('Remove', 'btn--danger');
+            remove.setAttribute('aria-label', 'Remove ' + human(row.name));
+            remove.addEventListener('click', async function () {
+              var confirmed = await window.mvConfirm('Remove “' + human(row.name) + '” from the agents’ skills? New tasks will stop using it.', {okText: 'Remove skill'});
+              if (!confirmed) return;
+              remove.disabled = true;
+              try {
+                await request('/api/v1/skills/learned-candidates/' + encodeURIComponent(row.name) + '/withdraw',
+                  {method: 'POST', json: {fingerprint: row.fingerprint, confirm: true}});
+                var current = await refresh();
+                if (current && !(current.added || []).some(function (item) { return item.name === row.name; })) {
+                  document.querySelectorAll('[data-skill]').forEach(function (item) {
+                    if (item.getAttribute('data-skill') === row.name) item.remove();
+                  });
+                  say(status, 'Removed ' + human(row.name) + '. New tasks will not use it.');
+                } else {
+                  say(status, 'The remove request returned, but the current skill list could not confirm it. Refresh before trying again.');
+                }
+              } catch (failure) {
+                say(status, await failText(failure, 'remove this skill'));
+                remove.disabled = false;
+              }
+            });
+            card.appendChild(remove); added.appendChild(card);
+          });
+        }
+      } catch (failure) {
+        say(status, await failText(failure, 'load suggested skills'));
+        return null;
+      }
+      return data;
+    }
+    refresh();
+  }
+
   // ---- Skills: track record ------------------------------------------------
   function rate(row) { return row.win_rate == null ? 'Not known yet' : Math.round(row.win_rate * 100) + '%'; }
   function priority(row) { return row.weight >= 0.995 ? 'Normal' : 'Lowered to ' + Math.round(row.weight * 100) + '%'; }
@@ -469,6 +583,7 @@
 
   function start() {
     skillInstall();
+    learnedSkills();
     skillUsage();
     skillTidy();
     versions();

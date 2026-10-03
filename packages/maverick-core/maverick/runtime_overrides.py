@@ -24,6 +24,8 @@ import math
 import re
 import threading
 from collections import OrderedDict
+from contextlib import contextmanager
+from contextvars import ContextVar
 from pathlib import Path
 
 from .paths import data_dir, diagnostic_data_dir, reset_tenant, set_tenant
@@ -48,6 +50,21 @@ _VALID_TOOL_NAME = re.compile(r"^[a-z0-9_-]+$")
 # every mutator's read-modify-write in-process (RLock) and cross-process (flock).
 _OVERRIDE_LOCK = threading.RLock()
 _mutation_context = threading.local()
+_setting_audit: ContextVar[object | None] = ContextVar(
+    "runtime_override_setting_audit", default=None,
+)
+
+
+@contextmanager
+def setting_audit_callback(callback):
+    """Bind a dashboard audit hook to a serialized runtime-overlay write."""
+    token = _setting_audit.set(callback)
+    try:
+        yield
+    finally:
+        _setting_audit.reset(token)
+
+
 _LKG_LIMIT = 8
 _LOAD_FAILURE_LIMIT = 32
 _MAX_OVERRIDE_BYTES = 1024 * 1024
@@ -707,7 +724,12 @@ def _write_state(denied: set[str], models: dict[str, str] | None,
     # Parse and validate before replacement. A renderer/schema bug must never
     # atomically replace the last valid operator policy with corrupt TOML.
     state = _validate_loaded_state(_tomllib().loads(body))
+    audit = _setting_audit.get()
+    if audit is not None:
+        audit("prepared", _load(), state)
     atomic_write_text(path, body)
+    if audit is not None:
+        audit("completed", {}, state)
     # Keep the fallback synchronized with writes from this process.
     with _OVERRIDE_LOCK:
         _remember_valid(_cache_key(path), state)

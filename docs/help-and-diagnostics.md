@@ -20,11 +20,14 @@ stopped task also links directly to its authorized selection in Help.
 
 Task report drafts are reviewed and edited inside Lightwork. They are held only
 in the page's memory. Recognized secrets are removed, but business details can
-remain and should be reviewed. Copy and download do not navigate externally.
-Sending the reviewed draft to GitHub transfers its exact reviewed title and body
-to GitHub in the issue-form address; publishing an issue is a separate action.
-Access and secret scrubbing are checked again before these actions. If scrubbing
-changes an edited draft, the updated text must be reviewed again.
+remain and should be reviewed. Confirming the exact fields checks access and
+secret scrubbing; if scrubbing changes an edited draft, review the updated text
+again. The enabled **Copy reviewed draft** and **Download reviewed draft**
+buttons keep the page open and make a local copy. Send that copy through the
+support channel your organization gave you. This installation has no configured
+task-report support inbox, and Help does not send the draft to GitHub or another
+service. A blocked clipboard write leaves the draft visible for download or
+manual selection and copying.
 
 Unexpected dashboard failures return a unique reference and UTC time. The same
 reference identifies the exception in restricted server logs. It contains no

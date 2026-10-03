@@ -290,7 +290,10 @@ test('recovery comparison pages real protected differences, downloads captured e
   }
   expect((await request.post('/api/v1/facts',{data:{key:'browser_recovery_comparison',value:'Synthetic database content must not enter the report'}})).status()).toBe(204);
   let restoreRequests=0;page.on('request',req=>{if(/\/recovery\/(restore|.*\/prepare|installation\/authorize)$/.test(new URL(req.url()).pathname))restoreRequests++;});
+  const compared=page.waitForResponse(r=>r.request().method()==='POST'&&/\/api\/v1\/recovery\/snapshots\/[^/]+\/compare$/.test(new URL(r.url()).pathname));
   await page.locator('#wrec-compare').press('Enter');
+  const compareResponse=await compared;await compareResponse.finished();
+  console.log(`recovery comparison initial request: ${Math.round(compareResponse.request().timing().responseEnd)} ms`);
   await expect(page.locator('#wrec-comparison-report')).toBeVisible();
   await expect(page.locator('#wrec-comparison-items > li')).toHaveCount(50);
   await expect(page.locator('#wrec-comparison-next')).toBeEnabled();

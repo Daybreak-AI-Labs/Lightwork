@@ -160,8 +160,12 @@
       show(null); say('This run is being kept as a learning example. Approve its actions as usual; review it here when it finishes.'); return;
     }
     if (kind === 'awaiting_review') { show('review'); say('The run finished. Review what it did before it can be used for learning.'); return; }
-    if (kind === 'accepted' && row.grant_sha256) {
+    if (kind === 'accepted' && row.training_available === true) {
       show(null); $('next').hidden = false; say('Accepted, and new flows may learn from it.'); return;
+    }
+    if (kind === 'accepted' && row.grant_sha256) {
+      show(null); say('Permission to learn from this example has ended. Keep a fresh run as a new example if this work still needs to be taught.');
+      return;
     }
     if (kind === 'accepted') {
       show('grant');

@@ -723,6 +723,7 @@ def require_person(
     scope: str | None = None,
     detail: str | None = None,
     provenance: str | None = None,
+    approval_card: Mapping[str, object] | None = None,
 ) -> ConsentDecision:
     """A decision made by a person, for a gate an administrator turned on.
 
@@ -731,7 +732,7 @@ def require_person(
     ``ask`` mode at an interactive terminal, to the terminal prompt). No
     decision within the dashboard wait is a refusal, and the unanswered
     request is withdrawn. ``auto-deny`` refuses at once; nothing grants
-    silently.
+    silently. A supplied exact-operation card is checked with the decision.
     """
     ts = time.time()
     mode = _resolve_mode(risk)
@@ -740,8 +741,9 @@ def require_person(
     if mode == "ask" and sys.stdin.isatty():
         return require_consent(action, risk=risk, scope=scope, detail=detail,
                                provenance=provenance, allow_auto_approve=False,
-                               consult_ledger=False)
+                               consult_ledger=False, approval_card=approval_card)
     decided = _decide_via_dashboard(action, risk, scope, detail, provenance,
+                                    approval_card,
                                     withdraw_on_timeout=True)
     if decided is not None:
         return _emit(decided, action, scope, detail)
@@ -1036,9 +1038,14 @@ def require_operation_consent(
     budget_provider: Callable[[], Mapping[str, Any]] | None = None,
     allow_auto_approve: bool = False,
     consult_ledger: bool = False,
+    require_fresh_person: bool = False,
     ttl_seconds: float = 300.0,
 ) -> ConsentPermit:
-    """Obtain a one-use exact-operation permit for a mutating boundary."""
+    """Obtain a one-use exact-operation permit for a mutating boundary.
+
+    ``require_fresh_person`` sends the committed card to an explicit reviewer
+    regardless of silent consent or standing grants.
+    """
 
     from ..approval_cards import ApprovalCardError, build_approval_card, digest
 
@@ -1101,17 +1108,24 @@ def require_operation_consent(
             after=after,
             irreversible=irreversible,
         )
-        decision = require_consent(
-            display_action,
-            risk=risk,
-            scope=display_scope,
-            detail=display_detail,
-            provenance=display_provenance,
-            raise_on_deny=True,
-            allow_auto_approve=allow_auto_approve,
-            consult_ledger=consult_ledger,
-            approval_card=card,
-        )
+        if require_fresh_person:
+            decision = require_person(
+                display_action, risk=risk, scope=display_scope,
+                detail=display_detail, provenance=display_provenance,
+                approval_card=card,
+            )
+        else:
+            decision = require_consent(
+                display_action,
+                risk=risk,
+                scope=display_scope,
+                detail=display_detail,
+                provenance=display_provenance,
+                raise_on_deny=True,
+                allow_auto_approve=allow_auto_approve,
+                consult_ledger=consult_ledger,
+                approval_card=card,
+            )
         if not decision.granted:
             raise ConsentDenied(display_action)
         permit = ConsentPermit(

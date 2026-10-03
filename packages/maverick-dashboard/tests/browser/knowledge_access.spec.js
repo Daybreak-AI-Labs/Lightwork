@@ -307,3 +307,58 @@ test('authenticated browser uses the real APP10 API for search, detail, and rete
   expect(denied.status()).toBe(409);
   expect(await denied.text()).not.toContain('real APP10 registry');
 });
+
+test('an administrator can archive a finished real request in the page while its source stays blocked', async ({page, request}) => {
+  const setup = await request.post('/__browser_fixture/knowledge-access/setup');
+  expect(setup.status()).toBe(200);
+  const fixture = await setup.json();
+  await page.goto('/knowledge-access');
+  await page.locator('#ka-query').fill('synthetic governed browser policy');
+  await page.getByRole('button', {name: 'Search current sources'}).click();
+  await page.getByRole('button', {name: 'View details for Synthetic governed browser policy'}).click();
+  const form = page.locator('#ka-request-form');
+  await form.locator('select[name="request_type"]').selectOption('exclusion');
+  await form.locator('textarea[name="reason"]').fill('Synthetic archive review.');
+  await form.locator('input[name="confirm"]').check();
+  await page.getByRole('button', {name: 'Submit request'}).click();
+  const card = page.locator('.ka-request', {hasText: 'Synthetic archive review.'});
+  await expect(card).toBeVisible();
+  await card.locator('.ka-review textarea').fill('Independent synthetic review confirmed.');
+  await card.locator('.ka-review input[type="checkbox"]').check();
+  await card.getByRole('button', {name: 'Approve and stop using this source'}).click();
+  await expect(card).toContainText('approved');
+  await page.getByRole('button', {name: 'Ready to archive'}).click();
+  await expect(card.getByRole('button', {name: 'Move to finished archive'})).toBeVisible();
+  page.once('dialog', dialog => dialog.accept());
+  await card.getByRole('button', {name: 'Move to finished archive'}).click();
+  await expect(page.locator('#ka-requests')).toContainText('No finished requests are ready to archive');
+  await page.getByRole('button', {name: 'View finished archive'}).click();
+  await expect(page.locator('#ka-requests')).toContainText('Synthetic archive review.');
+  await expect(page.locator('#ka-requests')).toContainText('Retained in the finished archive');
+  const referenceText = await page.locator('.ka-request', {hasText: 'Synthetic archive review.'})
+    .getByText('Request reference:').textContent();
+  const requestReference = referenceText.match(/knowledge-req-[a-f0-9]{40}/)[0];
+  await page.getByRole('button', {name: 'View active requests'}).click();
+  await page.locator('#ka-archive-reference').fill(requestReference);
+  await page.getByRole('button', {name: 'Find archived request'}).click();
+  await expect(page.locator('#ka-requests')).toContainText('Synthetic archive review.');
+  const blocked = await request.post('/api/v1/knowledge-access/detail', {data: {
+    context: fixture.context, reference: fixture.reference, purpose: 'product_research'
+  }});
+  expect(blocked.status()).toBe(409);
+});
+
+test('a colleague can recover their own older archived request in the page', async ({page, request}) => {
+  const prepared = await request.post('/__browser_fixture/knowledge-access/archived-owner');
+  expect(prepared.status()).toBe(200);
+  const {id} = await prepared.json();
+  await page.setExtraHTTPHeaders({'X-Browser-Principal': 'browser-colleague'});
+  await page.goto('/knowledge-access');
+  await expect(page.locator('#knowledge-access')).toHaveAttribute('data-can-review', 'false');
+  await page.locator('#ka-archive-reference').fill(id);
+  await page.getByRole('button', {name: 'Find archived request'}).click();
+  await expect(page.locator('#ka-requests')).toContainText('Synthetic colleague archive receipt.');
+  await expect(page.locator('#ka-requests')).toContainText('Retained in the finished archive');
+  await expect(page.locator('#ka-requests')).toContainText(id);
+  await expect(page.locator('#ka-requests .ka-review')).toHaveCount(0);
+});

@@ -432,6 +432,7 @@ def test_director_profiles_setting_shapes_a_director_run(monkeypatch):
                  "MAVERICK_REVIEW_CHECKPOINT_TOOL_CALLS"):
         monkeypatch.setenv(name, "placeholder")  # restored after the test
     monkeypatch.setattr("maverick.runner.configured_max_dollars", lambda: 12.0)
+    monkeypatch.setattr("maverick.runner.configured_goal_ceiling_dollars", lambda: 12.0)
     title, description, cap = _apply_director("supervised", "Close the books", "", 10.0)
     assert cap == 12.0  # never above the configured spending cap
     assert os.environ["MAVERICK_CONSENT_MODE"] == "dashboard"
@@ -533,7 +534,7 @@ def start_env(monkeypatch, tmp_path):
     monkeypatch.setattr("maverick_dashboard.api.require_provider_or_400", lambda: None)
     monkeypatch.setattr(dashboard, "check_goal_rate_limit", lambda request, **_: None)
     monkeypatch.setattr("maverick.runner.configured_max_dollars", lambda: 10.0)
-    monkeypatch.setattr("maverick_dashboard.api.configured_max_dollars", lambda: 10.0)
+    monkeypatch.setattr("maverick.runner.configured_goal_ceiling_dollars", lambda: 10.0)
     calls = []
 
     async def run(goal_id, *args, **kwargs):

@@ -26,6 +26,19 @@ def page_env(monkeypatch, tmp_path):
     world.close()
 
 
+def test_new_task_page_shows_current_goal_limits(page_env, tmp_path):
+    client, _world = page_env
+    fresh = client.get("/chat")
+    assert fresh.status_code == 200
+    assert 'id="goal-task-limits"' in fresh.text
+    assert "$2.00" in fresh.text and ">30</bdi> minutes" in fresh.text
+
+    (tmp_path / "config.toml").write_text("[budget]\ntask_limits_enabled = false\n", encoding="utf-8")
+    existing = client.get("/chat")
+    assert existing.status_code == 200
+    assert "No spending or time limit is set for each task." in existing.text
+
+
 def test_goal_page_folds_the_kernels_withheld_markers_and_renders_prose(page_env):
     from maverick.blackboard import Blackboard
 
@@ -125,6 +138,23 @@ def test_answer_actions_download_saved_result_and_keep_current_access(page_env, 
 
     monkeypatch.setattr(dash_app, "assert_goal_access", deny)
     assert client.get(f"/chat/goal/{gid}/download.md").status_code == 404
+
+
+def test_paged_history_keeps_answered_clarifications_for_complete_print(page_env):
+    client, world = page_env
+    root = world.create_goal("First message", "")
+    conversation = world.get_or_create_conversation("web", f"local/{root}")
+    world.append_turn(conversation.id, "user", "First message", goal_id=root)
+    question_id = world.ask("Which year?", goal_id=root)
+    world.answer(question_id, "2026")
+    world.append_turn(conversation.id, "assistant", "First answer", goal_id=root)
+    child = world.create_goal("Second message", "", parent_id=root)
+    world.append_turn(conversation.id, "user", "Second message", goal_id=child)
+
+    response = client.get(f"/api/v1/goals/{child}/thread-history")
+    assert response.status_code == 200
+    user = next(turn for turn in response.json()["turns"] if turn["role"] == "user")
+    assert user["questions"] == [{"question": "Which year?", "answer": "2026"}]
 
 
 def test_markdown_export_enforces_current_review_and_visible_table(page_env):

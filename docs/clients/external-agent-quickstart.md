@@ -96,7 +96,9 @@ Semantics worth knowing:
   logical run and a retried report returns the original record instead of
   double-counting spend.
 - `start()` returns `{goal_id, heartbeat_seconds}`; call `heartbeat()` at
-  least that often. `False` is the **kill switch** — stop working now.
+  least that often. The recommended interval is shorter than stale-run
+  recovery's deadline, leaving room for request delay. `False` is the
+  **kill switch** — stop working now.
 - `memory_ingest(kind, goal_text, ...)` (`kind` is `success` / `failure` /
   `lesson`) and `memory_recall(query)` reach the governed learning plane
   when `[fleet_memory]` is enabled; an empty `context` with a `reason` is a

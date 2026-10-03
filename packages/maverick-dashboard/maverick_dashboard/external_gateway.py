@@ -1338,8 +1338,8 @@ _OPENAPI: dict = {
                             "goal_id": {"type": "integer"},
                             "heartbeat_seconds": {
                                 "type": "number",
-                                "description": "Beat at least this often "
-                                               "or the run is reclaimed."},
+                                "description": "Recommended maximum interval between beats. "
+                                               "It leaves margin before stale-run recovery."},
                         }}}}}},
             },
         },

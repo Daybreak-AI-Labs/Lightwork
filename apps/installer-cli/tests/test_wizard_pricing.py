@@ -28,9 +28,11 @@ def test_pick_budget_defaults_to_strict_pricing(monkeypatch):
     budget = wizard.pick_budget()
 
     assert budget["strict_pricing"] is True
-    assert not {"max_dollars", "max_wall_seconds", "max_tool_calls"} & budget.keys()
+    assert budget["max_dollars"] == 2.0
+    assert budget["max_wall_seconds"] == 1800.0
+    assert budget["max_tool_calls"] == 500
     assert prompts == [
-        ("  Add spending, time or tool-count limits to each task?", False),
+        ("  Use task limits? Standard goals stop at $2 and 30 minutes; choose No for no task limit.", True),
         (
             "  Strict pricing? Fail closed if a model has no verified price "
             "(recommended; choose No only for estimate-only custom gateways)",
@@ -54,6 +56,7 @@ def test_pick_budget_preserves_explicit_legacy_estimate_opt_out(monkeypatch):
     budget = wizard.pick_budget()
 
     assert budget["strict_pricing"] is False
+    assert budget["task_limits_enabled"] is False
 
 
 def test_generated_config_persists_strict_default(

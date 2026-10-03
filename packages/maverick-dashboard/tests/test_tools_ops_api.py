@@ -11,8 +11,11 @@ from __future__ import annotations
 import io
 import json
 import zipfile
+from contextlib import contextmanager
+from pathlib import Path
 
 import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 ORIGIN = {"Origin": "http://testserver"}
@@ -93,6 +96,279 @@ def _verbs(seen) -> list[str]:
 def _plain(text: str) -> None:
     from test_support.plain_language import developer_terms
     assert developer_terms(f"<main>{text}</main>") == [], text
+
+
+def test_suggested_skill_requires_shared_source_review_and_audited_admission(
+    client, monkeypatch, tmp_path,
+):
+    from maverick import skills, world_model
+    from maverick.skill.distillation_local import save_skill
+
+    monkeypatch.setenv("MAVERICK_DISTILL_LOCAL", "1")
+    world = world_model.WorldModel(world_model.default_db_path())
+    shared = world.create_goal("Check customer renewal timing", owner="")
+    private = world.create_goal("PRIVATE PAYROLL", owner="user:alice")
+    world.close()
+    store = tmp_path / "home" / "learned-skills"
+    for name, goal_id in (("renewal-timing", shared), ("private-payroll", private)):
+        save_skill({"name": name, "triggers": ["check customer renewal timing"],
+                    "tools_needed": [], "summary": "Check customer renewal timing and report it",
+                    "n_examples": 2, "source_goal_ids": [goal_id]}, store)
+
+    seen = _audit(monkeypatch)
+    listing = client.get("/api/v1/skills/learned-candidates")
+    assert listing.status_code == 200, listing.text
+    data = listing.json()
+    assert [row["name"] for row in data["suggestions"]] == ["renewal-timing"]
+    row = data["suggestions"][0]
+    assert "Check customer renewal timing" in row["instructions"]
+    assert row["source_tasks"] == [shared]
+    assert "private-payroll" not in listing.text
+    assert client.post("/api/v1/skills/learned-candidates/private-payroll/admit", json={
+        "fingerprint": "a" * 64, "confirm": True,
+    }).status_code == 404
+    assert client.post("/api/v1/skills/learned-candidates/renewal-timing/admit", json={
+        "fingerprint": row["fingerprint"], "confirm": False,
+    }).status_code == 422
+    assert client.post("/api/v1/skills/learned-candidates/renewal-timing/admit", json={
+        "fingerprint": "b" * 64, "confirm": True,
+    }).status_code == 409
+    assert skills.load_skills() == []
+
+    added = client.post("/api/v1/skills/learned-candidates/renewal-timing/admit", json={
+        "fingerprint": row["fingerprint"], "publish_name": "renewal-timing", "confirm": True,
+    })
+    assert added.status_code == 201, added.text
+    assert added.json()["name"] == "renewal-timing"
+    assert "learned_skill_admit" in _verbs(seen)
+    assert [skill.name for skill in skills.load_skills()] == ["renewal-timing"]
+    after = client.get("/api/v1/skills/learned-candidates").json()
+    assert after["suggestions"] == []
+    assert [saved["name"] for saved in after["added"]] == ["renewal-timing"]
+    fp = after["added"][0]["fingerprint"]
+    assert client.post("/api/v1/skills/learned-candidates/renewal-timing/withdraw", json={
+        "fingerprint": "0" * 64, "confirm": True,
+    }).status_code == 409
+    removed = client.post("/api/v1/skills/learned-candidates/renewal-timing/withdraw", json={
+        "fingerprint": fp, "confirm": True,
+    })
+    assert removed.status_code == 200, removed.text
+    assert "learned_skill_withdraw" in _verbs(seen)
+    assert skills.load_skills() == []
+
+
+def test_suggested_skill_admission_refuses_disabled_learning_and_audit_failure(
+    client, monkeypatch, tmp_path,
+):
+    from maverick import world_model
+    from maverick.skill.distillation_local import save_skill
+
+    monkeypatch.setenv("MAVERICK_DISTILL_LOCAL", "1")
+    world = world_model.WorldModel(world_model.default_db_path())
+    shared = world.create_goal("Review customer renewal", owner="")
+    world.close()
+    save_skill({"name": "renewal-review", "triggers": ["review customer renewal"],
+                "tools_needed": [], "summary": "Review customer renewal and report outcome",
+                "n_examples": 2, "source_goal_ids": [shared]},
+               tmp_path / "home" / "learned-skills")
+    row = client.get("/api/v1/skills/learned-candidates").json()["suggestions"][0]
+    from maverick import audit
+
+    monkeypatch.setattr(audit, "audit_event", lambda *args, **kwargs: False)
+    body = {"fingerprint": row["fingerprint"], "confirm": True}
+    refused = client.post("/api/v1/skills/learned-candidates/renewal-review/admit", json=body)
+    assert refused.status_code == 503
+    assert client.get("/api/v1/skills").json() == []
+    monkeypatch.setenv("MAVERICK_DISTILL_LOCAL", "0")
+    assert client.post("/api/v1/skills/learned-candidates/renewal-review/admit", json=body).status_code == 403
+    data = client.get("/api/v1/skills/learned-candidates").json()
+    assert data["can_add"] is False and data["suggestions"]
+
+
+def test_admitted_suggestion_remains_visible_and_withdrawable_after_source_becomes_private(
+    client, monkeypatch, tmp_path,
+):
+    from maverick import skills, world_model
+    from maverick.skill.distillation_local import save_skill
+
+    monkeypatch.setenv("MAVERICK_DISTILL_LOCAL", "1")
+    world = world_model.WorldModel(world_model.default_db_path())
+    source = world.create_goal("Review renewal schedule", owner="")
+    save_skill({"name": "renewal-schedule", "triggers": ["review renewal schedule"],
+                "tools_needed": [], "summary": "Review renewal schedule and report it",
+                "n_examples": 2, "source_goal_ids": [source]},
+               tmp_path / "home" / "learned-skills")
+    proposal = client.get("/api/v1/skills/learned-candidates").json()["suggestions"][0]
+    assert client.post("/api/v1/skills/learned-candidates/renewal-schedule/admit", json={
+        "fingerprint": proposal["fingerprint"], "confirm": True,
+    }).status_code == 201
+    assert world.bind_goal_owner(source, "user:alice")
+    world.close()
+
+    assert skills.load_skills() == []
+    current = client.get("/api/v1/skills/learned-candidates")
+    assert current.status_code == 200, current.text
+    assert current.json()["suggestions"] == []
+    paused = current.json()["added"][0]
+    assert paused["name"] == "renewal-schedule"
+    assert paused["source_shared"] is False
+    assert "Paused" in paused["status"]
+
+    removed = client.post("/api/v1/skills/learned-candidates/renewal-schedule/withdraw", json={
+        "fingerprint": paused["fingerprint"], "confirm": True,
+    })
+    assert removed.status_code == 200, removed.text
+    assert client.get("/api/v1/skills/learned-candidates").json()["added"] == []
+
+
+def test_suggested_skill_last_write_rechecks_administrator_permission(
+    client, monkeypatch, tmp_path,
+):
+    from maverick import file_lock, skills, world_model
+    from maverick.skill.distillation_local import save_skill
+    from maverick_dashboard import tools_ops_api as native
+
+    monkeypatch.setenv("MAVERICK_DISTILL_LOCAL", "1")
+    world = world_model.WorldModel(world_model.default_db_path())
+    source = world.create_goal("Review renewal schedule", owner="")
+    world.close()
+    save_skill({"name": "renewal-schedule", "triggers": ["review renewal schedule"],
+                "tools_needed": [], "summary": "Review renewal schedule and report it",
+                "n_examples": 2, "source_goal_ids": [source]},
+               tmp_path / "home" / "learned-skills")
+    proposal = client.get("/api/v1/skills/learned-candidates").json()["suggestions"][0]
+    state = {"admin": True, "demote_on_lock": True}
+    original_permission = native.require_permission
+    original_lock = file_lock.cross_process_lock
+
+    def permission(request, grant):
+        if grant == "admin" and not state["admin"]:
+            raise HTTPException(403, "administrator permission was removed")
+        return original_permission(request, grant)
+
+    @contextmanager
+    def lock_and_demote(target, **kwargs):
+        with original_lock(target, **kwargs):
+            if state["demote_on_lock"] and Path(target).name == "renewal-schedule.md":
+                state["admin"] = False
+            yield
+
+    monkeypatch.setattr(native, "require_permission", permission)
+    monkeypatch.setattr(file_lock, "cross_process_lock", lock_and_demote)
+    body = {"fingerprint": proposal["fingerprint"], "confirm": True}
+    refused = client.post("/api/v1/skills/learned-candidates/renewal-schedule/admit", json=body)
+    assert refused.status_code == 403
+    assert skills.load_skills() == []
+
+    state.update(admin=True, demote_on_lock=False)
+    assert client.post("/api/v1/skills/learned-candidates/renewal-schedule/admit", json=body).status_code == 201
+    current = client.get("/api/v1/skills/learned-candidates").json()["added"][0]
+    state.update(admin=True, demote_on_lock=True)
+    refused = client.post("/api/v1/skills/learned-candidates/renewal-schedule/withdraw", json={
+        "fingerprint": current["fingerprint"], "confirm": True,
+    })
+    assert refused.status_code == 403
+    assert [item.name for item in skills.load_skills()] == ["renewal-schedule"]
+
+
+def test_suggested_skill_audit_never_claims_success_before_file_change(
+    client, monkeypatch, tmp_path,
+):
+    from maverick import file_lock, world_model
+    from maverick.skill.distillation_local import save_skill
+
+    monkeypatch.setenv("MAVERICK_DISTILL_LOCAL", "1")
+    world = world_model.WorldModel(world_model.default_db_path())
+    source = world.create_goal("Review renewal schedule", owner="")
+    world.close()
+    save_skill({"name": "renewal-schedule", "triggers": ["review renewal schedule"],
+                "tools_needed": [], "summary": "Review renewal schedule and report it",
+                "n_examples": 2, "source_goal_ids": [source]},
+               tmp_path / "home" / "learned-skills")
+    proposal = client.get("/api/v1/skills/learned-candidates").json()["suggestions"][0]
+    seen = _audit(monkeypatch)
+    original_write = file_lock.atomic_write_text
+
+    def disk_full(path, text, **kwargs):
+        if Path(path).name == "renewal-schedule.md" and Path(path).parent.name == "skills":
+            raise OSError("simulated disk full")
+        return original_write(path, text, **kwargs)
+
+    monkeypatch.setattr(file_lock, "atomic_write_text", disk_full)
+    failed = client.post("/api/v1/skills/learned-candidates/renewal-schedule/admit", json={
+        "fingerprint": proposal["fingerprint"], "confirm": True,
+    })
+    assert failed.status_code == 503 and "Refresh" in failed.text
+    events = [row for row in seen if row.get("verb") == "learned_skill_admit"]
+    assert [row["phase"] for row in events] == ["prepared"]
+    assert all(row.get("ok") is not True for row in events)
+    assert not (tmp_path / "skills" / "renewal-schedule.md").exists()
+
+    monkeypatch.setattr(file_lock, "atomic_write_text", original_write)
+    assert client.post("/api/v1/skills/learned-candidates/renewal-schedule/admit", json={
+        "fingerprint": proposal["fingerprint"], "confirm": True,
+    }).status_code == 201
+    events = [row for row in seen if row.get("verb") == "learned_skill_admit"]
+    assert [row["phase"] for row in events][-2:] == ["prepared", "completed"]
+    assert events[-1]["ok"] is True
+
+    saved = client.get("/api/v1/skills/learned-candidates").json()["added"][0]
+    original_unlink = Path.unlink
+
+    def refuse_delete(path, *args, **kwargs):
+        if path.name == "renewal-schedule.md" and path.parent.name == "skills":
+            raise OSError("simulated delete failure")
+        return original_unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", refuse_delete)
+    failed = client.post("/api/v1/skills/learned-candidates/renewal-schedule/withdraw", json={
+        "fingerprint": saved["fingerprint"], "confirm": True,
+    })
+    assert failed.status_code == 503 and "Refresh" in failed.text
+    events = [row for row in seen if row.get("verb") == "learned_skill_withdraw"]
+    assert [row["phase"] for row in events] == ["prepared"]
+    assert all(row.get("ok") is not True for row in events)
+    assert (tmp_path / "skills" / "renewal-schedule.md").exists()
+
+    monkeypatch.setattr(Path, "unlink", original_unlink)
+    assert client.post("/api/v1/skills/learned-candidates/renewal-schedule/withdraw", json={
+        "fingerprint": saved["fingerprint"], "confirm": True,
+    }).status_code == 200
+    events = [row for row in seen if row.get("verb") == "learned_skill_withdraw"]
+    assert [row["phase"] for row in events][-2:] == ["prepared", "completed"]
+    assert events[-1]["ok"] is True
+
+
+def test_suggested_skill_completed_audit_failure_reports_changed_state(
+    client, monkeypatch, tmp_path,
+):
+    from maverick import audit, skills, world_model
+    from maverick.skill.distillation_local import save_skill
+
+    monkeypatch.setenv("MAVERICK_DISTILL_LOCAL", "1")
+    world = world_model.WorldModel(world_model.default_db_path())
+    source = world.create_goal("Review renewal schedule", owner="")
+    world.close()
+    save_skill({"name": "renewal-schedule", "triggers": ["review renewal schedule"],
+                "tools_needed": [], "summary": "Review renewal schedule and report it",
+                "n_examples": 2, "source_goal_ids": [source]},
+               tmp_path / "home" / "learned-skills")
+    proposal = client.get("/api/v1/skills/learned-candidates").json()["suggestions"][0]
+    original_audit = audit.audit_event
+
+    def lose_completion(kind, **payload):
+        if payload.get("phase") == "completed":
+            return False
+        return original_audit(kind, **payload)
+
+    monkeypatch.setattr(audit, "audit_event", lose_completion)
+    result = client.post("/api/v1/skills/learned-candidates/renewal-schedule/admit", json={
+        "fingerprint": proposal["fingerprint"], "confirm": True,
+    })
+    assert result.status_code == 503
+    assert "skill changed" in result.text.lower()
+    assert [item.name for item in skills.load_skills()] == ["renewal-schedule"]
+    assert client.get("/api/v1/skills/learned-candidates").json()["added"][0]["name"] == "renewal-schedule"
 
 
 # ---- skills: add from a web address after a check ----------------------------

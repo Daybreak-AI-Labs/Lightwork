@@ -66,7 +66,6 @@ def _cli_task_budget(title: str, max_dollars: float | None, default_dollars: flo
 
     from ..budget import budget_from_config
     from ..orchestrator import _budget_task_class
-
     return budget_from_config(
         defaults={"max_dollars": default_dollars},
         task_class=_budget_task_class(types.SimpleNamespace(title=title)),
@@ -3774,7 +3773,7 @@ def _apply_director(profile: str, outcome: str, description: str,
     profile can never raise spending past what the deployment allows.
     """
     from ..director_mode import UnknownProfileError, direct
-    from ..runner import clamp_task_limit, configured_max_dollars
+    from ..runner import requested_goal_dollars
 
     try:
         run = direct(outcome, profile=profile, base_max_dollars=max_dollars)
@@ -3785,7 +3784,7 @@ def _apply_director(profile: str, outcome: str, description: str,
         if value:
             os.environ[name] = value
     extra = f"\n\n{description}" if description else ""
-    capped = clamp_task_limit(run.max_dollars, configured_max_dollars())
+    capped = requested_goal_dollars(run.max_dollars)
     click.echo(f"[director {profile}] consent={run.consent_mode} "
                f"checkpoint={run.checkpoint} max_dollars={capped}")
     return run.goal_title, run.goal_description + extra, capped
@@ -3955,6 +3954,7 @@ def start(
 
     from ..budget import budget_from_config
     from ..orchestrator import _budget_task_class
+    from ..runner import goal_budget_defaults
 
     # --repeat N runs the SAME task N times so its attempts share a task_family
     # and form DPO preference pairs. A fresh goal row + budget per run.
@@ -3968,6 +3968,7 @@ def start(
         # so config caps were silently ignored). Precedence: built-in defaults
         # < config < explicit CLI flags. A None flag passes through as "unset".
         bud = budget_from_config(
+            defaults=goal_budget_defaults(),
             # Learned per-class default cap (default-on, lowest precedence; via
             # [budget] self_tuning). Department runs use their own class so
             # finance runs are sized by finance history.
@@ -4203,7 +4204,9 @@ def chat(ctx, max_depth: int, max_dollars: float, workdir) -> None:
         world.append_turn(conversation.id, "user", full, goal_id=goal_id)
         click.echo(click.style(f"  ... goal #{goal_id}", fg="bright_black"))
         from ..budget import budget_from_config
-        bud = budget_from_config(max_dollars=max_dollars)
+        from ..runner import goal_budget_defaults
+
+        bud = budget_from_config(defaults=goal_budget_defaults(), max_dollars=max_dollars)
         try:
             result = k.run_goal_sync(llm, world, bud, goal_id,
                                    sandbox=sandbox, max_depth=max_depth,
@@ -4420,7 +4423,7 @@ def config_lint_cmd() -> None:
             f"error: {p} is not valid TOML -- every setting in it is being "
             f"IGNORED ({type(e).__name__}: {e})", err=True,
         )
-        click.echo("fix the syntax above, or back it up and re-run `maverick init`.")
+        click.echo("ask an installation administrator to repair the saved settings or restore a known-good backup; setup will not replace them.")
         sys.exit(1)
     try:
         cfg = load_config() or {}
@@ -4979,7 +4982,10 @@ def resume(ctx, goal_id_arg, goal_id, max_depth: int, max_dollars, max_wall_seco
     # Honor [budget] config, and let --max-dollars/--max-wall-seconds raise
     # the cap on resume (the budget-halt message tells users to do this).
     from ..budget import budget_from_config
+    from ..runner import goal_budget_defaults
+
     bud = budget_from_config(
+        defaults=goal_budget_defaults(),
         max_dollars=max_dollars,
         max_wall_seconds=max_wall_seconds,
     )

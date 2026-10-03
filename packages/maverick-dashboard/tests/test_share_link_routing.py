@@ -77,7 +77,10 @@ def test_unknown_and_malformed_tokens_create_no_routing_or_world_files(share_env
     monkeypatch.setattr(app, "_world", must_not_open)
     random_token = secrets.token_urlsafe(32)
     assert share_link_routing.resolve(random_token) is None
-    for token in (random_token, "bad", "a" * 5000):
+    new_token = "r1_" + secrets.token_urlsafe(32)
+    with pytest.raises(share_link_routing.ShareRouteError):
+        share_link_routing.resolve(new_token)
+    for token in (random_token, new_token, "bad", "a" * 5000):
         assert share_env.get(f"/share/{token}").status_code == 404
     assert not (maverick_home() / "dashboard-share-routes").exists()
     assert not (maverick_home() / "tenants").exists()

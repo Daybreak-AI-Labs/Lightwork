@@ -147,9 +147,12 @@ patterns below account for most of the 92 P0/P1 findings.
    free OpenRouter models still hit that refusal (UX-206); Azure and Bedrock cannot be set
    up in the product (UX-074); self-hosted endpoints always fail "Test connection"
    (UX-054).
-5. **The first hour ends in dead ends.** Consumer setup without Docker silently disables file writing
-   and shell, so the README's own first goal cannot work (UX-047). After the first task in a
-   new workspace the default-on rehearsal gate holds every high-risk tool (UX-048). 964 of
+5. **The first hour ends in dead ends.** Consumer setup without an isolated work area now tells users
+   that file changes and program execution are off and points them to Permissions; the installed
+   recovery journey still needs live acceptance (UX-047). The former
+   default-on rehearsal hold is now watch-only by default; explicit Hold mode
+   now routes a paused step to Approvals, with installed-app acceptance open
+   (UX-048). 964 of
    2,031 specialists refuse to run under default settings and nothing says which (UX-070).
    "Results" shows 2,031 placeholders instead of the user's work (UX-069); every running chat
    says "Attachments and available evidence are ready." as its answer (UX-038); a provider
@@ -848,6 +851,7 @@ no images without alt, axe violations limited to nine distinct rules).
   - packages/maverick-core/maverick/rehearsal_runtime.py:55-85 — the model is fitted from the trajectory store, which records held (never-executed) attempts as steps of that tool
   - cmd: scratchpad/audit/C5a/tools/run_script.py (scripted fake model calling write_file/notebook_exec/shell) in a fresh MAVERICK_HOME: task 1 → write_file ran; tasks 2-9 → every call returned '⚠ Held by pre-execution rehearsal (escalate): world-model has no support for this action in this state' (out_rehearsal.txt); a new process then returned 'Held ... (block): rehearsal predicts a poor outcome (0.056 < floor 0.500)' with trajectory Counter shell=9 (all refused attempts). The 0.056 outcome partly reflects the lab verifier scoring low; the 'escalate' holds do not depend on it
 - **Recommendation (effort M):** Ship rehearsal in observe-only mode until a workspace has real support (log the verdict, never hold), or map ESCALATE to a real approval request via require_consent with a readable reason. Never record a held tool call as an executed step in the trajectory store. Surface the switch on Settings > Safety with plain copy ('Hold unfamiliar high-impact actions for review'), and show held actions on the task page with a one-click 'approve and run'.
+- **Implementation update (2026-10-03):** Rehearsal now defaults to watch-only predictions. Settings > Safety exposes its switch and mode; Shield, capability, and consent checks still decide their own refusals. Calls stopped before dispatch are excluded from executed action history and trajectory scoring, and ambiguous older failed rows are excluded from rehearsal fitting. Explicit Hold mode now requests a fresh person in Approvals for one exact task/tool/argument set, then checks the live permit before allowing the normal safety gates to continue. Rejection, timeout, unavailable authority, unavailable prediction and stale approval stop the action; an unanswered request is withdrawn. The native page has a synthetic authenticated browser journey, but the actual installed task-to-approval-to-execution journey and inline task review control remain open.
 - Source: C5a-010
 
 #### UX-049 · P1 · Bug · Skills the platform 'learns' from successful runs are never used again: distilled skills are written to learned-skills/, but agents only recall built-in + skills/

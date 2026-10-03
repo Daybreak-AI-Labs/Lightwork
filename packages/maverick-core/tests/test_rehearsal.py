@@ -88,3 +88,19 @@ def test_enabled_off_by_default(monkeypatch):
     assert rh.enabled() is False
     monkeypatch.setenv("MAVERICK_REHEARSAL", "1")
     assert rh.enabled() is True
+
+
+def test_live_rehearsal_observes_by_default_and_requires_explicit_hold(monkeypatch):
+    from maverick import config
+
+    monkeypatch.delenv("MAVERICK_REHEARSAL", raising=False)
+    monkeypatch.setattr(config, "load_config", dict)
+    assert config.get_rehearsal()["mode"] == "observe"
+    assert rh.enforcing() is False
+
+    monkeypatch.setattr(config, "load_config", lambda: {"rehearsal": {"mode": "hold"}})
+    assert rh.enforcing() is True
+
+    monkeypatch.setattr(config, "load_config", lambda: {"rehearsal": {"mode": "typo"}})
+    assert config.get_rehearsal()["mode"] == "observe"
+    assert rh.enforcing() is False

@@ -101,8 +101,8 @@ class TestGoals:
             (
                 resp.json()["id"],
                 {
-                    "max_dollars": None,
-                    "max_wall_seconds": None,
+                    "max_dollars": 2.0,
+                    "max_wall_seconds": 1800.0,
                     "max_depth": 3,
                     "channel": None,
                     "user_id": None,
@@ -210,14 +210,16 @@ class TestGoals:
         assert ".maverick" not in detail
 
     @pytest.mark.parametrize("ceiling,expected", [(None, 10_000.0), (25.0, 25.0), (0.0, 0.0)])
-    def test_create_applies_only_configured_max_dollars(self, monkeypatch, ceiling, expected):
+    def test_create_applies_only_configured_max_dollars(self, monkeypatch, tmp_path, ceiling, expected):
         """An explicit deployment ceiling constrains a caller's requested cap."""
         monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake")
         import maverick.runner as runner_mod
-        from maverick_dashboard import api as api_mod
-
         called = []
-        monkeypatch.setattr(api_mod, "configured_max_dollars", lambda: ceiling)
+        monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
+        if ceiling is not None:
+            (tmp_path / "config.toml").write_text(
+                f"[budget]\nmax_dollars = {ceiling}\n", encoding="utf-8",
+            )
         monkeypatch.setattr(runner_mod, "run_goal_in_thread", lambda *a, **kw: called.append((a, kw)))
         resp = client.post("/api/v1/goals", json={
             "title": "big spend", "max_dollars": 10_000.0,
@@ -225,6 +227,20 @@ class TestGoals:
         assert resp.status_code == 201
         assert len(called) == 1
         assert called[0][1]["max_dollars"] == expected
+
+    def test_create_without_limits_dispatches_finite_fresh_install_caps(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake")
+        monkeypatch.delenv("MAVERICK_BUDGET_DOLLARS", raising=False)
+        import maverick.runner as runner_mod
+
+        called = []
+        monkeypatch.setattr(runner_mod, "run_goal_in_thread", lambda *a, **kw: called.append((a, kw)))
+        resp = client.post("/api/v1/goals", json={"title": "bounded goal"})
+        assert resp.status_code == 201, resp.text
+        assert len(called) == 1
+        assert called[0][1]["max_dollars"] == 2.0
+        assert called[0][1]["max_wall_seconds"] == 1800.0
 
     def test_create_rejects_oversized_description(self, monkeypatch):
         """An unbounded description is a cost/DB-bloat amplification vector;

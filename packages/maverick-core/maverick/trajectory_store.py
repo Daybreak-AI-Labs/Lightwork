@@ -67,6 +67,10 @@ class TrajectoryStep:
     role: str
     tool: str = ""
     tool_succeeded: bool | None = None
+    # None on legacy rows, True for a call that reached execution. Refused
+    # calls are never captured by the agent loop. Keeping this separate from
+    # success lets an executed failure remain honest training evidence.
+    tool_executed: bool | None = None
     is_final: bool = False
     error: str = ""
     verifier_confidence: float | None = None
@@ -97,7 +101,8 @@ class TrajectoryStep:
         return TrajectoryStep(
             ts=self.ts, goal_id=self.goal_id, episode_id=self.episode_id,
             step=self.step, role=_scrub(self.role)[:64], tool=_scrub(self.tool)[:64],
-            tool_succeeded=self.tool_succeeded, is_final=self.is_final,
+            tool_succeeded=self.tool_succeeded, tool_executed=self.tool_executed,
+            is_final=self.is_final,
             error=_scrub(self.error)[:500], verifier_confidence=self.verifier_confidence,
             promise=self.promise, progress=self.progress, domain=_scrub(self.domain)[:64],
             parent_step=self.parent_step, outcome=self.outcome,

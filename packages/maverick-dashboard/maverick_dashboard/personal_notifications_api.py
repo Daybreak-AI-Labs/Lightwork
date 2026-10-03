@@ -57,6 +57,7 @@ def _projection(request, actor: str, *, world=None) -> tuple[list[dict], list[di
         operate = auth.has_permission(request, "operate")
         suites = auth.caller_suites(request)
     sources, tasks = [], []
+    limited = False
     projects = {project["id"]: {"id": project["id"], "name": project["name"]}
                 for project in world.list_projects(owner=actor) if project.get("owner") == actor}
     for goal, state_revision, result_revision in _goal_pages(world, actor):
@@ -99,9 +100,26 @@ def _projection(request, actor: str, *, world=None) -> tuple[list[dict], list[di
             sources.append({"ref": f"approval:{approval.id}", "version": str(approval.requested_at),
                             "category": "needs-decision", "title": "Assigned approval", "label": "Needs your decision",
                             "href": f"/approvals#approval-{approval.id}", "goal_id": None, "project_id": None})
+        from .flow_approval_inbox import pending_for_observer, pending_for_request
+
+        flow_approvals = (pending_for_observer(actor) if request is None
+                          else pending_for_request(request))
+        limited = flow_approvals["coverage"] != "current"
+        for row in flow_approvals["items"]:
+            if row["approval_card_status"] != "current":
+                continue
+            # Keep personal notification history free of the card and run data.
+            # The linked run page performs the current approval checks again.
+            sources.append({
+                "ref": f"flow-approval:{row['run_id']}",
+                "version": row["approval_binding_sha256"],
+                "category": "needs-decision", "title": "Flow approval waiting",
+                "label": "Review and decide", "href": row["href"],
+                "goal_id": None, "project_id": None,
+            })
     from maverick.budget_guidance import warning_sources
     sources.extend(warning_sources(actor))
-    return sources, tasks, list(projects.values()), False
+    return sources, tasks, list(projects.values()), limited
 
 
 def _state(request, *, seen_id=None):

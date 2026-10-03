@@ -1,4 +1,4 @@
-"""Locally reviewed task support drafts; external transfer is an explicit step."""
+"""Locally reviewed task support drafts for customer-controlled sharing."""
 from __future__ import annotations
 
 from datetime import date, datetime, time, timezone
@@ -125,16 +125,15 @@ async def issue_draft(body: IssueIn, request: Request, response: Response) -> di
     draft = await run_in_threadpool(build)
     await run_in_threadpool(_task, request, world, body.task)
     return {**draft, "summary": "Review the draft here. Remove business details you do not want to share. "
-            "Copying or downloading stays on this device. Opening GitHub sends the reviewed title and body "
-            "to GitHub; publishing the issue is a separate action there."}
+            "Copy or download it, then use the support channel your organization gave you. "
+            "Nothing is sent automatically."}
 
 
 @router.post("/review")
 async def review_issue(body: ReviewedIssueIn, request: Request, response: Response) -> dict:
     require_permission(request, "view")
     response.headers["Cache-Control"] = "private, no-store"
-    from maverick.issue_report import DEFAULT_REPO, build_issue_url
     from maverick.secrets import scrub
     await run_in_threadpool(_task, request, _world(), body.task)
     title, content = scrub(body.title)[:120], scrub(body.body)[:6000]
-    return {"title": title, "body": content, "url": build_issue_url(DEFAULT_REPO, title, content)}
+    return {"title": title, "body": content}

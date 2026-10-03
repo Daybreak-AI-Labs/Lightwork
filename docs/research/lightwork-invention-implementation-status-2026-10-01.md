@@ -7,11 +7,32 @@ installed-product, customer-outcome, novelty, or acquisition-value test. “Adja
 means a narrower component exists; it does **not** mean the proposed mechanism is
 implemented. No whole register item has been qualified end to end for a customer.
 
+October 2 draft addendum: N01 now has a bounded core feasibility model in
+`maverick.commitment_viability` and a durable, account/workspace-bound pilot in
+`maverick_dashboard.commitment_viability_store`. The optional Promise reviews
+page and typed Copilot controls let an owner enter two accepted orders, team-
+reported stock and capacity, a conditional option, and observed contention;
+the owner can confirm a proposed dependency or choice in the model. Source
+review times, stale states, operation receipts and uncertain-response readback
+remain visible. An authenticated synthetic browser journey passes from Settings
+through those controls and reload; it is not an installed-app or customer test.
+The service has no customer order, stock, supplier or reservation adapter and no
+qualified improvement over a strong baseline. An October 3 draft adds owner-
+confirmed, auditable archive and in-product readback so finished reviews can
+release slots under its 1,000-active-review shared tenant limit. This has not
+been qualified in an installed app or with a customer. A separately written exhaustive
+robust scheduler matched all 27 small, fully observed comparator cases. N01's
+novel research mechanism is still unproven; the count below records a bounded
+pilot separately from a completed invention. A pilot-page
+readiness check and tab-local Copilot transcript repair likewise do not
+complete F01, F02 or F04.
+
 | Status | Meaning | Count |
 | --- | --- | ---: |
 | Partial product support | Working code for part of a broad product foundation; integrated customer acceptance still open | 6 |
+| Bounded pilot; mechanism unproven | An in-product pilot exists, but neither complete customer operation nor a distinct invention is qualified | 1 |
 | Adjacent component | Code related to the direction, without its proposed general advance | 4 |
-| Research only | Mechanism remains a proposal or a research question | 14 |
+| Research only | Mechanism remains a proposal or a research question | 13 |
 | Rejected or parked | Retained to preserve an unfavorable or insufficient result | 4 |
 
 ## Product foundations
@@ -48,14 +69,14 @@ implemented. No whole register item has been qualified end to end for a customer
 
 ## New candidates
 
-The register itself identifies N01–N06 as hypotheses, and says N01 and N02
-still need mechanism and discriminating-experiment specifications before
-implementation. The related components below should not be marketed as those
-inventions.
+The register identifies N01–N06 as hypotheses. N01 now has a bounded pilot,
+but its proposed novel mechanism and discriminating experiment remain
+unqualified; N02 still needs those specifications before implementation. The
+related components below should not be marketed as completed inventions.
 
 | ID | Status | Closest current component and missing mechanism |
 | --- | --- | --- |
-| N01 | Research only | [Outcome accounting](https://github.com/Daybreak-AI-Labs/Lightwork/blob/1c27445dda93e21e2eb38ef2dde5193646832da8/packages/maverick-core/maverick/outcome_accounting.py#L1-L8) retains costs/outcomes; no online feasible-continuation controller for interacting customer commitments is present. [Definition](https://github.com/Daybreak-AI-Labs/Lightwork/blob/1c27445dda93e21e2eb38ef2dde5193646832da8/docs/research/lightwork-invention-register.md#L55-L69). |
+| N01 | Bounded pilot; novel mechanism unproven | [Commitment viability model](../../packages/maverick-core/maverick/commitment_viability.py) and [Promise reviews](../../packages/maverick-dashboard/maverick_dashboard/commitment_viability_store.py) support two manually entered orders, conditional options, owner-reviewed proposed contention, UI/Copilot controls and source-labeled assessment. They do not provide verified live resources, external reservations, full production constraints, customer-accepted outcomes, or demonstrated advantage over a robust scheduler. [Definition](lightwork-invention-register.md#n01-preserve-achievable-customer-commitments). |
 | N02 | Research only | [Fleet memory](https://github.com/Daybreak-AI-Labs/Lightwork/blob/1c27445dda93e21e2eb38ef2dde5193646832da8/packages/maverick-core/maverick/fleet_memory.py#L1-L23) can share scoped lessons, but there is no joint private-failure witness synthesis, permitted-release noninterference check, and target-local semantic retargeting. [Definition](https://github.com/Daybreak-AI-Labs/Lightwork/blob/1c27445dda93e21e2eb38ef2dde5193646832da8/docs/research/lightwork-invention-register.md#L71-L93). |
 | N03 | Research only | [Signed recipe lineage](https://github.com/Daybreak-AI-Labs/Lightwork/blob/1c27445dda93e21e2eb38ef2dde5193646832da8/packages/maverick-core/maverick/flow/recipe_lineage.py#L1-L8) is local evidence; no joint abstract-procedure/adapter discovery and target qualification across organizations. [Definition](https://github.com/Daybreak-AI-Labs/Lightwork/blob/1c27445dda93e21e2eb38ef2dde5193646832da8/docs/research/lightwork-invention-register.md#L95-L107). |
 | N04 | Research only | [Flow rewrites](https://github.com/Daybreak-AI-Labs/Lightwork/blob/1c27445dda93e21e2eb38ef2dde5193646832da8/packages/maverick-core/maverick/flow/evolve.py#L1-L20) propose node-type swaps; they do not learn obligation-preserving split/merge/batch/reorder transformations across jobs. [Definition](https://github.com/Daybreak-AI-Labs/Lightwork/blob/1c27445dda93e21e2eb38ef2dde5193646832da8/docs/research/lightwork-invention-register.md#L109-L121). |

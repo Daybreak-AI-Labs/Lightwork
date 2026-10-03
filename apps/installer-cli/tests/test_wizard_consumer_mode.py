@@ -17,12 +17,16 @@ def test_new_install_budget_defaults_are_optional_and_explicit_choices_survive(m
 
     monkeypatch.setattr(wizard, "_q_select", lambda *_a, **kw: kw["default"])
     monkeypatch.setattr(wizard, "_q_confirm", lambda *_a, **kw: kw["default"])
-    assert wizard._consumer_budget() == {}
+    assert wizard._consumer_budget() == {"max_dollars": 2.0, "max_wall_seconds": 1800.0}
     monkeypatch.setattr(wizard, "_q_text", lambda *_a, **kw: kw["default"])
-    assert wizard.pick_budget() == {"strict_pricing": True, "guidance": True, "warnings": True,
+    assert wizard.pick_budget() == {"max_dollars": 2.0, "max_wall_seconds": 1800.0,
+                                    "max_tool_calls": 500, "strict_pricing": True,
+                                    "guidance": True, "warnings": True,
                                     "warning_thresholds": [0.8, 0.95, 1.0]}
     monkeypatch.setattr(wizard, "_q_select", lambda *_a, **_kw: "$5")
-    assert wizard._consumer_budget() == {"max_dollars": 5.0}
+    assert wizard._consumer_budget() == {"max_dollars": 5.0, "max_wall_seconds": 1800.0}
+    monkeypatch.setattr(wizard, "_q_select", lambda *_a, **_kw: "No task limit")
+    assert wizard._consumer_budget() == {"task_limits_enabled": False}
 
 def test_pick_mode_default_is_consumer(monkeypatch):
     from maverick_installer import wizard
@@ -184,6 +188,7 @@ def test_run_consumer_writes_safe_defaults(monkeypatch, tmp_path: Path):
     assert config["rate_limits"]["web_search"] == "5/60"
     assert config["persona"]["user_name"] == "Alex"
     assert config["budget"]["max_dollars"] == 5.0
+    assert config["budget"]["max_wall_seconds"] == 1800.0
     assert config["capabilities"]["web_search"] is True
     assert config["self_learning"]["enable"] is True
     assert config["self_learning"]["create_tools"] is False
@@ -244,6 +249,7 @@ def test_run_consumer_demo_command_runs_a_real_first_outcome(monkeypatch, tmp_pa
     out = " ".join(capsys.readouterr().out.replace("│", " ").split())  # Rich wraps the panel
     assert "--domain finance_ap" in out
     assert "--model" not in out
+    assert "File changes and program execution are off" in out
 
 
 def test_run_consumer_creates_workdir(monkeypatch, tmp_path: Path):

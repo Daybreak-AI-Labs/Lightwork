@@ -53,7 +53,10 @@
       if (controller.signal.aborted) throw new Error(route === '/execute'
         ? 'The wait ended before the result was confirmed. Check native status before another attempt.'
         : 'This check timed out or was cancelled. Reopen the control to read current status.');
-      throw error;
+      if (error && error.status) throw error;
+      throw new Error(route === '/execute'
+        ? 'The result could not be confirmed. Check native status before another attempt.'
+        : 'This check could not be completed. Reopen the control to read current status.');
     } finally { clearTimeout(timeout); pendingRequests.delete(controller); }
   }
   function renderData(parent, value) {
@@ -115,8 +118,8 @@
       control.id = id; control.name = spec.name; control.className = 'input'; control.required = spec.required === true;
       if (choices && spec.kind === 'multiselect') control.multiple = true;
       if (choices) choices.forEach(function (choice, index) { var option = node('option', choice.label, control); option.value = String(index); option._typedValue = choice.value; if (spec.kind === 'multiselect' ? Array.isArray(spec.value) && spec.value.indexOf(choice.value) >= 0 : choice.value === spec.value) option.selected = true; });
-      else { control.type = spec.kind === 'boolean' ? 'checkbox' : spec.kind === 'number' ? 'number' : 'text'; if (spec.kind === 'number') { control.step = 'any'; control.min = '0'; } control.maxLength = spec.max_length || 2000; control.value = spec.value === null || spec.value === undefined ? '' : String(spec.value); if (spec.kind === 'boolean') control.checked = spec.value === true; }
-      controls[spec.name] = function () { if (choices && spec.kind === 'multiselect') return Array.from(control.selectedOptions, function (option) { return option._typedValue; }); if (choices) return control.selectedOptions[0] ? control.selectedOptions[0]._typedValue : ''; if (spec.kind === 'boolean') return control.checked; if (spec.kind === 'number') return control.value === '' ? null : Number(control.value); return control.value; };
+      else { if (control.tagName !== 'TEXTAREA') control.type = spec.kind === 'boolean' ? 'checkbox' : spec.kind === 'number' ? 'number' : spec.kind === 'datetime-local' ? 'datetime-local' : 'text'; if (spec.kind === 'number') { control.step = 'any'; control.min = '0'; } control.maxLength = spec.max_length || 2000; control.value = spec.value === null || spec.value === undefined ? '' : String(spec.value); if (spec.kind === 'boolean') control.checked = spec.value === true; }
+      controls[spec.name] = function () { if (choices && spec.kind === 'multiselect') return Array.from(control.selectedOptions, function (option) { return option._typedValue; }); if (choices) return control.selectedOptions[0] ? control.selectedOptions[0]._typedValue : ''; if (spec.kind === 'boolean') return control.checked; if (spec.kind === 'number') return control.value === '' ? null : Number(control.value); if (spec.kind === 'datetime-local') { var date = new Date(control.value); return Number.isNaN(date.getTime()) ? control.value : date.toISOString(); } return control.value; };
     }
     install(Array.isArray(spec.choices) ? spec.choices : null);
     if (spec.depends_on && spec.choices_by) return function () {
@@ -254,10 +257,14 @@
       try {
         var result = await request('/propose', Object.assign(payload(), {message: message, context: catalog.context}));
         if (!active(started)) return true;
-        if (result.context !== catalog.context) { clear(formHost); catalog = null; status.textContent = 'Your context changed. Reopen Copilot.'; return true; }
+        if (result.context !== catalog.context) {
+          clear(formHost); catalog = null; status.textContent = 'Your context changed. Reopen Copilot.';
+          document.dispatchEvent(new CustomEvent('lightwork:copilot-context-changed'));
+          return true;
+        }
         if (!result.operation) return false;
         lock(false); return await openOperation(result.operation);
-      } catch (error) { if (active(started)) status.textContent = error.message; return true; }
+      } catch (error) { if (active(started)) status.textContent = error.message; return 'unavailable'; }
       finally { lock(false); }
     }
   };

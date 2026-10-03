@@ -35,12 +35,26 @@
     if (!response.ok) throw response;
     return response.json();
   }
+  function syncNextActions() {
+    const readyRecipe = Boolean(state.recipe) && !state.busy;
+    const readyPackage = Boolean(state.pkg) && !state.busy;
+    const signedReady = root.dataset.lineage === '1';
+    if ($('rc-more')) $('rc-more').disabled = !readyRecipe;
+    if ($('rc-draft')) $('rc-draft').disabled = !readyRecipe;
+    $('sg-refine').disabled = !readyPackage || !signedReady;
+    $('sg-inspect').disabled = !readyPackage;
+    $('sg-download').disabled = !readyPackage;
+    $('sg-approve').disabled = !readyPackage || !signedReady;
+    $('ft-save-go').disabled = !state.draft || state.busy;
+    $('ft-save-cancel').disabled = state.busy;
+  }
   async function guarded(what, action, statusId) {
-    if (state.busy) return;
+    if (state.busy) { say('Still finishing the last step. Please try again in a moment.', statusId); return; }
     state.busy = true;
     root.setAttribute('aria-busy', 'true');
+    syncNextActions();
     try { await action(); } catch (failure) { say(failText(failure, what), statusId); }
-    finally { state.busy = false; root.setAttribute('aria-busy', 'false'); }
+    finally { state.busy = false; root.setAttribute('aria-busy', 'false'); syncNextActions(); }
   }
   function readJsonFile(file) {
     return new Promise((resolve, reject) => {
@@ -65,9 +79,10 @@
     $('ft-save-note').textContent = note;
     $('ft-save-go').textContent = mode === 'new' ? 'Save as a new flow' : 'Save as the flow’s next version';
     $('ft-save').hidden = false;
-    $('ft-save-go').focus();
+    syncNextActions();
+    if (!state.busy) $('ft-save-go').focus();
   }
-  $('ft-save-cancel').addEventListener('click', () => { state.draft = null; $('ft-save').hidden = true; say('Nothing was saved.'); });
+  $('ft-save-cancel').addEventListener('click', () => { state.draft = null; $('ft-save').hidden = true; syncNextActions(); say('Nothing was saved.'); });
   $('ft-save-go').addEventListener('click', () => guarded('save the flow', async () => {
     if (!state.draft) return;
     const ok = typeof window.mvConfirm === 'function' && await window.mvConfirm(state.draftMode === 'new'
@@ -323,7 +338,9 @@
     const label = make('label');
     const box = make('input'); box.type = 'checkbox'; box.value = run.run_id; box.name = name; box.disabled = !eligible;
     const when = run.started && typeof window.mvWhen === 'function' ? window.mvWhen(run.started) : 'Run';
-    label.append(box, ' ' + when + ' · ' + (STATUS[run.status] || human(run.status)));
+    const permission = run.status === 'accepted' && !run.can_learn
+      ? (run.grant ? ' · Learning permission ended' : ' · Allow learning from its run page first') : '';
+    label.append(box, ' ' + when + ' · ' + (STATUS[run.status] || human(run.status)) + permission);
     item.append(label);
     return item;
   }
@@ -338,8 +355,10 @@
       state.runs.forEach(run => $('rc-runs').append(runRow(run, 'rc-run', run.can_learn)));
     }
     $('sg-runs').replaceChildren();
-    const signable = state.runs.filter(r => r.can_sign);
-    if (!signable.length) $('sg-runs').append(make('p', 'muted', 'No runs are approved for learning yet. Runs appear here once they are reviewed and approved for learning.'));
+    const signable = root.dataset.lineage === '1' ? state.runs.filter(r => r.can_sign) : [];
+    if (!signable.length) $('sg-runs').append(make('p', 'muted', root.dataset.lineage === '1'
+      ? 'No runs are allowed for learning right now. Review a run and grant learning permission from its run page.'
+      : 'Signed learning is not ready. An administrator can check it in Settings.'));
     signable.forEach(run => {
       const row = runRow(run, 'sg-run', true);
       const button = make('button', 'btn btn--ghost', 'Make a signed copy'); button.type = 'button';
@@ -370,12 +389,17 @@
     $('rc-more').addEventListener('click', () => guarded('add these runs', async () => {
       const runs = checked('rc-run');
       if (!state.recipe || !runs.length) { say('Choose the runs to add.'); return; }
-      showRecipe(await api('/api/v1/flows/' + enc + '/teach/recipe/refine', { artifact: state.recipe, run_ids: runs }));
+      showRecipe(await api('/api/v1/flows/' + enc + '/teach/recipe/refine', { package: state.recipe, run_ids: runs }));
     }));
     $('rc-draft').addEventListener('click', () => guarded('make the new flow', async () => {
       const name = $('rc-name').value.trim();
       if (!name) { say('Name the new flow first.'); $('rc-name').focus(); return; }
-      const result = await api('/api/v1/flows/' + enc + '/teach/recipe/draft', { artifact: state.recipe, name: name, teaching: $('rc-teach').checked });
+      if (!state.recipe) { say('Choose reviewed runs and learn from them first.'); return; }
+      const ok = typeof window.mvConfirm === 'function' && await window.mvConfirm(
+        'Approve the signed examples for this new flow? Future actions will check that each example is still allowed for learning.',
+        { okText: 'Approve and prepare flow' });
+      if (!ok) return;
+      const result = await api('/api/v1/flows/' + enc + '/teach/recipe/draft', { package: state.recipe, name: name, teaching: $('rc-teach').checked });
       offerSave(result.draft, result.note, 'new');
     }));
   }
@@ -386,10 +410,12 @@
       + (summary.alternatives > 1 ? ' Some details can be worked out in more than one way, so the new flow asks before each action.' : '');
   }
   function showRecipe(result) {
-    state.recipe = result.artifact;
+    state.recipe = result.package;
+    document.querySelectorAll('input[name="rc-run"]:checked').forEach(box => { box.checked = false; });
     $('rc-summary').textContent = describeLearned(result.summary);
     $('rc-teach-wrap').hidden = !result.summary.choice;
     $('rc-result').hidden = false; $('rc-more').hidden = false;
+    syncNextActions();
     if (!$('rc-name').value) $('rc-name').value = (state.overview && state.overview.flow.name ? state.overview.flow.name + ' (learned)' : 'Learned flow');
     say('Learned. Name the new flow and make it, or add more runs.');
   }
@@ -432,6 +458,7 @@
     state.pkg = result.package;
     $('sg-summary').textContent = describeLearned(result.summary) + ' It isn’t approved for governed use yet.';
     $('sg-result').hidden = false; $('sg-refine').hidden = false; $('sg-steps').replaceChildren();
+    syncNextActions();
   }
   $('sg-learn').addEventListener('click', () => guarded('learn from the signed examples', async () => {
     if (state.bundles.length < 2) { say('Add at least two signed examples.'); return; }
@@ -498,6 +525,7 @@
   inputRow({ name: 'amount', kind: 'integer', min: 0, max: 1000 });
   renderExamples();
   syncRecipeStyle();
+  syncNextActions();
   guarded('load this flow', async () => {
     await loadOverview();
     await loadRuns();

@@ -164,7 +164,8 @@ def sandbox_run(
 
     Through a sandbox, the argv is shell-quoted with ``shlex.join`` and handed
     to ``exec()`` (which runs ``sh -c``); ``stdin`` is fed via a base64 pipe so
-    arbitrary text reaches the process without shell-quoting hazards. When no
+    arbitrary text reaches the process without shell-quoting hazards. Windows
+    LocalBackend runs the argv directly with a bounded stdin pipe. When no
     sandbox is wired in, falls back to a scrubbed-env ``subprocess.run`` of the
     raw argv list (no shell interpolation -- the chokepoint guard forbids that
     outside the sandbox backends), passing ``stdin`` directly.
@@ -175,6 +176,15 @@ def sandbox_run(
         from ..sandbox.sdk import execution_callable
 
         execute = execution_callable(sandbox)
+        if os.name == "nt":
+            from ..sandbox.local import LocalBackend
+
+            if type(sandbox) is LocalBackend:
+                # cmd.exe has no printf/base64 -d pipeline and an 8191-char
+                # command limit. Direct argv avoids shell interpolation; the
+                # bounded stdin pipe keeps notebook contents off the command line.
+                res = execute(argv, timeout=timeout, stdin=stdin)
+                return res.exit_code, res.stdout, res.stderr
         import shlex
         cmd = shlex.join(argv)
         if stdin is not None:

@@ -42,7 +42,7 @@ def build_report_fields(
     gtitle = scrub(str(getattr(goal, "title", "") or "")).strip()
     title = f"Agent run failed: {gtitle or 'goal'}"[:120]
     lines = [
-        "_Reported from a failed Lightwork run (`maverick report-issue`)._",
+        "_Reported from a stopped Lightwork task._",
         "",
         f"- Goal #{getattr(goal, 'id', '?')}: {gtitle}",
         f"- Status: {getattr(goal, 'status', '?')}",

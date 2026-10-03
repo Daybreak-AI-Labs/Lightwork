@@ -74,20 +74,20 @@
 
 {% block dock %}
 <form method="post" action="/chat/send" data-product-validation class="composer cs-anim" enctype="multipart/form-data">
+  <input type="hidden" name="composer_mode" value="message">
   <input type="hidden" name="connection_references" value="[]">
   <input type="hidden" name="submission_key" value="{{ submission_key }}" />
   <fieldset class="composer__controls"{% if not model_route_ready or not can_create_goal %} disabled{% endif %}>
   <legend class="sr-only">{{ ui('Start governed AI work') }}</legend>
-  <input
-    type="text"
+  <textarea
     lang="und" dir="auto" data-user-content name="title"
-    value="{{ prefill_title or '' }}"
     class="composer__field"
+    rows="2"
     placeholder="{{ ut('Message Lightwork…') }}"
     aria-label="{{ ut('Describe a task for Lightwork to do') }}"
     required
     autofocus
-  />
+  >{{ prefill_title or '' }}</textarea>
   <details{% if prefill_description %} open{% endif %}>
     <summary>{{ ui('Add details') }}</summary>
     <textarea lang="und" dir="auto" data-user-content
@@ -122,7 +122,9 @@
     <label for="authoring-kind" class="sr-only">{{ ui('What should Lightwork create?') }}</label>
     <select id="authoring-kind" name="authoring_kind" class="composer__mode" aria-label="{{ ut('What should Lightwork create?') }}">
       <option value="goal" lang="{{ ul('Run this task') }}">{{ ut('Run this task') }}</option>
+      {% if flows_enabled and can_create_goal %}
       <option value="flow" lang="{{ ul('Draft a workflow') }}">{{ ut('Draft a workflow') }}</option>
+      {% endif %}
       <option value="agent" lang="{{ ul('Draft an agent') }}">{{ ut('Draft an agent') }}</option>
     </select>
     <button type="submit" id="send-btn" class="composer__send" aria-label="{{ ut('Start task') }}" lang="{{ ul('Start task') }}">
@@ -135,6 +137,12 @@
 </form>
 <p id="goal-error" role="alert" aria-live="assertive"
    style="display: none; margin: var(--space-3) 0 0; color: var(--danger); font-size: var(--text-sm); text-align: center;"></p>
+{% if can_create_goal and not flows_enabled %}
+<p class="cs-dock__note" role="status">{{ ui('Workflows are turned off.') }}
+  {% if can_enable_flows %}<a href="/learning#lrn-flows-on">{{ ui('Turn them on in Learning') }}</a> {{ ui('to draft one here.') }}
+  {% else %}{{ ui('Ask the person who manages this installation to turn them on.') }}{% endif %}
+</p>
+{% endif %}
 {% if not model_route_ready %}
 <p class="cs-dock__note" id="composer-readiness" role="status">{{ ui(workspace.reason) }}</p>
 {% elif workspace.verdict == 'needs_test' %}
@@ -142,6 +150,16 @@
 {% else %}
 <p class="cs-dock__note">{{ ui('Check spending limits and approval settings before starting. Some actions may need your approval.') }}</p>
 {% endif %}
+<p class="cs-dock__note" id="goal-task-limits">
+  {% if goal_max_dollars is none and goal_max_wall_seconds is none %}
+    {{ ui('No spending or time limit is set for each task.') }}
+  {% else %}
+    {{ ui('Task limits:') }}
+    {% if goal_max_dollars is not none %}{{ ui('up to {amount}', amount='$' ~ ('%.2f'|format(goal_max_dollars))) }}{% else %}{{ ui('no spending limit') }}{% endif %},
+    {% if goal_max_wall_seconds is none %}{{ ui('no time limit') }}{% elif goal_max_wall_seconds > 0 and goal_max_wall_seconds % 60 == 0 %}{{ ui('up to {minutes} minutes', minutes='%g'|format(goal_max_wall_seconds / 60)) }}{% else %}{{ ui('up to {seconds} seconds', seconds='%g'|format(goal_max_wall_seconds)) }}{% endif %}.
+  {% endif %}
+  {% if show_settings_link %}<a href="/settings">{{ ui('Review task limits') }}</a>{% endif %}
+</p>
 {% endblock %}
 
 {% block scripts_extra %}
@@ -150,6 +168,16 @@
 <script>
   function chatCopy(node, source, values) { if (window.LightworkI18n) window.LightworkI18n.set(node, source, values); else node.textContent = source.replace(/\{(\w+)\}/g, function (_, key) { return (values || {})[key] === undefined ? '{' + key + '}' : values[key]; }); }
   function chatText(source) { return window.LightworkI18n ? window.LightworkI18n.text(source) : source; }
+  (function () {
+    var field = document.querySelector('form.composer [name="title"]');
+    if (!field) return;
+    function fit() { field.style.height = 'auto'; field.style.height = Math.min(field.scrollHeight, 224) + 'px'; }
+    field.addEventListener('input', fit); window.addEventListener('pageshow', fit); fit();
+    field.addEventListener('keydown', function (event) {
+      if (event.key !== 'Enter' || event.shiftKey || event.isComposing || event.keyCode === 229) return;
+      event.preventDefault(); field.form.requestSubmit();
+    });
+  })();
   // A prepared template becomes an ordinary draft for review, never a run.
   (async function receiveTemplateDraft() {
     var raw;
@@ -163,7 +191,7 @@
         !Number.isFinite(draft.created_at) || Date.now() - draft.created_at < 0 || Date.now() - draft.created_at > 600000) return;
     var form = document.querySelector('form.composer');
     if (!form) return;
-    var title = form.querySelector('input[name="title"]'), description = form.querySelector('textarea[name="description"]');
+    var title = form.querySelector('[name="title"]'), description = form.querySelector('textarea[name="description"]');
     if (!title || !description || title.value.trim() || description.value.trim()) return;
     var notice = document.getElementById('template-draft-notice');
     if (Array.from(draft.title).length > 200 || Array.from(draft.description).length > 16000) {
@@ -281,7 +309,7 @@
       text = (text || '').trim();
       if (!text) { chatCopy(hint, 'Heard nothing — try again closer to the mic.'); return; }
       var form = btn.form || document.getElementById('send-btn').form;
-      var title = form.querySelector('input[name="title"]');
+      var title = form.querySelector('[name="title"]');
       var details = form.querySelector('textarea[name="description"]');
       if (title && !title.value.trim()) { title.value = text; title.focus(); }
       else if (details) {

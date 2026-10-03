@@ -564,7 +564,9 @@ stoppable — **while it happens**, open a live run:
    `{goal_id, heartbeat_seconds}`. The goal lands **active** on the
    Operating Record immediately.
 2. `POST /api/v1/external/runs/{goal_id}/heartbeat` at least every
-   `heartbeat_seconds` (default 60; the deployment's orphan-reclaim window).
+   `heartbeat_seconds` (default 15, one quarter of the default 60-second
+   orphan-reclaim window). The returned interval includes room for normal
+   request delay; schedule the next beat from the last successful response.
    The reply is the kill switch: `{"continue": false, "reason": ...}` means
    **stop working now** — containment, revocation, expiry, and reclaimed or
    finished runs all return false. An agent that ignores it stops refreshing

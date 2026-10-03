@@ -35,6 +35,7 @@ def _quiet_dispatch(monkeypatch) -> None:
     # These synthetic clients have no paid usage. Keep the numeric projection
     # contract intact while this fixture isolates model selection/failover.
     monkeypatch.setattr(llm, "_estimate_call_cost", lambda *args, **kwargs: 0.0)
+    monkeypatch.setattr(llm, "_lookup_price_quote", lambda _spec: None)
 
 
 def test_provider_snapshot_rotation_never_mixes_generations(monkeypatch):

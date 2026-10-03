@@ -41,6 +41,7 @@
   {% if audit_window_note %}
   <p class="muted" role="status">{{ audit_window_note }}</p>
   {% endif %}
+  {% if deployment_filter_view %}<p class="panel" role="note">These setting-change entries are from the deployment-wide log and are available only to global administrators. This metadata view does not show the saved values before and after a change.</p>{% endif %}
   {% if audit_filter_error %}<p role="alert">{{ audit_filter_error }}</p>{% endif %}
   {% if audit_next_href %}<p><a class="btn" href="{{ audit_next_href }}">Older matching activity</a></p>{% endif %}
   {% if audit_read_report and audit_read_report.failures %}
@@ -190,8 +191,8 @@
   {% endif %}
 
   <section class="panel" aria-labelledby="aud-protect-title">
-    <h2 id="aud-protect-title">Protect and share the log</h2>
-    <p class="muted">These use the dates chosen above (today if none are chosen).</p>
+    <h2 id="aud-protect-title">Protect and share {{ 'the workspace log' if deployment_filter_view else 'the log' }}</h2>
+    <p class="muted">These controls use the dates chosen above (today if none are chosen).{% if deployment_filter_view %} They operate on the current workspace log, not the deployment-wide setting entries shown above.{% endif %}</p>
     <div class="aud-actions">
       <button type="button" class="btn btn--primary" id="aud-check">Check the log has not been changed</button>
       <label for="aud-format" class="sr-only">Download format</label>

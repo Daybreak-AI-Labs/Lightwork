@@ -133,6 +133,7 @@ def _model(request):
             return _vendor_reconciliation_rows(request)
     from .auth import can_access_goal
     from .content_access import can_read_approval
+    from .flow_approval_inbox import pending_for_request
     def connection_attention():
         from .connection_dependencies import connection_attention as owned_connections
         return owned_connections(request)
@@ -140,6 +141,7 @@ def _model(request):
         specs=specs, assessments=list_saved, assessment_allowed=allowed,
         project_reviews=project_reviews, vendor_reconciliations=vendor_reconciliations,
         connection_attention=connection_attention,
+        flow_approvals=lambda: pending_for_request(request, limit=action_center.SOURCE_LIMIT),
         approval_allowed=lambda row: can_read_approval(request, row, world=_world()),
         task_allowed=lambda goal: can_access_goal(request, goal) and domain_suites_allowed(request, goal.domain))
 

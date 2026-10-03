@@ -97,6 +97,7 @@ from .auth import (
     websocket_caller_principal,
 )
 from .budget_guidance_api import router as budget_guidance_router
+from .commitment_viability_api import router as commitment_viability_router
 from .conversation_inbox_api import router as conversation_inbox_router
 from .conversation_organization import present_title as _conversation_title
 from .conversation_organization import router as conversation_organization_router
@@ -1312,6 +1313,7 @@ app.include_router(conversation_inbox_router)
 app.include_router(action_center_router)
 app.include_router(outcome_accounting_router)
 app.include_router(outcome_pilots_router)
+app.include_router(commitment_viability_router)
 app.include_router(outcome_pilot_costs_router)
 app.include_router(project_reviews_router)
 app.include_router(deliverable_bundles_router)
@@ -1839,18 +1841,54 @@ async def persist_theme(request: Request, call_next):
 
 
 async def _reclaim_orphans() -> None:
-    """Mark goals stuck in active/pending as blocked after a crash.
+    """Mark stale active goals as blocked after a crash on PostgreSQL.
 
     Without this, SIGKILL/OOM mid-run strands rows in 'active' forever
-    and `active_goal()` returns a ghost. Council finding (Tier 0).
+    and `active_goal()` returns a ghost. SQLite retains its established
+    active/pending startup policy; PostgreSQL leaves pending to dispatchers.
     """
     try:
-        wm = _world()  # honor the configured backend (SQLite or Postgres)
-        n = wm.reclaim_orphan_goals()
+        from maverick.world_model_backends import is_postgres_configured
+
+        if is_postgres_configured():
+            from maverick.paths import current_tenant_id_strict
+            from maverick.world_model import reclaim_window_seconds
+
+            from .orphan_sweeper import MIN_WINDOW_SECONDS, reclaim_registered_postgres
+
+            window = reclaim_window_seconds()
+            if not math.isfinite(window) or window < MIN_WINDOW_SECONDS:
+                log.warning("orphan reclaim skipped: unsafe PostgreSQL stale window")
+                n = 0
+            elif current_tenant_id_strict() is not None:
+                # A process-bound single-tenant deployment already has its
+                # authority; preserve that path without requiring a roster.
+                n = _world().reclaim_orphan_goals(
+                    statuses=("active",), resolved_window_seconds=window,
+                    exact_tenant=True,
+                )
+            else:
+                # Shared PostgreSQL has no request tenant at startup. One
+                # bounded roster batch runs now; the periodic sweeper resumes
+                # the cursor. Missing/corrupt roster leaves rows untouched.
+                n = reclaim_registered_postgres(
+                    _world, resolved_window_seconds=window,
+                )
+        else:
+            n = _world().reclaim_orphan_goals()
         if n:
             log.warning("reclaimed %d orphan goal(s) from prior crash", n)
     except Exception:
         log.exception("orphan reclaim failed on startup")
+    # A quick restart can leave a dead goal younger than the stale window.
+    # The supervised sweep revisits it after the window, while live runs
+    # continue to refresh their own liveness timestamp.
+    try:
+        from .orphan_sweeper import start_orphan_sweeper
+
+        start_orphan_sweeper()
+    except Exception:
+        log.exception("stopped-task sweep not started")
 
 
 async def _install_queue_dispatcher() -> None:
@@ -6403,23 +6441,44 @@ async def audit_page(request: Request) -> HTMLResponse:
 
     window_note, next_href = "", None
     events, kind_set, people_set = [], set(), set()
+    deployment_filter_view = False
+    displayed_audit_log = audit_log
     if not filter_error:
         scan_since, scan_until = since, until
         if not (since or until):
             scan_since = scan_until = day or datetime.now(timezone.utc).date().isoformat()
+        source_events = iter_audit_events(since=scan_since, until=scan_until, report=read_report)
+        if kind == "setting_changed" and has_global_permission(request, "admin"):
+            # Setting writes are recorded in the deployment chain. The normal
+            # workspace reader cannot see that chain on tenant installations.
+            from maverick.audit import global_audit_log
+
+            global_log = global_audit_log()
+            if global_log.audit_dir != audit_log.audit_dir:
+                from maverick.audit.reader import iter_events
+
+                displayed_audit_log = global_log
+                deployment_filter_view = True
+                source_events = iter_events(
+                    since=scan_since, until=scan_until,
+                    audit_dir=global_log.audit_dir, report=read_report,
+                )
         result = await run_in_threadpool(
-            search_events, iter_audit_events(since=scan_since, until=scan_until, report=read_report),
+            search_events, source_events,
             matches=_matches, person_for=_audit_plain.event_person, limit=n,
             before=before_event, scan_limit=_AUDIT_RANGE_SCAN_LIMIT,
         )
         events, kind_set, people_set = result["events"], result["kinds"], result["people"]
+        if deployment_filter_view:
+            events = [{**event, "scope": "deployment"} for event in events]
         if not result["cursor_found"]:
             filter_error = "The saved activity position is no longer available. Start a new search."
             events = []
         elif result["cut"]:
             window_note = "The activity scan reached its limit. This is a partial view; narrow the dates before relying on its totals."
         else:
-            window_note = f"Showing {len(events)} of {result['matched']} matching events before this page boundary."
+            source_label = "deployment " if deployment_filter_view else ""
+            window_note = f"Showing {len(events)} of {result['matched']} matching {source_label}events before this page boundary."
         if result["next_cursor"] and not filter_error:
             params = dict(request.query_params)
             if not (since or until):
@@ -6456,7 +6515,8 @@ async def audit_page(request: Request) -> HTMLResponse:
             "order": order,
             "can_admin": has_permission(request, "admin"),
             "can_global_admin": has_global_permission(request, "admin"),
-            "audit_signing_enabled": bool(audit_log.signing_enabled),
+            "deployment_filter_view": deployment_filter_view,
+            "audit_signing_enabled": bool(displayed_audit_log.signing_enabled),
             "audit_read_report": read_report.as_dict(),
             "audit_window_note": window_note,
             "audit_filter_error": filter_error,
@@ -7588,7 +7648,14 @@ async def plugins_approvals(
     if hold is not None:
         return hold
     try:
-        await run_in_threadpool(settings_store.set_installable_plugins, parsed)
+        from .settings_audit import bind_setting_write
+
+        with bind_setting_write(
+            request, section="plugins", key="installable",
+            project=lambda d: (d.get("plugins") or {}).get("installable", []),
+            confirmed=approved is not None,
+        ):
+            await run_in_threadpool(settings_store.set_installable_plugins, parsed)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     from maverick.config import reset_config_cache
@@ -7616,7 +7683,14 @@ async def plugins_install_switch(
         _plugin_install_enabled(), enabled == "on")
     if hold is not None:
         return hold
-    await run_in_threadpool(settings_store.set_plugin_install_allowed, enabled == "on")
+    from .settings_audit import bind_setting_write
+
+    with bind_setting_write(
+        request, section="plugins", key="allow_install",
+        project=lambda d: (d.get("plugins") or {}).get("allow_install"),
+        confirmed=approved is not None,
+    ):
+        await run_in_threadpool(settings_store.set_plugin_install_allowed, enabled == "on")
     from maverick.config import reset_config_cache
 
     reset_config_cache()
@@ -8395,17 +8469,23 @@ def approvals_page(request: Request) -> HTMLResponse:
     """
     require_permission(request, "operate")
     from .content_access import can_read_approval
+    from .flow_approval_inbox import pending_for_request
+
     world = _world()
     pending = list(world.pending_approvals())
     approvals = [row for row in pending if can_read_approval(request, row, world)]
+    flow_approvals = pending_for_request(request)
     return templates.TemplateResponse(
         request,
         "approvals.html",
         {
             "approvals": approvals,
+            "flow_approvals": flow_approvals["items"],
+            "flow_approval_coverage": flow_approvals["coverage"],
             "private_count": len(pending) - len(approvals),
             **_approval_queue_context(approvals),
         },
+        headers={"Cache-Control": "private, no-store"},
     )
 
 
@@ -8755,8 +8835,21 @@ async def channels_save(request: Request) -> RedirectResponse:
     name = (form.get("channel") or "").strip()
     enabled = form.get("enabled") is not None  # checkbox present == on
     values = {k: v for k, v in form.items() if k not in ("channel", "enabled")}
+    from .settings_audit import bind_setting_write
+
+    def _audit_channel(data: dict) -> dict:
+        channels = data.get("channels") or {}
+        table = channels.get(name) if isinstance(channels, dict) else None
+        table = table if isinstance(table, dict) else {}
+        return {
+            "enabled": table.get("enabled"),
+            "fields_set": sorted(k for k, v in table.items() if k != "enabled" and v),
+        }
+
     try:
-        settings_store.set_channel(name, enabled, values)
+        with bind_setting_write(request, section="channels", key=name,
+                                project=_audit_channel):
+            settings_store.set_channel(name, enabled, values)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     from .audit_actions_api import _audit_event
@@ -8774,8 +8867,18 @@ def channels_clear(request: Request, channel: str = Form(...)) -> RedirectRespon
     require_global_permission(request, "admin")
     from maverick_dashboard import settings_store
 
+    from .settings_audit import bind_setting_write
+
     try:
-        settings_store.clear_channel((channel or "").strip())
+        name = (channel or "").strip()
+        with bind_setting_write(request, section="channels", key=name,
+                                project=lambda d: {
+                                    "enabled": ((d.get("channels") or {}).get(name) or {}).get("enabled"),
+                                    "fields_set": sorted(k for k, v in
+                                                         ((d.get("channels") or {}).get(name) or {}).items()
+                                                         if k != "enabled" and v),
+                                }):
+            settings_store.clear_channel(name)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     from .audit_actions_api import _audit_event
@@ -9430,6 +9533,9 @@ async def shield_calibration_api() -> JSONResponse:
 
 @app.get("/chat", response_class=HTMLResponse)
 def chat_page(request: Request) -> HTMLResponse:
+    from maverick import flow
+    from maverick.runner import configured_max_dollars, configured_max_wall_seconds
+
     from .onboarding_state import workspace_readiness
 
     workspace = workspace_readiness()
@@ -9453,6 +9559,10 @@ def chat_page(request: Request) -> HTMLResponse:
             "model_route_ready": workspace["verdict"] != "not_ready",
             "workspace": workspace,
             "director_profiles": _director_choices(),
+            "goal_max_dollars": configured_max_dollars(),
+            "goal_max_wall_seconds": configured_max_wall_seconds(),
+            "flows_enabled": flow.enabled(),
+            "can_enable_flows": has_global_permission(request, "admin") and "MAVERICK_FLOWS" not in os.environ,
         },
     )
 
@@ -9547,7 +9657,7 @@ def _director_run(profile: str, title: str, description: str, base_max_dollars: 
     if not name:
         return None
     from maverick.director_mode import UnknownProfileError, direct
-    from maverick.runner import clamp_task_limit, configured_max_dollars
+    from maverick.runner import configured_max_dollars, requested_goal_dollars
 
     base = base_max_dollars if base_max_dollars is not None else configured_max_dollars()
     try:
@@ -9558,7 +9668,7 @@ def _director_run(profile: str, title: str, description: str, base_max_dollars: 
 
     framed = run.goal_description + (f"\n\n{description}" if description.strip() else "")
     return dataclasses.replace(run, goal_title=title, goal_description=framed,
-                               max_dollars=clamp_task_limit(run.max_dollars, configured_max_dollars()))
+                               max_dollars=requested_goal_dollars(run.max_dollars))
 
 
 def _dispatch_goal(request: Request, bg: BackgroundTasks, goal_id: int, *, conversation_id: int | None,
@@ -9635,6 +9745,7 @@ async def chat_send(
     submission_key: str = Form(""),
     director_profile: str = Form(""),
     connection_references: str = Form(""),
+    composer_mode: str = Form(""),
 ) -> RedirectResponse:
     _require_same_origin(request)
     require_permission(request, "operate")
@@ -9650,21 +9761,31 @@ async def chat_send(
     title = (title or "").strip()
     if not title:
         raise HTTPException(status_code=400, detail="goal text is required")
-    if len(title) > GOAL_TITLE_MAX_LENGTH:
-        raise HTTPException(
-            status_code=422,
-            detail=f"Shorten the goal to {GOAL_TITLE_MAX_LENGTH:,} characters or fewer. Move additional instructions to Add details.",
-        )
-    if len(description) > GOAL_DESCRIPTION_MAX_LENGTH:
-        raise HTTPException(
-            status_code=422,
-            detail=f"Shorten the details to {GOAL_DESCRIPTION_MAX_LENGTH:,} characters or fewer before starting the goal.",
-        )
-    # The optional "Add details" textarea gives the agent a real brief; fall
-    # back to the title when empty (prior behavior was description == title).
-    # Preserve the full reviewed brief, including meaningful whitespace.
-    description = description if description.strip() else title
-    chat_text = _turn_text(title, description)
+    if composer_mode == "message":
+        # Chat accepts the full message as the task brief. The first line is
+        # only the short navigation title; it must not truncate the work.
+        brief = title + ("\n\n" + description if description.strip() else "")
+        if len(brief) > GOAL_DESCRIPTION_MAX_LENGTH:
+            raise HTTPException(status_code=422, detail=(
+                f"Shorten your message and details to {GOAL_DESCRIPTION_MAX_LENGTH:,} characters or fewer."
+            ))
+        title = title.splitlines()[0].strip()[:GOAL_TITLE_MAX_LENGTH]
+        description = chat_text = brief
+    else:
+        if len(title) > GOAL_TITLE_MAX_LENGTH:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Shorten the goal to {GOAL_TITLE_MAX_LENGTH:,} characters or fewer. Move additional instructions to Add details.",
+            )
+        if len(description) > GOAL_DESCRIPTION_MAX_LENGTH:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Shorten the details to {GOAL_DESCRIPTION_MAX_LENGTH:,} characters or fewer before starting the goal.",
+            )
+        # Existing API/form callers continue to send a separate short title
+        # and description. Preserve their recorded conversation semantics.
+        description = description if description.strip() else title
+        chat_text = _turn_text(title, description)
     # Director mode: the chosen autonomy level frames the task plan-first and
     # sets its consent, review checkpoints and spending share (never above the
     # configured cap, never looser than the installation's consent mode).
@@ -9829,8 +9950,7 @@ async def webhook_start(request: Request, bg: BackgroundTasks) -> JSONResponse:
     )
 
     from maverick.runner import (
-        clamp_task_limit,
-        configured_max_dollars,
+        requested_goal_dollars,
         run_goal_in_background_async,
     )
 
@@ -9848,7 +9968,7 @@ async def webhook_start(request: Request, bg: BackgroundTasks) -> JSONResponse:
         # optional, even on an externally reachable signed endpoint.
         if not math.isfinite(max_dollars) or max_dollars < 0:
             raise HTTPException(status_code=400, detail="budget must be a finite non-negative number")
-        max_dollars = clamp_task_limit(max_dollars, configured_max_dollars())
+        max_dollars = requested_goal_dollars(max_dollars)
     bg.add_task(run_goal_in_background_async, goal_id, max_dollars)
     return JSONResponse({"goal_id": goal_id}, status_code=201)
 
@@ -10023,13 +10143,12 @@ def _fire_stored_trigger(
             **({"connection_references": refs} if refs else {}))
         world.record_goal_origin(goal_id, "trigger", name)
         from maverick.runner import (
-            clamp_task_limit,
-            configured_max_dollars,
-            configured_max_wall_seconds,
+            requested_goal_dollars,
+            requested_goal_wall_seconds,
         )
 
-        max_dollars = clamp_task_limit(tpl.budget_dollars, configured_max_dollars())
-        max_wall = clamp_task_limit(tpl.budget_wall_seconds, configured_max_wall_seconds())
+        max_dollars = requested_goal_dollars(tpl.budget_dollars)
+        max_wall = requested_goal_wall_seconds(tpl.budget_wall_seconds)
         bg.add_task(
             _run_trigger_goal_in_tenant,
             goal_id,
@@ -11232,13 +11351,13 @@ def chat_goal(request: Request, goal_id: int) -> HTMLResponse:
     assert_goal_access(request, root)
     from maverick.attachment_submissions import SubmissionStore
     from maverick.chat_threads import ChatThreads
-    from maverick.runner import configured_max_dollars
+    from maverick.runner import configured_goal_ceiling_dollars
 
     from ._event_stream import TERMINAL_RUN_STATUSES
     from .answer_projection import version_for
 
     try:
-        spend_ceiling = configured_max_dollars()
+        spend_ceiling = configured_goal_ceiling_dollars()
     except Exception:  # pragma: no cover -- never 500 the goal page
         spend_ceiling = None
     # Why the run stopped, in plain words. The raw kernel text is shown only
@@ -11501,14 +11620,17 @@ def _shared_goal_in_scope(request: Request, token: str) -> HTMLResponse:
     if g.status != "done" or not g.result:
         raise HTTPException(status_code=404, detail="not found")
     prof = _require_shared_goal_release(w, g, goal_id)
-    from .deliverable_sharing import release_matches
+    from .deliverable_sharing import release_matches, release_snapshot, source_generation
     try:
-        if not release_matches(w, g, token):
+        generation = source_generation(w) if token.startswith("r1_") else None
+        released = release_snapshot(w, g, token) if token.startswith("r1_") else None
+        if token.startswith("r1_") and released is None:
             raise HTTPException(404, "not found")
     except Exception as exc:
         raise HTTPException(404, "not found") from exc
     contract, rendered = _goal_deliverable(g)
-    artifacts = _goal_artifacts(w, goal_id)
+    transcript = released.get("transcript") if released else None
+    artifacts = [] if transcript is not None else _goal_artifacts(w, goal_id)
     # Re-check after materializing the composite payload. If an artifact or
     # result changed between the first authorization read and these reads, its
     # transaction revoked sign-off; never render that mixed-version snapshot.
@@ -11516,14 +11638,16 @@ def _shared_goal_in_scope(request: Request, token: str) -> HTMLResponse:
         _require_shared_goal_release(w, g, goal_id)
     try:
         fresh_goal = w.get_goal(goal_id)
-        if fresh_goal is None or w.resolve_share_link(token) != goal_id or not release_matches(w, fresh_goal, token):
+        if (fresh_goal is None or w.resolve_share_link(token) != goal_id
+                or not release_matches(w, fresh_goal, token, source=released, generation=generation)):
             raise HTTPException(404, "not found")
     except Exception as exc:
         raise HTTPException(404, "not found") from exc
     return templates.TemplateResponse(
         request,
         "shared_goal.html",
-        {"goal": g, "deliverable": contract, "rendered": rendered, "artifacts": artifacts},
+        {"goal": g, "deliverable": contract, "rendered": rendered, "artifacts": artifacts,
+         "transcript": transcript},
     )
 
 
@@ -12054,6 +12178,7 @@ async def shell_copilot_js() -> FileResponse:
 @app.get("/static/lightwork-outcome-accounting.js")
 @app.get("/static/lightwork-outcome-value.js")
 @app.get("/static/lightwork-outcome-pilots.js")
+@app.get("/static/lightwork-commitment-viability.js")
 @app.get("/static/lightwork-outcome-pilot-costs.js")
 @app.get("/static/lightwork-project-reviews.js")
 @app.get("/static/lightwork-workspace-members.js")
@@ -12813,7 +12938,7 @@ async def flow_designer_page(
             "flow_id": flow_id,
             "seed_flow": seed_flow,
             "flows_enabled": _flow.enabled(),
-            "can_manage_flows": has_global_permission(request, "admin"),
+            "can_manage_flows": has_global_permission(request, "admin") and "MAVERICK_FLOWS" not in os.environ,
         }
     )
 

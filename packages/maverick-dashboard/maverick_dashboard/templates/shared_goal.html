@@ -43,6 +43,14 @@
     .artifact .prose { padding: .75rem; }
     .artifact { border: 1px solid rgba(127,127,127,.35); border-radius: 8px; margin: 1rem 0; overflow: hidden; }
     .artifact__head { padding: .5rem .75rem; border-bottom: 1px solid rgba(127,127,127,.25); font-weight: 600; font-size: .9rem; }
+    .transcript { display: grid; gap: 1rem; margin-top: 1.5rem; }
+    .turn { border: 1px solid rgba(127,127,127,.28); border-radius: 16px; padding: 1rem 1.2rem; }
+    .turn--user { margin-left: min(10%, 4rem); background: rgba(127,127,127,.07); }
+    .turn--assistant { margin-right: min(10%, 4rem); background: rgba(85,125,200,.07); }
+    .turn--clarification { margin: 0 min(5%, 2rem); background: rgba(127,127,127,.04); }
+    .turn__label { display: block; font-size: .78rem; font-weight: 650; color: #586681; margin-bottom: .45rem; }
+    .turn__text { white-space: pre-wrap; overflow-wrap: anywhere; }
+    .turn__text + .turn__label { margin-top: .8rem; }
     .foot { margin-top: 2.5rem; font-size: .75rem; color: #999; }
     .brandbar { display: inline-flex; background: #0b0f1c; border-radius: 8px; padding: 6px 10px; margin-bottom: 1rem; }
     .brandbar img { display: block; height: 34px; width: auto; }
@@ -52,6 +60,25 @@
   <div class="brandbar"><img src="/static/daybreak-logo.jpg" alt="Daybreak Labs" height="34"></div>
   <div class="banner">Shared for reading only · made with Lightwork by Daybreak Labs. The owner can turn off this link at any time.</div>
   <h1>{{ goal.title }}</h1>
+  {% if transcript is not none %}
+  <p class="muted">Conversation through this message. Files, work logs, costs and controls are not included.</p>
+  <section class="transcript" aria-label="Shared conversation">
+    {% for turn in transcript %}
+      {% if turn.role == 'clarification' %}
+      <div class="turn turn--clarification">
+        <span class="turn__label">Lightwork asked</span><div class="turn__text" lang="und" dir="auto">{{ turn.question }}</div>
+        <span class="turn__label">You answered</span><div class="turn__text" lang="und" dir="auto">{{ turn.answer }}</div>
+      </div>
+      {% else %}
+      <div class="turn turn--{{ turn.role }}">
+        <span class="turn__label">{{ 'You' if turn.role == 'user' else 'Lightwork · stopped' if turn.stopped else 'Lightwork' }}</span>
+        {% if turn.role == 'assistant' %}<div class="prose" data-markdown lang="und" dir="auto">{{ turn.text }}</div>
+        {% else %}<div class="turn__text" lang="und" dir="auto">{{ turn.text }}</div>{% endif %}
+      </div>
+      {% endif %}
+    {% endfor %}
+  </section>
+  {% else %}
   {% if deliverable %}<p class="muted">{{ deliverable.deliverable }}</p>{% endif %}
 
   {% if rendered and rendered.table %}
@@ -81,6 +108,7 @@
         {% endif %}
       </div>
     {% endfor %}
+  {% endif %}
   {% endif %}
 
   <p class="foot">Shared securely · Lightwork by Daybreak Labs</p>

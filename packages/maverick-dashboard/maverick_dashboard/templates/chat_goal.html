@@ -128,6 +128,8 @@
   .goal-share .btn, .goal-project .input { font-size: var(--text-xs); padding: 0.3rem 0.6rem; }
   .share-list { list-style: none; padding: 0; margin: var(--space-2) 0 0; width: 100%; }
   .share-list li { display: flex; align-items: center; gap: var(--space-2); font-size: var(--text-sm); color: var(--muted); margin-bottom: var(--space-1); }
+  .share-review { max-height: min(60vh, 36rem); overflow: auto; width: 100%; padding: var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-lg); }
+  .share-review pre { white-space: pre-wrap; overflow-wrap: anywhere; }
   .spinner {
     display: inline-block; width: 0.8em; height: 0.8em;
     border: 2px solid var(--border); border-top-color: var(--brand);
@@ -226,7 +228,8 @@
   .runmeta .zero { color: var(--accent); }
   .answer-actions { margin-top: var(--space-3); display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); }
   .answer-actions .btn { font-size: var(--text-sm); }
-  .turn-copy-source { display: none !important; }
+  .turn-copy-source:not(.turn-copy-source--visible) { display: none !important; }
+  .turn-copy-source--visible { display: block; width: 100%; min-height: 8rem; margin-top: var(--space-2); }
   .print-heading { display: none; }
   .share-panel { margin-top: var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: var(--space-3) var(--space-4); }
   .share-panel summary { cursor: pointer; font-weight: var(--font-medium); }
@@ -237,8 +240,11 @@
     body.chat-shell main, .cs-scroll, .cs-column { display: block !important; width: auto !important; max-width: none !important; height: auto !important; overflow: visible !important; padding: 0 !important; margin: 0 !important; }
     .cs-side, .cs-topbar, .cs-dock, .cs-backdrop, .navfinder, .mv-toasts, dialog,
     .activity, .feedback, .answer-actions, .share-panel, .more, .planning-steps,
+    .task-tabs, .print-control, #newer-chat-turn, #conversation-inbox,
     .halt-card, .goal-share, #edit-box, #attachments-panel, #goal-action-msg, #stream-error,
-    #answer-action-msg, #answer-refresh-notice, #loading-placeholder { display: none !important; }
+    #answer-action-msg, #answer-refresh-notice, #answer-refresh-status, #loading-placeholder,
+    #stream-retry, #question-status, #question-retry, #answer-receipt-check, #answer-refresh,
+    #history-load, #history-status, #history-turns a { display: none !important; }
     .convo, .msg, .answer, .prose, .artifact, .deliverable { color: #111 !important; background: #fff !important; box-shadow: none !important; }
     .print-heading { display: block; padding-bottom: 10mm; margin-bottom: 9mm; border-bottom: 1px solid #bbb; }
     .print-heading h1 { margin: 2mm 0; color: #111; font-size: 20pt; line-height: 1.25; }
@@ -259,7 +265,7 @@
 {% endblock %}
 
 {% block chat %}
-{% if display_signed_in %}<p><a class="btn btn--ghost" href="/preferences?thread={{ goal.id }}">{{ ui('Conversation response style') }}</a></p>{% endif %}
+{% if display_signed_in %}<p class="print-control"><a class="btn btn--ghost" href="/preferences?thread={{ goal.id }}">{{ ui('Conversation response style') }}</a></p>{% endif %}
 {% macro agent_mark() -%}
       <svg width="16" height="16" viewBox="0 0 22 22" aria-hidden="true">
         <rect x="1" y="1" width="20" height="20" rx="6.5" fill="var(--brand)"/>
@@ -299,7 +305,8 @@
   </section>
   {% endif %}
   {% set status_labels = {'pending': 'queued', 'running': 'working', 'done': 'done', 'blocked': 'paused', 'failed': 'failed', 'cancelled': 'cancelled'} %}
-  <span id="status" class="badge {{ goal.status }}" data-status="{{ goal.status }}" hidden>{{ status_labels.get(goal.status, goal.status) }}</span>
+  {% set stopped_kinds = ('provider_not_ready', 'internal_error', 'unpriced_model') %}
+  <span id="status" class="badge {{ goal.status }}" data-status="{{ goal.status }}" hidden>{{ 'stopped' if goal.status == 'blocked' and stop and stop.kind in stopped_kinds else status_labels.get(goal.status, goal.status) }}</span>
 
   {# Earlier turns of this chat: what was asked before, and what Lightwork answered. #}
   {% for t in thread_turns or [] %}
@@ -344,9 +351,13 @@
 
   <div class="msg msg--user">
     <div class="bubble">
+      {% if goal.description and goal.description.startswith(goal.title) %}
+      <div class="bubble__text" lang="und" dir="auto" data-user-content>{{ goal.description }}</div>
+      {% else %}
       <div class="bubble__title" lang="und" dir="auto" data-user-content>{{ goal.title }}</div>
       {% if goal.description and goal.description != goal.title %}
       <div class="bubble__desc" lang="und" dir="auto" data-user-content>{{ goal.description }}</div>
+      {% endif %}
       {% endif %}
     </div>
   </div>
@@ -373,8 +384,8 @@
       </svg>
       Lightwork
     </div>
-    <p><a href="/my-work">{{ ui('View my background work') }}</a></p>
-    <details><summary>{{ ui('Organize this conversation') }}</summary>
+    <p class="print-control"><a href="/my-work">{{ ui('View my background work') }}</a></p>
+    <details class="print-control"><summary>{{ ui('Organize this conversation') }}</summary>
       <p>{{ ui('Names, pins and archive status apply to all its turns. Archive hides it from recents without deleting task or audit history; workspace retention still applies. You can pin up to 20 conversations.') }}</p>
       <form id="conversation-organization" data-goal="{{ goal.id }}" data-context="{{ conversation_context }}" data-draft-recovery="off">
         <label for="conversation-name">{{ ui('Conversation name') }}</label><input id="conversation-name" class="input" maxlength="200" autocomplete="off">
@@ -417,7 +428,7 @@
     <p id="question-status" role="status" aria-live="polite"></p>
     <button type="button" id="question-retry" class="btn btn--ghost" hidden>{{ ui('Retry loading question') }}</button>
     <button type="button" id="answer-receipt-check" class="btn btn--ghost" hidden>{{ ui('Check answer receipt') }}</button>
-    <p class="muted">{{ ui('Question answers can include documents, PDFs, images and text. Audio and video need a separately reviewed transcription task.') }}</p>
+    <p class="muted print-control">{{ ui('Question answers can include documents, PDFs, images and text. Audio and video need a separately reviewed transcription task.') }}</p>
     <p id="stream-error" role="alert" class="muted" style="display: none; margin: 0 0 var(--space-4); color: var(--danger);"></p>
     <p id="answer-refresh-status" class="muted" role="status" aria-live="polite"></p>
     <button type="button" id="answer-refresh" class="btn btn--ghost" hidden>{{ ui('Refresh saved result and controls') }}</button>
@@ -454,6 +465,11 @@
       {% if can_recover_task_files %}<a class="btn btn--ghost" href="/chat/goal/{{ goal.id }}/files">{{ ui('Review task files') }}</a>{% endif %}
       <a class="btn btn--ghost" href="/goals/{{ goal.id }}/trajectory#goal-export">{{ ui('Download or share full history') }}</a>
       {% if can_operate %}
+      <label for="share-scope">{{ ui('What to share') }}</label>
+      <select id="share-scope" class="input" aria-describedby="share-msg">
+        <option value="result" selected>{{ ui('Saved answer and files') }}</option>
+        <option value="conversation">{{ ui('Full conversation through this message') }}</option>
+      </select>
       <button type="button" id="share-create" class="btn btn--ghost"{% if goal.status != 'done' or not goal.result %} hidden disabled{% endif %}>{{ ui('Review share link') }}</button>
       <input type="text" id="share-url" class="input" readonly aria-label="{{ ut('Share link') }}"
              style="display: none; max-width: 28rem;" onclick="this.select()">
@@ -665,6 +681,7 @@
         withheld: 'M8 2.5a5.5 5.5 0 110 11 5.5 5.5 0 010-11zM5.5 8h5',
       };
       const STATUS_LABELS = { pending: 'Queued', running: 'Working', done: 'Done', blocked: 'Paused', failed: 'Failed', cancelled: 'Stopped' };
+      const STOPPED_KINDS = new Set(['provider_not_ready', 'internal_error', 'unpriced_model']);
       // The kernel replaces model-derived events with one fixed sentence when
       // the evidence gateway is on; the page folds those into a single line.
       const WITHHELD = new Set({{ (withheld_markers or [])|tojson }});
@@ -693,7 +710,8 @@
         currentStatus = status;
         statusEl.className = 'badge ' + status;
         statusEl.dataset.status = status;
-        cgCopy(statusEl,STATUS_LABELS[status] || status);
+        cgCopy(statusEl,status === 'blocked' && lastStop && STOPPED_KINDS.has(lastStop.kind)
+          ? 'Stopped' : (STATUS_LABELS[status] || status));
       }
 
       function fmtAgent(a) {
@@ -1166,11 +1184,11 @@
         // #events is itself the scroll container (max-height + overflow-y:auto);
         // its parent doesn't scroll, so scroll the element itself.
         eventsEl.scrollTop = eventsEl.scrollHeight;
+        if (Object.prototype.hasOwnProperty.call(d, 'stop')) lastStop = d.stop && typeof d.stop === 'object' ? d.stop : null;
         if (d.status) {
           setStatus(d.status);
           if (!['blocked', 'failed', 'cancelled'].includes(d.status) && haltCard) haltCard.style.display = 'none';
         }
-        if (Object.prototype.hasOwnProperty.call(d, 'stop')) lastStop = d.stop && typeof d.stop === 'object' ? d.stop : null;
         if (d.result) {
           const changed = d.result !== lastResult;
           lastResult = d.result;
@@ -1301,17 +1319,25 @@
     (function () {
       Array.prototype.forEach.call(document.querySelectorAll('.turn-copy, .turn-print'), function (button) {
         button.addEventListener('click', function () {
-          if (button.classList.contains('turn-print')) { window.print(); return; }
+          if (button.classList.contains('turn-print')) {
+            var printStatus = button.closest('.answer-actions')?.querySelector('.turn-copy-status');
+            if (window.LightworkThreadHistory) window.LightworkThreadHistory.printConversation(printStatus);
+            else if (printStatus) printStatus.textContent = 'Printing is still loading. Try again in a moment, or reload this conversation.';
+            return;
+          }
           var group = button.closest('.answer-actions');
           var source = group && group.nextElementSibling;
           var status = group && group.querySelector('.turn-copy-status');
           if (!source || !status) return;
-          if (!navigator.clipboard || !navigator.clipboard.writeText) {
-            status.textContent = 'Copy is unavailable here. Use Download answer instead.'; return;
+          function selectSource() {
+            source.hidden = false; source.classList.add('turn-copy-source--visible');
+            source.focus(); source.select();
+            status.textContent = 'Copy was unavailable. The answer is selected; press Ctrl+C or Command+C.';
           }
+          if (!navigator.clipboard || !navigator.clipboard.writeText) { selectSource(); return; }
           navigator.clipboard.writeText(source.value).then(function () {
             status.textContent = 'Copied.';
-          }).catch(function () { status.textContent = 'Could not copy. Use Download answer instead.'; });
+          }).catch(selectSource);
         });
       });
     })();
@@ -1358,7 +1384,8 @@
         if (nowEl.classList) nowEl.classList.remove('is-live');
         if (spin) spin.style.display = 'none';
         cgCopy(nowEl,'Work log: {steps}',{steps:steps(stepTotal())});
-        cgCopy(metaEl,SETTLED[st] || (window.mvHuman ? window.mvHuman(st) : st));
+        cgCopy(metaEl,st === 'blocked' && status && status.textContent.trim().toLowerCase() === 'stopped'
+          ? 'Stopped' : (SETTLED[st] || (window.mvHuman ? window.mvHuman(st) : st)));
         return true;
       }
 

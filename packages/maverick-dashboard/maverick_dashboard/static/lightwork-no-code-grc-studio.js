@@ -486,11 +486,15 @@
     try {
       status = await request("/status");
       var ready = status.enabled === true && status.configured === true && status.ready === true;
+      var connected = status.runtime_projection_apply_configured === true;
       operations.disabled = !ready;
       statusMark.className = "badge " + (ready ? "ok" : "failed");
-      statusMark.textContent = ready ? "Ready" : "Not ready";
-      readiness.textContent = ready ? "The studio is ready." : (status.enabled ? "The studio is not set up yet." : "The studio is turned off.");
-      readinessDetail.textContent = ready ? "" : "Ask an administrator to finish setting up the no-code GRC studio for this workspace.";
+      statusMark.textContent = ready ? "Ready to build" : "Not ready";
+      readiness.textContent = ready ? "You can build and approve blueprints here." : (status.enabled ? "The studio is not set up yet." : "The studio is turned off.");
+      readinessDetail.textContent = ready ? (connected
+        ? "Destinations are connected. Check the specific destination before applying a published blueprint to it."
+        : "Publishing makes a blueprint active in this studio. It will not update questionnaires, evidence checks or reports elsewhere until an administrator connects those destinations.")
+        : "Ask an administrator to finish setting up the no-code GRC studio for this workspace.";
       $("grcs-projection-panel").hidden = !(ready && status.runtime_projection_preview_configured === true);
       $("grcs-projection-apply").disabled = !permissions.admin || status.runtime_projection_apply_configured !== true;
       if (ready) {
@@ -709,11 +713,13 @@
       ] }]).then(function (values) { if (values) { return lifecycle("approve", row, values, "approve it", "Approved. It can now be published."); } });
     } },
     publish: { label: "Publish", cls: "btn btn--primary", run: function (row) {
-      return confirmed("Publish “" + nameOf(row) + "” version " + row.version + "? It replaces the live version straight away.", "Publish")
+      return confirmed("Publish “" + nameOf(row) + "” version " + row.version + "? It replaces the version active in this studio straight away.", "Publish")
         .then(async function (ok) {
           if (!ok) { return; }
           var pointer = await activePointer(row.studio_id);
-          return lifecycle("publish", row, { pointer: pointer }, "publish it", "Published. Version " + row.version + " is now live.");
+          return lifecycle("publish", row, { pointer: pointer }, "publish it", status.runtime_projection_apply_configured === true
+            ? "Published. Version " + row.version + " is now active."
+            : "Published in this studio. Other questionnaires, evidence checks and reports are not connected yet.");
         });
     } },
     restore: { label: "Restore this version", cls: "btn", run: function (row) {

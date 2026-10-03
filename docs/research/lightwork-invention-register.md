@@ -2,11 +2,11 @@
 
 For current code evidence, see the [28-item implementation status](lightwork-invention-implementation-status-2026-10-01.md). The register retains hypotheses and rejected experiments; its entries are not release claims.
 
-Updated October 1, 2026. This cumulative register retains the ideas from the current discussion and the retained invention research, including unsuccessful experiments. Its purpose is to help choose a genuinely differentiated capability for Lightwork without losing earlier work or repeatedly renaming established methods.
+Created October 1, 2026; N01's bounded pilot status was updated October 2. This cumulative register retains the ideas from the current discussion and the retained invention research, including unsuccessful experiments. Its purpose is to help choose a genuinely differentiated capability for Lightwork without losing earlier work or repeatedly renaming established methods.
 
-The strongest new research candidates are preserving achievable customer commitments and turning private operational failures into transferable executable challenges. Neither is implemented or established as a novel algorithm. Earlier learning proposals remain in the register. Useful engineering, comparative advantage, scientific novelty, customer benefit, and acquisition interest are separate claims.
+The strongest new research candidates are preserving achievable customer commitments and turning private operational failures into transferable executable challenges. N01 has a bounded, manually entered feasibility pilot; its proposed novel mechanism is not implemented or established. N02 remains a research proposal. Earlier learning proposals remain in the register. Useful engineering, comparative advantage, scientific novelty, customer benefit, and acquisition interest are separate claims.
 
-This update changes documentation only. The reviewed checkout was `326402bf115a6d6de2adc255e3a1cc9d75fd37a9`. No production change, paid provider experiment, GitHub publication, or hosted CI is part of this update. Earlier experiment numbers below are preserved from their dated records, not rerun here.
+The October 1 research review changed documentation only and inspected checkout `326402bf115a6d6de2adc255e3a1cc9d75fd37a9`. The later N01 pilot is described below and in the linked implementation status. No production deployment, paid provider experiment, or hosted CI is claimed by this register. Earlier experiment numbers below are preserved from their dated records, not rerun here.
 
 ## How to retain and evaluate ideas
 
@@ -67,6 +67,8 @@ The proposed technical object is a compact representation of feasible continuati
 **Test:** compare with an authored robust scheduler and controller, event-driven replanning, and durable workflows using identical observations and budgets. Hold out environments containing resource contention, expiring options, uncertain durations, approvals, delayed callbacks, and irreversible actions. Measure avoidable broken promises, conservatively rejected feasible work, throughput, reservation cost, and employee interventions together.
 
 **Reject the invention claim if** a strong robust scheduler matches the result, gains arise from accepting fewer jobs or buying more capacity, or engineers must hand-author each feasibility boundary. Conditional feasibility under a declared uncertainty model cannot guarantee against arbitrary external changes.
+
+October 2 research checkpoint: a bounded feasibility model assesses two manually entered accepted orders, reported capacity and stock, expiring conditional options, and owner-reviewed observed contention. A durable account/workspace-bound pilot now exposes ordinary forms, attributed source-review times, current assessments, owner decisions, recovery after uncertain responses, and typed Copilot controls behind an optional feature setting. It does not connect to a customer order system, independently verify stock or supplier claims, reserve or purchase anything, model full production precedence and quality, or qualify a customer deployment. The pilot caps the tenant's shared review namespace at 1,000 saved records across its account contexts; retention-based retirement is not yet a customer control. An independently implemented exhaustive robust scheduler matched all 27 small, fully observed comparator scenarios; these tests support correctness on their stated cases, not superiority or novelty. Wider held-out experiments and customer acceptance remain open.
 
 Customer experience: “Friday remains achievable. Reserving these materials before 2 p.m. preserves both production options.” The person sees the affected commitments, supporting evidence, cost, authority, available options, and a real permitted decision.
 
@@ -152,7 +154,7 @@ Customer experience: “These additional offers could become feasible if this co
 
 N02 is the strongest provisional candidate for reusable learning across installations. N01 is the strongest candidate for a materially different operational capability. N03 is a related portability track with substantial overlap. N04 through N06 remain in the register as secondary leads.
 
-Before implementation, N02 needs an explicit source-model language, release contract, witness semantics, target mapping contract, and comparator specification. N01 needs a precise state and observation model, commitment constraints, uncertainty assumptions, feasible-continuation representation, and a strong robust-controller baseline. The required next artifact is a discriminating experiment specification, not a favorable demonstration.
+Before implementation, N02 needs an explicit source-model language, release contract, witness semantics, target mapping contract, and comparator specification. Before claiming N01's proposed novel mechanism, the bounded pilot needs a precise state and observation model, commitment constraints, uncertainty assumptions, feasible-continuation representation, and a strong robust-controller baseline. The required next artifact is a discriminating experiment specification, not a favorable demonstration.
 
 All candidates must satisfy [the customer experience contract](../customer-experience-contract.md): complete control after installation, plain language, the shared Liquid Glass design, working controls, current authorized Copilot operations, and understandable recovery. Research terms belong in engineering evidence, not ordinary customer instructions.
 

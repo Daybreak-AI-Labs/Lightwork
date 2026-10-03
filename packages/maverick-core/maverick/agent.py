@@ -1041,6 +1041,14 @@ def _tool_call_failed(output: str) -> bool:
     return tool_result_failed(output)
 
 
+class _NotExecutedToolResult(str):
+    """A pre-dispatch refusal returned to the model, never an executed step.
+
+    Keeping this a string preserves the tool-result protocol while letting the
+    learner distinguish a held call from a tool that ran and failed.
+    """
+
+
 def _cascade_draft(role: str, model: str) -> str | None:
     """The cascade's cheap first model for ``role`` (None when off)."""
     try:
@@ -3573,14 +3581,9 @@ class Agent:
             raise
 
     async def _run_tool(self, name: str, args: dict) -> str:
-        # Record the tool name on this agent's action sequence so a parent can
-        # capture per-sub-agent trajectories (maverick.credit.build_subtrajectories).
-        # Tool NAMES only -- never args -- so this carries no secrets. Lazy-init
-        # to avoid touching the constructor.
-        acts = getattr(self, "_actions", None)
-        if acts is None:
-            acts = self._actions = []
-        acts.append(name)
+        # Add to the action sequence only after all pre-dispatch checks pass.
+        # A refused call must not masquerade as an executed action in credit,
+        # rehearsal context, or learned tool trajectories.
         # Compartment Rung 1: a sealed agent runs no further tools. Its prior
         # blackboard posts are also withheld (see Blackboard.render).
         q = getattr(self.ctx, "quarantine", None)
@@ -3588,7 +3591,7 @@ class Agent:
             # Register this agent's domain so a Rung-2 sector seal reaches it.
             q.register_agent(self.name, getattr(self, "domain", None))
             if q.is_sealed(self.name):
-                return (
+                return _NotExecutedToolResult(
                     f"⚠ Agent sealed by compartment quarantine "
                     f"({q.reason(self.name)}). No further tools will run."
                 )
@@ -3599,7 +3602,7 @@ class Agent:
         # gate on each of those executions; re-scanning them adds nothing).
         suppressed = self._loop_guard_suppression(name, args)
         if suppressed is not None:
-            return suppressed
+            return _NotExecutedToolResult(suppressed)
         shield = self.ctx.shield
         if shield is not None:
             verdict = shield.scan_tool_call(name, args)
@@ -3615,7 +3618,7 @@ class Agent:
                        reason="; ".join(verdict.reasons),
                        score=getattr(verdict, "score", None))
                 self._maybe_seal(q, verdict)
-                return (
+                return _NotExecutedToolResult(
                     f"⚠ BLOCKED by Shield ({verdict.severity}): "
                     f"{'; '.join(verdict.reasons)}. The tool was not executed."
                 )
@@ -3637,18 +3640,11 @@ class Agent:
             self._tool_token_denial,
         ):
             if (d := _gate(name, cap)) is not None:
-                return d
+                return _NotExecutedToolResult(d)
         if (d := self._capability_path_denial(name, args, cap)) is not None:
-            return d
+            return _NotExecutedToolResult(d)
         if (d := self._read_only_path_denial(name, args)) is not None:
-            return d
-        # Operating-Twin pre-execution gates (governed rehearsal defaults on;
-        # both fail open on incidental errors, never an audit-policy refusal):
-        # rehearsal holds an elevated-risk tool the world-model can't vouch for;
-        # a learned guardrail holds an action the data engine has causally shown
-        # lowers outcomes (self-correcting -- dropped when the harm is gone).
-        if (d := self._twin_denial(name)) is not None:
-            return d
+            return _NotExecutedToolResult(d)
         # The browser can follow redirects and later URL-less actions read or
         # interact with the current page. Pass the active host scope into the
         # tool so it can gate the final/current page host before returning
@@ -3656,11 +3652,16 @@ class Agent:
         # the host-scope check so the (possibly rewritten) args carry forward.
         args = self._with_capability_host_scope(name, args, cap)
         if (d := self._capability_host_denial(name, args, cap)) is not None:
-            return d
+            return _NotExecutedToolResult(d)
+        # Hold-mode review commits the final dispatch arguments (including a
+        # browser's active host scope), and never replaces the other gates.
+        d, rehearsal_verdict = await self._twin_check(name, args)
+        if d is not None:
+            return _NotExecutedToolResult(d)
 
         # Autonomy servo (Loop 2): low run-trust tightens the risk ceiling.
         if (d := self._autonomy_denial(name, cap)) is not None:
-            return d
+            return _NotExecutedToolResult(d)
 
         # Org oversight control plane (enterprise): policy DENY or REQUIRE_HUMAN
         # sign-off (EU AI Act Art 14). Default-open for non-enterprise installs.
@@ -3670,9 +3671,9 @@ class Agent:
             cap,
         )
         if _governance_refusal is not None:
-            return _governance_refusal
+            return _NotExecutedToolResult(_governance_refusal)
         if (d := await self._ifc_denial(name, args)) is not None:
-            return d
+            return _NotExecutedToolResult(d)
 
         # PreToolUse hooks: any registered hook can BLOCK the call by
         # returning a non-zero exit code (shell hook) or a falsy value
@@ -3689,7 +3690,7 @@ class Agent:
                 self.name, "error",
                 f"tool={name} BLOCKED by PreToolUse hook",
             )
-            return "⚠ BLOCKED by hook. The tool was not executed."
+            return _NotExecutedToolResult("⚠ BLOCKED by hook. The tool was not executed.")
 
         # Dispatch audit: TOOL_CALL proves the request reached the governed
         # execution boundary; TOOL_RESULT below proves whether it completed.
@@ -3710,7 +3711,9 @@ class Agent:
                 call_id=call_id,
             )
         except ValueError:
-            return "ERROR: invalid tool-call evidence identity; dispatch refused"
+            return _NotExecutedToolResult(
+                "ERROR: invalid tool-call evidence identity; dispatch refused"
+            )
         if not self._audit_tool_event(
             "tool_call",
             name=name,
@@ -3722,10 +3725,17 @@ class Agent:
             input_summary=_audit_summary(args),
             **_checked_tags(name, keys=_compliance_profiles),
         ):
-            return (
+            return _NotExecutedToolResult(
                 "ERROR: tool dispatch refused because its required audit "
                 "evidence could not be written"
             )
+
+        self._capture_rehearsal_prediction(rehearsal_verdict, name)
+
+        acts = getattr(self, "_actions", None)
+        if acts is None:
+            acts = self._actions = []
+        acts.append(name)
 
         _recent = getattr(self, "_recent_tool_calls", None)
         if _recent is None:
@@ -3972,10 +3982,9 @@ class Agent:
             step_index, tool_name, tool_succeeded, is_final, error, promise, progress)
 
     def _last_tool(self) -> str:
-        """The tool used just before this one (``_actions`` already holds the
-        current call at [-1], so the prior is [-2]); '' at the first tool."""
+        """The last dispatched tool, excluding calls held before dispatch."""
         acts = getattr(self, "_actions", None)
-        return acts[-2] if acts and len(acts) >= 2 else ""
+        return acts[-1] if acts else ""
 
     def _speculative_turn_model(self) -> str:
         """Pick the model for this turn: a cheap draft when the Operating Twin's
@@ -4016,59 +4025,134 @@ class Agent:
             return self.model
         return draft
 
-    def _twin_denial(self, name: str) -> str | None:
-        """The Operating-Twin pre-execution gates, first hold wins: rehearsal
-        (world-model can't vouch) then learned guardrails (causally harmful)."""
-        return self._rehearsal_denial(name) or self._guardrail_denial(name)
+    async def _twin_check(self, name: str, args: dict) -> tuple[str | None, object | None]:
+        """Return a hold and an eligible prediction, with the first hold winning."""
+        denial = self._guardrail_denial(name)
+        if denial is not None:
+            return denial, None
+        return await self._rehearsal_check(name, args)
 
-    def _rehearsal_denial(self, name: str) -> str | None:
-        """Hold an elevated-risk tool the rehearsal twin can't vouch for.
-
-        No-op unless ``[rehearsal]`` is enabled; only ``high``-risk tools are
-        gated; incidental errors fail open. Audit-policy refusals stop dispatch.
-        A confident-good rehearsal
-        proceeds; a confident-poor (BLOCK) or unvouchable (ESCALATE) one returns a
-        non-leaky refusal the model can react to.
-        """
+    def _capture_rehearsal_prediction(self, verdict: object | None, name: str) -> None:
+        """Pin evidence only when a tool reaches the audited dispatch boundary."""
+        if verdict is None:
+            return
         try:
-            from . import rehearsal
-            if not rehearsal.enabled():
-                return None
-            from .safety.tool_risk import tool_risk
-            if tool_risk(name) != "high":
-                return None
-            from .rehearsal_runtime import gate_tool
-            v = gate_tool(domain=self.domain, role=self.role,
-                          last_tool=self._last_tool(), tool_name=name)
-            if v.decision == rehearsal.PROCEED:
-                try:  # pin the prediction as earned-autonomy evidence
-                    # (default-off, module self-gated). Only PROCEED verdicts:
-                    # they used to vanish, and they are exactly the predictions
-                    # reality later grades -- a held action never executes, so
-                    # its prediction must not be scored against the outcome.
-                    from .earned_autonomy import capture_prediction
-                    capture_prediction(
-                        v, principal=getattr(self, "_autonomy_name", self.role),
-                        action=name, risk="high",
-                        goal_id=int(self.ctx.goal_id or 0),
-                        episode_id=int(getattr(self.ctx, "episode_id", 0) or 0))
-                except AuditRefused:
-                    raise
-                except Exception:  # pragma: no cover -- never breaks the loop
-                    pass
-                return None
-            # tamper-evident record of the hold; a refusal propagates
-            from .audit import EventKind, audit_event
-            audit_event(EventKind.SHIELD_BLOCK, agent=self.name, goal_id=self.ctx.goal_id,
-                   stage="rehearsal", reason=f"{v.decision}: {v.reason}")
-            return (
-                f"⚠ Held by pre-execution rehearsal ({v.decision}): {v.reason}. "
-                "The tool was not executed; choose another approach or seek approval."
+            from .earned_autonomy import capture_prediction
+            capture_prediction(
+                verdict,
+                principal=getattr(self, "_autonomy_name", self.role),
+                action=name, risk="high",
+                goal_id=int(self.ctx.goal_id or 0),
+                episode_id=int(getattr(self.ctx, "episode_id", 0) or 0),
             )
         except AuditRefused:
             raise
-        except Exception:  # pragma: no cover -- incidental rehearsal failure
-            return None
+        except Exception:  # pragma: no cover -- prediction is optional
+            pass
+
+    async def _rehearsal_check(self, name: str, args: dict) -> tuple[str | None, object | None]:
+        """Observe a prediction; explicit Hold mode asks a person for release."""
+        enforcing = False
+        try:
+            from . import rehearsal
+            if not rehearsal.enabled():
+                return None, None
+            enforcing = rehearsal.enforcing()
+            from .safety.tool_risk import tool_risk
+            if tool_risk(name) != "high":
+                return None, None
+            from .rehearsal_runtime import gate_tool
+            v = gate_tool(domain=self.domain, role=self.role,
+                          last_tool=self._last_tool(), tool_name=name)
+            if not enforcing:
+                log.info(
+                    "rehearsal observed tool=%s decision=%s support=%s; tool remains eligible for normal checks",
+                    name, v.decision, getattr(v, "support", 0),
+                )
+                return None, v
+            if v.decision == rehearsal.PROCEED:
+                return None, v
+        except AuditRefused:
+            raise
+        except Exception:
+            if enforcing:
+                return (
+                    "Lightwork could not check this high-impact step. Nothing ran. "
+                    "Ask the person in charge to review the task before trying it again."
+                ), None
+            return None, None
+
+        # A prediction is not authority. Bind a fresh person's decision to
+        # this exact goal, tool and argument object; the consent permit also
+        # rechecks the live actor, budget and target before it is consumed.
+        plain_name = {
+            "shell": "run a command", "notebook_exec": "run code",
+            "repl_exec": "run code", "write_file": "save a file",
+            "apply_patch": "change a file", "browser": "use the browser",
+            "http_fetch": "open a web page", "spawn_subagent": "ask a specialist",
+        }.get(name, f"use {name.replace('_', ' ')}")
+        goal_id = int(self.ctx.goal_id or 0)
+        target = {"goal_id": goal_id, "tool": name}
+        parameters = {"goal_id": goal_id, "tool": name, "arguments": args}
+        detail = (
+            "Lightwork has too little reliable experience with this step. "
+            if v.decision == rehearsal.ESCALATE else
+            "Past similar steps suggest this may not work as intended. "
+        ) + "Review it before work continues."
+        try:
+            from .safety.consent import (
+                _dashboard_timeout,
+                approval_undo_grace_seconds,
+                consume_operation_consent,
+                require_operation_consent,
+            )
+            permit = await asyncio.to_thread(
+                require_operation_consent,
+                name, risk="high", scope=f"Task {goal_id}: {plain_name}",
+                detail=detail, provenance="rehearsal",
+                target=target, parameters=parameters,
+                parameter_summary=[
+                    f"Allow Lightwork to {plain_name} once in this task.",
+                    "This decision applies to the exact proposed input; other safety checks still apply.",
+                ],
+                known_effects=[
+                    "If the remaining checks allow it, Lightwork may try this step once. Its effects may persist.",
+                ],
+                unresolved_assumptions=[
+                    "The prediction may be wrong; approval does not guarantee the step will succeed.",
+                    "The action may require another specific approval before it runs.",
+                ],
+                before="The proposed step has not run.",
+                after="The reviewed step is eligible for the remaining safety checks.",
+                irreversible=True,
+                target_provider=lambda: target,
+                parameters_provider=lambda: parameters,
+                require_fresh_person=True,
+                ttl_seconds=max(
+                    300.0, _dashboard_timeout() + approval_undo_grace_seconds() + 30.0,
+                ),
+            )
+            with consume_operation_consent(permit):
+                pass
+        except AuditRefused:
+            raise
+        except Exception:
+            # Invalid/stale cards, a missing approval service, rejection and
+            # timeout all stop the action. Never turn review failure into a
+            # prediction error that the observe-only path would fail open.
+            from .audit import EventKind, audit_event
+            audit_event(
+                EventKind.SHIELD_BLOCK, agent=self.name,
+                goal_id=self.ctx.goal_id, stage="rehearsal",
+                reason=f"{v.decision}: review not granted",
+            )
+            return (
+                "Lightwork paused this high-impact action for review. The review "
+                "was not granted or expired, so nothing ran. Do not retry it "
+                "automatically in this task; ask the person in charge or choose "
+                "another safe approach."
+            ), None
+        return None, v
 
     def _guardrail_denial(self, name: str) -> str | None:
         """Hold an action a learned guardrail flags as causally harmful.
@@ -4124,7 +4208,9 @@ class Agent:
                 ts=_t.time(), goal_id=int(self.ctx.goal_id or 0),
                 episode_id=int(getattr(self.ctx, "episode_id", 0) or 0),
                 step=int(step_index), role=self.role, tool=tool_name or "",
-                tool_succeeded=tool_succeeded, is_final=bool(is_final),
+                tool_succeeded=tool_succeeded,
+                tool_executed=True if tool_name else None,
+                is_final=bool(is_final),
                 error=error or "", promise=promise, progress=progress,
                 domain=self.domain or "", **dag,
             ))
@@ -5546,11 +5632,12 @@ class Agent:
                         self.name, "observation",
                         f"tool={tc.name} -> {output[:500]}",
                     )
-                    self._score_step(
-                        step_index=step,
-                        tool_name=tc.name,
-                        tool_succeeded=not _tool_call_failed(output),
-                    )
+                    if not isinstance(output, _NotExecutedToolResult):
+                        self._score_step(
+                            step_index=step,
+                            tool_name=tc.name,
+                            tool_succeeded=not _tool_call_failed(output),
+                        )
                     tool_results.append(self._make_tool_result(tc.id, output))
             else:
                 for tc in resp.tool_calls:
@@ -5601,7 +5688,7 @@ class Agent:
                             "reconcile state before retrying"
                         )
                         raise
-                    if tc.name == "ask_user":
+                    if tc.name == "ask_user" and not isinstance(output, _NotExecutedToolResult):
                         from .autonomy import assume_when_headless
                         if assume_when_headless():
                             # No human is available to answer (headless /
@@ -5625,11 +5712,12 @@ class Agent:
                         self.name, "observation",
                         f"tool={tc.name} -> {output[:500]}",
                     )
-                    self._score_step(
-                        step_index=step,
-                        tool_name=tc.name,
-                        tool_succeeded=not _tool_call_failed(output),
-                    )
+                    if not isinstance(output, _NotExecutedToolResult):
+                        self._score_step(
+                            step_index=step,
+                            tool_name=tc.name,
+                            tool_succeeded=not _tool_call_failed(output),
+                        )
                     tool_results.append(self._make_tool_result(tc.id, output))
                     # Governed-action lineage (opt-in via [actions] enable /
                     # MAVERICK_GOVERNED_ACTIONS; off by default). Record a
@@ -5639,7 +5727,7 @@ class Agent:
                         from . import governed_actions as _gov
                         if getattr(self, "_lineage_on", None) is None:
                             self._lineage_on = _gov.enabled()
-                        if self._lineage_on:
+                        if self._lineage_on and not isinstance(output, _NotExecutedToolResult):
                             _gov.record_tool_lineage(
                                 self.ctx.goal_id, tc.name, tc.input,
                                 skills=tuple(sorted(self.ctx.skills_used or ())),

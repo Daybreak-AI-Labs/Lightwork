@@ -46,11 +46,12 @@
     <span class="badge" id="fr-status" role="status">Loading…</span>
   </div>
   <p class="fr__msg" id="fr-meta"></p>
-  <p>
+  <p id="fr-owner-links" hidden>
     <a class="btn btn--ghost" id="fr-designer-link" href="/flows/designer/{{ flow_id }}">Open the flow</a>
     <a class="btn btn--ghost" href="/flows/{{ flow_id | urlencode }}/teach#teach-recipe">Learn from reviewed runs</a>
     <a class="btn btn--ghost" href="/automations">All automations</a>
   </p>
+  <p id="fr-review-links" hidden><a class="btn btn--ghost" href="/approvals">Back to Approvals</a></p>
   <div class="fr__error" id="fr-error" role="alert" hidden></div>
   <div class="fr__actions" id="fr-actions"></div>
   <span class="fr__msg" id="fr-msg" role="status" aria-live="polite"></span>
@@ -118,10 +119,10 @@
     <p id="lx-next" class="fr__msg" hidden><a class="btn btn--ghost" href="/flows/{{ flow_id | urlencode }}/teach#teach-recipe">Learn from reviewed runs</a></p>
   </section>
 
-  <h2 style="font-size:var(--text-base);">Steps</h2>
-  <ul class="fr__steps" id="fr-steps"></ul>
+  <h2 id="fr-steps-title" style="font-size:var(--text-base);" hidden>Steps</h2>
+  <ul class="fr__steps" id="fr-steps" hidden></ul>
 
-  <div class="fr__data">
+  <div class="fr__data" hidden>
     <h2 style="font-size:var(--text-base);">Information in this run</h2>
     <p class="fr__msg">Private values are hidden.</p>
     <table><thead><tr><th scope="col">Name</th><th scope="col">Value</th></tr></thead><tbody id="fr-data-rows"></tbody></table>
@@ -152,6 +153,7 @@
   var STATUS_BADGE = { completed: 'ok', failed: 'blocked', rejected: 'blocked', indeterminate: 'warn', budget_limited: 'warn' };
   var ORIGIN = { webhook: 'Started by another app', schedule: 'Started on schedule', event_trigger: 'Started by a new item', retry: 'Started again' };
   var flowName = '';
+  var assignedReviewOnly = false;
   function human(v) { return window.mvHuman ? window.mvHuman(v) : String(v || '').replace(/_/g, ' '); }
   function plain(failure, what) { return window.mvErrorText ? window.mvErrorText(failure, what) : 'Could not ' + what + '. Please try again.'; }
   function stepLabel(id) {
@@ -442,7 +444,21 @@
       .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) {
         say(r.ok ? (decision === 'rejected' ? 'Rejected.' : (decision === 'approved' ? 'Approved — continuing…' : '“' + decision + '” chosen — continuing…'))
           : (j && typeof j.detail === 'string' && j.detail.length < 512 ? j.detail : 'Could not resume.'));
-        poll(8);
+        if (r.ok && typeof assignedReviewOnly !== 'undefined' && assignedReviewOnly) {
+          // The assignee cannot follow the owner's run after deciding it.
+          // Replace the old decision buttons so the page cannot invite a
+          // second vote on a request that has already been accepted.
+          var actions = document.getElementById('fr-actions');
+          actions.textContent = '';
+          var note = document.createElement('p');
+          note.textContent = 'Decision recorded. The flow owner can follow what happens next.';
+          actions.appendChild(note);
+          var back = document.createElement('a');
+          back.className = 'btn btn--ghost'; back.href = '/approvals';
+          back.textContent = 'Back to Approvals';
+          actions.appendChild(back);
+          document.getElementById('fr-status').textContent = 'Decision recorded';
+        } else if (typeof assignedReviewOnly === 'undefined' || !assignedReviewOnly) poll(8);
       }); })
       .catch(function () { say('Could not resume.'); });
   }
@@ -483,15 +499,23 @@
     });
   }
   function renderRun(run) {
+    assignedReviewOnly = run.approval_review_only === true;
+    ['fr-owner-links', 'le-card', 'lx-card', 'fr-steps-title', 'fr-steps'].forEach(function (id) {
+      document.getElementById(id).hidden = assignedReviewOnly;
+    });
+    document.querySelector('.fr__data').hidden = assignedReviewOnly;
+    document.getElementById('fr-review-links').hidden = !assignedReviewOnly;
     var started = window.mvWhen ? window.mvWhen(run.created || run.created_at || run.started_at) : '';
-    document.getElementById('fr-title').textContent = '“' + (flowName || 'Flow') + '”' + (started ? ' — run started ' + started : ' — run');
+    document.getElementById('fr-title').textContent = assignedReviewOnly ? 'Flow approval request'
+      : '“' + (flowName || 'Flow') + '”' + (started ? ' — run started ' + started : ' — run');
     var st = document.getElementById('fr-status');
     st.textContent = STATUS_LABEL[run.status] || human(run.status);
     st.className = 'badge ' + (STATUS_BADGE[run.status] || (ACTIVE.indexOf(run.status) >= 0 || /^paused/.test(run.status) ? 'pending' : 'idle'));
     var meta = document.getElementById('fr-meta');
     if (meta) {
       var bits = [];
-      if (run.origin && run.origin !== 'manual') bits.push(
+      if (assignedReviewOnly) bits.push('Assigned to you');
+      else if (run.origin && run.origin !== 'manual') bits.push(
         run.origin.indexOf('event:v2:') === 0
           ? 'Started by ' + human(run.origin.split(':').slice(4).join(':'))
           : (ORIGIN[run.origin] || human(run.origin)));
@@ -568,4 +592,4 @@
 })();
 </script>
 {% endblock %}
-{% block scripts_extra %}<script src="/static/lightwork-learning-example.js" defer></script><script src="/static/lightwork-learning-capture.js" defer></script>{% endblock %}
+{% block scripts_extra %}{% if not request.query_params.get('approval_review') %}<script src="/static/lightwork-learning-example.js" defer></script><script src="/static/lightwork-learning-capture.js" defer></script>{% endif %}{% endblock %}

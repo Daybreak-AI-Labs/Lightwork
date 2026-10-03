@@ -190,6 +190,8 @@ test("the register loads on open with plain rows and working row buttons", async
   const h = page(t, [row(), row({ version: 2, state: "approved", updated_at: 1800000100 })]);
   await h.settle();
   assert.equal(h.$("grcs-operations").disabled, false);
+  assert.equal(h.$("grcs-status-mark").textContent, "Ready to build");
+  assert.match(h.$("grcs-readiness-detail").textContent, /will not update questionnaires/);
   const text = h.$("grcs-version-list").textContent;
   assert.match(text, /Supplier review/);
   assert.match(text, /Draft/);
@@ -208,6 +210,7 @@ test("the register loads on open with plain rows and working row buttons", async
   await h.settle();
   const published = h.calls.find((call) => call.key.endsWith("/versions/2/publish"));
   assert.equal(published.body.expected_active_version, 0);
+  assert.match(h.$("grcs-operation-status").textContent, /Published in this studio/);
   assert.match(h.$("grcs-backup-list").textContent, /Check it|20/);
 });
 

@@ -178,11 +178,12 @@ def save_skill(skill: dict, store: Path | str | None = None) -> Path:
     name = str(skill.get("name") or "")
     if not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", name) or len(name) > 96:
         raise ValueError("distilled skill name must be bounded kebab-case")
-    from ..file_lock import atomic_write_text, ensure_private_directory
+    from ..file_lock import atomic_write_text, cross_process_lock, ensure_private_directory
     store = (Path(store) if store is not None else _default_store()).resolve()
     ensure_private_directory(store)
     path = store / f"{name}.md"
-    atomic_write_text(path, to_skill_markdown(skill), mode=0o600)
+    with cross_process_lock(path):
+        atomic_write_text(path, to_skill_markdown(skill), mode=0o600)
     return path
 
 

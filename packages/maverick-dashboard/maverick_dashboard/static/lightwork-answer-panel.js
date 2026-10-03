@@ -135,7 +135,10 @@
         navigator.clipboard.writeText(text).then(function () { say(status, 'Copied.'); })
           .catch(selectSavedAnswer);
       });
-      if (print) print.addEventListener('click', function () { window.print(); });
+      if (print) print.addEventListener('click', function () {
+        if (window.LightworkThreadHistory) window.LightworkThreadHistory.printConversation(status);
+        else say(status, 'Printing is still loading. Try again in a moment, or reload this conversation.');
+      });
       if (share) share.addEventListener('click', function () {
         var details = document.getElementById('share-panel');
         if (!details) { say(status, 'Sharing is unavailable. Reload this conversation and try again.'); return; }

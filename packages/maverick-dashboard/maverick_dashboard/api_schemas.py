@@ -132,6 +132,7 @@ class AssessmentEvidenceIn(BaseModel):
 class ShareLinkIn(BaseModel):
     """Informed confirmation of the exact current public release preview."""
     confirm: bool = False
+    scope: Literal["result", "conversation"] = "result"
     source_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
     lifetime_seconds: int = Field(86400, ge=3600, le=604800)
     label: str = Field("Read-only deliverable", min_length=1, max_length=120)
@@ -809,6 +810,11 @@ class SandboxBackendIn(BaseModel):
     # "local" runs model-driven shell on the host, so it never happens on a
     # bare click.
     acknowledge_local_risk: bool = False
+
+
+class FileWorkEnableIn(BaseModel):
+    """Explicit administrator confirmation for container file work."""
+    confirm: bool = False
 
 
 class ActiveTenantIn(BaseModel):

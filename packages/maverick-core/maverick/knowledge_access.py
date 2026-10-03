@@ -20,7 +20,7 @@ from collections import OrderedDict
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass
 
-from .governed_records import GovernedRecordStore
+from .governed_records import GovernedRecordCapacityError, GovernedRecordStore
 from .knowledge_retrieval import LexicalProjection, SearchCursor, digest, rank, retrieval_passage
 from .paths import canonical_tenant_id, tenant_scope
 from .privacy_ops import RecordConflict
@@ -41,6 +41,7 @@ KNOWLEDGE_JOB_MATERIALIZATION_SCHEMA = "lightwork.knowledge-job-materialization.
 KNOWLEDGE_RIGHTS_REQUEST_SCHEMA = "lightwork.knowledge-rights-request.v1"
 KNOWLEDGE_ACTOR_AUTHORITY_SCHEMA = "lightwork.knowledge-actor-authority.v1"
 KNOWLEDGE_RETENTION_HOLD_SCHEMA = "lightwork.knowledge-retention-hold.v1"
+KNOWLEDGE_REQUEST_ARCHIVE_SCHEMA = "lightwork.knowledge-rights-archive.v1"
 
 _ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}\Z")
 _PURPOSE = re.compile(r"[a-z][a-z0-9_.-]{0,63}\Z")
@@ -126,6 +127,14 @@ class KnowledgeRequestNotFound(KnowledgeAccessError, LookupError):
 
 class KnowledgeRequestConflict(KnowledgeAccessError):
     """A rights request or its source changed during review."""
+
+
+class KnowledgeRequestCapacity(KnowledgeRequestConflict):
+    """The live rights ledger requires administrator archival of finished work."""
+
+
+class KnowledgeArchiveUnavailable(KnowledgeRequestConflict):
+    """A shared backend cannot safely move a request between record stores."""
 
 
 @dataclass(frozen=True)
@@ -304,6 +313,7 @@ class KnowledgeAccessService:
         content_resolver: ContentResolver | None = None,
         actor_authority_resolver: ActorAuthorityResolver | None = None,
         request_store: GovernedRecordStore | None = None,
+        archive_store: GovernedRecordStore | None = None,
         correction_store: GovernedRecordStore | None = None,
         after_source_revoked: Callable[[dict], None] | None = None,
         cache_capacity: int = _MAX_CACHE,
@@ -327,6 +337,11 @@ class KnowledgeAccessService:
             "knowledge-rights-requests",
             "knowledge-req",
             "knowledge-rights-request",
+        )
+        self.archive_store = archive_store or GovernedRecordStore(
+            "knowledge-rights-archive",
+            "knowledge-req",
+            "knowledge-rights-archive",
         )
         self.correction_store = correction_store or GovernedRecordStore(
             "knowledge-correction-sources",
@@ -357,6 +372,7 @@ class KnowledgeAccessService:
             content_resolver=self.content_resolver,
             actor_authority_resolver=resolver,
             request_store=self.request_store,
+            archive_store=self.archive_store,
             correction_store=self.correction_store,
             after_source_revoked=self.after_source_revoked,
             cache_capacity=self.cache_capacity,
@@ -439,7 +455,9 @@ class KnowledgeAccessService:
         expected = asdict(reference)
         with tenant_scope(tenant=tenant):
             rows = self.request_store.list(limit=_MAX_REQUESTS)
-        if len(rows) >= _MAX_REQUESTS:
+        if len(rows) >= _MAX_REQUESTS and self.request_store.count(
+            maximum=_MAX_REQUESTS + 1
+        ) > len(rows):
             self._evict(tenant, reference)
             raise KnowledgeAccessDenied(
                 "knowledge retirement authority cannot be resolved within its request boundary"
@@ -1521,6 +1539,8 @@ class KnowledgeAccessService:
         self,
         tenant: str,
         record: Mapping[str, object],
+        *,
+        archived_at: float | None = None,
     ) -> dict:
         """Project immutable request history with current derivative states.
 
@@ -1540,7 +1560,199 @@ class KnowledgeAccessService:
             request_status=str(record.get("status")),
         )
         projection["lineage_revalidated_before_return"] = True
+        projection["archived_at"] = archived_at
+        projection["archive_ready"] = (
+            archived_at is None and self._archive_ready(canonical, record)
+        )
         return projection
+
+    @staticmethod
+    def _archive_digest(record: Mapping[str, object]) -> str:
+        encoded = json.dumps(
+            record, allow_nan=False, ensure_ascii=False,
+            separators=(",", ":"), sort_keys=True,
+        ).encode("utf-8")
+        return hashlib.sha256(encoded).hexdigest()
+
+    def _archived_request(self, tenant: str, archive: Mapping[str, object]) -> dict:
+        """Verify a retained snapshot before it can be shown or replayed."""
+        record = archive.get("request")
+        if (
+            archive.get("schema") != KNOWLEDGE_REQUEST_ARCHIVE_SCHEMA
+            or archive.get("tenant") != tenant
+            or not isinstance(record, dict)
+            or record.get("tenant") != tenant
+            or record.get("id") != archive.get("id")
+            or record.get("status") not in {"approved", "denied"}
+            or not hmac.compare_digest(
+                str(archive.get("request_sha256") or ""),
+                self._archive_digest(record),
+            )
+        ):
+            raise KnowledgeRequestConflict("retained knowledge request could not be verified")
+        return record
+
+    def _archive_ready(self, tenant: str, record: Mapping[str, object]) -> bool:
+        if not self._archive_available(tenant):
+            return False
+        if record.get("status") not in {"approved", "denied"}:
+            return False
+        hold = record.get("retention_hold")
+        if hold is not None and (
+            not isinstance(hold, Mapping) or hold.get("status") != "released"
+        ):
+            return False
+        if record.get("decision") != ("approve" if record["status"] == "approved" else "deny"):
+            return False
+        if record.get("status") == "denied":
+            return True
+        try:
+            reference = ResearchAssetRef(**dict(record["source_reference"]))
+            source = self.registry.inspect(tenant, reference)
+            revocation = source.get("revocation")
+            if (
+                source.get("state") != "revoked"
+                or not isinstance(revocation, Mapping)
+                or revocation.get("revoked_by") != record.get("decided_by")
+                or revocation.get("reason_code") != "knowledge_" + str(record["request_type"])
+                or not hmac.compare_digest(
+                    str(revocation.get("evidence_sha256") or ""),
+                    str(record.get("decision_evidence_sha256") or ""),
+                )
+            ):
+                return False
+            if record.get("request_type") == "correction":
+                replacement = record.get("replacement_reference")
+                if not isinstance(replacement, Mapping) or record.get(
+                    "replacement_status"
+                ) != "approved":
+                    return False
+                state = self.registry.inspect(tenant, ResearchAssetRef(**dict(replacement)))
+                return state.get("state") == "approved"
+            return True
+        except (
+            KeyError, TypeError, ValueError,
+            ResearchRegistryNotFound, ResearchRegistryConflict, ResearchRegistryDenied,
+        ):
+            return False
+
+    def _archive_available(self, tenant: str) -> bool:
+        """The two-store retirement protocol is safe only under one local fence."""
+        with tenant_scope(tenant=tenant):
+            return (
+                self.request_store.backend_kind == "local"
+                and self.archive_store.backend_kind == "local"
+            )
+
+    def _full_request_message(self, tenant: str) -> str:
+        if self._archive_available(tenant):
+            return (
+                "The active knowledge request list is full. Ask an administrator to archive "
+                "finished requests in Knowledge. Requests and evidence are retained."
+            )
+        return (
+            "The active knowledge request list is full. Ask an administrator to review "
+            "capacity. Archiving is unavailable on shared storage until transactional "
+            "retirement is supported; requests and evidence remain in place."
+        )
+
+    def request_capacity(self, tenant: str) -> dict:
+        canonical = canonical_tenant_id(tenant)
+        with tenant_scope(tenant=canonical):
+            count = self.request_store.count(maximum=_MAX_REQUESTS + 1)
+            archive_available = self._archive_available(canonical)
+        return {
+            "active_count": count,
+            "active_limit": _MAX_REQUESTS,
+            "archive_available": archive_available,
+        }
+
+    def archive_request(
+        self, tenant: str, actor: str, request_id: str, *, expected_revision: int,
+    ) -> dict:
+        """Retain a final request before removing its live ledger row.
+
+        A concurrent revision change or undelivered archive audit leaves the
+        live row intact. The registry continues to enforce approved retirements.
+        """
+        canonical = canonical_tenant_id(tenant)
+        principal = _text(actor, "archive reviewer", 512)
+        if not principal.startswith("user:"):
+            raise ValueError("a named administrator is required")
+        _text(request_id, "knowledge request_id", 128)
+        if (
+            isinstance(expected_revision, bool)
+            or not isinstance(expected_revision, int)
+            or expected_revision < 1
+        ):
+            raise ValueError("expected_revision must be a positive integer")
+        with tenant_scope(tenant=canonical), self.registry.effect_fence():
+            if not self._archive_available(canonical):
+                raise KnowledgeArchiveUnavailable(
+                    "Finished-request archiving is unavailable on this installation. "
+                    "The request and source restrictions remain in place."
+                )
+            current = self.request_store.get(request_id)
+            if current is None:
+                archive = self.archive_store.get(request_id)
+                if archive is None:
+                    raise KnowledgeRequestNotFound("knowledge rights request was not found")
+                record = self._archived_request(canonical, archive)
+                if int(record["revision"]) != expected_revision:
+                    raise KnowledgeRequestConflict("knowledge request changed before archiving")
+                return self._fresh_request_projection(
+                    canonical, record, archived_at=float(archive["created_at"]),
+                )
+            if current.get("tenant") != canonical:
+                raise KnowledgeRequestNotFound("knowledge rights request was not found")
+            if int(current["revision"]) != expected_revision:
+                raise KnowledgeRequestConflict("knowledge request changed before archiving")
+            if not self._archive_ready(canonical, current):
+                raise KnowledgeRequestConflict(
+                    "Only finished requests with confirmed source changes and released legal holds can be archived"
+                )
+            if current.get("_audit_pending"):
+                current = self.request_store._flush(current)
+            if current.get("_audit_pending"):
+                raise KnowledgeRequestConflict(
+                    "The request's audit record is still syncing. Refresh and try again."
+                )
+            snapshot = {key: value for key, value in current.items() if key != "_audit_pending"}
+            material = {
+                "schema": KNOWLEDGE_REQUEST_ARCHIVE_SCHEMA,
+                "id": request_id,
+                "tenant": canonical,
+                "request": snapshot,
+                "request_sha256": self._archive_digest(snapshot),
+                "archived_by": principal,
+            }
+            archive = self.archive_store.get(request_id)
+            if archive is None:
+                archive = self.archive_store.create(
+                    material, actor=principal, action="knowledge.rights_request.archive",
+                )
+            else:
+                self._archived_request(canonical, archive)
+                if archive.get("request_sha256") != material["request_sha256"]:
+                    def refresh(record: dict) -> None:
+                        record.update(material)
+                    archive = self.archive_store.update(
+                        request_id, refresh, expected_revision=int(archive["revision"]),
+                        actor=principal, action="knowledge.rights_request.archive.refresh",
+                    )
+                    if archive is None:
+                        raise KnowledgeRequestConflict("retained request changed before archiving")
+            if archive.get("_audit_pending"):
+                archive = self.archive_store._flush(archive)
+            if archive.get("_audit_pending"):
+                raise KnowledgeRequestConflict(
+                    "The retained audit record is still syncing. Refresh and try again."
+                )
+            if not self.request_store.delete(request_id, expected_revision=expected_revision):
+                raise KnowledgeRequestConflict("knowledge request changed before archiving")
+            return self._fresh_request_projection(
+                canonical, snapshot, archived_at=float(archive["created_at"]),
+            )
 
     def _prepare_correction_source(
         self,
@@ -1578,7 +1790,8 @@ class KnowledgeAccessService:
                     artifact,
                     actor=actor,
                     action="knowledge.correction_source.create",
-                    max_records=_MAX_REQUESTS,
+                    # Approved corrections remain live registered source content.
+                    # Their source artifacts cannot be retired with request cards.
                 )
             except RecordConflict as exc:
                 current = self.correction_store.get(artifact["id"])
@@ -1640,16 +1853,26 @@ class KnowledgeAccessService:
         }
         material_sha256 = _digest(material)
         record_id = self._request_id(canonical, principal, key)
-        with tenant_scope(tenant=canonical):
+        with tenant_scope(tenant=canonical), self.registry.effect_fence():
             current = self.registry.inspect(canonical, reference)
             impact = self.registry.derivative_impact(canonical, reference)
             existing = self.request_store.get(record_id)
+            archived_at = None
+            if existing is None:
+                archived = self.archive_store.get(record_id)
+                if archived is not None:
+                    existing = self._archived_request(canonical, archived)
+                    archived_at = float(archived["created_at"])
             if existing is not None:
                 if existing.get("request_sha256") != material_sha256:
                     raise KnowledgeRequestConflict(
                         "knowledge request key was already used for different material"
                     )
-                return self._fresh_request_projection(canonical, existing)
+                return self._fresh_request_projection(
+                    canonical, existing, archived_at=archived_at,
+                )
+            if self.request_store.count(maximum=_MAX_REQUESTS) >= _MAX_REQUESTS:
+                raise KnowledgeRequestCapacity(self._full_request_message(canonical))
             correction_source = None
             correction_sha256 = None
             if kind == "correction":
@@ -1703,6 +1926,8 @@ class KnowledgeAccessService:
                 raise KnowledgeRequestConflict(
                     "knowledge request was created concurrently with different material"
                 ) from exc
+            except GovernedRecordCapacityError as exc:
+                raise KnowledgeRequestCapacity(self._full_request_message(canonical)) from exc
             return self._fresh_request_projection(canonical, saved)
 
     @staticmethod
@@ -1710,7 +1935,7 @@ class KnowledgeAccessService:
         """Employee receipt: own submission/status, never derivative or hold details."""
         fields = ("id", "request_type", "status", "reason", "proposed_correction",
                   "created_at", "updated_at", "source_use_status", "raw_record_status",
-                  "retention_review_status")
+                  "retention_review_status", "archived_at")
         return {"schema": "lightwork.knowledge-feedback.v1",
                 **{field: record.get(field) for field in fields},
                 "notice": "An independent administrator reviews source changes, dependencies and legal holds. Submitting grants no deletion or training rights."}
@@ -1734,16 +1959,35 @@ class KnowledgeAccessService:
             return self._feedback_projection(result)
 
     def feedback_requests(self, tenant: str, actor: str, *, limit: int = 100,
-                          request_id: str | None = None) -> list[dict]:
+                          request_id: str | None = None,
+                          archived: bool = False) -> list[dict]:
         canonical = canonical_tenant_id(tenant)
         if not actor.startswith("user:"):
             raise PermissionError("A named user is required")
         with tenant_scope(tenant=canonical):
-            rows = [row for row in self.request_store.list(limit=_MAX_REQUESTS)
-                    if row.get("tenant") == canonical and row.get("requested_by") == actor
-                    and (request_id is None or row.get("id") == request_id)]
+            archive_times: dict[str, float] = {}
+            if request_id is not None:
+                hot = self.request_store.get(request_id)
+                cold = None if hot is not None else self.archive_store.get(request_id)
+                rows = [hot] if hot is not None else (
+                    [self._archived_request(canonical, cold)] if cold is not None else []
+                )
+                if cold is not None:
+                    archive_times[request_id] = float(cold["created_at"])
+            elif archived:
+                rows = []
+                for item in self.archive_store.list(limit=_MAX_REQUESTS):
+                    if (item.get("tenant") == canonical
+                            and self.request_store.get(str(item["id"])) is None):
+                        rows.append(self._archived_request(canonical, item))
+                        archive_times[str(item["id"])] = float(item["created_at"])
+            else:
+                rows = self.request_store.list(limit=_MAX_REQUESTS)
+            rows = [row for row in rows if row.get("tenant") == canonical
+                    and row.get("requested_by") == actor]
         rows.sort(key=lambda row: (row.get("created_at", 0), row.get("id", "")), reverse=True)
-        return [self._feedback_projection(row) for row in rows[:max(1, min(limit, 250))]]
+        return [self._feedback_projection({**row, "archived_at": archive_times.get(str(row["id"]))})
+                for row in rows[:max(1, min(limit, 250))]]
 
     def get_request(self, tenant: str, request_id: str) -> dict:
         canonical = canonical_tenant_id(tenant)
@@ -1752,25 +1996,47 @@ class KnowledgeAccessService:
             raise ValueError("knowledge request_id is malformed")
         with tenant_scope(tenant=canonical):
             record = self.request_store.get(exact_id)
+            archived_at = None
+            if record is None:
+                archive = self.archive_store.get(exact_id)
+                if archive is not None:
+                    record = self._archived_request(canonical, archive)
+                    archived_at = float(archive["created_at"])
         if record is None or record.get("tenant") != canonical:
             raise KnowledgeRequestNotFound("knowledge rights request was not found")
-        return self._fresh_request_projection(canonical, record)
+        return self._fresh_request_projection(
+            canonical, record, archived_at=archived_at,
+        )
 
-    def list_requests(self, tenant: str, *, limit: int = 100) -> list[dict]:
+    def list_requests(self, tenant: str, *, limit: int = 100,
+                      archived: bool = False,
+                      ready_to_archive: bool = False) -> list[dict]:
         canonical = canonical_tenant_id(tenant)
         if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 250:
             raise ValueError("request limit must be between 1 and 250")
+        if archived and ready_to_archive:
+            raise ValueError("choose one knowledge request view")
         with tenant_scope(tenant=canonical):
-            rows = [
-                row
-                for row in self.request_store.list(limit=_MAX_REQUESTS)
-                if row.get("tenant") == canonical
-            ]
+            if archived:
+                archives = [item for item in self.archive_store.list(limit=_MAX_REQUESTS)
+                            if item.get("tenant") == canonical
+                            and self.request_store.get(str(item["id"])) is None]
+                rows = [self._archived_request(canonical, item) for item in archives]
+                archive_times = {str(item["id"]): float(item["created_at"])
+                                 for item in archives}
+            else:
+                rows = [row for row in self.request_store.list(limit=_MAX_REQUESTS)
+                        if row.get("tenant") == canonical]
+                if ready_to_archive:
+                    rows = [row for row in rows if self._archive_ready(canonical, row)]
+                archive_times = {}
         rows.sort(
             key=lambda row: (float(row.get("created_at", 0)), str(row.get("id", ""))),
             reverse=True,
         )
-        return [self._fresh_request_projection(canonical, row) for row in rows[:limit]]
+        return [self._fresh_request_projection(
+            canonical, row, archived_at=archive_times.get(str(row["id"])),
+        ) for row in rows[:limit]]
 
     def place_retention_hold(
         self,
@@ -2348,13 +2614,16 @@ __all__ = [
     "KNOWLEDGE_JOB_MATERIALIZATION_SCHEMA",
     "KNOWLEDGE_RETENTION_HOLD_SCHEMA",
     "KNOWLEDGE_RIGHTS_REQUEST_SCHEMA",
+    "KNOWLEDGE_REQUEST_ARCHIVE_SCHEMA",
     "KNOWLEDGE_SEARCH_SCHEMA",
     "KnowledgeAccessDenied",
     "KnowledgeAccessError",
     "KnowledgeAccessService",
     "KnowledgeActorAuthority",
+    "KnowledgeArchiveUnavailable",
     "KnowledgeDocument",
     "KnowledgeRequestConflict",
+    "KnowledgeRequestCapacity",
     "KnowledgeRequestNotFound",
     "TRAINING_PERMISSION_NOTICE",
     "WEIGHT_INFLUENCE_NOTICE",
