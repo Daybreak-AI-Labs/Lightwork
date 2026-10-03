@@ -250,9 +250,7 @@ gap `synthetic_demo_data_present`.
 ## Benchmark evidence
 
 The cockpit links the
-[published governance benchmark report](./benchmarks/governance-frontier.md),
-the
-[source-repository report](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/benchmarks/GOVERNANCE_FRONTIER_RESULTS.md),
+[published governance benchmark report](./benchmarks/governance-frontier.md)
 and the dashboard's `/benchmarks` history view. Treat benchmark results as
 scoped test evidence: they establish only the controls, fixtures, versions,
 and runs named in the report. They do not establish regulatory compliance or

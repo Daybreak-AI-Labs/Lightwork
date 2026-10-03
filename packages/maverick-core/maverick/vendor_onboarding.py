@@ -2024,8 +2024,9 @@ class VendorOnboardingService:
                 message="Operation authority changed; prepare and review a new action.",
             )
         self._check_prepared_inputs(execution, row)
-        approval = {"reviewer": ctx.actor, "at": self.clock(),
-                    "binding_sha256": operation_binding(operation), "scope": operation["scope"]}
+        approval = {"reviewer": ctx.actor, "reviewer_context": ctx.binding(),
+                    "at": self.clock(), "binding_sha256": operation_binding(operation),
+                    "scope": operation["scope"]}
         return self._save(ctx, row, operation=dict(operation, state="approved", approval=approval),
                           stage="action_approved")
 
@@ -2118,9 +2119,29 @@ class VendorOnboardingService:
             validate_approval(operation, ctx, self.clock())
         except ApprovalBindingError as exc:
             self._require_new_action_review(ctx, row, code=exc.code, message=str(exc))
-        approver = ServiceContext(**operation["context"], human=True)
-        approver = ServiceContext(**dict(asdict(approver), actor=operation["approval"]["reviewer"]))
-        self._permit(approver, "action.approve", case_id, human=True)
+        approval = operation["approval"]
+        reviewer_context = approval.get("reviewer_context")
+        if reviewer_context is None:
+            # Older approvals were possible only for the bound executor.
+            if approval["reviewer"] != operation["context"]["actor"]:
+                raise ApprovalBindingError(
+                    "The exact operation has no valid human approval.",
+                    code="approval_binding_invalid",
+                )
+            reviewer_context = operation["context"]
+        approver = ServiceContext(**reviewer_context, human=True)
+        if approver.actor != approval["reviewer"] or approver.tenant != ctx.tenant:
+            raise ApprovalBindingError(
+                "The exact operation has no valid human approval.",
+                code="approval_binding_invalid",
+            )
+        try:
+            self._permit(approver, "action.approve", case_id, human=True)
+        except PermissionError:
+            self._require_new_action_review(
+                ctx, row, code="approval_authority_changed",
+                message="Operation authority changed; prepare and review a new action.",
+            )
         self._check_prepared_inputs(ctx, row)
         operation = dict(operation, state="executing", attempts=operation["attempts"] + 1,
                          started_at=self.clock())

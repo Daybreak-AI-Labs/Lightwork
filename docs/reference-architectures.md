@@ -1,7 +1,7 @@
 # Reference architectures
 
 Self-hostable deployment blueprints for the governed Lightwork runtime. Every
-one runs the dashboard + control plane from the published container image and
+one runs the dashboard + control plane from the licensed container image and
 keeps state on a persistent volume; secrets come from the platform's secret
 store, never the image. Pick the one that matches where you already run things.
 
@@ -14,10 +14,10 @@ store, never the image. Pick the one that matches where you already run things.
 
 | Platform | Manifest | State | Secrets |
 |---|---|---|---|
-| Kubernetes | [`kubernetes/maverick.yaml`](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/deploy/reference-architectures/kubernetes/maverick.yaml) | PVC (`ReadWriteOnce`) | `Secret` → `envFrom` |
-| AWS ECS (Fargate) | [`ecs/task-definition.json`](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/deploy/reference-architectures/ecs/task-definition.json) | EFS volume | Secrets Manager → `secrets` |
-| Fly.io | [`flyio/fly.toml`](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/deploy/reference-architectures/flyio/fly.toml) | Fly volume at `/state` | `fly secrets set` |
-| Railway | [`railway/railway.json`](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/deploy/reference-architectures/railway/railway.json) | Railway volume at `/state` | service variables |
+| Kubernetes | `kubernetes/maverick.yaml` in the licensed package | PVC (`ReadWriteOnce`) | `Secret` → `envFrom` |
+| AWS ECS (Fargate) | `ecs/task-definition.json` in the licensed package | EFS volume | Secrets Manager → `secrets` |
+| Fly.io | `flyio/fly.toml` in the licensed package | Fly volume at `/state` | `fly secrets set` |
+| Railway | `railway/railway.json` in the licensed package | Railway volume at `/state` | service variables |
 
 ## Kubernetes
 

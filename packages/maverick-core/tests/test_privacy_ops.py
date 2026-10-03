@@ -1127,8 +1127,14 @@ class TestIncidentRegister:
         r = privacy_ops.open_incident(
             "Misdirected owner statement batch", severity="high",
             categories="contact details, account balances",
-            affected_estimate="~120 owners", reported_by="ops")
+            affected_estimate="~120 owners", affected_people=120,
+            reported_by="ops")
         assert r["status"] == "open"
+        assert r["affected_people"] == 120
+        updated = privacy_ops.set_incident_affected_people(
+            r["id"], None, updated_by="ops")
+        assert updated["affected_people"] is None
+        assert updated["affected_estimate"] == "~120 owners"
         listed = privacy_ops.list_incidents()[0]
         assert 70 <= listed["hours_left"] <= 72
         assert listed["clock_breached"] is False
@@ -1136,6 +1142,8 @@ class TestIncidentRegister:
             privacy_ops.open_incident("x", severity="catastrophic")
         with pytest.raises(ValueError):
             privacy_ops.open_incident("   ")
+        with pytest.raises(ValueError, match="affected_people"):
+            privacy_ops.open_incident("x", affected_people=-1)
 
     def test_notification_decision_documents_both_ways(self):
         r = privacy_ops.open_incident("Lost badge with cached emails")

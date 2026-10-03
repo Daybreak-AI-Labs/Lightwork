@@ -197,7 +197,8 @@ _SCHEMA: dict[str, Any] = {
             "maxLength": 512,
             "description": (
                 "Current remote ETag/revision for PUT, PATCH, or DELETE. "
-                "Sent as If-Match and required to prevent stale writes."
+                "Sent as If-Match when available; without it, a fresh human "
+                "approval must acknowledge that newer remote work could be overwritten."
             ),
         },
         "confirm": {"type": "boolean", "description": "required for write ops."},
@@ -254,11 +255,14 @@ def _rest_validate(
     if op in {"put", "patch", "delete"}:
         if_match = args.get("if_match")
         if not isinstance(if_match, str) or not if_match.strip():
-            return (
-                f"ERROR: {op.upper()} requires if_match with the current remote "
-                "ETag/revision; refresh the record and review again"
-            )
-        if (
+            from ..governed_tools import approved_without_revision
+
+            if not approved_without_revision(name, args):
+                return (
+                    f"ERROR: {op.upper()} requires the current remote ETag/revision "
+                    "or a fresh human approval without concurrency protection"
+                )
+        elif (
             if_match.strip() == "*"
             or len(if_match) > 512
             or "\r" in if_match

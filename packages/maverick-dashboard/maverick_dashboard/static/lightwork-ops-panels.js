@@ -449,7 +449,7 @@
       }
       if (!window.mvForm) return;
       var fields = regimes.map(function (r) { return {key: 'law:' + r.regime, label: r.name, type: 'bool'}; });
-      fields.push({key: 'people', label: 'About how many people are affected', type: 'number', default: 0});
+      fields.push({key: 'people', label: 'People affected (whole number, blank if unknown)', type: 'text'});
       fields.push({key: 'discovered', label: 'Day it was discovered', type: 'date'});
       fields.push({key: 'sensitive', label: 'It involves sensitive data (health, money, identity numbers)', type: 'bool'});
       fields.push({key: 'malicious', label: 'Someone did this on purpose', type: 'bool'});
@@ -458,7 +458,16 @@
       var chosen = Object.keys(values).filter(function (k) { return k.indexOf('law:') === 0 && values[k] === true; })
         .map(function (k) { return k.slice(4); });
       if (!chosen.length) { say(out, 'Choose at least one law.'); return; }
-      var people = Math.max(0, Math.floor(Number(values.people) || 0));
+      var rawPeople = values.people == null ? '' : String(values.people).trim();
+      if (rawPeople && !/^(0|[1-9][0-9]*)$/.test(rawPeople)) {
+        say(out, 'Enter a whole number of people, or leave the count blank if it is unknown.');
+        return;
+      }
+      var people = rawPeople ? Number(rawPeople) : null;
+      if (people !== null && !Number.isSafeInteger(people)) {
+        say(out, 'Enter a smaller whole number of people.');
+        return;
+      }
       var body = {jurisdictions: chosen, subjects_affected: people, sensitive: !!values.sensitive, malicious: !!values.malicious};
       if (values.discovered) {
         var t = Date.parse(values.discovered + 'T00:00:00');
@@ -468,6 +477,9 @@
       try {
         var plan = await request('/api/v1/breach/plan', {method: 'POST', json: body});
         out.textContent = '';
+        if (plan.subjects_affected == null) {
+          out.appendChild(el('p', 'muted', 'Affected-person count not provided. Check count-based reporting thresholds before relying on this plan.'));
+        }
         out.appendChild(table(['Law', 'Tell', 'Deadline', 'Notes'], (plan.obligations || []).map(function (o) {
           return [o.name || human(o.regime), o.authority, o.authority_due_at ? when(o.authority_due_at) : 'As the law sets out', o.threshold_note || ''];
         }), 'Who to tell and by when'));

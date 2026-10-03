@@ -509,13 +509,17 @@ def test_breach_plan_endpoints(tmp_path):
     assert plan.status_code == 200, plan.text
     rows = {row["regime"]: row for row in plan.json()["obligations"]}
     assert rows["eu_gdpr"]["authority_due_at"] is not None
+    unknown = client.post("/api/v1/breach/plan", json={
+        "jurisdictions": ["us_ca"],
+    })
+    assert unknown.json()["obligations"][0]["authority_below_threshold"] is None
     bad = client.post("/api/v1/breach/plan",
                       json={"jurisdictions": ["narnia"]})
     assert bad.status_code == 422
     # Anchored to a real incident's discovery time.
     opened = client.post("/api/v1/privacy/incidents", json={
         "title": "Laptop lost", "severity": "high",
-        "affected_estimate": "about 600 people",
+        "affected_estimate": "1.2k customers", "affected_people": "1200",
     })
     assert opened.status_code == 201, opened.text
     incident = opened.json()
@@ -524,8 +528,65 @@ def test_breach_plan_endpoints(tmp_path):
         + "/notification-plan?jurisdictions=eu_gdpr,us_co")
     assert anchored.status_code == 200, anchored.text
     body = anchored.json()
-    assert body["subjects_affected"] == 600
+    assert body["subjects_affected"] == 1200
     assert body["discovered_at"] == incident["created_at"]
+    revised = client.post(
+        f"/api/v1/privacy/incidents/{incident['id']}/affected-people",
+        json={"affected_people": None},
+    )
+    assert revised.status_code == 200, revised.text
+    assert revised.json()["affected_estimate"] == "1.2k customers"
+    unknown_plan = client.get(
+        f"/api/v1/privacy/incidents/{incident['id']}/notification-plan"
+        "?jurisdictions=us_ca,jp_appi"
+    ).json()
+    assert unknown_plan["subjects_affected"] is None
+    assert all(row["authority_below_threshold"] is None
+               for row in unknown_plan["obligations"])
+    assert all("count not provided" in row["threshold_note"]
+               for row in unknown_plan["obligations"])
+
+
+def test_legacy_incident_counts_are_used_only_when_unambiguous(tmp_path):
+    from maverick import config, privacy_ops
+
+    (tmp_path / "config.toml").write_text(
+        _CONFIG + "\n[breach_notification]\nenable = true\n",
+        encoding="utf-8")
+    config.reset_config_cache()
+    for estimate, expected in (
+        ("1,200", 1200),
+        ("1.2k customers", None),
+        ("1,000-5,000", None),
+        ("~300 (0.5% of base)", None),
+    ):
+        opened = client.post("/api/v1/privacy/incidents", json={
+            "title": "Legacy count", "affected_estimate": estimate,
+        }).json()
+        privacy_ops._INCIDENT.update(
+            opened["id"], lambda row: row.pop("affected_people", None))
+        plan = client.get(
+            f"/api/v1/privacy/incidents/{opened['id']}/notification-plan"
+            "?jurisdictions=us_ca,jp_appi"
+        )
+        assert plan.status_code == 200, plan.text
+        assert plan.json()["subjects_affected"] == expected
+        assert all(row["authority_below_threshold"] is not True
+                   for row in plan.json()["obligations"])
+        if estimate == "1.2k customers":
+            corrected = client.post(
+                f"/api/v1/privacy/incidents/{opened['id']}/affected-people",
+                json={"affected_people": 1200},
+            )
+            assert corrected.status_code == 200, corrected.text
+            assert corrected.json()["affected_estimate"] == estimate
+            updated_plan = client.get(
+                f"/api/v1/privacy/incidents/{opened['id']}/notification-plan"
+                "?jurisdictions=us_ca,jp_appi"
+            ).json()
+            assert updated_plan["subjects_affected"] == 1200
+            assert all(row["authority_below_threshold"] is False
+                       for row in updated_plan["obligations"])
 
 
 def test_dsar_fulfillment_flow_over_the_api(tmp_path):

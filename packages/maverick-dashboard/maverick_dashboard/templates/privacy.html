@@ -756,9 +756,11 @@
         <div class="pw-form-row">
           <label><span>Data categories involved</span>
             <input class="input" name="categories" maxlength="500" placeholder="For example: contact details, account balances"></label>
-          <label><span>People affected (estimate)</span>
-            <input class="input" name="affected_estimate" maxlength="100" placeholder="For example: about 120 customers"></label>
+          <label><span>People affected (best estimate, if known)</span>
+            <input class="input" type="number" name="affected_people" min="0" step="1" placeholder="For example: 1200"></label>
         </div>
+        <label><span>Context for the estimate (optional)</span>
+          <input class="input" name="affected_estimate" maxlength="100" placeholder="For example: about 1.2k customers, based on access logs"></label>
         <label><span>Description (optional)</span>
           <textarea class="textarea" name="description" rows="2"
             placeholder="What is known so far. The 72-hour deadline to tell the regulator starts when you open the record."></textarea></label>
@@ -776,7 +778,7 @@
         <tbody>
           {% for r in records.incidents %}
           <tr>
-            <td>{{ r.title }}{% if r.categories %}<br><span class="muted" style="font-size:var(--text-xs);">{{ r.categories }}{% if r.affected_estimate %} · {{ r.affected_estimate }}{% endif %}</span>{% endif %}</td>
+            <td>{{ r.title }}<br><span class="muted" style="font-size:var(--text-xs);">{% if r.categories %}{{ r.categories }} · {% endif %}{% if r.get('affected_people') is not none %}{{ r.affected_people }} people{% else %}Count not entered{% endif %}{% if r.affected_estimate %} · {{ r.affected_estimate }}{% endif %}</span></td>
             <td><span class="badge {{ 'blocked' if r.severity == 'high' else 'warn' if r.severity == 'medium' else 'done' }}">{{ (r.severity or '') | capitalize }}</span></td>
             <td><span class="badge {{ 'blocked' if r.status == 'notify' else 'done' if r.status in ('documented', 'closed') else 'info' }}">{{ {'open': 'Open', 'notify': 'Must notify', 'documented': 'No notification needed', 'closed': 'Closed'}.get(r.status, (r.status or '') | capitalize) }}</span></td>
             <td {% if r.clock_breached %}class="pw-due-warn"{% endif %}>
@@ -789,6 +791,7 @@
                 <button class="btn pw-inc-act" data-id="{{ r.id }}" data-notify="false" type="button">Decide: no notification needed</button>
               {% endif %}
               {% if r.status != 'closed' %}
+                <button class="btn pw-inc-count" data-id="{{ r.id }}" data-count="{{ r.get('affected_people') if r.get('affected_people') is not none else '' }}" type="button">Update affected count</button>
                 <button class="btn pw-inc-close" data-id="{{ r.id }}" type="button">Close</button>
               {% endif %}
               <button class="btn pw-breach-plan" data-id="{{ r.id }}" type="button">Who must we tell?</button>
@@ -2129,6 +2132,37 @@
     });
   });
 
+  document.querySelectorAll('.pw-inc-count').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var out = document.getElementById('pw-breach-out');
+      mvForm('Update the affected-person count', [{
+        key: 'affected_people', label: 'Best estimate as a whole number (blank if unknown)',
+        type: 'text', default: btn.dataset.count
+      }], { okText: 'Save count' }).then(function (values) {
+        if (!values) return;
+        var raw = values.affected_people;
+        if (raw !== undefined && !/^(0|[1-9][0-9]*)$/.test(raw)) {
+          out.textContent = 'Enter a whole number of people, or leave the count blank if it is unknown.';
+          return;
+        }
+        var count = raw === undefined ? null : Number(raw);
+        if (count !== null && !Number.isSafeInteger(count)) {
+          out.textContent = 'Enter a smaller whole number of people.';
+          return;
+        }
+        btn.disabled = true;
+        return jfetch('/api/v1/privacy/incidents/' + encodeURIComponent(btn.dataset.id) +
+                      '/affected-people', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ affected_people: count })
+        }).then(function () { location.reload(); }).catch(function (e) {
+          btn.disabled = false;
+          out.textContent = errText(e, 'save the affected-person count');
+        });
+      });
+    });
+  });
+
   // JSON fetch that surfaces the API's detail instead of a bare status.
   function jfetch(url, opts) {
     return fetch(url, opts).then(function (r) {
@@ -2166,6 +2200,11 @@
         .then(function (plan) {
           if (!plan) return;
           out.textContent = '';
+          var count = document.createElement('p');
+          count.textContent = plan.subjects_affected == null
+            ? 'Affected-person count not provided. Check count-based reporting thresholds before relying on this plan.'
+            : 'Plan uses an estimated count of ' + plan.subjects_affected.toLocaleString() + ' people.';
+          out.appendChild(count);
           var table = document.createElement('table');
           var head = table.createTHead().insertRow();
           ['Law', 'Tell', 'Deadline', 'Notes'].forEach(function (h) {

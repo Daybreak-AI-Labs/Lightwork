@@ -1087,6 +1087,12 @@ class IncidentIn(BaseModel):
     description: str = Field("", max_length=4000)
     categories: str = Field("", max_length=500)
     affected_estimate: str = Field("", max_length=100)
+    affected_people: int | None = Field(None, ge=0)
+
+
+class IncidentAffectedPeopleIn(BaseModel):
+    """A revised best estimate; null means the count is unknown."""
+    affected_people: int | None = Field(..., ge=0)
 
 
 class IncidentNotifyIn(BaseModel):
@@ -1742,7 +1748,7 @@ class CopilotIn(BaseModel):
 class BreachPlanIn(BaseModel):
     """Facts for a per-regime breach-notification plan."""
     jurisdictions: list[str] = Field(..., min_length=1, max_length=32)
-    subjects_affected: int = Field(0, ge=0)
+    subjects_affected: int | None = Field(None, ge=0)
     sensitive: bool = False
     malicious: bool = False
     discovered_at: float | None = Field(None, gt=0)

@@ -175,6 +175,18 @@ test('the breach planner asks in a form and shows who to tell', async (t) => {
   assert.match(ui.document.getElementById('ops-breach-out').textContent, /Supervisory authority/);
 });
 
+test('the breach planner leaves an omitted count unknown', async (t) => {
+  const ui = await fixture(partial('_ops_privacy.html'), (url) => {
+    if (url.endsWith('/regimes')) return response({regimes: [{regime: 'us_ca', name: 'California'}]});
+    return response({subjects_affected: null, obligations: [], notice: 'Not legal advice.'});
+  }, {form: () => ({'law:us_ca': true})});
+  t.after(() => ui.window.close());
+  ui.document.getElementById('ops-breach-plan').click();
+  await ui.settle();
+  assert.equal(posts(ui, '/breach/plan')[0].body.subjects_affected, null);
+  assert.match(ui.document.getElementById('ops-breach-out').textContent, /count not provided/);
+});
+
 test('a bucket scan asks for the bucket and sends the row\'s version', async (t) => {
   const row = '<button class="ops-dm-scan" data-asset="DMA-1" data-revision="4" data-name="Exports" data-kind="bucket">Scan the files</button>';
   const ui = await fixture(row + partial('_ops_privacy.html'),

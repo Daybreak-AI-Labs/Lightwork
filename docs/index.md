@@ -8,7 +8,7 @@ with use — deployed in your own environment. It drives any
 LLM (Claude, GPT, Kimi, Grok, Gemini, DeepSeek, Ollama, OpenRouter), and
 ships a governed, auditable safety surface built for regulated teams.
 Lightwork is proprietary, commercially licensed software (see
-[`LICENSE`](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/LICENSE)).
+[`LICENSE`](https://daybreak-ai-labs.github.io/Lightwork/license/)).
 
 ## What you can do with it
 
@@ -52,11 +52,10 @@ Lightwork is proprietary, commercially licensed software (see
 
 ## Quick start
 
-Download a binary for your operating system from an
-[asset-bearing release](https://github.com/Daybreak-AI-Labs/Lightwork/releases),
+Request the customer package for your operating system from
+[Daybreak Labs](mailto:chris@daybreakailabs.com?subject=Lightwork%20customer%20package),
 verify its checksum and exact-tag signature, then run its `dashboard` command.
-Complete the owner and provider setup in the application. If no binary is
-attached for your platform, request a customer package. A repository clone
+Complete the owner and provider setup in the application. A repository clone
 copies internal research, audit and patent documents; source installation is
 for authorized engineering.
 
@@ -68,9 +67,9 @@ in-product controls still need implementation and customer acceptance.
 ## Licensing & access
 
 Lightwork is **proprietary, commercially licensed** software (see
-[`LICENSE`](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/LICENSE)). It is self-hostable — the runtime executes entirely
+[`LICENSE`](https://daybreak-ai-labs.github.io/Lightwork/license/)). It is self-hostable — the runtime executes entirely
 in your own environment — and use requires a license. Pricing is handled
-per engagement; [contact us](https://github.com/Daybreak-AI-Labs/Lightwork) for
+per engagement; [contact us](mailto:chris@daybreakailabs.com?subject=Lightwork%20inquiry) for
 evaluation or enterprise access.
 
 A deliberately stripped-down **open-source "lite" edition** may be released

@@ -1,5 +1,26 @@
 INHERIT: mkdocs.yml
 
+# Customer pages must not advertise source/edit links into the private repo.
+repo_url: null
+edit_uri: ""
+theme:
+  name: material
+  features:
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - navigation.indexes
+    - navigation.footer
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.code.annotate
+    - toc.follow
+extra:
+  social: []
+
 # The Pages workflow copies docs/public-docs.txt into this clean staging tree.
 # GitHub Pages never sees the full docs/ directory, so a new internal document
 # is private by default and cannot leak merely because it was omitted from nav.
@@ -70,3 +91,6 @@ nav:
       - Contributor License Agreement: CLA.md
       - Code of Conduct: CODE_OF_CONDUCT.md
       - Security policy: security-policy.md
+  - Legal:
+      - License: license.md
+      - Trademark policy: trademark.md

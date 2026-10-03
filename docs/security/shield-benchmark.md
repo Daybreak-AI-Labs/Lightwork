@@ -58,8 +58,8 @@ Methodology (baked into the harness so it can't drift):
 - **Leakage guard** (`detector_score.train_overlap`): any external prompt that
   normalizes to a trained-on phrase is dropped before scoring.
 
-The table below is the 2026-07-29 snapshot generated into the authoritative
-[`benchmarks/security/RESULTS.md`](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/benchmarks/security/RESULTS.md)
+The table below is the 2026-07-29 snapshot generated into the internal
+`benchmarks/security/RESULTS.md`
 artifact from the current corpus (53 train / 31 held-out / 32 benign):
 
 | backend | TPR train¹ | TPR held-out (95% CI) | FPR benign (95% CI) | F1 held-out |
@@ -85,8 +85,8 @@ depends on confirmation gates, capabilities, sandbox isolation, budget limits,
 and egress controls. A credible headline efficacy number requires pinned
 external held-out sets plus end-to-end attack-success-rate measurement.
 
-Current held-out misses and false positives are listed in
-[`benchmarks/security/RESULTS.md`](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/benchmarks/security/RESULTS.md)
+Current held-out misses and false positives are listed in the licensed
+package's `benchmarks/security/RESULTS.md`
 (regenerated with each run) so the gaps are tracked, not forgotten.
 
 ## Latency & ReDoS are a hard CI gate
@@ -108,8 +108,8 @@ carries no encoded blobs — obfuscated variants are built at runtime.
 
 ## Roadmap to a published recall number
 
-The credible public recall figure comes from scale + end-to-end measurement,
-documented in [`RUNBOOK_SECURITY.md`](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/benchmarks/security/RUNBOOK_SECURITY.md):
+The credible public recall figure comes from scale and end-to-end measurement,
+documented in the licensed package's `benchmarks/security/RUNBOOK_SECURITY.md`:
 external held-out sets (AgentDojo, JailbreakBench) run through the leakage
 guard, and an end-to-end AgentDojo run measuring attack-success-rate reduction
 with the shield **on vs. off** (the number that actually matters: not "did we

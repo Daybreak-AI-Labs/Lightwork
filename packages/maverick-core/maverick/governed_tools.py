@@ -27,6 +27,7 @@ import logging
 import os
 import re
 import uuid
+from contextvars import ContextVar
 from urllib.parse import urlsplit, urlunsplit
 
 from .approval_cards import ApprovalCardError, digest
@@ -51,6 +52,15 @@ _REVISION_EXEMPT_OPS = frozenset({
     "submit_event", "submit_metric", "subscribe", "task_create", "track",
     "trigger",
 })
+
+# These provider operations create a new object or append a new comment. Their
+# exact names differ from the generic create/comment verbs above; no existing
+# remote record is overwritten by the requested operation.
+_REVIEWED_CREATE_APPEND_OPS: dict[str, frozenset[str]] = {
+    "hubspot": frozenset({"contact_create"}),
+    "gitlab": frozenset({"issue_create", "issue_comment"}),
+    "trello": frozenset({"card_create"}),
+}
 
 
 class _RevisionPreconditionError(ValueError):
@@ -176,6 +186,42 @@ _SQL_CONNECTORS = frozenset({
 # Do not admit comments, expressions, FROM clauses, or stacked statements here.
 _PURE_SQL_PROBE = re.compile(r"[ \t\r\n]*SELECT[ \t\r\n]+1[ \t\r\n]*;?[ \t\r\n]*", re.ASCII | re.IGNORECASE)
 
+# Only the exact request that cleared a fresh human decision may omit a remote
+# revision in a connector that otherwise requires one. A model cannot set this
+# ContextVar through tool arguments.
+_APPROVED_NO_REVISION: ContextVar[tuple[str, str] | None] = ContextVar(
+    "lightwork_approved_connector_without_revision", default=None,
+)
+
+
+def approved_without_revision(name: str, args: dict) -> bool:
+    current = _APPROVED_NO_REVISION.get()
+    if current is None or current[0] != name:
+        return False
+    request = json.dumps(args, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(request.encode("utf-8")).hexdigest() == current[1]
+
+
+def _no_revision_review_note(contract: dict[str, object]) -> str:
+    if contract.get("state") != "human_approved_no_revision":
+        return ""
+    return (
+        "; NO REMOTE REVISION CHECK: Lightwork has not verified whether this "
+        "service offers an ETag; the request could overwrite newer work"
+    )
+
+
+def _unresolved_connector_assumptions(contract: dict[str, object]) -> list[str]:
+    assumptions = [
+        "The remote service may apply additional automation after accepting the request."
+    ]
+    if contract.get("state") == "human_approved_no_revision":
+        assumptions.append(
+            "No current ETag was supplied. Lightwork has not verified whether "
+            "the service offers one, so newer remote work could be overwritten."
+        )
+    return assumptions
+
 
 def _is_pure_sql_probe(tool_name: str, args: dict) -> bool:
     field = "sql" if tool_name in {"bigquery", "database"} else "statement"
@@ -188,12 +234,12 @@ def _governed_description(tool: Tool) -> str:
 
     if tool.name in _SQL_CONNECTORS:
         # Raw connector descriptions advertise ordinary SQL reads. The live
-        # governed registry cannot safely offer those reads yet; replacing
-        # that description prevents the model from planning an unusable path.
+        # governed registry sends anything beyond a constant probe through a
+        # fresh human decision because SQL dialects admit effectful functions.
         return (
-            f"{tool.name} connection check. Under governance, only a constant "
-            "SELECT 1 probe runs. Customer table reads and all other SQL are "
-            "refused until a remote revision contract exists."
+            f"{tool.name} SQL. A constant SELECT 1 connection check runs "
+            "directly. Other queries and changes require a fresh human review; "
+            "the review explains when the service has no concurrency protection."
             + GOVERNED_DESCRIPTION_NOTE
         )[:1024]
     return (tool.description + GOVERNED_DESCRIPTION_NOTE)[:1024]
@@ -312,6 +358,8 @@ def _is_governed_write(tool: Tool, args: dict) -> bool:
 
 def _resource_label(tool_name: str, args: dict) -> str:
     """Return a stable, non-secret label for the governed write preview."""
+    if tool_name in _SQL_CONNECTORS:
+        return f"{tool_name} SQL statement"
     path = str(args.get("path") or "").strip()
     if path:
         return path
@@ -324,6 +372,12 @@ def _resource_label(tool_name: str, args: dict) -> str:
         sys_id = str(args.get("sys_id") or "").strip()
         return "/".join(part for part in ("table", table, sys_id) if part)
     return str(args.get("op") or "write")
+
+
+def _connector_effect(tool_name: str, operation: str, path: str) -> str:
+    if tool_name in _SQL_CONNECTORS and operation in {"query", "sql"}:
+        return f"Run a SQL statement in {tool_name}"
+    return f"would {operation.upper()} {tool_name} {path}".rstrip()
 
 
 def _safe_resource_label(value: str) -> str:
@@ -377,11 +431,17 @@ def _connector_revision_contract(tool: Tool, args: dict) -> dict[str, object]:
             for item in declared.get("operations", [])
         }
         if op in operations:
+            if not field or not header:
+                raise _RevisionPreconditionError("the connector's revision contract is incomplete")
             value = args.get(field)
+            if value is None or value == "":
+                return {
+                    "schema": "lightwork.connector-conditional-revision.v1",
+                    "state": "human_approved_no_revision",
+                    "reason": "No current ETag was supplied; newer remote work could be overwritten",
+                }
             if (
-                not field
-                or not header
-                or not isinstance(value, str)
+                not isinstance(value, str)
                 or not value.strip()
                 or value.strip() == "*"
                 or len(value) > 512
@@ -401,12 +461,15 @@ def _connector_revision_contract(tool: Tool, args: dict) -> dict[str, object]:
     existing_state_mutation = (
         _is_graphql_op_tool(tool)
         or tool.name in _SQL_CONNECTORS
-        or op not in _REVISION_EXEMPT_OPS
+        or (op not in _REVISION_EXEMPT_OPS
+            and op not in _REVIEWED_CREATE_APPEND_OPS.get(tool.name, frozenset()))
     )
     if existing_state_mutation:
-        raise _RevisionPreconditionError(
-            "this connector does not declare an atomic revision/ETag contract"
-        )
+        return {
+            "schema": "lightwork.connector-conditional-revision.v1",
+            "state": "human_approved_no_revision",
+            "reason": "No current ETag was supplied; newer remote work could be overwritten",
+        }
     return {
         "schema": "lightwork.connector-conditional-revision.v1",
         "state": "not_applicable",
@@ -416,33 +479,85 @@ def _connector_revision_contract(tool: Tool, args: dict) -> dict[str, object]:
 
 def _approval_detail(
     effect: str,
-    args: dict,
     *,
     transaction_id: str,
     request_digest: str,
 ) -> str:
-    """Bounded, secret-redacted request shown to the approving human.
+    """Brief approval headline; the complete redacted request is shown below."""
+    return (
+        f"{effect}; transaction_id={transaction_id}; "
+        f"request_sha256={request_digest}; review every redacted request part below"
+    )
 
-    Field names alone are not enough to approve a system-of-record mutation.
-    The digest binds the decision and receipts to the exact frozen request;
-    the redacted preview lets the operator understand what is changing.
-    """
+
+_REDACTED_REQUEST_VALUE = "[REDACTED:sensitive field]"
+_SENSITIVE_REQUEST_WORDS = frozenset({
+    "auth", "authorization", "bearer", "cert", "certificate", "credential",
+    "credentials", "password", "passwd", "passphrase", "secret", "secrets",
+    "token", "cookie", "cookies", "dsn", "key", "apikey", "accesskey",
+    "privatekey", "clientsecret", "connectionstring",
+})
+_SENSITIVE_REQUEST_PAIRS = frozenset({
+    ("api", "key"), ("access", "key"), ("private", "key"),
+    ("connection", "string"),
+})
+
+
+def _sensitive_request_key(key: object) -> bool:
+    separated = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", str(key))
+    words = re.findall(r"[a-z0-9]+", separated.lower())
+    return any(word in _SENSITIVE_REQUEST_WORDS for word in words) or any(
+        pair in _SENSITIVE_REQUEST_PAIRS for pair in zip(words, words[1:], strict=False)
+    )
+
+
+def _redact_request_fields(value: object, *, sensitive: bool = False) -> object:
+    """Retain the request shape while hiding all leaves below sensitive keys."""
+    if isinstance(value, dict):
+        return {
+            key: _redact_request_fields(
+                item, sensitive=sensitive or _sensitive_request_key(key),
+            )
+            for key, item in value.items()
+        }
+    if isinstance(value, (list, tuple)):
+        return [_redact_request_fields(item, sensitive=sensitive) for item in value]
+    return _REDACTED_REQUEST_VALUE if sensitive else value
+
+
+def _approval_request_parts(args: dict) -> list[str]:
+    """Show the frozen request shape with sensitive values redacted."""
+    size = 380
     try:
-        request = json.dumps(args, sort_keys=True, default=str)
-    except Exception:  # pragma: no cover -- tool inputs are normally JSON
-        request = repr(args)
-    try:
+        raw_request = json.dumps(args, sort_keys=True, separators=(",", ":"), default=str)
+        if not raw_request or len(raw_request) > size * 20:
+            raise ApprovalCardError("the full connector request is too long to review")
+        request = json.dumps(
+            _redact_request_fields(args), sort_keys=True,
+            separators=(",", ":"), default=str,
+        )
         from .safety.secret_detector import redact
 
         request, _ = redact(request)
-    except Exception:  # pragma: no cover -- retain the binding when optional DLP fails
-        request = "(request preview unavailable; inspect the bound digest)"
-    if len(request) > 2000:
-        request = request[:2000] + "...(truncated)"
-    return (
-        f"{effect}; transaction_id={transaction_id}; "
-        f"request_sha256={request_digest}; request={request}"
-    )
+        if len(request) > size * 20:
+            raise ApprovalCardError("the full connector request is too long to review")
+    except ApprovalCardError:
+        raise
+    except Exception as exc:
+        raise ApprovalCardError("the full connector request could not be shown") from exc
+    parts = [request[i:i + size] for i in range(0, len(request), size)]
+    return [f"Request part {i + 1}/{len(parts)}: {part}" for i, part in enumerate(parts)]
+
+
+def _approval_card_error_reason(exc: ApprovalCardError) -> str:
+    lowered = str(exc).lower()
+    if "expired" in lowered:
+        return "approval expired"
+    if "full connector request" in lowered:
+        return str(exc)
+    if "actor is unavailable" in lowered:
+        return "the current signed-in actor is unavailable"
+    return "the operation or its authority changed"
 
 
 def _connector_credential_versions(tool: Tool) -> dict[str, str]:
@@ -614,9 +729,7 @@ def _wrap_connector_executor(
             name=action,
             params={"op": str, "path": str},
             risk="high",
-            simulate=lambda p: (
-                f"would {p['op'].upper()} {tool.name} {p['path']}".rstrip()
-            ),
+            simulate=lambda p: _connector_effect(tool.name, p["op"], p["path"]),
         ))
         params = {"op": op, "path": path}
         try:
@@ -653,10 +766,12 @@ def _wrap_connector_executor(
             approval_scope = f"{path}#sha256={request_digest}"
             approval_detail = _approval_detail(
                     preview.effect,
-                    receipt_args,
                     transaction_id=transaction_id,
                     request_digest=request_digest,
                 )
+            request_parts = _approval_request_parts(receipt_args)
+            no_revision = revision_contract.get("state") == "human_approved_no_revision"
+            approval_detail += _no_revision_review_note(revision_contract)
             permit = require_operation_consent(
                 action,
                 risk="high",
@@ -669,16 +784,15 @@ def _wrap_connector_executor(
                     "transaction_id": transaction_id,
                 },
                 parameter_summary=[
-                    "Send the exact request committed by SHA-256 under the displayed transaction id.",
+                    "Review every redacted request part below. The SHA-256 binds the exact inputs sent once.",
+                    *request_parts,
                     (
                         "Remote revision precondition: "
                         f"{revision_contract.get('header', revision_contract.get('reason'))}."
                     ),
                 ],
                 known_effects=[preview.effect],
-                unresolved_assumptions=[
-                    "The remote service may apply additional automation after accepting the request."
-                ],
+                unresolved_assumptions=_unresolved_connector_assumptions(revision_contract),
                 before="No PREPARE receipt or remote write exists for this transaction.",
                 after="The remote system may contain the reviewed change and Lightwork records its outcome.",
                 irreversible=True,
@@ -734,6 +848,9 @@ def _wrap_connector_executor(
             # Spend and revalidate after PREPARE, immediately before the
             # connector crosses its remote effect boundary.
             with consume_operation_consent(permit):
+                token = _APPROVED_NO_REVISION.set(
+                    (tool.name, request_digest) if no_revision else None
+                )
                 try:
                     result = tool.fn(receipt_args)
                 except (Exception, asyncio.CancelledError) as exc:
@@ -758,6 +875,8 @@ def _wrap_connector_executor(
                         "external-effect boundary; reconcile before retrying. "
                         f"transaction_id={transaction_id}; failure_type={detail}"
                     )
+                finally:
+                    _APPROVED_NO_REVISION.reset(token)
 
             # A string error from a connector is also ambiguous: several
             # connector implementations catch network exceptions internally,
@@ -817,13 +936,7 @@ def _wrap_connector_executor(
                 "no external write was attempted."
             )
         except ApprovalCardError as exc:
-            lowered = str(exc).lower()
-            if "expired" in lowered:
-                reason = "approval expired"
-            elif "actor is unavailable" in lowered:
-                reason = "the current signed-in actor is unavailable"
-            else:
-                reason = "the operation or its authority changed"
+            reason = _approval_card_error_reason(exc)
             return (
                 f"REFUSED (governed): {reason} for target {path!r}; review the "
                 "current target and request again. No external write was "

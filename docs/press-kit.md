@@ -40,7 +40,7 @@ append-only audit log.
 
 - **License model**: proprietary, commercially licensed. Use, redistribution,
   and derivative works require a license (see
-  [`LICENSE`](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/LICENSE)). A
+  [`LICENSE`](https://daybreak-ai-labs.github.io/Lightwork/license/)). A
   stripped-down open-source "lite" edition is a stated possibility in product
   planning, not a commitment.
 - **Deployment**: self-hosted — laptop, Docker, VPS, Kubernetes, or a
@@ -77,9 +77,9 @@ append-only audit log.
 
 "Lightwork", the Lightwork name, and the Lightwork logo are trademarks of
 Christopher Day / Day AI Labs and are **not** licensed under the software
-[`LICENSE`](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/LICENSE).
+[`LICENSE`](https://daybreak-ai-labs.github.io/Lightwork/license/).
 The full
-[`TRADEMARK.md`](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/TRADEMARK.md)
+[`TRADEMARK.md`](https://daybreak-ai-labs.github.io/Lightwork/trademark/)
 policy applies; the short version for writers:
 
 - **Product name**: "Lightwork", capital M. The CLI command is lowercase
@@ -92,8 +92,7 @@ policy applies; the short version for writers:
   distribution; in domain names, package names, company names, or advertising;
   or describing any build as the "official" Lightwork.
 
-For permission requests, contact the licensor via
-[github.com/Daybreak-AI-Labs/Lightwork](https://github.com/Daybreak-AI-Labs/Lightwork).
+For permission requests, [email the licensor](mailto:chris@daybreakailabs.com?subject=Lightwork%20trademark%20permission).
 
 ## Logos and assets
 
@@ -110,6 +109,4 @@ For permission requests, contact the licensor via
 
 ## Press contact
 
-> **Placeholder — maintainers: add a press email/contact here.** Until a
-> dedicated press contact is published, reach the project via
-> [github.com/Daybreak-AI-Labs/Lightwork](https://github.com/Daybreak-AI-Labs/Lightwork).
+> For press inquiries, [email Daybreak Labs](mailto:chris@daybreakailabs.com?subject=Lightwork%20press%20inquiry).

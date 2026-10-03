@@ -486,7 +486,7 @@ def list_regimes() -> list[dict[str, Any]]:
 def assess_breach(
     jurisdictions: list[str],
     *,
-    subjects_affected: int = 0,
+    subjects_affected: int | None = None,
     sensitive: bool = False,
     malicious: bool = False,
     discovered_at: float | None = None,
@@ -512,9 +512,12 @@ def assess_breach(
             f"{known}. Absent by design: "
             + "; ".join(f"{k} ({v})" for k, v in UNVERIFIED_REGIMES.items())
         )
-    if not isinstance(subjects_affected, int) or isinstance(subjects_affected, bool) \
-            or subjects_affected < 0:
-        raise ValueError("subjects_affected must be a non-negative integer")
+    if subjects_affected is not None and (
+        not isinstance(subjects_affected, int)
+        or isinstance(subjects_affected, bool)
+        or subjects_affected < 0
+    ):
+        raise ValueError("subjects_affected must be a non-negative integer or None")
     now = time.time()
     discovery = float(discovered_at) if discovered_at is not None else now
     determination = (
@@ -534,7 +537,8 @@ def assess_breach(
             )
         minimum = rule.get("authority_min_subjects")
         below_threshold = (
-            minimum is not None and subjects_affected and subjects_affected < minimum
+            minimum is not None and subjects_affected is not None
+            and subjects_affected < minimum
         )
         calendar = str(rule.get("holiday_calendar") or "")
         entry: dict[str, Any] = {
@@ -546,7 +550,10 @@ def assess_breach(
                 authority_spec, calendar=calendar,
                 discovered_at=discovery, determined_at=determination,
             ),
-            "authority_below_threshold": bool(below_threshold),
+            "authority_below_threshold": (
+                None if minimum is not None and subjects_affected is None
+                else bool(below_threshold)
+            ),
             "subjects_deadline": rule["subjects_deadline"],
             "subjects_due_at": _due_at(
                 rule["subjects_deadline"], calendar=calendar,
@@ -561,6 +568,12 @@ def assess_breach(
                 f"Reported subject count ({subjects_affected}) is below "
                 f"this regulator's {minimum}-subject trigger; other "
                 f"triggers (e.g. sensitivity) may still apply."
+            )
+        elif minimum is not None and subjects_affected is None:
+            entry["threshold_note"] = (
+                "Affected-person count not provided; this regulator's "
+                f"{minimum}-subject trigger cannot be assessed. Other "
+                "triggers (e.g. sensitivity) may still apply."
             )
         if sensitive and regime_id in {"jp_appi", "kr_pipa"}:
             entry["sensitivity_note"] = (

@@ -2740,8 +2740,8 @@ def breach_regimes() -> None:
 @breach_group.command("plan")
 @click.option("--jurisdiction", "jurisdictions", multiple=True, required=True,
               help="Regime id (repeatable); see 'breach regimes'.")
-@click.option("--subjects", type=int, default=0,
-              help="Affected subject count (0 = unknown).")
+@click.option("--subjects", type=click.IntRange(min=0), default=None,
+              help="Affected subject count (omit if unknown).")
 @click.option("--sensitive", is_flag=True, help="Sensitive data involved.")
 @click.option("--malicious", is_flag=True,
               help="Likely malicious (e.g. cyberattack).")

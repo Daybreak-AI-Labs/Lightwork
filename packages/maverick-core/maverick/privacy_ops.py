@@ -3323,7 +3323,8 @@ BREACH_NOTIFY_HOURS = 72  # Art. 33(1): without undue delay, within 72h
 
 def open_incident(title: str, *, severity: str = "medium",
                   description: str = "", categories: str = "",
-                  affected_estimate: str = "", reported_by: str = "") -> dict:
+                  affected_estimate: str = "", affected_people: int | None = None,
+                  reported_by: str = "") -> dict:
     """Open a privacy-incident record; the Art. 33 clock starts at discovery
     (= now). Whether the incident is a notifiable breach stays a HUMAN
     decision recorded via :func:`decide_incident_notification` -- the
@@ -3331,6 +3332,11 @@ def open_incident(title: str, *, severity: str = "medium",
     severity = (severity or "medium").strip().lower()
     if severity not in INCIDENT_SEVERITIES:
         raise ValueError(f"severity must be one of {INCIDENT_SEVERITIES}")
+    if affected_people is not None and (
+        not isinstance(affected_people, int) or isinstance(affected_people, bool)
+        or affected_people < 0
+    ):
+        raise ValueError("affected_people must be a non-negative integer or None")
     now = time.time()
     record = {
         "id": _INCIDENT.new_id(),
@@ -3338,6 +3344,7 @@ def open_incident(title: str, *, severity: str = "medium",
         "description": (description or "").strip()[:4000],
         "categories": (categories or "").strip()[:500],
         "affected_estimate": (affected_estimate or "").strip()[:100],
+        "affected_people": affected_people,
         "severity": severity,
         "reported_by": _actor_label(reported_by),
         "created_at": now,
@@ -3351,6 +3358,28 @@ def open_incident(title: str, *, severity: str = "medium",
     saved = _INCIDENT.save(record, expected_revision=0)
     saved = _audit_mutation(_INCIDENT, "incident", saved)
     _emit_record_event("incident.opened", "incident", saved)
+    return saved
+
+
+def set_incident_affected_people(incident_id: str, affected_people: int | None,
+                                 *, updated_by: str = "") -> dict | None:
+    """Record a revised best estimate without erasing the reporter's context."""
+    if affected_people is not None and (
+        not isinstance(affected_people, int) or isinstance(affected_people, bool)
+        or affected_people < 0
+    ):
+        raise ValueError("affected_people must be a non-negative integer or None")
+
+    def _mut(r: dict) -> None:
+        if r.get("status") == "closed":
+            raise RecordConflict("closed privacy incident cannot be changed")
+        r["affected_people"] = affected_people
+        _queue_audit(r, "affected_people_updated", updated_by)
+
+    saved = _INCIDENT.update(incident_id, _mut)
+    if saved is not None:
+        saved = _audit_mutation(_INCIDENT, "incident", saved)
+        _emit_record_event("incident.affected_people_updated", "incident", saved)
     return saved
 
 

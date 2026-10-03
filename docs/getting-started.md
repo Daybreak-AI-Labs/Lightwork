@@ -2,14 +2,11 @@
 
 ## Install
 
-Open the [GitHub Releases page](https://github.com/Daybreak-AI-Labs/Lightwork/releases)
-and choose a published release that actually includes the Lightwork binary for
-your operating system. Download the binary, its `.sig` and `.pem` files, and the
-release checksum manifest. Verify the checksum and exact-tag Sigstore identity
-before running it, using the verification instructions supplied with that
-release. A tag without an operating-system binary is
-not an installable customer release. Ask for a customer package if yours is
-missing.
+Request a [customer package](mailto:chris@daybreakailabs.com?subject=Lightwork%20customer%20package)
+for your operating system. It should include the Lightwork binary, its `.sig`
+and `.pem` files, and a checksum manifest. Verify the checksum and exact-tag
+Sigstore identity before running it, using the instructions supplied with that
+package. A source tag alone is not an installable customer release.
 
 Run the verified binary with its `dashboard` command and open the local address
 it prints. The current filenames are `maverick-windows-x86_64.exe` on Windows,

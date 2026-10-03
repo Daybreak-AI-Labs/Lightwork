@@ -285,7 +285,8 @@ TypeScript helpers for the screen-then-act, report-after loop.
    advisory because the external runtime still owns the effect. Use
    `/api/v1/external/execute` for a Lightwork-enforced connector effect.
 
-Paste-in packaging (deployable Apex invocable classes + the exact Setup clicks): [`examples/external-agents/agentforce/`](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/examples/external-agents/agentforce/).
+Paste-in packaging (deployable Apex invocable classes and Setup instructions)
+is in `examples/external-agents/agentforce/` in the licensed package.
 
 ### AWS Bedrock Agents
 
@@ -301,7 +302,8 @@ Paste-in packaging (deployable Apex invocable classes + the exact Setup clicks):
    the run at completion.
 4. Rotation = mint a new rest token and update the Secrets Manager value.
 
-Paste-in packaging (SAM template + forwarder Lambda + action-group schema): [`examples/external-agents/bedrock/`](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/examples/external-agents/bedrock/).
+Paste-in packaging (SAM template, forwarder Lambda, and action-group schema)
+is in `examples/external-agents/bedrock/` in the licensed package.
 
 ### OpenAI / LangChain
 

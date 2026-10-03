@@ -312,12 +312,27 @@ _PROVIDER_DEFAULT_ENDPOINTS = {
     "deepseek": "https://api.deepseek.com/v1/models",
     "xai": "https://api.x.ai/v1/models",
 }
+_SELF_HOSTED_PROVIDERS = frozenset({"ollama", "vllm", "tgi", "openai_compatible"})
 
 
 def _append_endpoint(base_url: str, suffix: str) -> str:
     parsed = urlsplit(base_url.strip())
     path = parsed.path.rstrip("/") + "/" + suffix.lstrip("/")
     return urlunsplit((parsed.scheme, parsed.netloc, path, "", ""))
+
+
+def _valid_self_hosted_address(base_url: str) -> bool:
+    try:
+        parsed = urlsplit(base_url)
+        _ = parsed.port  # reject malformed ports before making a request
+    except ValueError:
+        return False
+    return (
+        parsed.scheme in {"http", "https"} and bool(parsed.hostname)
+        and parsed.username is None and parsed.password is None
+        and not parsed.query and not parsed.fragment
+        and not any(char.isspace() for char in base_url)
+    )
 
 
 def probe_provider(provider: str, provider_config: dict[str, Any]) -> dict[str, Any]:
@@ -371,7 +386,8 @@ def probe_provider(provider: str, provider_config: dict[str, Any]) -> dict[str, 
             },
         }
     if name == "ollama":
-        endpoint = _append_endpoint(base_url or "http://127.0.0.1:11434", "api/tags")
+        base_url = base_url or "http://127.0.0.1:11434"
+        suffix = "api/tags"
         headers: dict[str, str] = {}
     elif name in {"vllm", "tgi", "openai_compatible"}:
         if not base_url:
@@ -390,7 +406,7 @@ def probe_provider(provider: str, provider_config: dict[str, Any]) -> dict[str, 
                 "detail": f"no effective {name} base URL is configured",
                 "evidence": {"kind": "live_status_probe"},
             }
-        endpoint = _append_endpoint(base_url, "models")
+        suffix = "models"
         headers = {"Authorization": f"Bearer {key}"} if key else {}
     else:
         endpoint = (
@@ -422,20 +438,32 @@ def probe_provider(provider: str, provider_config: dict[str, Any]) -> dict[str, 
             headers = {"x-goog-api-key": key}
         else:
             headers = {"Authorization": f"Bearer {key}"}
+    if name in _SELF_HOSTED_PROVIDERS:
+        if not _valid_self_hosted_address(base_url):
+            return {
+                "verified": False,
+                "detail": "provider address must be an HTTP or HTTPS URL without sign-in details",
+                "evidence": {"kind": "live_status_probe"},
+            }
+        endpoint = _append_endpoint(base_url, suffix)
     try:
-        parsed_host = (urlsplit(endpoint).hostname or "").strip()
-        if name == "ollama" and parsed_host in {"127.0.0.1", "::1"}:
-            # Exact loopback literals only: no hostname, RFC1918, link-local,
-            # or process-global private-host exception is introduced.
-            with _ssrf.allow_private_hosts((parsed_host,)):
-                response = _ssrf.safe_get(endpoint, headers=headers, timeout=8.0)
+        if name in _SELF_HOSTED_PROVIDERS:
+            import httpx
+
+            # This address is the effective operator-configured model endpoint
+            # (or Ollama's built-in loopback default), as with runtime clients.
+            # Never follow a response to a different, unconfigured host.
+            response = httpx.get(
+                endpoint, headers=headers, timeout=8.0,
+                follow_redirects=False, trust_env=False,
+            )
         else:
             response = _ssrf.safe_get(endpoint, headers=headers, timeout=8.0)
     except _ssrf.BlockedHost:
         return {
             "verified": False,
             "detail": "provider endpoint is blocked by the egress policy",
-            "evidence": {"kind": "live_status_probe"},
+            "evidence": {"kind": "live_status_probe", "blocked_by_egress_policy": True},
         }
     except Exception as exc:
         return {

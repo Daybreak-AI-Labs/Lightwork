@@ -4,8 +4,8 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 from types import SimpleNamespace
-from urllib.parse import urlsplit
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
@@ -121,26 +121,53 @@ def test_provider_unknown_then_fingerprint_bound_live_verified(monkeypatch):
 def test_provider_probe_truth_for_loopback_runtime_and_unsupported(monkeypatch):
     from maverick import config, providers
     from maverick.tools import _ssrf
-    from maverick_dashboard import integration_readiness
+    from maverick_dashboard import integration_readiness, settings_store
 
-    def scoped_safe_get(url: str, **_kwargs):
-        host = urlsplit(url).hostname or ""
-        assert _ssrf.resolve_pinned_ip(host) == "127.0.0.1"
+    requests = []
+
+    def configured_get(url: str, **kwargs):
+        requests.append((url, kwargs))
+        assert kwargs["follow_redirects"] is False
+        assert kwargs["trust_env"] is False
         return SimpleNamespace(status_code=200)
 
     with pytest.raises(_ssrf.BlockedHost):
         _ssrf.resolve_pinned_ip("127.0.0.1")
-    monkeypatch.setattr(_ssrf, "safe_get", scoped_safe_get)
-    ollama = integration_readiness.probe_provider("ollama", {})
-    assert ollama["verified"] is True
+    monkeypatch.setattr(httpx, "get", configured_get)
+    for name, base_url, suffix in (
+        ("ollama", "http://localhost:11434", "api/tags"),
+        ("vllm", "http://127.0.0.1:9815/v1", "models"),
+        ("tgi", "http://10.0.0.7:8080/v1", "models"),
+        ("openai_compatible", "http://192.168.1.5:1234/v1", "models"),
+    ):
+        result = integration_readiness.probe_provider(name, {"base_url": base_url})
+        assert result["verified"] is True
+        assert requests[-1][0] == base_url + "/" + suffix
+    assert integration_readiness.probe_provider("ollama", {})["verified"] is True
     with pytest.raises(_ssrf.BlockedHost):
         _ssrf.resolve_pinned_ip("127.0.0.1")
+    for invalid in ("file:///tmp/model", "http://user:pass@127.0.0.1/v1", "http://[invalid"):
+        rejected = integration_readiness.probe_provider("vllm", {"base_url": invalid})
+        assert rejected["verified"] is False
+        assert "address must be an HTTP or HTTPS URL" in rejected["detail"]
+    assert len(requests) == 5
 
-    private = integration_readiness.probe_provider(
-        "ollama", {"base_url": "http://10.0.0.7:11434"}
+    # Hosted providers still use the pinned public-only fetch policy.
+    hosted = integration_readiness.probe_provider(
+        "openai", {"api_key": "test-key", "base_url": "http://10.0.0.7/v1"}
     )
-    assert private["verified"] is False
-    assert "egress policy" in private["detail"]
+    assert hosted["verified"] is False
+    assert hosted["evidence"]["blocked_by_egress_policy"] is True
+    assert len(requests) == 5
+    settings_store.set_provider("openai", api_key="test-key", base_url="http://10.0.0.7/v1")
+    monkeypatch.setattr(providers, "missing_sdks", lambda _specs: [])
+    integration_readiness.record(
+        "provider", "openai", config.get_provider_config("openai"),
+        verified=False, detail=hosted["detail"], evidence=hosted["evidence"],
+    )
+    page = _client().get("/settings")
+    assert "Blocked by outbound-connection rules" in page.text
+    assert "Some details are missing or wrong" not in page.text
 
     material = {"api_key": "test-bedrock-key"}  # pragma: allowlist secret
     unsupported = integration_readiness.probe_provider("bedrock", material)
@@ -186,6 +213,45 @@ def test_provider_probe_truth_for_loopback_runtime_and_unsupported(monkeypatch):
     assert cli_readiness["runtime"]["status"] == "passed"
     assert cli_readiness["live"]["status"] == "unknown"
     assert cli_readiness["state"] == "runtime_passed_live_unknown"
+
+
+def test_self_hosted_probe_reaches_loopback_without_following_a_redirect():
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    from threading import Thread
+
+    from maverick_dashboard import integration_readiness
+
+    requests = []
+    redirect = [False]
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            requests.append(self.path)
+            if self.path == "/v1/models" and redirect[0]:
+                self.send_response(302)
+                self.send_header("Location", "/secret")
+            else:
+                self.send_response(200)
+            self.end_headers()
+
+        def log_message(self, *_args):
+            pass
+
+    with ThreadingHTTPServer(("127.0.0.1", 0), Handler) as server:
+        worker = Thread(target=server.serve_forever, daemon=True)
+        worker.start()
+        try:
+            material = {"base_url": f"http://127.0.0.1:{server.server_port}/v1"}
+            passed = integration_readiness.probe_provider("vllm", material)
+            redirect[0] = True
+            result = integration_readiness.probe_provider("vllm", material)
+        finally:
+            server.shutdown()
+            worker.join(timeout=5)
+    assert passed["verified"] is True
+    assert result["verified"] is False
+    assert result["evidence"]["http_status"] == 302
+    assert requests == ["/v1/models", "/v1/models"]
 
 
 def test_channel_failure_and_mcp_unknown_then_failed(_isolate: Path):

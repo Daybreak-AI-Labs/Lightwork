@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 from types import SimpleNamespace
 
@@ -180,18 +181,10 @@ class TestWrap:
         assert token not in out
         assert "REDACTED:lightwork_agent_token" in out
 
-    def test_existing_record_write_requires_atomic_remote_revision(
+    def test_existing_record_write_without_revision_still_requires_human(
         self, monkeypatch,
     ):
-        import maverick.safety.consent as consent
-
-        monkeypatch.setattr(
-            consent,
-            "require_consent",
-            lambda *_args, **_kwargs: pytest.fail(
-                "approval must not start without a revision precondition"
-            ),
-        )
+        monkeypatch.delenv("MAVERICK_GOVERNED_APPROVER", raising=False)
         calls = []
 
         out = wrap_connector_tool(_fake_tool(calls)).fn({
@@ -199,8 +192,28 @@ class TestWrap:
         })
 
         assert out.startswith("REFUSED (governed)")
-        assert "ETag/revision is required" in out
+        assert "approval was denied" in out
         assert calls == []
+
+    def test_approved_existing_record_write_explains_missing_revision(self, monkeypatch):
+        import maverick.safety.consent as consent
+
+        seen = []
+        monkeypatch.setattr(
+            consent, "require_consent",
+            lambda *_args, **kwargs: (
+                seen.append(kwargs) or SimpleNamespace(
+                    granted=True, source="dashboard", actor="user:reviewer",
+                )
+            ),
+        )
+        calls = []
+        out = wrap_connector_tool(_fake_tool(calls)).fn({
+            "op": "patch", "path": "/accounts/7", "body": {"role": "admin"},
+        })
+        assert "DID patch /accounts/7" in out
+        assert len(calls) == 1 and calls[0]["confirm"] is True
+        assert "no remote revision check" in str(seen).lower()
 
     def test_wildcard_precondition_cannot_authorize_existing_record_write(
         self, monkeypatch,
@@ -282,14 +295,13 @@ class TestWrap:
         assert "REFUSED (governed)" in out
         assert calls == []
 
-    def test_graphql_mutation_without_conditional_contract_fails_closed(self, monkeypatch):
+    def test_graphql_mutation_without_conditional_contract_needs_human(self, monkeypatch):
         _grant_human(monkeypatch)
         calls = []
         wrapped = wrap_connector_tool(_graphql_tool(calls))
         out = wrapped.fn({"op": "query", "query": "mutation { create_item { id } }"})
-        assert "REFUSED (governed)" in out
-        assert "revision/ETag contract" in out
-        assert calls == []
+        assert "GQL query confirm=True" in out
+        assert len(calls) == 1 and calls[0]["confirm"] is True
 
 
 class TestApply:
@@ -576,8 +588,8 @@ class TestEnterpriseBoundary:
         calls = []
         tool = _op_tool(name, [operation], calls)
         wrapped = wrap_connector_tool(tool)
-        assert "only a constant SELECT 1 probe" in wrapped.description
-        assert "Customer table reads and all other SQL are refused" in wrapped.description
+        assert "constant SELECT 1 connection check" in wrapped.description
+        assert "require a fresh human review" in wrapped.description
         assert "read runs" not in wrapped.description
         assert "simple reads run" not in wrapped.description
 
@@ -616,6 +628,46 @@ class TestEnterpriseBoundary:
         result = json.loads(out)
         assert result["rows"] == [[1]]
         assert result["transaction_status"] == "read_only"
+
+    def test_customer_sql_query_reaches_connector_after_human_review(
+        self, monkeypatch, tmp_path,
+    ):
+        import sqlite3
+
+        from maverick.tools.database_tool import database_tool
+
+        _grant_human(monkeypatch)
+        database = tmp_path / "customers.db"
+        with sqlite3.connect(database) as connection:
+            connection.execute("CREATE TABLE customers (name TEXT)")
+            connection.execute("INSERT INTO customers VALUES ('Acme')")
+        monkeypatch.setenv("DATABASE_URL", f"sqlite:///{database.as_posix()}")
+        reg = ToolRegistry()
+        reg.register(wrap_connector_tool(database_tool()))
+        out = asyncio.run(reg.run("database", {
+            "op": "query", "sql": "SELECT name FROM customers",
+            "response_format": "json",
+        }))
+        assert json.loads(out)["rows"] == [["Acme"]]
+
+    def test_no_revision_rest_write_requires_bound_human_decision(self, monkeypatch):
+        from maverick.tools._rest_connector import _rest_validate
+
+        def rest_call(args):
+            validated = _rest_validate(
+                args, name="acme", read_only=False, read_prefixes=(),
+                read_path_allowed=lambda _path: True, norm=lambda path: path,
+            )
+            return "accepted" if validated == ("patch", "/accounts/7") else str(validated)
+
+        tool = Tool(
+            name="acme", description="Acme REST", input_schema=_SCHEMA, fn=rest_call,
+        )
+        args = {"op": "patch", "path": "/accounts/7", "body": {"role": "admin"}}
+        assert "requires the current remote ETag" in rest_call({**args, "confirm": True})
+        _grant_human(monkeypatch)
+        assert wrap_connector_tool(tool).fn(args) == "accepted"
+        assert "requires the current remote ETag" in rest_call({**args, "confirm": True})
 
     def test_lambda_dryrun_is_non_effecting_but_live_invoke_is_governed(
         self, monkeypatch,
@@ -726,13 +778,106 @@ class TestEnterpriseBoundary:
         assert consent_calls[0][1]["consult_ledger"] is False
         assert consent_calls[0][1]["scope"].startswith("/accounts#sha256=")
         assert "request_sha256=" in consent_calls[0][1]["detail"]
-        assert '"body": {"n": 1}' in consent_calls[0][1]["detail"]
+        assert '"body":{"n":1}' in " ".join(
+            consent_calls[0][1]["approval_card"]["parameters"]["summary"]
+        )
         assert [entry[1]["phase"] for entry in receipts] == ["PREPARE", "COMMIT"]
         assert receipts[0][1]["strict"] is True
         assert receipts[0][1]["transaction_id"] == receipts[1][1]["transaction_id"]
         assert receipts[0][1]["actor"] == "user:alice"
         assert receipts[0][1]["approver"] == "user:reviewer"
         assert receipts[0][0][0] == 17
+
+    def test_approval_card_redacts_nested_sensitive_values(self, monkeypatch):
+        import maverick.governed_actions as actions
+        import maverick.safety.consent as consent
+
+        cards = []
+
+        def _consent(*_args, **kwargs):
+            cards.append(kwargs["approval_card"])
+            return SimpleNamespace(
+                granted=True, source="dashboard", actor="user:reviewer",
+            )
+
+        monkeypatch.setattr(consent, "require_consent", _consent)
+        monkeypatch.setattr(actions, "record_tool_lineage", lambda *a, **k: True)
+        calls = []
+        request = {
+            "op": "post", "path": "/accounts",
+            "body": {
+                "role": "viewer",
+                "credentials": {
+                    "username": "hidden-user",
+                    "nested": [{"apiKey": "hidden-api-key", "token": "hidden-token"}],
+                },
+                "access_key": "hidden-access-key",
+                "private_key": "hidden-private-key",
+                "client_secret": "hidden-client-secret",
+                "client_key": "hidden-client-key",
+                "connectionString": "hidden-connection-string",
+                "dsn": "hidden-dsn",
+                "password": "hidden-password",
+                "certificate": "hidden-certificate",
+            },
+            "headers": {
+                "Authorization": "hidden-authorization",
+                "Cookie": "hidden-cookie",
+                "auth": "hidden-auth",
+            },
+        }
+
+        out = wrap_connector_tool(_fake_tool(calls), enterprise=True).fn(request)
+
+        assert out.startswith("DID post")
+        assert cards and calls
+        card = cards[0]
+        summary = card["parameters"]["summary"]
+        assert all(len(part) <= 500 for part in summary)
+        displayed = "".join(
+            part.split(": ", 1)[1]
+            for part in summary if part.startswith("Request part ")
+        )
+        shown = json.loads(displayed)
+        marker = "[REDACTED:sensitive field]"
+        assert shown["body"]["role"] == "viewer"
+        assert shown["body"]["credentials"] == {
+            "username": marker,
+            "nested": [{"apiKey": marker, "token": marker}],
+        }
+        for key in (
+            "access_key", "private_key", "client_secret", "client_key",
+            "connectionString", "dsn", "password", "certificate",
+        ):
+            assert shown["body"][key] == marker
+        assert shown["headers"] == {
+            "Authorization": marker, "Cookie": marker, "auth": marker,
+        }
+        persisted = json.dumps(card)
+        assert "hidden-" not in persisted
+        frozen = {**request, "confirm": True}
+        request_sha256 = hashlib.sha256(
+            json.dumps(frozen, sort_keys=True, separators=(",", ":"), default=str).encode(),
+        ).hexdigest()
+        assert f"#sha256={request_sha256}" in card["target"]["label"]
+
+    def test_overlong_approval_request_refuses_before_consent(self, monkeypatch):
+        import maverick.safety.consent as consent
+
+        consent_calls = []
+        monkeypatch.setattr(
+            consent, "require_consent", lambda *a, **k: consent_calls.append((a, k)),
+        )
+        calls = []
+
+        out = wrap_connector_tool(_fake_tool(calls), enterprise=True).fn({
+            "op": "post", "path": "/accounts", "body": {"note": "x" * 8000},
+        })
+
+        assert out.startswith("REFUSED (governed)")
+        assert "full connector request is too long to review" in out
+        assert consent_calls == []
+        assert calls == []
 
     def test_enterprise_refuses_an_unattributed_dashboard_approval(
         self, monkeypatch,

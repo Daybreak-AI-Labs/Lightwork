@@ -55,3 +55,5 @@ CONTRIBUTING.md
 CLA.md
 CODE_OF_CONDUCT.md
 SECURITY.md|security-policy.md
+@repo/LICENSE|license.md
+@repo/TRADEMARK.md|trademark.md

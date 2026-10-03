@@ -1150,6 +1150,74 @@ def stock_workspace(web, monkeypatch):
     return service, current, row, tickets, request
 
 
+@pytest.mark.parametrize("revoke_reviewer", [False, True])
+def test_distinct_authorized_reviewer_can_approve_and_preparer_can_execute(
+    stock_workspace, web, monkeypatch, revoke_reviewer,
+):
+    from maverick_dashboard import auth, rbac, workspace_tenants
+    from maverick_dashboard import vendor_onboarding_composition as composition
+
+    client, _, _, tickets = web
+    service, preparer, _, _, _ = stock_workspace
+    reviewer = "user:second-reviewer"
+    rbac.set_role(reviewer, "operator")
+    rbac.set_tenant_role(preparer.tenant, reviewer, "viewer")
+    workspace_tenants.set_selection(reviewer, preparer.tenant)
+
+    def principal(request):
+        return "user:" + request.headers.get("X-Test-User", "reviewer")
+    monkeypatch.setattr(auth, "caller_principal", principal)
+    monkeypatch.setattr(composition, "caller_principal", principal)
+
+    def binding(request):
+        result = composition.bind_request(request)
+        result.service.documents = service.documents
+        result.service.tickets = tickets
+        result.service.clock = service.clock
+        return result
+
+    monkeypatch.setattr(app.state, "vendor_onboarding_binding_factory", binding)
+    row = _step(client, _step(client, _intake(client), "collect-evidence"), "assess")
+    row = _step(client, row, "review", decision="approved", rationale="Reviewed evidence")
+    row = _step(client, row, "prepare-action")
+    approval_body = {
+        "expected_revision": row["revision"], "confirm": True,
+        "approval_binding_sha256": row["operation"]["approval_card"]["binding_sha256"],
+    }
+    endpoint = f"{BASE}/{row['id']}/approve-action"
+    denied = client.post(endpoint, json=approval_body, headers={"X-Test-User": "second-reviewer"})
+    assert denied.status_code == 403
+    assert client.get(f"{BASE}/{row['id']}").json()["operation"]["state"] == "prepared"
+
+    rbac.set_tenant_role(preparer.tenant, reviewer, "operator")
+    approved = client.post(endpoint, json=approval_body, headers={"X-Test-User": "second-reviewer"})
+    assert approved.status_code == 200, approved.text
+    operation = approved.json()["operation"]
+    assert operation["state"] == "approved"
+    assert operation["context"]["actor"] == preparer.actor
+    assert operation["approval"]["reviewer"] == reviewer
+    assert operation["approval"]["reviewer_context"]["actor"] == reviewer
+
+    if revoke_reviewer:
+        rbac.remove_tenant_role(preparer.tenant, reviewer)
+        rbac.set_role(reviewer, "viewer")
+    executed = client.post(f"{BASE}/{row['id']}/execute", json={
+        "expected_revision": approved.json()["revision"], "confirm": True,
+    })
+    if revoke_reviewer:
+        assert executed.status_code == 409
+        assert executed.json()["detail"]["code"] == "approval_authority_changed"
+        rbac.set_tenant_role(preparer.tenant, reviewer, "operator")
+        retired = client.get(f"{BASE}/{row['id']}").json()
+        assert retired["operation"] is None
+        assert retired["operation_history"][-1]["invalidated_reason"] == "approval_authority_changed"
+        assert tickets.creates == 0
+        return
+    assert executed.status_code == 200, executed.text
+    assert executed.json()["operation"]["state"] == "verified"
+    assert tickets.creates == 1
+
+
 @pytest.mark.parametrize("timing", ["before_claim", "after_claim"])
 def test_stock_worker_rechecks_revoked_membership_before_effect(stock_workspace, monkeypatch, timing):
     from maverick_dashboard import rbac

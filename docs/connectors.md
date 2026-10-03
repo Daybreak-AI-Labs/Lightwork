@@ -10,8 +10,12 @@ endpoint/version of the upstream service.
   a saved connection authorized for that principal; they do not borrow the
   operator's process credentials. Dedicated integrations may have their own
   documented authentication modes.
-- **Writes are confirm-gated.** Any state-changing call (POST/PUT/PATCH/DELETE,
-  GraphQL mutations, non-read SQL) is a dry run until you pass `confirm=true`.
+- **External changes require a person.** A connector change is presented in
+  Approvals with every request field and non-secret value, plus a digest binding
+  the exact request. It is sent once after a fresh decision and a durable
+  preparation record. The agent's own `confirm=true` cannot approve it.
+  SQL beyond a constant `SELECT 1` check also takes this path because a query
+  can invoke effects that a generic SQL parser cannot prove safe.
 - **Fail closed, fail loud.** Missing config or an API error returns an
   `ERROR:`-prefixed message. A completed HTTP request alone does not establish a
   completed business operation.
@@ -19,8 +23,12 @@ endpoint/version of the upstream service.
 For the generic REST/GraphQL factories, small successful responses retain the
 legacy JSON body. Set `response_format="metadata"` to receive `status_code`,
 `body`, `truncated`, and the allowlisted `etag`, `last-modified`, and `retry-after`
-headers. Read the remote ETag before a conditional PUT/PATCH/DELETE and pass it as
-`if_match`; review the current record again after a conflict.
+headers. For PUT/PATCH/DELETE, pass the current remote ETag as `if_match` when
+available. If you omit it, Lightwork cannot verify whether the service offers
+an ETag. A signed-in reviewer can approve the exact request after an explicit
+warning that newer remote work could be overwritten. A direct connector call
+without an ETag or this fresh approval is refused. Review the current record
+again after a conflict.
 
 HTTP 202 returns `pending=true`; obtain a later result before claiming completion.
 Redirects and conditional 3xx responses are refused. Responses exceeding the

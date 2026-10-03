@@ -218,10 +218,11 @@ def test_unreadable_configuration_is_a_plain_not_ready_verdict(workspace, monkey
 
 
 @pytest.mark.parametrize("detail, expected", [
+    ("provider readiness request returned HTTP 302", "redirected the test"),
     ("provider readiness request returned HTTP 401", "did not accept the key"),
     ("provider readiness request returned HTTP 429", "reached its limit"),
     ("provider readiness request returned HTTP 503", "problem on its side"),
-    ("provider endpoint is blocked by the egress policy", "organization's rules"),
+    ("provider endpoint is blocked by the egress policy", "outbound-connection rules"),
     ("provider probe failed (ConnectError)", "could not reach the service"),
     ("openai SDK not installed. From the reviewed checkout run: pip", "Software this service needs"),
     ("configured Codex CLI binary was not found", "not installed"),

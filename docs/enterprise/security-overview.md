@@ -205,5 +205,5 @@ to hold a second factor.
   refused rather than skipped. Changes are audited like every other setting.
 
 > Licensing: Lightwork is proprietary, commercially licensed software
-> ([`LICENSE`](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/LICENSE)).
+> ([`LICENSE`](https://daybreak-ai-labs.github.io/Lightwork/license/)).
 > Contact us for evaluation or enterprise access.

@@ -4,8 +4,8 @@ Four deployment targets, all driven by the same `maverick init` wizard.
 
 ## Desktop
 
-For most users, obtain the signed binary for the target operating system from
-an [asset-bearing release](https://github.com/Daybreak-AI-Labs/Lightwork/releases).
+For most users, request the signed binary for the target operating system in a
+[customer package](mailto:chris@daybreakailabs.com?subject=Lightwork%20customer%20package).
 Verify its checksum and exact-tag signature, run its `dashboard` command, and
 complete setup in the local application. A tag without that binary is not a
 customer installation path. The eight-package PyPI cohort remains unpublished;
@@ -36,9 +36,8 @@ does not replicate these locators. Include the directory in application-state
 backups. Expired locators are pruned in bounded batches when new links are made.
 
 **Artifact status:** a successful tagged release is configured to publish three single-file
-PyInstaller binaries, checksums, SBOMs, and Sigstore material; check the
-[release assets](https://github.com/Daybreak-AI-Labs/Lightwork/releases) for
-the exact operating-system file before relying on one. The engineering
+PyInstaller binaries, checksums, SBOMs, and Sigstore material; ask for the
+exact operating-system file and verification material before relying on one. The engineering
 bootstrap packages and the Windows customer package candidate
 are separate paths. The customer candidate includes the frozen runtime and
 offline WebView2 installer, but still requires publisher and clean-machine
@@ -49,7 +48,9 @@ installation is not qualified customer delivery.
 
 ## Docker
 
-Isolated, reproducible, easy to nuke.
+Container deployments require licensed access to the Lightwork image registry.
+Authenticate with the credentials supplied for your deployment and use the
+approved, pinned image version in place of `latest` in this example.
 
 ```bash
 docker run -it --rm \
@@ -89,13 +90,11 @@ The generated service uses the configured sandbox workdir and validates that
 the service account can use it. It does not assume that every setup selected
 `~/maverick-workspace`.
 
-```bash
-LIGHTWORK_REF=<lowercase-full-40-character-commit-sha>
-curl -fsSLo /tmp/lightwork-install.sh \
-  "https://raw.githubusercontent.com/Daybreak-AI-Labs/Lightwork/${LIGHTWORK_REF}/deploy/vps/install.sh"
-sudo MAVERICK_REF="$LIGHTWORK_REF" bash /tmp/lightwork-install.sh
-sudo systemctl enable --now maverick
-```
+The VPS installer is part of licensed deployment materials, not a public
+download. [Request a customer package](mailto:chris@daybreakailabs.com?subject=Lightwork%20VPS%20deployment),
+verify its included artifacts, and follow its version-specific installation
+instructions. Confirm the generated service and reverse proxy before exposing
+the dashboard to users.
 
 ### Security-sensitive world-schema upgrades
 

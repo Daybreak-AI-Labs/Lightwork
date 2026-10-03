@@ -99,9 +99,28 @@ def test_thresholds_annotate_instead_of_dropping():
     row = plan["obligations"][0]
     assert row["authority_below_threshold"] is True
     assert "250" in row["threshold_note"]
-    unknown_count = bn.assess_breach(
+    unknown_count = bn.assess_breach(["us_tx"], discovered_at=_TUESDAY)
+    unknown_row = unknown_count["obligations"][0]
+    assert unknown_count["subjects_affected"] is None
+    assert unknown_row["authority_below_threshold"] is None
+    assert "count not provided" in unknown_row["threshold_note"]
+    zero_count = bn.assess_breach(
         ["us_tx"], subjects_affected=0, discovered_at=_TUESDAY)
-    assert unknown_count["obligations"][0]["authority_below_threshold"] is False
+    assert zero_count["obligations"][0]["authority_below_threshold"] is True
+
+
+def test_cli_omitted_count_stays_unknown():
+    from click.testing import CliRunner
+    from maverick.cli import main
+
+    runner = CliRunner()
+    unknown = runner.invoke(main, ["breach", "plan", "--jurisdiction", "us_ca"])
+    assert unknown.exit_code == 0, unknown.output
+    assert "count not provided" in unknown.output
+    zero = runner.invoke(main, ["breach", "plan", "--jurisdiction", "us_ca",
+                                "--subjects", "0"])
+    assert zero.exit_code == 0, zero.output
+    assert "Reported subject count (0) is below" in zero.output
 
 
 def test_qualitative_standards_carry_the_statutes_words():

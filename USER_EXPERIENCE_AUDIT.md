@@ -952,6 +952,11 @@ no images without alt, axe violations limited to nine distinct rules).
 
 #### UX-053 · P1 · Bug · Breach-notification plan reads '1.2k customers' as 12 people and tells the officer the incident is below California's and Japan's reporting thresholds
 
+- **Current branch (2026-10-03):** The incident form and API accept a numeric
+  affected-person count. Legacy free text is parsed only when unambiguous;
+  otherwise the count remains unknown and the notification plan does not assert
+  a threshold outcome. Focused privacy, notification, and UI checks passed.
+
 - **Who / where:** compliance · `GET /api/v1/privacy/incidents/{id}/notification-plan (Privacy workspace incident page)`
 - **User impact:** A privacy officer relying on the plan during the 72-hour clock can be told a 1,200-person breach is below the regulator's threshold (under-notification risk) or that a 300-person breach is over it. Ranges like '1,000-5,000' become 10,005,000. The input box gives no hint that only a plain integer is understood.
 - **Evidence (reproduced):**
@@ -963,6 +968,13 @@ no images without alt, axe violations limited to nine distinct rules).
 - Source: C5c-005
 
 #### UX-054 · P1 · Bug · 'Test connection' always fails for self-hosted models on localhost/private network ('blocked by the egress policy') even though tasks and model lists use the same address
+
+- **Current branch (2026-10-03):** Connection tests for configured Ollama,
+  vLLM, TGI, and OpenAI-compatible self-hosted addresses can reach loopback or
+  LAN services with redirects and ambient proxy settings disabled. Hosted
+  providers retain the public-host rule. The page distinguishes a blocked
+  outbound connection from a failed service test. Local probe checks passed;
+  a customer's actual model service remains unverified.
 
 - **Who / where:** workspace admin, evaluator, IT/security · `/settings → Test connection (POST /settings/providers/test)`
 - **User impact:** The standard on-prem/air-gapped setup (vLLM/Ollama on the same machine or LAN) can never pass the connection test; the page tells the admin their details are wrong and to re-save, sending them in circles, while real work actually succeeds.
@@ -978,6 +990,15 @@ no images without alt, axe violations limited to nine distinct rules).
 
 #### UX-055 · P1 · Bug · Every 'contact us', LICENSE, source and 'edit this page' link on the live public docs site points into the private GitHub repo and returns 404
 
+- **Current branch (2026-10-03):** The public MkDocs overlay removes private
+  repository, source-edit, and social links; license and trademark pages are
+  staged explicitly from their governing repository documents; public contact
+  links use the Daybreak Labs address already used by the company site. Public
+  guides no longer send readers to private release, example, or source pages.
+  A local strict public-site build passed, generated both legal pages, and had
+  zero links to the private Lightwork repository in rendered HTML. Publication
+  and a live-site click-through still depend on the docs deployment.
+
 - **Who / where:** evaluator, IT/security, compliance · `https://daybreak-ai-labs.github.io/Lightwork/ (all pages)`
 - **User impact:** A prospect who reads the public docs and clicks the only call to action ('contact us for evaluation') lands on a GitHub 404; they also cannot read the licence the docs tell them governs use. The evaluation journey dead-ends on the first page.
 - **Evidence (reproduced):**
@@ -989,6 +1010,12 @@ no images without alt, axe violations limited to nine distinct rules).
 - Source: C7-026
 
 #### UX-056 · P1 · Bug · AI vendor onboarding's irreversible Jira action can only be approved by the same person who prepared it; a second reviewer's approval invalidates it
+
+- **Current branch (2026-10-03):** A distinct authorized reviewer can approve
+  the prepared Jira action. The service retains that reviewer's authority
+  binding and checks it again before dispatch, including role and workspace
+  changes. Two-principal API and revocation checks passed; live Jira dispatch
+  still requires a connected customer service.
 
 - **Who / where:** compliance, IT/security, workspace admin · `POST /api/v1/vendor-onboarding/cases/{id}/actions/*/approve`
 - **User impact:** The only way to create the vendor's Jira task is self-approval, defeating the separation of duties a risk officer expects for an irreversible external action; a real second approver sees the action silently reset for re-review.
@@ -1004,6 +1031,17 @@ no images without alt, axe violations limited to nine distinct rules).
 - Source: U6-019, C5c-046
 
 #### UX-057 · P1 · Bug · Database connectors refuse every query — even SELECT 1 — and many ordinary connector actions (HubSpot contact_create, Trello card_create, Salesforce update, Jira transition …) are refused outright
+
+- **Current branch (2026-10-03):** A constant `SELECT 1` still runs directly.
+  Customer SQL, GraphQL mutations, and connector changes without an atomic
+  revision contract now reach the existing fresh human approval and durable
+  prepare/commit path. The review warns when no ETag was supplied, without
+  assuming the service lacks one, and generic REST updates without `if_match` are
+  accepted only inside that exact approved request; direct calls still refuse.
+  A real SQLite customer-table read through the governed registry passed with
+  human approval. This does not make all SQL safely read-only or qualify every
+  provider and connector operation; live customer endpoints, scopes, result
+  readback, and the full UI approval journey remain to be validated.
 
 - **Who / where:** end user, workspace admin, evaluator, developer · `tools database, snowflake, bigquery, oracle, databricks and ~40 bespoke connector write ops; all GraphQL mutations; REST PUT/PATCH/DELETE without if_match`
 - **User impact:** A customer connects their Postgres or Snowflake warehouse and asks a simple question; the assistant cannot run any query and reports an ETag/revision error that means nothing to them. Adding a HubSpot contact, creating a Trello card or GitLab issue, resolving a PagerDuty incident and dozens of other advertised actions are likewise impossible, while the product markets 2,877 write-capable connectors.

@@ -76,6 +76,8 @@ def plain_reason(detail: str) -> str:
     match = _HTTP_STATUS.search(text)
     if match:
         code = int(match.group(1))
+        if 300 <= code < 400:
+            return "The service redirected the test. Save its final model service address, then test again."
         if code in (401, 403):
             return "The service did not accept the key. Check the key and save it again."
         if code == 429:
@@ -84,7 +86,7 @@ def plain_reason(detail: str) -> str:
             return "The service reported a problem on its side. Try again later."
         return f"The service answered with an error (HTTP {code}). Check the key and the server address."
     if "egress policy" in lower or "policy" in lower:
-        return "Your organization's rules don't allow this connection."
+        return "Blocked by your outbound-connection rules. Ask an administrator to allow this address, then test again."
     if "probe failed" in lower:
         return "Lightwork could not reach the service. Check the internet connection or the server address, then test again."
     if "not found" in lower and "codex" in lower:
@@ -195,7 +197,11 @@ def _provider_row(name: str, label: str, cfg: dict[str, Any], roles: list[str]) 
     elif runtime["status"] == "failed":
         reason = plain_reason(live.get("detail") or runtime.get("detail") or "")
         row["last_test"].update(status="failed", reason=reason)
-        row.update(status="failed", status_label="Connection failed: " + reason, reason=reason)
+        if (live.get("evidence", {}).get("blocked_by_egress_policy")
+                or "egress policy" in str(live.get("detail") or "").lower()):
+            row.update(status="blocked", status_label="Blocked by outbound-connection rules", reason=reason)
+        else:
+            row.update(status="failed", status_label="Connection failed: " + reason, reason=reason)
     elif live.get("stale"):
         word = _saved_word(saved)
         row.update(status="untested", status_label=f"{word} saved, not tested yet",

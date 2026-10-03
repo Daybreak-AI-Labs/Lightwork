@@ -13,6 +13,7 @@ import hmac
 import json
 import logging
 import os
+import re
 import secrets
 import stat
 import threading
@@ -131,6 +132,7 @@ from .api_schemas import (
     HaltIn,
     ImportRunIn,
     ImportRunOut,
+    IncidentAffectedPeopleIn,
     IncidentIn,
     IncidentNotifyIn,
     JDDraftIn,
@@ -3223,9 +3225,8 @@ async def incident_notification_plan(request: Request, incident_id: str,
                                      jurisdictions: str = "") -> dict:
     """The breach plan anchored to one privacy incident's discovery time.
 
-    ``jurisdictions`` is a comma-separated regime list; the incident's
-    numeric ``affected_estimate`` (when it parses) supplies the subject
-    count."""
+    ``jurisdictions`` is a comma-separated regime list. Legacy free-text
+    estimates supply a count only when the entire value is an integer."""
     require_permission(request, "operate")
     bn = _breach_notification_or_403()
     ops = _privacy_ops_or_403()
@@ -3236,11 +3237,21 @@ async def incident_notification_plan(request: Request, incident_id: str,
             raise KeyError("no such incident")
         wanted = [part for part in
                   (jurisdictions or "").split(",") if part.strip()]
-        raw_estimate = str(record.get("affected_estimate") or "")
-        digits = "".join(ch for ch in raw_estimate if ch.isdigit())
+        subjects_affected = record.get("affected_people")
+        if "affected_people" not in record:
+            raw_estimate = str(record.get("affected_estimate") or "").strip()
+            if re.fullmatch(
+                r"(?:0|[1-9][0-9]*|[1-9][0-9]{0,2}(?:,[0-9]{3})+)",
+                raw_estimate,
+            ):
+                subjects_affected = int(raw_estimate.replace(",", ""))
+        if not isinstance(subjects_affected, int) or isinstance(
+            subjects_affected, bool
+        ) or subjects_affected < 0:
+            subjects_affected = None
         return bn.assess_breach(
             wanted,
-            subjects_affected=int(digits) if digits else 0,
+            subjects_affected=subjects_affected,
             discovered_at=float(record.get("created_at") or 0.0) or None,
         )
 
@@ -4557,8 +4568,31 @@ async def open_privacy_incident(request: Request, body: IncidentIn) -> dict:
         description=body.description,
         categories=body.categories,
         affected_estimate=body.affected_estimate,
+        affected_people=body.affected_people,
         reported_by=_request_actor(request),
     )
+    from .incident_attachment_projection import project_incident_record
+
+    return await run_in_threadpool(project_incident_record, request, record, "privacy")
+
+
+@router.post("/privacy/incidents/{incident_id}/affected-people")
+async def update_privacy_incident_affected_people(
+    request: Request, incident_id: str, body: IncidentAffectedPeopleIn,
+) -> dict:
+    """Revise the count used by the plan while preserving the original note."""
+    require_permission(request, "operate")
+    ops = _privacy_ops_or_403()
+    try:
+        record = await run_in_threadpool(
+            ops.set_incident_affected_people,
+            incident_id[:64], body.affected_people,
+            updated_by=_request_actor(request),
+        )
+    except ops.RecordConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if record is None:
+        raise HTTPException(status_code=404, detail="no such incident")
     from .incident_attachment_projection import project_incident_record
 
     return await run_in_threadpool(project_incident_record, request, record, "privacy")
