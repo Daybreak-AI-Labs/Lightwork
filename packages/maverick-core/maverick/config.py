@@ -1029,8 +1029,9 @@ def get_tool_exposure() -> dict:
     ``exposure`` is how much of the tool catalog every model turn describes up
     front: ``"core"`` (default) shows a short role-aware set (plus a selected
     pack's ``allow_tools``) and lets the model look the rest up with
-    ``find_tools``; ``"full"`` shows every tool except the SaaS-connector long
-    tail (the previous behaviour). ``core_extra`` pins extra tool names into
+    ``find_tools``; ``"full"`` offers every tool except the SaaS-connector long
+    tail up to the model's tool ceiling (overflow stays discoverable).
+    ``core_extra`` pins extra tool names into
     the visible set. ``MAVERICK_TOOL_EXPOSURE`` overrides ``exposure``. An
     unknown mode or a malformed list falls back to the lean default.
     """

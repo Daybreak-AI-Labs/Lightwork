@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pytest
@@ -100,10 +101,10 @@ def test_unpriced_selected_model_uses_model_settings_without_dispatch(
     assert context.status_code == 200
     assert context.json()["model_provider_configured"] is False
     assert context.json()["model_route_status"] == "pricing"
-    assert "no confirmed price" in context.json()["model_route_reason"]
+    assert "no usable price" in context.json()["model_route_reason"]
     assert context.json()["provider_setup"] == {
-        "href": "/settings#settings-models",
-        "label": "Choose a model with known pricing in Settings",
+        "href": "/settings#settings-model-prices",
+        "label": "Review model prices in Settings",
     }
 
     response = client.post(
@@ -113,9 +114,36 @@ def test_unpriced_selected_model_uses_model_settings_without_dispatch(
     assert response.status_code == 200
     assert response.json()["mode"] == "built_in"
     assert response.json()["model_route_status"] == "pricing"
-    assert "no confirmed price" in response.json()["model_route_reason"]
-    assert response.json()["provider_setup"]["href"] == "/settings#settings-models"
+    assert "no usable price" in response.json()["model_route_reason"]
+    assert response.json()["provider_setup"]["href"] == "/settings#settings-model-prices"
     assert "private-unpriced-model" not in response.text
+
+
+def test_copilot_route_becomes_ready_after_reviewed_model_ceiling(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path,
+) -> None:
+    from maverick import llm, runtime_overrides
+    from maverick_dashboard import api
+
+    monkeypatch.setattr(runtime_overrides, "OVERRIDES_PATH", tmp_path / "overrides.toml")
+    monkeypatch.setenv("MAVERICK_BILLING_STRICT", "true")
+    monkeypatch.setattr(api, "_any_provider_key_set", lambda: True)
+    monkeypatch.setattr(api, "require_provider_or_400", lambda **_kwargs: None)
+    monkeypatch.setattr(llm, "model_for_role", lambda _role: "openai_compatible:client-model")
+    before = client.get("/api/v1/copilot/context", params={"page": "/goals"})
+    assert before.json()["model_route_status"] == "pricing"
+
+    today = datetime.now(timezone.utc).date()
+    runtime_overrides.set_model_rate(
+        "openai_compatible:client-model", input_per_mtok=4.0,
+        output_per_mtok=12.0, source="Customer contract R1",
+        as_of=today.isoformat(), valid_until=(today + timedelta(days=30)).isoformat(),
+        approved_by="operator@example.com",
+    )
+    after = client.get("/api/v1/copilot/context", params={"page": "/goals"})
+    assert after.status_code == 200
+    assert after.json()["model_route_status"] == "ready"
+    assert "provider_setup" not in after.json()
 
 
 def test_estimate_only_opt_in_and_local_models_remain_route_ready(

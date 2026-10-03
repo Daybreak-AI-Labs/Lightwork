@@ -90,6 +90,9 @@
   </div>
 
   <div class="panel" data-settings-group="integrations"><h3>Notification delivery</h3><p>Check whether organization alerts reached the notification service.</p><a class="btn btn--ghost" href="/settings/notifications">Delivery history and test</a></div>
+  {% if show_personal_notifications %}
+  <div class="panel" data-settings-group="integrations"><h3>Your task alerts</h3><p>See when your work finishes or needs your answer, then choose which private alerts you receive.</p><a class="btn btn--ghost" href="/notifications#notification-preferences">Your notifications</a></div>
+  {% endif %}
 
   <div class="section-head" data-settings-group="models" id="settings-models"><h2>Models</h2></div>
   <div class="panel" data-settings-group="models">
@@ -158,6 +161,60 @@
   </div>
   {% endif %}
 
+  <section class="panel" data-settings-group="models" id="settings-model-prices" aria-labelledby="model-prices-title">
+    <h3 id="model-prices-title">Prices for the models you use</h3>
+    <p class="muted">A model without a usable price stops <strong>before</strong> Lightwork sends a paid request. Review the models that will be used on the next task:</p>
+    <table data-model-rate-status><thead><tr><th scope="col">Work</th><th scope="col">Model</th><th scope="col">Price status</th></tr></thead>
+      <tbody>{% for route in route_prices %}<tr>
+        <td>{{ route.label }}</td><td>{{ route.spec|model_label }}<br><span class="muted">Exact model: {{ route.spec }}</span></td>
+        <td><span class="badge {{ 'active' if route.ready else 'blocked' }}">{{ route.status }}</span></td>
+      </tr>{% endfor %}</tbody>
+    </table>
+    <p class="muted">For a company contract or private gateway, enter the <strong>highest USD input and output rates</strong> that apply to the exact model route, including any cache charges. Lightwork uses them to guard its spending limit and assumes no cache discount. Your provider's invoice remains the final bill. An entered rate is shown as an estimate and is never invoice evidence.</p>
+    <form method="post" action="/settings/models/rate" class="settings-row-form" data-settings-local="true">
+      <label class="settings-field">Model
+        <select class="select" name="rate_model" data-model-picker="rate-model-custom" required>
+          <option value="">Choose a model</option>
+          {% for pg in picker_groups %}<optgroup label="{{ pg.label }}">{% for m in pg.options %}<option value="{{ m.spec }}">{{ m.spec|model_label }}</option>{% endfor %}</optgroup>{% endfor %}
+          <option value="{{ custom_marker }}">Other model (advanced)…</option>
+        </select>
+      </label>
+      <label class="settings-field" id="rate-model-custom" hidden>Exact model route
+        <input class="input" name="rate_model_custom" maxlength="128" placeholder="provider:model-name">
+      </label>
+      <label class="settings-field">Maximum input price, USD per million tokens
+        <input class="input" type="number" name="input_per_mtok" min="0" max="1000000" step="any" required>
+      </label>
+      <label class="settings-field">Maximum output price, USD per million tokens
+        <input class="input" type="number" name="output_per_mtok" min="0" max="1000000" step="any" required>
+      </label>
+      <label class="settings-field">Where you checked the price
+        <input class="input" name="source" maxlength="300" required placeholder="Provider price page or contract reference (no secrets)">
+      </label>
+      <label class="settings-field">Price applies from
+        <input class="input" type="date" name="as_of" max="{{ price_today }}" value="{{ price_today }}" required>
+      </label>
+      <label class="settings-field">Review again by
+        <input class="input" type="date" name="valid_until" min="{{ price_today }}" value="{{ price_review_until }}" required>
+      </label>
+      <label class="settings-field"><input type="checkbox" name="confirm" required>
+        I checked this model's own USD rate and used a ceiling high enough for our agreement.
+      </label>
+      <button class="btn btn--primary" type="submit">Save spending ceiling</button>
+    </form>
+    {% if operator_rates %}
+    <h4>Saved company rates</h4>
+    <table><thead><tr><th scope="col">Model</th><th scope="col">Ceiling per million tokens</th><th scope="col">Source and review</th><th scope="col">Action</th></tr></thead>
+      <tbody>{% for rate in operator_rates %}<tr>
+        <td>{{ rate.spec|model_label }}<br><span class="muted">Exact model: {{ rate.spec }}</span><br><span class="badge {{ 'active' if rate.active else 'blocked' }}">{{ 'Active' if rate.active else 'Expired — requests stop' }}</span></td>
+        <td>Input ${{ rate.input_per_mtok }} · Output ${{ rate.output_per_mtok }}</td>
+        <td>{{ rate.source }}<br><span class="muted">Applies {{ rate.as_of }} · review by {{ rate.valid_until }}</span></td>
+        <td><form method="post" action="/settings/models/rate/remove" data-settings-local="true"><input type="hidden" name="model" value="{{ rate.spec }}"><button class="btn btn--ghost" type="submit">Remove rate</button></form></td>
+      </tr>{% endfor %}</tbody>
+    </table>
+    {% endif %}
+  </section>
+
   <section class="panel" data-settings-group="models" id="model-tests" aria-labelledby="model-tests-title">
     <h3 id="model-tests-title">Try one bounded model sample</h3>
     <p>A model-list refresh does not generate a response. This separate test sends a synthetic text or image sample to the model you select, after you review and confirm the possible cost. It does not change your model choices.</p>
@@ -215,9 +272,7 @@
       </label>
       <button type="submit" class="btn btn--primary">Save default</button>
     </form>
-    {% if pinned_model %}
-    <p class="muted settings-foot">Current default: <strong>{{ pinned_model|model_label }}</strong>. Choose "Lightwork's recommended model" and save to go back.</p>
-    {% endif %}
+    <p class="muted settings-foot" id="settings-current-default">Current default: <strong>{{ pinned_model|model_label if pinned_model else "Lightwork's recommended model" }}</strong>.{% if pinned_model %} Choose "Lightwork's recommended model" and save to go back.{% endif %}</p>
   </div>
 
   <div class="section-head" data-settings-group="models"><h2>Models for each role</h2></div>
@@ -255,7 +310,7 @@
                 <input class="input" type="text" id="{{ role }}-model-custom" name="{{ role }}_custom" value="{{ override if typed else '' }}" aria-label="Model name for {{ label }}, exactly as your provider lists it"{% if not typed %} hidden{% endif %} />
               </div>
             </td>
-            <td>{{ effective|model_label }}</td>
+            <td data-role-effective="{{ role }}">{{ effective|model_label }}</td>
           </tr>
           {% endfor %}
         </tbody>
@@ -928,6 +983,18 @@
           status.textContent = receipt.textContent.trim();
           if (response.status !== 202 && receipt.id !== "settings-notice") {
             dirty.delete(form);
+            if (form.matches('form[action="/settings/models"], form[action="/settings/models/roles"]')) {
+              var currentRates = document.querySelector('[data-model-rate-status]');
+              var updatedRates = documentCopy.querySelector('[data-model-rate-status]');
+              if (currentRates && updatedRates) currentRates.replaceWith(updatedRates);
+              var currentDefault = document.getElementById('settings-current-default');
+              var updatedDefault = documentCopy.getElementById('settings-current-default');
+              if (currentDefault && updatedDefault) currentDefault.replaceWith(updatedDefault);
+              document.querySelectorAll('[data-role-effective]').forEach(function (cell) {
+                var updated = documentCopy.querySelector('[data-role-effective="' + cell.dataset.roleEffective + '"]');
+                if (updated) cell.textContent = updated.textContent;
+              });
+            }
             form.querySelectorAll('input[type="password"]').forEach(function (input) { input.value = ''; });
             if (method === 'GET') ['theme', 'font', 'density'].forEach(function (key) {
               var value = body.get(key); if (value && window.mvApplyDisplayPreference) window.mvApplyDisplayPreference(key, value);

@@ -99,7 +99,16 @@ def find_tools(registry) -> Tool:
 
         scored.sort(key=_sort_key)
         top = [t for _, t in scored[:max_results]]
-        registry.activate([t.name for t in top])
+        # The catalog prefers the most recently activated tool when the model
+        # has fewer slots than matches. Activate lowest-ranked first so the
+        # strongest match is the one that remains callable.
+        activated = set(registry.activate([t.name for t in reversed(top)]))
+        top = [t for t in top if t.name in activated]
+        if not top:
+            return (
+                "This model's tool limit leaves no room for another action. "
+                "Ask an administrator to raise the tool limit in AI model settings."
+            )
         lines = [f"Activated {len(top)} tool(s); you can call them now:"]
         for t in top:
             first = (t.description or "").strip().splitlines()

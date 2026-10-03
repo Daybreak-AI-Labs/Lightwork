@@ -1,6 +1,8 @@
 """Settings page: appearance form + model pin via the runtime overlay."""
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+
 from fastapi.testclient import TestClient
 
 
@@ -29,6 +31,50 @@ def test_settings_page_renders(monkeypatch, tmp_path):
     assert 'action="/settings/models"' in r.text
     # nav link is wired
     assert 'href="/settings"' in r.text
+
+
+def test_admin_can_price_private_model_and_read_back_effective_route(monkeypatch, tmp_path):
+    _prep(monkeypatch, tmp_path)
+    monkeypatch.delenv("MAVERICK_MODEL_OVERRIDE", raising=False)
+    monkeypatch.setenv("MAVERICK_BILLING_STRICT", "true")
+    today = datetime.now(timezone.utc).date()
+    c = _client()
+    data = {
+        "rate_model": "__custom__",
+        "rate_model_custom": "openai_compatible:client-model",
+        "input_per_mtok": "4", "output_per_mtok": "12",
+        "source": "Contract R1", "as_of": today.isoformat(),
+        "valid_until": (today + timedelta(days=30)).isoformat(),
+        "confirm": "on",
+    }
+    response = c.post("/settings/models/rate", data=data,
+                      headers={"origin": "http://testserver"}, follow_redirects=False)
+    assert response.status_code == 303
+    from maverick.runtime_overrides import model_rate_overrides
+
+    assert model_rate_overrides()["openai_compatible:client-model"]["source"] == "Contract R1"
+    pin = c.post("/settings/models", data={"model": "__custom__", "model_custom": "openai_compatible:client-model"},
+                 headers={"origin": "http://testserver"}, follow_redirects=False)
+    assert pin.status_code == 303
+    page = c.get("/settings", params={"saved": "model_rate"})
+    assert page.status_code == 200
+    assert "Administrator ceiling" in page.text
+    assert "Contract R1" in page.text
+    assert "Model spending ceiling updated." in page.text
+
+    removed = c.post("/settings/models/rate/remove", data={"model": "openai_compatible:client-model"},
+                     headers={"origin": "http://testserver"}, follow_redirects=False)
+    assert removed.status_code == 303
+    assert "openai_compatible:client-model" not in model_rate_overrides()
+    assert "Will stop before a paid request" in c.get("/settings").text
+
+    already_tracked = c.post(
+        "/settings/models/rate",
+        data={**data, "rate_model": "claude-sonnet-4-6"},
+        headers={"origin": "http://testserver"}, follow_redirects=False,
+    )
+    assert already_tracked.status_code == 409
+    assert "anthropic:claude-sonnet-4-6" not in model_rate_overrides()
 
 
 def test_settings_has_bounded_sections_keyboard_tabs_and_search(monkeypatch, tmp_path):

@@ -109,8 +109,8 @@ async def test_unpriced_model_gives_pricing_message_not_a_cap_message(
         orchestrator_model_override="claude-nonexistent-99",
     )
 
-    assert "no verified price" in out
-    assert "strict_pricing" in out
+    assert "no usable price" in out
+    assert "Settings" in out
     assert client.calls == 0
     # Must NOT be mistaken for -- or advise the same fix as -- a real cap trip.
     assert "hit your spending or time limit" not in out
@@ -124,6 +124,5 @@ async def test_unpriced_model_gives_pricing_message_not_a_cap_message(
 
     stop = stop_payload(goal.status, goal.result)
     assert stop["kind"] == "unpriced_model"
-    assert "Choose a model with a known price" in stop["action"]
-    assert "Settings > Require known prices" in stop["action"]
-    assert stop["link"] == "/settings"
+    assert "choose a priced model" in stop["action"]
+    assert stop["link"] == "/settings#settings-model-prices"

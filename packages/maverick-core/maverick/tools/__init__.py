@@ -346,6 +346,10 @@ class ToolRegistry:
         self._core_names: set[str] = set()
         self._core: set[str] = set()
         self._activated: set[str] = set()
+        self._activation_order: list[str] = []
+        # The last model-facing catalog ceiling. Overflow is discoverable by
+        # find_tools, rather than disappearing when a provider truncates it.
+        self._catalog_limit: int | None = None
         # Names never exposed NOR discoverable (a pack's deny_tools, or
         # anything the agent's capability would refuse anyway). run() can
         # still resolve them -- the capability / ACL check at call time is
@@ -474,12 +478,19 @@ class ToolRegistry:
 
     def activate(self, names: list[str]) -> list[str]:
         """Reveal deferred tools to the model. Returns the names that
-        resolved to a registered tool (unknown names are ignored)."""
+        can actually be shown next turn (unknown names are ignored)."""
         resolved = [n for n in names if n in self._tools and n not in self._hidden
                     and self._acl_allows(n) and self._mcp_binding_current(n)]
         if resolved:
             self._activated.update(resolved)
+            for name in resolved:
+                if name in self._activation_order:
+                    self._activation_order.remove(name)
+                self._activation_order.append(name)
             self._anthropic_cache = None
+        if self._catalog_limit is not None:
+            visible = self._limited_names(self._catalog_limit)
+            return [n for n in resolved if n in visible]
         return resolved
 
     def exposed(self) -> list[Tool]:
@@ -495,16 +506,53 @@ class ToolRegistry:
 
     def deferred_tools(self) -> list[Tool]:
         """Registered tools not currently exposed -- find_tools' search space."""
-        names = self._exposed_names() | self._hidden
+        if self._catalog_limit is not None:
+            names = self._limited_names(self._catalog_limit) | self._hidden
+        elif self._deferred:
+            names = self._exposed_names() | self._hidden
+        else:
+            names = {t.name for t in self.exposed()} | self._hidden
         return [t for n, t in self._tools.items() if n not in names and self._acl_allows(n) and self._mcp_binding_current(n)]
 
-    def to_anthropic(self) -> list[dict[str, Any]]:
+    def _limited_names(self, limit: int) -> set[str]:
+        """Prefer discovery, recently requested tools and the working core."""
+        offered = self.exposed()
+        if len(offered) <= limit:
+            return {t.name for t in offered}
+        available = {t.name for t in offered}
+        # Registration order puts orchestration after hundreds of base tools.
+        # A model with a tool ceiling must retain discovery and coordination;
+        # recently discovered tools then displace the ordinary catalog tail.
+        priority = (
+            [self.META_TOOL]
+            + list(reversed(self._activation_order))
+            + ["ask_user", "spawn_subagent", "spawn_swarm", "spawn_specialist",
+               "list_specialists", "send_to_agent", "recv_from_agent",
+               "delegate_to_agent", "knowledge_search"]
+            + sorted(CORE_TOOL_NAMES)
+            + [t.name for t in offered]
+        )
+        selected: set[str] = set()
+        for name in priority:
+            if name in available:
+                selected.add(name)
+                if len(selected) == limit:
+                    break
+        return selected
+
+    def to_anthropic(self, *, max_tools: int | None = None) -> list[dict[str, Any]]:
+        if max_tools is not None and (type(max_tools) is not int or max_tools < 1):
+            raise ValueError("max_tools must be a positive integer")
+        self._catalog_limit = max_tools
         visible = tuple(n for n in self._mcp_bindings if self._mcp_binding_current(n))
         if visible != self._mcp_visibility:
             self._mcp_visibility = visible
             self._anthropic_cache = None
         if self._anthropic_cache is None:
             self._anthropic_cache = [t.to_anthropic() for t in self.exposed()]
+        if max_tools is not None and len(self._anthropic_cache) > max_tools:
+            names = self._limited_names(max_tools)
+            return [t for t in self._anthropic_cache if t["name"] in names]
         return self._anthropic_cache
 
     def cache_namespace(self) -> str:

@@ -455,7 +455,7 @@ def _bare_model_proxy_estimate(
     )
 
 
-def _lookup_price_quote(
+def _lookup_price_quote(  # noqa: C901 - ordered evidence and policy precedence
     model: str | None,
     *,
     estimate_only: bool | None = None,
@@ -472,6 +472,14 @@ def _lookup_price_quote(
 
     estimate_only = _resolve_estimate_only(estimate_only)
     requested = model or MODEL_SONNET
+    operator_cache: list[ModelPrice | None] = []
+
+    def operator_quote() -> ModelPrice | None:
+        # Most catalog routes have tracked first-party rates. Read the shared
+        # override only when that evidence is absent or provisional.
+        if not operator_cache:
+            operator_cache.append(_operator_rate_quote(requested))
+        return operator_cache[0]
 
     if requested.startswith("embedding:"):
         from .embedding_prices import quote_for_budget
@@ -507,6 +515,9 @@ def _lookup_price_quote(
         try:
             quote = model_price_quote(key, estimate_only=estimate_only)
         except UnverifiedRateError as exc:
+            approved = operator_quote()
+            if approved is not None:
+                return approved
             raise UnpricedModelError(
                 f"{exc}. A legacy/custom gateway may explicitly set "
                 "[budget] strict_pricing=false for warning-labelled "
@@ -514,6 +525,10 @@ def _lookup_price_quote(
             ) from exc
         legacy = MODEL_PRICES.get(key)
         if quote is not None and (legacy is None or legacy == quote.rates):
+            if not quote.verified:
+                approved = operator_quote()
+                if approved is not None:
+                    return approved
             if quote.currency != "USD":
                 raise UnpricedModelError(
                     f"price for {requested!r} is in {quote.currency}; "
@@ -532,6 +547,9 @@ def _lookup_price_quote(
                 )
             return quote
         if legacy is not None:
+            approved = operator_quote()
+            if approved is not None:
+                return approved
             # A runtime override of the compatibility tuple map carries no
             # source or verification evidence. Preserve it for planning, but
             # never let it become a bill merely because two floats exist.
@@ -565,6 +583,10 @@ def _lookup_price_quote(
                     estimate_quote.confidence,
                 )
             return estimate_quote
+
+    approved = operator_quote()
+    if approved is not None:
+        return approved
 
     # Bedrock model ids (W1-10): a provisional estimate from the Claude API
     # list rate of the model behind the id; never a bill under strict pricing.
@@ -637,6 +659,45 @@ def _lookup_price_quote(
             "Estimate-only unknown-model fallback; no vendor-specific "
             "pricing evidence"
         ),
+    )
+
+
+def _operator_rate_quote(model: str) -> ModelPrice | None:
+    """Use only a current, exact-route operator ceiling for spend admission."""
+    from datetime import date, datetime, timezone
+
+    from .llm import _parse_spec
+    from .runtime_overrides import model_rate_overrides
+
+    provider, model_id = _parse_spec(model)
+    route = f"{provider}:{model_id}"
+    rate = model_rate_overrides().get(route)
+    if rate is None or date.fromisoformat(rate["valid_until"]) < datetime.now(timezone.utc).date():
+        return None
+    approved_at = rate["approved_at"]
+    evidence_id = "operator-ceiling-" + hashlib.sha256(
+        json.dumps({"model": route, **rate}, sort_keys=True, separators=(",", ":"))
+        .encode("utf-8")
+    ).hexdigest()
+    return ModelPrice(
+        model_id=model,
+        input_per_mtok=rate["input_per_mtok"],
+        output_per_mtok=rate["output_per_mtok"],
+        source=rate["source"],
+        as_of=rate["as_of"],
+        fetched_at=approved_at,
+        currency="USD",
+        confidence=0.0,
+        verified=False,
+        rate_card_version="operator-ceiling-v1",
+        evidence_id=evidence_id,
+        pricing_basis="Administrator-approved USD ceiling per million tokens",
+        applicability=(
+            "Spend-limit estimate for this exact model route. Provider invoices "
+            "remain authoritative; cached input is conservatively charged at "
+            "the full input rate; do not use for chargebacks or invoices."
+        ),
+        valid_until=rate["valid_until"],
     )
 
 
@@ -799,8 +860,15 @@ class Budget:
             quote = _lookup_price_quote(model)
             in_rate, out_rate = quote.rates
             pricing_evidence = quote.metadata()
+            # A private gateway's cache discount is unknown. Provider adapter
+            # defaults (OpenAI 0.5x, Anthropic 0.1x) cannot silently reduce an
+            # operator-entered spending ceiling; charge cached input at full
+            # input rate unless a tracked provider rate establishes a discount.
+            effective_read_mult = (max(read_mult, 1.0)
+                                   if quote.rate_card_version == "operator-ceiling-v1"
+                                   else read_mult)
             call_dollars = (in_tok / 1_000_000) * in_rate
-            call_dollars += (cache_read_tok / 1_000_000) * in_rate * read_mult
+            call_dollars += (cache_read_tok / 1_000_000) * in_rate * effective_read_mult
             if split_cache_write:
                 call_dollars += (
                     (cache_write_5m_tok / 1_000_000) * in_rate

@@ -45,9 +45,11 @@
       const price = item.price;
       if (price) {
         lines.push(price.currency + ' per million tokens: input ' + price.input + ', output ' + price.output + '.');
-        lines.push('Price as of ' + price.as_of + (price.expired ? ' (expired)' : price.stale ? ' (stale: more than 30 days old)' : '') + (price.verified ? '; tracked source.' : '; unverified estimate only.'));
+        lines.push('Price as of ' + price.as_of + (price.expired ? ' (expired)' : price.stale ? ' (more than 30 days old)' : '') +
+          (price.operator_approved ? '; administrator-entered spending ceiling, not a provider invoice.' :
+            price.verified ? '; tracked source.' : '; estimate only, not a provider invoice.'));
         lines.push(price.basis + '. ' + price.applicability);
-      } else lines.push('Price: Unknown. This choice does not establish a billable rate.');
+      } else lines.push('Price unavailable. Under known-price controls, this model stops before a paid request. Choose a priced model or review its rate in Settings below.');
       lines.forEach(function (line) { const paragraph = document.createElement('p'); paragraph.textContent = line; details.appendChild(paragraph); });
       if (price && /^https:\/\//i.test(price.source || '')) {
         const source = document.createElement('a'); source.href = price.source;

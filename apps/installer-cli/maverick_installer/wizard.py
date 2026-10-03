@@ -1277,11 +1277,12 @@ def pick_budget() -> dict[str, Any]:
             default=500,
         ),
     } if enabled else {"task_limits_enabled": False}
-    # Billing-grade accounting is the safe default. Preserve an explicit false
-    # for legacy/custom gateways, where estimates remain provenance-labelled.
+    # Keep the safe default and explain the in-product recovery for a private
+    # rate. The legacy estimate mode remains an explicit operator choice.
     budget["strict_pricing"] = _q_confirm(
-        "  Strict pricing? Fail closed if a model has no verified price "
-        "(recommended; choose No only for estimate-only custom gateways)",
+        "  Require a reviewed price before paid AI work? Recommended. "
+        "You can add your contract's spending ceiling in Settings after installation. "
+        "Choose No only if you accept that dollar limits may be under-counted",
         default=True,
     )
     budget["guidance"] = _q_confirm(
@@ -6626,10 +6627,10 @@ def pick_persona() -> dict[str, str]:
 
 
 def pick_notifications() -> tuple[dict[str, Any], list[str]]:
-    """Run-end notification webhook. Returns (config, env_vars_needed)."""
+    """Private task alerts and shared organization delivery setup."""
     personal_alerts = _q_confirm(
-        "Allow signed-in people to use a personal in-product alert inbox with quiet hours and daily digests? Requires personal preferences; external personal delivery is not connected.",
-        default=False,
+        "Show signed-in people private alerts when their tasks finish or need attention? They can choose quiet hours and daily digests in Your notifications. Requires personal preferences.",
+        default=True,
     )
     personal_critical_bypass = personal_alerts and _q_confirm(
         "Allow people to opt approval/deadline alerts out of their quiet hours and digest timing?", default=False,
@@ -6645,7 +6646,7 @@ def pick_notifications() -> tuple[dict[str, Any], list[str]]:
         personal_config["personal_external"] = True
         personal_config["personal_dashboard_url"] = _q_text("HTTPS dashboard origin for authenticated notification links (no path):", default="")
     if not _q_confirm(
-        "Get pinged when long runs finish? (ntfy / Pushover / Slack / Discord)",
+        "Send shared organization alerts to a channel? Personal task alerts use each person's own notification choices.",
         default=False,
     ):
         return personal_config, []

@@ -549,6 +549,18 @@ def _nav_context(request: Request) -> dict:
         viewer_global_admin = has_global_permission(request, "admin")
     except Exception:  # pragma: no cover -- shell rendering stays fail-closed
         viewer_global_admin = False
+    try:
+        from maverick import config as core_config
+        from maverick import experience_preferences
+
+        show_personal_notifications = bool(caller_principal(request)) and has_permission(request, "view")
+        personal_notifications_enabled = (
+            show_personal_notifications and experience_preferences.enabled()
+            and not core_config.config_source_errors(include_tenant=True)
+            and (core_config.load_config().get("notifications") or {}).get("personal_alerts") is True
+        )
+    except Exception:  # pragma: no cover -- shell rendering stays fail-closed
+        show_personal_notifications = personal_notifications_enabled = False
     return {
         "viewer_global_admin": viewer_global_admin,
         "nav_groups": groups,
@@ -557,6 +569,8 @@ def _nav_context(request: Request) -> dict:
         "can_create_goal": can_create_goal,
         "can_halt": can_halt,
         "show_logout": show_logout,
+        "show_personal_notifications": show_personal_notifications,
+        "personal_notifications_enabled": personal_notifications_enabled,
     }
 
 

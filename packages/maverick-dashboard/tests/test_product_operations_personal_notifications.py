@@ -52,3 +52,18 @@ def test_recovery_uses_native_receipt_without_new_save(monkeypatch):
 def test_private_choices_use_current_verified_channel_records():
     state = {"projects": [], "tasks": [], "private_delivery": {"channels": [{"id": "a" * 32, "channel": "slack"}]}}
     assert operations._choices(state)["channel"] == [{"value": "a" * 32, "label": "Slack verified private identity"}]
+
+
+def test_copilot_inbox_reads_current_alerts_without_task_result(monkeypatch):
+    monkeypatch.setattr(operations.native, "_state", lambda _request: {
+        "items": [{"id": "a" * 64, "title": "My task", "label": "Finished",
+                   "href": "/chat/goal/7", "category": "completed", "seen_at": None,
+                   "result": "PRIVATE TASK RESULT"}], "partial": False,
+    })
+    registered = {adapter.id: adapter for adapter in operations.entries()}
+    adapter = registered["notifications.personal_inbox"]
+    current = adapter.snapshot(object(), {})
+    prepared = adapter.prepare(object(), {}, {})
+    assert current.details["unseen"] == 1
+    assert prepared.native["items"][0]["href"] == "/chat/goal/7"
+    assert "PRIVATE TASK RESULT" not in str(current.details) + str(prepared.native)

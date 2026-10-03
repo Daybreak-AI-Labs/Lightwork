@@ -2098,12 +2098,13 @@ class Agent:
         #     (measured: 237 tools / ~188 KB / ~47k tokens rode EVERY turn
         #     for every role, ~95% of the first call's input).
         #   exposure = "full": everything except base_registry's marked SaaS
-        #     long tail (the previous behaviour; ~237 tools).
+        #     long tail, subject to the model's tool ceiling. Overflow stays
+        #     discoverable through find_tools.
         # A tool the agent's capability refuses (a pack's deny_tools, an
         # allow list it is outside of, a risk ceiling) is neither shown nor
-        # discoverable. Disable deferral entirely via [capabilities]
-        # deferred_tools = false or MAVERICK_DEFERRED_TOOLS=0 (every schema,
-        # 600+ tools, on every turn).
+        # discoverable. Disable ordinary deferral via [capabilities]
+        # deferred_tools = false or MAVERICK_DEFERRED_TOOLS=0; a model's tool
+        # ceiling and the agent's capability still constrain what it sees.
         env_dt = os.environ.get("MAVERICK_DEFERRED_TOOLS", "").strip().lower()
         if env_dt in {"0", "false", "no", "off"}:
             deferred_on = False
@@ -2112,12 +2113,39 @@ class Agent:
         else:
             deferred_on = bool(caps.get("deferred_tools", True))
         deferrable = getattr(reg, "deferrable_names", None) or set()
-        if deferred_on and deferrable:
+        if deferrable:
             from .tools.find_tools import find_tools
             reg.register(find_tools(reg))
-            core, hidden = self._tool_exposure_sets(reg, deferrable)
-            reg.enable_deferred(core=core, hidden=hidden)
+            if deferred_on:
+                core, hidden = self._tool_exposure_sets(reg, deferrable)
+                reg.enable_deferred(core=core, hidden=hidden)
+            elif self.capability is not None:
+                # Disabling deferral widens the visible catalog, never a pack's
+                # authority. Keep refused names out of both model and search.
+                registered = {tool.name for tool in reg.all()}
+                hidden = {name for name in registered if not self.capability.permits(name)}
+                reg.enable_deferred(core=registered - hidden, hidden=hidden)
         return reg
+
+    def _tool_catalog_for_model(self, model: str) -> list[dict]:
+        """Offer capped providers a discoverable catalog, including on failover."""
+        from .providers.openai_provider import _OPENAI_MAX_TOOLS
+
+        if len(self.tools.exposed()) <= _OPENAI_MAX_TOOLS:
+            return self.tools.to_anthropic()
+        from .llm import _fallback_chain_for_dispatch, _parse_spec
+
+        provider, model_id = _parse_spec(model)
+        openai_style = {
+            "openai", "azure", "gemini", "openrouter", "deepseek", "xai",
+            "moonshot", "ollama", "vllm", "tgi", "openai_compatible",
+        }
+        if provider in openai_style:
+            return self.tools.to_anthropic(max_tools=_OPENAI_MAX_TOOLS)
+        fallbacks = _fallback_chain_for_dispatch(model, f"{provider}:{model_id}")
+        if any(_parse_spec(candidate)[0] in openai_style for candidate in fallbacks):
+            return self.tools.to_anthropic(max_tools=_OPENAI_MAX_TOOLS)
+        return self.tools.to_anthropic()
 
     def _tool_exposure_sets(self, reg: ToolRegistry, deferrable) -> tuple[set[str], set[str]]:
         """(visible core names, never-discoverable names) for this agent."""
@@ -4517,7 +4545,7 @@ class Agent:
                 if cache_prewarm_enabled():
                     self.ctx.budget.check()
                     self.ctx.llm.prewarm(
-                        self.system, self.tools.to_anthropic(), self.model,
+                        self.system, self._tool_catalog_for_model(self.model), self.model,
                         budget=self.ctx.budget)
             except Exception:  # pragma: no cover -- prewarm never blocks a run
                 pass
@@ -4708,14 +4736,15 @@ class Agent:
                 _preview = self._answer_stream_for_turn()
                 if _preview is not None:
                     _turn_kw["on_delta"] = _preview
+                _turn_model = self._speculative_turn_model()
                 resp = await self._complete_guarded(
                     system=self.system,
                     messages=messages,
-                    tools=self.tools.to_anthropic(),
+                    tools=self._tool_catalog_for_model(_turn_model),
                     budget=self.ctx.budget,
                     max_tokens=self._turn_max_tokens(),
                     thinking_budget=self._thinking_budget(),
-                    model=self._speculative_turn_model(),
+                    model=_turn_model,
                     **_turn_kw,
                 )
                 if _preview is not None:

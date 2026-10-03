@@ -9,6 +9,9 @@ templates.
 """
 from __future__ import annotations
 
+import hashlib
+import json
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 from fastapi import APIRouter, Form, HTTPException, Request
@@ -49,6 +52,15 @@ def _provider_audit_value(data: dict, name: str) -> dict[str, str]:
         "api_key": "set" if value.get("api_key") else "not set",  # pragma: allowlist secret
         "base_url": "set" if value.get("base_url") else "not set",
     }
+
+
+def _rate_audit_value(data: dict, spec: str) -> dict[str, object]:
+    """Prove the exact rate changed without publishing contract references."""
+    row = (data.get("model_rates") or {}).get(spec)
+    if row is None:
+        return {"configured": False}
+    fingerprint = hashlib.sha256(json.dumps(row, sort_keys=True).encode()).hexdigest()
+    return {"configured": True, "sha256": fingerprint}
 
 
 def _app():
@@ -96,6 +108,7 @@ def _settings_response(request: Request, saved: str = "", *, notice: str = "",
         allowed_models,
         budget_override,
         default_model_override,
+        model_rate_overrides,
         role_model_override,
         task_limits_override,
     )
@@ -108,6 +121,28 @@ def _settings_response(request: Request, saved: str = "", *, notice: str = "",
     role_models = [
         (label, role, model_for_role(role), role_model_override(role))
         for label, role in roles
+    ]
+    from maverick.budget import UnpricedModelError, _lookup_price_quote
+
+    route_prices = []
+    for label, spec in [("Default", model_for_role("default"))] + [
+        (label, effective) for label, _, effective, _ in role_models
+    ]:
+        try:
+            quote = _lookup_price_quote(spec)
+        except UnpricedModelError:
+            quote = None
+        route_prices.append({
+            "label": label, "spec": spec,
+            "status": ("Will stop before a paid request" if quote is None else
+                       "Administrator ceiling" if quote.rate_card_version == "operator-ceiling-v1" else
+                       "Tracked price" if quote.verified else "Estimate only"),
+            "ready": quote is not None,
+        })
+    today = datetime.now(timezone.utc).date()
+    operator_rates = [
+        {"spec": spec, **rate, "active": rate["valid_until"] >= today.isoformat()}
+        for spec, rate in sorted(model_rate_overrides().items())
     ]
     model_options = list(catalog_specs())
     seen = {s for s, _ in model_options}
@@ -175,6 +210,8 @@ def _settings_response(request: Request, saved: str = "", *, notice: str = "",
         "roles": "Role models updated.",
         "budget": "Task spending limit updated.",
         "allowed": "Approved models updated.",
+        "model_rate": "Model spending ceiling updated.",
+        "model_rate_removed": "Model spending ceiling removed.",
         "discover": "Model lists refreshed from your provider keys.",
         "providers": "Provider keys updated.",
         "provider_test": "Connection test finished. The result is shown next to the provider.",
@@ -191,6 +228,8 @@ def _settings_response(request: Request, saved: str = "", *, notice: str = "",
         "models": "models",
         "roles": "models",
         "allowed": "models",
+        "model_rate": "models",
+        "model_rate_removed": "models",
         "discover": "models",
         "discovery": "models",
         "providers": "integrations",
@@ -219,6 +258,10 @@ def _settings_response(request: Request, saved: str = "", *, notice: str = "",
         "visibility_matrix": ui_visibility.matrix(),
         "visibility_roles": list(rbac.known_roles()),
         "role_models": role_models,
+        "route_prices": route_prices,
+        "operator_rates": operator_rates,
+        "price_today": today.isoformat(),
+        "price_review_until": (today + timedelta(days=30)).isoformat(),
         "model_options": model_options,
         "picker_options": picker_options,
         "allowed_models": sorted(allow),
@@ -281,6 +324,86 @@ async def settings_set_model(request: Request) -> RedirectResponse:
         )) from exc
     _admin_audit(request, "settings_models")
     return RedirectResponse("/settings?saved=models", status_code=303)
+
+
+@router.post("/settings/models/rate")
+async def settings_set_model_rate(request: Request) -> RedirectResponse:
+    """Admin-attested ceiling for one exact provider route; never an invoice rate."""
+    _app()._require_same_origin(request)
+    auth.require_global_permission(request, "admin")
+    from maverick.budget import UnpricedModelError, _lookup_price_quote
+    from maverick.llm import _parse_spec
+    from maverick.runtime_overrides import (
+        RuntimeOverridesSecurityError,
+        model_rate_overrides,
+        set_model_rate,
+    )
+
+    from .model_pickers import chosen
+
+    form = await request.form()
+    spec = chosen(form, "rate_model")
+    if form.get("confirm") != "on":
+        raise HTTPException(status_code=400, detail="Confirm the source and ceiling before saving.")
+    try:
+        provider, model_id = _parse_spec(spec)
+        spec = f"{provider}:{model_id}"
+        try:
+            current_quote = _lookup_price_quote(spec)
+        except UnpricedModelError:
+            current_quote = None
+        if current_quote is not None and current_quote.verified:
+            raise HTTPException(status_code=409, detail=(
+                "This model already has a tracked price. Review its current rate in Models."
+            ))
+        actor = auth.caller_principal(request) or "local administrator"
+        with _setting_write(request, "model_rates", spec, lambda d:
+                            _rate_audit_value(d, spec)):
+            recorded = await run_in_threadpool(
+                set_model_rate, spec,
+                input_per_mtok=float(form.get("input_per_mtok", "")),
+                output_per_mtok=float(form.get("output_per_mtok", "")),
+                source=str(form.get("source", "")),
+                as_of=str(form.get("as_of", "")),
+                valid_until=str(form.get("valid_until", "")),
+                approved_by=actor,
+            )
+        if (await run_in_threadpool(model_rate_overrides)).get(spec) != recorded:
+            raise RuntimeOverridesSecurityError("model rate readback differs")
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail="Review the model, USD amounts, source and dates.") from exc
+    except (OSError, RuntimeOverridesSecurityError) as exc:
+        raise HTTPException(status_code=503, detail=(
+            "The model price could not be confirmed. Refresh Settings and Activity before retrying."
+        )) from exc
+    _admin_audit(request, "settings_model_rate", model=spec)
+    return RedirectResponse("/settings?saved=model_rate#settings-model-prices", status_code=303)
+
+
+@router.post("/settings/models/rate/remove")
+async def settings_remove_model_rate(request: Request, model: str = Form("")) -> RedirectResponse:
+    _app()._require_same_origin(request)
+    auth.require_global_permission(request, "admin")
+    from maverick.runtime_overrides import (
+        RuntimeOverridesSecurityError,
+        clear_model_rate,
+        model_rate_overrides,
+    )
+
+    try:
+        with _setting_write(request, "model_rates", model, lambda d:
+                            _rate_audit_value(d, model)):
+            await run_in_threadpool(clear_model_rate, model)
+        if model in await run_in_threadpool(model_rate_overrides):
+            raise RuntimeOverridesSecurityError("model rate removal readback differs")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Choose a saved model rate to remove.") from exc
+    except (OSError, RuntimeOverridesSecurityError) as exc:
+        raise HTTPException(status_code=503, detail=(
+            "The change could not be confirmed. Refresh Settings and Activity before retrying."
+        )) from exc
+    _admin_audit(request, "settings_model_rate_removed", model=model)
+    return RedirectResponse("/settings?saved=model_rate_removed#settings-model-prices", status_code=303)
 
 
 @router.post("/settings/budget")

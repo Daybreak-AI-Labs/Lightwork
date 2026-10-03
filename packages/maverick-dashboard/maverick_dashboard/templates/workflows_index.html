@@ -8,6 +8,12 @@
   .wfx__section { margin-bottom: var(--space-7); }
   .wfx__section h2 { font-size: var(--text-lg); margin: 0 0 var(--space-3); }
   .wfx__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-2); }
+  .wfx__more { position: relative; }
+  .wfx__more summary { list-style: none; cursor: pointer; }
+  .wfx__more summary::-webkit-details-marker { display: none; }
+  .wfx__menu { position: absolute; z-index: 4; right: 0; top: 100%; min-width: 11rem;
+    padding: var(--space-2); display: grid; gap: var(--space-1); border: 1px solid var(--border);
+    border-radius: var(--radius-md); background: var(--surface); box-shadow: var(--shadow-md); }
 </style>
 
 <div class="wfx">
@@ -56,6 +62,12 @@
         {% if can_operate_workflows %}<div class="mv-row__actions">
           <a class="btn btn--ghost" href="/flows/designer/{{ f.id | urlencode }}">Edit</a>
           <a class="btn btn--ghost" href="/flows/analytics">Analytics</a>
+          <details class="wfx__more"><summary class="btn btn--ghost">More</summary>
+            <div class="wfx__menu">
+              <button class="btn btn--ghost" type="button" data-flow-retire="off" data-flow-id="{{ f.id }}" data-flow-name="{{ f.name }}">Turn off</button>
+              <button class="btn btn--ghost" type="button" data-flow-retire="delete" data-flow-id="{{ f.id }}" data-flow-name="{{ f.name }}">Delete flow</button>
+            </div>
+          </details>
         </div>{% endif %}
       </li>
       {% endfor %}
@@ -132,4 +144,17 @@
     {% endif %}
   </section>
 </div>
+{% if can_operate_workflows and flows_enabled %}
+<script src="{{ asset('lightwork-flow-retirement.js') }}"></script>
+<script>
+  document.querySelectorAll('[data-flow-retire]').forEach(function (button) {
+    button.addEventListener('click', function () {
+      window.LightworkFlowRetirement.change(button.dataset.flowId, button.dataset.flowRetire, {
+        name: button.dataset.flowName, button: button,
+        onDone: function () { window.location.reload(); }
+      });
+    });
+  });
+</script>
+{% endif %}
 {% endblock %}

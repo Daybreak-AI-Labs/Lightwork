@@ -582,6 +582,13 @@ class FlowPublishIn(BaseModel):
     revision: str = Field(..., min_length=1, max_length=128)
 
 
+class FlowRetireIn(BaseModel):
+    """Revoke the reviewed release, including older saved flow formats."""
+    version: int = Field(..., ge=0)
+    revision: str = Field(..., max_length=128)
+    expected_release_id: str | None = Field(default=None, max_length=128)
+
+
 class FlowRunIn(BaseModel):
     """Start a real run of the exact published release with optional initial data.
 

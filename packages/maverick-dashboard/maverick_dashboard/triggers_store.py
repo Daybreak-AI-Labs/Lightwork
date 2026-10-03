@@ -161,7 +161,7 @@ def bound_template(trigger: dict):
     return Template(**normalised)
 
 
-def list_triggers(*, include_snapshot: bool = False) -> list[dict]:
+def list_triggers(*, include_snapshot: bool = False, strict: bool = False) -> list[dict]:
     """Every registered trigger as ``{name, template, params, created}``."""
     p = _path()
     if not p.exists():
@@ -169,11 +169,19 @@ def list_triggers(*, include_snapshot: bool = False) -> list[dict]:
     try:
         with open(p, "rb") as f:
             raw = _tomllib().load(f)
-    except (OSError, ValueError):
+    except (OSError, ValueError) as exc:
+        if strict:
+            raise RuntimeError("Connected starts could not be checked") from exc
+        return []
+    if not isinstance(raw.get("trigger") or {}, dict):
+        if strict:
+            raise RuntimeError("Connected starts could not be checked")
         return []
     out: list[dict] = []
     for name, t in (raw.get("trigger") or {}).items():
         if not isinstance(t, dict):
+            if strict:
+                raise RuntimeError("Connected starts could not be checked")
             continue
         try:
             params = json.loads(t.get("params") or "{}")

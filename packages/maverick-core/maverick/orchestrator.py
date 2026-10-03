@@ -313,13 +313,12 @@ def _unpriced_model_message(exc: BaseException, goal_id: Any) -> str:
     because the real problem is that Lightwork refuses to bill a model with
     no verified price, not that spend or time ran out.
     """
+    del exc, goal_id
     return (
-        "Stopped: this goal used a model with no verified price, so "
-        "Lightwork refused to bill it rather than guess.\n"
-        f"Detail: {_safe_exception_text(exc, fallback='model price unavailable')}\n"
-        "Fix: add a sourced price for this model to the rate card, or set "
-        "[budget] strict_pricing = false to allow a warning-labelled "
-        f"estimate, then resume: maverick resume {goal_id}"
+        "Lightwork paused because the selected AI model has no usable price. "
+        "Open Settings, review Models > Prices, then choose a priced model or "
+        "enter your current contract's spending ceiling. You can retry this "
+        "task after the price is ready."
     )
 
 

@@ -131,10 +131,32 @@ def _read(request, selection, _arguments):
     return Preview("These are your current personal notification preferences. No delivery was triggered.")
 
 
+def _inbox_snapshot(request, _selection):
+    state = native._state(request)
+    items = [{key: item[key] for key in ("id", "title", "label", "href", "category", "seen_at")}
+             for item in state["items"][:20]]
+    unseen = sum(item["seen_at"] is None for item in state["items"])
+    summary = f"You have {unseen} new notification{'s' if unseen != 1 else ''}."
+    if state["partial"]:
+        summary += " Some assigned decisions could not be checked; refresh the inbox."
+    if len(state["items"]) > len(items):
+        summary += " Open your inbox to see older notifications."
+    details = {"items": items, "unseen": unseen, "href": "/notifications", "partial": state["partial"]}
+    revision = hashlib.sha256(json.dumps(details, sort_keys=True).encode()).hexdigest()
+    return Snapshot(revision, "Your current notifications", summary, details)
+
+
+def _read_inbox(request, selection, _arguments):
+    current = _inbox_snapshot(request, selection)
+    return Preview(current.summary, native=current.details)
+
+
 def entries():
     shared = {"family": "notifications", "direct_ui": "/notifications#notification-preferences",
               "pages": ("/notifications", "/preferences", "/account", "/chat", "/chat/goal/*")}
     return (
+        Adapter(id="notifications.personal_inbox", label="Show my notifications", input_model=EmptyInput,
+                snapshot=_inbox_snapshot, prepare=_read_inbox, **shared),
         Adapter(id="notifications.personal_status", label="Show my personal alert preferences", input_model=EmptyInput,
                 snapshot=lambda request, selection: snapshot(request, selection, edit=False), prepare=_read, **shared),
         Adapter(id="notifications.personal_update", label="Change my personal alert preferences", input_model=ChangeInput,

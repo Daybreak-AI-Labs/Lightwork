@@ -143,7 +143,9 @@ patterns below account for most of the 92 P0/P1 findings.
 4. **"On the models you choose" is not true yet.** On every OpenAI-family provider (OpenAI, Azure,
    Gemini, OpenRouter, DeepSeek, xAI, Moonshot, Ollama, vLLM, TGI) the orchestrator silently loses its
    spawn, specialist, tool-discovery and knowledge tools because 237 tools are truncated to the first
-   128 (UX-051). Unpriced models are called, billed, and then refused (UX-050);
+   128 (UX-051; the current branch now caps the agent catalog and makes overflow discoverable). The original unpriced-model path called and billed before
+   refusing; the current branch guards dispatch and offers an in-product
+   reviewed-ceiling path (UX-050);
    free OpenRouter models still hit that refusal (UX-206); Azure and Bedrock cannot be set
    up in the product (UX-074); self-hosted endpoints always fail "Test connection"
    (UX-054).
@@ -880,6 +882,15 @@ no images without alt, axe violations limited to nine distinct rules).
 
 #### UX-050 · P1 · Bug · Models without a rate-card price (any OpenAI-compatible gateway, LM Studio/llama.cpp endpoints, many Azure/Bedrock deployments, Moonshot, xAI aliases) make one billed call, then every task stops with a developer-facing 'unpriced model' message
 
+- **Current branch (2026-10-03):** Core and Copilot now check pricing before
+  dispatch. Settings > Models > Prices shows each selected role's effective
+  state and lets a global administrator enter, read back, expire, or withdraw a
+  sourced USD ceiling for one exact route. Receipts label that rate estimated,
+  not vendor-verified invoice evidence. The installer points to this path and
+  the stop card gives a Settings recovery action. A synthetic browser journey
+  covered save → choose model → effective state → withdraw; installed gateway
+  billing and customer-specific contract accuracy remain unqualified.
+
 - **Who / where:** evaluator, workspace admin, end user · `default [budget] strict_pricing (true); goal result text`
 - **User impact:** An evaluator who connects their company's AI gateway, a LiteLLM proxy, LM Studio or an Azure deployment name completes setup, sends a first task and gets a refusal written for Lightwork developers ('Add a sourced ModelPrice to the versioned rate card'). A hosted model has already been charged for the call. Nothing in setup warned that the chosen model cannot be used.
 - **Evidence (reproduced):**
@@ -891,6 +902,12 @@ no images without alt, axe violations limited to nine distinct rules).
 - Source: C5a-024 · prior audit: W1-1 (still present at HEAD in changed form: refusal now happens after a paid call)
 
 #### UX-051 · P1 · Bug · On OpenAI-family models the orchestrator silently loses spawn/specialist/find_tools/knowledge tools (237 tools truncated to the first 128)
+
+- **Current branch (2026-10-03):** Agent catalogs now retain discovery,
+  coordination and knowledge tools within the model limit, and can activate
+  overflow on a later turn. The configured OpenAI-style failover route uses
+  the same cap. A direct client that bypasses Agent still has a last-resort
+  truncation path; live provider acceptance is outstanding.
 
 - **Who / where:** end user, workspace admin, evaluator, developer · `packages/maverick-core/maverick/providers/openai_provider.py:606-630`
 - **User impact:** Anyone running Lightwork on OpenAI, Azure OpenAI, Gemini, OpenRouter (including the promoted free models), DeepSeek, xAI, Moonshot, Ollama, vLLM or TGI gets an orchestrator that cannot delegate to sub-agents or the 2,031 specialists, cannot discover deferred tools and cannot search knowledge. The core 'multi-agent workforce' silently degrades to a single agent with a random grab-bag of niche tools, with only a server log warning.
@@ -915,6 +932,13 @@ no images without alt, axe violations limited to nine distinct rules).
 - Source: COORD-004, C5a-011, U3-001
 
 #### UX-052 · P1 · Bug · 'Send finished-task alerts' never fires for ordinary tasks: with ntfy configured and working, a finished task, a failed task and a task waiting for the user's answer sent zero alerts
+
+- **Current branch (2026-10-03):** Signed-in users now have a visible private
+  bell and owner-scoped inbox for completed, blocked and question-waiting work;
+  Copilot can read that inbox. New installs turn on in-product personal alerts.
+  Existing installs need an administrator to enable them. External private
+  delivery still needs background observation and a verified personal channel;
+  this does not turn ordinary tasks into organization-wide ntfy alerts.
 
 - **Who / where:** end user, workspace admin · `Settings > All settings > Integrations 'Send finished-task alerts with'; task lifecycle`
 - **User impact:** Users who set up phone/Slack alerts expecting to hear when their long task finishes, fails or needs an answer are never notified; they must keep the dashboard open and poll.

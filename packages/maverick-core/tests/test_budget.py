@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import pickle
+from datetime import datetime, timedelta, timezone
 
 import maverick.budget as budget_mod
 import pytest
@@ -86,6 +87,72 @@ def test_strict_pricing_raises_on_unknown_model(monkeypatch):
     monkeypatch.setenv("MAVERICK_BILLING_STRICT", "1")
     with pytest.raises(UnpricedModelError, match="no verified"):
         _lookup_price("totally-made-up-model")
+
+
+def test_admin_ceiling_prices_only_its_exact_route_and_survives_other_settings(
+    monkeypatch, tmp_path,
+):
+    from maverick import runtime_overrides as ro
+
+    monkeypatch.setattr(ro, "OVERRIDES_PATH", tmp_path / "runtime-overrides.toml")
+    monkeypatch.setenv("MAVERICK_BILLING_STRICT", "1")
+    today = datetime.now(timezone.utc).date()
+    ro.set_model_rate(
+        "openai_compatible:client-model", input_per_mtok=4.0,
+        output_per_mtok=12.0, source="Customer contract R1",
+        as_of=today.isoformat(), valid_until=(today + timedelta(days=30)).isoformat(),
+        approved_by="operator@example.com",
+    )
+    ro.disable_tool("shell")
+    quote = budget_mod._lookup_price_quote("openai_compatible:client-model")
+    assert quote.rates == (4.0, 12.0)
+    assert quote.verified is False
+    assert quote.rate_card_version == "operator-ceiling-v1"
+    assert Budget(max_dollars=20).record_tokens(
+        1_000_000, 1_000_000, model="openai_compatible:client-model",
+    ).dollars == 16.0
+    assert Budget(max_dollars=10).record_tokens(
+        0, 0, model="openai_compatible:client-model",
+        cache_read_tok=1_000_000, cache_read_mult=0.1,
+    ).dollars == 4.0  # an unknown gateway never inherits a cache discount
+    with pytest.raises(UnpricedModelError):
+        _lookup_price("azure:client-model")
+    with pytest.raises(ValueError, match="zero-cost"):
+        ro.set_model_rate(
+            "openai_compatible:free-claim", input_per_mtok=0,
+            output_per_mtok=0, source="Unverified claim",
+            as_of=today.isoformat(), valid_until=today.isoformat(),
+            approved_by="operator@example.com",
+        )
+    ro.clear_model_rate("openai_compatible:client-model")
+    with pytest.raises(UnpricedModelError):
+        _lookup_price("openai_compatible:client-model")
+
+
+def test_expired_operator_ceiling_stops_before_dispatch(monkeypatch, tmp_path):
+    from maverick import runtime_overrides as ro
+
+    path = tmp_path / "runtime-overrides.toml"
+    monkeypatch.setattr(ro, "OVERRIDES_PATH", path)
+    monkeypatch.setenv("MAVERICK_BILLING_STRICT", "1")
+    today = datetime.now(timezone.utc).date()
+    yesterday = today - timedelta(days=1)
+    ro.set_model_rate(
+        "openai_compatible:client-model", input_per_mtok=4.0,
+        output_per_mtok=12.0, source="Customer contract R1",
+        as_of=yesterday.isoformat(), valid_until=today.isoformat(),
+        approved_by="operator@example.com",
+    )
+    current = path.read_text(encoding="utf-8")
+    expired = current.replace(
+        f'"valid_until" = "{today.isoformat()}"',
+        f'"valid_until" = "{yesterday.isoformat()}"',
+        1,
+    )
+    assert expired != current
+    path.write_text(expired, encoding="utf-8")
+    with pytest.raises(UnpricedModelError):
+        _lookup_price("openai_compatible:client-model")
 
 
 def test_strict_pricing_allows_known_and_selfhosted(monkeypatch):

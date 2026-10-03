@@ -806,7 +806,7 @@ weaviate_vectorizer = ""      # MAVERICK_WEAVIATE_VECTORIZER (default text2vec-t
 [tools]
 exposure = "core"             # MAVERICK_TOOL_EXPOSURE: "core" describes a short role-aware tool list on each
                               # request (a specialist pack sees its own allow_tools) and agents look the rest
-                              # up with find_tools; "full" describes every tool (~240, ~47k tokens per turn)
+                              # up with find_tools; "full" offers more up front, up to the model's tool limit
 core_extra = []               # tool names always described as well as the short list
 speculative = false           # MAVERICK_SPECULATIVE_TOOLS: read ahead for repeated look-ups (needs output_cache)
 openapi_spec_max_bytes = 10000000   # MAVERICK_OPENAPI_SPEC_MAX_BYTES (read at startup)
@@ -815,7 +815,7 @@ openapi_call_max_bytes = 1000000    # MAVERICK_OPENAPI_CALL_MAX_BYTES (read at s
 [models]
 embed = ""                    # MAVERICK_EMBED_MODEL (default BAAI/bge-small-en-v1.5)
 clap = ""                     # MAVERICK_CLAP_MODEL (default laion/clap-htsat-unfused)
-openai_max_tools = 128        # MAVERICK_OPENAI_MAX_TOOLS (read at startup)
+openai_max_tools = 128        # MAVERICK_OPENAI_MAX_TOOLS (read at startup); overflow remains discoverable through find_tools
 
 [energy]                      # used by the energy_accounting tool's estimates
 wh_per_1k_tokens = 0.3        # MAVERICK_ENERGY_WH_PER_1K_TOKENS

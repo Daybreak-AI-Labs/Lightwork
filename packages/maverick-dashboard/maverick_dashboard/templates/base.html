@@ -72,6 +72,7 @@
       <symbol id="i-mcp" viewBox="0 0 16 16"><circle cx="8" cy="8" r="1.9"/><path d="M8 2.5v3.6M8 9.9v3.6M2.5 8h3.6M9.9 8h3.6"/></symbol>
       <symbol id="i-channels" viewBox="0 0 16 16"><circle cx="8" cy="8" r="1.4"/><path d="M5.3 5.3a4 4 0 0 0 0 5.4M10.7 5.3a4 4 0 0 1 0 5.4M3.5 3.5a6.4 6.4 0 0 0 0 9M12.5 3.5a6.4 6.4 0 0 1 0 9"/></symbol>
       <symbol id="i-settings" viewBox="0 0 16 16"><circle cx="8" cy="8" r="2"/><path d="M8 1.9v1.7M8 12.4v1.7M14.1 8h-1.7M3.6 8H1.9M12.3 3.7l-1.2 1.2M4.9 11.1l-1.2 1.2M12.3 12.3l-1.2-1.2M4.9 4.9 3.7 3.7"/></symbol>
+      <symbol id="i-bell" viewBox="0 0 16 16"><path d="M12.5 10.7H3.5c.8-.9 1.1-1.8 1.1-3V6.5a3.4 3.4 0 0 1 6.8 0v1.2c0 1.2.3 2.1 1.1 3Z"/><path d="M6.7 12.5a1.3 1.3 0 0 0 2.6 0"/></symbol>
       <symbol id="i-users" viewBox="0 0 16 16"><circle cx="6" cy="6" r="2.2"/><path d="M2.6 13a3.5 3.5 0 0 1 6.8 0"/><path d="M10.4 4.2a2.2 2.2 0 0 1 0 4.2M11 13a3.5 3.5 0 0 0-1.3-2.7"/></symbol>
       <symbol id="i-tenants" viewBox="0 0 16 16"><rect x="3.5" y="2.6" width="9" height="10.8" rx="1.2"/><path d="M6 5.2h1.4M9 5.2h1.4M6 7.6h1.4M9 7.6h1.4M6.6 13.4v-2.2h2.8v2.2"/></symbol>
       <symbol id="i-cache" viewBox="0 0 16 16"><ellipse cx="8" cy="4.2" rx="4.4" ry="1.8"/><path d="M3.6 4.2v7.6c0 1 2 1.8 4.4 1.8s4.4-.8 4.4-1.8V4.2"/><path d="M3.6 8c0 1 2 1.8 4.4 1.8s4.4-.8 4.4-1.8"/></symbol>
@@ -112,6 +113,14 @@
       {% if show_settings_link is not defined or show_settings_link %}
       <a class="iconbtn" href="/settings" aria-label="{{ ut('Settings') }}" title="{{ ut('Settings') }}" lang="{{ ul('Settings') }}">
         <svg viewBox="0 0 16 16" aria-hidden="true"><use href="#i-settings"></use></svg>
+      </a>
+      {% endif %}
+      {% if show_personal_notifications %}
+      <a class="iconbtn iconbtn--notifications personal-notification-link" id="personal-notification-link" href="/notifications"
+         data-enabled="{{ 'true' if personal_notifications_enabled else 'false' }}"
+         aria-label="Your notifications" title="Your notifications">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><use href="#i-bell"></use></svg>
+        <span class="notification-count" id="personal-notification-count" aria-hidden="true" hidden></span>
       </a>
       {% endif %}
       <a class="iconbtn iconbtn--text" href="{{ docs_learn_more.url if docs_learn_more else docs_home }}" target="_blank" rel="noopener noreferrer"
@@ -249,6 +258,7 @@
   <script src="{{ asset('lightwork-guided-actions.js') }}" defer></script>
   <script src="{{ asset('lightwork-navfinder.js') }}" defer></script>
   <script src="{{ asset('lightwork-settings-search.js') }}" defer></script>
+  {% if show_personal_notifications %}<script src="{{ asset('lightwork-notification-badge.js') }}" defer></script>{% endif %}
   {% if record_search_context %}<link rel="stylesheet" href="{{ asset('lightwork-record-search.css') }}"><script src="{{ asset('lightwork-record-search.js') }}" defer></script>{% endif %}
   <script src="{{ asset('lightwork-voice.js') }}" defer></script>
   {% block scripts_extra %}{% endblock %}

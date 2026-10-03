@@ -112,6 +112,7 @@ from .api_schemas import (
     FlowDryRunIn,
     FlowPublishIn,
     FlowResumeIn,
+    FlowRetireIn,
     FlowRollbackIn,
     FlowRunIn,
     FlowSaveIn,
@@ -6503,7 +6504,7 @@ def publish_flow_endpoint(
 def unpublish_flow_endpoint(
     request: Request,
     flow_id: str,
-    payload: FlowPublishIn,
+    payload: FlowRetireIn,
 ) -> dict:
     """Deactivate a release while retaining its draft and immutable history."""
     require_permission(request, "operate")
@@ -6519,9 +6520,12 @@ def unpublish_flow_endpoint(
             flow_id,
             expected_version=payload.version,
             expected_revision=payload.revision,
+            expected_release_id=payload.expected_release_id,
         )
     except store.FlowVersionConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except store.FlowSnapshotError as exc:
+        raise HTTPException(status_code=409, detail="The published flow changed or could not be checked. Review it again.") from exc
     from maverick_dashboard import automation_queue
 
     try:
@@ -7724,22 +7728,118 @@ def get_published_flow_endpoint(request: Request, flow_id: str) -> dict:
     }
 
 
+@router.get("/flows/{flow_id}/retirement")
+def flow_retirement_preview_endpoint(request: Request, flow_id: str) -> dict:
+    """Show what turning off or deleting a flow would affect before confirmation."""
+    require_permission(request, "operate")
+    _require_flows()
+    from maverick.flow import runner, store
+    from maverick.paths import current_tenant_id
+
+    from maverick_dashboard import event_triggers_store, triggers_store
+
+    flow = store.load_flow(flow_id)
+    if flow is None:
+        raise HTTPException(status_code=404, detail="no such flow")
+    _assert_flow_access(request, flow)
+    try:
+        published = store.load_published_bundle(flow_id)
+    except store.FlowSnapshotError as exc:
+        raise HTTPException(status_code=409, detail="The published flow could not be checked. Try again before changing it.") from exc
+    tenant = current_tenant_id() or ""
+    try:
+        webhooks = sum(
+            t.get("flow") == flow_id and t.get("tenant", "") == tenant
+            and t.get("flow_owner", "") == flow.owner
+            for t in triggers_store.list_triggers(strict=True)
+        )
+        linked_events = [
+            t for t in event_triggers_store.list_triggers(strict=True)
+            if t.get("flow") == flow_id and t.get("tenant", "") == tenant
+            and t.get("owner", "") in _event_trigger_allowed_owners(request)
+        ]
+        pending_forms = sum(
+            event_triggers_store.pending_form_submissions(t)
+            for t in linked_events if t.get("source") == "form"
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail="Connected starts could not be checked. Try again before changing this flow.") from exc
+    active_statuses = {
+        runner.STATUS_QUEUED, runner.STATUS_CLAIMED, runner.STATUS_RUNNING,
+        runner.STATUS_RESUMING, runner.STATUS_PAUSED_APPROVAL,
+        runner.STATUS_PAUSED_DELAY, runner.STATUS_PAUSED_EVENT,
+    }
+    run_owners = {flow.owner}
+    if (not flow.owner and caller_principal(request) is None
+            and (_dashboard_token_authenticated(request) or auth_genuinely_off())):
+        run_owners.update(("user:local", "operator", "local:dashboard"))
+    active_runs = sum(
+        1 for owner in run_owners
+        for _ in store.iter_run_metadata(
+            flow_id=flow_id, owner=owner, statuses=active_statuses
+        )
+    )
+    try:
+        published_parents = sum(
+            parent.id != flow_id and parent.owner == flow.owner
+            and release.get("subflow_digests", {}).get(flow_id) is not None
+            for parent, release in store.list_published_bundles()
+        )
+    except store.FlowSnapshotError as exc:
+        raise HTTPException(status_code=409, detail="Related published flows could not be checked. Try again before changing this flow.") from exc
+    return {
+        "id": flow.id, "name": flow.name, "version": flow.version,
+        "revision": flow.revision, "published": published is not None,
+        "release_id": str(published[1]["release_id"]) if published else "",
+        "scheduled": bool(published and published[0].schedule.strip()),
+        "connected_starts": webhooks + len(linked_events),
+        "pending_forms": pending_forms,
+        "active_runs": active_runs,
+        "published_parent_flows": published_parents,
+    }
+
+
 @router.delete("/flows/{flow_id}", status_code=204)
-def delete_flow_endpoint(request: Request, flow_id: str) -> None:
+def delete_flow_endpoint(
+    request: Request, flow_id: str, response: Response, version: int | None = None,
+    revision: str | None = None, expected_release_id: str | None = None,
+) -> None:
     require_permission(request, "operate")
     _require_flows()
     from maverick.flow import store
+    from maverick.paths import current_tenant_id
+
+    from maverick_dashboard import event_triggers_store
 
     f = store.load_flow(flow_id)
     if f is None:
         raise HTTPException(status_code=404, detail="no such flow")
     _assert_flow_access(request, f)
+    if (version is None) != (revision is None):
+        raise HTTPException(status_code=400, detail="include both flow version and revision")
     try:
-        deleted = store.delete_flow(
-            flow_id,
-            expected_version=f.version,
-            expected_revision=f.revision,
-        )
+        # Public form submission holds this registry lock through its release
+        # check and append. Retain that order while checking for accepted work
+        # and revoking the release so a submission cannot become stranded.
+        with event_triggers_store.registry_lock():
+            linked_forms = [
+                t for t in event_triggers_store.list_triggers(strict=True)
+                if t.get("source") == "form" and t.get("flow") == flow_id
+                and t.get("tenant", "") == (current_tenant_id() or "")
+                and t.get("flow_owner", "") == f.owner
+            ]
+            if any(event_triggers_store.pending_form_submissions(t) for t in linked_forms):
+                raise HTTPException(
+                    status_code=409,
+                    detail="This flow has received form submissions waiting in Automations. Review them before deleting it.",
+                    headers={"X-Lightwork-Pending-Forms": "true"},
+                )
+            deleted = store.delete_flow(
+                flow_id,
+                expected_version=f.version if version is None else version,
+                expected_revision=f.revision if revision is None else revision,
+                expected_release_id=expected_release_id,
+            )
     except store.FlowVersionConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except store.FlowSnapshotError as exc:
@@ -7747,8 +7847,38 @@ def delete_flow_endpoint(request: Request, flow_id: str) -> None:
             status_code=409,
             detail="flow could not be safely revoked; its draft was not deleted",
         ) from exc
+    except (RuntimeError, OSError) as exc:
+        raise HTTPException(
+            status_code=409,
+            detail="Received submissions could not be checked. Open Automations and try again before deleting this flow.",
+        ) from exc
     if not deleted:
         raise HTTPException(status_code=409, detail="flow changed while it was being deleted")
+    # The private editor recovery slot is separate from definition history.
+    # Retire its content after the confirmed delete; report a cleanup failure
+    # separately because the flow itself cannot be restored by retrying DELETE.
+    try:
+        from .draft_api import context_for
+        from .draft_store import DraftStore
+
+        slot = hashlib.sha256(f"flow-designer:{flow_id}".encode()).hexdigest()
+        drafts = DraftStore(context_for(request))
+        copy = drafts.read(slot)
+        if copy["payload"] is not None:
+            drafts.save(slot, None, expected_revision=copy["revision"],
+                        operation_id=secrets.token_hex(16))
+        response.headers["X-Lightwork-Recovery-Copy"] = "cleared"
+    except Exception:
+        log.exception("flow %s deleted but its editor recovery copy could not be cleared", flow_id)
+        response.headers["X-Lightwork-Recovery-Copy"] = "needs-review"
+    from maverick_dashboard import automation_queue
+
+    try:
+        automation_queue._reconcile_flow_crons()
+    except Exception:
+        # The publication pointer is already gone; periodic reconciliation
+        # repairs any remaining scheduled job.
+        log.exception("flow cron reconcile failed after deleting %s", flow_id)
 
 
 @router.post("/flows/{flow_id}/run")
@@ -13032,8 +13162,9 @@ def _copilot_model_route_status() -> str:
 def _copilot_model_route_reason(route_status: str) -> str | None:
     if route_status == "pricing":
         return (
-            "The selected AI model has no confirmed price. This workspace requires "
-            "known pricing before Copilot can use it."
+            "The selected AI model has no usable price. Copilot stopped before "
+            "sending a paid request. An administrator can choose a priced model "
+            "or review this model's rate in Settings."
         )
     if route_status == "model":
         return "The selected AI model is unavailable under this workspace's settings."
@@ -13093,8 +13224,8 @@ def _copilot_provider_setup(
     if "admin" in permissions:
         if route_status == "pricing":
             return {
-                "href": "/settings#settings-models",
-                "label": "Choose a model with known pricing in Settings",
+                "href": "/settings#settings-model-prices",
+                "label": "Review model prices in Settings",
             }
         if route_status == "model":
             return {"href": "/settings#settings-models", "label": "Choose an available model in Settings"}

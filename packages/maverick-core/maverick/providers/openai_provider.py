@@ -618,17 +618,14 @@ class OpenAIClient:
         if oai_tools and len(oai_tools) > _OPENAI_MAX_TOOLS:
             # OpenAI's Chat Completions API hard-caps `tools` at 128 and 400s the
             # whole request otherwise ("array too long"). A goal that assembles
-            # more (many MCP servers / enabled capabilities) would fail entirely.
-            # base_registry registers core/orchestration tools BEFORE MCP and
-            # extension tools, so keeping the first _OPENAI_MAX_TOOLS preserves the
-            # essential ones and drops the excess tail. An explicitly selected
-            # function takes precedence over the last retained tool. Operators who need the
-            # dropped tools should reduce enabled MCP servers/capabilities or run
-            # the orchestrator on a provider with a higher tool ceiling.
+            # more would fail entirely. Agent catalogs route overflow through
+            # find_tools before reaching this boundary; this last-resort cap is
+            # for direct provider callers. An explicitly selected function
+            # takes precedence over the last retained tool.
             log.warning(
                 "openai: %d tools exceed the API's %d-tool limit; sending the "
                 "first %d, retaining any explicitly selected function. "
-                "Trim enabled MCP servers/capabilities to expose the rest.",
+                "The caller must route overflow through tool discovery.",
                 len(oai_tools), _OPENAI_MAX_TOOLS, _OPENAI_MAX_TOOLS,
             )
             retained = oai_tools[:_OPENAI_MAX_TOOLS]

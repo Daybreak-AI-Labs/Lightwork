@@ -81,6 +81,7 @@
   var cleanDraft = null;
   var saveInFlight = false;
   var publishInFlight = false;
+  var retireInFlight = false;
   var runInFlight = false;
   var applyInFlight = false;
   var draftGeneration = 0;
@@ -162,10 +163,17 @@
   function markClean(snapshot) { cleanDraft = snapshot || draftSnapshot(); }
   function draftIsDirty() { return cleanDraft !== null && cleanDraft !== draftSnapshot(); }
   function syncSaveButtons() {
-    saveButton.disabled = saveInFlight || publishInFlight || applyInFlight;
-    publishButton.disabled = saveInFlight || publishInFlight || applyInFlight;
+    var busy = saveInFlight || publishInFlight || applyInFlight || retireInFlight;
+    saveButton.disabled = busy;
+    publishButton.disabled = busy;
+    var more = document.getElementById('fd-more');
+    if (more) more.hidden = !rootFlow.id || (!rootFlow.version && !canvas.getAttribute('data-flow-id'));
+    var off = document.getElementById('fd-turn-off');
+    if (off) off.disabled = busy || !rootFlow.published;
+    var del = document.getElementById('fd-delete-flow');
+    if (del) del.disabled = busy;
     props.querySelectorAll('[data-apply-node]').forEach(function (button) {
-      button.disabled = saveInFlight || publishInFlight || applyInFlight ||
+      button.disabled = busy ||
         button.getAttribute('data-apply-blocked') === 'true' || !proposals[button.getAttribute('data-apply-node')];
     });
   }
@@ -1486,6 +1494,7 @@
     autoLayout();
     nameInput.value = flow.name; idInput.value = flow.id;
     selected = null; selectedEdge = null; view = { x: 40, y: 20, k: 1 }; render(); renderProps();
+    syncSaveButtons();
     if (savedSnapshot) markClean();
     if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function')
       window.dispatchEvent(new Event('lightwork:flow-loaded'));
@@ -1575,7 +1584,7 @@
     return String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60);
   }
   async function save(forApply) {
-    if (saveInFlight || (applyInFlight && forApply !== true)) return false;
+    if (saveInFlight || retireInFlight || (applyInFlight && forApply !== true)) return false;
     var bad = commitRawFields();
     if (bad.length) { say('Some action settings aren’t filled in correctly. Check the steps and try again.', true); return false; }
     var body = toApiFlow();
@@ -1624,7 +1633,7 @@
     }
   }
   async function publishFlow() {
-    if (publishInFlight || saveInFlight || applyInFlight) return;
+    if (publishInFlight || saveInFlight || applyInFlight || retireInFlight) return;
     publishInFlight = true; syncSaveButtons();
     // Publish is the explicit activation authority. Save the reviewed canvas as
     // a draft, then bind activation to the exact CAS tokens the save returned.
@@ -1648,6 +1657,31 @@
       say(e.message || unconfirmedMutation('Publish'), true);
     } finally {
       publishInFlight = false; syncSaveButtons();
+    }
+  }
+  async function retireFlow(action, button) {
+    if (retireInFlight || saveInFlight || publishInFlight || applyInFlight ||
+        !rootFlow.id || (!rootFlow.version && !canvas.getAttribute('data-flow-id'))) return;
+    retireInFlight = true; syncSaveButtons();
+    try {
+      await window.LightworkFlowRetirement.change(rootFlow.id, action, {
+        button: button, dirty: draftIsDirty(), name: rootFlow.name,
+        onDone: function () {
+          if (action === 'delete') {
+            markClean();
+            window.location.assign('/workflows');
+          } else {
+            rootFlow.published = false;
+            rootFlow.published_version = 0;
+            rootFlow.published_revision = '';
+            say('Turned off. New automatic starts have stopped; existing runs may continue.');
+          }
+        }
+      });
+    } finally {
+      retireInFlight = false; syncSaveButtons();
+      var more = document.getElementById('fd-more');
+      if (more) more.open = false;
     }
   }
   function inputFields(definitions) {
@@ -1974,7 +2008,7 @@
     // Persisted apply: save the current graph, then enact the swap server-side so
     // it becomes a new version and its before/after impact is measured. Hardening
     // needs a tool: the node's own, else the one the loop inferred it keeps calling.
-    if (applyInFlight || saveInFlight || publishInFlight || prop.applicable === false) return;
+    if (applyInFlight || saveInFlight || publishInFlight || retireInFlight || prop.applicable === false) return;
     // Proposal IDs address root nodes only; nested bodies may reuse those IDs.
     if (flow !== rootFlow || rootFlow.nodes.indexOf(n) < 0) {
       say('Select the current step in the main flow before applying its suggestion.', true); return;
@@ -2455,6 +2489,8 @@
     }).catch(function () {});
   document.getElementById('fd-save').addEventListener('click', function () { save(); });
   document.getElementById('fd-publish').addEventListener('click', publishFlow);
+  document.getElementById('fd-turn-off').addEventListener('click', function () { retireFlow('off', this); });
+  document.getElementById('fd-delete-flow').addEventListener('click', function () { retireFlow('delete', this); });
   document.getElementById('fd-run').addEventListener('click', function () { run(true); });
   document.getElementById('fd-run-real').addEventListener('click', function () { run(false); });
   document.getElementById('fd-history').addEventListener('click', showHistory);

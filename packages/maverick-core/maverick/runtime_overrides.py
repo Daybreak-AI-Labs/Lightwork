@@ -26,6 +26,7 @@ import threading
 from collections import OrderedDict
 from contextlib import contextmanager
 from contextvars import ContextVar
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 from .paths import data_dir, diagnostic_data_dir, reset_tenant, set_tenant
@@ -69,7 +70,7 @@ _LKG_LIMIT = 8
 _LOAD_FAILURE_LIMIT = 32
 _MAX_OVERRIDE_BYTES = 1024 * 1024
 _KNOWN_TOP_LEVEL = frozenset(
-    {"security", "models", "budget", "plugins", "access", "styles", "mcp_servers"}
+    {"security", "models", "model_rates", "budget", "plugins", "access", "styles", "mcp_servers"}
 )
 _MCP_SPEC_KEYS = frozenset(
     {
@@ -265,6 +266,14 @@ def _validate_loaded_state(state: object) -> dict:
             or not _VALID_MODEL.fullmatch(model.strip())
         ):
             raise ValueError("models contains an invalid role or model id")
+
+    rates = _require_table(state, "model_rates")
+    if len(rates) > 100:
+        raise ValueError("too many administrator-approved model rates")
+    for model, rate in rates.items():
+        if not isinstance(model, str) or not _VALID_MODEL.fullmatch(model):
+            raise ValueError("model_rates contains an invalid model id")
+        _validate_model_rate(rate)
 
     budget = _require_table(state, "budget")
     _reject_unknown_keys(budget, {"max_dollars", "task_limits_enabled"}, "budget")
@@ -490,6 +499,43 @@ _VALID_MODEL = re.compile(r"^[A-Za-z0-9_.:/-]{1,128}$")
 # special "default" that applies to every role. Tight charset so a hand-edited
 # file can't inject junk keys.
 _VALID_ROLE = re.compile(r"^[a-z_]{1,40}$")
+_MODEL_RATE_KEYS = frozenset({
+    "input_per_mtok", "output_per_mtok", "source", "as_of", "valid_until",
+    "approved_at", "approved_by",
+})
+
+
+def _validate_model_rate(rate: object) -> dict:
+    """An operator-attested *ceiling*, never a vendor-verified invoice rate."""
+    if not isinstance(rate, dict) or set(rate) != _MODEL_RATE_KEYS:
+        raise ValueError("model rate requires both prices, source, dates and approver")
+    for key in ("input_per_mtok", "output_per_mtok"):
+        value = rate[key]
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or not 0 <= value <= 1_000_000:
+            raise ValueError("model rate must be a finite non-negative USD amount")
+    if not (rate["input_per_mtok"] or rate["output_per_mtok"]):
+        raise ValueError("a zero-cost model needs provider evidence, not an entered rate")
+    for key, limit in (("source", 300), ("approved_by", 200)):
+        value = rate[key]
+        if not isinstance(value, str) or not value.strip() or len(value) > limit or any(ord(c) < 32 for c in value):
+            raise ValueError(f"invalid model rate {key}")
+    try:
+        as_of = date.fromisoformat(rate["as_of"])
+        expires = date.fromisoformat(rate["valid_until"])
+        approved = datetime.fromisoformat(rate["approved_at"].replace("Z", "+00:00"))
+    except (TypeError, AttributeError, ValueError) as exc:
+        raise ValueError("model rate dates are invalid") from exc
+    today = datetime.now(timezone.utc).date()
+    if (approved.tzinfo is None or as_of > today or expires < as_of
+            or (expires - as_of).days > 366
+            or approved.astimezone(timezone.utc).date() > today):
+        raise ValueError("model rate dates require a current, dated source")
+    return rate
+
+
+def model_rate_overrides() -> dict[str, dict]:
+    """Read the shared, validated rate ceilings without changing routing."""
+    return copy.deepcopy(_load().get("model_rates") or {})
 
 
 def _models_overlay() -> dict[str, str]:
@@ -665,7 +711,8 @@ def _write_state(denied: set[str], models: dict[str, str] | None,
                  allowed: set[str] | None = None,
                  mcp: dict[str, dict] | None = None,
                  style: str | None = None,
-                 task_limits: bool | None = None) -> None:
+                 task_limits: bool | None = None,
+                 model_rates: dict[str, dict] | None = None) -> None:
     """Serialise the whole overlay: [security] denied_tools + optional [models]
     (default + per-role) + [budget] max_dollars + [plugins] enabled/disabled +
     [access] allowed_models + [mcp_servers.<name>] tables. One file holds every
@@ -713,6 +760,11 @@ def _write_state(denied: set[str], models: dict[str, str] | None,
     active_style = style_override() if style is None else style
     if active_style:
         body += f"\n[styles]\nactive = {_toml_string(active_style)}\n"
+    rates = model_rate_overrides() if model_rates is None else model_rates
+    if rates:
+        body += "\n[model_rates]\n"
+        for spec, rate in sorted(rates.items()):
+            body += f"{_toml_string(spec)} = {_toml_inline(rate)}\n"
     # MCP server tables come last: once a subtable header is emitted every
     # following key belongs to it, so no top-level section may follow.
     servers = mcp_overlay() if mcp is None else mcp
@@ -800,6 +852,36 @@ def clear_default_model() -> None:
     models = _models_overlay()
     models.pop("default", None)
     _write_state(denied_tools(), models or None, budget_override())
+
+
+@_serialized
+def set_model_rate(spec: str, *, input_per_mtok: float, output_per_mtok: float,
+                   source: str, as_of: str, valid_until: str, approved_by: str) -> dict:
+    """Approve a sourced USD ceiling for a route without claiming vendor verification."""
+    model = _validate_model(spec)
+    rate = _validate_model_rate({
+        "input_per_mtok": float(input_per_mtok),
+        "output_per_mtok": float(output_per_mtok),
+        "source": source.strip(), "as_of": as_of, "valid_until": valid_until,
+        "approved_at": datetime.now(timezone.utc).isoformat(),
+        "approved_by": approved_by,
+    })
+    if date.fromisoformat(valid_until) < datetime.now(timezone.utc).date():
+        raise ValueError("model rate has expired")
+    rates = model_rate_overrides()
+    rates[model] = rate
+    _write_state(denied_tools(), _models_overlay() or None, budget_override(),
+                 model_rates=rates)
+    return copy.deepcopy(rate)
+
+
+@_serialized
+def clear_model_rate(spec: str) -> None:
+    model = _validate_model(spec)
+    rates = model_rate_overrides()
+    rates.pop(model, None)
+    _write_state(denied_tools(), _models_overlay() or None, budget_override(),
+                 model_rates=rates)
 
 
 @_serialized
@@ -974,6 +1056,7 @@ __all__ = [
     "RuntimeOverridesSecurityError",
     "denied_tools", "disable_tool", "enable_tool",
     "default_model_override", "set_default_model", "clear_default_model",
+    "model_rate_overrides", "set_model_rate", "clear_model_rate",
     "role_model_override", "set_role_models",
     "budget_override", "set_budget", "clear_budget",
     "plugin_overlay", "enable_plugin", "disable_plugin", "reset_plugin",

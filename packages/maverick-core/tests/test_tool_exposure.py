@@ -148,6 +148,74 @@ def test_deferred_tools_off_exposes_everything(ctx, monkeypatch):
     assert _offered(agent) == {t.name for t in agent.tools.all()}
 
 
+@pytest.mark.parametrize("mode", ["full", "deferred-off"])
+def test_openai_catalog_keeps_coordination_and_discovers_overflow(ctx, monkeypatch, mode):
+    import maverick.config as config
+    from maverick.providers import openai_provider
+    from maverick.providers.openai_provider import OpenAIClient
+
+    _config(monkeypatch, {"exposure": "full"})
+    monkeypatch.setattr(openai_provider, "_OPENAI_MAX_TOOLS", 128)
+    monkeypatch.setattr(config, "knowledge_access_enabled", lambda: True)
+    if mode == "deferred-off":
+        monkeypatch.setenv("MAVERICK_DEFERRED_TOOLS", "0")
+    agent = _agent(ctx, "orchestrator", model_override="openai:gpt-5.4-mini",
+                   knowledge_sources=["legal"])
+    offered = agent._tool_catalog_for_model(agent.model)
+    sent = OpenAIClient.__new__(OpenAIClient)._build_kwargs(
+        "system", [], offered, 500, "gpt-5.4-mini"
+    )["tools"]
+    names = {item["function"]["name"] for item in sent}
+    assert len(offered) == len(sent) <= 128
+    assert {"find_tools", "spawn_subagent", "spawn_swarm", "spawn_specialist",
+            "list_specialists", "send_to_agent", "recv_from_agent", "ask_user",
+            "knowledge_search"} <= names
+    # An omitted tool is searchable and displaces a less relevant catalog entry.
+    overflow = {tool.name for tool in agent.tools.deferred_tools()}
+    assert "anki" in overflow and "anki" not in names
+    result = agent.tools.get("find_tools").fn({"query": "anki flashcards", "max_results": 1})
+    assert "Activated 1 tool(s)" in result and "anki" in result
+    names = {tool["name"] for tool in agent._tool_catalog_for_model(agent.model)}
+    assert "anki" in names and "find_tools" in names and len(names) <= 128
+
+
+def test_disabling_deferral_does_not_offer_denied_pack_tools(ctx, monkeypatch):
+    from maverick.capability import Capability
+
+    _config(monkeypatch)
+    monkeypatch.setenv("MAVERICK_DEFERRED_TOOLS", "0")
+    cap = Capability(
+        principal="agent:pack", max_risk="medium",
+        allow_tools=frozenset({"read_file", "federal_register"}),
+        deny_tools=frozenset({"shell"}),
+    )
+    agent = _agent(ctx, "specialist", capability=cap,
+                   model_override="openai:gpt-5.4-mini")
+    names = {tool["name"] for tool in agent._tool_catalog_for_model(agent.model)}
+    assert "read_file" in names and "federal_register" in names
+    assert "shell" not in names
+    assert all(cap.permits(name) for name in names)
+    assert "shell" not in {tool.name for tool in agent.tools.deferred_tools()}
+
+
+def test_openai_failover_uses_safe_catalog_without_capping_anthropic_alone(ctx, monkeypatch):
+    import maverick.llm as llm
+    from maverick.providers import openai_provider
+
+    _config(monkeypatch, {"exposure": "full"})
+    monkeypatch.setattr(openai_provider, "_OPENAI_MAX_TOOLS", 128)
+    agent = _agent(ctx, "orchestrator", model_override="anthropic:claude-sonnet")
+    monkeypatch.setattr(llm, "_fallback_chain_for_dispatch", lambda *_: [])
+    assert len(agent._tool_catalog_for_model(agent.model)) > 128
+    monkeypatch.setattr(llm, "_fallback_chain_for_dispatch",
+                        lambda *_: ["openai:gpt-5.4-mini"])
+    capped = agent._tool_catalog_for_model(agent.model)
+    assert len(capped) == 128
+    assert {"find_tools", "spawn_subagent", "spawn_specialist"} <= {
+        tool["name"] for tool in capped
+    }
+
+
 # ------------------------------------------------------------- per pack
 
 def _pack_agent(ctx, name, monkeypatch):

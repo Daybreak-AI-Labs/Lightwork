@@ -55,7 +55,7 @@ def parse_capabilities(style: str, payload: object) -> dict[str, dict]:
 
 def describe(spec: str, *, provider: str, capability: object = None,
              fetched_at: object = None, stale: bool = True) -> dict:
-    from .llm import model_price_quote
+    from .budget import UnpricedModelError, _lookup_price_quote
 
     result = clean_capabilities(capability)
     result.update({"self_hosted": provider in {"ollama", "vllm", "tgi"},
@@ -66,11 +66,13 @@ def describe(spec: str, *, provider: str, capability: object = None,
             result["fetched_at"] = datetime.fromtimestamp(fetched_at, timezone.utc).isoformat()
         except (ValueError, OverflowError, OSError):
             pass
-    # Do not borrow another provider's rate just because its bare model ID
-    # happens to match. Hosted gateways and deployments need their own quote.
-    quote = model_price_quote(spec, estimate_only=True)
-    if quote is None and provider in {"openai", "anthropic", "gemini", "deepseek", "xai", "moonshot"}:
-        quote = model_price_quote(spec.split(":", 1)[-1], estimate_only=True)
+    # Match the *live dispatch gate*, not a planning-only quote for a model
+    # spelled similarly on another provider. A price shown here must actually
+    # let a task start under the current workspace policy.
+    try:
+        quote = _lookup_price_quote(spec)
+    except UnpricedModelError:
+        quote = None
     if quote is not None:
         today = datetime.now(timezone.utc).date()
         result["price"] = {"input": quote.input_per_mtok, "output": quote.output_per_mtok,
@@ -78,6 +80,7 @@ def describe(spec: str, *, provider: str, capability: object = None,
                            "as_of": quote.as_of, "fetched_at": quote.fetched_at,
                            "verified": quote.verified, "basis": quote.pricing_basis,
                            "applicability": quote.applicability,
+                           "operator_approved": quote.rate_card_version == "operator-ceiling-v1",
                            "stale": (today - date.fromisoformat(quote.as_of)).days > 30,
                            "expired": bool(quote.valid_until and today > date.fromisoformat(quote.valid_until))}
     return result

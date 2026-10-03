@@ -788,10 +788,11 @@ def _tools(S, C) -> tuple:
         S("tools", "exposure", "Tools described on each request",
           "How much of the tool list each request to the AI describes up front. The short "
           "list fits the agent's role, and a specialist pack sees its own tools; agents can "
-          "look up any other tool when they need it.", "select", "Performance", "core",
+          "look up any other permitted tool when they need it. Models with a smaller tool "
+          "limit keep key actions and let agents look up the rest.", "select", "Performance", "core",
           "maverick.config", subgroup="Reusing tool results",
           choices=(("core", "A short list, and agents look up the rest (recommended)"),
-                   ("full", "Every tool on every request (costs far more per task)")),
+                   ("full", "A longer list, up to the model's limit (costs more)")),
           env=("MAVERICK_TOOL_EXPOSURE",), aliases="tool catalog exposure context tokens"),
         S("tools", "core_extra", "Tools always described",
           "Tools to describe on every request as well as the short list, by tool name.",
@@ -1616,7 +1617,9 @@ def _startup_limits(S) -> tuple:
           maximum=100, integer=True, scale=1000000, unit="MB", restart=True,
           env=("MAVERICK_OPENAPI_CALL_MAX_BYTES",)),
         S("models", "openai_max_tools", "Most tools offered to OpenAI-style models",
-          "OpenAI-style services refuse requests offering more tools than this.", "number",
+          "OpenAI-style services refuse requests offering more tools than this. Lightwork "
+          "keeps key actions available and lets agents find the rest. Change this only "
+          "when your AI service supports a different limit.", "number",
           "AI models", 128, "maverick.providers.openai_provider", subgroup="Model choices",
           minimum=1, maximum=1024, integer=True, unit="tools", restart=True,
           env=("MAVERICK_OPENAI_MAX_TOOLS",)),

@@ -1605,7 +1605,7 @@ def _response_call_cost(model_id, resp, cache_read_mult: float | None = None) ->
         _CACHE_READ_MULT,
         CACHE_READ_MULT_OPENAI,
         _cache_write_mult_from_ttl,
-        _lookup_price,
+        _lookup_price_quote,
     )
     raw_response = getattr(resp, "raw", None)
     usage = getattr(raw_response, "usage", None)
@@ -1651,7 +1651,9 @@ def _response_call_cost(model_id, resp, cache_read_mult: float | None = None) ->
     if not cache_read:
         openai_cached = min(_openai_cached_tokens(usage), in_tok)
         in_tok -= openai_cached
-    in_rate, out_rate = _lookup_price(model_id, estimate_only=True)
+    quote = _lookup_price_quote(model_id, estimate_only=True)
+    in_rate, out_rate = quote.rates
+    operator_ceiling = quote.rate_card_version == "operator-ceiling-v1"
     # ``cache_write`` (cache_creation_tokens) is only ever surfaced by the
     # Anthropic provider. A single call can write BOTH the system/tools
     # breakpoint (``_default_cache_ttl()`` -- 1h in interactive mode, 2.0x)
@@ -1680,8 +1682,10 @@ def _response_call_cost(model_id, resp, cache_read_mult: float | None = None) ->
     # 0.5x here overcounted DeepSeek cached input 5x (Gemini 2x) in the
     # provider-cap ledger, provider_health, and the budget_dollars metric.
     openai_mult = CACHE_READ_MULT_OPENAI if cache_read_mult is None else float(cache_read_mult)
+    if operator_ceiling:
+        openai_mult = max(openai_mult, 1.0)
     cost = (in_tok / 1_000_000) * in_rate
-    cost += (cache_read / 1_000_000) * in_rate * _CACHE_READ_MULT   # Anthropic 0.1x
+    cost += (cache_read / 1_000_000) * in_rate * (1.0 if operator_ceiling else _CACHE_READ_MULT)
     cost += (openai_cached / 1_000_000) * in_rate * openai_mult
     if cache_write_5m or cache_write_1h:
         from .budget import _CACHE_WRITE_MULT_1H, _CACHE_WRITE_MULT_5M

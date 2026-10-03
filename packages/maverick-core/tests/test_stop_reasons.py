@@ -44,10 +44,9 @@ def test_unpriced_model_points_to_known_price_setup_without_exposing_the_id():
            "'openai_compatible:private-gateway-id'; refusing to bill at an estimate")
     stop = explain_stop(raw)
     assert stop.kind == "unpriced_model"
-    assert "could not verify" in stop.message
-    assert "Choose a model with a known price" in stop.action
-    assert "Settings > Require known prices" in stop.action
-    assert stop.link == "/settings"
+    assert "needs a price" in stop.message
+    assert "choose a priced model" in stop.action
+    assert stop.link == "/settings#settings-model-prices"
     assert "private-gateway-id" not in stop.message + stop.action
     assert "strict_pricing=false" not in stop.message + stop.action
     assert stop.technical == raw

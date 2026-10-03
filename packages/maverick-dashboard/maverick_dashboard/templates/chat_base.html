@@ -211,6 +211,12 @@
       <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M11.5 2.5l2 2L6 12H4v-2z"/><path d="M2.5 13.5h11"/></svg>
       {{ ui("New chat") }}
     </a>{% endif %}
+    {% if show_personal_notifications %}<a class="cs-item cs-item--notifications personal-notification-link" id="personal-notification-link"
+       href="/notifications" data-enabled="{{ 'true' if personal_notifications_enabled else 'false' }}"
+       aria-label="Your notifications" title="Your notifications">
+      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M12.5 10.7H3.5c.8-.9 1.1-1.8 1.1-3V6.5a3.4 3.4 0 0 1 6.8 0v1.2c0 1.2.3 2.1 1.1 3Z"/><path d="M6.7 12.5a1.3 1.3 0 0 0 2.6 0"/></svg>
+      Your notifications <span class="notification-count" aria-hidden="true" hidden></span>
+    </a>{% endif %}
     <button type="button" class="cs-item cs-item--button" id="navfinder-open"
             aria-haspopup="dialog" aria-controls="navfinder-dialog" aria-expanded="false">
       <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 4.5h10M3 8h10M3 11.5h6"/></svg>
@@ -275,6 +281,12 @@
     <div class="cs-topbar">
       <button type="button" class="btn btn--ghost" id="cs-menu" aria-controls="cs-side" aria-expanded="false">{{ ui("Menu") }}</button>
       <span class="cs-topbar__title">Lightwork</span>
+      {% if show_personal_notifications %}<a class="iconbtn iconbtn--notifications personal-notification-link" href="/notifications"
+         data-enabled="{{ 'true' if personal_notifications_enabled else 'false' }}"
+         aria-label="Your notifications" title="Your notifications">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M12.5 10.7H3.5c.8-.9 1.1-1.8 1.1-3V6.5a3.4 3.4 0 0 1 6.8 0v1.2c0 1.2.3 2.1 1.1 3Z"/><path d="M6.7 12.5a1.3 1.3 0 0 0 2.6 0"/></svg>
+        <span class="notification-count" aria-hidden="true" hidden></span>
+      </a>{% endif %}
       {% if can_create_goal %}<a class="btn btn--ghost" href="/chat">{{ ui("New chat") }}</a>{% endif %}
     </div>
     <div class="cs-scroll" id="cs-scroll">
@@ -448,6 +460,7 @@
   <script src="{{ asset('lightwork-chat-drafts.js') }}" defer></script>
   <script src="{{ asset('lightwork-product-operations.js') }}"></script>
   <script src="{{ asset('lightwork-copilot.js') }}"></script>
+  {% if show_personal_notifications %}<script src="{{ asset('lightwork-notification-badge.js') }}" defer></script>{% endif %}
   {% block scripts_extra %}{% endblock %}
 </body>
 </html>

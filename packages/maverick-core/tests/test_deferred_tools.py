@@ -118,6 +118,22 @@ class TestFindTools:
         activated = _names(reg) - {"read_file", "find_tools"}
         assert len(activated) == 2
 
+    def test_small_model_limit_activates_only_the_strongest_visible_match(self):
+        reg = ToolRegistry()
+        reg.register(_tool("read_file"))
+        reg.register(_tool("jira_issue", "Create Jira issues"))
+        reg.register(_tool("issue_tool", "Track issues"))
+        reg.register(find_tools(reg))
+        reg.enable_deferred({"read_file"})
+        assert {t["name"] for t in reg.to_anthropic(max_tools=2)} == {
+            "read_file", "find_tools"
+        }
+        out = asyncio.run(reg.run("find_tools", {"query": "jira issue", "max_results": 2}))
+        assert "jira_issue" in out and "issue_tool" not in out
+        assert {t["name"] for t in reg.to_anthropic(max_tools=2)} == {
+            "find_tools", "jira_issue"
+        }
+
 
 class TestEnvKnob:
     def test_env_enables(self, monkeypatch):

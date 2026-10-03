@@ -156,6 +156,12 @@
   .fd__chat-msg.assistant { align-self: flex-start; background: var(--surface-sunken); border: 1px solid var(--border); }
   .fd__chat-msg.note { align-self: flex-start; color: var(--muted); font-style: italic; padding: 0 2px; }
   .fd__chat-form { display: flex; flex-shrink: 0; gap: var(--space-2); padding: var(--space-2); border-top: 1px solid var(--border); }
+  .fdx-more { position: relative; }
+  .fdx-more summary { list-style: none; cursor: pointer; }
+  .fdx-more summary::-webkit-details-marker { display: none; }
+  .fdx-more__menu { position: absolute; z-index: 6; right: 0; top: 100%; min-width: 11rem;
+    padding: var(--space-2); display: grid; gap: var(--space-1); border: 1px solid var(--border);
+    border-radius: var(--radius-md); background: var(--surface); box-shadow: var(--shadow-md); }
   .fd__chat-form input { flex: 1; min-width: 0; }
   .fd__chat-msg .btn { max-width: 100%; white-space: normal; margin-top: var(--space-2); }
   @media (prefers-reduced-transparency: reduce) { .fd__chat { background: var(--panel); backdrop-filter: none; } }
@@ -268,6 +274,12 @@
     <button class="btn btn--ghost" type="button" id="fd-history">Earlier versions</button>
     <button class="btn btn--ghost" type="button" id="fd-triggers" title="Everything that starts this flow">What starts it</button>
     {% if flow_id %}<a class="btn btn--ghost" id="fd-teach" href="/flows/{{ flow_id | urlencode }}/teach" title="Teach steps from examples, or build a flow from reviewed runs">Teach this flow</a>{% endif %}
+    <details class="fdx-more" id="fd-more" {% if not flow_id %}hidden{% endif %}><summary class="btn btn--ghost">More</summary>
+      <div class="fdx-more__menu">
+        <button class="btn btn--ghost" type="button" id="fd-turn-off">Turn off</button>
+        <button class="btn btn--ghost" type="button" id="fd-delete-flow">Delete flow</button>
+      </div>
+    </details>
     <button class="btn btn--ghost" type="button" id="fd-chat-toggle" title="Build and fix this flow by chatting">Assistant</button>
     <span class="fd__msg" id="fd-msg" aria-live="polite"></span>
   </div>
@@ -456,6 +468,7 @@
 <script>
 {% include "flow_designer_inputs.js" %}
 </script>
+<script src="{{ asset('lightwork-flow-retirement.js') }}"></script>
 <script>
 {% include "flow_designer.js" %}
 </script>

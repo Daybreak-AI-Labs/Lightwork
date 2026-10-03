@@ -155,8 +155,21 @@ def _state_locked(request, *, seen_id=None):
 
 @router.get("/notifications")
 def page(request: Request):
-    _identity(request)
-    return _app().templates.TemplateResponse(request, "personal_notifications.html", {},
+    from maverick import config, experience_preferences
+
+    auth.require_permission(request, "view")
+    if not auth.caller_principal(request):
+        raise HTTPException(403, "Sign in with your own account to see personal notifications.")
+    if config.config_source_errors(include_tenant=True):
+        unavailable = "Notification settings could not be read. Ask an administrator to check All settings."
+    elif not experience_preferences.enabled():
+        unavailable = "Personal preferences are turned off. An administrator can enable them in All settings."
+    elif (config.load_config().get("notifications") or {}).get("personal_alerts") is not True:
+        unavailable = "Personal task alerts are turned off. An administrator can enable them in All settings."
+    else:
+        unavailable = ""
+    return _app().templates.TemplateResponse(request, "personal_notifications.html",
+                                             {"personal_alerts_unavailable": unavailable},
                                              headers={"Cache-Control": "private, no-store"})
 
 
@@ -164,6 +177,15 @@ def page(request: Request):
 def inbox(request: Request, response: Response):
     response.headers["Cache-Control"] = "private, no-store"
     return _state(request)
+
+
+@router.get("/api/v1/notifications/personal/summary")
+def summary(request: Request, response: Response):
+    """A minimal owner-scoped count for the shared navigation bell."""
+    response.headers["Cache-Control"] = "private, no-store"
+    state = _state(request)
+    return {"unseen": sum(item["seen_at"] is None for item in state["items"]),
+            "partial": state["partial"], "checked_at": state["checked_at"]}
 
 
 class PreferencesIn(BaseModel):

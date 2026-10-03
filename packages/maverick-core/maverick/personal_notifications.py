@@ -124,7 +124,7 @@ class PersonalInbox:
                 return (source["category"] in preferences["events"] and preferences["mode"] != "off"
                         and (preferences["watch_all_projects"] or not source.get("goal_id")
                              or source.get("project_id") in preferences["projects"]))
-            items = [item for item in stored["items"] if item["created_at"] > now - 7 * 86400
+            items = [dict(item) for item in stored["items"] if item["created_at"] > now - 7 * 86400
                      and item["ref"] in current and current[item["ref"]]["version"] == item["version"]
                      and subscribed(current[item["ref"]])]
             known = stored["known"]
@@ -169,7 +169,8 @@ class PersonalInbox:
                           "semantic_digests": {ref: source["semantic_digest"] for ref, source in current.items()
                                                if source.get("semantic_digest")},
                           "items": items, "digest_day": digest_day, "initialized": True}
-            atomic_write_bytes(self.path, seal(json.dumps(next_state, separators=(",", ":")).encode()), mode=0o600)
+            if next_state != stored:
+                atomic_write_bytes(self.path, seal(json.dumps(next_state, separators=(",", ":")).encode()), mode=0o600)
         return {"items": sorted(visible, key=lambda row: row["created_at"], reverse=True),
                 "delivery_note": explanation, "checked_at": now,
                 "channel": "In-product inbox", "external_delivery": False}

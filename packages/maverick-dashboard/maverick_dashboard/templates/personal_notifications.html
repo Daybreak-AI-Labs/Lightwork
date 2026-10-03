@@ -1,6 +1,14 @@
 {% extends "base.html" %}
 {% block title %}Your notifications - Lightwork{% endblock %}
 {% block content %}
+{% if personal_alerts_unavailable %}
+<section class="panel">
+  <h1>Your notifications</h1>
+  <p role="status">{{ personal_alerts_unavailable }}</p>
+  <p>Personal task alerts can tell you when your work finishes, needs an answer, or needs attention. They stay with your account.</p>
+  {% if viewer_global_admin %}<p><a class="btn btn--primary" href="/settings/all">Open All settings</a></p>{% endif %}
+</section>
+{% else %}
 <section class="panel">
   <h1>Your notifications</h1>
   <p>Personal alerts for your own tasks and decisions assigned to you. Organization operational alerts keep their separate policy.</p>
@@ -51,4 +59,5 @@
   <p id="personal-notification-save-status" role="status" aria-live="polite"></p>
 </form>
 <script src="/static/lightwork-personal-notifications.js" defer></script>
+{% endif %}
 {% endblock %}

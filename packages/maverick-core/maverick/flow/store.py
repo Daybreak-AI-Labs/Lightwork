@@ -347,6 +347,7 @@ def delete_flow(
     *,
     expected_version: int | None = None,
     expected_revision: str | None = None,
+    expected_release_id: str | None = None,
 ) -> bool:
     """Revoke activation and delete one definition under one lock order."""
     with _activation_lock(flow_id):
@@ -354,6 +355,7 @@ def delete_flow(
             flow_id,
             expected_version=expected_version,
             expected_revision=expected_revision,
+            expected_release_id=expected_release_id,
         )
 
 
@@ -362,6 +364,7 @@ def _delete_flow_under_activation(
     *,
     expected_version: int | None = None,
     expected_revision: str | None = None,
+    expected_release_id: str | None = None,
 ) -> bool:
     """Delete one definition, optionally guarded by its exact generation.
 
@@ -381,6 +384,11 @@ def _delete_flow_under_activation(
                 and str(current.revision or "") != str(expected_revision)):
             raise FlowVersionConflict(
                 f"flow {flow_id!r} was replaced or changed generation")
+        if expected_release_id is not None:
+            published = load_published_bundle(flow_id)
+            active_id = str(published[1]["release_id"]) if published else ""
+            if active_id != expected_release_id:
+                raise FlowVersionConflict(f"published flow {flow_id!r} changed since review")
         with _activation_lock(flow_id):
             # Authorization must disappear before the draft does.  Moving the
             # pointer out of the live ``*.json`` namespace is atomic on the
@@ -886,6 +894,7 @@ def unpublish_flow(
     *,
     expected_version: int,
     expected_revision: str,
+    expected_release_id: str | None = None,
 ) -> bool:
     """Revoke one active release under the live-dispatch lock."""
     with _activation_lock(flow_id):
@@ -893,6 +902,7 @@ def unpublish_flow(
             flow_id,
             expected_version=expected_version,
             expected_revision=expected_revision,
+            expected_release_id=expected_release_id,
         )
 
 
@@ -901,6 +911,7 @@ def _unpublish_flow_under_activation(
     *,
     expected_version: int,
     expected_revision: str,
+    expected_release_id: str | None = None,
 ) -> bool:
     """Deactivate a release without deleting its draft or immutable objects."""
     with _definitions_lock():
@@ -916,6 +927,11 @@ def _unpublish_flow_under_activation(
             raise FlowVersionConflict(
                 f"flow {flow_id!r} was replaced or changed generation"
             )
+        if expected_release_id is not None:
+            published = load_published_bundle(flow_id)
+            active_id = str(published[1]["release_id"]) if published else ""
+            if active_id != expected_release_id:
+                raise FlowVersionConflict(f"published flow {flow_id!r} changed since review")
         with _activation_lock(flow_id):
             try:
                 (_published_dir() / f"{_safe_id(flow_id)}.json").unlink()
