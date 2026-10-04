@@ -306,3 +306,58 @@ def test_breaker_internal_error_does_not_block_healthy_call(monkeypatch):
         "sys", [{"role": "user", "content": "hi"}])
     assert out == "healthy"
     assert calls == ["dispatched"]  # breaker error failed OPEN -> call proceeded
+
+
+# ---- which model answered (the conversation says when the backup answered) ----
+
+def _served_by_backup_llm():
+    from maverick.llm import LLMResponse
+
+    class _Primary(LLM):
+        def complete(self, system, messages, **kw):
+            if kw.get("_no_failover"):
+                if kw["model"] == "a:m1":
+                    raise RuntimeError("primary down")
+                return LLMResponse(text="ok", thinking=None, tool_calls=[], stop_reason="end_turn")
+            return super().complete(system, messages, **kw)
+
+        async def complete_async(self, system, messages, **kw):
+            if kw.get("_no_failover"):
+                if kw["model"] == "a:m1":
+                    raise RuntimeError("primary down")
+                return LLMResponse(text="ok", thinking=None, tool_calls=[], stop_reason="end_turn")
+            return await super().complete_async(system, messages, **kw)
+
+    return _Primary(model="a:m1")
+
+
+def test_a_response_from_the_backup_model_says_so(monkeypatch):
+    monkeypatch.setattr(pf, "fallback_models", lambda primary: ["b:m2"])
+    resp = _served_by_backup_llm().complete("sys", [{"role": "user", "content": "hi"}])
+    assert resp.text == "ok"
+    assert resp.served_model == "b:m2"
+    assert resp.fallback_from == "a:m1"
+
+
+def test_an_async_response_from_the_backup_model_says_so(monkeypatch):
+    monkeypatch.setattr(pf, "fallback_models", lambda primary: ["b:m2"])
+    resp = asyncio.run(_served_by_backup_llm().complete_async(
+        "sys", [{"role": "user", "content": "hi"}]))
+    assert resp.served_model == "b:m2"
+    assert resp.fallback_from == "a:m1"
+
+
+def test_a_response_from_the_main_model_claims_no_fallback(monkeypatch):
+    from maverick.llm import LLMResponse
+
+    monkeypatch.setattr(pf, "fallback_models", lambda primary: ["b:m2"])
+
+    class _Healthy(LLM):
+        def complete(self, system, messages, **kw):
+            if kw.get("_no_failover"):
+                return LLMResponse(text="main", thinking=None, tool_calls=[], stop_reason="end_turn")
+            return super().complete(system, messages, **kw)
+
+    resp = _Healthy(model="a:m1").complete("sys", [{"role": "user", "content": "hi"}])
+    assert resp.text == "main"
+    assert resp.fallback_from is None
