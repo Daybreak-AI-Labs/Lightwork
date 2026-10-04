@@ -43,7 +43,7 @@ def test_page_renders_worklist_stats_and_catalog():
     html = resp.text
     # Worklist rows with the risk pair and review triggers.
     assert "Acme CRM" in html and "Globex HRIS" in html
-    assert 'class="btn btn--primary pw-review-btn"' in html
+    assert 'class="btn pw-review-btn"' in html
     # The shared pop-out is on the page.
     assert 'id="arv-dialog"' in html
     # The catalog lists the PRIVACY frameworks — and only those (the finance
