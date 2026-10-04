@@ -2768,7 +2768,11 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
                 status_code=302,
             )
         from .local_owner import claimed as local_owner_claimed
-        if local_owner_claimed() and request.url.path not in {"/auth/local-owner", "/auth/local-login"}:
+        from .local_passphrases import available as passphrase_sign_in
+
+        # The owner and invited colleagues both sign in on that page.
+        if ((local_owner_claimed() or passphrase_sign_in())
+                and request.url.path not in {"/auth/local-owner", "/auth/local-login"}):
             return RedirectResponse("/auth/local-login", status_code=302)
     if _wants_html(request):
         status = int(exc.status_code)
