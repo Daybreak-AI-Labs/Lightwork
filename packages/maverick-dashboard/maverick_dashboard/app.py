@@ -4531,6 +4531,7 @@ async def dsar_detail_page(request: Request, request_id: str) -> HTMLResponse:
     now = _time.time()
     record.update(privacy_ops.dsar_clock(record, now=now))
     record["created_date"] = _date(record.get("created_at"))
+    record["received_date"] = _date(record.get("received_at") or record.get("created_at"))
     record["due_date"] = _date(record.get("effective_due_at"))
     record["acknowledge_date"] = _date(record.get("acknowledge_by"))
     record["extended_date"] = _date(record.get("extended_until"))
@@ -4546,15 +4547,25 @@ async def dsar_detail_page(request: Request, request_id: str) -> HTMLResponse:
         if fulfillment and fulfillment.get("response"):
             fulfillment["response"]["expires_date"] = _date(
                 fulfillment["response"].get("expires_at"))
+    # Which secure-link step the "Completed" notice can point to.
+    fulfillment_state = (
+        "off" if not fulfillment_enabled else "not_started" if not fulfillment
+        else "ready" if (fulfillment.get("identity") or {}).get("status") == "verified"
+        else "unverified")
+    from maverick import public_rights_form
+
     from .webhooks_api import record_alerts
 
     return templates.TemplateResponse(
         request, "dsar_detail.html",
         {"dsar": record, "fulfillment": fulfillment,
          "fulfillment_enabled": fulfillment_enabled,
+         "fulfillment_state": fulfillment_state,
          "record_alerts": record_alerts("dsar", record["id"]),
          "can_admin": has_permission(request, "admin"),
-         "email_log": (record.get("public_form") or {}).get("emails") or []})
+         "can_manage_email": has_global_permission(request, "admin"),
+         "notices": public_rights_form.notice_log(record),
+         "answer": privacy_ops.dsar_answer(record)})
 
 
 @app.get("/consent", response_class=HTMLResponse)

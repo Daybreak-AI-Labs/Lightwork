@@ -236,7 +236,12 @@ def test_submission_never_reveals_whether_an_email_is_known(_isolate):
     prf.reset_limits()
     second = client.post(f"{PUBLIC}/shop/requests", json=_submission(email="a@example.com"))
     assert first.status_code == second.status_code == 202
-    assert first.json() == second.json()
+    # Identical apart from each request's own reference.
+    one, two = first.json(), second.json()
+    assert one["reference"] != two["reference"]
+    for body in (one, two):
+        body["message"] = body["message"].replace(body.pop("reference"), "")
+    assert one == two
     prf.reset_limits()
     invalid = client.post(f"{PUBLIC}/shop/requests", json=_submission(email="nope"))
     assert invalid.status_code == 422 and "valid email" in invalid.json()["detail"]
@@ -341,3 +346,20 @@ def test_client_address_is_proxy_aware_only_behind_a_pinned_proxy(tmp_path, _iso
     config.reset_config_cache()
     assert public_rights_api._client_ip(req("10.0.0.5", "198.51.100.4, 10.0.0.6")) == "198.51.100.4"
     assert public_rights_api._client_ip(req("10.0.0.5")) == "10.0.0.5"
+
+
+def test_submission_answers_with_a_reference_and_an_honest_email_promise():
+    _property()
+    r = client.post(f"{PUBLIC}/shop/requests", json=_submission())
+    assert r.status_code == 202
+    reference = r.json()["reference"]
+    assert reference.startswith("DSAR-") and reference in r.json()["message"]
+    assert r.json()["email_sent"] is True
+    prf.set_mail_sender(lambda *_: (False, "no sending account configured ([email] / EMAIL_USER)"))
+    r = client.post(f"{PUBLIC}/shop/requests", json=_submission(email="drew@example.com"),
+                    headers={"X-Forwarded-For": "198.51.100.40"})
+    assert r.status_code == 202
+    body = r.json()
+    assert body["email_sent"] is False and body["reference"] in body["message"]
+    assert "we have sent" not in body["message"].lower()
+    assert "EMAIL_USER" not in body["message"]

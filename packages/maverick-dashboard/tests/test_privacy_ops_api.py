@@ -637,3 +637,30 @@ def test_corrupt_auth_config_never_falls_back_to_local_actor(monkeypatch, tmp_pa
         json={"vendor": "Acme", "text": DPA_TEXT},
     )
     assert response.status_code == 401
+
+
+def test_dsar_close_records_what_happened_and_explains_missing_facts():
+    import datetime
+
+    rid = client.post("/api/v1/privacy/dsar", json={
+        "subject_id": "sam@example.com", "kind": "erasure"}).json()["id"]
+    today = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d")
+    missing = client.post(f"/api/v1/privacy/dsar/{rid}/close", json={
+        "kind": "answered", "answered_on": today, "reference": "CRM ticket 1"})
+    assert missing.status_code == 422
+    assert missing.json()["detail"] == "Say whether their data was erased."
+    done = client.post(f"/api/v1/privacy/dsar/{rid}/close", json={
+        "kind": "answered", "answered_on": today, "reference": "CRM ticket 1",
+        "erasure": "erased"})
+    assert done.status_code == 200
+    assert done.json()["outcome"]["erasure"] == "erased"
+    again = client.post(f"/api/v1/privacy/dsar/{rid}/close", json={"kind": "withdrawn"})
+    assert again.status_code == 409
+    report = client.get("/api/v1/privacy/report").json()["dsar"]
+    assert report["handled_on_time"] == 1 and report["closed_without_response"] == 0
+    # A close without a body still works and is counted honestly.
+    other = client.post("/api/v1/privacy/dsar", json={
+        "subject_id": "kim@example.com", "kind": "access"}).json()["id"]
+    assert client.post(f"/api/v1/privacy/dsar/{other}/close").status_code == 200
+    report = client.get("/api/v1/privacy/report").json()["dsar"]
+    assert report["handled"] == 2 and report["closed_without_response"] == 1

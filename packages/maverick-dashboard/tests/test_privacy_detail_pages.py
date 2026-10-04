@@ -269,3 +269,58 @@ def test_microsoft365_collection_needs_operate_and_plain_errors(monkeypatch):
     rbac.set_role("user:v", "viewer")
     monkeypatch.setattr(auth, "caller_principal", lambda request: "user:v")
     assert client.post(url, json={"revision": record["revision"]}).status_code == 403
+
+
+def _main(html: str) -> str:
+    return html.split("<main", 1)[-1].split("</main>", 1)[0]
+
+
+def test_dsar_page_counts_only_sent_notices_and_explains_unsent_ones():
+    from maverick import privacy_ops
+    from maverick import public_rights_form as prf
+
+    request = privacy_ops.open_dsar("lee@example.com", "access", opened_by="ops")
+    prf.set_mail_sender(lambda *_: (False, "no sending account configured ([email] / EMAIL_USER)"))
+    try:
+        prf.send_notice(request["id"], "acknowledgement", actor="ops")
+    finally:
+        prf.set_mail_sender(None)
+    main = _main(client.get(f"/privacy/dsar/{request['id']}").text)
+    assert "Notices sent (" not in main
+    assert "Notices: 0 sent · 1 not sent" in main
+    assert "Lightwork has no email account to send from." in main
+    plain, technical = main.split("Technical details", 1)
+    assert "EMAIL_USER" not in plain and "EMAIL_USER" in technical
+    assert 'href="/settings/all?id=email.user"' in main  # the fix, for an administrator
+
+
+def test_dsar_page_says_whether_an_answer_is_on_record():
+    import datetime
+
+    from maverick import privacy_ops
+
+    request = privacy_ops.open_dsar("max@example.com", "erasure", opened_by="ops")
+    privacy_ops.close_dsar(request["id"], closed_by="ops")
+    main = _main(client.get(f"/privacy/dsar/{request['id']}").text)
+    assert "Closed without a recorded answer" in main
+    assert 'id="dsar-record-outcome"' in main
+    today = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d")
+    privacy_ops.close_dsar(request["id"], closed_by="ops", outcome={
+        "kind": "answered", "answered_on": today, "reference": "CRM ticket 77",
+        "erasure": "erased"})
+    main = _main(client.get(f"/privacy/dsar/{request['id']}").text)
+    assert f"Answered on {today}" in main and "Their data was erased" in main
+    assert "CRM ticket 77" in main
+    assert 'id="dsar-record-outcome"' not in main
+
+
+def test_completion_notice_points_at_a_step_that_exists():
+    from maverick import config, privacy_ops
+
+    request = privacy_ops.open_dsar("ana@example.com", "access", opened_by="ops")
+    page = client.get(f"/privacy/dsar/{request['id']}").text
+    assert 'data-fulfillment-state="not_started"' in page
+    (config.config_path()).write_text("[privacy_ops]\nenable = true\n", encoding="utf-8")
+    config.reset_config_cache()
+    page = client.get(f"/privacy/dsar/{request['id']}").text
+    assert 'data-fulfillment-state="off"' in page

@@ -12,11 +12,12 @@ const html = `<div id="dsar-page" data-request-id="DSAR-1" data-subject="a@examp
 <div id="dsar-link-box" hidden><input id="dsar-link-url"><button id="dsar-link-copy"></button></div></div>`;
 const json = (v, status = 200) => new Response(JSON.stringify(v), { status, headers: { "Content-Type": "application/json" } });
 
-async function fixture({ formValues, confirm = true, reply }) {
-  const dom = new JSDOM(html, { url: "https://lightwork.example/privacy/dsar/DSAR-1", runScripts: "outside-only" });
+async function fixture({ formValues, confirm = true, reply, markup = html, hash = "" }) {
+  const dom = new JSDOM(markup, { url: "https://lightwork.example/privacy/dsar/DSAR-1" + hash, runScripts: "outside-only" });
   const { window } = dom;
   const calls = [], forms = [], confirms = [];
-  window.mvForm = async (title, fields) => { forms.push({ title, fields }); return formValues.shift(); };
+  window.mvForm = async (title, fields, opts) => { forms.push({ title, fields, opts }); return formValues.shift(); };
+  window.mvPlainDetail = (d) => (typeof d === "string" && /^[A-Z].*\.$/.test(d) ? d : "");
   window.mvConfirm = async (m) => { confirms.push(m); return confirm; };
   window.mvErrorText = (f, action) => `Could not ${action}.`;
   window.fetch = async (url, opts = {}) => { calls.push({ url, ...opts }); return reply(url, opts); };
@@ -76,12 +77,91 @@ test("an uncertified erasure keeps the request open", async (t) => {
   assert.doesNotMatch(status, /You can now close/);
 });
 
-test("closing needs confirmation and errors stay plain", async (t) => {
-  const ui = await fixture({ formValues: [], reply: () => new Response("x", { status: 500 }) });
+test("closing asks what happened before anything is sent, and errors stay plain", async (t) => {
+  const ui = await fixture({ formValues: [{ kind: "no_response" }, {}], reply: () => new Response("x", { status: 500 }) });
   t.after(() => ui.window.close());
   ui.doc.getElementById("dsar-close").click(); await ui.settle();
-  assert.equal(ui.confirms.length, 1);
+  assert.equal(ui.forms.length, 2);
+  assert.equal(ui.forms[1].opts.okText, "Close request");
+  assert.deepEqual(JSON.parse(ui.calls[0].body), { kind: "no_response" });
   assert.equal(ui.doc.getElementById("dsar-status").textContent, "Could not close the request.");
+});
+
+test("cancelling the close form changes nothing", async (t) => {
+  const ui = await fixture({ formValues: [null], reply: () => json({}) });
+  t.after(() => ui.window.close());
+  ui.doc.getElementById("dsar-close").click(); await ui.settle();
+  assert.equal(ui.calls.length, 0);
+});
+
+test("closing a deletion records the answer date, the erasure result and the proof", async (t) => {
+  const ui = await fixture({
+    formValues: [{ kind: "answered" }, { answered_on: "2026-10-04", erasure: "erased", reference: "ticket 9" }],
+    reply: () => json({}),
+  });
+  t.after(() => ui.window.close());
+  ui.doc.getElementById("dsar-close").click(); await ui.settle();
+  const keys = ui.forms[1].fields.map((f) => f.key).join(",");
+  assert.equal(keys, "answered_on,erasure,lawful_basis,reference");
+  assert.ok(ui.forms[1].fields.find((f) => f.key === "erasure").options.every((o) => !/_/.test(o.label)));
+  assert.match(ui.calls[0].url, /\/privacy\/dsar\/DSAR-1\/close$/);
+  assert.deepEqual(JSON.parse(ui.calls[0].body),
+    { kind: "answered", answered_on: "2026-10-04", erasure: "erased", reference: "ticket 9" });
+});
+
+test("keeping someone's data needs the lawful reason before anything is sent", async (t) => {
+  const ui = await fixture({
+    formValues: [{ kind: "answered" }, { answered_on: "2026-10-04", erasure: "not_erased", reference: "ticket 9" }],
+    reply: () => json({}),
+  });
+  t.after(() => ui.window.close());
+  ui.doc.getElementById("dsar-close").click(); await ui.settle();
+  assert.equal(ui.calls.length, 0);
+  assert.match(ui.doc.getElementById("dsar-status").textContent, /lawful reason/);
+});
+
+test("a refused close says what is missing in plain words", async (t) => {
+  const ui = await fixture({
+    formValues: [{ kind: "refused" }, { answered_on: "2026-10-04", lawful_basis: "x", reference: "y" }],
+    reply: () => json({ detail: "The answer date cannot be in the future." }, 422),
+  });
+  t.after(() => ui.window.close());
+  ui.doc.getElementById("dsar-close").click(); await ui.settle();
+  assert.equal(ui.doc.getElementById("dsar-status").textContent,
+    "Could not close the request. The answer date cannot be in the future.");
+});
+
+test("a list's Close link opens the close form on arrival", async (t) => {
+  const ui = await fixture({ formValues: [null], reply: () => json({}), hash: "#close" });
+  t.after(() => ui.window.close());
+  await ui.settle();
+  assert.equal(ui.forms.length, 1);
+  assert.equal(ui.forms[0].title, "Close this request");
+});
+
+const sendMarkup = `<div id="dsar-page" data-request-id="DSAR-1" data-kind="access" data-fulfillment-state="off">
+<div id="dsar-status"></div><button class="dsar-send" data-kind="completion"></button>
+<button class="dsar-send" data-kind="acknowledgement"></button></div>`;
+
+test("the completion notice says where its secure link comes from", async (t) => {
+  const ui = await fixture({ formValues: [null], reply: () => json({}), markup: sendMarkup });
+  t.after(() => ui.window.close());
+  ui.doc.querySelector('[data-kind="completion"]').click(); await ui.settle();
+  const link = ui.forms[0].fields.find((f) => f.key === "secure_link");
+  assert.doesNotMatch(link.label + link.help, /step 3/);
+  assert.match(link.help, /turn on answering data requests/);
+});
+
+test("an unsent notice says why and what to do next, without setting names", async (t) => {
+  const ui = await fixture({
+    formValues: [], markup: sendMarkup,
+    reply: () => json({ sent: false, reason: "no sending account configured ([email] / EMAIL_USER)",
+      problem: "Lightwork has no email account to send from.", next_step: "Contact the requester another way." }),
+  });
+  t.after(() => ui.window.close());
+  ui.doc.querySelector('[data-kind="acknowledgement"]').click(); await ui.settle();
+  const status = ui.doc.getElementById("dsar-status").textContent;
+  assert.equal(status, "Notice not sent. Lightwork has no email account to send from. Contact the requester another way.");
 });
 
 test("the search checklist counts what Lightwork holds, including conversations and goals", async (t) => {

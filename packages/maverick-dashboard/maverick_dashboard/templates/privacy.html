@@ -720,7 +720,8 @@
                   {{ 'Gather their data' if r.kind in ('access', 'portability') else 'Prepare deletion' if r.kind == 'erasure' else 'Mark answered' }}</button>
               {% endif %}
               {% if r.status != 'closed' %}
-                <button class="btn pw-dsar-act" data-id="{{ r.id }}" data-act="close" data-kind="{{ r.kind }}" type="button">Close</button>
+                {# Closing records what happened, on the request's own page. #}
+                <a class="btn" href="/privacy/dsar/{{ r.id }}#close">Close</a>
               {% endif %}
               <button class="btn" data-pe-worksheet="{{ r.id }}" type="button">Where to search</button>
               <button class="btn pw-dsar-fulfillment" data-id="{{ r.id }}" type="button">Send response</button>

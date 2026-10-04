@@ -92,6 +92,7 @@ from .api_schemas import (
     DocDiscoverIn,
     DpaFromDocumentIn,
     DpaReviewIn,
+    DsarCloseIn,
     DsarFromMessageIn,
     DsarIn,
     EventTriggerIn,
@@ -4534,14 +4535,27 @@ async def fulfill_dsar_request(request: Request, request_id: str) -> dict:
 
 
 @router.post("/privacy/dsar/{request_id}/close")
-async def close_dsar_request(request: Request, request_id: str) -> dict:
+async def close_dsar_request(request: Request, request_id: str,
+                             body: DsarCloseIn | None = None) -> dict:
+    """Close a request. With a body, record what happened (the answer and,
+    for a deletion, what happened to the data); a request closed without
+    one can have it recorded later, once. Missing facts are a 422 with a
+    plain sentence; an outcome already on record is a 409."""
     require_permission(request, "operate")
     ops = _privacy_ops_or_403()
-    record = await run_in_threadpool(
-        ops.close_dsar,
-        request_id[:64],
-        closed_by=_request_actor(request),
-    )
+    try:
+        record = await run_in_threadpool(
+            ops.close_dsar,
+            request_id[:64],
+            closed_by=_request_actor(request),
+            outcome=None if body is None else body.model_dump(),
+        )
+    except ops.RecordConflict as exc:
+        raise HTTPException(
+            status_code=409, detail="What happened to this request is already on record."
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     if record is None:
         raise HTTPException(status_code=404, detail="no such request")
     return record
