@@ -190,6 +190,11 @@ def test_status_roles_stay_off_text_that_never_changes():
     agents = (TEMPLATES / "agents.html").read_text(encoding="utf-8")
     assert '<div class="panel" role="status"' not in agents
     assert '<div class="jc-sec" role="status">' not in agents
+    # Summaries the page writes once when it loads are not announced either.
+    learning = (TEMPLATES / "learning.html").read_text(encoding="utf-8")
+    for source, ident in ((workforce, "fa-autonomy-status"), (learning, "fa-flywheel-status")):
+        line = re.search(rf'<p [^>]*id="{ident}"[^>]*>', source).group(0)
+        assert "role=" not in line and "aria-live" not in line, line
 
 
 def test_the_kernel_planning_trace_is_kept_out_of_the_spoken_task_log():
