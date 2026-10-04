@@ -20,8 +20,11 @@ test('Stop is offered while a task works and goes away once it has stopped on a 
   await expect(page.locator('#status')).toHaveText('Working');
   await expect(stop).toBeVisible();
   await expect(recents).toHaveText('Working');
-  // Send is unavailable while the task works; the page says why and where Stop is.
-  await expect(page.locator('#composer-run-note')).toContainText('press Stop');
+  // Guidance while a task works is on by default (owner decision, 4 October):
+  // Send stays available for guidance, so no "Send is unavailable" note shows.
+  await expect(page.locator('#answer-send')).toBeEnabled();
+  await expect(page.locator('#answer-input')).toHaveAttribute('placeholder', /Add guidance/);
+  await expect(page.locator('#composer-run-note')).toBeHidden();
 
   const failed=await request.post(`/__browser_fixture/chat/${goal}/provider-fail`);
   expect(failed.status(),await failed.text()).toBe(200);

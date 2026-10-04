@@ -1221,7 +1221,9 @@
           }
           return;
         }
-        if (window.mvConversationInbox && window.mvConversationInbox.available) {
+        // Guidance and queued messages are for a task that is still working;
+        // once it has finished, the next message is an ordinary follow-up.
+        if (!done && window.mvConversationInbox && window.mvConversationInbox.available) {
           submitting = true;
           try { await window.mvConversationInbox.send(answerForm); }
           finally { submitting = false; syncComposer(); }

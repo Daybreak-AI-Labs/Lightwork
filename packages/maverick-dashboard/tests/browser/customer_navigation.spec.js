@@ -73,9 +73,9 @@ for (const zoom of [1, 2]) test(`five customer destinations support keyboard nav
     await expect(choice).toHaveAttribute('aria-selected', 'true');
     await fits(page);
     await page.keyboard.press('Enter');
-    // Settings settles on its selected section using replaceState; wait for
-    // that state rather than racing the existing section initializer.
-    await expect(page).toHaveURL(path === '/settings' ? /\/settings#settings-general$/ : new RegExp(`${path}$`));
+    // Settings paints its chosen section on the server and no longer writes a
+    // fragment on load (that made the page jump), so every address is exact.
+    await expect(page).toHaveURL(new RegExp(`${path}$`));
     await expect(page).toHaveTitle(new RegExp(`^${label}`));
     await expect(page.locator('main')).toBeVisible();
     await expect.poll(() => page.evaluate(() => Number(getComputedStyle(document.documentElement).zoom))).toBe(zoom);
