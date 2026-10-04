@@ -63,7 +63,9 @@
       color-scheme: light;
       --bg: #f4f6fa; --panel: #ffffff; --border: #dde2ea;
       --text: #18202e; --muted: #505b6b; --accent: #176a3a;
-      --warn: #80560d; --danger: #b02e22; --danger-fg: #ffffff;
+      /* Deep enough to read on its own 18% badge tint over a raised card
+         ("Can't be undone" on approvals): 4.6:1, where #80560d gave 3.8:1. */
+      --warn: #6d4a0b; --danger: #b02e22; --danger-fg: #ffffff;
       --brand: #21426f; --brand-hi: #2d5790; --brand-fg: #ffffff; --info: #245e88;
       --shadow-sm: 0 1px 2px rgba(20,28,46,0.06);
       --shadow-md: 0 4px 16px rgba(20,28,46,0.08);
@@ -1525,7 +1527,10 @@ body[data-global-admin="1"] .mg-banner .mg-nonadmin-note { display: none; }
   --text: #EEF1F7; --muted: #8E97AC; --accent: #3DDC97;
   --warn: #FFB547; --danger: #FF6B6B;
 }
-body.theme-dark { --brand: #3D8BFF; --brand-hi: #79ACFF; --brand-fg: #000000; --info: #37D7FF; }
+/* Brand blue one step lighter than the website's #3D8BFF: brand text sits on
+   raised surfaces (--surface-2) too, where #3D8BFF measured 4.1:1; #5297FF
+   gives 4.7:1 there (tests/test_ui_semantic_contrast.py). */
+body.theme-dark { --brand: #5297FF; --brand-hi: #79ACFF; --brand-fg: #000000; --info: #37D7FF; }
 body:not(.font-dyslexic) { font-family: var(--font-sans); }
 .mono, code, pre, kbd { font-family: var(--font-mono); }
 
