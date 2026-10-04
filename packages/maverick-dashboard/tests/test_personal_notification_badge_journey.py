@@ -108,6 +108,23 @@ def test_disabled_alerts_have_a_working_explanation_page(client_and_actor):
     assert client.get("/api/v1/notifications/personal/summary").status_code == 403
 
 
+def test_disabled_personal_preferences_stop_the_api_and_background_enrollment(client_and_actor):
+    from maverick import config, personal_notification_recipients
+    from maverick_dashboard import personal_notification_scheduler
+
+    client, _actor, world, home = client_and_actor
+    (home / "config.toml").write_text(
+        "[features]\npersonal_preferences = false\n[notifications]\n"
+        "personal_alerts = true\npersonal_background = true\n", encoding="utf-8",
+    )
+    config.reset_config_cache()
+    assert "Personal preferences are turned off" in client.get("/notifications").text
+    assert client.get("/api/v1/notifications/personal/summary").status_code == 403
+    assert personal_notification_scheduler._enabled() is False
+    world.create_goal("Task while alerts are unavailable", owner="user:alice")
+    assert personal_notification_recipients.principals() == []
+
+
 def test_owner_is_enrolled_at_task_creation_and_first_check_catches_fast_outcomes(
     client_and_actor, monkeypatch,
 ):
@@ -157,3 +174,30 @@ def test_in_app_alerts_are_on_for_a_fresh_install(client_and_actor):
         (own, "completed"), (waiting, "needs-decision")}
     assert inbox["background_enabled"] is False
     assert inbox["preferences"]["external_links"] == []
+
+
+def test_background_observer_records_owner_outcomes_without_an_open_inbox(
+    client_and_actor, monkeypatch,
+):
+    from maverick import config, personal_identity, personal_notification_recipients
+    from maverick_dashboard import personal_notification_scheduler as scheduler
+
+    client, _actor, world, home = client_and_actor
+    monkeypatch.setattr(personal_identity, "principal_current", lambda actor: actor == "user:alice")
+    completed = world.create_goal("Background completion", owner="user:alice")
+    waiting = world.create_goal("Background question", owner="user:alice")
+    world.set_goal_status(completed, "done", result="Private result")
+    world.ask("Private question", waiting)
+    assert personal_notification_recipients.status("user:alice")["last_observed_at"] is None
+
+    (home / "config.toml").write_text(
+        "[notifications]\npersonal_alerts = true\npersonal_background = true\n", encoding="utf-8",
+    )
+    config.reset_config_cache()
+    assert scheduler.observe("user:alice") is True
+    assert personal_notification_recipients.status("user:alice")["last_observed_at"] is not None
+    rows = client.get("/api/v1/notifications/personal").json()["items"]
+    assert {(row["goal_id"], row["category"]) for row in rows} == {
+        (completed, "completed"), (waiting, "needs-decision"),
+    }
+    assert all(row["href"] == f'/chat/goal/{row["goal_id"]}' for row in rows)

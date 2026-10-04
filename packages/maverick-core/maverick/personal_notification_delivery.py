@@ -284,12 +284,16 @@ def dispatch(principal: str, inbox: dict, preferences: dict) -> None:
 
 
 def status(principal: str) -> dict:
+    from .personal_identity import enabled as identity_links_enabled
     from .personal_identity import linked_channels
     try:
         _base_url(_settings())
         ready, reason = True, "Select a verified private channel to opt in."
     except ValueError as exc:
         ready, reason = False, str(exc)
+    if ready and not identity_links_enabled():
+        ready = False
+        reason = "Private delivery needs My Data identity linking. Ask an administrator to enable personal data controls in All settings."
     channels = []
     for link in linked_channels(principal):
         supported, why = True, ""

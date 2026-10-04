@@ -26,11 +26,50 @@ from __future__ import annotations
 import asyncio
 import json
 
+from ..approval_cards import ApprovalCardError
+from ..safety import ConsentDenied, consume_operation_consent
+from ..safety.secret_detector import redact
 from . import Tool, sandbox_run
+from .execution_consent import execution_target, request_execution_consent
 
 # Bound the up-front fan-out; each declared call is budget-accounted besides.
 _MAX_DECLARED_CALLS = 24
 _CODE_TIMEOUT = 120.0
+
+
+def _declared_call_error(declared: list) -> str | None:
+    for i, call in enumerate(declared):
+        if not isinstance(call, dict) or not call.get("name"):
+            return f"ERROR: tool_calls[{i}] needs a name and arguments."
+        cargs = call.get("arguments")
+        if cargs is None:
+            cargs = call.get("input") or {}
+        if not isinstance(cargs, dict):
+            return f"ERROR: tool_calls[{i}].arguments must be an object."
+    return None
+
+
+async def _request_code_permit(agent, code: str, declared: list):
+    parameters = {"code": code, "tool_calls": declared, "timeout_seconds": _CODE_TIMEOUT}
+    preview, _ = redact(" | ".join(code.strip().splitlines()[:2])[:180])
+    call_names, _ = redact(", ".join(str(call["name"]) for call in declared)[:180] or "none")
+    return await asyncio.to_thread(
+        request_execution_consent,
+        "code_exec",
+        target_provider=lambda: execution_target(agent.ctx.sandbox),
+        parameters=parameters,
+        detail="Run one Python script and its declared tool calls.",
+        effect="Runs declared tools, then Python code in the reviewed environment.",
+        review_items=[f"Script start (truncated, redacted): {preview}",
+                      f"Declared tool calls ({len(declared)}): {call_names}"],
+        timeout=_CODE_TIMEOUT,
+    )
+
+
+def _run_approved_script(agent, permit, script: str):
+    with consume_operation_consent(permit):
+        return sandbox_run(agent.ctx.sandbox, ["python3", "-"],
+                           timeout=_CODE_TIMEOUT, stdin=script)
 
 
 def code_exec_tool(agent) -> Tool:
@@ -63,20 +102,26 @@ def code_exec_tool(agent) -> Tool:
         except ToolOutputLimit:
             return "ERROR: script exceeds the complete-result byte quota; no tool was dispatched"
 
+        if error := _declared_call_error(declared):
+            return error
+        # Review before *any* declared call. Such calls still pass through the
+        # agent's own shield and per-tool consent; this permit covers the
+        # model's script and the exact declared fan-out together.
+        try:
+            permit = await _request_code_permit(agent, code, declared)
+        except ConsentDenied:
+            return "ERROR: code execution was not approved; no tool or script was run"
+        except ApprovalCardError:
+            return "ERROR: code, execution target, or approval authority changed; review it again"
+
         # 1. Run the declared tool calls FIRST, through the shielded path.
         tool_outputs: dict[str, str] = {}
         retained_bytes = 0
         for i, call in enumerate(declared):
-            if not isinstance(call, dict):
-                return f"ERROR: tool_calls[{i}] must be an object with name + arguments."
             name = call.get("name")
-            if not name:
-                return f"ERROR: tool_calls[{i}] is missing 'name'."
             cargs = call.get("arguments")
             if cargs is None:
                 cargs = call.get("input") or {}
-            if not isinstance(cargs, dict):
-                return f"ERROR: tool_calls[{i}].arguments must be an object."
             var = str(call.get("as") or f"{name}_{i}")
             try:
                 agent.ctx.budget.record_tool_call()
@@ -120,10 +165,15 @@ def code_exec_tool(agent) -> Tool:
         # 3. Run the script in the sandbox (off the event loop). stdin carries
         # the script to `python3 -`; only its stdout returns to the model.
         try:
-            rc, out, err = await asyncio.to_thread(
-                sandbox_run, agent.ctx.sandbox, ["python3", "-"],
-                timeout=_CODE_TIMEOUT, stdin=script,
-            )
+            rc, out, err = await asyncio.to_thread(_run_approved_script, agent, permit, script)
+        except ApprovalCardError:
+            if declared:
+                return (
+                    "INDETERMINATE: execution approval changed after declared tools were called; "
+                    "the script was withheld. Earlier tools may have run; inspect their effects "
+                    "before retrying."
+                )
+            return "ERROR: code, execution target, or approval authority changed; review it again"
         except Exception as e:  # noqa: BLE001 -- surface as a tool error, don't crash the turn
             return f"ERROR: could not run the script: {type(e).__name__}: {e}"
         if rc != 0:

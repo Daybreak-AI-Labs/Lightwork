@@ -80,7 +80,7 @@
     event.preventDefault();
     if (busy) return;
     const name = $('name').value.trim();
-    if (!name) { say('Enter the business name first.'); $('name').focus(); return; }
+    if (!name) { say('Enter a name for the new specialist.'); $('name').focus(); return; }
     lock(true); $('review').hidden = true; job = null;
     say('Drafting the specialist. Nothing is saved yet…');
     try {
@@ -88,7 +88,12 @@
         method: 'POST', credentials: 'same-origin', cache: 'no-store', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: name, description: $('what').value.trim(), industry: $('industry').value.trim(), use_ai: $('ai').value === 'ai' })
       });
-      if (!response.ok) { say(failText(response, 'draft the specialist')); return; }
+      if (!response.ok) {
+        const conflict = response.status === 409 ? await response.json().catch(() => ({})) : null;
+        say(conflict && typeof conflict.detail === 'string' ? conflict.detail : failText(response, 'draft the specialist'));
+        if (conflict) $('name').focus();
+        return;
+      }
       const started = await response.json();
       if (!started || !/^[a-f0-9]{32}$/.test(String(started.job))) { say('The draft couldn’t be checked.'); return; }
       const data = await wait(started.job, 'draft');

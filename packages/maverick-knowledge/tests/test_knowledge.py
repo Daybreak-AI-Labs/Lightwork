@@ -362,6 +362,7 @@ class TestBuildEmbedderFailLoud:
 
         monkeypatch.delenv("MAVERICK_EMBED_PROVIDER", raising=False)
         monkeypatch.delenv("MAVERICK_EMBED_API_KEY", raising=False)
+        monkeypatch.delenv("VOYAGE_API_KEY", raising=False)
         # Default provider is hosted; with no key it must raise, not quietly
         # return a hash embedder that scores garbage against the corpus.
         with pytest.raises(RuntimeError, match="API key"):
@@ -373,6 +374,15 @@ class TestBuildEmbedderFailLoud:
         monkeypatch.delenv("MAVERICK_EMBED_PROVIDER", raising=False)
         e = build_embedder({"embedder": "hosted", "api_key": "k", "dim": 8})
         assert isinstance(e, HostedEmbedder) and e.dim == 8
+
+    def test_hosted_reads_documented_voyage_key(self, monkeypatch):
+        from maverick_knowledge.embed import HostedEmbedder, build_embedder
+
+        monkeypatch.delenv("MAVERICK_EMBED_PROVIDER", raising=False)
+        monkeypatch.setenv("VOYAGE_API_KEY", "voyage-credential")
+        e = build_embedder({"embedder": "hosted", "dim": 8})
+        assert isinstance(e, HostedEmbedder)
+        assert e.api_key == "voyage-credential"
 
     def test_unknown_provider_raises(self, monkeypatch):
         from maverick_knowledge.embed import build_embedder

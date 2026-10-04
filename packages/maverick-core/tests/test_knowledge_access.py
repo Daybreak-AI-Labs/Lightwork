@@ -1298,6 +1298,52 @@ def test_full_rights_ledger_has_admin_recovery_without_losing_source_restriction
     )["status"] == "submitted"
 
 
+def test_legacy_overfill_scans_later_finished_request_before_archiving(access, monkeypatch):
+    service, registry, rights, _calls = access
+    monkeypatch.setattr(knowledge_access, "_MAX_REQUESTS", 3)
+    sources = []
+    finished = None
+    for index in range(3):
+        source = _dataset(registry, rights, "tenant-a", f"overfill-{index}")
+        sources.append(source)
+        submitted = service.submit_request(
+            "tenant-a", "user:admin", source, request_type="exclusion",
+            reason="Review this version.", request_key=f"overfill-{index}",
+        )
+        if index == 0:
+            finished = service.decide_request(
+                "tenant-a", "user:admin", submitted["id"],
+                expected_revision=submitted["revision"], decision="deny",
+                evidence_sha256=_sha("overfill denial"),
+            )
+    # The finished record is older than the two pending ones and therefore
+    # beyond the fixed list window after a restore or external import.
+    with tenant_scope(tenant="tenant-a"):
+        assert finished["id"] not in {row["id"] for row in service.request_store.list(limit=2)}
+    monkeypatch.setattr(knowledge_access, "_MAX_REQUESTS", 2)
+    with pytest.raises(KnowledgeAccessDenied, match="request boundary"):
+        service.detail("tenant-a", "user:reader", sources[0], purpose=PURPOSE)
+    assert service.list_requests("tenant-a", ready_to_archive=True) == []
+
+    cursor, seen, candidates = "", set(), []
+    for _ in range(4):
+        page = service.recovery_candidates("tenant-a", cursor=cursor, limit=1)
+        assert len(page["items"]) <= 1
+        candidates.extend(page["items"])
+        if page["next_cursor"] is None:
+            break
+        assert page["next_cursor"] not in seen
+        seen.add(page["next_cursor"])
+        cursor = page["next_cursor"]
+    assert [item["id"] for item in candidates] == [finished["id"]]
+    assert service.archive_request(
+        "tenant-a", "user:admin", finished["id"],
+        expected_revision=finished["revision"],
+    )["archived_at"] is not None
+    assert service.request_capacity("tenant-a")["active_count"] == 2
+    assert service.detail("tenant-a", "user:reader", sources[0], purpose=PURPOSE)
+
+
 def test_archive_refuses_legal_hold_and_undelivered_audit_without_deleting_live_request(
     access, monkeypatch,
 ):

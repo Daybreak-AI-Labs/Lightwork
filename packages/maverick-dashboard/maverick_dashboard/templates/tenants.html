@@ -129,6 +129,25 @@
       <p id="tenant-quota-msg" role="status" aria-live="polite" class="muted tenants-msg"></p>
     </div>
   {% endif %}
+  {% if removed_tenants or removed_error %}
+  <details class="panel tenants-advanced" id="removed-workspaces">
+    <summary><h2 class="tenants-advanced__title">Removed workspaces{% if removed_tenants %} ({{ removed_tenants | length }}){% endif %}</h2></summary>
+    <p class="muted">Their stored records remain closed. Restoring one reopens the same records as a paused workspace; former members and selections do not return. Review the records, then invite people again before resuming it.</p>
+    {% if removed_error %}<p role="alert">{{ removed_error }}</p>{% endif %}
+    {% for removed in removed_tenants %}
+    <div class="settings-row-form" data-removed-workspace="{{ removed.id }}" data-removed-name="{{ removed.display_name }}">
+      <strong>{{ removed.display_name }}</strong>
+      <span class="muted">Reference: {{ removed.id }}</span>
+      {% if removed.restorable %}
+      <button type="button" class="btn" data-tenant-restore>Restore as paused</button>
+      {% else %}
+      <span class="muted">Records cannot be restored here. Ask an administrator to check the backup.</span>
+      {% endif %}
+    </div>
+    {% endfor %}
+    <p id="removed-tenants-msg" role="status" aria-live="polite" class="muted tenants-msg"></p>
+  </details>
+  {% endif %}
   <details class="panel tenants-advanced" id="tenant-keys-panel">
     <summary><h2 id="keys-title" class="tenants-advanced__title">Advanced: workspace encryption keys</h2></summary>
     <p class="muted">When your IT team replaces the master encryption key, re-protect every workspace's own key with the new one here before the server switches over. Choose both key files; they are used only for this and are never saved or shown.</p>

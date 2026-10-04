@@ -2751,6 +2751,15 @@ async def _run_goal_accounted(
         try:
             lifecycle.finish(error)
         finally:
+            # Playwright's synchronous objects belong to their browser worker.
+            # Close every principal's goal session there before the goal/tenant
+            # context is reset, including cancelled and failed runs.
+            try:
+                from .tools.browser import close_goal_browsers
+
+                await close_goal_browsers(goal_id)
+            except Exception:
+                log.warning("browser goal cleanup failed", exc_info=True)
             settlement.record()
             try:
                 from .logging_config import reset_goal_context

@@ -55,6 +55,19 @@ def test_team_with_no_usable_specialist_is_not_deployed(monkeypatch):
     assert "no specialists" in response.json()["detail"]
 
 
+def test_team_with_only_unverified_specialists_is_not_deployed(monkeypatch):
+    import maverick.domain_edit as domain_edit
+    from maverick.departments import get_department
+
+    monkeypatch.setattr(domain_edit, "list_agents", lambda: [
+        {"name": name, "readiness": {"state": "unknown"}}
+        for name in get_department("finance").members
+    ])
+    response = client.post("/api/v1/departments/finance/deploy", json={})
+    assert response.status_code == 409
+    assert "setup checks" in response.json()["detail"]
+
+
 def test_unknown_department_404():
     assert client.get("/api/v1/departments/not_a_dept").status_code == 404
     assert client.get("/api/v1/departments/not_a_dept/review").status_code == 404
@@ -101,6 +114,55 @@ def test_workforce_page_renders():
     assert "Finance" in r.text
     # The nav link is wired in.
     assert "/workforce" in r.text
+
+
+def test_workforce_candidate_has_current_revision_and_grant_gate(monkeypatch):
+    from types import SimpleNamespace
+
+    import maverick.agent_autonomy as autonomy
+    from maverick.departments import get_department
+
+    name = get_department("finance").members[0]
+    monkeypatch.setattr(autonomy, "levels_enabled", lambda: True)
+    monkeypatch.setattr(autonomy, "graduation_candidates", lambda _history, _names: [
+        SimpleNamespace(name=name, sample=12, approve_rate=1.0, confidence=0.95,
+                        reason="clean approval record"),
+    ])
+    response = client.get("/api/v1/workforce/posture")
+    assert response.status_code == 200
+    candidate = response.json()["graduation_candidates"][0]
+    assert candidate["name"] == name
+    assert len(candidate["generation"]) == 64
+    assert candidate["can_grant"] is True
+
+
+def test_act_policy_is_review_only_even_with_clean_aggregate_approvals(monkeypatch):
+    from types import SimpleNamespace
+
+    import maverick.agent_autonomy as autonomy
+    import maverick.domain_edit as domain_edit
+    from maverick.departments import get_department
+
+    name = get_department("finance").members[0]
+    original_view = domain_edit.resolved_view
+
+    def act_view(candidate: str):
+        view = original_view(candidate)
+        if candidate == name and view:
+            view["autonomy"]["pack"]["high"] = "auto"
+        return view
+
+    monkeypatch.setattr(domain_edit, "resolved_view", act_view)
+    monkeypatch.setattr(autonomy, "levels_enabled", lambda: True)
+    monkeypatch.setattr(autonomy, "graduation_candidates", lambda _history, _names: [
+        SimpleNamespace(name=name, sample=100, approve_rate=1.0, confidence=1,
+                        reason="clean approval record"),
+    ])
+    response = client.get("/api/v1/workforce/posture")
+    assert response.status_code == 200
+    candidate = response.json()["graduation_candidates"][0]
+    assert candidate["can_grant"] is False
+    assert "overall approval record cannot prove" in candidate["grant_block_reason"]
 
 
 def test_workforce_connector_search_is_race_safe():
@@ -208,8 +270,38 @@ def test_deploy_department_creates_a_fleet(tmp_path, monkeypatch):
     fleet = r.json()["fleet"]
     assert fleet["name"] == "dept-finance"
     assert fleet["agents"]
+    assert r.json()["skipped_count"] == 0
     # It is now a real, runnable fleet.
     assert any(f["name"] == "dept-finance" for f in client.get("/api/v1/fleets").json()["fleets"])
+
+
+def test_deploy_excludes_specialists_that_need_setup_and_reports_them(tmp_path, monkeypatch):
+    import maverick.domain_edit as domain_edit
+    from maverick.departments import get_department
+
+    members = get_department("finance").members
+    ready = members[0]
+    monkeypatch.setattr(domain_edit, "list_agents", lambda: [
+        {"name": name, "readiness": {
+            "state": "action_ready" if name == ready else "needs_setup",
+            "label": "Can start" if name == ready else "Needs a connected source",
+            "fix_url": None if name == ready else "/connections",
+        }}
+        for name in members
+    ])
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.delenv("MAVERICK_TENANT", raising=False)
+    response = client.post("/api/v1/departments/finance/deploy")
+    assert response.status_code == 201, response.text
+    body = response.json()
+    assert [agent["name"] for agent in body["fleet"]["agents"]] == [ready]
+    assert body["deployed_count"] == 1
+    assert body["skipped_count"] == len(members) - 1
+    assert all(item["reason"] == "Needs a connected source" and item["fix_url"] == "/connections"
+               for item in body["skipped_specialists"])
+    from maverick.fleet import load_fleet
+
+    assert [agent.name for agent in load_fleet("dept-finance").agents] == [ready]
 
 
 def test_deploy_blocked_without_addon_returns_402(tmp_path, monkeypatch):

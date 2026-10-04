@@ -84,13 +84,16 @@ goals beyond a cap queue (not rejected) up to `MAVERICK_GOAL_ACQUIRE_TIMEOUT`.
 The per-user lane also prevents an attacker / runaway client from draining
 your Anthropic budget by firing 100 POSTs in 30 seconds.
 
-For an installation with no config file, omitted goal limits are $2 and
-30 minutes. A new installer saves those limits. Existing installations with
-unset task limits keep their previous behavior; administrators can choose
-"No limit for each task" in Settings. Requested limits are clamped to the
-configured deployment ceiling, if any. `max_depth` is validated in [1, 5].
-Spend and time values must be finite and non-negative; invalid values receive
-a 422 response before the goal starts.
+REST goal starts always have finite limits, including on an older installation
+whose general task limits were switched off. Omitted values use the current
+configured task limit, or $2 and 30 minutes when none exists. A supplied value
+is clamped to the operator's lower ceiling and the REST safety ceiling of $100
+and 24 hours. The accepted `POST /goals` response includes `limits` with the
+exact dollar, time and depth caps passed to the runner. A request with an
+`Idempotency-Key` can recover those caps from the submission receipt.
+This REST rule does not change the operator's limits for CLI or internal tasks.
+`max_depth` is validated in [1, 5]. Spend and time values must be finite and
+non-negative; invalid values receive a 422 response before the goal starts.
 
 ## Endpoints
 
@@ -98,7 +101,7 @@ a 422 response before the goal starts.
 
 | Method | Path | Description |
 |---|---|---|
-| `POST`   | `/api/v1/goals` | Create + start a goal (BackgroundTask). Honors `max_dollars`, `max_wall_seconds`, `max_depth` from body. |
+| `POST`   | `/api/v1/goals` | Create + start a goal (BackgroundTask). Returns effective `limits` after configured and REST ceilings. |
 | `GET`    | `/api/v1/goals` | List goals (filter `status=`, paginate `limit=` + `offset=`). |
 | `GET`    | `/api/v1/goals/{id}` | One goal. |
 | `GET`    | `/api/v1/goals/{id}/events` | **Short-poll** live progress (returns events with `id > since`). |
@@ -188,7 +191,8 @@ curl --fail-with-body --max-time 15 -X POST http://127.0.0.1:8765/api/v1/goals \
        "max_dollars":2.0,"max_wall_seconds":1800}'
 ```
 
-A goal ID acknowledges admission, **not execution**. Inspect its current task state.
+A goal ID acknowledges admission, **not execution**. Inspect `limits` in the
+response to see the exact accepted cap, then inspect the current task state.
 If the request times out, loses its reply, or has an uncertain server error, use
 only this read with the same key, account and workspace:
 
@@ -199,7 +203,8 @@ curl --fail-with-body --max-time 15 \
 ```
 
 The receipt distinguishes `state` (`accepted` or `not_dispatched`),
-`submission_state`, the goal, and `execution_confirmed: false`. Admission/dispatch
+`submission_state`, the goal, accepted `limits` (when dispatch intent exists),
+and `execution_confirmed: false`. Admission/dispatch
 is not proof of a completed provider or external action. A 409 means that the same
 key's reviewed input or effective execution limits differ; review the existing
 request. A missing/unavailable receipt leaves the start unresolved: keep the
@@ -268,7 +273,7 @@ HTTP status codes:
 - `400` malformed input (missing API key, invalid template params)
 - `401` missing / wrong bearer token
 - `404` no such goal / question / skill
-- `422` Pydantic validation (e.g., `max_dollars` out of range)
+- `422` Pydantic validation (e.g., a negative or non-finite spending limit)
 - `500` internal error (server bug -- file an issue with `maverick doctor` output)
 
 ## Mobile / external app integrations
@@ -280,6 +285,7 @@ Designed for non-channel frontends:
 - Cron jobs -> a 6am goal to summarize overnight email + slack
 - GitHub Actions -> kick off a Lightwork goal on PR open
 
-External callers should send explicit `max_dollars` and `max_wall_seconds`
-when their own policy requires them. An omitted value uses the installation's
-task limit; on an unconfigured installation, that is $2 and 30 minutes.
+External callers can send explicit `max_dollars` and `max_wall_seconds` when
+their own policy requires a tighter cap. An omitted value uses the configured
+task limit or the REST default of $2 and 30 minutes. Larger requests never
+exceed $100 or 24 hours, and a lower operator ceiling still wins.

@@ -108,6 +108,41 @@ def test_poll_fires_a_flow_run_with_event_data(monkeypatch, tmp_path):
     assert snapshot.nodes["a"].brief == "welcome {{email}}"
 
 
+def test_rss_source_published_flow_catalog_create_and_poll(monkeypatch, tmp_path):
+    """The guided RSS-to-published-flow journey reaches the real event worker."""
+    _isolate(monkeypatch, tmp_path)
+    _save_flow()
+    import maverick.automation_events as ev
+    from maverick.flow import store as flow_store
+    from maverick_dashboard import automation_queue as aq
+
+    _reset_aq(monkeypatch, aq)
+    feed = ["<rss><channel><item><guid>one</guid><title>First</title></item></channel></rss>"]
+    monkeypatch.setattr(ev, "_http_get_text", lambda *args, **kwargs: feed[0])
+    c = _client()
+    listed = c.get("/api/v1/flows")
+    assert listed.status_code == 200, listed.text
+    assert any(item["id"] == "onboard" and item["published"] for item in listed.json()["flows"])
+
+    created = c.post("/api/v1/event-triggers", json={
+        "name": "New posts", "flow": "onboard", "source": "rss",
+        "config": {"url": "https://example.org/feed.xml"},
+    })
+    assert created.status_code == 201, created.text
+    assert created.json()["flow"] == "onboard"
+    first = c.post("/api/v1/event-triggers/poll").json()["triggers"][0]
+    assert first["new_events"] == 0  # Initial check safely establishes a baseline.
+
+    feed[0] = ("<rss><channel><item><guid>two</guid><title>Second</title></item>"
+               "<item><guid>one</guid><title>First</title></item></channel></rss>")
+    second = c.post("/api/v1/event-triggers/poll").json()["triggers"][0]
+    assert second["new_events"] == 1
+    assert len(second["fired_flows"]) == 1
+    run = flow_store.load_run(second["fired_flows"][0])
+    assert run.flow_id == "onboard"
+    assert run.data["title"] == "Second"
+
+
 def test_flow_fire_is_logged_in_history_with_run_ids(monkeypatch, tmp_path):
     # A flow fire records a FIRED history row carrying the flow run ids (not an
     # empty goal-id list), so the automations UI can show it fired.

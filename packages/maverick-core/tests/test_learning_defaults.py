@@ -93,7 +93,9 @@ def _governed_states() -> dict[str, bool]:
 
 def test_governed_learning_defaults_on_but_dgm_defaults_off(tmp_path, monkeypatch):
     _isolate(tmp_path, monkeypatch)
-    assert all(_governed_states().values())
+    states = _governed_states()
+    assert states.pop("budget_tuning") is False
+    assert all(states.values())
     from maverick.config import get_self_harness, get_self_improvement, get_self_learning
 
     assert get_self_learning()["create_tools"] is False

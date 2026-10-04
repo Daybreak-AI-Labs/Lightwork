@@ -9,7 +9,7 @@ import json
 from typing import Literal
 
 from maverick.tenant.registry import DEFAULT_TENANT_DAILY_DOLLARS
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, model_validator
 
 _HUNTER_BATCH_BYTES = 16 * 1024 * 1024
 _HUNTER_EVENT_BYTES = 256 * 1024
@@ -65,6 +65,16 @@ class WorkflowStepIn(BaseModel):
     gate: str | None = None
 
 
+class AgentAutonomyIn(BaseModel):
+    """The specialist's explicit authority dial in a tenant pack override."""
+
+    default: Literal["observe", "suggest", "request", "auto"]
+    low: Literal["observe", "suggest", "request", "auto"] | None = None
+    medium: Literal["observe", "suggest", "request", "auto"] | None = None
+    high: Literal["observe", "suggest", "request", "auto"] | None = None
+    onboarding: StrictBool = True
+
+
 class AgentOverrideIn(BaseModel):
     """A tenant override patch for a domain pack (agent). Every field is
     optional: only the ones the client actually sets are persisted, so the
@@ -81,6 +91,11 @@ class AgentOverrideIn(BaseModel):
     workflow: list[WorkflowStepIn] | None = None
     compartment: str | None = None
     extends: str | None = None
+    autonomy: AgentAutonomyIn | None = None
+
+
+class AgentGraduationIn(BaseModel):
+    expected_generation: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
 class JDMatchIn(BaseModel):
@@ -211,6 +226,10 @@ class GoalOut(BaseModel):
     title: str
     description: str | None = None
     result: str | None = None
+    # Present on REST admission; the exact limits passed to the runner.
+    # A plain goal read has no durable cap record unless submitted with an
+    # Idempotency-Key (whose receipt retains the dispatch intent).
+    limits: dict[str, float | int] | None = None
     # Stable machine-readable cause for a stopped run. ``awaiting_input``
     # takes priority over a generic blocked status; absent while work is
     # running or finished successfully.

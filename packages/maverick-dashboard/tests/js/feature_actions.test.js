@@ -273,6 +273,46 @@ test('independence levels show each level count once the levels are on', async (
   assert.match(ui.document.getElementById('fa-autonomy-status').textContent, /own level of independence/);
 });
 
+test('a graduation candidate can be granted only after confirmation and a fresh server check', async (t) => {
+  const markup = slice('workforce.html', '<section class="panel" aria-labelledby="fa-autonomy-title">', '</section>');
+  let granted = false;
+  const ui = await fixture(markup, (url, options) => {
+    if (url === '/api/v1/agents/finance_clerk/graduate') {
+      granted = true;
+      return response({autonomy: {onboarding: false}});
+    }
+    return response({levels_enabled: true, can_manage: true,
+      autonomy_posture: {suggest: 1}, packs_onboarding: granted ? 0 : 1,
+      graduation_candidates: granted ? [] : [{name: 'finance_clerk', sample: 20, approve_rate: 0.95,
+        confidence: 0.9, reason: 'clean record', generation: 'a'.repeat(64), can_grant: true}]});
+  });
+  t.after(() => ui.window.close());
+  const grant = [...ui.document.querySelectorAll('#fa-autonomy button')].find((button) => /Grant independence/.test(button.textContent));
+  assert.ok(grant);
+  grant.click();
+  await ui.settle();
+  const mutation = nonAccount(ui.calls).find((call) => call.url === '/api/v1/agents/finance_clerk/graduate');
+  assert.ok(mutation);
+  assert.equal(mutation.options.method, 'POST');
+  assert.deepEqual(JSON.parse(mutation.options.body), {expected_generation: 'a'.repeat(64)});
+  assert.equal(ui.confirms.length, 1);
+  assert.doesNotMatch(ui.document.getElementById('fa-autonomy').textContent, /Grant independence/);
+});
+
+test('an Act policy explains why aggregate approvals cannot grant independence', async (t) => {
+  const markup = slice('workforce.html', '<section class="panel" aria-labelledby="fa-autonomy-title">', '</section>');
+  const ui = await fixture(markup, () => response({levels_enabled: true, can_manage: true,
+    autonomy_posture: {suggest: 1}, packs_onboarding: 1,
+    graduation_candidates: [{name: 'finance_clerk', sample: 100, approve_rate: 1,
+      confidence: 1, reason: 'clean record', generation: 'a'.repeat(64), can_grant: false,
+      grant_block_reason: 'This specialist is set to Act on its own for high actions. Its overall approval record cannot prove those actions are safe.'}]}));
+  t.after(() => ui.window.close());
+  const panel = ui.document.getElementById('fa-autonomy');
+  assert.match(panel.textContent, /overall approval record cannot prove/);
+  assert.ok(panel.querySelector('a[href="/agents?name=finance_clerk#agent-autonomy"]'));
+  assert.doesNotMatch(panel.textContent, /Grant independence/);
+});
+
 test('a skill file is checked and problems stay in technical details', async (t) => {
   const markup = '<input type="file" id="fa-skill-file"><p id="fa-skill-status"></p><div id="fa-skill-out"></div>';
   const ui = await fixture(markup, () => response({ok: false, errors: ['frontmatter missing name'], warnings: []}));

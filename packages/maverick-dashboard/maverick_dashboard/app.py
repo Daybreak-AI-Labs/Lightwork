@@ -4059,6 +4059,14 @@ async def tenants_page(request: Request) -> HTMLResponse:
         tenants = list_tenants()
     except Exception:  # pragma: no cover -- never 500 the console
         tenants = []
+    try:
+        from maverick.tenant.registry import list_removed_tenants
+
+        removed_tenants = list_removed_tenants()
+        removed_error = ""
+    except Exception:
+        removed_tenants = []
+        removed_error = "Removed workspace history is unavailable. Ask an administrator to check the installation."
     from .workspace_display import duplicate_workspace_ids
 
     duplicate_ids = duplicate_workspace_ids((t.id, t.display_name or t.id) for t in tenants)
@@ -4073,7 +4081,8 @@ async def tenants_page(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(
         request,
         "tenants.html",
-        {"tenants": tenants, "duplicate_ids": duplicate_ids, "is_admin": True, "billing_on": billing_on},
+        {"tenants": tenants, "removed_tenants": removed_tenants, "removed_error": removed_error,
+         "duplicate_ids": duplicate_ids, "is_admin": True, "billing_on": billing_on},
     )
 
 
@@ -4557,7 +4566,6 @@ async def vendor_detail_page(request: Request, vendor_id: str) -> HTMLResponse:
     import time as _time
 
     from maverick import vendor_management
-    from maverick.governed_record_lookup import lookup_digest
     if not vendor_management.enabled():
         raise HTTPException(status_code=403,
                             detail="Vendor management is turned off. An administrator can turn it on from the Privacy workspace.")
@@ -4583,8 +4591,8 @@ async def vendor_detail_page(request: Request, vendor_id: str) -> HTMLResponse:
         c["renews_date"] = _date(c.get("renews_at"))
         c["overdue"] = float(c.get("renews_at") or 0) < now
     for q in record.get("questionnaires") or []:
-        token = q.pop("token", None)   # the live form token never reaches a page
-        q["request_id"] = lookup_digest(str(token or ""))
+        # Core returns a non-authorizing request id; no live form address is
+        # available on a read, even to this server-rendered page.
         status = questionnaire_statuses.get(q["request_id"])
         if status is None:
             questionnaire_unavailable = True
@@ -12906,7 +12914,7 @@ async def workflow_builder_page(
             # expose, so a save (which replaces the override) can't drop them.
             preserve = {
                 k: raw[k]
-                for k in ("knowledge_sources", "models", "compartment", "extends")
+                for k in ("knowledge_sources", "models", "compartment", "extends", "autonomy")
                 if k in raw
             }
             edit_agent_prefill = {

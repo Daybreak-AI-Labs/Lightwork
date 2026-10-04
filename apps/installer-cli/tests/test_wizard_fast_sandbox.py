@@ -55,6 +55,7 @@ def test_fast_setup_falls_back_to_local_when_docker_down(monkeypatch, tmp_path):
         "write_file",
         "apply_patch",
         "str_replace_editor",
+        "ast_edit",
     }
 
 

@@ -17,9 +17,10 @@ _cursor = 0
 
 
 def _enabled() -> bool:
-    from maverick import config
+    from maverick import config, experience_preferences
     from maverick.personal_notifications import personal_alerts_on
     return (not config.config_source_errors(include_tenant=True)
+            and experience_preferences.enabled()
             and personal_alerts_on(config.load_config().get("notifications"))
             and (config.load_config().get("notifications") or {}).get("personal_background") is True)
 

@@ -197,14 +197,12 @@
         <select id="auto-event-source"></select>
       </div>
       <p class="auto__hint" id="auto-event-source-hint"></p>
+      <p class="auto__hint" id="auto-event-source-availability" role="status"></p>
       <div id="auto-event-fields" class="auto__fields"></div>
       <p class="auto__hint" id="auto-event-formurl" hidden></p>
       <details id="auto-event-config-advanced">
         <summary>More settings</summary>
         <div id="auto-event-more" class="auto__fields"></div>
-        <div id="auto-event-extra" class="auto__extra"></div>
-        <button class="btn btn--ghost" type="button" id="auto-event-extra-add">Add a setting</button>
-        <p class="auto__hint">Only needed when your administrator gives you an extra setting for this source.</p>
       </details>
       <div class="field">
         <label for="auto-event-name">Trigger name (optional)</label>
@@ -222,7 +220,7 @@
         </select>
       </div>
       <div class="wf__row" style="display:flex; gap: var(--space-3); align-items:center;">
-        <button class="btn" type="submit">Create automation</button>
+        <button class="btn" type="submit" id="auto-event-create" disabled>Create automation</button>
       </div>
     </form>
     </details>
@@ -688,8 +686,9 @@
     var evMsg = document.getElementById('auto-event-msg');
     var evFields = document.getElementById('auto-event-fields');
     var evMore = document.getElementById('auto-event-more');
-    var evExtra = document.getElementById('auto-event-extra');
     var evAdvanced = document.getElementById('auto-event-config-advanced');
+    var evAvailability = document.getElementById('auto-event-source-availability');
+    var evCreate = document.getElementById('auto-event-create');
     var evTarget = document.getElementById('auto-event-template');
     var evTargetKind = document.getElementById('auto-event-target-kind');
     var sourceDrafts = Object.create(null), currentSource = '', sourceControls = [];
@@ -707,6 +706,7 @@
     };
     var SOURCE_LABELS = { http_json: 'Web feed', rss: 'RSS or Atom feed', oauth_http_json: 'Connected account feed', github_issues: 'GitHub issues', imap_email: 'Email inbox', file_dir: 'Incoming files', form: 'Form submissions' };
     var SOURCE_HINTS = {
+      rss: 'Paste the public address of an RSS or Atom feed. The first check remembers existing posts; later checks start your workflow for new posts.',
       http_json: 'Use a feed that returns a list of items.',
       oauth_http_json: 'Choose an account connected below. Lightwork uses its saved approval; never paste a password or access key.',
       github_issues: 'Watch new issues in a repository. Connect GitHub below for private repositories.',
@@ -715,16 +715,9 @@
       form: 'Lightwork gives this automation a private form link when you save. If you update an existing automation, its link stays the same.'
     };
     var connectedProviders = [];
-    function knownKeys() { return (SOURCE_FIELDS[currentSource] || []).map(function (f) { return f[0]; }); }
     function readSourceConfig() {
       if (currentSource === 'form') return {};
-      var cfg = Object.assign({}, sourceDrafts[currentSource] || {});
-      // Extra settings typed as name/value rows (for sources without guided fields).
-      if (evExtra) Array.prototype.forEach.call(evExtra.children || [], function (row) {
-        var k = row._key && row._key.value.trim(), v = row._val && row._val.value.trim();
-        if (k && v) cfg[k] = /^(true|false)$/.test(v) ? v === 'true' : (/^-?\d+(\.\d+)?$/.test(v) ? Number(v) : v);
-      });
-      return cfg;
+      return Object.assign({}, sourceDrafts[currentSource] || {});
     }
     function showFormUrl() {
       var hint = document.getElementById('auto-event-formurl');
@@ -732,23 +725,8 @@
       if (hint.hidden) return;
       hint.textContent = 'After saving, open or copy the private form link from the saved automation below.';
     }
-    function addExtraRow(key, value) {
-      var row = el('div', 'auto__extra-row'), n = (evExtra.children || []).length;
-      var kf = el('div', 'field'), vf = el('div', 'field');
-      var kl = el('label', '', 'Setting'), vl = el('label', '', 'Value');
-      var ki = document.createElement('input'), vi = document.createElement('input');
-      ki.type = 'text'; vi.type = 'text'; ki.className = vi.className = 'input';
-      ki.id = 'auto-extra-key-' + n; vi.id = 'auto-extra-val-' + n; kl.htmlFor = ki.id; vl.htmlFor = vi.id;
-      ki.value = key || ''; vi.value = value === undefined ? '' : String(value);
-      kf.appendChild(kl); kf.appendChild(ki); vf.appendChild(vl); vf.appendChild(vi);
-      var rm = el('button', 'btn btn--ghost', 'Remove'); rm.type = 'button';
-      rm.addEventListener('click', function () { if (row.remove) row.remove(); });
-      row._key = ki; row._val = vi;
-      row.appendChild(kf); row.appendChild(vf); row.appendChild(rm); evExtra.appendChild(row);
-      return row;
-    }
     function fillSourceFields() {
-      evFields.textContent = ''; if (evMore) evMore.textContent = ''; if (evExtra) evExtra.textContent = '';
+      evFields.textContent = ''; if (evMore) evMore.textContent = '';
       sourceControls = [];
       var cfg = sourceDrafts[currentSource] || (sourceDrafts[currentSource] = {});
       (SOURCE_FIELDS[evSource.value] || []).forEach(function (field) {
@@ -782,24 +760,17 @@
         (field[5] && evMore ? evMore : evFields).appendChild(wrapper);
         sourceControls.push(input);
       });
-      // Settings saved earlier that have no guided field stay editable as rows.
-      var known = knownKeys();
-      Object.keys(cfg).forEach(function (key) {
-        if (known.indexOf(key) === -1 && (typeof cfg[key] !== 'object' || cfg[key] === null)) addExtraRow(key, cfg[key]);
-      });
       showFormUrl();
     }
     function changeSource() {
       if (currentSource) sourceDrafts[currentSource] = readSourceConfig();
       currentSource = evSource.value;
       document.getElementById('auto-event-source-hint').textContent = SOURCE_HINTS[currentSource] || '';
-      evAdvanced.open = !SOURCE_FIELDS[currentSource];
-      evAdvanced.hidden = currentSource === 'form';
+      evAdvanced.open = false;
+      evAdvanced.hidden = !(SOURCE_FIELDS[currentSource] || []).some(function (field) { return field[5]; });
       fillSourceFields();
     }
     evSource.addEventListener('change', changeSource);
-    var extraAdd = document.getElementById('auto-event-extra-add');
-    if (extraAdd) extraAdd.addEventListener('click', function () { var row = addExtraRow('', ''); if (row._key.focus) row._key.focus(); });
     function renderTargetParams() {
       var container = document.getElementById('auto-event-params'); container.textContent = '';
       var target = targetCatalog[evTargetKind.value].find(function (item) { return item.name === evTarget.value; });
@@ -842,18 +813,28 @@
       var data = {};
       try {
         var response = await fetch('/api/v1/event-triggers', {cache: 'no-store'});
-        if (!response.ok) return false;
+        if (!response.ok) throw new Error('Could not load sources. Refresh to try again.');
         data = await response.json();
-        if (!data || !Array.isArray(data.triggers)) return false;
+        if (!data || !Array.isArray(data.triggers)) throw new Error('Could not read sources. Refresh to try again.');
         if (expectedForm && !data.triggers.some(function (row) {
           return row.name === expectedForm.name && row.source === 'form' &&
             row.config && row.config.token === expectedForm.token;
         })) return false;
-      } catch (e) { return false; }
+      } catch (e) {
+        if (!evSource.children.length) evAvailability.textContent = e.message || 'Could not load sources. Refresh to try again.';
+        return false;
+      }
       if (evSource && !evSource.children.length) {
-        (data.sources || []).forEach(function (s) {
+        var order = ['rss', 'form', 'http_json', 'github_issues', 'oauth_http_json', 'imap_email', 'file_dir'];
+        var offered = (data.sources || []).filter(function (s) { return Object.prototype.hasOwnProperty.call(SOURCE_FIELDS, s); });
+        offered.sort(function (a, b) { return order.indexOf(a) - order.indexOf(b); });
+        offered.forEach(function (s) {
           var o = document.createElement('option'); o.value = s; o.textContent = SOURCE_LABELS[s] || mvHuman(s); evSource.appendChild(o);
         });
+        var unavailable = (data.sources || []).length - offered.length;
+        evAvailability.textContent = !offered.length ? 'No sources can be set up from this page. Ask your administrator to check this installation.' :
+          (unavailable ? unavailable + ' additional source' + (unavailable === 1 ? ' is' : 's are') + ' not yet available for setup here.' : '');
+        evCreate.disabled = !offered.length;
         changeSource();
       }
       var items = data.triggers || [];
@@ -1144,6 +1125,10 @@
       ev.preventDefault();
       if (creatingEvent) return;
       evMsg.textContent = '';
+      if (!evTarget.value || !Object.prototype.hasOwnProperty.call(SOURCE_FIELDS, evSource.value)) {
+        evMsg.textContent = 'Choose an available workflow or flow and source before creating an automation.';
+        return;
+      }
       var config = readSourceConfig();
       if (!evForm.reportValidity()) return;
       var intervalRaw = String(document.getElementById('auto-event-interval').value || '').trim();

@@ -914,7 +914,7 @@ class TestEnterpriseBoundary:
         import maverick.governed_actions as actions
         import maverick.safety.consent as consent
 
-        monkeypatch.setenv("MAVERICK_GOVERNED_APPROVER", "configured-label")
+        monkeypatch.setenv("MAVERICK_GOVERNED_APPROVER", "user:reviewer")
         request = {
             "op": "post", "path": "/accounts", "body": {"role": "viewer"},
         }
@@ -942,13 +942,35 @@ class TestEnterpriseBoundary:
         assert receipts[0][1]["approver"] == "user:reviewer"
         assert receipts[0][0][2]["body"] == {"role": "viewer"}
 
+    def test_configured_approver_rejects_a_different_person_before_prepare(self, monkeypatch):
+        import maverick.governed_actions as actions
+        import maverick.safety.consent as consent
+
+        monkeypatch.setenv("MAVERICK_GOVERNED_APPROVER", "user:owner")
+        monkeypatch.setattr(
+            consent, "require_consent",
+            lambda *_args, **_kwargs: SimpleNamespace(
+                granted=True, source="dashboard", actor="user:reviewer",
+            ),
+        )
+        receipts, calls = [], []
+        monkeypatch.setattr(actions, "record_tool_lineage",
+                            lambda *_args, **kwargs: receipts.append(kwargs) or True)
+
+        out = wrap_connector_tool(_fake_tool(calls), enterprise=True).fn({
+            "op": "post", "path": "/accounts", "body": {"n": 1},
+        })
+
+        assert "configured approver did not approve" in out
+        assert receipts == [] and calls == []
+
     def test_credential_rotation_after_approval_blocks_external_write(
         self, monkeypatch,
     ):
         import maverick.governed_actions as actions
         import maverick.safety.consent as consent
 
-        monkeypatch.setenv("MAVERICK_GOVERNED_APPROVER", "ops@corp")
+        monkeypatch.setenv("MAVERICK_GOVERNED_APPROVER", "user:reviewer")
         monkeypatch.setenv("ACME_TOKEN", "generation-one")
 
         def approve(*_args, **_kwargs):

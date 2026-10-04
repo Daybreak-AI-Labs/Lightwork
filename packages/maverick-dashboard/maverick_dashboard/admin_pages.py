@@ -36,11 +36,12 @@ def _admin_audit(request: Request, action: str, **payload) -> None:
 
 
 def _setting_write(request: Request, section: str, key: str, project,
-                   *, confirmed: bool = False):
+                   *, confirmed: bool = False, changed_fields=None):
     from .settings_audit import bind_setting_write
 
     return bind_setting_write(request, section=section, key=key,
-                              project=project, confirmed=confirmed)
+                              project=project, confirmed=confirmed,
+                              changed_fields=changed_fields)
 
 
 def _provider_audit_value(data: dict, name: str) -> dict[str, str]:
@@ -48,10 +49,31 @@ def _provider_audit_value(data: dict, name: str) -> dict[str, str]:
     providers = data.get("providers") or {}
     value = providers.get(name) if isinstance(providers, dict) else None
     value = value if isinstance(value, dict) else {}
+    setup = {field: value.get(field) for field in
+             ("auth_mode", "deployment", "api_version", "endpoint", "region", "model_id")
+             if value.get(field)}
     return {
         "api_key": "set" if value.get("api_key") else "not set",  # pragma: allowlist secret
         "base_url": "set" if value.get("base_url") else "not set",
+        "setup_sha256": hashlib.sha256(json.dumps(setup, sort_keys=True).encode()).hexdigest(),
     }
+
+
+def _provider_changed_fields(old: dict, new: dict, name: str) -> list[str]:
+    """Name changed connection fields without recording their values or hashes."""
+    def provider(data: dict) -> dict:
+        providers = data.get("providers") or {}
+        value = providers.get(name) if isinstance(providers, dict) else None
+        return value if isinstance(value, dict) else {}
+
+    before, after = provider(old), provider(new)
+    labels = {
+        "api_key": "access key", "base_url": "service address",
+        "auth_mode": "sign-in method", "deployment": "deployment",
+        "api_version": "service version", "endpoint": "endpoint",
+        "region": "region", "model_id": "model",
+    }
+    return [label for field, label in labels.items() if before.get(field) != after.get(field)]
 
 
 def _rate_audit_value(data: dict, spec: str) -> dict[str, object]:
@@ -680,6 +702,12 @@ async def settings_set_provider(
     provider: str = Form(...),
     api_key: str = Form(""),
     base_url: str = Form(""),
+    auth_mode: str = Form(""),
+    deployment: str = Form(""),
+    api_version: str = Form(""),
+    endpoint: str = Form(""),
+    region: str = Form(""),
+    model_id: str = Form(""),
 ) -> RedirectResponse:
     """Rotate only provider fields this dashboard can make effective.
 
@@ -693,15 +721,18 @@ async def settings_set_provider(
     provider_name = provider.strip()
     key_value = api_key.strip()
     base_value = base_url.strip()
+    setup = ({"auth_mode": auth_mode, "deployment": deployment, "api_version": api_version}
+             if provider_name == "azure" else
+             {"auth_mode": auth_mode, "endpoint": endpoint, "region": region, "model_id": model_id}
+             if provider_name == "bedrock" else None)
     try:
         with _setting_write(request, "providers", provider_name, lambda d:
-                            _provider_audit_value(d, provider_name)):
-            await run_in_threadpool(
-                settings_store.rotate_provider,
-                provider_name,
-                api_key=key_value,
-                base_url=base_value,
-            )
+                            _provider_audit_value(d, provider_name), changed_fields=lambda old, new:
+                            _provider_changed_fields(old, new, provider_name)):
+            values = {"api_key": key_value, "base_url": base_value}
+            if setup is not None:
+                values["details"] = setup
+            await run_in_threadpool(settings_store.rotate_provider, provider_name, **values)
     except settings_store.ProviderConfigurationUnavailable as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except settings_store.SecuritySuiteConfigUnavailable as exc:
@@ -724,7 +755,8 @@ def settings_clear_provider(request: Request, provider: str = Form(...)) -> Redi
     try:
         name = provider.strip()
         with _setting_write(request, "providers", name, lambda d:
-                            _provider_audit_value(d, name)):
+                            _provider_audit_value(d, name), changed_fields=lambda old, new:
+                            _provider_changed_fields(old, new, name)):
             settings_store.clear_provider(name)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="unknown provider") from exc
@@ -734,27 +766,26 @@ def settings_clear_provider(request: Request, provider: str = Form(...)) -> Redi
 
 @router.post("/settings/providers/test")
 async def settings_test_provider(
-    request: Request, provider: str = Form(...), next: str = Form("")
+    request: Request, provider: str = Form(...), next_page: str = Form("", alias="next")
 ) -> RedirectResponse:
     """Run a bounded live provider probe and bind its receipt to this config."""
     _app()._require_same_origin(request)
     auth.require_global_permission(request, "admin")
-    from maverick import config
-
     from maverick_dashboard.integration_readiness import test_provider
+    from maverick_dashboard.provider_readiness import workspace_readiness
 
     name = provider.strip().lower()
-    try:
-        state = await run_in_threadpool(config.provider_configuration_state, name)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail="unknown provider") from exc
-    if not state["configured"]:
-        raise HTTPException(status_code=409, detail="provider is not configured")
+    rows = (await run_in_threadpool(workspace_readiness))["providers"]
+    row = next((item for item in rows if item["name"] == name), None)
+    if row is None:
+        raise HTTPException(status_code=400, detail="unknown provider")
+    if not row["configured"]:
+        raise HTTPException(status_code=409, detail="finish the provider setup before testing")
     await run_in_threadpool(test_provider, name)
     await run_in_threadpool(_refresh_models_quietly, name)
-    if next == "providers":  # the Providers page's own Test connection button
-        return RedirectResponse("/providers?tested=1", status_code=303)
     _admin_audit(request, "settings_provider_test")
+    if next_page == "providers":  # the Providers page's own Test connection button
+        return RedirectResponse("/providers?tested=1", status_code=303)
     return RedirectResponse("/settings?saved=provider_test", status_code=303)
 
 

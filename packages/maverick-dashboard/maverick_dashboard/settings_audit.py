@@ -15,13 +15,16 @@ from fastapi import HTTPException, Request
 
 def record_setting_change(request: Request, *, section: str, key: str, old: object,
                           new: object, confirmed: bool = False,
-                          phase: str | None = None) -> bool:
+                          phase: str | None = None,
+                          changed_fields: list[str] | None = None) -> bool:
     """Write the row; :class:`maverick.audit.AuditRefused` propagates."""
     from maverick.audit import EventKind, audit_event
 
     from . import auth
 
-    fields = {"phase": phase} if phase is not None else {}
+    fields: dict[str, object] = {"phase": phase} if phase is not None else {}
+    if changed_fields is not None:
+        fields["changed_fields"] = changed_fields
     return audit_event(
         EventKind.SETTING_CHANGED,
         agent="dashboard",
@@ -44,9 +47,10 @@ class SettingWrite:
     section: str
     key: str
     project: Callable[[dict], object]
+    changed_fields: Callable[[dict, dict], list[str]] | None = None
     confirmed: bool = False
     deferred: bool = False
-    pending: tuple[object, object] | None = None
+    pending: tuple[object, object, list[str] | None] | None = None
 
     def prepare(self, old: dict, new: dict) -> None:
         from maverick.audit import AuditRefused
@@ -57,10 +61,12 @@ class SettingWrite:
         # demoted while waiting must not publish a setting under stale authority.
         auth.require_global_permission(self.request, "admin")
         before, after = self.project(old), self.project(new)
+        changed = self.changed_fields(old, new) if self.changed_fields is not None else None
         try:
             result = record_setting_change(
                 self.request, section=self.section, key=self.key,
                 old=before, new=after, confirmed=self.confirmed, phase="prepared",
+                changed_fields=changed,
             )
             if result is False:
                 raise AuditRefused("settings activity record unavailable")
@@ -69,18 +75,19 @@ class SettingWrite:
                 status_code=503,
                 detail="Activity recording is unavailable. Settings were not changed; retry after it is restored.",
             ) from exc
-        self.pending = (before, after)
+        self.pending = (before, after, changed)
 
     def complete(self) -> None:
         from maverick.audit import AuditRefused
 
         if self.pending is None:
             return
-        before, after = self.pending
+        before, after, changed = self.pending
         try:
             result = record_setting_change(
                 self.request, section=self.section, key=self.key,
                 old=before, new=after, confirmed=self.confirmed, phase="completed",
+                changed_fields=changed,
             )
             if result is False:
                 raise AuditRefused("settings activity record unavailable")
@@ -108,11 +115,13 @@ def current_write() -> SettingWrite | None:
 
 @contextmanager
 def bind_setting_write(request: Request, *, section: str, key: str,
-                       project: Callable[[dict], object], confirmed: bool = False):
+                       project: Callable[[dict], object], confirmed: bool = False,
+                       changed_fields: Callable[[dict, dict], list[str]] | None = None):
     """Bind one route to dashboard and runtime-overlay write boundaries."""
     from maverick.runtime_overrides import setting_audit_callback
 
-    change = SettingWrite(request, section, key, project, confirmed=confirmed)
+    change = SettingWrite(request, section, key, project,
+                          changed_fields=changed_fields, confirmed=confirmed)
     token = _current.set(change)
     try:
         with setting_audit_callback(change.on_runtime_write):

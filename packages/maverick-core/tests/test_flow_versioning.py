@@ -19,6 +19,73 @@ def _flow(brief="do a"):
                 nodes={"a": FlowNode(id="a", kind="agent", brief=brief)})
 
 
+def test_disconnected_steps_are_draftable_but_cannot_be_published(tmp_path, monkeypatch):
+    _dd(tmp_path, monkeypatch)
+    flow = _flow()
+    flow.nodes["approval"] = FlowNode(
+        id="approval", kind="approval", prompt="Approve payment", label="Approve payment",
+    )
+    saved = store.save_flow(flow)
+    assert saved.unreachable_node_ids() == ["approval"]
+    with pytest.raises(store.FlowSnapshotError, match="Approve payment.*can never run"):
+        store.publish_flow(saved.id, expected_version=saved.version,
+                           expected_revision=saved.revision)
+    saved.nodes["a"].next = "approval"
+    connected = store.save_flow(saved, expected_version=saved.version,
+                                expected_revision=saved.revision)
+    release = store.publish_flow(connected.id, expected_version=connected.version,
+                                 expected_revision=connected.revision)
+    assert release["definition_version"] == connected.version
+
+
+def test_disconnected_nested_step_blocks_publication(tmp_path, monkeypatch):
+    _dd(tmp_path, monkeypatch)
+    body = _flow()
+    body.nodes["unused"] = FlowNode(id="unused", kind="agent", brief="Never reached")
+    flow = Flow(id="nested", name="Nested", start="loop", nodes={
+        "loop": FlowNode(id="loop", kind="foreach", items="rows", body=body),
+    })
+    saved = store.save_flow(flow)
+    with pytest.raises(store.FlowSnapshotError, match="unused.*can never run"):
+        store.publish_flow(saved.id, expected_version=saved.version,
+                           expected_revision=saved.revision)
+
+
+def test_referenced_child_draft_must_be_connected_before_parent_publication(tmp_path, monkeypatch):
+    _dd(tmp_path, monkeypatch)
+    child = Flow(id="child", name="Child", start="a", nodes={
+        "a": FlowNode(id="a", kind="agent", brief="First"),
+        "unused": FlowNode(id="unused", kind="agent", brief="Never reached"),
+    })
+    saved_child = store.save_flow(child)
+    parent = store.save_flow(Flow(id="parent", name="Parent", start="call", nodes={
+        "call": FlowNode(id="call", kind="subflow", flow_ref="child"),
+    }))
+    # Saving and ordinary snapshots remain possible while the child is a draft.
+    assert store.snapshot_current_flow_bundle(parent.id)[2]["child"] is not None
+    with pytest.raises(store.FlowSnapshotError, match="subflow 'child'.*unused.*can never run"):
+        store.publish_flow(parent.id, expected_version=parent.version,
+                           expected_revision=parent.revision)
+
+    saved_child.nodes["a"].next = "unused"
+    store.save_flow(saved_child, expected_version=saved_child.version,
+                    expected_revision=saved_child.revision)
+    release = store.publish_flow(parent.id, expected_version=parent.version,
+                                 expected_revision=parent.revision)
+    assert release["subflow_digests"]["child"]
+
+
+def test_branch_default_edge_does_not_make_an_unusable_step_reachable():
+    flow = Flow(id="branch", name="Branch", start="choose", nodes={
+        "choose": FlowNode(id="choose", kind="branch", condition="amount > 100",
+                           if_true="yes", if_false="no", next="unused"),
+        "yes": FlowNode(id="yes", kind="agent", brief="yes"),
+        "no": FlowNode(id="no", kind="agent", brief="no"),
+        "unused": FlowNode(id="unused", kind="agent", brief="never"),
+    })
+    assert flow.unreachable_node_ids() == ["unused"]
+
+
 @pytest.mark.skipif(os.name != "nt", reason="Windows extended-length paths")
 def test_maximum_tenant_segment_definition_publication_and_idempotency(tmp_path, monkeypatch):
     from maverick.paths import MAX_TENANT_SEGMENT_LENGTH, data_dir, tenant_scope

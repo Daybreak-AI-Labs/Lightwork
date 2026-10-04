@@ -213,6 +213,48 @@ _CONTEXTS = tuple(
             ),
         ),
         _registered(
+            path="/agents",
+            summary="Browse specialists, check required actions, and review each specialist's guardrails and independence level.",
+            capabilities=(
+                "Check whether required workflow actions are present before choosing a specialist.",
+                "Administrators can edit a specialist's independence by risk level and keep new specialists supervised.",
+            ),
+            boundaries=(
+                "A Can start label checks registered actions; live connections, permissions and the AI service are checked when work starts.",
+                "A server-configured specialist policy takes priority over the editor. The server checks authority and current approval evidence before ending supervision.",
+            ),
+            next_steps=(
+                "Use the ready-first picker and open a specialist's job card to see its current setup.",
+                "If an action needs setup, follow Review setup. Administrators can review Independence in the specialist editor.",
+            ),
+            suggested_questions=(
+                "Why can this specialist not start?",
+                "What do Watch, Suggest, Ask, and Act mean?",
+                "Why is this specialist still supervised?",
+            ),
+        ),
+        _registered(
+            path="/workforce",
+            summary="See departments, specialist setup status, and how independently specialists may work.",
+            capabilities=(
+                "See how many specialists in each department have their required actions available.",
+                "Administrators can grant independence to a candidate after a current approval-record check.",
+            ),
+            boundaries=(
+                "Department counts check registered actions only; live connections, permissions and the AI service are checked when work starts.",
+                "Independence levels must be enabled, and a candidate's current approval record and specialist revision are rechecked before a grant.",
+            ),
+            next_steps=(
+                "Open a department to review the specialists that need setup.",
+                "Review each candidate's policy before granting independence; use the specialist editor to set per-risk levels.",
+            ),
+            suggested_questions=(
+                "Which departments need setup?",
+                "How do I change a specialist's independence?",
+                "What evidence is needed before a specialist graduates?",
+            ),
+        ),
+        _registered(
             path="/approvals",
             summary="Review work Lightwork has paused for a person's decision.",
             capabilities=(
@@ -340,28 +382,21 @@ _CONTEXTS = tuple(
         _registered(
             path="/assurance/cloud-agents",
             summary=(
-                "Inventory and govern registered agents in Bedrock, Azure AI Foundry, "
-                "Vertex AI, and reviewed Databricks framework mappings."
+                "Cloud agent oversight is a research preview and is not available "
+                "in this installation."
             ),
             capabilities=(
-                "Inspect bounded, server-configured cloud-agent inventory.",
-                "Evaluate revision-pinned policy and prepare governed enforcement intents.",
-                "Dispatch and reconcile an exact intent through enrolled provider authorities.",
+                "Explain the current availability of cloud agent oversight.",
             ),
             boundaries=(
-                "The browser cannot choose credentials, provider URLs, native IDs, or tenants.",
-                "Provider acceptance is not proof of applied state; reconciliation needs a fresh read.",
-                "Inventory is bounded and may be incomplete.",
+                "This installation cannot list agents in cloud accounts or send changes to them.",
+                "Changing workspaces or settings cannot make this preview available.",
             ),
             next_steps=(
-                "Load runtime status and confirm durable provider composition is ready.",
-                "Review inventory before evaluating or preparing an enforcement intent.",
-                "Reconcile ambiguous dispatches before accepting an outcome.",
+                "Ask Daybreak about availability using the email link on this page.",
             ),
             suggested_questions=(
-                "Is this cloud-agent runtime ready?",
-                "How do I safely enforce a policy?",
-                "What does reconciliation prove?",
+                "Can I oversee cloud agents in this installation?",
             ),
         ),
         _registered(

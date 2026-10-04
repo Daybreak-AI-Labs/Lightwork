@@ -7,8 +7,19 @@
 from __future__ import annotations
 
 import sqlite3
+from contextlib import nullcontext
 
+import pytest
 from maverick.tools.sql_query import sql_query
+
+
+@pytest.fixture(autouse=True)
+def _approved_sql_writes(monkeypatch):
+    import importlib
+
+    module = importlib.import_module("maverick.tools.sql_query")
+    monkeypatch.setattr(module, "request_execution_consent", lambda *a, **kw: object())
+    monkeypatch.setattr(module, "consume_operation_consent", lambda permit: nullcontext())
 
 
 def _mkdb(tmp_path):
@@ -85,6 +96,24 @@ def test_write_allowed_when_read_only_false(tmp_path):
     c = sqlite3.connect(db)
     assert c.execute("SELECT COUNT(*) FROM users").fetchone()[0] == 2
     c.close()
+
+
+def test_denied_write_leaves_rows_unchanged(tmp_path, monkeypatch):
+    import importlib
+
+    from maverick.safety import ConsentDenied
+
+    def deny(*args, **kwargs):
+        raise ConsentDenied("sql_query.write")
+
+    module = importlib.import_module("maverick.tools.sql_query")
+    monkeypatch.setattr(module, "request_execution_consent", deny)
+    db = _mkdb(tmp_path)
+    out = sql_query().fn({"database": str(db), "query": "DELETE FROM users",
+                          "read_only": False})
+    assert "not approved" in out
+    with sqlite3.connect(db) as connection:
+        assert connection.execute("SELECT COUNT(*) FROM users").fetchone()[0] == 3
 
 
 def test_write_mode_authorizer_blocks_attach_outside_workspace(tmp_path):

@@ -63,6 +63,26 @@ def test_page_empty_state():
     assert "No assessments yet" in resp.text
 
 
+def test_closed_request_exposes_export_cleanup_failure_and_retry(monkeypatch):
+    from maverick import privacy_ops
+
+    request = privacy_ops.open_dsar("person@example.test", "access", channel="email")
+    privacy_ops.fulfill_dsar(request["id"])
+    monkeypatch.setattr(privacy_ops, "_remove_closed_dsar_export", lambda _record: False)
+
+    closed = client.post(f"/api/v1/privacy/dsar/{request['id']}/close")
+    assert closed.status_code == 200
+    assert closed.json()["export_cleanup"]["status"] == "failed"
+    assert "Saved export needs cleanup" in client.get("/privacy").text
+    assert "Retry export cleanup" in client.get(f"/privacy/dsar/{request['id']}").text
+
+    monkeypatch.setattr(privacy_ops, "_remove_closed_dsar_export", lambda _record: True)
+    retried = client.post(f"/api/v1/privacy/dsar/{request['id']}/close")
+    assert retried.status_code == 200
+    assert retried.json()["export_cleanup"]["status"] == "removed"
+    assert "Saved export needs cleanup" not in client.get("/privacy").text
+
+
 def test_templates_catalog_api():
     resp = client.get("/api/v1/assess/templates")
     assert resp.status_code == 200

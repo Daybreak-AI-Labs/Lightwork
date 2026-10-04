@@ -209,7 +209,7 @@ class TestGoals:
         assert "/" not in detail                  # no filesystem path leaked
         assert ".maverick" not in detail
 
-    @pytest.mark.parametrize("ceiling,expected", [(None, 10_000.0), (25.0, 25.0), (0.0, 0.0)])
+    @pytest.mark.parametrize("ceiling,expected", [(None, 100.0), (25.0, 25.0), (0.0, 0.0)])
     def test_create_applies_only_configured_max_dollars(self, monkeypatch, tmp_path, ceiling, expected):
         """An explicit deployment ceiling constrains a caller's requested cap."""
         monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake")
@@ -227,6 +227,55 @@ class TestGoals:
         assert resp.status_code == 201
         assert len(called) == 1
         assert called[0][1]["max_dollars"] == expected
+        assert resp.json()["limits"]["max_dollars"] == expected
+
+    def test_legacy_no_limit_config_stays_unchanged_but_rest_has_safe_defaults(
+            self, monkeypatch, tmp_path):
+        monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake")
+        (tmp_path / "config.toml").write_text(
+            "[budget]\ntask_limits_enabled = false\n", encoding="utf-8",
+        )
+        from maverick import runner as runner_mod
+
+        called = []
+        monkeypatch.setattr(runner_mod, "run_goal_in_thread", lambda *a, **kw: called.append(kw))
+
+        response = client.post("/api/v1/goals", json={"title": "legacy bounded REST"})
+
+        assert response.status_code == 201, response.text
+        assert response.json()["limits"] == {
+            "max_dollars": 2.0, "max_wall_seconds": 1800.0, "max_depth": 3,
+        }
+        assert called[0]["max_dollars"] == 2.0
+        assert called[0]["max_wall_seconds"] == 1800.0
+        assert runner_mod.configured_max_dollars() is None
+        assert runner_mod.configured_max_wall_seconds() is None
+
+    def test_explicit_rest_limits_are_bounded_and_reconciled(
+            self, monkeypatch, tmp_path):
+        monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake")
+        from maverick import runner as runner_mod
+
+        called = []
+        monkeypatch.setattr(runner_mod, "run_goal_in_thread", lambda *a, **kw: called.append(kw))
+        headers = {"Idempotency-Key": "bounded-rest-goal"}
+        payload = {"title": "large request", "max_dollars": 1000,
+                   "max_wall_seconds": 1000000}
+
+        first = client.post("/api/v1/goals", json=payload, headers=headers)
+        replay = client.post("/api/v1/goals", json=payload, headers=headers)
+        receipt = client.get("/api/v1/goal-submissions/receipt", headers=headers)
+
+        expected = {"max_dollars": 100.0, "max_wall_seconds": 86400.0,
+                    "max_depth": 3}
+        assert first.status_code == replay.status_code == 201
+        assert first.json()["limits"] == replay.json()["limits"] == expected
+        assert receipt.status_code == 200 and receipt.json()["limits"] == expected
+        assert len(called) == 1
+        assert called[0]["max_dollars"] == 100.0
+        assert called[0]["max_wall_seconds"] == 86400.0
 
     def test_create_without_limits_dispatches_finite_fresh_install_caps(self, monkeypatch, tmp_path):
         monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))

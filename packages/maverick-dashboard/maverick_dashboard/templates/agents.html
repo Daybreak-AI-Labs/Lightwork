@@ -208,7 +208,7 @@
         const builtIn = button.dataset.builtin === '1';
         const status = button.parentElement.querySelector('.af-recover-status');
         const question = builtIn
-          ? 'Restore “' + name + '” to its original setup? Its custom changes will be removed.'
+          ? 'Restore “' + name + '” to its original setup? Its custom limits will be removed. The built-in policy may allow more; review it after restoring.'
           : 'Remove “' + name + '”? Its saved custom setup will be removed.';
         if (!(await mvConfirm(question, { okText: builtIn ? 'Restore specialist' : 'Remove specialist' }))) return;
         button.disabled = true;
@@ -260,8 +260,9 @@
       <span class="muted" style="font-weight: 400;">— describe what you do, review the draft, then add it with your documents</span>
     </summary>
     <form id="biz-form" style="margin-top: 0.8rem;" novalidate>
-      <div class="fld"><label for="biz-name">Business name</label>
-        <input id="biz-name" class="input" type="text" maxlength="120" required></div>
+      <div class="fld"><label for="biz-name">Name for your new specialist</label>
+        <input id="biz-name" class="input" type="text" maxlength="120" placeholder="For example, Acme customer support" required>
+        <p class="sub">Give it a name that sets it apart from the specialists already in your workspace.</p></div>
       <div class="fld"><label for="biz-what">What does the business do?</label>
         <textarea id="biz-what" class="textarea" rows="4" maxlength="4000"></textarea></div>
       <div class="fld"><label for="biz-industry">Industry (optional)</label>
@@ -396,6 +397,43 @@
             <a class="model-badge" href="/settings">● Model · Settings</a>
           </div>
         </div>
+
+        {% set auto = selected.autonomy if selected else none %}
+        <section class="panel" id="agent-autonomy"
+                 data-default="{{ auto.default if auto else 'suggest' }}"
+                 data-low="{{ auto.low if auto and auto.low else '' }}"
+                 data-medium="{{ auto.medium if auto and auto.medium else '' }}"
+                 data-high="{{ auto.high if auto and auto.high else '' }}"
+                 data-onboarding="{{ 'true' if not auto or auto.onboarding else 'false' }}"
+                 data-overridden="{{ '1' if selected and 'autonomy' in selected.overridden else '0' }}"
+                 data-config-override="{{ '1' if auto and auto.config_override else '0' }}"
+                 data-pack="{{ auto.pack | tojson | forceescape if auto else '' }}">
+          <h3>Independence</h3>
+          <p class="sub">Set how this specialist handles consequential actions. Allowed actions, risk limits, approvals and hard refusals still apply.</p>
+          {% if auto and not auto.levels_enabled %}
+          <p class="muted" role="status">Independence levels are off for this workspace. These choices take effect only after an installation administrator turns on <a href="/settings/all?id=workforce.levels">Per-agent independence levels</a>.</p>
+          {% endif %}
+          {% if auto and auto.config_override %}
+          <p class="muted" role="status">This specialist has a server-configured independence policy. An installation administrator must remove that override before editing it here.</p>
+          {% endif %}
+          {% for risk, title in [('default', 'Usual actions'), ('low', 'Low-risk actions'), ('medium', 'Medium-risk actions'), ('high', 'High-risk actions')] %}
+          {% set chosen = auto[risk] if auto else ('suggest' if risk == 'default' else none) %}
+          <div class="fld">
+            <label for="f-auto-{{ risk }}">{{ title }}</label>
+            <select id="f-auto-{{ risk }}" class="input"{% if not editable or (auto and auto.config_override) %} disabled{% endif %}>
+              {% if risk != 'default' %}<option value=""{% if not chosen %} selected{% endif %}>Use usual level</option>{% endif %}
+              {% for level, label in [('observe', 'Watch only'), ('suggest', 'Suggest; a person acts'), ('request', 'Ask before acting'), ('auto', 'Act on its own')] %}
+              <option value="{{ level }}"{% if chosen == level %} selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          {% endfor %}
+          <label class="sub" for="f-auto-onboarding">
+            <input id="f-auto-onboarding" type="checkbox"{% if not auto or auto.onboarding %} checked{% endif %}{% if not editable or (auto and auto.config_override) %} disabled{% endif %}>
+            Supervise this specialist while it is new
+          </label>
+          <p class="sub">Supervision lowers each chosen level by one step. An overall approval record can support ending supervision only when every level is Ask or lower. Act on its own needs proof for the specific actions it would take.</p>
+        </section>
 
         <details class="advanced">
           <summary>More — blocked actions and the step-by-step playbook
@@ -1086,6 +1124,27 @@
       }
 
       function payload() {
+        const autoBox = document.getElementById('agent-autonomy');
+        const policy = autoBox && {
+          default: document.getElementById('f-auto-default').value,
+          low: document.getElementById('f-auto-low').value || null,
+          medium: document.getElementById('f-auto-medium').value || null,
+          high: document.getElementById('f-auto-high').value || null,
+          onboarding: document.getElementById('f-auto-onboarding').checked,
+        };
+        let autonomy = null;
+        if (policy && autoBox.dataset.configOverride === '1') {
+          // The server policy wins. Preserve an existing pack setting without
+          // copying the server's higher-priority values into the tenant pack.
+          if (autoBox.dataset.overridden === '1') autonomy = JSON.parse(autoBox.dataset.pack);
+        } else if (policy) {
+          const changed = policy.default !== autoBox.dataset.default ||
+            (policy.low || '') !== autoBox.dataset.low ||
+            (policy.medium || '') !== autoBox.dataset.medium ||
+            (policy.high || '') !== autoBox.dataset.high ||
+            String(policy.onboarding) !== autoBox.dataset.onboarding;
+          if (changed || autoBox.dataset.overridden === '1') autonomy = policy;
+        }
         return {
           expected_generation: creating ? 'new' : form.dataset.generation,
           description: document.getElementById('f-description').value,
@@ -1094,6 +1153,7 @@
           deny_tools: words(document.getElementById('f-deny').value),
           max_risk: document.getElementById('f-risk').value,
           workflow: gatherWorkflow(),
+          ...(autonomy ? { autonomy } : {}),
         };
       }
       function beginMutation(button) {
@@ -1139,7 +1199,7 @@
         if (!beginMutation(saveBtn)) return;
         try {
           if (!(await mvConfirm(
-            (creating ? 'Create the specialist “' : 'Save the specialist “') + name + '”? Its allowed actions and steps take effect for everyone who uses it.',
+            (creating ? 'Create the specialist “' : 'Save the specialist “') + name + '”? Its allowed actions, steps and independence settings take effect for everyone who uses it.',
             { okText: creating ? 'Create agent' : 'Deploy specialist' }
           ))) return;
           await call('POST', `/api/v1/agents/${name}/override`, payload());
@@ -1157,7 +1217,7 @@
         if (!name || !beginMutation(resetBtn)) return;
         try {
           if (!(await mvConfirm(
-            'Reset “' + name + '” to how it came? Your changes to its allowed actions and steps will be removed.',
+            'Reset “' + name + '” to how it came? This removes your limits on allowed actions, risk, blocked actions and independence. The built-in policy may allow more. Review its policy after resetting.',
             { okText: 'Reset specialist' }
           ))) return;
           await call('DELETE', `/api/v1/agents/${name}/override?expected_generation=${encodeURIComponent(form.dataset.generation)}`);
@@ -1236,6 +1296,18 @@
         <p class="muted">This checks required actions only; live connections, permissions and the AI service are checked when work starts.</p>
         {% endif %}
       </div>
+      <div class="jc-sec"><h3>Independence</h3>
+        {% if selected.autonomy.levels_enabled %}
+        {% set level_names = {'observe': 'Watch only', 'suggest': 'Suggest', 'request': 'Ask before acting', 'auto': 'Act on its own'} %}
+        <p>Current levels: low-risk actions — {{ level_names[selected.autonomy.effective.low] }};
+          medium-risk actions — {{ level_names[selected.autonomy.effective.medium] }};
+          high-risk actions — {{ level_names[selected.autonomy.effective.high] }}.</p>
+        {% if selected.autonomy.onboarding %}<p class="muted">Supervision is on, so the chosen levels are lowered one step.</p>{% endif %}
+        {% else %}
+        <p>Independence levels are off. Consequential actions are staged for a person.</p>
+        {% endif %}
+        {% if editable %}<p><a href="#agent-autonomy" id="jc-autonomy-open">Review independence settings</a></p>{% endif %}
+      </div>
       <div class="jc-cards" id="jc-stats"></div>
       <div class="jc-sec"><h3>Cost level</h3>
         <div class="jc-tier">
@@ -1313,6 +1385,7 @@
         .catch(function(){ el('jc-name').textContent='Could not load the job card. Close it and try again.'; });
     }
     var btn=el('btn-jobcard'); if(btn) btn.addEventListener('click', open);
+    var autoLink=el('jc-autonomy-open'); if(autoLink) autoLink.addEventListener('click', function(){ dlg.close(); });
     el('jc-close').addEventListener('click', function(){ dlg.close(); });
     dlg.addEventListener('click', function(e){ if(e.target===dlg) dlg.close(); });
     el('jc-band-set').addEventListener('change', function(){

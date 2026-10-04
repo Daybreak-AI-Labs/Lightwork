@@ -473,6 +473,32 @@ def test_revoked_agent_is_denied_everywhere():
                                       "summary": "y"})
 
 
+def test_reenrollment_preserves_credentials_and_revocation():
+    _enroll(expires_days=2)
+    token = xa.mint_token("sf-quotebot", "rest")
+    before = lookup("sf-quotebot")
+    assert before is not None and before.expires_at is not None
+    _enroll(allow_tools=["crm_read"], expires_days=30)
+    healthy = lookup("sf-quotebot")
+    assert healthy is not None
+    assert healthy.allow_tools == frozenset({"crm_read"})
+    assert healthy.expires_at == before.expires_at
+    assert agent_for_token(token, "rest") is not None
+
+    from maverick.agent_trust import set_revoked
+    assert set_revoked("sf-quotebot", True)
+    _enroll(allow_tools=["crm_read", "crm_update"], expires_days=30)
+    revoked = lookup("sf-quotebot")
+    assert revoked is not None and revoked.revoked is True
+    assert revoked.rest_token == healthy.rest_token
+    assert revoked.expires_at == before.expires_at
+    assert agent_for_token(token, "rest") is None
+    assert xa.roster()[0]["active"] is False
+    from maverick.agent_trust import put_agent
+    assert put_agent({"id": "sf-quotebot", "direction": "inbound",
+                      "revoked": False}).revoked is True
+
+
 def test_disabled_plane_refuses_traffic(monkeypatch):
     _enroll()
     monkeypatch.delenv("MAVERICK_EXTERNAL_AGENTS", raising=False)

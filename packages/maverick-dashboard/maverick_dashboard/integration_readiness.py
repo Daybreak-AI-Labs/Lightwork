@@ -315,6 +315,114 @@ _PROVIDER_DEFAULT_ENDPOINTS = {
 _SELF_HOSTED_PROVIDERS = frozenset({"ollama", "vllm", "tgi", "openai_compatible"})
 
 
+def _cloud_receipt_material(name: str, material: dict[str, Any]) -> object:
+    """Bind cloud receipts to the actual routed identity, including env inputs."""
+    if name not in {"azure", "bedrock"}:
+        return material
+    try:
+        from maverick.llm import LLM
+
+        return {"config": material, "route": LLM()._provider_client_config(name).fingerprint}
+    except Exception:
+        return {"config": material, "route": "unavailable"}
+
+
+def _probe_native_cloud(name: str) -> dict[str, Any]:
+    """One small model request through the same native client used by tasks.
+
+    SDK response bodies are discarded. A successful constructor or IAM token
+    lookup alone is never enough to label the provider connected.
+    """
+    from maverick.budget import Budget, BudgetExceeded, UnpricedModelError, _lookup_price_quote
+    from maverick.llm import LLM, _enforce_provider_cap, model_for_role
+    from maverick.providers import get_provider_client
+
+    client = None
+    held = 0.0
+    budget = Budget(max_input_tokens=512, max_output_tokens=16,
+                    max_dollars=0.05, max_wall_seconds=15)
+    try:
+        route = LLM()._provider_client_config(name)
+        client = get_provider_client(
+            name, api_key=route.api_key, base_url=route.base_url,
+            default_headers=route.headers_dict(), environment=route.environment_dict(),
+        )
+        model_id = client.deployment if name == "azure" else client.DEFAULT_MODEL
+        chosen = model_for_role("default")
+        if chosen.startswith(f"{name}:") and chosen.partition(":")[2] != model_id:
+            return {
+                "verified": None,
+                "detail": "the default task model differs from the model saved in this connection",
+                "evidence": {"kind": "model_mismatch", "external_live_verified": False},
+            }
+        spec = f"{name}:{model_id}"
+        quote = _lookup_price_quote(spec)
+        projected = (256 * quote.input_per_mtok + 16 * quote.output_per_mtok) / 1_000_000
+        _enforce_provider_cap(name, projected)
+        budget.check()
+        held = budget.reserve(projected)
+        if name == "azure":
+            args = client._build_kwargs(
+                "Connection check.", [{"role": "user", "content": "Reply OK."}],
+                None, 16, model_id,
+            )
+            response = client._sync.with_options(timeout=8.0, max_retries=0).chat.completions.create(**args)
+        else:
+            response = client.client.with_options(timeout=8.0, max_retries=0).messages.create(
+                model=model_id, max_tokens=16,
+                messages=[{"role": "user", "content": "Reply OK."}],
+            )
+        usage = getattr(response, "usage", None)
+        if usage is None:
+            budget.record_tokens(256, 16, model=spec)
+            return {
+                "verified": None,
+                "detail": "the service answered but did not report usage for the connection check",
+                "evidence": {"kind": "live_model_probe", "external_live_verified": False},
+            }
+        input_tokens = getattr(usage, "prompt_tokens" if name == "azure" else "input_tokens", None)
+        output_tokens = getattr(usage, "completion_tokens" if name == "azure" else "output_tokens", None)
+        if input_tokens is None or output_tokens is None:
+            raise ValueError("usage missing")
+        budget.record_tokens(input_tokens, output_tokens, model=spec)
+        return {
+            "verified": True, "detail": "provider accepted the bounded model request",
+            "evidence": {"kind": "live_model_probe", "external_live_verified": True},
+        }
+    except UnpricedModelError:
+        return {
+            "verified": None,
+            "detail": "set a current spending ceiling for this model before testing its connection",
+            "evidence": {"kind": "price_preflight", "external_live_verified": False},
+        }
+    except BudgetExceeded:
+        return {
+            "verified": None,
+            "detail": "the connection check exceeded its small spending or token limit",
+            "evidence": {"kind": "budget_limit", "external_live_verified": False},
+        }
+    except Exception as exc:
+        status = getattr(exc, "status_code", None)
+        detail = (f"provider readiness request returned HTTP {status}"
+                  if isinstance(status, int) and 100 <= status <= 599 else
+                  f"provider probe failed ({type(exc).__name__})")
+        return {
+            "verified": False, "detail": detail,
+            "evidence": {"kind": "live_model_probe", "external_live_verified": False},
+        }
+    finally:
+        if held:
+            budget.release(held)
+        if client is not None:
+            sync = getattr(client, "_sync", None) or getattr(client, "client", None)
+            close = getattr(sync, "close", None)
+            if callable(close):
+                try:
+                    close()
+                except Exception:
+                    pass
+
+
 def _append_endpoint(base_url: str, suffix: str) -> str:
     parsed = urlsplit(base_url.strip())
     path = parsed.path.rstrip("/") + "/" + suffix.lstrip("/")
@@ -345,6 +453,8 @@ def probe_provider(provider: str, provider_config: dict[str, Any]) -> dict[str, 
     from maverick.tools import _ssrf
 
     name = str(provider).strip().lower()
+    if name in {"azure", "bedrock"}:
+        return _probe_native_cloud(name)
     key = _provider_key(name, provider_config)
     base_url = str(provider_config.get("base_url") or "").strip()
     if name == "codex_cli":
@@ -539,7 +649,7 @@ def provider_readiness(provider: str, *, configured: bool) -> dict[str, Any]:
             missing[0] if missing else "provider SDK dependency is importable",
             kind="provider_sdk",
         )
-    live = get("provider", name, material)
+    live = get("provider", name, _cloud_receipt_material(name, material))
     runtime_verified = live.get("evidence", {}).get("runtime_verified") is True
     runtime = check(
         (
@@ -587,7 +697,7 @@ def test_provider(provider: str) -> dict[str, Any]:
     return record(
         "provider",
         name,
-        material,
+        _cloud_receipt_material(name, material),
         verified=result["verified"],
         detail=result["detail"],
         evidence=result.get("evidence"),
@@ -621,13 +731,96 @@ _CHANNEL_MODULES = {
     "telegram": "maverick_channels.telegram",
     "discord": "maverick_channels.discord",
     "slack": "maverick_channels.slack",
+    "matrix": "maverick_channels.matrix",
+    "bluesky": "maverick_channels.bluesky",
+    "mastodon": "maverick_channels.mastodon",
+    "whatsapp": "maverick_channels.whatsapp",
     "whatsapp_cloud": "maverick_channels.whatsapp_cloud",
+    "threads": "maverick_channels.threads",
+    "rcs": "maverick_channels.rcs",
     "sms": "maverick_channels.sms",
     "email": "maverick_channels.email",
     "voice": "maverick_channels.voice",
     "mattermost": "maverick_channels.mattermost",
     "teams": "maverick_channels.teams",
+    "irc": "maverick_channels.irc",
 }
+
+# Adapter modules deliberately defer optional imports so the dashboard itself
+# can start without every chat integration.  Check what an enabled adapter
+# actually needs before saying its required software is present.
+_CHANNEL_SDKS = {
+    "telegram": ("telegram",),
+    "discord": ("discord", "aiohttp"),
+    "slack": ("slack_sdk", "aiohttp"),
+    "matrix": ("nio", "aiohttp"),
+    "bluesky": ("httpx",),
+    "mastodon": ("httpx",),
+    "whatsapp": ("fastapi", "twilio", "multipart"),
+    "whatsapp_cloud": ("fastapi", "httpx"),
+    "threads": ("httpx",),
+    "rcs": ("fastapi", "httpx", "google.auth"),
+    "sms": ("fastapi", "twilio", "multipart"),
+    "email": (),
+    "voice": ("fastapi", "httpx"),
+    "mattermost": ("httpx",),
+    "teams": ("fastapi", "httpx", "jwt"),
+    "irc": (),
+}
+
+_CHANNEL_NAMES = {
+    "sms": "Text messaging",
+    "rcs": "RCS",
+    "whatsapp_cloud": "WhatsApp Business",
+    "teams": "Microsoft Teams",
+    "irc": "IRC",
+}
+
+
+def _channel_dependency(channel: str) -> dict[str, Any]:
+    module = _CHANNEL_MODULES.get(channel)
+    if not module:
+        return check("unknown", "this channel has no bounded software check", kind="channel_adapter")
+    label = _CHANNEL_NAMES.get(channel, channel.replace("_", " ").title())
+    try:
+        missing = []
+        for sdk in _CHANNEL_SDKS[channel]:
+            try:
+                present = importlib.util.find_spec(sdk) is not None
+            except (ImportError, ValueError):
+                present = False
+            if not present:
+                missing.append(sdk)
+        if missing:
+            return check(
+                "failed",
+                f"{label} support is missing from this Lightwork installation. "
+                "Ask your installation administrator to add it, then restart "
+                "the chat service in Settings.",
+                kind="channel_adapter", evidence={"missing_modules": missing},
+            )
+        adapter = importlib.import_module(module)
+        # A cached adapter can still be unusable if its optional import failed
+        # before the software was installed. Restarting reloads that adapter.
+        flag = {"telegram": "_HAVE_TELEGRAM", "discord": "_HAVE_DISCORD",
+                "slack": "_HAVE_SLACK", "matrix": "_HAVE_MATRIX"}.get(channel, "_HAVE_DEPS")
+        if hasattr(adapter, flag) and getattr(adapter, flag) is not True:
+            return check(
+                "failed",
+                f"{label} support did not load. Ask your installation "
+                "administrator to repair it, then restart the chat service in Settings.",
+                kind="channel_adapter",
+            )
+    except Exception as exc:
+        return check(
+            "failed",
+            f"{label} support could not load "
+            f"({type(exc).__name__}). Ask your installation administrator to repair it, "
+            "then restart the chat service in Settings.",
+            kind="channel_adapter",
+        )
+    return check("passed", "required chat support is installed and loads locally",
+                 kind="channel_adapter")
 
 
 def _voice_configuration_problem(channel_config: dict[str, Any]) -> str:
@@ -667,7 +860,27 @@ def _email_configuration_problem(channel_config: dict[str, Any]) -> str:
         re.fullmatch(r"[^@\s,]+@[A-Za-z0-9.-]+", sender) is None or ".." in sender
         for sender in senders
     ):
-        return "Add full permitted email addresses in All settings before email can start work."
+        return "Add full permitted email addresses on the Channels page before email can start work."
+    return ""
+
+
+def _channel_allowlist_problem(channel: str, channel_config: dict[str, Any]) -> str:
+    from maverick_channels.base import normalize_allowlist
+
+    from .settings_catalog import CHANNEL_ALLOWLISTS
+
+    access = CHANNEL_ALLOWLISTS.get(channel)
+    if not access or not access[1] or channel == "email":
+        return ""
+    key, pattern, error = access[2], access[5], access[6]
+    supplied = channel_config.get(key)
+    if supplied is not None and not isinstance(supplied, list):
+        return "The permitted-people list needs attention on the Channels page."
+    people = normalize_allowlist(supplied, f"{channel.upper()}_{key.upper()}")
+    if not people:
+        return "Add permitted people on the Channels page before this chat app can start work."
+    if any(re.fullmatch(pattern, person) is None for person in people):
+        return f"The permitted-people list needs {error} on the Channels page."
     return ""
 
 
@@ -689,6 +902,10 @@ def probe_channel(name: str, channel_config: dict[str, Any]) -> dict[str, Any]:
         if problem:
             return {"verified": False, "detail": problem,
                     "evidence": {"kind": "local_adapter_preflight"}}
+    problem = _channel_allowlist_problem(channel, channel_config)
+    if problem:
+        return {"verified": False, "detail": problem,
+                "evidence": {"kind": "local_adapter_preflight"}}
     missing = [
         field
         for field in _CHANNEL_REQUIRED_FIELDS.get(channel, ())
@@ -700,20 +917,12 @@ def probe_channel(name: str, channel_config: dict[str, Any]) -> dict[str, Any]:
             "detail": "missing required field(s): " + ", ".join(missing),
             "evidence": {"kind": "local_adapter_preflight"},
         }
-    module = _CHANNEL_MODULES.get(channel)
-    if not module:
+    dependency = _channel_dependency(channel)
+    if dependency["status"] != "passed":
         return {
             "verified": False,
-            "detail": "this channel has no bounded dashboard preflight",
-            "evidence": {"kind": "unsupported"},
-        }
-    try:
-        importlib.import_module(module)
-    except Exception as exc:
-        return {
-            "verified": False,
-            "detail": f"channel adapter could not load ({type(exc).__name__})",
-            "evidence": {"kind": "local_adapter_preflight"},
+            "detail": dependency["detail"],
+            "evidence": {"kind": "local_adapter_preflight", "dependency": dependency["evidence"]},
         }
     return {
         "verified": True,
@@ -741,28 +950,7 @@ def channel_readiness(name: str, channel_config: dict[str, Any]) -> dict[str, An
             kind="channel_local_preflight",
         )
     else:
-        module = _CHANNEL_MODULES.get(channel)
-        if not module:
-            dependency = check(
-                "unknown",
-                "this channel has no bounded adapter dependency check",
-                kind="channel_adapter",
-            )
-        else:
-            try:
-                importlib.import_module(module)
-            except Exception as exc:
-                dependency = check(
-                    "failed",
-                    f"channel adapter could not load ({type(exc).__name__})",
-                    kind="channel_adapter",
-                )
-            else:
-                dependency = check(
-                    "passed",
-                    "channel adapter dependency is importable",
-                    kind="channel_adapter",
-                )
+        dependency = _channel_dependency(channel)
         missing = [
             field
             for field in _CHANNEL_REQUIRED_FIELDS.get(channel, ())
@@ -770,11 +958,12 @@ def channel_readiness(name: str, channel_config: dict[str, Any]) -> dict[str, An
         ]
         voice_problem = _voice_configuration_problem(channel_config) if channel == "voice" else ""
         email_problem = _email_configuration_problem(channel_config) if channel == "email" else ""
+        allowlist_problem = _channel_allowlist_problem(channel, channel_config)
         runtime = check(
-            "failed" if missing or voice_problem or email_problem else "passed",
+            "failed" if missing or voice_problem or email_problem or allowlist_problem else "passed",
             (
-                voice_problem or email_problem or "missing required field(s): " + ", ".join(missing)
-                if voice_problem or email_problem or missing
+                voice_problem or email_problem or allowlist_problem or "missing required field(s): " + ", ".join(missing)
+                if voice_problem or email_problem or allowlist_problem or missing
                 else "required channel configuration passed local preflight"
             ),
             kind="channel_local_preflight",

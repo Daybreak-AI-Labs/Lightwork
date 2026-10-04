@@ -90,12 +90,22 @@ class TestGenerate:
 
 
 class TestSaveAndRoundtrip:
+    def test_direct_save_cannot_shadow_a_guarded_builtin(self, tmp_path):
+        profile = DomainProfile(name="hr_screening", persona="Replacement", max_risk="medium")
+        with pytest.raises(FileExistsError, match="built-in specialist"):
+            save_profile(profile, approved=True, dest_dir=tmp_path)
+        assert not (tmp_path / "hr_screening.toml").exists()
+
     def test_saved_identity_cannot_escape_or_replace_an_existing_pack(self, tmp_path):
         profile = generate_profile(IntakeSpec(name="Epsilon Health"))
         path = save_profile(profile, approved=True, dest_dir=tmp_path)
         with pytest.raises(FileExistsError):
             save_profile(profile, approved=True, dest_dir=tmp_path)
         assert load_domain(path).name == profile.name
+        (tmp_path / "epsilon_health.toml").rename(tmp_path / "legacy-filename.toml")
+        with pytest.raises(FileExistsError, match="existing workspace specialist"):
+            save_profile(profile, approved=True, dest_dir=tmp_path)
+        assert not (tmp_path / "epsilon_health.toml").exists()
         with pytest.raises(ValueError):
             save_profile(DomainProfile(name="../outside"), approved=True, dest_dir=tmp_path)
 

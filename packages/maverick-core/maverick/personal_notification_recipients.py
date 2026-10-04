@@ -52,11 +52,12 @@ def enroll_task_owner(principal: str) -> None:
     if not isinstance(principal, str) or not principal.startswith("user:") or len(principal) > 256:
         return
     try:
-        from . import config
+        from . import config, experience_preferences
         from .personal_identity import principal_current
         from .personal_notifications import personal_alerts_on
 
         if (config.config_source_errors(include_tenant=True)
+                or not experience_preferences.enabled()
                 or not personal_alerts_on(config.load_config().get("notifications"))
                 or not principal_current(principal)):
             return

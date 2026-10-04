@@ -556,8 +556,8 @@ class _Pause(Exception):
 
 
 class _Reject(Exception):
-    def __init__(self, node: FlowNode, data: dict):
-        self.node, self.data = node, data
+    def __init__(self, node: FlowNode, data: dict, *, error: str = ""):
+        self.node, self.data, self.error = node, data, error
 
 
 class _NodeError(Exception):
@@ -1370,7 +1370,11 @@ def _run_wait(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
     # CLOSED like a nested approval rather than silently continuing -- otherwise
     # downstream nodes run before the awaited event's data has arrived.
     ctx.on_node(node, "skipped", None)
-    raise _Reject(node, data)
+    raise _Reject(
+        node, data,
+        error="A wait for another app cannot run inside repeated or parallel work. "
+              "Move it to the main flow.",
+    )
 
 
 def _run_scope(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
@@ -1839,7 +1843,8 @@ def _execute_chain_result(flow: Flow, data: dict, ctx: _Ctx, start: str | None) 
         return FlowRunResult(status=status, data=p.data, cursor=p.node.id,
                              resume_at=p.resume_at, prompt=prompt)
     except _Reject as r:
-        return FlowRunResult(status=STATUS_REJECTED, data=r.data, cursor=r.node.id)
+        return FlowRunResult(status=STATUS_FAILED if r.error else STATUS_REJECTED,
+                             data=r.data, cursor=r.node.id, error=r.error)
     except _NodeError as e:  # an executor blew up inside a known node -- keep the
         # node id as the cursor so the run can be retried from right there.
         return FlowRunResult(status=STATUS_FAILED, data=data,

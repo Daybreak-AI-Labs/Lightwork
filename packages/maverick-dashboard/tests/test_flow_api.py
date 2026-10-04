@@ -184,6 +184,29 @@ def _store_published_approval_pin(flow_id: str = "approval-expiry") -> dict:
     }
 
 
+def test_disconnected_step_stays_in_draft_but_blocks_live_publication(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    client = _client()
+    flow = {"id": "disconnected", "name": "Payment review", "start": "check", "nodes": [
+        {"id": "check", "kind": "agent", "brief": "Check payment"},
+        {"id": "approve", "kind": "approval", "label": "Approve payment", "prompt": "Approve?"},
+    ]}
+    created = client.post("/api/v1/flows", json={"flow": flow})
+    assert created.status_code == 201, created.text
+    saved = created.json()
+    blocked = client.post("/api/v1/flows/disconnected/publish", json={
+        "version": saved["version"], "revision": saved["revision"],
+    })
+    assert blocked.status_code == 409
+    assert "Approve payment" in blocked.json()["detail"]
+    assert "can never run" in blocked.json()["detail"]
+    draft = client.get("/api/v1/flows/disconnected").json()
+    draft["nodes"][0]["next"] = "approve"
+    connected = client.post("/api/v1/flows", json={"flow": draft})
+    assert connected.status_code == 201, connected.text
+    assert _publish(client, "disconnected")["published"] is True
+
+
 _FLOW = {
     "id": "demo", "name": "Demo", "start": "a",
     "nodes": [

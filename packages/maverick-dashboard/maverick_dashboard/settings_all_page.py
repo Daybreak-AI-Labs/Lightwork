@@ -38,6 +38,9 @@ router = APIRouter()
 PAGE_PATH = "/settings/all"
 ROWS_PATH = PAGE_PATH + "/rows"
 API_PATH = "/api/v1/settings/catalog"
+# The shipped cloud-agent authority is process-local and deliberately refuses
+# production enablement. Do not offer controls that cannot make the page work.
+_UNAVAILABLE_SETTING_SECTIONS = frozenset({"ai_cloud_agent_governance"})
 
 SOURCE_TEXT = {
     "deployment": "Set by your server's deployment settings",
@@ -844,7 +847,8 @@ def _in_page_order(group: str) -> list[catalog.Setting]:
     Rows come from several group modules, so one part's rows can be split by
     another module's; the page shows rows without a part first, then each part
     in the order it first appears, never one heading twice."""
-    settings = [s for s in catalog.SETTINGS if s.group == group]
+    settings = [s for s in catalog.SETTINGS if s.group == group
+                and s.section not in _UNAVAILABLE_SETTING_SECTIONS]
     first: dict[str, int] = {}
     for setting in settings:
         first.setdefault(setting.subgroup, len(first))
@@ -1124,6 +1128,11 @@ def _plan(body: CatalogUpdate) -> tuple[dict, list[dict], list[dict], dict]:  # 
         setting = catalog.BY_ID.get(item.id)
         if setting is None:
             raise _Refused(400, "That setting is not available here.")
+        if setting.section in _UNAVAILABLE_SETTING_SECTIONS:
+            raise _Refused(
+                409,
+                "Cloud agent oversight is still in development and cannot be turned on in this installation. Open its page to ask Daybreak about availability.",
+            )
         if item.id in seen:
             raise _Refused(400, "Each setting can be changed once per save.")
         seen.add(item.id)

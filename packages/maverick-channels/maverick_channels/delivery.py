@@ -158,7 +158,10 @@ def _payload(msg, record_id):
     payload = {"user_id": _bounded(msg.user_id, 4096, "recipient"), "sender_id": msg.sender_id,
                "provider_tenant_id": getattr(msg, "provider_tenant_id", None),
                "provider_sender_id": getattr(msg, "provider_sender_id", None),
-               "channel": msg.channel, "message_id": msg.message_id, "text": msg.text, "attachments": files}
+               "channel": msg.channel, "message_id": msg.message_id,
+               "conversation_ref": getattr(msg, "conversation_ref", None),
+               "question_reply_only": getattr(msg, "question_reply_only", False),
+               "text": msg.text, "attachments": files}
     return payload, publications
 
 
@@ -264,7 +267,8 @@ class DeliveryJournal:
             row = self._surface_stale_claim(self.get(record_id))
             next_cursor = position
             if (row and not row.get("restore_hold") and row["channel"] == channel and row["account_sha256"] == _digest(account)
-                    and (row["execution"] == "received" or row["delivery"] in {"ready", "retryable"})):
+                    and (row["execution"] == "received" or row["delivery"] in {"ready", "retryable"}
+                         or row.get("question_watch"))):
                 rows.append(row)
             if len(rows) >= limit or _monotonic() - started >= scan_seconds:
                 break
@@ -450,7 +454,8 @@ class DeliveryJournal:
     def _compact_receipt(self, row, now):
         from maverick.privacy_ops import RecordConflict
 
-        if (not row or row.get("restore_hold") or row["execution"] != "completed"
+        if (not row or row.get("restore_hold") or row.get("question_watch")
+                or row["execution"] != "completed"
                 or row["delivery"] != "delivered"):
             return False
         if row.get("compacted") and row.get("cleanup_pending") == []:
@@ -501,8 +506,11 @@ async def _execute_claimed(channel, inbound, claimed, *, journal, authorize):
         reply = as_reply(await channel.handler(inbound))
         if len(reply.text) > MAX_TEXT_CHARS or len(reply.attachments) > MAX_ATTACHMENTS:
             raise ValueError("Channel reply exceeds durable outbox bound")
-        return await asyncio.to_thread(journal.change, claimed, execution="completed", delivery="ready",
-                                       reply=asdict(reply))
+        return await asyncio.to_thread(
+            journal.change, claimed, execution="completed", delivery="ready",
+            reply=asdict(reply),
+            question_watch=getattr(inbound, "_channel_question_watch", None),
+        )
     except asyncio.CancelledError:
         # Recorded synchronously: a second cancellation cannot interrupt it,
         # and the receipt must not stay "started" with no outcome.
@@ -550,8 +558,9 @@ async def process_message(channel, msg, *, external_id, account, authorize, send
 
             inbound = await prepare(inbound)
             payload, publications = await asyncio.to_thread(_payload, inbound, row["id"])
-            if any(payload[key] != row["message"][key]
-                    for key in ("user_id", "sender_id", "channel", "message_id", "text")):
+            if any(payload.get(key) != row["message"].get(key)
+                    for key in ("user_id", "sender_id", "channel", "message_id",
+                                "conversation_ref", "question_reply_only", "text")):
                 raise PermissionError("Prepared channel input changed its admitted identity or text")
             for path, data, sha in publications:
                 await asyncio.to_thread(ensure_private_directory, path.parent)
@@ -610,6 +619,55 @@ async def _recover_row(channel, row, *, account, authorize, send, prepare, journ
         idempotent=idempotent)
 
 
+async def notify_queued_question(row, *, authorize, send, journal=None):
+    """Deliver one later question through the original sealed intake route."""
+    watch = row.get("question_watch")
+    if not watch or row.get("restore_hold") or row.get("compacted"):
+        return None
+    journal = journal or DeliveryJournal()
+    values = {key: value for key, value in row["message"].items() if key != "attachments"}
+    incoming = IncomingMessage(**values)
+    if not authorize(incoming):
+        return None
+    from maverick.server import queued_channel_question
+
+    text, retire = await asyncio.to_thread(
+        queued_channel_question, watch, incoming, row["account_sha256"],
+    )
+    if retire:
+        from maverick.privacy_ops import RecordConflict
+
+        try:
+            return await asyncio.to_thread(journal.change, row, question_watch=None)
+        except RecordConflict:
+            return None
+    if not text or row["delivery"] != "delivered":
+        return None
+    key = "question:" + _digest(text)[:32]
+    attempt = _DeliveryAttempt(journal, row["id"], lambda: authorize(incoming))
+
+    async def send_question():
+        # Provider chunks and deterministic email Message-IDs need their own
+        # namespace; the queued acknowledgement already used text-0/email-0.
+        token = _ACTIVE.set(_PrefixedAttempt(attempt, key + ":"))
+        try:
+            return await send(incoming, Reply(text), row["route"])
+        finally:
+            _ACTIVE.reset(token)
+
+    await attempt.send_chunk(
+        key, {"text": text, "route": row["route"]},
+        send_question,
+    )
+    from maverick.privacy_ops import RecordConflict
+
+    current = await asyncio.to_thread(journal.get, row["id"])
+    try:
+        return await asyncio.to_thread(journal.change, current, question_watch=None)
+    except RecordConflict:
+        return None
+
+
 async def recover_messages(channel, *, account, authorize, send, prepare=None, limit=16,
                            journal=None, idempotent=False):
     """Recover one fair window with adapter-owned routing and current policy.
@@ -625,6 +683,10 @@ async def recover_messages(channel, *, account, authorize, send, prepare=None, l
             outcome = await _recover_row(channel, row, account=account, authorize=authorize,
                                          send=send, prepare=prepare, journal=journal,
                                          idempotent=idempotent)
+            current = await asyncio.to_thread(journal.get, row["id"])
+            if current and current.get("question_watch"):
+                await notify_queued_question(current, authorize=authorize, send=send,
+                                             journal=journal)
         except Exception as exc:
             # One unrecoverable row (a malformed record, a missing blob, an
             # unknown outcome) must not pin the cursor: that would starve every
@@ -688,7 +750,10 @@ class _DeliveryAttempt:
         chunks[key] = {"state": "sending", "payload_sha256": digest, "attempt_id": attempt_id,
                        "idempotency_key": str(uuid.uuid5(uuid.NAMESPACE_URL, self.record_id + ":" + key))}
         try:
-            await asyncio.to_thread(self.journal.change, row, chunks=chunks, delivery="sending")
+            updates = {"chunks": chunks}
+            if key == "reply":
+                updates["delivery"] = "sending"
+            await asyncio.to_thread(self.journal.change, row, **updates)
         except RecordConflict as exc:
             raise _DeliveryOwnedElsewhere("Another worker owns this channel delivery") from exc
         if key == "reply":
@@ -717,6 +782,19 @@ class _DeliveryAttempt:
         if key == "reply":
             updates["delivery"] = state
         await asyncio.to_thread(self.journal.change, row, **updates)
+
+
+class _PrefixedAttempt:
+    """Namespace a later question's provider chunks within the intake receipt."""
+
+    def __init__(self, attempt, prefix):
+        self.attempt, self.prefix = attempt, prefix
+        self.record_id = attempt.record_id + ":" + prefix
+
+    async def send_chunk(self, key, payload, call, *, idempotent=False):
+        return await self.attempt.send_chunk(
+            self.prefix + key, payload, call, idempotent=idempotent,
+        )
 
 
 async def send_chunk(key, payload, call, *, idempotent=False):

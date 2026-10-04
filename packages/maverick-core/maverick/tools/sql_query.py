@@ -16,9 +16,13 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
+from ..approval_cards import ApprovalCardError
 from ..query_execution import QueryDeadlineExceeded, QueryExecution
 from ..query_results import QueryResult, render_effect
+from ..safety import ConsentDenied, consume_operation_consent
+from ..safety.secret_detector import redact
 from . import Tool
+from .execution_consent import execution_target, request_execution_consent
 from .ffmpeg_tool import _safe_path
 
 log = logging.getLogger(__name__)
@@ -226,7 +230,33 @@ def _run_sql_query(args: dict[str, Any], sandbox) -> str:
     if read_only and _looks_like_write(query):
         return "ERROR: write statement rejected in read-only mode (set read_only=false to allow)"
 
-    return _execute_sqlite_query(p, query, params, read_only, max_rows, response_format)
+    if read_only:
+        return _execute_sqlite_query(p, query, params, read_only, max_rows, response_format)
+    preview, _ = redact(" ".join(query.split())[:160])
+    parameters = {"database": str(p.resolve()), "query": query, "params": params,
+                  "max_rows": max_rows, "response_format": response_format}
+    try:
+        permit = request_execution_consent(
+            "sql_query.write",
+            target_provider=lambda: {**execution_target(sandbox), "database": str(p.resolve())},
+            parameters=parameters,
+            detail=f"Run one write-enabled SQL statement on {p.name}.",
+            effect="The statement may change rows or schema in the selected database.",
+            review_items=[f"Query (truncated, redacted): {preview}",
+                          "Bind values are included in the exact-operation digest."],
+            parameters_provider=lambda: {"database": str(p.resolve()), "query": query,
+                                         "params": params, "max_rows": max_rows,
+                                         "response_format": response_format},
+        )
+    except ConsentDenied:
+        return "ERROR: database write was not approved; no statement was run"
+    except ApprovalCardError:
+        return "ERROR: SQL, database target, or approval authority changed; review it again"
+    try:
+        with consume_operation_consent(permit):
+            return _execute_sqlite_query(p, query, params, read_only, max_rows, response_format)
+    except ApprovalCardError:
+        return "ERROR: SQL, database target, or approval authority changed; review it again"
 
 
 def sql_query(sandbox=None) -> Tool:

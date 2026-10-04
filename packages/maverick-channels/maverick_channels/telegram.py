@@ -225,6 +225,8 @@ class TelegramChannel(Channel):
             raw=update,
             sender_id=str(update.effective_user.id) if update.effective_user else None,
             message_id=str(update.message.message_id),
+            conversation_ref=(str(update.message.message_thread_id)
+                              if getattr(update.message, "message_thread_id", None) else None),
         )
         account = self._account()
         route = {"reply_to": msg.message_id, "files": files}

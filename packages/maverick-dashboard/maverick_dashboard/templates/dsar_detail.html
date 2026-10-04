@@ -122,10 +122,18 @@
       {% endif %}
       {% if dsar.status != 'closed' %}
         <button type="button" class="btn btn--ghost" id="dsar-close">Close request</button>
-      {% elif not dsar.outcome and not answer %}
-        <button type="button" class="btn btn--primary" id="dsar-record-outcome">Record how it was answered</button>
+      {% else %}
+        {% if not dsar.outcome and not answer %}
+          <button type="button" class="btn btn--primary" id="dsar-record-outcome">Record how it was answered</button>
+        {% endif %}
+        {% if dsar.kind in ('access', 'portability') and (not dsar.export_cleanup or dsar.export_cleanup.status != 'removed') %}
+          <button type="button" class="btn btn--ghost" id="dsar-close">Retry export cleanup</button>
+        {% endif %}
       {% endif %}
     </div>
+    {% if dsar.status == 'closed' and dsar.kind in ('access', 'portability') and (not dsar.export_cleanup or dsar.export_cleanup.status != 'removed') %}
+      <p class="notice notice--warning">This request is closed, but its saved data export still needs cleanup. Use Retry export cleanup or ask an administrator for help.</p>
+    {% endif %}
     <div class="dsar-actions" aria-label="Send a notice to the requester">
       <span class="muted">Send:</span>
       <button type="button" class="btn dsar-send" data-kind="acknowledgement">We received it</button>

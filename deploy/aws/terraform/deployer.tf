@@ -2,15 +2,25 @@
 # access key lives in the tooling's environment settings, so routine deploys stop
 # running as the account root through browser logins that expire every few hours.
 #
-# Scope: everything this stack manages, no more. IAM writes are limited to this
-# stack's role, policy and user names; secrets to this stack's prefix. The access
-# key is created by hand in the console (never in state or chat) and rotated there.
+# This credential deploys the already bootstrapped stack. IAM identities and
+# policies, including this user's boundary, are changed only by a separate
+# administrator apply. The access key is created and rotated outside Terraform.
 resource "aws_iam_user" "deployer" {
-  name = "${local.name}-deployer"
-  tags = { Purpose = "Lightwork prod deploys (Terraform, CodeBuild, ECS)" }
+  name                 = "${local.name}-deployer"
+  permissions_boundary = aws_iam_policy.deployer.arn
+  tags                 = { Purpose = "Lightwork prod deploys (Terraform, CodeBuild, ECS)" }
 }
 
 data "aws_iam_policy_document" "deployer" {
+  # A same-account role trust policy can grant AssumeRole directly to a user.
+  # Keep that route closed even if an unrelated trust policy changes later.
+  statement {
+    sid       = "NeverAssumeRole"
+    effect    = "Deny"
+    actions   = ["sts:AssumeRole"]
+    resources = ["*"]
+  }
+
   # Read-only discovery Terraform and the CLI need everywhere.
   statement {
     sid = "Describe"
@@ -52,11 +62,17 @@ data "aws_iam_policy_document" "deployer" {
     resources = [aws_ecr_repository.app.arn]
   }
 
-  # Runtime: cluster, service, task definitions, one-off tasks, logs.
+  # Runtime writes are confined to this cluster, service, task family and its
+  # tasks. Read-only ECS discovery remains in Describe above.
   statement {
-    sid       = "Ecs"
-    actions   = ["ecs:*"]
-    resources = ["*"]
+    sid     = "Ecs"
+    actions = ["ecs:*"]
+    resources = [
+      "arn:aws:ecs:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:cluster/${local.name}",
+      "arn:aws:ecs:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:service/${local.name}/${local.name}",
+      "arn:aws:ecs:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:task-definition/${local.name}:*",
+      "arn:aws:ecs:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:task/${local.name}/*",
+    ]
   }
   statement {
     sid     = "Logs"
@@ -85,25 +101,31 @@ data "aws_iam_policy_document" "deployer" {
     resources = ["arn:aws:secretsmanager:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:secret:${local.name}/*"]
   }
 
-  # IAM: only this stack's roles, policies and users, plus handing roles to services.
+  # Only hand the three fixed, separately administered roles to their services.
+  # No Create/Put/Attach/PolicyVersion/User/Role IAM writes are granted: a CI
+  # credential must never edit its own policy or mint an administrator role.
   statement {
-    sid = "IamStack"
-    actions = [
-      "iam:CreateRole", "iam:DeleteRole", "iam:UpdateRole", "iam:UpdateAssumeRolePolicy", "iam:TagRole", "iam:UntagRole",
-      "iam:PutRolePolicy", "iam:DeleteRolePolicy", "iam:AttachRolePolicy", "iam:DetachRolePolicy", "iam:PassRole",
-      "iam:CreatePolicy", "iam:DeletePolicy", "iam:CreatePolicyVersion", "iam:DeletePolicyVersion", "iam:TagPolicy", "iam:UntagPolicy",
-      "iam:CreateUser", "iam:DeleteUser", "iam:TagUser", "iam:UntagUser", "iam:AttachUserPolicy", "iam:DetachUserPolicy",
-    ]
+    sid     = "PassEcsRoles"
+    actions = ["iam:PassRole"]
     resources = [
-      "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${local.name}-*",
-      "arn:aws:iam::${data.aws_caller_identity.current.account_id}:policy/${local.name}-*",
-      "arn:aws:iam::${data.aws_caller_identity.current.account_id}:user/${local.name}-*",
+      "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${local.name}-task-exec",
+      "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${local.name}-task",
     ]
+    condition {
+      test     = "StringEquals"
+      variable = "iam:PassedToService"
+      values   = ["ecs-tasks.amazonaws.com"]
+    }
   }
   statement {
-    sid       = "ServiceLinkedRoles"
-    actions   = ["iam:CreateServiceLinkedRole"]
-    resources = ["*"]
+    sid       = "PassCodeBuildRole"
+    actions   = ["iam:PassRole"]
+    resources = ["arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${local.name}-codebuild"]
+    condition {
+      test     = "StringEquals"
+      variable = "iam:PassedToService"
+      values   = ["codebuild.amazonaws.com"]
+    }
   }
 }
 

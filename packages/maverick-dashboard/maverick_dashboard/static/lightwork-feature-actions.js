@@ -325,6 +325,7 @@
     var status = $('fa-autonomy-status');
     try {
       var data = await request('/api/v1/workforce/posture');
+      box.textContent = '';
       say(status, data.levels_enabled ? 'Each specialist has its own level of independence.' :
         'Independence levels are turned off, so every specialist follows the same approval rules.');
       // With levels off the per-level split is not applied to anything, so it
@@ -336,6 +337,14 @@
         });
         if (data.packs_onboarding) list.appendChild(el('li', 'badge', 'Still learning the ropes: ' + data.packs_onboarding));
         box.appendChild(list);
+      } else if (data.can_manage) {
+        var setup = el('p', 'muted');
+        setup.appendChild(el('span', null, 'To use these controls, turn on '));
+        var settings = el('a', null, 'Per-agent independence levels');
+        settings.href = '/settings/all?id=workforce.levels';
+        setup.appendChild(settings);
+        setup.appendChild(el('span', null, ' in Settings.'));
+        box.appendChild(setup);
       }
       var cands = data.graduation_candidates || [];
       if (!cands.length) {
@@ -343,8 +352,36 @@
         return;
       }
       box.appendChild(el('h3', null, 'Ready for more independence'));
-      box.appendChild(table(['Specialist', 'Approved work', 'Approval rate'], cands.map(function (c) {
-        return [window.mvHuman ? window.mvHuman(c.name) : c.name, c.sample, percent(c.approve_rate)];
+      box.appendChild(table(['Specialist', 'Approved work', 'Approval rate', 'Next step'], cands.map(function (c) {
+        var link = el('a', null, window.mvHuman ? window.mvHuman(c.name) : c.name);
+        link.href = '/agents?name=' + encodeURIComponent(c.name) + '#agent-autonomy';
+        var action = el('span');
+        if (c.can_grant) {
+          var grant = el('button', 'btn btn--primary', 'Grant independence');
+          grant.type = 'button';
+          grant.addEventListener('click', async function () {
+            if (grant.disabled) return;
+            if (!(await window.mvConfirm('End supervision for ' + link.textContent + '? Its configured independence levels will take effect.',
+                                         {okText: 'Grant independence'}))) return;
+            grant.disabled = true;
+            try {
+              await request('/api/v1/agents/' + encodeURIComponent(c.name) + '/graduate',
+                            {method: 'POST', json: {expected_generation: c.generation}});
+              await workforcePosture();
+              say(status, link.textContent + ' was granted its configured independence levels.');
+            } catch (failure) {
+              say(status, await failText(failure, 'grant independence'));
+              grant.disabled = false;
+            }
+          });
+          action.appendChild(grant);
+        } else {
+          var review = el('a', null, 'Review policy');
+          review.href = link.href;
+          action.appendChild(review);
+          if (c.grant_block_reason) action.appendChild(el('p', 'muted', c.grant_block_reason));
+        }
+        return [link, c.sample, percent(c.approve_rate), action];
       })));
       technical(box, cands.map(function (c) { return c.name + ': ' + c.reason; }));
     } catch (failure) {

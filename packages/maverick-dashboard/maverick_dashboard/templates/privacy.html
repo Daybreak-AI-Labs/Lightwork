@@ -720,6 +720,9 @@
               {% if r.status == 'closed' and not r.answer and (r.outcome or {}).get('kind') != 'withdrawn' %}
                 <br><span class="badge warn">No answer on record</span>
               {% endif %}
+              {% if r.status == 'closed' and r.kind in ('access', 'portability') and (not r.export_cleanup or r.export_cleanup.status != 'removed') %}
+                <br><span class="badge warn">Saved export needs cleanup</span>
+              {% endif %}
             </td>
             <td {% if r.overdue %}class="pw-due-warn"{% endif %}>
               {% if r.status in ('open', 'unverified', 'awaiting_erasure') %}
@@ -735,6 +738,8 @@
               {% if r.status != 'closed' %}
                 {# Closing records what happened, on the request's own page. #}
                 <a class="btn" href="/privacy/dsar/{{ r.id }}#close">Close</a>
+              {% elif r.kind in ('access', 'portability') and (not r.export_cleanup or r.export_cleanup.status != 'removed') %}
+                <button class="btn pw-dsar-act" data-id="{{ r.id }}" data-act="close" data-kind="{{ r.kind }}" data-retry="true" type="button">Retry export cleanup</button>
               {% endif %}
               <button class="btn" data-pe-worksheet="{{ r.id }}" type="button">Where to search</button>
               <button class="btn pw-dsar-fulfillment" data-id="{{ r.id }}" type="button">Send response</button>
@@ -2145,14 +2150,29 @@
     btn.addEventListener('click', async function () {
       var out = document.getElementById('pw-fulfill-out');
       var text = btn.dataset.act === 'close'
-        ? 'Close this request? It leaves the open list and its deadline stops.'
+        ? (btn.dataset.retry === 'true' ? 'Try removing this request’s saved export again?'
+            : 'Close this request? It leaves the open list and its deadline stops.')
         : btn.dataset.kind === 'erasure'
           ? 'Prepare deletion for this request? Nothing is deleted yet: you confirm the deletion on the request\'s own page.'
           : 'Gather everything Lightwork holds about this person now?';
-      if (!(await mvConfirm(text, { okText: btn.dataset.act === 'close' ? 'Close request' : 'Continue' }))) return;
+      if (!(await mvConfirm(text, { okText: btn.dataset.retry === 'true' ? 'Retry cleanup' :
+          btn.dataset.act === 'close' ? 'Close request' : 'Continue' }))) return;
       btn.disabled = true;
-      post('/api/v1/privacy/dsar/' + encodeURIComponent(btn.dataset.id) +
-           '/' + btn.dataset.act).catch(function (e) {
+      fetch('/api/v1/privacy/dsar/' + encodeURIComponent(btn.dataset.id) +
+           '/' + btn.dataset.act, { method: 'POST' }).then(function (response) {
+        if (!response.ok) throw failed(response);
+        return response.json();
+      }).then(function (result) {
+        var cleanup = result.export_cleanup;
+        if (btn.dataset.act === 'close' && cleanup && cleanup.status === 'failed') {
+          out.textContent = cleanup.message;
+          btn.dataset.retry = 'true';
+          btn.textContent = 'Retry export cleanup';
+          btn.disabled = false;
+          return;
+        }
+        location.reload();
+      }).catch(function (e) {
         btn.disabled = false;
         out.textContent = errText(e, btn.dataset.act === 'close' ? 'close the request' : 'start this step');
       });

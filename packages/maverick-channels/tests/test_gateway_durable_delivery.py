@@ -140,6 +140,96 @@ def test_slack_admits_before_ack_then_downloads_and_recovers_after_ack_crash(mon
     assert channel._web.chat_postMessage.call_args.kwargs["thread_ts"] == "100.1"
 
 
+def test_queued_slack_question_uses_saved_receipt_and_sends_once(monkeypatch):
+    from maverick import server as server_mod
+
+    async def handler(msg):
+        msg._channel_question_watch = {
+            "goal_id": 4, "conversation_id": 8, "tenant": None,
+            "owner": "user:slack:human", "execution_principal": "user:slack:human",
+        }
+        return "Task queued"
+
+    channel, client, request = _slack(monkeypatch, handler)
+    asyncio.run(channel._on_request(client, request))
+    row = DeliveryJournal().store.list()[0]
+    assert row["question_watch"]["goal_id"] == 4
+    assert row["delivery"] == "delivered"
+    seen = []
+
+    def question(watch, msg, account_sha256):
+        seen.append((watch["goal_id"], msg.principal_id, account_sha256))
+        return "Question #9 for task #4: Which customer?\nReply here with your answer.", False
+
+    monkeypatch.setattr(server_mod, "queued_channel_question", question)
+    kwargs = {"account": channel._account_id,
+              "authorize": lambda msg: channel._authorized(msg, channel._account_id),
+              "send": channel._send_saved, "prepare": channel._prepare}
+    asyncio.run(channel.recover_messages(**kwargs))
+    assert len(seen) == 1 and seen[0][0:2] == (4, "human")
+    assert channel._web.chat_postMessage.await_count == 2
+    assert "Question #9" in channel._web.chat_postMessage.call_args.kwargs["text"]
+    assert channel._web.chat_postMessage.call_args.kwargs["thread_ts"] == "100.1"
+    assert DeliveryJournal().get(row["id"])["question_watch"] is None
+    asyncio.run(channel.recover_messages(**kwargs))
+    assert channel._web.chat_postMessage.await_count == 2
+
+
+def test_queued_telegram_question_uses_original_chat_and_reply_anchor(monkeypatch):
+    from maverick import server as server_mod
+
+    async def handler(msg):
+        msg._channel_question_watch = {
+            "goal_id": 4, "conversation_id": 8, "tenant": None,
+            "owner": "user:telegram:7", "execution_principal": "user:telegram:7",
+        }
+        return "Task queued"
+
+    channel, update = _telegram(monkeypatch, handler)
+    channel._app = NS(bot=NS(send_message=AsyncMock(return_value=NS(message_id=9))))
+    asyncio.run(channel._on_message(update, None))
+    monkeypatch.setattr(server_mod, "queued_channel_question",
+                        lambda *a: ("Question #9 for task #4: Which customer?", False))
+    account = channel._account()
+    kwargs = {"account": account,
+              "authorize": lambda msg: channel._authorized(msg, account, None),
+              "send": channel._send_saved, "prepare": channel._prepare_saved}
+    asyncio.run(channel.recover_messages(**kwargs))
+    call = channel._app.bot.send_message.call_args.kwargs
+    assert call["chat_id"] == -77
+    assert call["reply_to_message_id"] == 5
+    assert "Which customer?" in call["text"]
+    assert DeliveryJournal().store.list()[0]["question_watch"] is None
+
+
+def test_uncertain_queued_question_send_is_held_without_duplicate(monkeypatch):
+    from maverick import server as server_mod
+
+    async def handler(msg):
+        msg._channel_question_watch = {
+            "goal_id": 4, "conversation_id": 8, "tenant": None,
+            "owner": "user:slack:human", "execution_principal": "user:slack:human",
+        }
+        return "Task queued"
+
+    channel, client, request = _slack(monkeypatch, handler)
+    asyncio.run(channel._on_request(client, request))
+    monkeypatch.setattr(server_mod, "queued_channel_question",
+                        lambda *a: ("Question #9 for task #4: Which customer?", False))
+    channel._web.chat_postMessage.side_effect = TimeoutError("uncertain acceptance")
+    kwargs = {"account": channel._account_id,
+              "authorize": lambda msg: channel._authorized(msg, channel._account_id),
+              "send": channel._send_saved, "prepare": channel._prepare}
+    asyncio.run(channel.recover_messages(**kwargs))
+    row = DeliveryJournal().store.list()[0]
+    assert row["question_watch"] is not None
+    assert row["delivery"] == "delivered"  # queued ack remains confirmed
+    assert any(key.startswith("question:") and chunk["state"] == "delivery_unknown"
+               for key, chunk in row["chunks"].items())
+    asyncio.run(channel.recover_messages(**kwargs))
+    assert channel._web.chat_postMessage.await_count == 2
+
+
 def test_preupgrade_slack_receipt_authority_is_legacy_only(monkeypatch):
     from maverick import oidc
 

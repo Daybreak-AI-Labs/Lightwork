@@ -36,6 +36,18 @@ complete setup in Lightwork. If the release has no binary for your platform,
 request a customer package. Repository access is an engineering arrangement:
 cloning the repository also copies internal research, audit and patent files.
 
+After connecting an AI service, a first task can be run in Chat or from the
+terminal without file or program access:
+
+```bash
+lightwork start "Draft a one-page plan to reduce our customer support response time without adding headcount. State your assumptions and the facts you need from me."
+```
+
+If Docker or Podman was not running at setup, file changes and program
+execution remain off. Start a container service, then use **Permissions → Where
+work runs → Allow file work** in Lightwork before asking it to create files or
+run programs. `lightwork doctor` shows the current limitation.
+
 ## Status
 
 Alpha with an engineering source-install path. Release automation
@@ -112,7 +124,7 @@ The CLI installs under two interchangeable names — `lightwork` (shown below) a
 | `lightwork schedule goal / add / list / rm` | Schedule recurring autonomous goals via cron |
 | `lightwork worker` | Drain the scheduled-job queue (runs the recurring tasks) |
 | `lightwork fact / facts` | Get / set persistent facts |
-| `lightwork skills` | List installed + distilled skills |
+| `lightwork skills` | List built-in and installed skills available for recall; review distilled suggestions on the Skills page |
 | `lightwork skill install / remove / info` | Manage the skill marketplace |
 | `lightwork template list / show` | Goal templates with `{{ var }}` substitution |
 | `lightwork learn-demo FILE [--name --no-llm --source --industry --yes]` | Build an agent from a recorded demonstration (parse → induce → approve → save → provision) |

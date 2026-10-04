@@ -16,6 +16,7 @@ from __future__ import annotations
 import hashlib
 import hmac as hmac_mod
 import json
+import math
 import os
 import re
 import time
@@ -38,6 +39,7 @@ _MAX_LIST = 500
 _MAX_RECORDS = 10_000
 _SCAN_LIMIT = _MAX_RECORDS + 1
 _MAX_HISTORY = 40
+_MAX_FUTURE_SKEW_SECONDS = 300
 _MAX_NOTICE_BYTES = 200_000
 _SCAN_MAX_BYTES = 2 * 1024 * 1024
 _SCAN_TIMEOUT_SECONDS = 15.0
@@ -158,6 +160,35 @@ def _record_id(subject: str, purpose: str) -> str:
     )
 
 
+def _latest_valid_event(row: dict[str, Any], now: float) -> dict[str, Any] | None:
+    """Read legacy receipts without letting a bad future event pin consent."""
+    latest = None
+    latest_order = float("-inf")
+    for event in row.get("history") or []:
+        try:
+            stamp = float(event["recorded_at"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if not math.isfinite(stamp) or not 0 < stamp <= now + _MAX_FUTURE_SKEW_SECONDS:
+            continue
+        if event.get("status") not in STATUSES:
+            continue
+        # A small clock skew may be accepted, but it cannot outrank a later
+        # withdrawal merely because the sender's clock was ahead.
+        received_at = event.get("received_at")
+        try:
+            received = float(received_at) if received_at is not None else stamp
+        except (TypeError, ValueError):
+            continue
+        if not math.isfinite(received) or received <= 0:
+            continue
+        order = min(stamp, received)
+        if order >= latest_order:
+            latest = event
+            latest_order = order
+    return latest
+
+
 def record_consent(
     subject_ref: str,
     *,
@@ -182,15 +213,19 @@ def record_consent(
     purpose_key = _text(purpose, "purpose", 128).lower().replace(" ", "_")
     version = _text(policy_version, "policy_version", 64)
     operator = _text(actor, "actor", 256)
-    stamp = time.time() if recorded_at is None else float(recorded_at)
-    if stamp <= 0:
-        raise ValueError("recorded_at must be positive")
+    now = time.time()
+    stamp = now if recorded_at is None else float(recorded_at)
+    if not math.isfinite(stamp) or stamp <= 0:
+        raise ValueError("recorded_at must be a finite positive time")
+    if stamp > now + _MAX_FUTURE_SKEW_SECONDS:
+        raise ValueError("recorded_at is too far in the future")
     subject = subject_digest(subject_ref)
     event = {
         "status": status,
         "policy_version": version,
         "channel": channel,
         "recorded_at": stamp,
+        "received_at": now,
         "recorded_by": operator,
     }
     event["receipt_sha256"] = hashlib.sha256(
@@ -210,10 +245,11 @@ def record_consent(
         # last-written one: importing a backdated row (OneTrust exports
         # are commonly newest-first or carry historical backfill) must
         # never flip a newer withdrawal back to granted.
-        if stamp >= float(value.get("last_recorded_at") or 0.0):
-            value["current_status"] = status
-            value["policy_version"] = version
-            value["last_recorded_at"] = stamp
+        latest = _latest_valid_event(value, now)
+        if latest is not None:
+            value["current_status"] = latest["status"]
+            value["policy_version"] = latest["policy_version"]
+            value["last_recorded_at"] = latest["recorded_at"]
         if stamp < float(value.get("first_recorded_at") or stamp):
             value["first_recorded_at"] = stamp
 
@@ -272,13 +308,15 @@ def subject_preferences(subject_ref: str) -> dict[str, Any]:
     _require_enabled()
     subject = subject_digest(subject_ref)
     purposes: dict[str, Any] = {}
+    now = time.time()
     for row in _RECEIPTS.list(limit=_SCAN_LIMIT):
         if row.get("subject_digest") != subject:
             continue
+        latest = _latest_valid_event(row, now)
         purposes[str(row.get("purpose"))] = {
-            "status": row.get("current_status"),
-            "policy_version": row.get("policy_version"),
-            "last_recorded_at": row.get("last_recorded_at"),
+            "status": latest["status"] if latest else "unknown",
+            "policy_version": latest["policy_version"] if latest else None,
+            "last_recorded_at": latest["recorded_at"] if latest else None,
         }
     return {"subject_digest": subject, "purposes": dict(sorted(purposes.items()))}
 
@@ -287,10 +325,12 @@ def consent_posture() -> dict[str, Any]:
     _require_enabled()
     rows = _RECEIPTS.list(limit=_SCAN_LIMIT)
     by_purpose: dict[str, dict[str, int]] = {}
+    now = time.time()
     for row in rows:
         purpose = str(row.get("purpose") or "unknown")
-        bucket = by_purpose.setdefault(purpose, {"granted": 0, "withdrawn": 0})
-        status = str(row.get("current_status") or "")
+        bucket = by_purpose.setdefault(purpose, {"granted": 0, "withdrawn": 0, "unknown": 0})
+        latest = _latest_valid_event(row, now)
+        status = latest["status"] if latest else "unknown"
         if status in bucket:
             bucket[status] += 1
     return {
@@ -307,15 +347,17 @@ def export_receipts(*, limit: int = 500) -> list[dict[str, Any]]:
         raise ValueError("limit must be between 1 and 2000")
     rows = _RECEIPTS.list(limit=limit)
     rows.sort(key=lambda row: -float(row.get("last_recorded_at") or 0.0))
+    now = time.time()
     return [
         {
             "subject_digest": row.get("subject_digest"),
             "purpose": row.get("purpose"),
-            "current_status": row.get("current_status"),
-            "policy_version": row.get("policy_version"),
+            "current_status": (latest["status"] if latest else "unknown"),
+            "policy_version": (latest["policy_version"] if latest else None),
             "history": row.get("history"),
         }
         for row in rows
+        for latest in [_latest_valid_event(row, now)]
     ]
 
 

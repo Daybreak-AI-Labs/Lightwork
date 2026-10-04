@@ -6,7 +6,7 @@ filesystem, no network, no host syscalls beyond what is explicitly granted.
 A capability-grant model native to WASI: the module sees ONLY the directories
 preopened via ``dirs`` and the env/args passed here.
 
-Auth: none. Requires the ``wasmtime`` binary on PATH
+Auth: each run requires fresh human approval. Requires the ``wasmtime`` binary on PATH
 (https://wasmtime.dev — single static binary).
 
 ops:
@@ -25,7 +25,10 @@ import shutil
 from pathlib import Path
 from typing import Any
 
+from ..approval_cards import ApprovalCardError
+from ..safety import ConsentDenied, consume_operation_consent
 from . import Tool
+from .execution_consent import execution_target, file_version, request_execution_consent
 
 log = logging.getLogger(__name__)
 
@@ -100,9 +103,30 @@ def _op_run(args: dict, sandbox) -> str:
         cmd.append("--")
         cmd.extend(module_args)
     timeout = max(1, min(int(args.get("timeout") or 60), 600))
+    parameters = {"command": cmd, "stdin": args.get("stdin"), "timeout_seconds": timeout}
+    try:
+        permit = request_execution_consent(
+            "wasm_run",
+            target_provider=lambda: execution_target(sandbox),
+            parameters=parameters,
+            detail=f"Run the {Path(module).name} WebAssembly module with a {timeout}-second limit.",
+            effect="Runs the selected WebAssembly module with the reviewed directory grants.",
+            review_items=[f"Module: {module}", f"Preopened directories: {', '.join(dirs) or 'none'}",
+                          "Environment values and input are included in the exact-operation digest."],
+            timeout=timeout,
+            input_versions_provider=lambda: file_version(Path(module)),
+        )
+    except ConsentDenied:
+        return "ERROR: WebAssembly execution was not approved; no module was run"
+    except (ApprovalCardError, OSError):
+        return "ERROR: module, execution target, or approval authority changed; review it again"
     from . import sandbox_run
-    code, out, stderr = sandbox_run(sandbox, cmd, timeout=timeout,
-                                    stdin=args.get("stdin"))
+    try:
+        with consume_operation_consent(permit):
+            code, out, stderr = sandbox_run(sandbox, cmd, timeout=timeout,
+                                            stdin=args.get("stdin"))
+    except (ApprovalCardError, OSError):
+        return "ERROR: module, execution target, or approval authority changed; review it again"
     if code != 0:
         return f"ERROR: wasmtime ({code}): {stderr.strip()[-400:]}"
     tail = f"\n[stderr] {stderr.strip()[-200:]}" if stderr.strip() else ""

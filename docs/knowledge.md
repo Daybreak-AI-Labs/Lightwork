@@ -52,7 +52,8 @@ enable  = true
 store   = "qdrant"
 url     = "http://qdrant:6333"     # or QDRANT_URL
 dim     = 1024
-# api_key via QDRANT_API_KEY
+# Qdrant key: set store_api_key in All settings, or QDRANT_API_KEY on the server.
+# The separate api_key setting is only for the embedding service.
 ```
 
 This adapter's low-level upsert does not provide atomic document admission.

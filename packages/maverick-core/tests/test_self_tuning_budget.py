@@ -10,6 +10,16 @@ def _learner(tmp_path, **kw):
     return SelfTuningBudget(path=tmp_path / "bt.json", rng=Random(0), **kw)
 
 
+def test_learned_limit_requires_an_explicit_boolean_opt_in(monkeypatch):
+    from maverick import config, self_tuning_budget
+
+    monkeypatch.setattr(config, "governed_learning_env_flag", lambda _name: None)
+    for value, expected in ((None, False), ("false", False), (False, False), (True, True)):
+        section = {} if value is None else {"self_tuning": value}
+        monkeypatch.setattr(config, "load_config", lambda section=section: {"budget": section})
+        assert self_tuning_budget.enabled() is expected
+
+
 def test_cold_class_returns_none(tmp_path):
     b = _learner(tmp_path, min_samples=5)
     b.observe("research", 1.0)

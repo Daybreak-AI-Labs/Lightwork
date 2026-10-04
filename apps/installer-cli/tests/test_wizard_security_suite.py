@@ -306,8 +306,8 @@ def test_pick_security_suite_response_is_separate_opt_in(monkeypatch):
     assert picked["ai_dynamic_risk"] is True
     assert picked["ai_policy_management"] is True
     assert picked["ai_runtime_guardrails"] is True
-    assert picked["ai_cloud_agent_governance"] is True
-    assert picked["databricks_ai_security_framework"] is True
+    assert picked["ai_cloud_agent_governance"] is False
+    assert picked["databricks_ai_security_framework"] is False
     assert picked["ai_governance_loop"] is True
     assert picked["ai_explainability"] is True
     assert picked["ai_conformity_workflow"] is True

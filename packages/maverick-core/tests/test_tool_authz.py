@@ -153,6 +153,36 @@ def test_an_allowed_dispatch_is_recorded_on_the_chain(monkeypatch) -> None:
     assert len(payload["call_id"]) == 24
 
 
+def test_flow_action_receipts_exclude_nonpattern_request_and_result_values(
+        monkeypatch) -> None:
+    from maverick.flow.execution import default_action_runner
+    from maverick.tools import Tool, ToolRegistry
+
+    _allow_flow_action(monkeypatch)
+    private_value = "cedar-marble-4829-7731"  # pragma: allowlist secret
+    params = {"body": f"pin={private_value}"}
+    passed = []
+    registry = ToolRegistry()
+    registry.register(Tool(
+        name="web_search", description="test", input_schema={"type": "object"},
+        fn=lambda arguments: passed.append(arguments) or {"echo": private_value},
+    ))
+    monkeypatch.setattr("maverick.tools.base_registry", lambda *a, **k: registry)
+    seen = _records(monkeypatch)
+
+    result, outcome = default_action_runner(world=None)("web_search", params, {})
+
+    assert outcome == 1.0 and private_value in str(result)
+    assert passed == [params]  # Real execution still receives the full request.
+    rows = [payload for kind, payload in seen
+            if "tool_call" in str(kind) or "tool_result" in str(kind)]
+    assert len(rows) == 2
+    assert rows[0]["call_id"] == rows[1]["call_id"]
+    assert rows[0]["input_summary"] == "1 parameter supplied"
+    assert rows[1]["output_summary"] == "Tool completed"
+    assert private_value not in str(rows)
+
+
 def test_missing_dispatch_audit_refuses_flow_before_tool_effect(monkeypatch) -> None:
     from maverick.flow.execution import default_action_runner
     from maverick.tools import Tool, ToolRegistry

@@ -486,6 +486,12 @@ def _q_confirm(message: str, default: bool = True) -> bool:
 # ---------- preflight ----------
 
 
+_FILE_WORK_RECOVERY = (
+    "Start Docker or Podman, then open Lightwork > Permissions > Where work "
+    "runs, choose its container, and select Allow file work."
+)
+
+
 def preflight() -> bool:
     """Check the environment before asking any questions.
 
@@ -527,12 +533,14 @@ def preflight() -> bool:
         except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
             console.print(
                 "[yellow]![/yellow] Docker isn't running. Simple setup will keep "
-                "file changes and program execution off until an isolated work area is available."
+                "file changes and program execution off until an isolated work area is available. "
+                + _FILE_WORK_RECOVERY
             )
     else:
         console.print(
             "[yellow]![/yellow] Docker is not installed. Simple setup will keep "
-            "file changes and program execution off until an isolated work area is available."
+            "file changes and program execution off until an isolated work area is available. "
+            + _FILE_WORK_RECOVERY
         )
 
     return all_ok
@@ -3587,13 +3595,9 @@ def pick_security_suite() -> dict[str, Any]:
         "runtime receipts? Raw runtime content is never persisted by this plane.",
         default=False,
     )
-    ai_cloud_agent_governance = _q_confirm(
-        "Enable named AWS Bedrock, Azure AI Foundry, and Google Vertex AI agent "
-        "inventory, observability, and policy-enforcement intents? This enables "
-        "the required inventory, policy, and runtime-guardrail authorities but "
-        "does not install credentials or claim provider writes.",
-        default=False,
-    )
+    # The canonical cloud-agent authority is not durable in the shipped
+    # runtime. A wizard toggle would write an enabled config that cannot run.
+    ai_cloud_agent_governance = False
     databricks_ai_security_framework = False
     if ai_cloud_agent_governance:
         ai_inventory = True
@@ -6687,6 +6691,8 @@ def pick_notifications() -> tuple[dict[str, Any], list[str]]:
         default=False,
     ):
         return personal_config, []
+
+
     delivery_receipts = _q_confirm(
         "Keep content-free delivery results for seven days and enable in-product delivery tests?", default=True,
     )
@@ -6729,6 +6735,21 @@ def pick_notifications() -> tuple[dict[str, Any], list[str]]:
             ["DISCORD_NOTIFY_WEBHOOK"],
         )
     return {}, []
+
+
+def _resolve_private_alert_linking(advanced: dict[str, Any], notifications: dict[str, Any]) -> None:
+    """Do not save private delivery without its in-product linking path."""
+    if not notifications.get("personal_external") or advanced.get("allow_personal_data_controls") is True:
+        return
+    if _q_confirm(
+        "Private Slack and Telegram alerts need My Data so people can verify their own account. Turn on My Data now?",
+        default=False,
+    ):
+        advanced["allow_personal_data_controls"] = True
+    else:
+        notifications["personal_external"] = False
+        notifications.pop("personal_dashboard_url", None)
+        console.print("Private delivery stays off. People can still use in-product task alerts.")
 
 
 def pick_deadline_alerts(notifications: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -10043,10 +10064,11 @@ def run_fast() -> int:
     }
     denied_tools = ["computer", "browser"]
     if backend == "local":
-        denied_tools.extend(["shell", "write_file", "apply_patch", "str_replace_editor"])
+        denied_tools.extend(["shell", "write_file", "apply_patch", "str_replace_editor", "ast_edit"])
         console.print(
             "[yellow]![/yellow] Docker isn't running. Lightwork can answer questions, "
-            "but it cannot create files or run programs in this setup."
+            "but it cannot create files or run programs in this setup. "
+            + _FILE_WORK_RECOVERY
         )
     capabilities = {"computer_use": False, "browser": False, "ros": False}
     # Pick up the API key from the env if it's already there;
@@ -10099,11 +10121,13 @@ def run_fast() -> int:
     console.print()
     console.print(
         Panel.fit(
-            "[bold green]Fast setup finished.[/bold green]\n\n"
-            'Try: [bold]maverick start "hello"[/bold]\n'
-            f"Saved setup: {CONFIG_FILE}\n"
-            "[dim]The maverick command is also available as lightwork.[/dim]",
-            border_style="green",
+            ("[bold yellow]Fast setup saved. File work is off.[/bold yellow]\n\n"
+             if backend == "local" else "[bold green]Fast setup finished.[/bold green]\n\n")
+            + 'Try: [bold]maverick start "hello"[/bold]\n'
+            + (_FILE_WORK_RECOVERY + "\n" if backend == "local" else "")
+            + f"Saved setup: {CONFIG_FILE}\n"
+            + "[dim]The maverick command is also available as lightwork.[/dim]",
+            border_style="yellow" if backend == "local" else "green",
         )
     )
     return 0
@@ -10283,7 +10307,7 @@ def write_consumer_config(
     # the container is the blast radius, not the user's machine.
     denied_tools = ["computer", "browser"]
     if backend == "local":
-        denied_tools.extend(["shell", "write_file", "apply_patch", "str_replace_editor"])
+        denied_tools.extend(["shell", "write_file", "apply_patch", "str_replace_editor", "ast_edit"])
     write_config(
         ["anthropic"],  # providers
         {},  # role_models -> kernel defaults
@@ -10381,7 +10405,8 @@ def run_consumer() -> int:
         console.print(
             "[yellow]File changes and program execution are off.[/yellow] "
             "Docker was not running during setup. Lightwork can still answer "
-            "questions and work with the features that do not need a work area."
+            "questions and work with the features that do not need a work area. "
+            + _FILE_WORK_RECOVERY
         )
 
     # First-outcome nudge. Don't run the task here (the kernel doesn't
@@ -10396,13 +10421,16 @@ def run_consumer() -> int:
     if keys:
         console.print(
             Panel.fit(
-                f"[bold green]Setup complete, {user_name}.[/bold green]\n\n"
-                f"Your first task ({outcome.label}, on sample data, waits in {outcome.lands_in}):\n"
-                f"  [bold]{cli_command(department)}[/bold]\n\n"
-                "Then:\n"
-                "  [bold]maverick dashboard[/bold]   web UI at http://127.0.0.1:8765\n\n"
-                "[dim]The maverick command is also available as lightwork.[/dim]",
-                border_style="green",
+                (f"[bold yellow]Setup saved, {user_name}. File work is off.[/bold yellow]\n\n"
+                 if backend == "local" else
+                 f"[bold green]Setup complete, {user_name}.[/bold green]\n\n")
+                + f"Your first task ({outcome.label}, on sample data, waits in {outcome.lands_in}):\n"
+                + f"  [bold]{cli_command(department)}[/bold]\n\n"
+                + (_FILE_WORK_RECOVERY + "\n\n" if backend == "local" else "")
+                + "Then:\n"
+                + "  [bold]maverick dashboard[/bold]   web UI at http://127.0.0.1:8765\n\n"
+                + "[dim]The maverick command is also available as lightwork.[/dim]",
+                border_style="yellow" if backend == "local" else "green",
             )
         )
     else:
@@ -10662,7 +10690,7 @@ def run_express() -> int:
     # runs against the user's host filesystem, not a container blast radius.
     denied_tools = ["computer", "browser"]
     if backend == "local":
-        denied_tools.extend(["shell", "write_file", "apply_patch", "str_replace_editor"])
+        denied_tools.extend(["shell", "write_file", "apply_patch", "str_replace_editor", "ast_edit"])
     try:
         write_config(
             providers=["anthropic"],
@@ -10713,18 +10741,22 @@ def run_express() -> int:
         console.print(
             "[yellow]File changes and program execution are off.[/yellow] "
             "Docker was not running during setup. Lightwork can still answer "
-            "questions and use features that do not need a work area."
+            "questions and use features that do not need a work area. "
+            + _FILE_WORK_RECOVERY
         )
 
     console.print()
     if keys:
         console.print(
             Panel.fit(
-                f"[bold green]Setup saved, {user_name}.[/bold green]\n\n"
-                "Open the dashboard:\n"
-                "  [bold]maverick dashboard[/bold]   web UI at http://127.0.0.1:8765\n\n"
-                "[dim]Open Lightwork Settings to change supported options.[/dim]",
-                border_style="green",
+                (f"[bold yellow]Setup saved, {user_name}. File work is off.[/bold yellow]\n\n"
+                 if backend == "local" else
+                 f"[bold green]Setup saved, {user_name}.[/bold green]\n\n")
+                + "Open the dashboard:\n"
+                + "  [bold]maverick dashboard[/bold]   web UI at http://127.0.0.1:8765\n\n"
+                + (_FILE_WORK_RECOVERY + "\n\n" if backend == "local" else "")
+                + "[dim]Open Lightwork Settings to change supported options.[/dim]",
+                border_style="yellow" if backend == "local" else "green",
             )
         )
     else:
@@ -11220,6 +11252,8 @@ def run(fast: bool = False, resume: bool = False) -> int:
 
     _announce()
     notifications, notify_envs = state.get("_notifications_pair") or pick_notifications()
+    _resolve_private_alert_linking(advanced, notifications)
+    state["advanced"] = advanced
     state["_notifications_pair"] = [notifications, notify_envs]
     _save_partial(state)
 

@@ -35,6 +35,8 @@
   var archivedView = false;
   var readyView = false;
   var archiveAvailable = true;
+  var overfilled = false;
+  var recoveryCursor = null;
   var currentItems = [];
   var selectedReference = null;
   var pending = false;
@@ -60,6 +62,13 @@
   nextButton.type = "button";
   nextButton.hidden = true;
   searchNote.after(nextButton);
+  var recoveryMore = canReview ? node("button", "btn", "Scan next batch of requests") : null;
+  if (recoveryMore) {
+    recoveryMore.id = "ka-recovery-more";
+    recoveryMore.type = "button";
+    recoveryMore.hidden = true;
+    requests.after(recoveryMore);
+  }
 
   // A reply this page could not verify is shown as one plain sentence; the
   // precise reason stays on the error for the technical record. Messages
@@ -456,6 +465,7 @@
     searchButton.disabled = value || !searchForm.elements.purpose.value;
     nextButton.disabled = value || !nextCursor;
     refreshRequests.disabled = value;
+    if (recoveryMore) recoveryMore.disabled = value || !recoveryCursor;
     if (showArchived) showArchived.disabled = value;
     if (showReady) showReady.disabled = value || !archiveAvailable;
     if (findArchived) findArchived.querySelector("button").disabled = value;
@@ -507,6 +517,8 @@
     detail.textContent = "";
     detailPanel.hidden = true;
     requests.textContent = "";
+    recoveryCursor = null;
+    if (recoveryMore) recoveryMore.hidden = true;
     exportButton.disabled = true;
     clearRequestInputs();
     var query = document.getElementById("ka-query");
@@ -747,6 +759,7 @@
       }
       var canArchive = payload.capacity.archive_available !== false;
       archiveAvailable = canArchive;
+      overfilled = used > maximum;
       if (showReady) {
         showReady.disabled = !canArchive;
         showReady.title = canArchive ? "" : "Finished-request archiving is unavailable on shared storage.";
@@ -755,6 +768,8 @@
         "The active request list is full. Archiving is unavailable on this installation. Ask an administrator to review capacity; requests and evidence remain in place." :
         !canArchive && used >= Math.floor(maximum * 0.9) ?
           "The active request list is nearly full (" + used + " of " + maximum + "). Ask an administrator to review capacity." :
+        overfilled ?
+        "The active request list is over capacity. Open Ready to archive and scan batches to find finished requests. Records and evidence remain available in the archive." :
         used >= maximum ?
         "The active request list is full. Archive finished requests below to make room. Records and evidence remain available in the archive." :
         used >= Math.floor(maximum * 0.9) ?
@@ -1029,13 +1044,15 @@
     return box;
   }
 
-  function renderRequests(items) {
-    requests.textContent = "";
+  function renderRequests(items, append, recoveryScan) {
+    if (!append || !requests.querySelector(".ka-request")) requests.textContent = "";
     if (!items.length) {
-      var empty = archivedView ?
+      if (requests.querySelector(".ka-request")) return;
+      var empty = recoveryScan ?
+        ["No finished requests in this batch", "Scan the next batch if one is available."] : archivedView ?
         ["No finished requests are in the archive yet", "Finished requests appear here once they are archived."] : readyView ?
         ["No finished requests are ready to archive", "Requests appear here when they can be archived. Complete a review or release a legal hold first."] :
-        ["No correction or removal requests yet", "Requests to correct, exclude or delete a source appear here with their status. Open a source with View details, then use Request a correction or removal to make one."];
+        ["No correction, exclusion, or deletion requests in this view", "Requests to correct, exclude or delete a source appear here with their status. Open a source with View details, then use the Request a correction or removal section to make one."];
       requests.appendChild(window.mvEmpty ? window.mvEmpty(empty[0], empty[1], null, { compact: true })
         : node("p", "muted", empty[0] + ". " + empty[1]));
       return;
@@ -1154,16 +1171,29 @@
     });
   }
 
-  async function loadRequests() {
+  async function loadRequests(append) {
     var token = access.capture();
-    var response = await fetch(apiBase + "/requests?limit=100&archived=" + (archivedView ? "true" : "false") +
-      "&ready_to_archive=" + (readyView ? "true" : "false"), {
+    var recoveryScan = canReview && readyView && overfilled;
+    var path = recoveryScan ?
+      "/requests/recovery?limit=100&cursor=" + encodeURIComponent(append ? recoveryCursor || "" : "") :
+      "/requests?limit=100&archived=" + (archivedView ? "true" : "false") +
+      "&ready_to_archive=" + (readyView ? "true" : "false");
+    var response = await fetch(apiBase + path, {
       method: "GET",
       credentials: "same-origin",
       headers: {Accept: "application/json"}
     });
-    var payload = await readJson(response, token, "/requests", true);
-    renderRequests(validateRequests(payload));
+    var payload = await readJson(response, token, recoveryScan ? "/requests/recovery" : "/requests", true);
+    var items = validateRequests(payload);
+    if (recoveryScan) {
+      if (payload.next_cursor !== null &&
+          (typeof payload.next_cursor !== "string" || payload.next_cursor.length > 128 || !payload.next_cursor)) {
+        throw failure("The recovery scan cursor failed validation.");
+      }
+      recoveryCursor = payload.next_cursor;
+    } else recoveryCursor = null;
+    renderRequests(items, recoveryScan && append, recoveryScan);
+    if (recoveryMore) recoveryMore.hidden = !recoveryScan || !recoveryCursor;
     unconfirmedPaths.clear();
   }
 
@@ -1389,6 +1419,17 @@
     } finally {
       setBusy(false);
     }
+  });
+
+  if (recoveryMore) recoveryMore.addEventListener("click", async function () {
+    if (pending || !recoveryCursor) return;
+    setBusy(true);
+    try {
+      await loadRequests(true);
+      announce(recoveryCursor ? "More requests can be scanned." : "This recovery scan reached the end of the active requests.", false);
+    } catch (error) {
+      announce(error.message || "Could not scan the next batch. Try again.", true, error);
+    } finally { setBusy(false); }
   });
 
   if (showArchived) showArchived.addEventListener("click", async function () {

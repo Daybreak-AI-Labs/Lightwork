@@ -21,7 +21,7 @@ Playwright is imported lazily (inside the shared session), so this module
 imports — and its tests run — without the ``browser`` extra installed.
 Offline tests inject a fake page via ``_page``.
 
-Factory exported, NOT registered in the default tool set: callers opt in.
+Registered alongside ``browser`` when that optional capability is enabled.
 """
 from __future__ import annotations
 
@@ -64,11 +64,21 @@ def _page():
     return _get_session().page
 
 
-# Ledger from the most recent snapshot: node id -> (role, name). Ids are
-# stable for a given tree (depth-first numbering), so re-snapshotting an
-# unchanged page reproduces them.
-_nodes: dict[str, tuple[str, str]] = {}
+# Keep node ids with their browser scope. A global ledger could expose one
+# customer's accessible names or resolve an id against another customer's page.
+_nodes: dict[tuple[str | None, str | None, int | None], dict[str, tuple[str, str]]] = {}
 _nodes_lock = threading.Lock()
+
+
+def _scope() -> tuple[str | None, str | None, int | None]:
+    from .browser import _session_scope
+
+    return _session_scope()
+
+
+def _clear_scope(scope: tuple[str | None, str | None, int | None]) -> None:
+    with _nodes_lock:
+        _nodes.pop(scope, None)
 
 
 def _walk(node: dict, depth: int, lines: list[str], ledger: dict[str, tuple[str, str]]) -> None:
@@ -93,8 +103,7 @@ def _take_snapshot(page) -> list[str]:
     if isinstance(tree, dict):
         _walk(tree, 0, lines, ledger)
     with _nodes_lock:
-        _nodes.clear()
-        _nodes.update(ledger)
+        _nodes[_scope()] = ledger
     return lines
 
 
@@ -103,11 +112,11 @@ def _activate(page, args: dict[str, Any]) -> str:
     if not nid:
         return "ERROR: activate requires node_id (from snapshot/find)"
     with _nodes_lock:
-        node = _nodes.get(nid)
+        node = _nodes.get(_scope(), {}).get(nid)
     if node is None:
         _take_snapshot(page)  # no (or stale) ledger: refresh once and retry
         with _nodes_lock:
-            node = _nodes.get(nid)
+            node = _nodes.get(_scope(), {}).get(nid)
     if node is None:
         return f"ERROR: unknown node id {nid!r}; run op=snapshot and use an id from it"
     role, name = node
@@ -155,7 +164,7 @@ def _run(args: dict[str, Any]) -> str:
         with _nodes_lock:
             hits = [
                 f"{nid} [{r}] {n!r}"
-                for nid, (r, n) in _nodes.items()
+                for nid, (r, n) in _nodes.get(_scope(), {}).items()
                 if (not role or r.lower() == role) and (not name or name in n.lower())
             ]
         if not hits:
@@ -168,8 +177,13 @@ def _run(args: dict[str, Any]) -> str:
     return f"ERROR: unknown op {op!r}"
 
 
-def aria_navigate() -> Tool:
+def aria_navigate(*, managed: bool = False) -> Tool:
     """Factory: ARIA-first navigation over the shared browser session."""
+    async def managed_action(args: dict[str, Any]) -> str:
+        from .browser import run_on_browser_worker
+
+        return await run_on_browser_worker(_run, args)
+
     return Tool(
         name="aria_navigate",
         description=(
@@ -180,7 +194,7 @@ def aria_navigate() -> Tool:
             "'browser' tool (same session)."
         ),
         input_schema=_SCHEMA,
-        fn=_run,
+        fn=managed_action if managed else _run,
     )
 
 

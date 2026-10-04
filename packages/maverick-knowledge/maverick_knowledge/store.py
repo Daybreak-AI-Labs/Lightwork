@@ -1135,7 +1135,7 @@ def build_store(cfg: dict | None = None):
     if backend == "qdrant":
         return QdrantStore(
             url=cfg.get("url") or None,
-            api_key=cfg.get("api_key") or None,
+            api_key=cfg.get("store_api_key") or None,
             dim=int(cfg.get("dim", 1024)),
             namespace=_namespace_from_cfg(cfg),
         )

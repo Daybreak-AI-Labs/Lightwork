@@ -101,11 +101,11 @@
   <div class="section-head" data-settings-group="models" id="settings-models"><h2>Models</h2></div>
   <div class="panel" data-settings-group="models">
     <p class="muted settings-lead">
-      Lightwork offers every model your saved provider keys can reach, plus its
+      Lightwork offers every model your set-up AI services can reach, plus its
       built-in list. Nothing changes until you save a choice below.
     </p>
     <div class="models-overview" role="group" aria-label="Model availability">
-      <div class="stat"><span class="num">{{ configured_count }}</span><span class="muted">provider{{ '' if configured_count == 1 else 's' }} with a key</span></div>
+      <div class="stat"><span class="num">{{ configured_count }}</span><span class="muted">provider{{ '' if configured_count == 1 else 's' }} set up</span></div>
       <div class="stat"><span class="num">{{ offered_specs|length }}</span><span class="muted">model{{ '' if offered_specs|length == 1 else 's' }} available</span></div>
       <div class="stat"><span class="num">{{ live_count }}</span><span class="muted">up-to-date list{{ '' if live_count == 1 else 's' }}{% if last_refresh_ago %} · refreshed {{ last_refresh_ago }}{% endif %}</span></div>
       <form method="post" action="/settings/models/discover" class="models-overview-action">
@@ -125,9 +125,9 @@
       {% endif %}
     </div>
     {% elif not configured_count %}
-    <p class="muted">No provider key is saved yet. Add one under <a href="#settings-integrations" data-settings-jump="integrations">Provider keys</a> and its models will appear here.</p>
+    <p class="muted">No AI service is set up yet. Add one under <a href="#settings-integrations" data-settings-jump="integrations">Provider keys</a> and its models will appear here.</p>
     {% endif %}
-    {% set status_words = {'live': 'Up to date', 'unavailable': 'Could not check', 'unconfigured': 'No key', 'pending': 'Not checked yet', 'disabled': 'Built-in list', 'unsupported': 'Built-in list', 'catalog': 'Added by your installation'} %}
+    {% set status_words = {'live': 'Up to date', 'unavailable': 'Could not check', 'unconfigured': 'Not set up', 'pending': 'Not checked yet', 'disabled': 'Built-in list', 'unsupported': 'Built-in list', 'configured': 'Saved model', 'catalog': 'Added by your installation'} %}
     <ul class="models-status" aria-label="Model list status by provider">
       {% for g in model_groups if g.name != 'custom' %}
       <li data-settings-search-item>
@@ -136,8 +136,9 @@
         <span class="muted">
           {%- if g.status == 'live' %}{{ g.live_count }} model{{ '' if g.live_count == 1 else 's' }} available with your key
           {%- elif g.status == 'unavailable' %}The provider did not answer. Try refreshing later.
-          {%- elif g.status == 'unconfigured' %}Add a key under Provider keys to use this provider.
+          {%- elif g.status == 'unconfigured' %}Set up this service under Provider keys to use it.
           {%- elif g.status == 'pending' %}Refresh to see the models this key can reach.
+          {%- elif g.status == 'configured' %}Using the model saved in your connection.
           {%- else %}Showing Lightwork's built-in list for this provider.{% endif %}
           {%- if g.fetched_ago %} · refreshed {{ g.fetched_ago }}{% endif %}{% if g.stale %} · out of date, refresh to update{% endif %}</span>
       </li>
@@ -419,16 +420,17 @@
   <div class="section-head" data-settings-group="integrations" id="settings-integrations"><h2>Provider keys</h2></div>
   <div class="panel" data-settings-group="integrations">
     <p class="muted settings-lead">
-      Add a key from your AI provider's account page. You need at least one to
-      run tasks. Keys are stored securely and never shown again. Leave the field
-      blank to keep the key you already saved.
+      Connect the AI service your company uses. Azure and Bedrock can use the
+      server's company sign-in instead of a key. Keys are stored securely and
+      never shown again. Leave a key field blank to keep its saved value.
     </p>
     {% for p in providers %}
     <div class="provider-row" data-settings-search-item id="provider-{{ p.name }}" role="group" aria-labelledby="provider-name-{{ p.name }}"{% if p.name == ai_focus_provider %} data-ai-provider-focus{% endif %}>
       <div class="provider-row__about">
         <div class="provider-row__name" id="provider-name-{{ p.name }}">{{ p.label }}</div>
         <div class="muted provider-row__meta">
-          {% if p.configured %}Saved, {{ p.via|source_label }}{% if p.key_hint %} · {{ p.key_hint }}{% endif %}
+          {% if p.configured %}Set up{% if p.via %}, {{ p.via|source_label }}{% endif %}{% if p.key_hint %} · {{ p.key_hint }}{% endif %}
+          {% elif p.name in ('azure', 'bedrock') %}Not ready yet. Enter the connection details below.
           {% else %}No key yet. Paste one to use this provider.{% endif %}
           {% if p.source_errors %}<div><span class="badge blocked">Settings could not be read</span></div>{% endif %}
           {% if not p.dashboard_can_set_api_key %}<div>This key is {{ p.api_key_source|source_label }}, so it can't be changed here.</div>{% endif %}
@@ -443,6 +445,7 @@
           Models:
           {% if p.discovery.status == 'live' %}<span class="badge active">{{ p.discovery.live_count }} available</span>{% if p.discovery.fetched_ago %} refreshed {{ p.discovery.fetched_ago }}{% endif %}
           {% elif p.discovery.status == 'unavailable' %}<span class="badge blocked">Could not check</span> The provider did not answer. Try refreshing later.
+          {% elif p.discovery.status == 'configured' %}<span class="badge">Saved model</span> Choose it under Models after testing the connection.
           {% else %}Showing Lightwork's built-in list.{% endif %}
         </div>
         {% endif %}
@@ -450,7 +453,42 @@
       <div class="provider-row__actions">
         <form method="post" action="/settings/providers" class="settings-row-form">
           <input type="hidden" name="provider" value="{{ p.name }}" />
-          {% if p.base_url_field %}
+          {% if p.name == 'azure' %}
+          <label class="settings-field"><span>Azure resource address</span>
+            <input class="input" id="provider-url-azure" type="url" name="base_url" value="{{ p.base_url }}"
+                   placeholder="https://your-resource.openai.azure.com" autocomplete="off" required
+                   {% if not p.dashboard_can_set_base_url %}disabled{% endif %} /></label>
+          <label class="settings-field"><span>Azure model deployment</span>
+            <input class="input" name="deployment" value="{{ p.setup.deployment }}" maxlength="64" required
+                   placeholder="Your deployment name" {% if p.setup_locked.deployment %}disabled{% endif %} /></label>
+          <label class="settings-field"><span>How Lightwork signs in</span>
+            <select class="input" name="auth_mode" {% if p.setup_locked.auth_mode %}disabled{% endif %}>
+              <option value="api_key"{% if p.setup.auth_mode != 'entra_id' %} selected{% endif %}>Azure resource key</option>
+              <option value="entra_id"{% if p.setup.auth_mode == 'entra_id' %} selected{% endif %}>Server's Microsoft sign-in</option>
+            </select></label>
+          <details class="settings-field"><summary>Azure service version</summary>
+            <input class="input" name="api_version" value="{{ p.setup.api_version }}" placeholder="Use Lightwork's standard version"
+                   {% if p.setup_locked.api_version %}disabled{% endif %} /></details>
+          <p class="muted provider-row__meta">The Microsoft sign-in option uses the identity already set up on this server and removes a key saved here. After saving, test the connection below, choose the deployment under Models, and <a href="#settings-model-prices" data-settings-jump="models">review its spending ceiling</a>.</p>
+          {% elif p.name == 'bedrock' %}
+          <label class="settings-field"><span>AWS region</span>
+            <input class="input" name="region" value="{{ p.setup.region }}" maxlength="20" required placeholder="us-east-1"
+                   {% if p.setup_locked.region %}disabled{% endif %} /></label>
+          <label class="settings-field"><span>Claude model in your AWS account</span>
+            <input class="input" name="model_id" value="{{ p.setup.model_id }}" maxlength="120" required
+                   placeholder="Paste the model ID from Bedrock" {% if p.setup_locked.model_id %}disabled{% endif %} /></label>
+          <label class="settings-field"><span>Bedrock service</span>
+            <select class="input" name="endpoint" {% if p.setup_locked.endpoint %}disabled{% endif %}>
+              <option value="mantle"{% if p.setup.endpoint != 'legacy' %} selected{% endif %}>Current Claude service</option>
+              <option value="legacy"{% if p.setup.endpoint == 'legacy' %} selected{% endif %}>Older Claude service</option>
+            </select></label>
+          <label class="settings-field"><span>How Lightwork signs in</span>
+            <select class="input" name="auth_mode" {% if p.setup_locked.auth_mode %}disabled{% endif %}>
+              <option value="iam"{% if p.setup.auth_mode != 'api_key' %} selected{% endif %}>Server's AWS sign-in or role</option>
+              <option value="api_key"{% if p.setup.auth_mode == 'api_key' %} selected{% endif %}>Bedrock access key</option>
+            </select></label>
+          <p class="muted provider-row__meta">This connection runs Claude through your AWS account. Choosing server sign-in removes a Bedrock key saved here. After saving, test the connection, choose this model under Models, and <a href="#settings-model-prices" data-settings-jump="models">review its spending ceiling</a>.</p>
+          {% elif p.base_url_field %}
           <label class="settings-field">
             <span>Server address (only for self-hosted models)</span>
             <input class="input" id="provider-url-{{ p.name }}" type="url" name="base_url" value="{{ p.base_url }}"
@@ -459,13 +497,13 @@
           </label>
           {% endif %}
           <label class="settings-field">
-            <span>{{ p.label }} key</span>
+            <span>{{ 'Azure resource key' if p.name == 'azure' else 'Bedrock access key' if p.name == 'bedrock' else p.label ~ ' key' }}</span>
             <input class="input" id="provider-key-{{ p.name }}" type="password" name="api_key"
                    placeholder="Paste your key" autocomplete="off"
                    {% if not p.dashboard_can_set_api_key %}disabled{% endif %} />
           </label>
           <button type="submit" class="btn"
-                  {% if (not p.dashboard_can_set_api_key) and ((not p.base_url_field) or (not p.dashboard_can_set_base_url)) %}disabled aria-disabled="true"{% endif %}>Save</button>
+                  {% if p.name not in ('azure', 'bedrock') and (not p.dashboard_can_set_api_key) and ((not p.base_url_field) or (not p.dashboard_can_set_base_url)) %}disabled aria-disabled="true"{% endif %}>Save</button>
         </form>
         <div class="settings-row-form provider-row__buttons">
           {% if p.configured %}
@@ -473,6 +511,7 @@
             <input type="hidden" name="provider" value="{{ p.name }}" />
             <button type="submit" class="btn">Test connection</button>
           </form>
+          {% if p.name in ('azure', 'bedrock') %}<span class="muted provider-row__meta">This sends one small model request. Your provider may charge for it.</span>{% endif %}
           {% endif %}
           {% if p.configured and p.discovery and p.discovery.supported and discovery_enabled %}
           <form method="post" action="/settings/models/discover">
@@ -481,9 +520,9 @@
           </form>
           {% endif %}
           {% if p.dashboard_set %}
-          <form method="post" action="/settings/providers/clear" data-confirm="Remove the saved {{ p.label }} key? Tasks will stop using this provider until you add a key again." data-confirm-ok="Remove key">
+          <form method="post" action="/settings/providers/clear" data-confirm="Remove the saved {{ p.label }} setup? Tasks using this provider will stop until you set it up again." data-confirm-ok="Remove setup">
             <input type="hidden" name="provider" value="{{ p.name }}" />
-            <button type="submit" class="btn btn--danger">Remove key</button>
+            <button type="submit" class="btn btn--danger">{{ 'Remove setup' if p.name in ('azure', 'bedrock') else 'Remove key' }}</button>
           </form>
           {% endif %}
         </div>
@@ -697,6 +736,15 @@
       {% if can_open_page('/cache') %}<a class="btn btn--ghost" href="/cache">Cache</a>{% endif %}</p>
   </div>
   {% endif %}
+
+  <div class="section-head" data-settings-group="maintenance"><h2>Running code</h2></div>
+  <div class="panel" data-settings-group="maintenance">
+    <p class="muted settings-lead">A person must approve each request before Lightwork runs code or changes a project or database. The request shows what will run and where. One approval covers one run; saved approvals cannot silently authorize later runs.</p>
+    {% if can_open_page('/approvals') %}<p><a class="btn btn--ghost" href="/approvals">Review pending requests</a></p>{% endif %}
+    <details class="settings-details"><summary>What this covers</summary>
+      <p class="muted">Commands, notebooks, Python scripts, WebAssembly programs, code-analysis servers, database changes, and Git changes all require a fresh review. Reading a database or inspecting project history does not ask for a code-running approval.</p>
+    </details>
+  </div>
 
   <div class="section-head" data-settings-group="maintenance"><h2>Safety checks for this installation</h2></div>
   <div class="panel" data-settings-group="maintenance" data-maintenance="checks">

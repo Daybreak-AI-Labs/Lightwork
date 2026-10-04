@@ -261,14 +261,31 @@
         say('Add the lawful reason for keeping their data, then try again.');
         return;
       }
-      return call('POST', base + encodeURIComponent(requestId) + '/close', body).then(function () {
-        say(recordOnly ? 'Recorded.' : 'Request closed.'); reloadSoon();
+      return call('POST', base + encodeURIComponent(requestId) + '/close', body).then(function (result) {
+        var cleanup = result && result.export_cleanup;
+        say(cleanup && cleanup.status === 'failed' ? cleanup.message : (recordOnly ? 'Recorded.' : 'Request closed.'));
+        reloadSoon();
       });
     }).catch(function (f) { failPlain(f, recordOnly ? 'record the answer' : 'close the request'); });
   }
-  on('dsar-close', function () { closeRequest(false); });
+  // A closed access or portability request whose saved export could not be
+  // removed offers the cleanup again instead of a second close.
+  function retryCleanup() {
+    ask('Try removing this request’s saved export again?', 'Retry cleanup').then(function (ok) {
+      if (!ok) return;
+      call('POST', base + encodeURIComponent(requestId) + '/close').then(function (result) {
+        var cleanup = result && result.export_cleanup;
+        say(cleanup && cleanup.status === 'failed' ? cleanup.message : 'Saved export cleanup complete.');
+        reloadSoon();
+      }).catch(function (f) { failPlain(f, 'remove the saved export'); });
+    });
+  }
+  on('dsar-close', function () {
+    if (page.getAttribute('data-status') === 'closed') { retryCleanup(); return; }
+    closeRequest(false);
+  });
   on('dsar-record-outcome', function () { closeRequest(true); });
-  if (location.hash === '#close' && $('dsar-close')) closeRequest(false);
+  if (location.hash === '#close' && $('dsar-close') && page.getAttribute('data-status') !== 'closed') closeRequest(false);
 
   // Erasure: pick the matching person (by their identifier) and erase.
   on('dsar-erase', function () {

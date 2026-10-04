@@ -592,6 +592,53 @@ def test_full_request_list_explains_in_product_recovery_without_blocking_reads(
     }).status_code == 200
 
 
+def test_admin_recovers_later_finished_request_from_legacy_overfill(customer, monkeypatch):
+    client, service, registry, rights = customer
+    monkeypatch.setattr(knowledge_access, "_MAX_REQUESTS", 3)
+    sources = [_dataset(registry, rights, "knowledge-a", f"legacy-{i}") for i in range(3)]
+    first = service.submit_request(
+        "knowledge-a", OWNER, sources[0], request_type="exclusion",
+        reason="Review this version.", request_key="legacy-0",
+    )
+    finished = service.decide_request(
+        "knowledge-a", OWNER, first["id"], expected_revision=first["revision"],
+        decision="deny", evidence_sha256=_sha("legacy denial"),
+    )
+    for index in (1, 2):
+        service.submit_request(
+            "knowledge-a", OWNER, sources[index], request_type="exclusion",
+            reason="Review this version.", request_key=f"legacy-{index}",
+        )
+    monkeypatch.setattr(knowledge_access, "_MAX_REQUESTS", 2)
+    assert client.get(BASE + "/requests?ready_to_archive=true").json()["items"] == []
+    assert client.post(BASE + "/detail", json={
+        "context": _context(client), "reference": _ref(sources[1]), "purpose": PURPOSE,
+    }).status_code == 409
+
+    cursor, candidates = "", []
+    for _ in range(4):
+        page = client.get(BASE + "/requests/recovery", params={"cursor": cursor, "limit": 1})
+        assert page.status_code == 200, page.text
+        payload = page.json()
+        assert payload["can_review"] and payload["ready_to_archive"]
+        assert len(payload["items"]) <= 1
+        candidates.extend(payload["items"])
+        cursor = payload["next_cursor"]
+        if cursor is None:
+            break
+    assert [item["id"] for item in candidates] == [finished["id"]]
+    moved = client.post(BASE + f"/requests/{finished['id']}/archive", json={
+        "context": _context(client), "confirm": True,
+        "expected_revision": finished["revision"],
+    })
+    assert moved.status_code == 200 and moved.json()["archived_at"] is not None
+    assert client.post(BASE + "/detail", json={
+        "context": _context(client), "reference": _ref(sources[1]), "purpose": PURPOSE,
+    }).status_code == 200
+    _select(client, "knowledge-b")
+    assert client.get(BASE + "/requests/recovery").json()["items"] == []
+
+
 def test_context_confirmation_and_malformed_inputs_fail_closed(customer):
     client, _service, registry, rights = customer
     source = _dataset(registry, rights, "knowledge-a", "input-source")

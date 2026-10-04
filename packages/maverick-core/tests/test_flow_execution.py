@@ -242,6 +242,12 @@ class TestExecution:
         assert paused.status == "paused_approval"
         assert paused.prompt == "Approve paying Acme Corp 5000?"
         assert paused.human["approval_card"]["summary"] == paused.prompt
+        card = paused.human["approval_card"]
+        assert card["target"]["label"] == "AI task"
+        assert card["parameters"]["summary"][-1] == "Next: AI task"
+        assert not any("digest" in text or "node" in text
+                       for text in card["parameters"]["summary"])
+        assert "current permissions" in card["preview"]["after"]
 
     def test_pause_resume_across_persisted_state(self, tmp_path, monkeypatch):
         _patch_home(tmp_path, monkeypatch)
@@ -262,6 +268,41 @@ class TestExecution:
                                      ))
         assert resumed.status == "completed" and resumed.data["done"] == "ran"
         assert resumed.run_id == paused.run_id          # same run, resumed in place
+
+    def test_approval_saved_before_copy_change_can_resume(self, tmp_path, monkeypatch):
+        _patch_home(tmp_path, monkeypatch)
+        from maverick.approval_cards import digest
+        from maverick.flow import approvals
+
+        flow = Flow(id="old-card", name="Old card", start="approve", nodes={
+            "approve": FlowNode(id="approve", kind="approval", prompt="Continue?", next="do"),
+            "do": FlowNode(id="do", kind=NODE_AGENT, brief="finish", output="result"),
+        })
+        presentation = approvals.approval_card_presentation
+        with monkeypatch.context() as patch:
+            patch.setattr(
+                approvals, "approval_card_presentation",
+                lambda flow, paused, next_node, prompt: presentation(
+                    flow, paused, next_node, prompt, legacy=True,
+                    run_data_sha256=digest({"n": 1}),
+                ),
+            )
+            paused = execution.execute(
+                flow, agent_runner=lambda brief, data: ("done", 1.0),
+                action_runner=lambda *args: ("", None), data={"n": 1},
+            )
+        assert paused.status == "paused_approval"
+        assert paused.human["approval_card"]["parameters"]["summary"][1].startswith(
+            "Continue after approval node:")
+        resumed = execution.execute(
+            flow, agent_runner=lambda brief, data: ("done", 1.0),
+            action_runner=lambda *args: ("", None),
+            resume_run_id=paused.run_id, decision="approved",
+            decided_by="system:direct",
+            approval_binding_sha256=_approval_binding(paused),
+            approval_decision_attestation=_approval_attestation(paused),
+        )
+        assert resumed.status == "completed"
 
     def test_resume_merges_free_form_human_inputs(self, tmp_path, monkeypatch):
         # An approval can also COLLECT data: inputs given at resume merge into the
@@ -341,6 +382,32 @@ class TestExecution:
         assert run.status == "completed"
         assert run.nodes["a"]["outcome"] == 1.0 and run.nodes["b"]["outcome"] == 1.0
         assert node_outcomes.stats("dry") == {}          # nothing grounded
+
+    def test_dry_run_never_echoes_rendered_params_or_brief_in_saved_data(
+            self, tmp_path, monkeypatch):
+        from maverick.flow import store
+
+        _patch_home(tmp_path, monkeypatch)
+        private_value = "cedar-marble-4829-7731"  # pragma: allowlist secret
+        f = Flow(id="private-dry", name="Private test", start="a", nodes={
+            "a": FlowNode(id="a", kind=NODE_AGENT,
+                          brief=f"Summarize {private_value}", output="draft", next="b"),
+            "b": FlowNode(id="b", kind=NODE_ACTION, tool="web_search",
+                          params={"body": f"pin={private_value}"}, output="posted"),
+        })
+        ag, act = execution.sandbox_runners()
+
+        run = execution.execute(f, agent_runner=ag, action_runner=act,
+                                data={"sample": "ordinary"}, record_outcomes=False)
+        saved = store.load_run(run.run_id)
+
+        assert run.status == "completed" and saved.status == "completed"
+        assert saved.data["posted"] == {
+            "dry_run": True, "tool": "web_search", "parameters": "withheld",
+        }
+        assert private_value not in str(run.data)
+        assert private_value not in str(saved.data)
+        assert private_value not in str(saved.input_data)
 
     def test_execute_preserves_queued_placeholder_idem_and_inputs(self, tmp_path, monkeypatch):
         # A queued placeholder (saved by enqueue with the idempotency key + inputs)

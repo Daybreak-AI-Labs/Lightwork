@@ -457,6 +457,48 @@ class Flow:
             recipe_teaching=copy.deepcopy(d.get("recipe_teaching")),
         )
 
+    def unreachable_node_ids(self) -> list[str]:
+        """Steps that no run can reach from this flow's first step."""
+        reached: set[str] = set()
+        pending = [self.start]
+        while pending:
+            node_id = pending.pop()
+            if node_id in reached or node_id not in self.nodes:
+                continue
+            reached.add(node_id)
+            node = self.nodes[node_id]
+            if node.kind == NODE_BRANCH:
+                targets = [node.if_true or node.next, node.if_false or node.next]
+            elif node.kind == NODE_SWITCH:
+                targets = [node.next] + [
+                    case.get("to") or node.next
+                    for case in node.cases if isinstance(case, dict)
+                ]
+            else:
+                targets = [node.next]
+            if node.kind in (_WORK_KINDS | {NODE_SCOPE}):
+                targets.append(node.on_error)
+            if node.kind == NODE_APPROVAL:
+                targets.append(node.on_expire)
+            pending.extend(target for target in targets
+                           if isinstance(target, str) and target)
+        return sorted(self.nodes.keys() - reached)
+
+    def reachability_errors(self) -> list[str]:
+        """Publication blockers, including disconnected nested flow steps."""
+        errors = [
+            f"step {self.nodes[node_id].label or node_id!r} can never run; connect it from the first step"
+            for node_id in self.unreachable_node_ids()
+        ]
+        for node in self.nodes.values():
+            if node.body is not None:
+                errors.extend(f"{node.label or node.id}: {error}"
+                              for error in node.body.reachability_errors())
+            for branch in node.branches:
+                errors.extend(f"{node.label or node.id}: {error}"
+                              for error in branch.reachability_errors())
+        return errors
+
     def validate(self, *, _inherited_approval: bool = False) -> list[str]:
         """Structural problems (empty list = valid). Not an execution check."""
         errs: list[str] = []
@@ -823,12 +865,11 @@ def ensure_high_risk_approvals(flow: Flow) -> Flow:
 
 
 def _pause_node_errors(flow: Flow) -> list[str]:
-    """Errors for ``approval``/``delay`` nodes anywhere inside a NESTED sub-flow
+    """Errors for pausing nodes anywhere inside a NESTED sub-flow
     (a foreach body, a parallel branch, and recursively their own nested bodies).
     Human-in-the-loop lives only at the top flow: a nested context can't pause, so
-    a nested ``approval`` rejects the WHOLE run and a nested ``delay`` silently
-    does nothing. Flagging it at validation turns a runtime footgun into a clear
-    save-time error."""
+    a nested approval or event wait rejects the run and a nested delay is skipped.
+    Flagging it at validation turns a runtime footgun into a clear save-time error."""
     errs: list[str] = []
     for n in flow.nodes.values():
         if n.kind == NODE_APPROVAL:
@@ -837,6 +878,9 @@ def _pause_node_errors(flow: Flow) -> list[str]:
         if n.kind == NODE_DELAY:
             errs.append(f"delay node {n.id!r} can't wait inside a loop/branch "
                         "(nested delays are skipped); move it to the top flow")
+        if n.kind == NODE_WAIT:
+            errs.append(f"Wait for another app step {n.label or n.id!r} cannot wait "
+                        "inside a loop or parallel path; move it to the main flow")
         if n.kind in (NODE_FOREACH, NODE_WHILE, NODE_SCOPE) and n.body is not None:
             errs.extend(_pause_node_errors(n.body))
         if n.kind == NODE_PARALLEL:

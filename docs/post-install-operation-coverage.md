@@ -17,6 +17,28 @@ Local service tests and synthetic browser fixtures provide distinct evidence;
 neither alone is an authenticated installed-application acceptance test. Track
 those gaps explicitly instead of calling a screen complete because it renders.
 
+## Everyday task controls (October 4, 2026)
+
+The default-off product-operation catalog now exposes task discovery and a
+reviewed new-task start on Chat, Tasks and Today. The native task API and
+Copilot share task admission, current spending-limit resolution, rate limits,
+provider readiness, owner authority and a keyed submission receipt. A lost
+start response can be read back by its exact operation identity; a repeated
+confirmation does not dispatch another task. Search returns bounded task links
+after re-reading each full task and checking current department authority. The
+native task-search API now applies the same full-row check.
+
+| Customer job | Direct UI and Copilot operation | Observable result and recovery | Remaining boundary |
+| --- | --- | --- | --- |
+| Find a task | Tasks search; `tasks.find` on Chat, Tasks, Today and task pages | Read-only owner-scoped match list with current status and a link to task progress | Search examines the latest 1,000 tasks; older work needs the paginated task history. |
+| Start a task | Chat composer or task API; `tasks.start` on Chat, Tasks and Today | Sealed preview of task text and effective limits, separate confirmation, native admission receipt and task-progress link; exact-key replay | Accepted admission is not completed work. Source attachments, specialist/template starts and connected-account choices remain in native controls. |
+| Stop or restart | Native task progress; existing `tasks.stop` and `tasks.resume` | Current-owner checks, separate reviewed Stop/restart, exact receipts and progress readback | Stop is cooperative; prior external effects remain. A restart is a new attempt. |
+| Review work | Project reviews; existing `reviews.respond` | Fixed-version response with current reviewer authority and receipt recovery | The separate high-risk Approvals queue and task deliverable sign-off still need typed Copilot decision adapters. |
+
+Focused local product-operation and native-submission tests passed (27 checks).
+No installed-app, real provider, customer-content or narrow-screen acceptance
+was run for these additions. Whole-product Copilot parity remains open.
+
 ## High-impact action review (October 3, 2026)
 
 Safety settings keep practice predictions in watch-only mode by default. An
@@ -108,6 +130,7 @@ inference families add separate data-range and decision controls.
 | --- | --- | --- |
 | Admit a skill suggested from repeated completed work | Default local distillation writes a tenant-scoped suggestion, not an active skill. Administrators can read full instructions and linked currently shared task sources on Skills, choose a distinct saved name, and confirm one exact proposal version. The canonical skill validation, signing policy and shield checks run before admission; current source checks and a no-overwrite rule guard the write. Administrator permission is checked again at the file-change boundary. The activity record first marks the authorized intent and records success only after the file change; a post-change record failure tells the operator to refresh current state. If a source later becomes private or unavailable, runtime recall stops and the installed skill stays visible to administrators as paused so they can remove its exact version from Skills or guarded Copilot. Local core, API, JavaScript and typed Copilot tests cover this path. | Qualify the authenticated installed-app journey, keyboard and narrow-screen use, signed-only installations, and an interrupted activity record on a customer machine. The separate opt-in AI-provider distillation still writes directly to installed skills after validation and is not changed by this local-suggestion review path. |
 | Run a saved learned workflow | Designer has ordinary typed input forms and checks the published version before execution. Unsupported forms refuse rather than silently converting data. | Full installed-app journey and authorized Copilot execution. |
+| Check a specialist's answers | Workforce lets an administrator save and revise up to 20 business test questions per specialist, then select up to five at a time against its current answer instructions with no tools or company knowledge. The existing bounded-model-test installation setting gates paid runs. An exact request reference is saved before dispatch, so a lost response reads the original result without repeating a paid call. Completed answers, case versions, model, instruction fingerprint and recorded cost remain in workspace history. Copilot's enabled model-controls family can read, add and start a saved set of five or fewer with sealed review and exact-operation recovery. Local route, service and UI checks cover this narrow journey. | These are literal answer checks, not a full specialist or source-correctness evaluation. Add Copilot selection from larger sets, knowledge-grounded grading, safe workflow/tool simulation, flow cases, import, draft comparisons, promotion gates, independent audit custody and installed-app acceptance. |
 | Turn off or delete a saved flow | Workflows and the designer now offer both actions. A current-state preview counts the live schedule, connected starts, pending form submissions, already active runs and published flows that contain a pinned copy. Turn off keeps the draft; delete requires the exact reviewed draft and publication, refuses while received forms await a decision, and clears the private editor recovery copy when available. Both reconcile the flow schedule. A synthetic browser journey covered create, publish, turn off and delete. | Connected starts need reconnection after a fresh publication. Already active runs and other published flows holding a pinned copy may continue. An unavailable recovery store leaves a separate cleanup warning. Qualify the installed-app journey, failure recovery, and Copilot control. |
 | Edit a workflow with Copilot | Designer proposals protect newer edits, and Undo/Redo include settings. | Global operation coverage is separate from graph suggestions. |
 | Stop future use of an accepted example | Run page and global Copilot now host the same reason/confirmation form. Copilot's closed catalog reads current selection and authority, prepares a sealed short-lived review, then calls the native withdrawal service only after human confirmation. It reports confirmed, pending and changed states separately. Native page maintenance remains available when Copilot actions, workflows or learning are stopped. | Authenticated installed-app browser acceptance, effective-source transfer for the optional setting, and the rest of the example lifecycle. No claim of erasing copies or undoing completed work. |

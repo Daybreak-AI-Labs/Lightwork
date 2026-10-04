@@ -772,13 +772,19 @@ def _wrap_connector_executor(
             request_parts = _approval_request_parts(receipt_args)
             no_revision = revision_contract.get("state") == "human_approved_no_revision"
             approval_detail += _no_revision_review_note(revision_contract)
+            expected_approver = _approver()
+
+            def approval_target():
+                return {**_connector_target(tool, resource, revision_contract),
+                        "standing_approver": _approver()}
+
             permit = require_operation_consent(
                 action,
                 risk="high",
                 scope=approval_scope,
                 detail=approval_detail,
                 provenance="governed-connector",
-                target=_connector_target(tool, resource, revision_contract),
+                target=approval_target(),
                 parameters={
                     "request": receipt_args,
                     "transaction_id": transaction_id,
@@ -796,9 +802,7 @@ def _wrap_connector_executor(
                 before="No PREPARE receipt or remote write exists for this transaction.",
                 after="The remote system may contain the reviewed change and Lightwork records its outcome.",
                 irreversible=True,
-                target_provider=lambda: _connector_target(
-                    tool, resource, revision_contract,
-                ),
+                target_provider=approval_target,
                 parameters_provider=lambda: {
                     "request": copy.deepcopy(receipt_args),
                     "transaction_id": transaction_id,
@@ -824,6 +828,11 @@ def _wrap_connector_executor(
                     "REFUSED (governed): the dashboard decision did not carry "
                     "an authenticated approver identity for target "
                     f"{path!r}; no write was attempted."
+                )
+            if expected_approver and decision_actor != expected_approver:
+                return (
+                    "REFUSED (governed): the configured approver did not approve "
+                    f"the change to {path!r}; no write was attempted."
                 )
             approval_identity = decision_actor or decision.source
             try:

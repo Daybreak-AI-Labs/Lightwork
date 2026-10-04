@@ -185,7 +185,45 @@ var FDCore = (function () {
       if (n.kind === 'approval' && !n.prompt) errs.push('approval ' + n.id + ' has no prompt');
       if (n.kind === 'subflow' && !n.flow_ref) errs.push('subflow ' + n.id + ' has no flow reference');
     });
+    nestedWaitSteps(f).forEach(function (n) {
+      errs.push('Wait for another app step ' + n.id + ' cannot wait inside a loop or parallel path');
+    });
     return errs;
+  }
+
+  function unreachableNodeIds(f) {
+    var nodes = f.nodes || [], byId = {}, seen = {}, queue = f.start ? [f.start] : [];
+    nodes.forEach(function (n) { byId[n.id] = n; });
+    while (queue.length) {
+      var id = queue.shift(), n = byId[id];
+      if (!n || seen[id]) continue;
+      seen[id] = true;
+      var targets = n.kind === 'branch'
+        ? [n.if_true || n.next, n.if_false || n.next]
+        : n.kind === 'switch'
+          ? [n.next].concat((n.cases || []).map(function (c) { return c && (c.to || n.next); }))
+          : [n.next];
+      if (['agent', 'action', 'scope'].indexOf(n.kind) >= 0) targets.push(n.on_error);
+      if (n.kind === 'approval') targets.push(n.on_expire);
+      targets.forEach(function (target) { if (target) queue.push(target); });
+    }
+    return nodes.filter(function (n) { return !seen[n.id]; }).map(function (n) { return n.id; });
+  }
+
+  function nestedWaitSteps(f) {
+    var found = [];
+    function walk(sub) {
+      (sub && sub.nodes || []).forEach(function (n) {
+        if (n.kind === 'wait_event') found.push(n);
+        if (n.body) walk(n.body);
+        (n.branches || []).forEach(walk);
+      });
+    }
+    (f.nodes || []).forEach(function (n) {
+      if (n.body) walk(n.body);
+      (n.branches || []).forEach(walk);
+    });
+    return found;
   }
 
   // The same checks in plain words for people: each problem names the step by
@@ -224,6 +262,14 @@ var FDCore = (function () {
       if (n.kind === 'approval' && !n.prompt) out.push(name(n) + ' needs a question for the approver.');
       if (n.kind === 'subflow' && !n.flow_ref) out.push(name(n) + ' needs a flow chosen.');
     });
+    var unreachable = unreachableNodeIds(f);
+    nodes.forEach(function (n) {
+      if (unreachable.indexOf(n.id) >= 0)
+        out.push(name(n) + ' can never run. Connect it from an earlier step.');
+    });
+    nestedWaitSteps(f).forEach(function (n) {
+      out.push(name(n) + ' cannot wait inside a repeated or parallel path. Move it to the main flow.');
+    });
     return out;
   }
 
@@ -259,6 +305,7 @@ var FDCore = (function () {
            commitRawParams: commitRawParams,
            upstreamOutputs: upstreamOutputs, fitView: fitView,
            validateFlow: validateFlow, plainProblems: plainProblems,
+           unreachableNodeIds: unreachableNodeIds,
            COND_OPS: COND_OPS, COND_RE: COND_RE };
 })();
 

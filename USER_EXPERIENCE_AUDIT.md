@@ -120,24 +120,26 @@ little of it. The product's promises — a governed, multi-tenant, provably impr
 a non-programmer can run — break at the seams between subsystems more often than inside them. The ten
 patterns below account for most of the 92 P0/P1 findings.
 
+These patterns describe the September 30 audit baseline. Later **Current branch** notes under
+individual findings record source fixes or narrowed claims; a code fix is not an installed
+customer acceptance result.
+
 1. **Workspace isolation leaks through side stores.** The world database is per workspace, but goal
-   feedback (UX-001), run-trace annotations (UX-002) and the runtime-overrides
-   file (UX-016) are one file per server keyed by goal number or fixed at import, so data
-   and settings cross workspaces. Removing a workspace keeps its data and members, and a new workspace
-   with the same name inherits both (UX-005). The browser tool shares one logged-in browser
-   across users and workspaces (UX-024).
+   feedback (UX-001) and run-trace annotations (UX-002) were found in shared stores;
+   the runtime-overrides finding (UX-016) was later reconciled as a deployment-wide
+   control plane restricted to global administrators. Workspace removal and recovery once had member-access and retained-data traps (UX-005; local fix described below). The shared browser-session gap has a source fix with local isolation checks (UX-024).
 2. **Secrets and keys escape.** `{{secret('NAME')}}` in a flow reads any server environment variable,
    including the platform's own model key (UX-003); test runs store the resolved value
    (UX-010) and live runs write it to the signed audit log (UX-011). "Keys
-   excluded" backups include audit-signing and at-rest keys (UX-018); a server-wide KMS key
+   excluded" backups historically included tenant signing and at-rest keys (UX-018; fixed in source and verified by a CLI archive check); a server-wide KMS key
    id overrides a workspace's own key (UX-019); vendor questionnaire tokens are returned
    in plaintext to any viewer (UX-026).
 3. **The governance gates are uneven.** A goal routed to a specialist ignores the caller's role and
-   regulatory restrictions (UX-012). "Hold risky tasks for a person" works only from the
-   CLI (UX-014). Flows, A2A, federation and the agent bus screen tool calls with a weaker
-   shield that lets `rm -rf /` through (UX-022). Shell needs per-command approval while
-   `notebook_exec` runs model-written Python with none (UX-025). Most settings changes
-   leave no audit record (UX-023), and `record verify` accepts a capsule signed by anyone
+   regulatory restrictions (UX-012). The shared task-start risk gate has since been fixed
+   for product entry points (UX-014). The weaker flow tool-call shield (UX-022)
+   has been replaced in source by the agent's tool-call classifier; A2A, federation and the agent bus screen incoming text before any agent tool decision. Shell needs per-command approval while
+   `notebook_exec` historically ran model-written Python with none (UX-025; execution gates added in source). Most settings changes
+   leave no audit record (UX-023); `record verify` now requires a trusted signing key
    (UX-017). Four-eyes review is impossible in one place (UX-056) and
    unsatisfiable on single-user installs in others (UX-072).
 4. **"On the models you choose" is not true yet.** On every OpenAI-family provider (OpenAI, Azure,
@@ -146,8 +148,8 @@ patterns below account for most of the 92 P0/P1 findings.
    128 (UX-051; the current branch now caps the agent catalog and makes overflow discoverable). The original unpriced-model path called and billed before
    refusing; the current branch guards dispatch and offers an in-product
    reviewed-ceiling path (UX-050);
-   free OpenRouter models still hit that refusal (UX-206); Azure and Bedrock cannot be set
-   up in the product (UX-074); self-hosted endpoints always fail "Test connection"
+   free OpenRouter models still hit that refusal (UX-206); Azure and Bedrock now have
+   local Settings setup paths awaiting live tenant acceptance (UX-074); self-hosted endpoints always fail "Test connection"
    (UX-054).
 5. **The first hour ends in dead ends.** Consumer setup without an isolated work area now tells users
    that file changes and program execution are off and points them to Permissions; the installed
@@ -181,11 +183,12 @@ patterns below account for most of the 92 P0/P1 findings.
    (UX-049); the causal "placebo refutation" cannot fail (UX-099); snapshots and
    rollback cover six stores, not the guardrails and habits the flywheel writes (UX-247,
    UX-246); flow "hardening" can never apply (UX-090).
-10. **The public story overclaims and the help is missing.** "Hard dollar/wall-clock caps" are off by
-    default (UX-092); the docs home advertises session providers that do not exist
-    (UX-091); every "contact us" and bug-report link points at a private repository
-    (UX-055, UX-046); there is no user guide for the product UI (UX-089); and
-    `/help` contains no help (UX-390).
+10. **The public story overclaims and the help is missing.** The older "hard dollar/wall-clock caps"
+    claim did not match every entry path (UX-092); the docs home advertised session providers that
+    did not exist (UX-091). The private-repository contact and task-report links (UX-055, UX-046)
+    now have source fixes, including an in-product report draft; installed public-site acceptance
+    remains open. The original audit also found no complete UI guide (UX-089) and a thin Help page
+    (UX-390); their current coverage needs separate verification.
 
 ### What is genuinely strong (verified; protect these)
 
@@ -286,6 +289,7 @@ no images without alt, axe violations limited to nine distinct rules).
 
 #### UX-005 · P0 · Trust · Removing a workspace keeps its records AND its member roles; creating a new workspace with the same name silently inherits both (old tasks visible, former members become admins)
 
+- **October 4 source fix (local verification):** Existing registry tombstones, namespace claims and suffix allocation already prevented a newly created workspace from adopting a removed workspace's ID and records. Removal now revokes its direct member roles, clears saved workspace selections and the local active selection; a failed cleanup leaves the tombstone in force and can be retried. The role read boundary also ignores any legacy orphaned memberships for removed IDs. The admin Workspaces page lists removed workspaces whose records remain on disk and offers an explicit, fresh-sign-in recovery. Recovery restores the same archived workspace as **paused**, with records intact and all former memberships still revoked; an administrator must review it and grant access again. If a new workspace took the old display name, recovery assigns a distinct visible name. A removed workspace whose records were erased or whose older tombstone lacks recovery metadata cannot be restored from this page. The erase-data flow still lacks a separate UI preview, and installed multi-worker acceptance remains open.
 - **Who / where:** workspace admin, IT/security, compliance · `/tenants → Remove, then Create workspace (DELETE/POST /api/v1/admin/tenants)`
 - **User impact:** An agency that offboards a client and later creates a workspace with the same name (a new client, or a re-onboarding under a new contract) exposes the old client's records and gives every former member — including removed contractors — access to the new workspace, contradicting the dialog's promise that no one can open it.
 - **Evidence (reproduced):**
@@ -298,21 +302,17 @@ no images without alt, axe violations limited to nine distinct rules).
 
 ## P1 findings
 
-#### UX-006 · P1 · Trust · Setting up a business specialist whose name matches a built-in ('HR Screening') silently replaces that built-in for the whole workspace, raising its risk ceiling and discarding its regulated persona — bypassing the editor's 'limits only tighten' guard
+#### UX-006 · P1 · Trust · Resolved: business setup cannot replace a guarded specialist with the same name
 
-- **Who / where:** workspace admin, compliance, end user · `/agents 'Set up a specialist for your business' (POST /api/v1/agents/business-setup/draft + /approve)`
-- **User impact:** Anyone with factory access can, by naming a business like an existing specialist, replace a governed high-stakes specialist (here the EU AI Act Annex III resume screener, one of the product's golden-case packs) for every user, loosening its limits with no review and no trace in the editor's safety check.
-- **Evidence (reproduced):**
-  - cmd BEFORE: GET /api/v1/agents/hr_screening -> max_risk low, allow [read_file, web_search, knowledge_search], persona 'You are the Resume Screening specialist (EU AI Act Annex III …'
-  - cmd: business-setup draft {name:'HR Screening', use_ai:false} -> approve (confirm=true) -> result {saved: true, name: 'hr_screening', message: ''} — no warning of a collision
-  - cmd AFTER: GET /api/v1/agents/hr_screening -> max_risk medium, allow [read_file, web_search], persona 'You are a specialist assistant for this business. Answer fro…'
-  - packages/maverick-core/maverick/intake.py:384-407 — save_profile writes user_dir()/<slug>.toml with no existence check; domain.py:407-420 overlays a same-named user pack onto the built-in
-  - contrast: the editor path rejects the same change ('max_risk cannot be raised', domain_edit.py:132-173) and refuses name collisions for new agents (expected_generation='new', domain_edit.py:221-223); map/08 §7.2
-- **Recommendation (effort S):** In save_profile (and JD/learn-demo paths) refuse or auto-suffix names that exist in available_domains(), run domain_edit's envelope validation on any write that would overlay a built-in, and show 'A specialist called HR Screening already exists — create “HR Screening (Café Olé)” instead?'.
-- Source: U3-037
+- **Who / where:** workspace admin, compliance, end user · `/agents` business specialist setup and the approved intake save path.
+- **Current-source reconciliation:** `intake.generate_profile` assigns a distinct identity if a name matches a built-in, and `intake.save_profile` refuses a direct built-in identity or an existing custom file before writing. Business setup now checks the requested name against built-in and workspace specialists before starting a draft or spending on AI. The page states the conflict plainly and keeps the existing specialist and safeguards intact; an approval-time collision also returns a specific existing-name message.
+- **Verification:** `test_business_setup_rejects_existing_specialist_names_before_drafting` checks the `HR Screening` risk/persona/tool envelope remains unchanged and an existing custom file is untouched. `test_direct_save_cannot_shadow_a_guarded_builtin` covers the direct kernel call. `business_agent_collision.test.js` checks the customer sees the conflict and no draft review opens.
+- **Historical finding:** U3-037 reproduced a `HR Screening` setup that changed `hr_screening` from low risk with its regulated screening persona to medium risk with a generic persona. That reproduction predates the current guards and is no longer an open overwrite path.
+- Source: U3-037.
 
 #### UX-007 · P1 · Trust · The AWS deployer IAM user can grant itself administrator rights
 
+- **October 4 source fix (local validation, not applied to AWS):** The deployer policy no longer grants any IAM user, role or policy mutation and explicitly denies role assumption. It can pass only the stack's two ECS task roles to ECS and its CodeBuild role to CodeBuild, with service-principal conditions. ECS writes are confined to the stack's cluster, service, task family and tasks. The same managed policy now serves as the user's permissions boundary, so another identity policy cannot expand its ordinary IAM permissions. `terraform fmt` and `terraform validate` pass. A separately privileged operator must apply this IAM change once; until AWS shows the new attached policy and boundary, existing credentials retain the old risk. Subsequent image, task and service deploys remain in the deployer's scope; IAM resource changes need that privileged operator.
 - **Who / where:** IT/security · `deploy/aws/terraform/deployer.tf`
 - **User impact:** Anyone holding the CI deployer credentials can rewrite its own policy or attach AdministratorAccess to itself and take over the AWS account — a much larger blast radius than the security team was told.
 - **Evidence (code-verified):**
@@ -323,6 +323,7 @@ no images without alt, axe violations limited to nine distinct rules).
 
 #### UX-008 · P1 · Trust · A single future-dated consent event (e.g. year 2100) freezes that person's consent as 'granted' forever; later withdrawals are ignored
 
+- **October 4 source fix:** New events more than five minutes in the future or with non-finite timestamps are refused in the shared `record_consent` boundary, including webhook/import callers. A later valid event recomputes the durable projection from eligible history, so a legacy future grant cannot pin it. Preference, posture and export readback also ignore legacy future events and return an unknown state if no valid event survives. Historical bad events remain in the audit history for review; a dedicated admin repair screen and installed CMP acceptance remain open. Local registry cases pass.
 - **Who / where:** compliance, end user · `POST /consent/webhook, OneTrust consent import, consent_registry.record_consent`
 - **User impact:** One bad timestamp from a CMP bug, a misparsed OneTrust date or a typo pins a data subject as consented permanently. When that person later withdraws, the withdrawal is written to history but the register (and anything that reads it) still says 'granted' — marketing keeps processing someone who opted out, and the privacy officer has no view that shows why.
 - **Evidence (reproduced):**
@@ -335,6 +336,7 @@ no images without alt, axe violations limited to nine distinct rules).
 
 #### UX-009 · P1 · Trust · Re-enrolling (editing) an external agent silently lifts its revocation and wipes its credentials
 
+- **October 4 source fix:** External-agent re-enrollment now updates its reach while preserving existing credential bindings, pinned identity, revocation and lifecycle limits inside the trust registry's write lock. A revoked agent remains inactive after edit; a healthy agent's token remains valid. Focused trust/external-agent checks pass (160 cases). The in-product edit warning and installed external-agent acceptance remain open.
 - **Who / where:** IT/security, workspace admin · `POST /api/v1/external-agents, POST /api/v1/trust/agents, maverick external-agents enroll`
 - **User impact:** A security admin revokes a compromised agent; another admin later 'updates' its allowed tools by re-enrolling, and the agent shows as active again with no revocation history — the containment guard that protects the normal restore path is skipped. The same edit also silently invalidates every token a healthy agent is using, breaking it with no warning.
 - **Evidence (reproduced):**
@@ -347,6 +349,7 @@ no images without alt, axe violations limited to nine distinct rules).
 
 #### UX-010 · P1 · Trust · 'Test' (dry run) stores the resolved value of {{secret('…')}} in the saved run data, visible to anyone who can open the run (D8)
 
+- **Current branch:** The historical vault-expression reproduction is closed at the shared flow credential review: `secret()` calls are refused before any node executes, including nested flows and resumed runs. The dry-run mocks now withhold rendered action parameters and agent briefs, so a non-pattern credential supplied in an action field or brief is not echoed into the saved test result. Focused tests cover the persisted run record. This does not claim that arbitrary sample input supplied as run data is secret-aware; users should bind credentials through Connections.
 - **Who / where:** workspace admin, IT/security, compliance · `POST /api/v1/flows/dry-run (designer 'Test'); GET /api/v1/flows/runs/{id}; run page 'Information in this run'`
 - **User impact:** Clicking Test on a flow that uses a vault credential writes the credential in clear text into the run record shown on the run page and API, contradicting the product's promise.
 - **Evidence (reproduced):**
@@ -362,6 +365,7 @@ no images without alt, axe violations limited to nine distinct rules).
 
 #### UX-011 · P1 · Trust · Flow action params resolved from the secret vault ({{secret('NAME')}}) are written unredacted into the signed, append-only audit log
 
+- **Current branch:** Vault expressions are refused before live dispatch. The shared non-agent authorization gate now writes a value-free parameter count to `TOOL_CALL`; the live flow runner writes outcome-only `TOOL_RESULT` summaries. A focused check passes a non-pattern credential to a real action runner and verifies the connector receives it while neither signed receipt contains it. The existing evidence below describes the older behavior, not the current branch. Raw arbitrary connector output in flow run data is a separate limitation unless it matches the run-data redactor; no universal secret inference is claimed.
 - **Who / where:** IT/security, compliance, workspace admin · `Flow run (live action node) → audit/<day>.ndjson TOOL_CALL input_summary`
 - **User impact:** An admin who follows the documented pattern of keeping connector credentials in the vault finds those credentials copied into the tamper-evident audit trail, which auditors, SIEM exports and compliance staff read and which cannot be edited without breaking the chain.
 - **Evidence (reproduced):**
@@ -375,6 +379,7 @@ no images without alt, axe violations limited to nine distinct rules).
 
 #### UX-012 · P1 · Trust · Tasks routed to a specialist pack (domain) drop the requesting user's role and regulatory restrictions and run under the pack's own tool envelope
 
+- **Current branch:** Closed in source before this pass. `Agent._resolve_capability` narrows every explicit pack grant by the run's ambient grant; for a depth-zero specialist it mints and retains the requester's grant first when enforcement is enabled. `agent_from_profile` also bounds a root pack by a caller-supplied `ctx.capability`. The actual tool boundary returns a customer-visible capability refusal without executing the tool. `test_domain_root_capability.py` covers low-risk ceilings, read-only roles, HIPAA outbound denial, explicit run grants, child inheritance and the refused write; all 10 local tests pass. The evidence below describes the older path.
 - **Who / where:** IT/security, workspace admin, compliance · `goal start with a domain/pack (dashboard pack picker, API domain=, auto-routing)`
 - **User impact:** An admin restricts a user or channel (for example read-only, or max risk 'low', or a regulatory profile that forbids outbound actions). The same user starts a task through a specialist pack and the pack's tool list and risk ceiling apply instead, so actions the admin blocked for that person become available. Nothing on screen shows that the user's restrictions were dropped.
 - **Evidence (code-verified):**
@@ -410,6 +415,7 @@ no images without alt, axe violations limited to nine distinct rules).
 
 #### UX-014 · P1 · Trust · Admin setting 'hold risky tasks for a person' ([safety] goal_risk_require_human) is skipped for every task started from the dashboard, API, queue worker, flows or schedules
 
+- **Current-source reconciliation:** The shared runner's `resume=True` no longer bypasses first-start review. `orchestrator._goal_already_ran` looks for a durable prior episode, and `test_goal_risk_gate_entry_points.py` covers a first start held for approval, an approved start, a real resume, and a held task's attempted resume. The historical reproduction below predates this fix. A live configured approval walkthrough remains separate acceptance work.
 - **Who / where:** workspace admin, IT/security, compliance, end user · `dashboard chat + REST goal start (run_goal_in_thread), worker.py, queue_dispatcher, flow/execution.py`
 - **User impact:** An administrator turns on 'tasks that look high-risk wait for a person before they start' and sees it work from the terminal, but every task a business user starts in the dashboard chat, through the API, a schedule, a flow or the job queue starts immediately with no approval request. A task worded 'wire the vendor payment ... delete the production database' runs unattended. The admin has no signal that the control is inert for the product's main surfaces.
 - **Evidence (reproduced):**
@@ -423,6 +429,7 @@ no images without alt, axe violations limited to nine distinct rules).
 
 #### UX-015 · P1 · Trust · Knowledge base with Qdrant sends the embedding provider's API key to the Qdrant server
 
+- **October 4 source fix (local validation):** `build_store` now passes only the separate `store_api_key` to Qdrant; `get_knowledge` carries that value and All settings exposes a sealed Qdrant key field. Existing `api_key` remains solely the embedding credential, and `QDRANT_API_KEY` remains the Qdrant environment fallback. A regression check confirms the embedding key cannot reach the Qdrant adapter with or without an explicit Qdrant key. Existing deployments must set the Qdrant key in All settings or `QDRANT_API_KEY`; a live Qdrant/embedding round trip remains unqualified.
 - **Who / where:** IT/security · `[knowledge] api_key with store='qdrant'`
 - **User impact:** A Voyage/Cohere key is disclosed to whoever operates the Qdrant endpoint (possibly a third-party cloud), and a correctly set QDRANT_API_KEY is overridden so the store may fail to authenticate.
 - **Evidence (code-verified):**
@@ -434,6 +441,7 @@ no images without alt, axe violations limited to nine distinct rules).
 
 #### UX-016 · P1 · Trust · A tenant admin's model pins, allowed models, per-task budget, task-limit switch and denied tools are written to one process-wide file and apply to every tenant
 
+- **Current-source reconciliation:** The overlay remains deployment-global by design, and `admin_pages.py` now requires `auth.require_global_permission(request, "admin")` on the Settings page and these write routes. A workspace-only admin cannot read or change the deployment control plane; `test_app_global_control_plane_authz.py` covers the boundary. The historical reproduction below describes a global administrator's shared policy, not a tenant admin changing another tenant's controls. Workspace-specific spending limits have a separate surface; workspace-specific model/tool restrictions remain a product gap rather than a cross-tenant privilege escalation.
 - **Who / where:** IT/security, workspace admin · `Dashboard admin overrides (admin_pages.py set_budget / model pins / denied tools) → runtime_overrides.py`
 - **User impact:** In a shared deployment, when one workspace's admin blocks a tool, pins a model or sets a spend cap, every other workspace gets the same change, and each admin sees the other's settings as their own. One tenant can switch off another tenant's task limits or deny tools they rely on.
 - **Evidence (reproduced):**
@@ -446,6 +454,7 @@ no images without alt, axe violations limited to nine distinct rules).
 
 #### UX-017 · P1 · Trust · `maverick record verify` accepts a forged Operating Record capsule signed with any key (origin check is self-certifying)
 
+- **Current-source reconciliation:** `verify_capsule` now checks an explicit trusted public key/keyring, defaulting to this installation's audit keyring, and CLI `record verify` accepts `--pubkey`/`--trusted-keys`. A forged capsule signed with an arbitrary key fails as untrusted; focused origin tests pass. The historical reproduction below predates this change. A verifier on another installation must receive the producer's trusted public key through an authenticated channel; a capsule alone cannot establish its own origin.
 - **Who / where:** compliance, IT/security · `maverick record verify <capsule>`
 - **User impact:** An auditor or acquiring company handed a capsule ('the firm's decisions as a system of record') gets 'ok' for a capsule anyone fabricated or altered and re-signed. The tool gives a false assurance of provenance on exactly the artifact meant to prove what the company decided.
 - **Evidence (reproduced):**
@@ -456,20 +465,17 @@ no images without alt, axe violations limited to nine distinct rules).
 - **Recommendation (effort S):** Require a trust anchor: `maverick record verify --pubkey <hex>|--trusted-keys <file>` (and default to the local audit keyring), fail with 'signed by an untrusted key' when the embedded key is not trusted, and print the key fingerprint prominently. Mirror `audit verify --pubkey`. Fix the docstring claim.
 - Source: C5b-001
 
-#### UX-018 · P1 · Trust · Backups made with keys excluded still contain every workspace's audit-signing key and a client deployment's at-rest encryption keys
+#### UX-018 · P1 · Trust · Resolved: keys-excluded backups withhold workspace signing and at-rest keys
 
-- **Who / where:** IT/security, compliance, workspace admin · `maverick backup (unbound, whole-home), installation recovery whole_home backups`
-- **User impact:** Anyone who obtains a backup (offsite bucket, standby host, a contractor) can decrypt a client-bound deployment's data and forge each workspace's tamper-evident audit trail, although the product tells admins keys are left out by default. This is the at-rest-key problem the earlier fix (W1-45) solved only for the top-level folder.
-- **Evidence (reproduced):**
-  - packages/maverick-core/maverick/backup.py:815-821 — _KEY_MATERIAL_ROOTS = (('keys',), ('audit','keys')) matched only at the archive root
-  - packages/maverick-core/maverick/backup.py:803-814, 927-932 — docstring promises the at-rest key, keyring and audit signing keys are withheld by default
-  - tenant keys live at tenants/<seg>/audit/keys/*.key (audit/signing.py:93-104) and tenants/<client>/keys/at_rest.key + at_rest.d/*.key (crypto_at_rest.py:105-120)
-  - cmd: scratchpad/audit/C5a/persist (out_backup_kms.txt) — create_backup(include_keys=False) over a home with root and tenant keys → archive key files: ['data/tenants/acme/audit/keys/signing.key', 'data/tenants/clientco/keys/at_rest.d/old.key', 'data/tenants/clientco/keys/at_rest.key'] (root keys correctly excluded)
-- **Recommendation (effort S):** Match key material at any depth (any path segment sequence ('keys',) or ('audit','keys') followed by *.key), add tenant cases to the backup tests, and list withheld key files in the backup receipt so admins know what to escrow.
-- Source: C5a-069 · prior audit: W1-45 (fixed only for root-level keys, tenant keys still bundled at HEAD)
+- **Who / where:** IT/security, compliance, workspace admin · `maverick backup create` and whole-home installation recovery backups.
+- **Current-source reconciliation:** `backup._key_material_scope` recognizes raw `*.key` under both the data root and each `tenants/<id>/keys/` or `tenants/<id>/audit/keys/` folder. `_stage` excludes them by default, while `--include-keys` is an explicit opt-in. The CLI receipt lists each withheld path relative to the data root so the operator knows what to escrow. A keys-excluded restore preserves live workspace keys rather than deleting them. Wrapped DEKs and public keys remain in the archive.
+- **Verification:** `test_backup_excludes_workspace_key_material_by_default`, `test_backup_include_keys_keeps_workspace_key_material`, `test_replace_existing_restore_preserves_live_workspace_keys`, and `test_cli_whole_home_backup_receipt_names_workspace_keys` cover the exact tenant audit-signing, primary at-rest, and rotation-key paths. The receipt test also checks that those named paths are absent from the resulting archive.
+- **Historical finding:** C5a-069 reproduced `data/tenants/acme/audit/keys/signing.key`, `data/tenants/clientco/keys/at_rest.d/old.key`, and `data/tenants/clientco/keys/at_rest.key` in a keys-excluded whole-home archive. That reproduction predates the current source and must not be treated as an open leak.
+- Source: C5a-069 · prior audit: W1-45.
 
 #### UX-019 · P1 · Trust · A server-wide MAVERICK_KMS_KEY_ID silently overrides each workspace's own KMS key (BYOK)
 
+- **Current-source reconciliation:** `tenant.kms.get_kms` reads the named workspace's own overlay key and passes it explicitly to the cloud KMS builder, ahead of the server-wide variable. `test_tenant_kms_fleet.py` covers tenant BYOK precedence, a workspace without its own key, and ambient-context isolation. The generic cloud builder still gives a server environment key precedence over the operator's global config key, which is intentional and separate from workspace BYOK. Showing the effective key identity on the Security page remains a product visibility gap; live cloud revocation has not been exercised here.
 - **Who / where:** IT/security, compliance · `per-tenant [kms] key_id with cloud KMS (aws/gcp/vault)`
 - **User impact:** An enterprise customer who configured their own KMS key (so they can revoke Lightwork's access) has their data keys wrapped with the operator's key instead whenever the operator also set the global variable. The customer's revocation right is silently void and nothing in the product shows which key is in use.
 - **Evidence (reproduced):**
@@ -481,6 +487,7 @@ no images without alt, axe violations limited to nine distinct rules).
 
 #### UX-020 · P1 · Trust · DSAR export files are kept forever in plaintext after the request is closed
 
+- **Current branch:** New closes commit `closed` with a pending cleanup marker before touching the export, then remove only the current tenant/request's regular, single-link artifact whose embedded intent and digest match the request. The response and stored request expose `export_cleanup.status` (`removed` or `failed`) and a safe message; calling close again retries a failed or interrupted cleanup without repeating fulfillment. An orphan written just before an interrupted fulfillment is also removed when the request closes. Focused DSAR tests pass, including tampered-path/content refusal. Already-closed legacy requests still need a repeat close or a separate migration/sweep; there is no time-based retention purge yet.
 - **Who / where:** compliance, IT/security · `DSAR fulfil / close in the Privacy workspace`
 - **User impact:** Every access request leaves a complete copy of the person's data on disk indefinitely, outside at-rest encryption and outside retention — the opposite of data minimisation, and FEATURES.md's 'no second copy' claim does not cover this path.
 - **Evidence (code-verified):**
@@ -491,6 +498,7 @@ no images without alt, axe violations limited to nine distinct rules).
 
 #### UX-021 · P1 · Trust · REST goals have no spend or time cap by default, while docs/api.md promises '$2, 30min' defaults and a [0,100] clamp
 
+- **Current branch:** REST goal admission now always supplies finite caps, including when a legacy installation has no general task limit: omitted requests use the configured limit or $2/30 minutes; explicit requests are narrowed by operator ceilings and an API maximum of $100/24 hours. The accepted goal body exposes exact `limits`, and keyed receipt recovery exposes the durable dispatch limits. Reviewed Copilot task-start previews use the same calculation. CLI/internal operator no-limit policy remains unchanged. Focused local REST and Copilot tests pass; installed deployment acceptance is still open.
 - **Who / where:** developer, workspace admin, IT/security · `POST /api/v1/goals; docs/api.md`
 - **User impact:** An integrator who trusts the API docs and omits max_dollars (or passes a typo like 1000) launches an uncapped, unbounded-duration run that can spend real provider money; nothing in the 201 response reveals the effective cap.
 - **Evidence (reproduced):**
@@ -507,41 +515,40 @@ no images without alt, axe violations limited to nine distinct rules).
 - **Recommendation (effort S):** Either ship real defaults (e.g. [budget] max_dollars / max_wall_seconds written by the wizard and shown in Settings > Spending limits) or reject API goals without a cap when no deployment ceiling exists; return the effective caps in GoalOut (e.g. limits:{max_dollars,max_wall_seconds,max_depth}); correct docs/api.md.
 - Source: C3-001, C7-010 · prior audit: W5-109 (partially fixed, W5-109 (still present, defaults now absent entirely, defaults sentence still wrong), not $5/1h as W5-109 recorded)
 
-#### UX-022 · P1 · Trust · Flows, workflows, A2A, federation and the agent bus screen tool calls with a weaker shield check that lets 'rm -rf /' through
+#### UX-022 · P1 · Trust · Flow tool calls formerly used a weaker text scan that let 'rm -rf /' through (source fix verified locally)
 
+- **October 4 source reconciliation:** The flow action runner now calls `tool_authz.authorize(tool, params)` before effect. That shared gate invokes `shield_policy.scan_tool_call_block`, which passes the actual tool name and argument dictionary to `Shield.from_config().scan_tool_call`; the older text scan remains an additional floor. The real Shield still returns no block for `scan_block("shell {'cmd': 'rm -rf /'}")`, but returns `rm_rf_root` for `scan_tool_call_block("shell", {'cmd': 'rm -rf /'})`; an ordinary `read_file` call is allowed. Existing real-Shield regression tests cover destructive and nested arguments through `tool_authz`, and the dispatch-contract test catches a new ungated registry call. `Workflow.run` remains an in-process library API with no production caller; the dispatch contract guards that assumption. The cited A2A, federation and agent-bus calls are input screening of goal/message prose, not direct tool dispatch. Their default execution paths enter the orchestrator, whose `Agent._run_tool` calls `scan_tool_call` on the eventual tool and its arguments. The dashboard security API call cited below screens telemetry and rules, not a tool invocation. Those text surfaces should not classify every mention of a dangerous command as an attempted tool call.
+- **Verification limit:** `test_shield_policy.py` and `test_tool_authz.py` passed locally (52 tests). Installed A2A/federation/agent-bus journeys and the external agent-shield SDK were not exercised; the local Shield used its built-in rules. The optional shield can still be disabled by operator configuration on non-required installations.
 - **Who / where:** IT/security, workspace admin, developer · `flow/workflow tool steps (tool_authz), A2A tasks, federation inbound, agent bus, dashboard security API`
-- **User impact:** Admins assume the same safety shield protects every tool call. A destructive command or exfiltration call arriving through a flow step, an A2A request, a federated peer or the agent bus is checked only against prompt-injection text patterns and passes, even though the agent path would block it.
-- **Evidence (reproduced):**
+- **Original user impact:** A destructive command in a flow action could pass a repr-based text scan even though the agent tool-call scan would block it. This direct-dispatch gap is closed in the current source; A2A, federation and agent-bus messages still require separate installed-path verification.
+- **Historical evidence (the direct-dispatch call site has since changed):**
   - packages/maverick-core/maverick/tool_authz.py:103-105 — payload = f"{tool} {params}" (Python repr) → shield_policy.scan_block
   - packages/maverick-core/maverick/shield_policy.py:80 — Shield().scan_input(text), i.e. prompt-injection input rules, not tool-call rules
   - packages/maverick-shield/maverick_shield/guard.py:405-417 — documents this repr-quoting bypass for scan_input
   - cmd: shield_policy.scan_block("shell {'cmd': 'rm -rf /'}") → None (allowed); Shield().scan_tool_call('shell', {'cmd': 'rm -rf /'}) → BLOCKED (rule rm_rf_root). Also confirmed by the audit coordinator (MAP.md V2)
-- **Recommendation (effort S):** Replace scan_block(f'{tool} {params}') with Shield.from_config().scan_tool_call(tool, params) at every non-agent chokepoint (tool_authz, federation.py:523, a2a_tasks.py:1291, tools/agent_bus_tool.py:112, security_api.py:2269), and remove the unit-test stubs that hid it (test_tool_authz.py:58-113).
+- **Recommendation status:** Superseded for direct flow tool calls by the shared gate and real-Shield tests above. Keep ingress text screening on message surfaces and verify their downstream agent tool gate in an installed integration environment.
 - Source: C5a-038
 
-#### UX-023 · P1 · Trust · Most admin setting changes leave no audit record: provider keys, code execution/desktop control, per-task budget, role models, approved models, features, page visibility
+#### UX-023 · P1 · Trust · Resolved: admin settings writes create redacted activity receipts
 
-- **Who / where:** IT/security, compliance, workspace admin · `POST /settings/capabilities, /settings/providers, /settings/providers/clear, /settings/budget, /settings/models/roles, /settings/models/allowed, /settings/features, /settings/ui-visibility/reset`
-- **User impact:** A security officer asked 'who turned on code execution / desktop control, swapped the AI provider key or raised the spend cap last week?' cannot answer: the Activity log has nothing. Only the All-settings page audits, so the same kind of change is recorded or not depending on which screen was used.
-- **Evidence (reproduced):**
-  - cmd: POST /settings/capabilities code_exec=on&computer_use=on → 303 saved; POST /settings/models/roles orchestrator=anthropic:claude-opus-4-8 → 303; POST /settings/features → 303; POST /settings/budget mode=configured&max_dollars=5 → 303; POST /settings/providers provider=vllm base_url+api_key → 303; POST /settings/models/allowed → 303; POST /settings/ui-visibility/reset → 303
-  - cmd: POST /api/v1/settings/catalog dashboard.max_goals_per_min=20 → then GET /api/v1/audit/tail?n=50 → output: exactly ONE event (kind=setting_changed, key=max_goals_per_min); none of the 7 changes above appear
-  - packages/maverick-dashboard/maverick_dashboard/settings_store.py:1097-1111 set_toggles writes overlay with no audit call; rotate_provider 850-1000 and clear_provider 1000-1025 have no audit
-  - packages/maverick-core/maverick/runtime_overrides.py (set_role_models 745, set_budget 760, set_allowed_models) — grep audit/EventKind → 0 hits
-  - packages/maverick-dashboard/maverick_dashboard/admin_pages.py:227-610 handlers call the setters directly
-- **Recommendation (effort M):** Route every Settings writer (capabilities, features, providers set/clear/test, budget, default/role/approved models, discovery, visibility matrix, channels, sandbox backend, module switches) through settings_audit.record_setting_change with actor, old/new (secrets redacted to 'changed'), and roll back on AuditRefused exactly like settings_all_page.catalog_update.
-- Source: U5-001 · prior audit: and wider than D6 listed), map/12 D6 (still present at HEAD
+- **Who / where:** IT/security, compliance, workspace admin · Settings, provider connections, capabilities, task budget, model policy, features, page visibility, channels, sandbox and module switches.
+- **Current-source reconciliation:** `settings_audit.bind_setting_write` records actor, section, key, safe old/new projection and prepared/completed phases at the serialized write boundary. The named `/settings` mutations use it; All settings keeps its own audit path, and webhook/spending-limit changes have dedicated audit records. A refused preparation prevents the write; a failed completion reports an uncertain saved state instead of claiming success. Provider-key values remain redacted, while the existing receipt now names which connection fields changed, including a key rotation from `set` to `set`, without logging credential values or hashes. Provider tests and model discovery are probes with separate action events rather than setting writes.
+- **Verification:** `test_settings_audit_routes.py` covers the named routes, provider rotation and clear, redaction, audit refusal, failed storage, and uncertain completion. Installed Activity-log acceptance and external log forwarding remain deployment checks.
+- **Historical finding:** U5-001 reproduced successful UI changes to capabilities, provider credentials, budget, role and allowed models, features, and page visibility with no corresponding `setting_changed` event. That reproduction predates the current write hooks.
+- Source: U5-001 · map/12 D6.
 
-#### UX-024 · P1 · Trust · The browser tool keeps one shared browser (cookies, logins, open page) for the whole server process, reused across users, tasks and workspaces until someone closes it
+#### UX-024 · P1 · Trust · Browser sessions previously crossed users, goals and workspaces (source fix verified locally)
 
+- **October 4 source fix:** Browser contexts are keyed by workspace, principal and goal; the optional `browser` and `aria_navigate` tools use one dedicated worker thread per scope, preserving Playwright's thread affinity across actions. The ARIA node ledger is scoped too. The goal-finally path closes every scoped context on its worker, including failed or cancelled goals. Goal-scoped use cannot load or save the server-wide `MAVERICK_BROWSER_STATE` file, and its agent file-access gate no longer treats that file as an active sink. Standalone local use keeps the explicit opt-in persistence behavior.
+- **Local verification and limit:** Fake-session regressions proved distinct principals, goals and workspaces receive different pages; browser and ARIA actions for one scope stay on the same thread, cleanup runs on that thread, and scoped work does not save the shared state file. The production optional-tool registration selects the managed worker path. The focused browser suite passed locally (51 tests). Playwright itself is not installed here, so a real Chromium cookie/login acceptance run remains open.
 - **Who / where:** IT/security, end user, workspace admin · `[capabilities] browser = true (opt-in) in the multi-user dashboard / serve process`
-- **User impact:** With the browser capability on, a page one user logged into (their CRM, bank portal, admin console) stays open and authenticated for the next task, which may belong to a different user or workspace; that task can read the page or act in the logged-in session.
-- **Evidence (code-verified):**
+- **Historical user impact:** A logged-in page could remain open for the next user's task and expose its cookies or content. The former module-global session is removed in the current source.
+- **Historical evidence (the named code paths have changed):**
   - packages/maverick-core/maverick/tools/browser.py:615-624 — module-global _session created once per process
   - packages/maverick-core/maverick/tools/browser.py:14-16 — docstring 'Closed at the end of the goal via close_browser()'
   - grep close_browser outside tools/browser.py → no caller (orchestrator/runner/agent never close it at goal end); browser.py only closes on a denied navigation (700-720)
   - packages/maverick-core/maverick/agent.py:1989 — enabled via [capabilities] browser
-- **Recommendation (effort M):** Create a browser context per goal (and per principal/tenant), close it in the orchestrator's finally block, and never share contexts across tenants; add a test that two goals see independent cookies.
+- **Recommendation status:** Implemented in source; run an installed Chromium test with two authenticated goals before calling the browser journey customer-ready.
 - Source: C5a-055
 
 #### UX-025 · P1 · Trust · Shell commands require a person's approval, but notebook_exec (on by default) runs arbitrary model-written Python in the same workspace with no approval at all
@@ -554,9 +561,12 @@ no images without alt, axe violations limited to nine distinct rules).
   - tools/code_exec.py:122-126, wasm_run.py:104, git_advanced.py:52-64,140-160, sql_query.py:200-201, lsp_bridge.py:81-88 — same pattern (no consent gate)
   - cmd: MAVERICK_REHEARSAL=0, scripted task: write_file report.ipynb (cell imports os/subprocess, writes NB_RAN.txt) then notebook_exec → 'exit_code: 0 stdout: notebook code ran as uid 0' and NB_RAN.txt created in the workspace; the shell call in the same run was refused for lack of approval (out_d4.txt)
 - **Recommendation (effort M):** Apply one policy to all code-execution tools: route notebook_exec, code_exec, wasm_run, git_advanced mutating ops, sql_query read_only=false and lsp_bridge through the same require_operation_consent (or the same admin-configurable execution policy as shell). Show in Settings > Safety a single 'Running code' control that lists every tool it covers.
+- **Implementation update (2026-10-04):** The notebook path had already gained one-use exact-operation consent. `code_exec`, WebAssembly runs, Git mutations, write-enabled SQLite statements and host language-server launches now use a shared fresh-consent adapter. It binds the reviewed inputs, execution target, timeout and relevant file versions, denies silent/standing approval, and rechecks the permit at execution. `code_exec` asks before its declared tool calls; those calls still use their own safety path. Settings now explains the coverage and links to Approvals. Read-only database queries, Git inspection and the WebAssembly version probe remain ungated. Focused local tests cover each denied boundary, the shared policy in automatic modes, existing execution behavior, and lint. A live installed dashboard approval walkthrough remains unverified; this is source-level closure, not a production acceptance claim.
 - Source: C5a-014
 
 #### UX-026 · P1 · Trust · Vendor questionnaire links (bearer tokens) are returned in plaintext by the vendor list API to any viewer
+
+- **Current branch (2026-10-04):** Vendor list/detail and unrelated write responses now project questionnaires to a non-authorizing request ID, without live or historical tokens. Questionnaire reply reads no longer include the live `form_path`. Only the one-time send/replace response contains the new address; the vendor page can still copy that address at the moment it is issued. Core, API, and page checks passed (56 focused). Existing governed records still store raw tokens for reply lookup and link retirement; digest-only storage and migration of legacy records remain open. Installed customer-session validation remains open.
 
 - **Who / where:** compliance, IT/security · `GET /api/v1/vendors`
 - **User impact:** Any workspace viewer (or a leaked API response/log) can open and submit a vendor's questionnaire as if they were the vendor, corrupting the risk evidence the privacy team relies on.
@@ -599,6 +609,8 @@ no images without alt, axe violations limited to nine distinct rules).
 
 #### UX-029 · P1 · Bug · AI Entity Tasks: the AI-system picker never loads because the page calls a URL that does not exist
 
+- **Current branch (2026-10-04):** The page already calls the correct inventory route. This pass distinguishes an unavailable inventory from a truly empty one, disables task creation until a real system is loaded, and offers Check again and a direct AI inventory link. Thirteen focused page checks passed; an installed, populated-inventory journey remains unverified.
+
 - **Who / where:** compliance · `static/lightwork-ai-entity-tasks.js (AI entity tasks workbench)`
 - **User impact:** Someone creating a task for an AI system gets an empty picker (the request 404s), so they cannot choose the AI system the task is about and the workbench is effectively unusable.
 - **Evidence (reproduced):**
@@ -613,6 +625,8 @@ no images without alt, axe violations limited to nine distinct rules).
 
 #### UX-030 · P1 · Bug · Cloud Agent Governance is advertised but can never become ready; it tells a user who has a workspace to 'choose a workspace'
 
+- **Current branch (2026-10-04):** The shipped core cannot safely be enabled: `build_cloud_agent_governance_runtime` refuses production operation while canonical governance state is process-local. The page now checks for both a service probe and a runtime factory before offering controls, shows an honest unavailable explanation even when no tenant is bound, and points to Help for availability. The default API status reports `available: false, reason: not_connected` instead of presenting the preview as merely turned off. The page is held out of sidebar/finder/product cards, its security-page link is removed, Settings hides/rejects the unavailable controls, and the installer no longer asks to enable it. Injected test/development compositions remain supported; durable state, production provider composition, and customer acceptance remain **unbuilt/unverified**.
+
 - **Who / where:** compliance, evaluator, workspace admin · `/assurance/cloud-agents`
 - **User impact:** A risk officer following the product page to govern Bedrock/Azure/Vertex agents hits a permanent dead end whose message blames their workspace; nothing any user or admin can do in the product makes it work.
 - **Evidence (reproduced):**
@@ -625,6 +639,8 @@ no images without alt, axe violations limited to nine distinct rules).
 
 #### UX-031 · P1 · Bug · Waiting flow approvals never reach the Approvals inbox or Action Center — both say 'All clear' / 'You're all caught up' while a run waits for a decision
 
+- **Current branch (2026-10-04):** This finding is stale at the current source. `flow_approval_inbox.pending_for_request` reads paused checkpoints, validates their current approval card and assignee authority, and feeds both `/api/v1/approvals` and Action Center. The same projection drives personal notifications. Nine focused inbox tests pass, including authorized/unauthorized reviewers, stale checkpoints, and decision access. A live channel notification and installed-browser approval remain unverified.
+
 - **Who / where:** end user, workspace admin, compliance · `/approvals, /action-center, GET /api/v1/approvals, GET /api/v1/action-center`
 - **User impact:** An approver checks the product's approval inbox, sees nothing to do, and the flow waits (and later expires) without anyone deciding. Power Automate/Teams approvals land in one Approvals center; here they only appear on the individual run page.
 - **Evidence (reproduced):**
@@ -636,6 +652,8 @@ no images without alt, axe violations limited to nine distinct rules).
 - Source: U4-009
 
 #### UX-032 · P1 · Bug · Running one agent assessment breaks the Audit binder (auditor evidence export) and finance board with a 500 error
+
+- **Current branch (2026-10-04):** The current assessment reader skips foreign `register.json` data and records that cannot pass the saved-assessment identity check. The dashboard coexistence regression creates a capability assessment and reads the binder, finance board, and question ROI; it passes. Eighteen focused dashboard/core checks passed. This historical crash is fixed in source; an installed customer-data run remains unverified.
 
 - **Who / where:** compliance, workspace admin · `/audit/binder, GET /api/v1/audit/binder, /api/v1/finance/board, /api/v1/assess/question-roi`
 - **User impact:** The printable evidence pack an auditor asks for, the finance risk board and question analytics all crash as soon as the (separate) continuous agent assessments feature is used once - two of the most basic governance features cannot coexist.
@@ -664,9 +682,12 @@ no images without alt, axe violations limited to nine distinct rules).
   - [C5b-024] packages/maverick-core/maverick/automation_import/to_flow.py:157-190 — every other connected node is created but never wired
   - [C5b-024] cmd: python3 repro_n8n.py (Webhook → [Add to CRM, Notify Slack, Send welcome email]) → n0 'Add to CRM' reachable=True; n1 'Notify Slack' reachable=False; n2 'Send welcome email' reachable=False; report lists all three; flow.validate() → [] (scratch: audit/C5b/repro_n8n.py)
 - **Recommendation (effort M):** Lower multi-edge outputs to a 'Run together' (parallel) node or a sequential chain, mark fan-out 'approximated' when order is assumed, and fail the report loudly when any imported step is unreachable.
+- **Current branch:** Supported tree-shaped n8n fan-out now lowers every connection into a runnable parallel path, including multiple edges from the trigger or either decision arm. The report lists nested steps and marks the parallel execution-order/data-sharing difference as approximated. Shared downstream joins, loops, unsupported output sockets, and disconnected steps fail import with a repair message before anything is saved; they no longer produce a misleading success report. Local import, publish, and execution checks cover three outgoing paths and a high-risk path with a durable parent approval. General n8n joins and cycles still need an explicit graph mapping before they can import.
 - Source: U4-029, C5b-024
 
 #### UX-034 · P1 · Bug · Automations page crashes rendering its lists ('el is not a function'): saved flows, recent flow runs (with Approve/Reject) and schedule rows do not render
+
+- **Current branch (2026-10-04):** The automations script now runs in `scripts_extra`, after the shared UI script defines `mvEl` and `mvWhen`. A Chromium regression checks a saved start, schedule row, schedule form, and zero page errors. The historical load-order crash is fixed in source; this pass did not repeat an installed automation run with real saved customer data.
 
 - **Who / where:** workspace admin, end user, evaluator · `/automations`
 - **User impact:** The one page that promises 'every way your workflows run without you' shows no flows, no recent runs and cannot approve/reject a waiting run or delete a schedule; the admin sees blank sections and assumes nothing exists.
@@ -678,6 +699,8 @@ no images without alt, axe violations limited to nine distinct rules).
 - Source: U4-008
 
 #### UX-035 · P1 · Bug · Every chat app set up on the Channels page fails to start: the page has no 'allowed senders' field, but all 7 adapters refuse to initialize without one
+
+- **Current branch (2026-10-04):** The Channels setup form now shows a permitted-people list for every chat app it manages, validates each entry against the same identity format as All settings, saves the list in the effective channel configuration, and shows the saved members when reopened. Clearing the field falls back to an administrator-supplied list; if neither exists, local readiness fails with an action on the Channels page before a test or service launch. Focused setup and channel checks passed. Optional SDKs are not installed in this checkout and live message delivery remains unverified. Adding a refused sender from a log is still open.
 
 - **Who / where:** workspace admin, end user · `/channels → Save; lightwork serve`
 - **User impact:** An administrator follows the four on-page steps, sees 'Chat app saved' and a passing local check, and the channel silently never works; the only fix is an environment variable (e.g. EMAIL_ALLOWED_USER_IDS) or hand-editing config.toml — exactly what the customer-experience contract forbids.
@@ -706,6 +729,7 @@ no images without alt, axe violations limited to nine distinct rules).
   - [C5c-007] packages/maverick-core/maverick/server.py:303-319 — a follow-up message creates a new goal; no channel path answers an open question
   - [C5c-007] cmd: audit/C5c_repro/r06_channel_ask.py (fake OpenAI-compatible model, '[ask]' prompt) → CHANNEL REPLY: 'Goal #1 finished with status blocked, but its result is not available in this process.'; world.db: goals [(1,'blocked',None)], questions [(1,1,<encrypted question>)] (output: audit/C5c_repro/r06.out)
 - **Recommendation (effort M):** When a channel goal blocks on ask_user, reply with the question text; bind the next message in the same conversation/thread as the answer (world.answer + resume) with an explicit 'this answers your question' echo; cover with a test in test_server_dispatcher.py.
+- **Implementation status (2026-10-04):** Channel intake shows open questions and resumes the original goal after a bound answer. Slack room threads accept a plain reply; Slack DMs, Telegram and email require `#<question-id> answer`, while an ordinary message starts a new task. Queued runs retain the original sender, tenant and route in the durable intake receipt; Slack, Telegram and email recovery deliver a later question with chunk receipts. Uncertain sends remain held for review to avoid duplicates. Focused local tests cover all three channels, a second queued question, isolation and uncertain delivery. No live provider acceptance or Postgres run was performed.
 - Source: C3-029, C5c-007
 
 #### UX-037 · P1 · Bug · Channel readiness says 'channel adapter dependency is importable' (passed) when the chat SDK is not installed; the channel server then refuses to start it
@@ -718,6 +742,7 @@ no images without alt, axe violations limited to nine distinct rules).
   - cmd: lightwork serve → 'ERROR maverick.server: channel telegram enabled but optional deps missing: python-telegram-bot not installed. Install with: From the reviewed checkout run: python -m pip install -e './packages/maverick-channels[telegram]''
   - packages/maverick-dashboard/maverick_dashboard/integration_readiness.py:554-573 — imports the adapter module (maverick_channels.telegram), which defers the SDK import, so the check always passes
 - **Recommendation (effort S):** Probe the real SDK module per channel (telegram, discord, slack_sdk, twilio, nio …) with importlib.util.find_spec and report 'Needs the Telegram component — install it from Settings > Components' (an in-product install/repair path), never a pip command.
+- **Current branch (2026-10-04):** The Channels inventory and local connection preflight now check each known adapter's optional runtime modules and reject an adapter whose deferred imports already failed. A missing component is shown in the main status with the channel name, installation-administrator repair guidance, and a link to restart the chat service in Settings; the API reports `dependency_failed`. An old passing connection receipt no longer makes the page summary look working, and Test connection / Send a test message stop before an external call when required software is missing. This local check does not claim external message delivery. Signal's external `signal-cli` and macOS-only iMessage remain unverified by this dependency check. There is no in-product installer for optional channel components yet, so installation repair still needs the administrator who manages the Lightwork package; that part of the original recommendation remains open. Focused local tests simulate missing Telegram, Slack, Discord, Matrix, SMS, RCS and Teams modules and cover the rendered page, API and test actions; live installation and delivery were not exercised.
 - Source: C3-027
 
 #### UX-038 · P1 · Bug · Every chat shows 'Attachments and available evidence are ready.' as Lightwork's answer while the task runs (even with no attachments)
@@ -731,10 +756,12 @@ no images without alt, axe violations limited to nine distinct rules).
   - packages/maverick-core/maverick/attachment_submissions.py:185-186 — SubmissionStore.update writes that message into goals.result
   - packages/maverick-dashboard/maverick_dashboard/templates/chat_goal.html:326 and :962-979 — result-section shown whenever goal.result/d.result is non-empty
 - **Recommendation (effort S):** Stop storing submission-preparation status in goals.result (keep it in attachment_submissions.detail only), or have the chat page ignore result while status is draft/pending/running unless the stream marks it as the streamed answer. Show preparation status as a small step in the activity strip, and only mention attachments when files were attached.
-- **Current branch (2026-10-03):** Preparation updates now stay in the submission receipt and no longer overwrite the task answer. The existing submission-status panel still explains files when files are present. The answer panel and live update path hide a matching legacy preparation message already saved by an older build. Local admission/chat checks passed; a live browser run remains open.
+- **Current branch (2026-10-04):** New no-file submissions leave `goals.result` empty and show no attachment-status panel while the task runs. Full-page rendering and live updates already suppress a matching preparation message left in `goals.result` by an older build; the refreshed answer-panel fragment now receives the submission receipt and suppresses that message too. A no-file TestClient regression checks the full page, refreshed fragment, and subsequent real answer. The focused admission, answer-projection, and chat suite passed (24 tests). A live browser walkthrough remains unverified.
 - Source: U2-001
 
 #### UX-039 · P1 · Bug · Connections page is unusable in single-user (no sign-in) mode: after 'Turn on connections' the whole 'Add a connection with a key' form is disabled with 'Your connection access changed. Sign in again' — there is no sign-in to use
+
+- **Current branch (2026-10-04):** The historical finding is fixed in the current source. In auth-off local mode, `GET /api/v1/connection-setup` returns 200 with `account_sign_in_available: false` and a plain explanation that key-based connections still work; the account panel does not emit the access-lost event. The key form's own `/api/v1/connections` authority remains independent, and the local enable → reload → save-key API journey succeeds without sign-in. Actual loss of account or workspace authority still clears private form state. Focused checks passed: 28 Python connection API/local-mode tests and 36 browser-controller JS tests. A live installed-browser walkthrough and real provider key check remain unverified.
 
 - **Who / where:** workspace admin, evaluator · `/connections`
 - **User impact:** An evaluator or small team running Lightwork locally (the default, auth off) cannot add a Slack/GitHub/Salesforce key or any account connection from the product at all, and is told to sign in when no sign-in exists.
@@ -749,6 +776,7 @@ no images without alt, axe violations limited to nine distinct rules).
 
 #### UX-040 · P1 · Bug · Consent & Preferences and Find Personal Data pages disable their own 'Turn on' buttons, so an administrator cannot enable the feature from the page
 
+- **October 4 source reconciliation:** The shared disabled-feature sweep now exempts controls inside `[data-module-gate]` and does not mark an ancestor of the gate `aria-disabled`. The existing `module_gate_controls.test.js` exercises both an enabled Turn on button and its server request/refusal path; `node --test` passed locally (2 cases). A live installed-browser walkthrough remains unverified.
 - **Who / where:** compliance, workspace admin, evaluator · `/consent, /privacy/data-discovery`
 - **User impact:** The main Consent page (the hub every consent job depends on) and Find Personal Data show a Turn on button that does nothing and tells the administrator to ask an administrator. A privacy officer concludes the feature is unavailable. The only escape is discovering that turning on a sub-feature on another page (e.g. Consent publishing) silently turns the parent on.
 - **Evidence (reproduced):**
@@ -762,6 +790,7 @@ no images without alt, axe violations limited to nine distinct rules).
 
 #### UX-041 · P1 · Bug · Browser privacy signals (GPC / Do Not Track) are rejected whenever the banner includes any purpose not based on consent
 
+- **October 4 source fix:** The public signal route now submits only consent-basis purposes to the preference receipt. A focused mixed consent/contract browser API case passes. The non-consent purpose is not turned into a consent denial. This fixes the whole-request 422 for mixed banners, but it does not establish sale/share opt-out compliance or installed-browser acceptance; those require the separate global opt-out path to be qualified.
 - **Who / where:** compliance, end user, developer · `POST /api/v1/public/consent/privacy-signals`
 - **User impact:** Visitors' Global Privacy Control opt-outs are silently not recorded for realistic banners, so the business fails a legally required opt-out (CCPA/CPRA, Colorado) while the dashboard shows no error. OneTrust/Osano honour GPC for the relevant purposes only.
 - **Evidence (code-verified):**
@@ -777,6 +806,7 @@ no images without alt, axe violations limited to nine distinct rules).
 
 #### UX-042 · P1 · Bug · Consent webhook from a CMP (OneTrust etc.) is rejected with 401 on every deployment that has dashboard sign-in turned on
 
+- **October 4 verification:** This auth gap is fixed in the current source. The exact `/consent/webhook` path is exempt from both the dashboard bearer gate and principal requirement, and page visibility skips self-authenticated routes. The handler still requires webhook enablement and verifies the bounded delivery's HMAC and timestamp before import. Local tests accepted signed deliveries without a dashboard credential under token and proxy sign-in, rejected a bad signature, and exercised webhook replay/validation behavior (11 targeted tests passed). The historical evidence below predates the fix; delivery from an installed CMP and last-delivery visibility remain unverified.
 - **Who / where:** compliance, IT/security, developer · `POST /consent/webhook`
 - **User impact:** The documented 'push consent changes from your CMP' integration works only when the dashboard has no authentication. In any real (token/OIDC/SAML/proxy) deployment every signed CMP delivery fails with 401, so opt-outs and withdrawals recorded in the CMP never reach Lightwork's consent register, and nothing in the product shows that deliveries are being refused.
 - **Evidence (reproduced):**
@@ -788,28 +818,35 @@ no images without alt, axe violations limited to nine distinct rules).
 
 #### UX-043 · P1 · Bug · Tasks given to a department-deployed specialist on Fleets run as a generic orchestrator: the specialist's persona, playbook and deliverable contract are never applied
 
+- **October 4 resolution:** Current `run_fleet_agent` rejects a disabled or missing specialist pack and stamps the goal with `agent.domain`; the orchestrator builds the root through `agent_from_profile`, which supplies the specialist's persona, playbook, refusals and output contract under its attenuated capability. A local request-to-run check deployed the Sales & GTM department, assigned a ready Deal Inspection specialist, and confirmed its persona reached the model stand-in, its goal retained the pack domain, and its run principal and shell denial survived dispatch. The earlier generic-orchestrator reproduction is historical.
+- **Related readiness correction:** The department API previously allowed deployment if *any* specialist passed setup checks, but saved the entire roster, including specialists whose required actions were unavailable. It now saves only `action_ready` specialists and returns deployed/skipped counts with a user-facing setup reason and recovery link for each skipped specialist. The Workforce page shows the count held back. Departments with no verified-ready specialists receive a 409 before a fleet is saved. Runtime still checks the pack and capabilities again when work starts, because setup can change after deployment.
+- **Verification:** `test_fleet_dispatch.py` deployed a real department and reached a fake local model with the named specialist's persona and restricted tools (2 focused deploy checks passed); `test_workforce.py` verified mixed-readiness persistence, truthful skipped reasons, all-ready behavior and no-ready refusal (9 focused checks passed). Ruff passed. No external provider output was assessed. In the local default setup, Commerce has no verified-ready specialist and correctly needs setup before deployment.
 - **Who / where:** end user, workspace admin · `/workforce 'Deploy team' -> /fleets 'Give it to … / Start task' -> POST /api/v1/fleets/{fleet}/run`
-- **User impact:** An administrator deploys 'Commerce' and hands work to 'Merchant Analytics'; the result comes from an unbriefed generic agent wearing that name. The specialist's instructions, refusals, workflow gates and deliverable format are silently absent, so the department feature delivers nothing it advertises.
-- **Evidence (reproduced):**
+- **Historical user impact:** An administrator deployed 'Commerce' and handed work to 'Merchant Analytics'; an earlier revision ran an unbriefed generic agent wearing that name.
+- **Historical evidence (reproduced before domain binding):**
   - cmd: POST /api/v1/departments/commerce/deploy -> fleet dept-commerce (11 agents, domain=pack); POST /api/v1/fleets/dept-commerce/run {agent: com_merch_analytics, prompt: 'Summarise last week sales trends…'} -> goal 7 done
   - logs/llm.jsonl for goal 7: system prompt starts 'You are the orchestrator of a Lightwork swarm'; neither 'Merchant Analytics' nor 'merchandis' appears anywhere in it (the pack persona begins 'You are the Merchant Analytics specialist…', domains/com_merch_analytics.toml:5)
   - packages/maverick-dashboard/maverick_dashboard/api.py:13635-13656 — run_fleet_agent only narrows the capability with domain_capability(); w.create_goal(...) is called without set_goal_domain, so orchestrator.py never builds the root via agent_from_profile
   - contrast: POST /api/v1/goals with domain=cx_triage (api.py:1367-1375, 1415) does inject the persona (llm.jsonl contained the cx_triage persona)
-- **Recommendation (effort S):** In run_fleet_agent, when agent.domain names an enabled pack, stamp it on the goal (w.set_goal_domain) so the root is built with agent_from_profile, and run the same deploy-readiness check; add a test asserting the persona reaches the model for a department fleet run.
+- **Remaining scope:** Real provider responses and live external sources remain unverified; setup changes after deploy can make a specialist unavailable, in which case runtime refuses the run rather than using a generic agent.
 - Source: U3-002
 
 #### UX-044 · P1 · Bug · 'Starts when new items arrive' form cannot be completed: with 'Published flow' chosen the flow list is empty, and no source fields (RSS address, inbox, folder) appear for any source
 
+- **October 4 resolution:** The earlier `el is not a function` load-order defect is absent: the page script runs in `scripts_extra` after `lightwork-ui.js` defines `window.mvEl`. The source picker now puts RSS first, exposes a required feed-address field, and enables Create only after it loads guided sources. A custom registered source with no guided setup is omitted with an explicit availability notice instead of exposing arbitrary settings that the product cannot explain. The published-flow picker consumes the API's `published` field and omits drafts.
+- **Verification:** A local authenticated Chromium journey opened the real `/automations` page, selected a published flow, filled the RSS address, submitted the expected flow/source payload, saw the saved row and used Check now without page errors (`automations_load_order.spec.js`, 1 passed). The browser journey stubs the API; a separate real FastAPI `TestClient` check exercised flow listing, RSS trigger creation, initial baseline, and a later RSS item producing a flow run with event data (`test_flow_triggers.py::test_rss_source_published_flow_catalog_create_and_poll`, 1 passed). Focused UI control checks passed (29 Node tests). These checks do not verify a live external feed, email server, or server folder deployment.
 - **Who / where:** workspace admin, evaluator · `/automations → Add an event automation`
-- **User impact:** The README's 'fires from email, form, file, RSS, or polled/OAuth'd sources' cannot be set up in the product at all; the form offers a Create button for an automation with no target and no source settings.
-- **Evidence (reproduced):**
+- **Historical user impact:** The README's 'fires from email, form, file, RSS, or polled/OAuth'd sources' could not be set up in the product; the form offered Create with no target or source fields.
+- **Historical evidence (reproduced before the load-order correction):**
   - misc.py: 5 flows published, target kind 'Published flow' → 'Workflow or flow' options [] ; sources rss/imap_email/file_dir/form → '#auto-event-fields' empty; 9× '[pageerror] el is not a function'
   - screenshot: shots/U4/evt_form.png — empty 'Workflow or flow' select, no feed/inbox/folder fields
   - packages/maverick-dashboard/maverick_dashboard/templates/automations.html:715-728,775-776 build the fields and target options with el(), which is undefined on this page (same root cause as U4-008)
-- **Recommendation (effort S):** Fix the el/mvEl ordering (U4-008), then add an end-to-end UI test that creates an RSS trigger targeting a published flow.
+- **Remaining scope:** Email and server-folder sources require administrator-controlled credentials or filesystem setup; this check does not claim they are self-service or verified end to end.
 - Source: U4-032
 
 #### UX-045 · P1 · Bug · Steps view silently disconnects every step added after a Decision; the flow publishes, runs and reports "Finished" while the approval and later steps are never reached
+
+- **Current branch (2026-10-04, rechecked):** The historical failure is fixed in the current source. Steps view offers the Decision's Yes and No paths when adding a step and connects the chosen branch; its list names disconnected steps and both branch destinations. Save retains a disconnected draft with a warning; the canvas dims those steps; publication refuses unreachable steps, including inside nested flows. The current local checks passed (40 editor/graph JS checks and 37 flow-versioning/API checks). A live installed-browser run with an actual approval remains unverified.
 
 - **Who / where:** workspace admin, end user, evaluator · `/flows/designer (Steps view, 'Add step')`
 - **User impact:** A non-programmer builds 'if the amount is over $1,000, ask for approval, then record the payment' in the default Steps view. It looks correct, saves and publishes without complaint, and every run ends 'Finished' — but the approval never happens and the payment step never runs. The user believes the automation works.
@@ -824,6 +861,7 @@ no images without alt, axe violations limited to nine distinct rules).
 
 #### UX-046 · P1 · Bug · 'Report a Problem With a Task' opens a new-issue form on a PRIVATE GitHub repository that customers cannot access, while the UI calls it 'Lightwork's public bug-report page'
 
+- **October 4 verification:** The Chat stopped-task link opens `/help?task={id}#issue-report`, where the customer can select the task, edit a locally prepared draft, review the exact redacted fields, and copy or download it. The Help page says no support inbox is configured and nothing is sent; `support_ops_api.py` returns no GitHub URL. Local API checks passed (6 tests), as did browser-controller checks for review and copy/download behavior (8 tests). The focused Playwright journey could not start because the local fixture Python lacks `uvicorn`, so an installed-browser walkthrough remains unverified. A customer still needs an agreed support destination; the broken private-repo handoff described below is historical.
 - **Who / where:** end user, workspace admin, evaluator · `/help → Report a Problem With a Task; POST /api/v1/support/issue-report`
 - **User impact:** The only in-product way to report a broken task sends customers to a GitHub 404/sign-in page (they are not collaborators on a private repo); the report goes nowhere and the copy is false.
 - **Evidence (reproduced):**
@@ -836,6 +874,7 @@ no images without alt, axe violations limited to nine distinct rules).
 
 #### UX-047 · P1 · Bug · Default consumer setup on a machine without a running Docker daemon silently disables file writing and shell, so the README's own first goal cannot work
 
+- **Current branch:** Consumer, express, and fast setup now name the file/program limitation in their closing state and give the exact in-product recovery path. The local fallback also denies `ast_edit`, which otherwise could still change a file despite the warning; the container re-enable path removes that first-run block with the other file tools after administrator confirmation. `lightwork start` warns before creating a paid task, and `lightwork doctor` has a separate file-work row. README/getting-started now open with an answer-only task. The Docker/Podman recovery still needs acceptance on an installed customer package and a live container daemon; a host-local write-only alternative is not offered.
 - **Who / where:** evaluator, end user, workspace admin · `lightwork init (consumer, default)`
 - **User impact:** An evaluator on an ordinary laptop (no Docker running) follows the README exactly, is told setup is complete, and the headline demo can neither write the CLI nor run it. The only hint was a yellow Docker line saying it 'only matters if you pick the docker sandbox'.
 - **Evidence (reproduced):**
@@ -860,11 +899,13 @@ no images without alt, axe violations limited to nine distinct rules).
 - **Implementation update (2026-10-03):** Rehearsal now defaults to watch-only predictions. Settings > Safety exposes its switch and mode; Shield, capability, and consent checks still decide their own refusals. Calls stopped before dispatch are excluded from executed action history and trajectory scoring, and ambiguous older failed rows are excluded from rehearsal fitting. Explicit Hold mode now requests a fresh person in Approvals for one exact task/tool/argument set, then checks the live permit before allowing the normal safety gates to continue. Rejection, timeout, unavailable authority, unavailable prediction and stale approval stop the action; an unanswered request is withdrawn. The native page has a synthetic authenticated browser journey, but the actual installed task-to-approval-to-execution journey and inline task review control remain open.
 - Source: C5a-010
 
-#### UX-049 · P1 · Bug · Skills the platform 'learns' from successful runs are never used again: distilled skills are written to learned-skills/, but agents only recall built-in + skills/
+#### UX-049 · P1 · Bug · Historical: distilled skills were stored as proposals but never entered later-run recall
 
+- **October 4 reconciliation:** Current source deliberately keeps raw `learned-skills/` proposals out of agent recall. `skills.admit_learned_skill` requires administrator review of exact bytes, current shared-source lineage, validation and the learning stop before admission into the installed-skill recall path. Learned page and Copilot expose that review path. The old suggestion to recall raw proposals automatically would bypass this governance. A real after-admission use/outcome journey remains unqualified.
+- **October 4 verification:** The current guarded path is wired through `available_skills()` → `apply_skill_overlays()` → `Agent._build_system()`, which records both name and exact-version use counters. Existing focused tests exercise proposal creation, explicit admission, next-prompt recall, use count, withdrawal, and refusal of private-source proposals. No runtime bypass was added. The stale distiller, CLI and Learned-page descriptions now distinguish a suggestion from a skill available for recall. This verifies source behavior and a synthetic next-agent prompt, not a live installed task-to-review-to-outcome result or causal improvement.
 - **Who / where:** end user, workspace admin, evaluator, compliance · `Every goal run (agent skill recall); dreaming; orchestrator per-run distillation`
-- **User impact:** The headline promise — the workforce distills what worked and reuses it — does not happen: learning appears to run (skills pile up, dashboards count them) but results never improve from them. Because learned skills are never used, their usage stats never accrue, so the 'safe forgetting' retirement/probation can't act on them either.
-- **Evidence (reproduced):**
+- **User impact (original finding):** Learning produced suggestions but no route for those suggestions to reach later-run recall, so calling a suggestion an active improvement was misleading. Current source adds explicit review and admission; use counts measure recall, not improvement caused by the skill.
+- **Evidence (historical reproduction; line numbers predate current source):**
   - packages/maverick-core/maverick/skill/distillation_local.py:166-186 — save_skill writes to data_dir('learned-skills')
   - packages/maverick-core/maverick/skills.py:38-48, 308-337 — available_skills() = builtin + data_dir('skills') only
   - packages/maverick-core/maverick/agent.py:195-215 — apply_skill_overlays recalls from available_skills()
@@ -881,7 +922,7 @@ no images without alt, axe violations limited to nine distinct rules).
   - [C7-013] packages/maverick-core/maverick/skills.py:40-48 skills_dir() = data_dir('skills'); :308-337 available_skills() = builtin + skills_dir only (no learned-skills)
   - [C7-013] packages/maverick-core/maverick/cli/__init__.py:5035-5050 — `skills` command lists available_skills(), i.e. the 514 builtin + ~/.maverick/skills; empty-state text 'no skills yet (in <builtin> or ~/.maverick/skills)'
   - [C7-013] docs/getting-started.md:266 vs :268 — two different directories both described as distilled skills
-- **Recommendation (effort M):** Include the tenant's learned-skills store in available_skills() (below user skills, above builtins) with the same signature/quarantine checks, record use stats for them, and add an end-to-end test: distill → next run recalls. Until then, remove 'picked up on later runs' from FEATURES/README.
+- **Recommendation (reconciled):** Keep raw proposals out of recall. Preserve exact-version administrator admission, tenant and shared-source checks, and withdrawal. Qualify one installed task → review → later task → observed outcome journey before claiming a learned skill improves results.
 - Source: C5b-051, C5a-087, C7-013
 
 #### UX-050 · P1 · Bug · Models without a rate-card price (any OpenAI-compatible gateway, LM Studio/llama.cpp endpoints, many Azure/Bedrock deployments, Moonshot, xAI aliases) make one billed call, then every task stops with a developer-facing 'unpriced model' message
@@ -935,24 +976,40 @@ no images without alt, axe violations limited to nine distinct rules).
 - **Recommendation (effort M):** Rank tools by priority before the cap: always keep the coordination/core set (spawn_*, list/spawn_specialist, find_tools, ask_user, send/recv_to_agent, knowledge_search, fs) and fill the rest from the pack's allow-list; better, send only CORE + find_tools and rely on deferred loading for OpenAI-family providers. Surface the truncation in the task's work log and in Settings > Models.
 - Source: COORD-004, C5a-011, U3-001
 
-#### UX-052 · P1 · Bug · 'Send finished-task alerts' never fires for ordinary tasks: with ntfy configured and working, a finished task, a failed task and a task waiting for the user's answer sent zero alerts
+#### UX-052 · P1 · Resolved for in-product alerts · Task owners need reliable notice when work finishes, fails, or needs an answer
 
-- **Current branch (2026-10-03):** Signed-in users now have a visible private
-  bell and owner-scoped inbox for completed, blocked and question-waiting work;
-  Copilot can read that inbox. New installs turn on in-product personal alerts.
-  Existing installs need an administrator to enable them. External private
-  delivery still needs background observation and a verified personal channel;
-  this does not turn ordinary tasks into organization-wide ntfy alerts.
-
-- **Who / where:** end user, workspace admin · `Settings > All settings > Integrations 'Send finished-task alerts with'; task lifecycle`
-- **User impact:** Users who set up phone/Slack alerts expecting to hear when their long task finishes, fails or needs an answer are never notified; they must keep the dashboard open and poll.
-- **Evidence (reproduced):**
-  - Lab :8818 with [notifications] backend='ntfy', ntfy_topic='u8audit', ntfy_server=local listener; notify() self-test delivered ('sync self-test' logged)
-  - Started tasks #2 (finished 'done'), #3 '[fail]' (blocked, 'internal error'), #4 '[ask]' (blocked waiting for the user's answer) via POST /api/v1/goals → listener received 0 notifications (u8work/ntfy.jsonl)
-  - packages/maverick-dashboard/maverick_dashboard/settings_catalog.py:866-871 label 'Send finished-task alerts with' / help 'Where to send a message when a long task finishes.'
-  - Only importers of maverick.notifications: automation_queue.py:1310 (flows), ops_alert.py:49 (off by default), tools/notify.py:46 (agent-invoked), ai_regulatory_feed.py:709, push_v2.py:141 — none in runner/orchestrator/worker
-- **Recommendation (effort M):** Emit notifications from the goal lifecycle (done, failed/stopped, needs your answer, approval requested) for the task owner, respecting per-user preferences; include a deep link to /chat/goal/{id}.
-- Source: U8-026
+- **Current branch (2026-10-04):** Goal creation enrolls a current named owner.
+  The owner-scoped inbox projects completed, failed, blocked and open-question
+  states; the shared navigation bell polls a count while the page is visible.
+  The dashboard's bounded observer refreshes enrolled owners while pages are
+  closed when background alerts are enabled. Copilot can read the same inbox.
+  Personal preferences, current membership, quiet hours, digest timing and
+  per-event choices govern what appears. The API, new-owner enrollment and
+  background observer now all stop when personal preferences are disabled,
+  matching the unavailable page and hidden bell.
+- **Verified locally:** A signed-in owner completes one task and gets a question
+  on another before opening the inbox; background observation records both,
+  and the owner sees separate notices with authenticated task links. A second
+  owner's work is excluded. Focused dashboard and delivery checks passed.
+- **Private delivery limit:** Slack/Telegram delivery additionally requires
+  background observation, an HTTPS dashboard origin, a verified My Data identity,
+  bot/channel allowlists and the owner's explicit destination choice. The inbox
+  now explains when My Data identity linking is disabled. Provider acceptance
+  is recorded separately from whether the person read the message. Existing
+  installs must enable personal alerts; external delivery remains opt-in.
+- **Historical reproduction:** In the earlier lab run, a working organization
+  ntfy self-test received zero notices for finished/failed/question-waiting
+  tasks. That shared ntfy channel remains for organization operations and is
+  deliberately not a destination for private task content. The prior settings
+  label implied otherwise; the present installer separates shared alerts from
+  personal task alerts.
+- **Installer prerequisite (2026-10-04):** If private Slack/Telegram delivery is
+  selected while My Data is off, setup now asks explicitly whether to turn on
+  identity linking. Declining keeps private delivery off and leaves in-product
+  alerts available; accepting writes the needed My Data feature switch. Both
+  choices passed focused installer checks. Live provider delivery remains open.
+- Source: U8-026; `test_personal_notification_badge_journey.py`,
+  `test_personal_notification_scheduler.py`, `test_personal_notification_delivery.py`
 
 #### UX-053 · P1 · Bug · Breach-notification plan reads '1.2k customers' as 12 people and tells the officer the incident is below California's and Japan's reporting thresholds
 
@@ -1158,12 +1215,7 @@ no images without alt, axe violations limited to nine distinct rules).
 
 #### UX-062 · P1 · Reliability · After 2,048 knowledge rights requests, every knowledge read and search in that workspace is permanently denied
 
-- **Current branch (code review, 2026-10-03):** Normal request submission stops
-  at the 2,048 active-record limit; the knowledge page exposes capacity and an
-  administrator archive action for finished requests. The read guard only
-  refuses when it detects more records than it can scan, so the permanent
-  read outage is not reachable through normal submission. Legacy or externally
-  overfilled stores still need a bounded recovery path and installed acceptance.
+- **Current branch (2026-10-04):** Normal submission stops at the 2,048 active-record limit; reads stay available at that limit. For a legacy or externally overfilled local ledger, the administrator's Ready to archive view now scans bounded pages of request IDs beyond the old first-2,048 window and shows only requests that pass the existing finished-request checks. Each archive still requires a separate revision-bound, audited action; source restrictions and evidence remain retained. A focused overfill test confirmed reads fail closed before recovery and resume after archiving one later finished request. Focused core/API tests and 28 knowledge-page JS tests passed. Shared storage still refuses the two-store archive protocol, and installed acceptance remains open.
 
 - **Who / where:** end user, compliance, workspace admin · `Knowledge search, read, export, jobs (knowledge_search tool and dashboard library)`
 - **User impact:** Once a workspace accumulates 2,048 correction/deletion requests over its lifetime, the AI can no longer read any knowledge source and users get an unintelligible 'request boundary' error; there is no admin action to recover.
@@ -1385,9 +1437,12 @@ no images without alt, axe violations limited to nine distinct rules).
   - packages/maverick-core/maverick/domain_edit.py:73-110 — overlay_toml never serialises [autonomy], so even a pack override cannot carry it (map/08 §7.12); agents.html has no autonomy field (grep 'autonomy' templates/agents.html -> 0 hits)
   - live: /workforce shows 'No specialist has earned more independence yet. They qualify after a run of approved work.' with no way to act when one does
 - **Recommendation (effort M):** Add an 'Independence' control to each specialist's job card/editor (per risk level, with the onboarding clamp shown), a 'Grant' button on each graduation candidate that records an audited decision, persist via a tenant store (not config.toml), and serialise [autonomy] in domain_edit overrides.
+- **Implementation status (current branch, local verification):** Specialist editor and job card now expose the effective Watch/Suggest/Ask/Act policy and supervision; tenant overrides persist `[autonomy]`. Workforce offers a revision-checked, audited Grant action and links blocked candidates to their policy. Aggregate approval history cannot grant an unsupervised Act level: the API refuses graduation and editor saves for any Act risk until risk- and action-bound evidence exists. Reset requires the current revision, warns that built-in permissions may broaden, and records the intent before removal. Installed tenant acceptance remains open.
 - Source: U3-015
 
 #### UX-074 · P1 · Customization · Azure OpenAI and AWS Bedrock cannot be set up in the product: Settings > Provider keys offers only 9 providers, while the kernel supports 14
+
+- **Implementation status (current branch, local verification):** Settings now has guided Azure resource address, deployment, sign-in and version controls, plus Bedrock region, Claude model, service and sign-in controls. The existing sealed, authority-checked provider rotation saves these fields, verifies that they became effective, and restores the prior overlay on a failed save. The saved deployment/model appears in the normal model picker. Test connection sends one bounded, potentially billable model request through the native provider client after a price and spending preflight; it records no success on constructor-only or SDK-only evidence. The page shows the result and the next step for missing prices or a mismatched model. Server-managed Microsoft/AWS identities still require the organization's credential setup, and live Azure/Bedrock tenant acceptance remains open.
 
 - **Who / where:** workspace admin, IT/security, evaluator · `/settings#settings-integrations (Provider keys)`
 - **User impact:** Regulated enterprises — the stated target market — typically may only use Azure OpenAI or Bedrock; their admin cannot connect the AI service from the web UI at all and is pushed to the 38-step CLI wizard or env vars.
@@ -1416,6 +1471,9 @@ no images without alt, axe violations limited to nine distinct rules).
 - Source: U5-025 · prior audit: post-install-operation-coverage.md 'Advanced sandbox and single sign-on policy'
 
 #### UX-076 · P1 · Feature · Missing: customer-authored test sets and batch evaluation for specialists (and flows)
+
+- **2026-10-04 implementation (partial):** Workforce now lets an administrator write, edit, remove and run customer-owned answer checks for a selected specialist. Each run saves the exact case versions and a fingerprint of the current specialist instructions, uses the configured specialist model with no tools or outside systems, honors the existing bounded-model-test installation setting, caps one batch at five cases and $0.25, records per-answer results and cost, and never automatically replays an uncertain provider call. A client-held operation reference supports readback after a lost response. Viewers can read cases and result history for departments they may access. Copilot can list, create and start these checks through the same authorization and reviewed-operation path when its model-controls family is enabled. The UI explicitly explains that literal phrase and citation-marker checks do not prove factual correctness or source validity.
+- **Still open:** Flow test sets, CSV import, case generation, draft-versus-current comparison, knowledge-grounded/source-validity grading, regression gates on publication, larger batches, Copilot selection from a saved set over five cases, and CI export/API contract. The current answer checks do not execute tools, workflows, company knowledge retrieval or human approvals; those require a separate contained evaluation environment before they can honestly be called end-to-end specialist tests.
 
 - **Who / where:** workspace admin, compliance, evaluator, developer · `/workforce (test suite panel), maverick domains-eval`
 - **User impact:** A buyer who edits a specialist's playbook or switches its model has no way to prove it still gives correct answers before real work reaches it. For a product that competes on 'provable learning', the absence of customer-owned regression tests is a visible hole in evaluations and RFPs.
@@ -3061,6 +3119,8 @@ no images without alt, axe violations limited to nine distinct rules).
 
 #### UX-192 · P2 · Bug · No check anywhere for steps that can never run (unreachable from the first step): client and server validation accept orphaned steps
 
+- **Current branch (2026-10-04):** The flow editor identifies and explains unreachable steps; publication checks the saved graph server-side before activation. Drafts may retain disconnected work for editing. The canvas dims those steps and names the issue for assistive technology. Existing published releases are not retroactively changed.
+
 - **Who / where:** workspace admin, developer · `/flows/designer Save/Publish; POST /api/v1/flows; flow/ir.py Flow.validate`
 - **User impact:** Steps that are disconnected by editing (delete a connector, add after a decision, import) stay in the flow looking live but never execute; nothing tells the builder.
 - **Evidence (code-verified):**
@@ -3071,6 +3131,8 @@ no images without alt, axe violations limited to nine distinct rules).
 - Source: U4-002
 
 #### UX-193 · P2 · Bug · 'Wait for another app' inside a Repeat-for-each passes Save and Publish, then every run ends 'Rejected' with no reason (D1)
+
+- **Current branch (2026-10-04):** Client and server authoring checks now refuse a nested event wait with a plain instruction to move it into the main flow. If an existing release still reaches this runtime path, it fails with that reason instead of reporting a human rejection. A live installed migration journey has not been run.
 
 - **Who / where:** workspace admin · `POST /api/v1/flows, /publish, /run; run page`
 - **User impact:** The flow looks valid, then every run appears to have been 'Rejected' (as if a person said no); the admin has no clue the loop is the cause.
@@ -3108,6 +3170,8 @@ no images without alt, axe violations limited to nine distinct rules).
 
 #### UX-242 · P2 · Reliability · Drafter fallback silently drops the requested schedule and approval gate: 'every weekday at 9am … ask the finance lead to approve before posting to Slack' becomes one unscheduled AI task with no approval step
 
+- **Current branch (2026-10-04):** The fallback now warns plainly when a requested schedule or approval step is missing, and the editor displays that warning. It still produces an editable one-step draft that a person can publish after reviewing; there is no persistent requirement check or installed browser acceptance yet.
+
 - **Who / where:** workspace admin, compliance · `/flows/designer → ✨ Draft`
 - **User impact:** A user who publishes the fallback thinks approval is enforced because the words 'ask … to approve' are in the step; in fact nothing pauses for a human and nothing is scheduled.
 - **Evidence (reproduced):**
@@ -3131,6 +3195,8 @@ no images without alt, axe violations limited to nine distinct rules).
 
 #### UX-297 · P2 · Ux · Approval card is written in engine jargon: 'agent node n3', 'Continue after approval node: n2', a 64-hex 'input digest', 'pinned continuation may execute once under current worker authority'
 
+- **Current branch (2026-10-04):** The visible card now names the flow, decision and next step in customer language, and explains before/after in plain terms. The hashes and exact continuation binding remain in the machine-checkable card fields. Focused card creation passed; an installed approval journey has not been rerun.
+
 - **Who / where:** end user, workspace admin · `/flows/{id}/runs/{run}; /automations`
 - **User impact:** A business approver cannot tell what happens after approving ('agent node n3'); hashes and 'worker authority' language make a routine decision look alarming.
 - **Evidence (reproduced):**
@@ -3141,6 +3207,8 @@ no images without alt, axe violations limited to nine distinct rules).
 - Source: U4-011
 
 #### UX-298 · P2 · Ux · When the plain-English drafter fails, the user sees a Python exception name ('couldn't build a full graph (ValueError)') and gets one AI step whose name is the description cut mid-word
+
+- **Current branch (2026-10-04):** Fallback notes no longer expose Python exception names, the draft title stops at a word boundary, and the designer offers **Try draft again** after a warning or failure while retaining the description. A better short summary and installed browser acceptance remain open.
 
 - **Who / where:** workspace admin, evaluator · `/flows/designer → ✨ Draft`
 - **User impact:** On any model hiccup the evaluator sees developer jargon and a meaningless one-box flow with a truncated title, with no suggestion to retry or rephrase.
@@ -3692,6 +3760,7 @@ no images without alt, axe violations limited to nine distinct rules).
 
 #### UX-324 · P2 · Ux · Access request is marked 'Answered' after collection although nothing was delivered, and the collected copy cannot be downloaded from the request
 
+- **Current-source scope correction:** UX-020 now removes an authentic saved export on close and exposes cleanup failure/retry in the product. The misleading "Answered" state before delivery and missing officer review/download of the collected package remain open here. The old indefinite-retention evidence below is historical after that close-path fix; existing closed records require a retry or migration sweep.
 - **Who / where:** compliance · `/privacy/dsar/{id} > 'Collect their data and mark answered'`
 - **User impact:** The request list shows the person as answered before they have received anything, so SLA reporting overstates compliance; the officer cannot review or hand over the collected copy, and a second copy of personal data lingers on the server indefinitely.
 - **Evidence (reproduced):**
@@ -6069,6 +6138,7 @@ no images without alt, axe violations limited to nine distinct rules).
 
 #### UX-204 · P2 · Bug · Hitting the emergency stop (HALT) between tool calls reports 'the assistant ran into an error ... maverick resume N' and records the run as a failure in the learning loop
 
+- **October 4 source reconciliation:** The serial tool-call HALT return now sets `stop_kind="killswitch"` and `stop_detail`, matching the other HALT paths. The orchestrator's HALT branch therefore applies rather than the generic agent-error learning path. This was code-reviewed in the current branch; a live interrupted task has not been exercised here.
 - **Who / where:** workspace admin, end user, IT/security · `goal result text (dashboard task view), learning signals (skills, reflexion, consequence)`
 - **User impact:** When an operator halts the platform while an agent is between tool calls, the task shows a generic error and advises 'try again with maverick resume', which just halts again. The halted run is also scored as a genuine failure, so the skills and planning modes that were in use are down-weighted for something that was not their fault.
 - **Evidence (code-verified):**
@@ -6081,6 +6151,7 @@ no images without alt, axe violations limited to nine distinct rules).
 
 #### UX-205 · P2 · Bug · CLI tasks silently get a learned dollar cap (0.25–100 USD) after about 8 runs of the same kind, contradicting 'ordinary goals no longer receive generated dollar limits'
 
+- **October 4 source fix:** Learned task-class caps now require an explicit `true` opt-in. Settings > Spending & limits exposes the choice in plain language; the default is off, a malformed config value cannot enable it, and explicit limits keep precedence. The 25 focused budget/learning checks and the exact Settings catalog reader check passed locally; no installed CLI run has been verified.
 - **Who / where:** developer, workspace admin · `maverick start (CLI); [budget] self_tuning (default on via governed_learning_default)`
 - **User impact:** A developer running the same kind of task from the terminal finds later runs stopping with 'budget exceeded' at an amount nobody configured. Dashboard runs of the same task do not stop, so the behaviour looks random.
 - **Evidence (code-verified):**
@@ -6093,6 +6164,7 @@ no images without alt, axe violations limited to nine distinct rules).
 
 #### UX-206 · P2 · Bug · Free OpenRouter models still hit the 'unpriced model' refusal on the billing path, although the release notes say free OpenRouter models are priced at $0
 
+- **October 4 source fix:** `OpenRouterClient` now supplies `openrouter:` to the shared response accounting path. A listed free model therefore reaches the verified $0 price rule under strict billing; unknown paid models remain refused. Focused response-accounting and budget checks passed locally (36 cases). A live OpenRouter response is still unverified.
 - **Who / where:** evaluator, end user · `OpenRouter provider with a ':free' model under default strict pricing`
 - **User impact:** A trial user who picks a free OpenRouter model to avoid cost sees the health check and estimates say $0, then the first task stops after one call with 'unpriced model'.
 - **Evidence (reproduced):**
@@ -6104,6 +6176,7 @@ no images without alt, axe violations limited to nine distinct rules).
 
 #### UX-212 · P2 · Bug · Settings 'Governed connector approver' ([governed_connectors] approver) has no effect on who approves connector writes
 
+- **October 4 source fix:** A configured standing approver must now match the authenticated actor on the fresh decision before any PREPARE receipt or connector call. The approval card binds the configured approver into its exact target, so a change while waiting invalidates the permit. The governed-tool test file passed locally (126 cases); live two-person approval and provider writes remain unverified.
 - **Who / where:** workspace admin, compliance · `Settings catalog governed_connectors.approver / MAVERICK_GOVERNED_APPROVER`
 - **User impact:** An admin names the person who must approve CRM or database writes and believes the control is in place; any approver on the Approvals page can still approve them.
 - **Evidence (code-verified):**
@@ -6749,6 +6822,8 @@ no images without alt, axe violations limited to nine distinct rules).
 - Source: C5b-071
 
 #### UX-159 · P2 · Bug · 'Oversee cloud AI agents' can be enabled in Settings and the wizard, but the shipped dashboard can never run it (no runtime/probe is installed)
+
+- **Current branch (2026-10-04):** The shipped Settings page no longer lists cloud-agent controls and rejects direct save attempts with an availability message; the installer no longer asks users to enable this preview. The default API/page also distinguish an unconnected installation from a disabled working installation. Production support remains unavailable pending durable canonical state and provider composition.
 
 - **Who / where:** compliance, IT/security, workspace admin · `Settings > Integrations > 'Oversee cloud AI agents'; wizard; /assurance/cloud-agents`
 - **User impact:** An admin turns on Bedrock/Azure/Vertex agent oversight, picks their clouds, and the workbench keeps reporting it as disabled — with no explanation that the deployment lacks a required component.

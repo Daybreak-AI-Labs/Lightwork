@@ -486,6 +486,29 @@ async def list_requests(
     }
 
 
+@router.get("/requests/recovery")
+async def recovery_candidates(
+    request: Request,
+    response: Response,
+    cursor: str = Query(default="", max_length=128),
+    limit: Annotated[int, Query(ge=1, le=250)] = 100,
+):
+    tenant, _actor, context = _binding(request, response, administrator=True)
+    service = _service(request)
+    page = await _call(service.recovery_candidates, tenant, cursor=cursor, limit=limit)
+    return {
+        "schema": "lightwork.knowledge-rights-requests.v1",
+        "context": context,
+        "items": page["items"],
+        "count": len(page["items"]),
+        "can_review": True,
+        "archived": False,
+        "ready_to_archive": True,
+        "capacity": await _call(service.request_capacity, tenant),
+        "next_cursor": page["next_cursor"],
+    }
+
+
 @router.get("/requests/{request_id}")
 async def get_request(request_id: str, request: Request, response: Response):
     tenant, actor, context = _binding(request, response)

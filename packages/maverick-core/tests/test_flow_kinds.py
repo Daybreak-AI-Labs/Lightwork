@@ -152,7 +152,7 @@ def test_scope_redacts_executor_secrets_before_catch_branch():
 
 def test_nested_wait_event_fails_closed_not_open():
     # A wait_event buried in a foreach body cannot pause; it must fail closed
-    # (reject) rather than silently continue before the event's data arrives.
+    # with an actionable error rather than silently continue before the event's data arrives.
     f = {
         "id": "nw", "name": "nw", "start": "l",
         "nodes": [{"id": "l", "kind": "foreach", "items": "rows", "var": "row",
@@ -168,7 +168,8 @@ def test_nested_wait_event_fails_closed_not_open():
     res = run_flow(Flow.from_dict(f),
                    agent_fn=lambda n, b, d: (ran.append(b) or ("x", 1.0)),
                    action_fn=lambda n, p, d: ("", 1.0), data={"rows": ["a"]})
-    assert res.status == STATUS_REJECTED
+    assert res.status == STATUS_FAILED
+    assert "Move it to the main flow" in res.error
     assert "should NOT run" not in ran and "downstream" not in ran
 
 

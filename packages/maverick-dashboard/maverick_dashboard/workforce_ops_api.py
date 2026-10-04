@@ -21,7 +21,7 @@ from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 
-from .auth import goal_owner_filter, require_permission
+from .auth import domain_suites_allowed, goal_owner_filter, require_permission
 from .learning_ops_api import _choice, _clip, _world, start_job
 
 router = APIRouter(prefix="/workforce-ops", tags=["workforce-ops"])
@@ -52,6 +52,30 @@ class AgentIn(BaseModel):
                     "open-source", "custom"]
     name: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
     description: str = Field(default="", max_length=200)
+
+
+class SpecialistCaseIn(BaseModel):
+    specialist: str = Field(min_length=1, max_length=100)
+    task: str = Field(min_length=8, max_length=1000)
+    includes: list[str] = Field(default_factory=list, max_length=8)
+    excludes: list[str] = Field(default_factory=list, max_length=8)
+    refusal: bool = False
+    citation: bool = False
+    identity: str | None = Field(default=None, pattern=r"^[a-f0-9]{32}$")
+    expected_revision: int | None = Field(default=None, ge=1)
+
+
+class SpecialistCaseDelete(BaseModel):
+    specialist: str = Field(min_length=1, max_length=100)
+    identity: str = Field(pattern=r"^[a-f0-9]{32}$")
+    expected_revision: int = Field(ge=1)
+
+
+class SpecialistRunIn(BaseModel):
+    specialist: str = Field(min_length=1, max_length=100)
+    operation_id: str = Field(pattern=r"^[a-f0-9]{32}$")
+    case_ids: list[str] = Field(default_factory=list, max_length=5)
+    case_revisions: dict[str, int] = Field(min_length=1, max_length=5)
 
 
 def _audit(request: Request, action: str, **detail: Any) -> None:
@@ -184,6 +208,204 @@ def _test_suite() -> dict:
 async def test_suite(request: Request) -> dict:
     require_permission(request, "view")
     return await run_in_threadpool(_test_suite)
+
+
+def _test_profile(request: Request, name: str):
+    from maverick.domain import available_domains
+    profile = available_domains().get(name)
+    if profile is None:
+        raise HTTPException(status_code=404, detail="Choose a specialist from the list.")
+    if not domain_suites_allowed(request, name):
+        raise HTTPException(status_code=403, detail="You cannot access this specialist's department.")
+    return profile
+
+
+@router.get("/test-suite/specialists")
+async def test_specialists(request: Request) -> dict:
+    require_permission(request, "view")
+    from maverick.domain import available_domains
+    names = sorted(name for name in available_domains() if domain_suites_allowed(request, name))
+    return {"specialists": [{"value": name, "label": _name(name)} for name in names]}
+
+
+@router.get("/test-suite/customer")
+async def customer_tests(request: Request, specialist: str = Query(max_length=100)) -> dict:
+    require_permission(request, "view")
+    _test_profile(request, specialist)
+    from . import specialist_test_sets as saved
+    return {"specialist": specialist, "cases": await run_in_threadpool(saved.cases_for, specialist),
+            "runs": await run_in_threadpool(saved.runs_for, specialist),
+            "live_enabled": _live_tests_enabled()}
+
+
+def _live_tests_enabled() -> bool:
+    from maverick import model_tests
+    try:
+        model_tests.policy()
+    except PermissionError:
+        return False
+    return True
+
+
+def _case_fields(body: SpecialistCaseIn) -> dict:
+    def terms(values: list[str]) -> list[str]:
+        cleaned = [" ".join(value.split()) for value in values]
+        if any(not value or len(value) > 100 for value in cleaned):
+            raise HTTPException(status_code=422, detail="Each phrase must be between 1 and 100 characters.")
+        if len({value.casefold() for value in cleaned}) != len(cleaned):
+            raise HTTPException(status_code=422, detail="Remove repeated phrases from this test.")
+        return cleaned
+    includes, excludes = terms(body.includes), terms(body.excludes)
+    if not (includes or excludes or body.refusal or body.citation):
+        raise HTTPException(status_code=422, detail="Say what the answer must or must not contain, or choose a refusal or source check.")
+    if set(map(str.casefold, includes)) & set(map(str.casefold, excludes)):
+        raise HTTPException(status_code=422, detail="The same phrase cannot be both required and forbidden.")
+    task = " ".join(body.task.split())
+    if len(task) < 8:
+        raise HTTPException(status_code=422, detail="Write a question or request of at least 8 characters.")
+    return {"task": task, "includes": includes, "excludes": excludes,
+            "refusal": body.refusal, "citation": body.citation}
+
+
+@router.post("/test-suite/customer")
+async def save_customer_test(request: Request, body: SpecialistCaseIn) -> dict:
+    require_permission(request, "admin")
+    _test_profile(request, body.specialist)
+    fields = _case_fields(body)
+    from . import specialist_test_sets as saved
+    await run_in_threadpool(lambda: _audit(request, "specialist_test_save", specialist=body.specialist,
+                                           test=body.identity or "new"))
+    try:
+        case = await run_in_threadpool(lambda: saved.save_case(
+            body.specialist, fields, identity=body.identity, expected_revision=body.expected_revision))
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {"case": case}
+
+
+@router.post("/test-suite/customer/remove")
+async def remove_customer_test(request: Request, body: SpecialistCaseDelete) -> dict:
+    require_permission(request, "admin")
+    _test_profile(request, body.specialist)
+    from . import specialist_test_sets as saved
+    await run_in_threadpool(lambda: _audit(request, "specialist_test_remove", specialist=body.specialist,
+                                           test=body.identity))
+    try:
+        await run_in_threadpool(lambda: saved.delete_case(body.specialist, body.identity,
+                                                           body.expected_revision))
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {"removed": True}
+
+
+def _start_customer_test_job(request: Request, specialist: str, *, operation_id: str | None = None,
+                             case_ids: list[str] | None = None,
+                             case_revisions: dict[str, int] | None = None) -> dict:
+    require_permission(request, "admin")
+    profile = _test_profile(request, specialist)
+    from maverick import model_tests
+    from maverick.llm import LLM, model_for_role
+
+    from . import learning_jobs
+    from . import specialist_test_sets as saved
+    if operation_id:
+        existing = saved.run_by_id(operation_id)
+        if existing is not None:
+            if existing["specialist"] != specialist:
+                raise HTTPException(status_code=409, detail="That test request belongs to another specialist.")
+            if existing["state"] != "prepared":
+                return {"run": saved.public_run(existing), "replayed": True}
+    try:
+        model_tests.policy()
+    except PermissionError as exc:
+        raise HTTPException(status_code=409, detail=(
+            "Turn on bounded model tests in Settings before checking live answers.")) from exc
+    try:
+        cases = saved.snapshot(specialist, case_ids)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if case_revisions is not None and {c["id"]: c["revision"] for c in cases} != case_revisions:
+        raise HTTPException(status_code=409, detail="A selected check changed. Refresh and review it before spending.")
+    model = model_for_role(specialist)
+    system = saved.answer_system(profile)
+    instruction_hash = saved.instruction_digest(system, model)
+    from .learning_ops_api import _budget
+    budget = _budget("specialist_eval")
+    for key, ceiling in (("max_dollars", .25), ("max_input_tokens", 10000),
+                         ("max_output_tokens", 640), ("max_wall_seconds", 120),
+                         ("max_tool_calls", 0)):
+        current = getattr(budget, key)
+        setattr(budget, key, ceiling if current is None else min(current, ceiling))
+    try:
+        budget.check()
+    except Exception as exc:
+        raise HTTPException(status_code=409, detail="The current spending limit does not allow this test run.") from exc
+
+    def _guard(job) -> None:
+        require_permission(request, "admin")
+        current = _test_profile(request, specialist)
+        model_tests.policy()
+        if (model_for_role(specialist) != model
+                or saved.instruction_digest(saved.answer_system(current), model) != instruction_hash):
+            raise ValueError("This specialist or its model changed. No further tests were sent.")
+        if job.cancelled:
+            raise ValueError("Stopped before the next answer check.")
+        budget.check()
+
+    def _run(job) -> dict:
+        run, created = saved.begin_run(specialist, model, instruction_hash, cases,
+                                       getattr(job, "started_by", ""), identity=operation_id)
+        if not created:
+            return {"run": run}
+        llm = LLM(model)
+        final_state, message = "done", ""
+        try:
+            for case in cases:
+                if job.cancelled:
+                    final_state = "stopped"
+                    break
+                _guard(job)
+                # A tool-free, single-attempt request tests answer quality only;
+                # it cannot change customer systems or silently fail over.
+                answer = llm.complete(system, [{"role": "user", "content": case["task"]}],
+                                      tools=None, budget=budget, max_tokens=128,
+                                      _no_failover=True, max_physical_attempts=1,
+                                      dispatch_guard=lambda: _guard(job))
+                saved.append_result(run["id"], saved.grade(case, answer.text), budget.dollars)
+        except Exception:  # noqa: BLE001 -- provider dispatch may have been billable
+            final_state = "unknown"
+            message = ("A check could not finish. A provider call may have been billed; "
+                       "no request was replayed. Review the completed answers and provider accounting.")
+        result = saved.finish_run(run["id"], final_state, budget.dollars, message)
+        return {"run": result}
+
+    _audit(request, "specialist_test_run", specialist=specialist,
+           cases=len(cases), model=model, max_dollars=budget.max_dollars)
+    if operation_id:
+        from .auth import caller_principal
+        saved.reserve_run(specialist, model, instruction_hash, cases,
+                          caller_principal(request) or "local administrator", operation_id)
+    return start_job(request, "specialist_answer_test", "Checking specialist answers", _run,
+                     needs_global=False, cancellable=True, on_cancel=learning_jobs.stop_budget(budget))
+
+
+@router.post("/test-suite/customer/run")
+def run_customer_tests(request: Request, body: SpecialistRunIn) -> dict:
+    return _start_customer_test_job(request, body.specialist, operation_id=body.operation_id,
+                                    case_ids=body.case_ids, case_revisions=body.case_revisions)
+
+
+@router.get("/test-suite/customer/run/{operation_id}")
+def customer_test_run_status(request: Request, operation_id: str) -> dict:
+    require_permission(request, "admin")
+    if len(operation_id) != 32 or any(c not in "0123456789abcdef" for c in operation_id):
+        raise HTTPException(status_code=404, detail="This answer check was not found.")
+    from . import specialist_test_sets as saved
+    row = saved.run_by_id(operation_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="No saved answer check has this request reference.")
+    _test_profile(request, row["specialist"])
+    return {"run": saved.public_run(row)}
 
 
 # ---- tasks coming due (forward) -----------------------------------------------------

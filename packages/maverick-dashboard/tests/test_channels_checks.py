@@ -42,7 +42,8 @@ def client(tmp_path, monkeypatch):
 
 def _slack(client):
     r = client.post("/channels/save", data={"channel": "slack", "enabled": "on",
-                                              "app_token": "xapp-1", "bot_token": "xoxb-1"},  # pragma: allowlist secret
+                                              "app_token": "xapp-1", "bot_token": "xoxb-1",
+                                              "allowed_user_ids": "U01ABCDEF"},  # pragma: allowlist secret
                     follow_redirects=False)
     assert r.status_code == 303
     from maverick import config
@@ -50,8 +51,11 @@ def _slack(client):
 
 
 def test_test_connection_marks_the_channel_working(client, monkeypatch):
-    from maverick_dashboard import channel_check_api
+    from maverick_dashboard import channel_check_api, integration_readiness
     _slack(client)
+    monkeypatch.setattr(integration_readiness, "_channel_dependency",
+                        lambda _name: integration_readiness.check(
+                            "passed", "fixture", kind="channel_adapter"))
     seen = []
     monkeypatch.setattr(channel_check_api, "_get", lambda url, headers: seen.append(url) or _Resp(200, {"ok": True}))
     r = client.post("/channels/test", data={"channel": "slack"}, follow_redirects=False)
@@ -62,8 +66,11 @@ def test_test_connection_marks_the_channel_working(client, monkeypatch):
 
 
 def test_send_test_message_validates_the_destination_and_records_result(client, monkeypatch):
-    from maverick_dashboard import channel_check_api
+    from maverick_dashboard import channel_check_api, integration_readiness
     _slack(client)
+    monkeypatch.setattr(integration_readiness, "_channel_dependency",
+                        lambda _name: integration_readiness.check(
+                            "passed", "fixture", kind="channel_adapter"))
     sent = []
     monkeypatch.setattr(channel_check_api, "_post",
                         lambda url, **kw: sent.append((url, kw.get("json"))) or _Resp(200, {"ok": False}))
@@ -73,6 +80,29 @@ def test_send_test_message_validates_the_destination_and_records_result(client, 
     assert sent[0][0] == "https://slack.com/api/chat.postMessage" and sent[0][1]["channel"] == "#general"
     assert "Test failed" in client.get("/channels").text
     assert client.post("/channels/send-test", data={"channel": "telegram", "to": "x"}).status_code == 400
+
+
+def test_channel_tests_stop_before_network_when_no_people_are_permitted(client, monkeypatch):
+    from maverick_dashboard import channel_check_api, integration_readiness
+
+    _slack(client)
+    monkeypatch.setattr(integration_readiness, "_channel_dependency",
+                        lambda _name: integration_readiness.check(
+                            "passed", "fixture", kind="channel_adapter"))
+    monkeypatch.setattr(channel_check_api, "_channel_config",
+                        lambda _name: {"enabled": True, "app_token": "xapp-1", "bot_token": "xoxb-1"})
+    monkeypatch.setattr(channel_check_api, "_get",
+                        lambda *_args, **_kwargs: pytest.fail("credential test reached the network"))
+    monkeypatch.setattr(channel_check_api, "_post",
+                        lambda *_args, **_kwargs: pytest.fail("message test reached the network"))
+
+    for path, data, result in (
+        ("/channels/test", {"channel": "slack"}, "test_failed"),
+        ("/channels/send-test", {"channel": "slack", "to": "#general"}, "send_failed"),
+    ):
+        response = client.post(path, data=data, follow_redirects=False)
+        assert response.status_code == 303
+        assert f"saved={result}" in response.headers["location"]
 
 
 def test_email_check_requires_sender_setup_and_tests_both_mail_signins(monkeypatch):

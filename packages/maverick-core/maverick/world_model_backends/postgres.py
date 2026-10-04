@@ -3857,6 +3857,46 @@ class PostgresWorldModel:
             rows = cur.fetchall()
         return [_dec_question_row(r) for r in rows]
 
+    def open_channel_questions(
+        self, conversation_id: int, owner: str, execution_principal: str,
+    ) -> list:
+        """Only blocked questions bound to this tenant's exact conversation."""
+        frag, fparams = _tenant_scope("g.tenant_id")
+        with self._tx() as cur:
+            cur.execute(
+                "SELECT q.id, q.goal_id, q.question, q.asked_at, q.answer, q.answered_at "
+                "FROM questions q JOIN goals g ON g.id = q.goal_id "
+                "WHERE q.answer IS NULL AND g.status = 'blocked' "
+                "AND g.owner = %s AND g.execution_principal = %s "
+                "AND EXISTS (SELECT 1 FROM turns t WHERE t.goal_id = g.id "
+                "AND t.conversation_id = %s AND t.role = 'user')"
+                + (" AND " + frag if frag else "") + " ORDER BY q.id",
+                (owner, execution_principal, conversation_id, *fparams),
+            )
+            rows = cur.fetchall()
+        return [_dec_question_row(r) for r in rows]
+
+    def answer_open_channel_question(
+        self, question_id: int, goal_id: int, answer: str, *,
+        conversation_id: int, owner: str, execution_principal: str,
+    ) -> bool:
+        """Claim one open question under its owner, thread, and tenant."""
+        frag, fparams = _tenant_scope("g.tenant_id")
+        with self._tx() as cur:
+            cur.execute(
+                "UPDATE questions SET answer = %s, answered_at = %s "
+                "WHERE id = %s AND goal_id = %s AND answer IS NULL "
+                "AND EXISTS (SELECT 1 FROM goals g WHERE g.id = questions.goal_id "
+                "AND g.status = 'blocked' AND g.owner = %s "
+                "AND g.execution_principal = %s "
+                "AND EXISTS (SELECT 1 FROM turns t WHERE t.goal_id = g.id "
+                "AND t.conversation_id = %s AND t.role = 'user')"
+                + (" AND " + frag if frag else "") + ")",
+                (_seal(answer), time.time(), question_id, goal_id, owner,
+                 execution_principal, conversation_id, *fparams),
+            )
+            return cur.rowcount == 1
+
     def all_questions(self, goal_id: int) -> list:
         frag, fparams = _tenant_scope("g.tenant_id")
         table = "questions q"

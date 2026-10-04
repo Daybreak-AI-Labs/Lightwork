@@ -117,8 +117,8 @@ def test_replacing_a_full_questionnaire_link_retains_earlier_replies(monkeypatch
         record["id"], assessment_type="vendor_risk", actor="ops",
         expected_revision=record["revision"],
     )
-    old_token = sent["questionnaires"][0]["token"]
-    old_id = vm.lookup_digest(old_token)
+    old_token = sent["form_path"].removeprefix("/form/")
+    old_id = sent["questionnaires"][0]["request_id"]
     monkeypatch.setattr(form_store, "_MAX_LINES", 1)
     assert form_store.append(old_token, {"vr_q1": "yes"}) == 1
     with pytest.raises(form_store.FormStoreFull):
@@ -127,7 +127,7 @@ def test_replacing_a_full_questionnaire_link_retains_earlier_replies(monkeypatch
         record["id"], old_id, actor="admin",
         expected_revision=sent["revision"],
     )
-    new_token = replaced["questionnaires"][0]["token"]
+    new_token = replaced["form_path"].removeprefix("/form/")
     assert new_token != old_token
     assert vm.questionnaire_for_token(old_token) is None
     assert vm.questionnaire_for_token(new_token) is not None
@@ -161,9 +161,9 @@ def test_questionnaire_link_remains_closed_if_record_write_fails(monkeypatch):
         record["id"], assessment_type="vendor_risk", actor="ops",
         expected_revision=record["revision"],
     )
-    old_token = sent["questionnaires"][0]["token"]
+    old_token = sent["form_path"].removeprefix("/form/")
     def fail_after_close(_vendor_id, mutate, **_kwargs):
-        mutate(dict(vm.get_vendor(record["id"])))
+        mutate(dict(vm._VENDORS.get(record["id"])))
         raise RuntimeError("simulated saved-record failure")
 
     with monkeypatch.context() as patch:
@@ -181,7 +181,7 @@ def test_questionnaire_link_remains_closed_if_record_write_fails(monkeypatch):
         expected_revision=sent["revision"],
     )
     assert repaired["revision"] > sent["revision"]
-    assert vm.questionnaire_for_token(repaired["questionnaires"][0]["token"]) is not None
+    assert vm.questionnaire_for_token(repaired["form_path"].removeprefix("/form/")) is not None
 
 
 def test_questionnaire_read_failure_does_not_look_unanswered(monkeypatch):

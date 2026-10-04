@@ -20,8 +20,11 @@ crashing logs an error but doesn't take the others down.
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import logging
 import os
+import re
 from pathlib import Path
 
 from .config import load_config
@@ -35,6 +38,111 @@ from .world_model import (
 )
 
 log = logging.getLogger(__name__)
+
+
+def _channel_conversation_user(msg, principal_id: str, memory_user_id: str) -> str:
+    """Keep room/thread history separate without changing the owner's identity."""
+    recipient = str(msg.user_id)
+    thread = str(getattr(msg, "conversation_ref", None) or "")
+    # Slack DMs (and legacy Teams chats) already used the sender-only key.
+    # Keep it so an open question survives an upgrade. Room-based Slack
+    # messages carry an explicit thread anchor and take the scoped key below.
+    if not thread and (recipient == principal_id or msg.channel in {"slack", "teams"}):
+        return memory_user_id
+    context = json.dumps([recipient, thread], separators=(",", ":"))
+    digest = hashlib.sha256(context.encode("utf-8")).hexdigest()
+    return f"{memory_user_id}:conversation:{digest}"
+
+
+def _channel_answer_text(msg) -> str:
+    """Email's generated Subject line is routing metadata, not the answer."""
+    text = msg.text.strip()
+    if msg.channel == "email" and text.startswith("Subject: ") and "\n\n" in text:
+        text = text.split("\n\n", 1)[1].strip()
+    return text
+
+
+def _question_id_required(msg) -> bool:
+    """A Slack room thread is task-specific; inboxes and topics are long lived."""
+    return not (msg.channel == "slack" and getattr(msg, "conversation_ref", None))
+
+
+def _question_reply(goal_id: int, questions: list, *, require_id: bool = False) -> str:
+    lines = [f"Question #{q.id} for task #{q.goal_id}: {q.question}" for q in questions]
+    if len(questions) == 1 and not require_id:
+        instructions = "Reply here with your answer and I’ll continue this task."
+    else:
+        instructions = ("Reply with the question number and your answer, for example "
+                        f"#{questions[0].id} your answer. Send a new request normally. "
+                        "I’ll continue this task when its questions are answered.")
+    return "\n".join([*lines, instructions])
+
+
+def queued_channel_question(watch: dict, msg, account_sha256: str) -> tuple[str | None, bool]:
+    """Read a queued goal's question under its original sender and tenant.
+
+    The second return value retires a watch whose goal finished without an
+    open question. An unavailable identity or world keeps it for later review.
+    """
+    from .oidc import oidc_enabled
+    from .paths import tenant_by_user_enabled, tenant_scope
+    from .personal_identity import CHANNELS, account_identity
+
+    principal = msg.principal_id
+    if oidc_enabled():
+        if msg.channel not in {"slack", "teams"}:
+            return None, False
+        from . import channel_oidc_bridge
+
+        principal = channel_oidc_bridge.resolve(
+            msg.channel, account_sha256, msg.provider_tenant_id,
+            msg.provider_sender_id,
+        )
+        if not principal:
+            return None, False
+    expected_tenant = f"{msg.channel}:{principal}" if tenant_by_user_enabled() else None
+    if watch.get("tenant") != expected_tenant:
+        return None, False
+    memory_user_id = (account_identity(principal, account_sha256)
+                      if msg.channel in CHANNELS and account_sha256 else principal)
+    if _linked_channel_refusal(msg.channel, memory_user_id, account_sha256):
+        return None, False
+    owner = f"user:{msg.channel}:{memory_user_id}"
+    execution_principal = f"user:{msg.channel}:{principal}"
+    if (watch.get("owner") != owner
+            or watch.get("execution_principal") != execution_principal):
+        return None, False
+
+    from .world_model import close_world_if_owned, open_world
+
+    with tenant_scope(tenant=expected_tenant):
+        world = open_world()
+        try:
+            goal_id = watch.get("goal_id")
+            goal = world.get_goal(goal_id)
+            if goal is None or goal.owner != owner or goal.execution_principal != execution_principal:
+                return None, False
+            questions = [
+                q for q in world.open_channel_questions(
+                    watch["conversation_id"], owner, execution_principal,
+                ) if q.goal_id == goal_id
+            ]
+            if questions:
+                text = _question_reply(goal_id, questions,
+                                       require_id=_question_id_required(msg))
+                try:
+                    from maverick_shield import Shield
+                except ImportError:
+                    pass
+                else:
+                    verdict = Shield.from_config().scan_output(text)
+                    if not verdict.allowed:
+                        text = (f"Task #{goal_id} needs an answer, but its question "
+                                "cannot be shown in this chat. Open Lightwork to review it.")
+                return text, False
+            return None, goal.status in {"blocked", "done", "failed", "cancelled"}
+        finally:
+            close_world_if_owned(world)
 
 
 def _reclaim_tenant_orphans() -> int:
@@ -335,36 +443,35 @@ class Server:
             disclosure = first_turn_disclosure(
                 world,
                 channel=msg.channel or "unknown",
-                user_id=memory_user_id,
+                user_id=_channel_conversation_user(msg, principal_id, memory_user_id),
             )
 
             conversation = world.get_or_create_conversation(
                 channel=msg.channel or "unknown",
-                user_id=memory_user_id,
+                user_id=_channel_conversation_user(msg, principal_id, memory_user_id),
             )
 
             from .deployment import require_enterprise_or_die
             require_enterprise_or_die()
 
-            title = msg.text[:80]
             # Persist the exact principal the runner will execute under.  The
             # identity is opaque and stays in the database; tenant path code
             # independently percent-encodes it before any filesystem use.
             execution_user_id = f"{msg.channel or 'unknown'}:{principal_id}"
-            # [channels.routing] rules may send this message to a specialist
-            # pack; with no rules (or no match) nothing changes.
-            from .channel_autorouting import specialist_for
-            specialist = specialist_for(msg)
-            goal_id = world.create_goal(
-                title,
-                msg.text,
-                owner=f"user:{msg.channel or 'unknown'}:{memory_user_id}",
-                execution_principal=f"user:{execution_user_id}",
-                **({"domain": specialist} if specialist else {}),
+            owner = f"user:{msg.channel or 'unknown'}:{memory_user_id}"
+            execution_principal = f"user:{execution_user_id}"
+            answer = self._channel_answer(
+                world, msg, conversation.id, owner, execution_principal,
             )
-            world.append_turn(conversation.id, "user", msg.text, goal_id=goal_id)
-            if specialist:
-                log.info("goal #%s routed to specialist %s", goal_id, specialist)
+            if answer is not None:
+                goal_id, answered_question, early_reply = answer
+                if early_reply is not None:
+                    return self._channel_output(early_reply, disclosure)
+            else:
+                answered_question = None
+                goal_id = self._new_channel_goal(
+                    world, msg, conversation.id, owner, execution_principal,
+                )
 
             # Inbound channel attachments (Slack files, email/Telegram
             # attachments) become goal attachments, exactly like a dashboard
@@ -408,6 +515,14 @@ class Server:
                 return "⚠ An internal error occurred. Try again or check the logs."
 
             if dispatch_status == "queued":
+                # The worker may ask later. The durable channel receipt keeps
+                # this binding so the adapter can deliver that question after
+                # the initial queued acknowledgement has been sent.
+                msg._channel_question_watch = {
+                    "goal_id": goal_id, "conversation_id": conversation.id,
+                    "tenant": tenant, "owner": owner,
+                    "execution_principal": execution_principal,
+                }
                 # QueueDispatcher returns after authenticated enqueue. It cannot
                 # supply a final channel reply yet, so be explicit rather than
                 # pretending the goal completed (or holding this event loop open
@@ -428,7 +543,12 @@ class Server:
                 # status string itself as an answer. A remote worker must share the
                 # same world backend for this to succeed.
                 completed = world.get_goal(goal_id)
-                if completed is not None and completed.result is not None:
+                questions = (world.open_questions(goal_id)
+                             if completed is not None and completed.status == "blocked" else [])
+                if questions:
+                    result = _question_reply(goal_id, questions,
+                                             require_id=_question_id_required(msg))
+                elif completed is not None and completed.result is not None:
                     result = completed.result
                 else:
                     known_status = (
@@ -441,17 +561,82 @@ class Server:
                         "but its result is not available in this process."
                     )
 
-            if self._shield is not None:
-                verdict = self._shield.scan_output(result)
-                if not verdict.allowed:
-                    return f"⚠ Output blocked: {'; '.join(verdict.reasons)}"
+            if answered_question is not None:
+                result = (f"I saved your answer to Question #{answered_question.id} "
+                          f"and continued task #{goal_id}.\n\n{result}")
 
-            if disclosure is not None:
-                return f"{disclosure}\n\n{result}"
-            return result
+            return self._channel_output(result, disclosure)
         finally:
             # Always free the tenant's concurrency slot, on every exit path.
             tenant_concurrency.release(tenant)
+
+    @staticmethod
+    def _new_channel_goal(world, msg, conversation_id, owner, execution_principal):
+        from .channel_autorouting import specialist_for
+
+        specialist = specialist_for(msg)
+        goal_id = world.create_goal(
+            msg.text[:80], msg.text, owner=owner,
+            execution_principal=execution_principal,
+            **({"domain": specialist} if specialist else {}),
+        )
+        world.append_turn(conversation_id, "user", msg.text, goal_id=goal_id)
+        if specialist:
+            log.info("goal #%s routed to specialist %s", goal_id, specialist)
+        return goal_id
+
+    @staticmethod
+    def _channel_answer(world, msg, conversation_id, owner, execution_principal):
+        """Bind a channel reply to one still-open question, or return None."""
+        pending = world.open_channel_questions(conversation_id, owner, execution_principal)
+        if not pending:
+            return (None, None, "") if getattr(msg, "question_reply_only", False) else None
+        answer_text = _channel_answer_text(msg)
+        selected = re.match(r"^#(\d+)\s*[:.-]?\s+(.+)$", answer_text, re.DOTALL)
+        if selected:
+            question_id = int(selected.group(1))
+            answer_text = selected.group(2).strip()
+            question = next((q for q in pending if q.id == question_id), None)
+            if question is None:
+                message = (f"Question #{question_id} is not open in this conversation.\n"
+                           + _question_reply(pending[0].goal_id, pending,
+                                             require_id=_question_id_required(msg)))
+                return None, None, message
+        elif len(pending) == 1 and not _question_id_required(msg):
+            question = pending[0]
+        elif _question_id_required(msg) and not getattr(msg, "question_reply_only", False):
+            # A long-lived inbox can have a blocked task and a fresh request.
+            # Only an explicit question id is an answer in that context.
+            return None
+        else:
+            return None, None, _question_reply(pending[0].goal_id, pending,
+                                               require_id=_question_id_required(msg))
+        if not answer_text:
+            return None, None, _question_reply(question.goal_id, [question],
+                                               require_id=_question_id_required(msg))
+        if not world.answer_open_channel_question(
+            question.id, question.goal_id, answer_text,
+            conversation_id=conversation_id, owner=owner,
+            execution_principal=execution_principal,
+        ):
+            return None, None, "That question changed while you replied. Check the latest task message."
+        world.append_turn(conversation_id, "user", msg.text, goal_id=question.goal_id)
+        remaining = world.open_questions(question.goal_id)
+        if remaining:
+            message = (f"Answer to Question #{question.id} saved for task #{question.goal_id}.\n"
+                       + _question_reply(question.goal_id, remaining,
+                                         require_id=_question_id_required(msg)))
+            return question.goal_id, question, message
+        return question.goal_id, question, None
+
+    def _channel_output(self, result: str, disclosure: str | None) -> str:
+        if not result:
+            return ""
+        if self._shield is not None:
+            verdict = self._shield.scan_output(result)
+            if not verdict.allowed:
+                return f"⚠ Output blocked: {'; '.join(verdict.reasons)}"
+        return f"{disclosure}\n\n{result}" if disclosure is not None else result
 
     @staticmethod
     def _store_inbound_attachments(world, goal_id: int, items) -> int:

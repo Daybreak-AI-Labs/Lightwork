@@ -337,6 +337,29 @@ def test_business_setup_drafts_then_saves_only_after_confirmation(env, monkeypat
     assert again.status_code == 404, "a draft is approved at most once"
 
 
+def test_business_setup_rejects_existing_specialist_names_before_drafting(env):
+    from maverick.domain import available_domains
+
+    base = "/api/v1/agents/business-setup/draft"
+    before = available_domains()["hr_screening"]
+    original = (before.persona, before.max_risk, before.allow_tools)
+    response = env.client.post(base, json={"name": "HR Screening", "use_ai": False}, headers=_as("boss"))
+    assert response.status_code == 409
+    assert "HR Screening" in response.json()["detail"]
+    assert "existing specialist and its safeguards have not changed" in response.json()["detail"]
+    after = available_domains()["hr_screening"]
+    assert (after.persona, after.max_risk, after.allow_tools) == original
+    assert not list((env.tmp / "domains").glob("*.toml"))
+    assert not any(row["kind"] == "business_agent_drafted" for row in env.audit)
+
+    folder = env.tmp / "domains"
+    folder.mkdir(exist_ok=True)
+    existing = folder / "acme_bakery.toml"
+    existing.write_text("existing draft", encoding="utf-8")
+    response = env.client.post(base, json={"name": "Acme Bakery", "use_ai": False}, headers=_as("boss"))
+    assert response.status_code == 409 and existing.read_text(encoding="utf-8") == "existing draft"
+
+
 def _tool_gap_plan(env, monkeypatch):
     import maverick.provision as provision
 

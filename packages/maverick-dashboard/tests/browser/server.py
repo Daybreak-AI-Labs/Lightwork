@@ -49,6 +49,8 @@ action_recipe_transforms = true
 action_recipe_lineage = true
 require_action_recipe_lineage = false
 action_evidence_issuer = "synthetic-browser-learning"
+[event_triggers]
+enable = true
 [connections]
 enable = true
 [ai_cost_roi]

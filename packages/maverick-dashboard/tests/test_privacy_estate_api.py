@@ -92,6 +92,15 @@ def test_vendor_questionnaire_lifecycle_over_the_api():
               "revision": vendor["revision"]})
     assert sent.status_code == 201, sent.text
     assert sent.json()["form_path"].startswith("/form/")
+    token = sent.json()["form_path"].removeprefix("/form/")
+    assert "token" not in sent.json()["questionnaires"][0]
+
+    # The creation response is the only place the public bearer link is shown.
+    listed = client.get("/api/v1/vendors").json()
+    detail = client.get(f"/api/v1/vendors/{vendor['id']}").json()
+    for projection in (listed, detail):
+        assert token not in str(projection)
+    assert detail["questionnaires"][0]["request_id"]
 
     bad = client.post(
         f"/api/v1/vendors/{vendor['id']}/questionnaires",
@@ -102,6 +111,8 @@ def test_vendor_questionnaire_lifecycle_over_the_api():
     back = client.get(f"/api/v1/vendors/{vendor['id']}/questionnaires")
     assert back.status_code == 200
     assert back.json()["questionnaires"][0]["status"] == "sent"
+    assert token not in back.text
+    assert "form_path" not in back.json()["questionnaires"][0]
 
 
 def test_admin_can_replace_vendor_link_without_losing_replies(monkeypatch):
@@ -144,6 +155,12 @@ def test_admin_can_replace_vendor_link_without_losing_replies(monkeypatch):
     assert replaced.headers["cache-control"] == "no-store"
     new_path = replaced.json()["form_path"]
     assert new_path != old_path
+    for route in ("/api/v1/vendors", f"/api/v1/vendors/{vendor['id']}",
+                  f"/api/v1/vendors/{vendor['id']}/questionnaires"):
+        projection = client.get(route)
+        assert projection.status_code == 200
+        assert old_path.rsplit("/", 1)[-1] not in projection.text
+        assert new_path.rsplit("/", 1)[-1] not in projection.text
     assert client.get(old_path).status_code == 404
     assert client.post(old_path, json={"vr_q1": "no"}).status_code == 404
     assert client.get(new_path).status_code == 200

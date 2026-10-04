@@ -78,6 +78,17 @@ def test_provider_rotation_and_clear_are_redacted(client, rows, monkeypatch):
     assert [r["phase"] for r in rows] == ["prepared", "completed"]
     assert secret not in json.dumps(rows)
     assert rows[-1]["new"]["api_key"] == "set"  # pragma: allowlist secret
+    assert rows[-1]["changed_fields"] == ["access key"]
+    rows.clear()
+    replacement = "sk-replaced-do-not-log"  # pragma: allowlist secret
+    response = client.post(
+        "/settings/providers", data={"provider": "openai", "api_key": replacement},
+        follow_redirects=False,
+    )
+    assert response.status_code == 303, response.text
+    assert rows[-1]["old"]["api_key"] == rows[-1]["new"]["api_key"] == "set"  # pragma: allowlist secret
+    assert rows[-1]["changed_fields"] == ["access key"]
+    assert replacement not in json.dumps(rows)
     rows.clear()
     response = client.post(
         "/settings/providers/clear", data={"provider": "openai"},
@@ -86,6 +97,7 @@ def test_provider_rotation_and_clear_are_redacted(client, rows, monkeypatch):
     assert response.status_code == 303, response.text
     assert rows[0]["old"]["api_key"] == "set"  # pragma: allowlist secret
     assert rows[-1]["new"]["api_key"] == "not set"  # pragma: allowlist secret
+    assert rows[-1]["changed_fields"] == ["access key"]
 
 
 def test_channel_credentials_are_redacted(client, rows):

@@ -34,8 +34,12 @@ from fastapi import (
 from maverick.governed_records import RecordConflict
 from maverick.runner import (
     DEFAULT_MAX_DEPTH,
+    DEFAULT_MAX_DOLLARS,
+    DEFAULT_MAX_WALL_SECONDS,
     clamp_task_limit,
     configured_goal_ceiling_dollars,
+    configured_max_dollars,
+    configured_max_wall_seconds,
     requested_goal_dollars,
     requested_goal_wall_seconds,
 )
@@ -59,6 +63,7 @@ from ._shared import _world_cache as _world_cache  # re-export: tests clear api.
 from ._shared import dashboard_token as _dashboard_token
 from .api_schemas import (
     ActiveTenantIn,
+    AgentGraduationIn,
     AgentOverrideIn,
     AiSystemIn,
     AnswerIn,
@@ -331,7 +336,7 @@ def _goal_reason_code(g, open_ids: list[int]) -> str | None:
     return stop["kind"] if stop else None
 
 
-def _to_goal_out(g) -> GoalOut:
+def _to_goal_out(g, *, limits: dict | None = None) -> GoalOut:
     from .goal_waiting import open_question_ids
     from .plain_labels import risk_label
 
@@ -343,6 +348,7 @@ def _to_goal_out(g) -> GoalOut:
         title=g.title,
         description=g.description,
         result=g.result,
+        limits=limits,
         reason_code=_goal_reason_code(g, open_ids),
         risk_tier=risk.get("tier"),
         risk_reasons=risk.get("reasons"),
@@ -530,10 +536,7 @@ async def set_active_tenant(request: Request, body: ActiveTenantIn) -> dict:
 def workforce_posture(request: Request) -> dict:
     """The workforce autonomy dial: fleet posture + graduation candidates.
 
-    Read-only surface for the dashboard -- whether per-agent autonomy levels are
-    on, the distribution of baseline authority rungs across the roster, how many
-    hires are still onboarding, and which have earned graduation from a clean
-    approval record (advisory; the client lifts onboarding to act on it).
+    Current authority posture and candidates who can be reviewed for graduation.
     """
     require_permission(request, "view")
     from maverick.agent_autonomy import graduation_candidates, levels_enabled
@@ -545,22 +548,40 @@ def workforce_posture(request: Request) -> dict:
         "autonomy_posture": s.get("autonomy_posture", {}),
         "packs_onboarding": s.get("packs_onboarding", 0),
         "graduation_candidates": [],
+        "can_manage": pack_editing_denial(request) is None,
     }
     try:
-        from maverick.domain import available_domains
+        from maverick.domain import available_domains, suites_for_domain
+        from maverick.domain_edit import resolved_view
 
         wm = _world()
-        cands = graduation_candidates(wm.list_approvals(limit=5000), sorted(available_domains()))
-        out["graduation_candidates"] = [
-            {
+        domains = available_domains()
+        allowed = caller_suites(request)
+        names = [name for name, profile in sorted(domains.items())
+                 if allowed is None or suites_for_domain(name, profile) <= allowed]
+        cands = graduation_candidates(wm.list_approvals(limit=5000), names)
+        visible_candidates = []
+        for c in cands:
+            view = resolved_view(c.name)
+            if view is None or not view["autonomy"]["onboarding"]:
+                continue
+            auto_risks = _autonomy_auto_risks(view["autonomy"]["pack"])
+            visible_candidates.append({
                 "name": c.name,
                 "sample": c.sample,
                 "approve_rate": c.approve_rate,
                 "confidence": c.confidence,
                 "reason": c.reason,
-            }
-            for c in cands
-        ]
+                "generation": view["generation"],
+                "can_grant": out["can_manage"] and out["levels_enabled"]
+                and view["autonomy"]["onboarding"]
+                and not view["autonomy"]["config_override"] and not auto_risks,
+                "grant_block_reason": _autonomy_auto_graduation_reason(auto_risks) if auto_risks else None,
+                "needs_supervision": view["autonomy"]["onboarding"],
+            })
+            if len(visible_candidates) >= 100:
+                break
+        out["graduation_candidates"] = visible_candidates
     except Exception:  # pragma: no cover -- no DB / empty install -> empty list
         pass
     return out
@@ -1291,12 +1312,72 @@ async def delete_tenant(
 ) -> Response:
     require_global_permission(request, "admin")
     step_up.require_recent_mfa(request, "delete_workspace")
+    import os
+
     from maverick.tenant import registry as tenant_registry
 
-    _get_tenant_or_404(tenant_id)
-    tenant_registry.delete_tenant(tenant_id, purge=purge)
-    await _audit_tenant_change(request, "tenant_deleted", tenant_id, purge=purge)
+    from . import rbac, settings_store, workspace_tenants
+
+    existing = tenant_registry.get_tenant(tenant_id)
+    if existing is None:
+        if not tenant_registry.tenant_retired(tenant_id):
+            raise HTTPException(status_code=404, detail="workspace not found")
+        if purge:
+            raise HTTPException(status_code=409, detail="Removed workspaces cannot be erased by retrying Remove.")
+    else:
+        if os.environ.get("MAVERICK_TENANT", "").strip() == tenant_id:
+            raise HTTPException(status_code=409, detail=(
+                "This installation is fixed to this workspace. Change that binding before removing it."
+            ))
+        tenant_registry.delete_tenant(tenant_id, purge=purge)
+    try:
+        revoked = rbac.clear_tenant_roles(tenant_id)
+        cleared = workspace_tenants.clear_tenant_selections(tenant_id)
+        local_selection_cleared = settings_store.clear_deleted_active_tenant(tenant_id)
+    except Exception as exc:
+        # The tombstone already denies every old member. A retry of this same
+        # endpoint completes cleanup without reopening the retained records.
+        raise HTTPException(status_code=503, detail=(
+            "Workspace access is closed, but member cleanup could not be confirmed. Retry Remove."
+        )) from exc
+    await _audit_tenant_change(request, "tenant_deleted", tenant_id, purge=purge,
+                               revoked_members=revoked, cleared_selections=cleared,
+                               local_selection_cleared=local_selection_cleared)
     return Response(status_code=204)
+
+
+@router.get("/admin/tenants/removed/list")
+async def removed_tenants(request: Request) -> list[dict[str, object]]:
+    require_global_permission(request, "admin")
+    from maverick.tenant.registry import list_removed_tenants
+
+    return list_removed_tenants()
+
+
+@router.post("/admin/tenants/{tenant_id}/restore", response_model=TenantOut)
+async def restore_tenant(request: Request, tenant_id: str) -> TenantOut:
+    require_global_permission(request, "admin")
+    step_up.require_recent_mfa(request, "restore_workspace")
+    from maverick.tenant import registry as tenant_registry
+
+    from . import rbac, workspace_tenants
+
+    # Legacy role files may predate removal cleanup. Clear them before any
+    # retained workspace can be re-admitted; never reactivate former members.
+    if not tenant_registry.tenant_retired(tenant_id):
+        raise HTTPException(status_code=404, detail="removed workspace not found")
+    try:
+        rbac.clear_tenant_roles(tenant_id)
+        workspace_tenants.clear_tenant_selections(tenant_id)
+        rec = tenant_registry.restore_tenant(tenant_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=(
+            "Workspace recovery could not be confirmed. The records remain closed; refresh and retry."
+        )) from exc
+    await _audit_tenant_change(request, "tenant_restored", tenant_id, status="suspended")
+    return _to_tenant_out(rec)
 
 
 # Per-tenant RBAC: a principal can hold a different role in each tenant. These
@@ -1461,6 +1542,48 @@ def create_goal(
     bg: BackgroundTasks,
     response: Response,
 ) -> GoalOut:
+    return _create_goal(request, payload, bg, response,
+                        idempotency_key=request.headers.get("Idempotency-Key") or "")
+
+
+_REST_GOAL_MAX_DOLLARS = 100.0
+_REST_GOAL_MAX_WALL_SECONDS = 86_400.0
+
+
+def _rest_goal_limits(payload: GoalIn) -> dict[str, float | int]:
+    """Finite REST admission limits, independent of legacy no-limit policy.
+
+    The operator's numeric task ceiling still narrows the request. An older
+    installation that deliberately has no general task default keeps that
+    policy for CLI/internal work, while an external REST submission receives
+    the published $2/30-minute default and $100/24-hour upper bound.
+    """
+    dollars = payload.max_dollars
+    if dollars is None:
+        dollars = configured_max_dollars()
+    if dollars is None:
+        dollars = DEFAULT_MAX_DOLLARS
+    seconds = payload.max_wall_seconds
+    if seconds is None:
+        seconds = configured_max_wall_seconds()
+    if seconds is None:
+        seconds = DEFAULT_MAX_WALL_SECONDS
+    return {
+        "max_dollars": min(requested_goal_dollars(dollars), _REST_GOAL_MAX_DOLLARS),
+        "max_wall_seconds": min(requested_goal_wall_seconds(seconds), _REST_GOAL_MAX_WALL_SECONDS),
+        "max_depth": min(payload.max_depth, DEFAULT_MAX_DEPTH),
+    }
+
+
+def _create_goal(
+    request: Request,
+    payload: GoalIn,
+    bg: BackgroundTasks,
+    response: Response,
+    *,
+    idempotency_key: str,
+) -> GoalOut:
+    """Native launch authority shared with reviewed Copilot task starts."""
     require_permission(request, "operate")
     require_provider_or_400()
     # Shared sliding-window cap across /chat/send + this route, so a
@@ -1501,7 +1624,8 @@ def create_goal(
     title = (title or "").strip()
     if not title:
         raise HTTPException(status_code=400, detail="title is required")
-    director, description = _api_director(payload, title, description)
+    limits = _rest_goal_limits(payload)
+    director, description = _api_director(payload, title, description, limits["max_dollars"])
     # Run AS a specialist pack (JD hires, department deploys): the orchestrator
     # inherits a domain stamped on the goal row, binding that pack's persona,
     # capability envelope and compartment. Validate against the enabled roster
@@ -1513,12 +1637,12 @@ def create_goal(
     # Keyed admission uses the same atomic goal/receipt transaction as chat
     # attachments, binding the complete reviewed payload and effective limits.
     # Replays and read reconciliation never dispatch work a second time.
-    idem_key = (request.headers.get("Idempotency-Key") or "").strip()
+    idem_key = idempotency_key.strip()
     # A director autonomy level can only lower the cap (None = no own cap).
-    max_dollars = clamp_task_limit(getattr(director, "max_dollars", None),
-                                   requested_goal_dollars(payload.max_dollars))
-    max_wall_seconds = requested_goal_wall_seconds(payload.max_wall_seconds)
-    max_depth = min(payload.max_depth, DEFAULT_MAX_DEPTH)
+    max_dollars = clamp_task_limit(getattr(director, "max_dollars", None), limits["max_dollars"])
+    max_wall_seconds = limits["max_wall_seconds"]
+    max_depth = limits["max_depth"]
+    limits["max_dollars"] = max_dollars
     receipt = None
     if idem_key:
         from .goal_submission import reserve_api
@@ -1538,7 +1662,7 @@ def create_goal(
             response.headers["Location"] = f"/api/v1/goals/{g0.id}"
             response.headers["Idempotency-Replayed"] = "true"
             if g0.status != "draft":
-                return _to_goal_out(g0)
+                return _to_goal_out(g0, limits=limits)
             # The first request stopped between admission and its dispatch
             # claim, so nothing is running. The payload (and so its limits) is
             # bound by the fingerprint: finish the claim below. The claim is an
@@ -1571,7 +1695,7 @@ def create_goal(
             if g1 is not None and g1.status != "draft":
                 response.headers["Location"] = f"/api/v1/goals/{goal_id}"
                 response.headers["Idempotency-Replayed"] = "true" if replay_resume else "false"
-                return _to_goal_out(g1)
+                return _to_goal_out(g1, limits=limits)
             raise HTTPException(status_code=409, detail=(
                 "Request retained; execution admission is unconfirmed. Reconcile before retrying."))
     if user_id:
@@ -1599,7 +1723,7 @@ def create_goal(
         raise HTTPException(status_code=500, detail="goal vanished after create")
     response.headers["Location"] = f"/api/v1/goals/{goal_id}"
     response.headers["Idempotency-Replayed"] = "true" if receipt is not None and replay_resume else "false"
-    return _to_goal_out(g)
+    return _to_goal_out(g, limits=limits)
 
 
 def _bind_source_analysis(world, goal_id, actor, selection):
@@ -1631,14 +1755,13 @@ def _source_analysis_selection(request: Request, payload: GoalIn):
     return selection
 
 
-def _api_director(payload: GoalIn, title: str, description: str):
+def _api_director(payload: GoalIn, title: str, description: str, max_dollars: float):
     """``(director run or None, description to store)`` for a REST start."""
     if not payload.director_profile:
         return None, description
     from maverick_dashboard.app import _director_run
 
-    director = _director_run(payload.director_profile, title, description,
-                             requested_goal_dollars(payload.max_dollars))
+    director = _director_run(payload.director_profile, title, description, max_dollars)
     return director, director.goal_description
 
 
@@ -1670,9 +1793,14 @@ def reconcile_goal_submission(request: Request, response: Response, kind: str = 
     response.headers["Cache-Control"] = "no-store"
     # A draft was admitted but never dispatched: replaying the request with the
     # same Idempotency-Key runs it. Do not report that as accepted work.
+    intent = (receipt.get("detail") or {}).get("dispatch_intent")
+    limits = ({key: intent[key] for key in ("max_dollars", "max_wall_seconds", "max_depth")}
+              if isinstance(intent, dict) and all(key in intent for key in
+                  ("max_dollars", "max_wall_seconds", "max_depth")) else None)
     return {"state": "not_dispatched" if goal.status == "draft" else "accepted",
             "submission_state": receipt["state"],
             "goal": {"id": goal.id, "status": goal.status},
+            "limits": limits,
             "replayed": True, "execution_confirmed": False}
 
 
@@ -1751,8 +1879,13 @@ def search_goals(request: Request, q: str, limit: int = 50) -> list[GoalOut]:
     if not query:
         return []
     limit = max(1, min(int(limit or 50), 200))
-    goals = _world().search_goals(query, owner=goal_owner_filter(request), limit=limit)
-    return [_to_goal_out(g) for g in goals]
+    world = _world()
+    goals = world.search_goals(query, owner=goal_owner_filter(request), limit=200)
+    # The search projection omits the domain used by suite authorization.
+    # Resolve the current full goal before exposing task text in search.
+    current = [world.get_goal(goal.id) for goal in goals]
+    visible = [goal for goal in current if goal is not None and can_access_goal(request, goal)]
+    return [_to_goal_out(goal) for goal in visible[:limit]]
 
 
 @router.get("/goals/{goal_id}", response_model=GoalOut)
@@ -13522,6 +13655,84 @@ def _agent_action_errors(name: str, payload: AgentOverrideIn) -> list[str]:
             for tool in sorted(added - available)]
 
 
+def _autonomy_auto_risks(policy: dict) -> list[str]:
+    """Risk bands that would allow unreviewed action after supervision ends."""
+    return [risk for risk in ("usual", "low", "medium", "high")
+            if (policy.get("default") if risk == "usual" else
+                policy.get(risk) or policy.get("default")) == "auto"]
+
+
+def _autonomy_auto_graduation_reason(risks: list[str]) -> str:
+    return ("This specialist is set to Act on its own for " + ", ".join(risks)
+            + " actions. Its overall approval record cannot prove those actions are safe. "
+            "Set each of those levels to Ask or lower before ending supervision.")
+
+
+def _agent_autonomy_errors(name: str, payload: AgentOverrideIn) -> list[str]:
+    """Check the live authority and evidence before widening a specialist's dial."""
+    if payload.autonomy is None:
+        return []
+    from maverick.agent_autonomy import graduation_status, levels_enabled
+    from maverick.domain_edit import resolved_view
+
+    view = resolved_view(name)
+    if view and view["autonomy"]["config_override"]:
+        if payload.autonomy.model_dump() == view["autonomy"]["pack"]:
+            return []  # preserve the existing pack setting during another edit
+        return ["A server-configured independence policy controls this specialist. Remove it before editing here."]
+    auto_risks = _autonomy_auto_risks(payload.autonomy.model_dump())
+    if not payload.autonomy.onboarding and auto_risks:
+        return [_autonomy_auto_graduation_reason(auto_risks)]
+    if payload.autonomy.onboarding or (view and not view["autonomy"]["onboarding"]):
+        return []
+    if not levels_enabled():
+        return ["Turn on per-agent independence levels before ending supervision."]
+    if view is None:
+        return ["A new specialist must start under supervision."]
+    try:
+        verdict = graduation_status(name, _world().list_approvals(limit=5000))
+    except Exception:
+        return ["The specialist's approval record is unavailable. Keep supervision on and retry."]
+    if not verdict.graduated:
+        return ["This specialist has not yet earned graduation from its approval record."]
+    return []
+
+
+def _record_agent_autonomy_intent(request: Request, name: str, before: dict, after: dict,
+                                  *, sample: int = 0) -> None:
+    """Require a tenant-scoped activity record before any authority increase."""
+    from maverick.audit import AuditRefused, EventKind, audit_event
+
+    try:
+        recorded = audit_event(
+            EventKind.CONTROL_PLANE_ACTION, agent="dashboard",
+            verb="specialist_independence_change_requested",
+            actor=caller_principal(request) or "local administrator", specialist=name,
+            before=before, requested=after, approved_samples=sample,
+        )
+    except AuditRefused as exc:
+        raise HTTPException(status_code=503, detail="The activity record is unavailable; no change was made.") from exc
+    if not recorded:
+        raise HTTPException(status_code=503, detail="The activity record is unavailable; no change was made.")
+
+
+def _record_agent_reset_intent(request: Request, name: str, fields: list[str]) -> None:
+    """Record an override removal before built-in permissions can return."""
+    from maverick.audit import AuditRefused, EventKind, audit_event
+
+    try:
+        recorded = audit_event(
+            EventKind.CONTROL_PLANE_ACTION, agent="dashboard",
+            verb="specialist_override_reset_requested",
+            actor=caller_principal(request) or "local administrator", specialist=name,
+            removed_fields=fields, requested={"reset_to_builtin": True},
+        )
+    except AuditRefused as exc:
+        raise HTTPException(status_code=503, detail="The activity record is unavailable; no change was made.") from exc
+    if not recorded:
+        raise HTTPException(status_code=503, detail="The activity record is unavailable; no change was made.")
+
+
 @router.post("/agents/{name}/validate")
 async def validate_agent_override(request: Request, name: str, payload: AgentOverrideIn) -> dict:
     """Lint the merged result of a proposed override without persisting it."""
@@ -13530,7 +13741,8 @@ async def validate_agent_override(request: Request, name: str, payload: AgentOve
     _require_pack_editing(request)
     from maverick.domain_edit import validate_override
 
-    errors, warnings = validate_override(name, payload.model_dump(exclude_unset=True))
+    errors, warnings = validate_override(name, payload.model_dump(exclude_unset=True, exclude_none=True))
+    errors.extend(await run_in_threadpool(_agent_autonomy_errors, name, payload))
     try:
         errors.extend(_agent_action_errors(name, payload))
     except Exception as exc:
@@ -13543,29 +13755,111 @@ async def save_agent_override(request: Request, name: str, payload: AgentOverrid
     """Persist a tenant override for ``name``. 403 if pack editing is disabled,
     422 if the merged pack fails lint (the override is rejected, not written)."""
     _require_pack_editing(request)
-    from maverick.domain_edit import OverrideConflict, write_override
+    from maverick.domain_edit import OverrideConflict, read_override, resolved_view, write_override
 
     try:
-        errors = _agent_action_errors(name, payload)
+        errors = await run_in_threadpool(_agent_autonomy_errors, name, payload)
+        errors += _agent_action_errors(name, payload)
         if errors:
             raise ValueError("; ".join(errors))
-        return write_override(name, payload.model_dump(exclude_unset=True, exclude={"expected_generation"}),
+        if payload.autonomy is not None and payload.expected_generation is None:
+            raise OverrideConflict("Reload the specialist before changing independence settings.")
+        previous = read_override(name)
+        if payload.autonomy is None and "autonomy" in previous:
+            raise OverrideConflict("This specialist has independence settings. Reload the editor before saving.")
+        if payload.autonomy is not None:
+            current = resolved_view(name)
+            before = (current or {}).get("autonomy", {}).get("pack", {})
+            after = payload.autonomy.model_dump()
+            if before != after:
+                await run_in_threadpool(
+                    _record_agent_autonomy_intent, request, name, before, after)
+        return write_override(name, payload.model_dump(exclude_unset=True, exclude_none=True,
+                                                       exclude={"expected_generation"}),
                               expected_generation=payload.expected_generation, return_view=True)
     except OverrideConflict as e:
         raise HTTPException(status_code=409, detail=str(e)) from e
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e)) from e
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=503, detail="Available actions could not be checked. Try again shortly.") from e
+
+
+@router.post("/agents/{name}/graduate")
+async def graduate_agent(request: Request, name: str, payload: AgentGraduationIn) -> dict:
+    """Grant a candidate its configured levels after a fresh approval check."""
+    _require_pack_editing(request)
+    from maverick.agent_autonomy import graduation_status, levels_enabled
+    from maverick.domain_edit import (
+        OverrideConflict,
+        read_override,
+        resolved_view,
+        write_override,
+    )
+
+    view = await run_in_threadpool(resolved_view, name)
+    if view is None:
+        raise HTTPException(status_code=404, detail="No such specialist.")
+    if view["generation"] != payload.expected_generation:
+        raise HTTPException(status_code=409, detail="This specialist changed. Refresh before granting independence.")
+    if not levels_enabled():
+        raise HTTPException(status_code=409, detail="Turn on per-agent independence levels first.")
+    if view["autonomy"]["config_override"]:
+        raise HTTPException(status_code=409, detail="A server-configured policy controls this specialist.")
+    if not view["autonomy"]["onboarding"]:
+        raise HTTPException(status_code=409, detail="This specialist is already out of supervision.")
+    auto_risks = _autonomy_auto_risks(view["autonomy"]["pack"])
+    if auto_risks:
+        raise HTTPException(status_code=409, detail=_autonomy_auto_graduation_reason(auto_risks))
+    try:
+        verdict = await run_in_threadpool(
+            lambda: graduation_status(name, _world().list_approvals(limit=5000)))
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="The approval record could not be checked.") from exc
+    if not verdict.graduated:
+        raise HTTPException(status_code=409, detail="This specialist has not earned graduation yet.")
+    patch = await run_in_threadpool(read_override, name)
+    after = dict(view["autonomy"]["pack"])
+    after["onboarding"] = False
+    patch["autonomy"] = after
+    await run_in_threadpool(
+        _record_agent_autonomy_intent, request, name, view["autonomy"]["pack"], after,
+        sample=verdict.sample)
+    try:
+        return await run_in_threadpool(
+            write_override, name, patch, expected_generation=payload.expected_generation,
+            return_view=True)
+    except OverrideConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.delete("/agents/{name}/override")
 async def delete_agent_override(request: Request, name: str, expected_generation: str | None = Query(None, pattern=r"^[0-9a-f]{64}$")) -> dict:
     """Drop a tenant override, reverting the agent to its built-in pack."""
     _require_pack_editing(request)
-    from maverick.domain_edit import OverrideConflict, remove_override, resolved_view
+    from maverick.domain_edit import (
+        OverrideConflict,
+        read_override,
+        rejected_override_view,
+        remove_override,
+        resolved_view,
+    )
 
     try:
+        current = read_override(name)
+        if expected_generation is None:
+            raise OverrideConflict("Reload the specialist before resetting its settings.")
+        view_before = resolved_view(name) or rejected_override_view(name)
+        if view_before and view_before["generation"] != expected_generation:
+            raise OverrideConflict("This specialist changed. Reload its latest version before resetting it.")
+        if current or (view_before and "is_builtin" in view_before):
+            await run_in_threadpool(
+                _record_agent_reset_intent, request, name,
+                sorted(current) if current else ["unavailable_override"])
         removed = remove_override(name, expected_generation=expected_generation)
     except OverrideConflict as e:
         raise HTTPException(status_code=409, detail=str(e)) from e
@@ -16445,7 +16739,7 @@ async def deploy_department_api(request: Request, key: str) -> dict:
         fleet_name_for,
         get_department,
     )
-    from maverick.fleet import load_fleet
+    from maverick.fleet import load_fleet, save_fleet
     from maverick.suite_grants import DepartmentAccessError
 
     dept = get_department(key)
@@ -16478,16 +16772,15 @@ async def deploy_department_api(request: Request, key: str) -> dict:
 
     by_name = {agent["name"]: agent for agent in list_agents()}
     action_status = _department_action_status(dept.members, by_name)
-    if (action_status["ready_specialists"] == 0
-            and action_status["unknown_specialists"] == 0):
+    if action_status["ready_specialists"] == 0:
         raise HTTPException(
             status_code=409,
-            detail="This team has no specialists whose required actions are available. "
+            detail="This team has no specialists whose required actions passed setup checks. "
                    "Open View team to see what needs setup before deploying.",
         )
 
     try:
-        fleet = deploy_department(key, owner, tenant=tenant)
+        fleet = deploy_department(key, owner, tenant=tenant, save=False)
     except EntitlementError as e:
         raise HTTPException(status_code=402, detail=str(e)) from e
     except DepartmentAccessError as e:
@@ -16498,7 +16791,35 @@ async def deploy_department_api(request: Request, key: str) -> dict:
         ) from e
     if fleet is None:  # suite disabled between the check and the deploy
         raise HTTPException(status_code=404, detail="no such department")
-    return {"fleet": fleet.to_dict()}
+    # A department may have one runnable specialist and many whose required
+    # actions are unavailable. Do not deploy those specialists as selectable
+    # fleet agents only to block their first task after the customer assigns it.
+    ready_names = {
+        name for name in dept.members
+        if by_name.get(name, {}).get("readiness", {}).get("state") == "action_ready"
+    }
+    from dataclasses import replace
+
+    fleet = replace(fleet, agents=tuple(a for a in fleet.agents if a.name in ready_names))
+    if not fleet.agents:
+        raise HTTPException(
+            status_code=409,
+            detail="No ready specialist remains in this team. Open View team to check its setup.",
+        )
+    deployed_names = {a.name for a in fleet.agents}
+    skipped = [
+        {
+            "name": name,
+            "reason": by_name.get(name, {}).get("readiness", {}).get("label")
+                      or "Setup check unavailable",
+            "fix_url": by_name.get(name, {}).get("readiness", {}).get("fix_url")
+                       or "/workforce",
+        }
+        for name in dept.members if name not in deployed_names
+    ]
+    save_fleet(fleet, tenant=tenant or "__active__")
+    return {"fleet": fleet.to_dict(), "deployed_count": len(fleet.agents),
+            "skipped_count": len(skipped), "skipped_specialists": skipped}
 
 
 @router.get("/departments/{key}/review")

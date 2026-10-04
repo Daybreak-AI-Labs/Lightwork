@@ -324,11 +324,12 @@ def test_deployed_department_agent_runs_under_domain_capability(monkeypatch, tmp
     r = c.post("/api/v1/departments/sales_gtm/deploy")
     assert r.status_code == 201, r.text
     fleet = r.json()["fleet"]
-    agent = next(a for a in fleet["agents"] if a["name"] == "gtm_demand_gen")
-    assert agent["domain"] == "gtm_demand_gen"  # bound to its pack
+    agent = next(a for a in fleet["agents"] if a["name"] == "gtm_deal_inspection")
+    assert agent["domain"] == "gtm_deal_inspection"  # bound to its pack
+    assert not any(a["name"] == "gtm_demand_gen" for a in fleet["agents"])
 
     rr = c.post("/api/v1/fleets/dept-sales_gtm/run",
-                json={"agent": "gtm_demand_gen", "prompt": "plan a campaign"})
+                json={"agent": "gtm_deal_inspection", "prompt": "inspect pipeline risks"})
     assert rr.status_code == 201, rr.text
 
     # The dispatched capability enforces the pack's hard denials (shell/write).
@@ -466,6 +467,58 @@ def test_specialist_agent_run_reaches_the_model_as_the_specialist(monkeypatch, t
     assert cap.permits("web_search") is False
     assert cap.permits("write_file") is False
     assert cap.principal == "agent:dept-ledger.ledger_reviewer"
+
+
+def test_deployed_department_specialist_reaches_model_with_persona_and_capability(
+    monkeypatch, tmp_path,
+):
+    """The customer deploy→assign→run path uses the shipped specialist pack."""
+    _isolate(monkeypatch, tmp_path)
+    from maverick import budget as budget_mod
+    from maverick import domain as domain_mod
+    from maverick import llm as llm_mod
+    from maverick import sandbox as sandbox_mod
+    from maverick import trace_pin
+
+    class _Sandbox:
+        def close(self):
+            return None
+
+    llm = _RecordingLLM()
+    roots = []
+    real_build = domain_mod.agent_from_profile
+
+    def capture_root(profile, ctx, task, **kwargs):
+        agent = real_build(profile, ctx, task, **kwargs)
+        roots.append(agent)
+        return agent
+
+    monkeypatch.setattr(llm_mod, "LLM", lambda: llm)
+    monkeypatch.setattr(sandbox_mod, "build_sandbox", _Sandbox)
+    monkeypatch.setattr(budget_mod, "budget_from_config", lambda **_kw: budget_mod.Budget())
+    monkeypatch.setattr(trace_pin, "pin_trace", lambda *_a, **_kw: None)
+    monkeypatch.setattr(domain_mod, "agent_from_profile", capture_root)
+
+    client = _client()
+    deployed = client.post("/api/v1/departments/sales_gtm/deploy")
+    assert deployed.status_code == 201, deployed.text
+    assert any(agent["name"] == "gtm_deal_inspection" and agent["domain"] == "gtm_deal_inspection"
+               for agent in deployed.json()["fleet"]["agents"])
+    assert any(row["name"] == "gtm_demand_gen" and row["reason"] == "Needs Web search"
+               for row in deployed.json()["skipped_specialists"])
+
+    assigned = client.post("/api/v1/fleets/dept-sales_gtm/run", json={
+        "agent": "gtm_deal_inspection", "prompt": "Inspect pipeline risks",
+    })
+    assert assigned.status_code == 201, assigned.text
+    from maverick.world_model import WorldModel
+
+    goal = WorldModel(tmp_path / "world.db").get_goal(assigned.json()["goal_id"])
+    assert goal.domain == "gtm_deal_inspection"
+    assert llm.calls and "Deal Inspection Agent" in llm.calls[0]["system"]
+    assert len(roots) == 1
+    assert roots[0].capability.principal == "agent:dept-sales_gtm.gtm_deal_inspection"
+    assert not roots[0].capability.permits("shell")
 
 
 def test_specialist_agent_whose_pack_is_gone_is_refused_not_run_generically(monkeypatch, tmp_path):

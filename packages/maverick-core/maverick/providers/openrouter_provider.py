@@ -15,6 +15,7 @@ from .openai_provider import OpenAIClient
 
 class OpenRouterClient(OpenAIClient):
     DEFAULT_MODEL = "meta-llama/llama-3.3-70b"
+    PRICE_MODEL_PREFIX = "openrouter:"
 
     def __init__(self, api_key: str | None = None, base_url: str | None = None, *, environment=None):
         env = os.environ if environment is None else environment

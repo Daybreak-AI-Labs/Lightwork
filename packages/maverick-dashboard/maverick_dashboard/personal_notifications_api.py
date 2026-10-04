@@ -20,10 +20,13 @@ def _app():
 
 
 def _identity(request):
+    from maverick import experience_preferences
     from maverick.personal_notifications import personal_alerts_enabled
 
     from .preferences_api import _principal
     principal = _principal(request)
+    if not experience_preferences.enabled():
+        raise HTTPException(403, "Personal preferences are turned off. An administrator can enable them in All settings.")
     if not personal_alerts_enabled():
         raise HTTPException(403, "Personal alerts are turned off. An administrator can enable them in All settings.")
     return principal

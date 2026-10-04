@@ -25,6 +25,8 @@ from pathlib import Path
 
 from maverick import config
 
+from .settings_catalog import CHANNEL_ALLOWLISTS
+
 # Serializes the overlay load-modify-save in-process; cross_process_lock in
 # _locked() extends it across processes (multiple dashboard workers edit
 # provider keys / toggles).
@@ -107,6 +109,8 @@ PROVIDERS: list[dict] = [
     {"name": "vllm", "label": "vLLM (self-hosted)", "env": ["VLLM_BASE_URL"], "base_url": True},
     {"name": "tgi", "label": "Hugging Face TGI (self-hosted)", "env": ["TGI_BASE_URL"], "base_url": True},
     {"name": "openai_compatible", "label": "OpenAI-compatible server", "env": ["OPENAI_COMPATIBLE_BASE_URL"], "base_url": True},
+    {"name": "azure", "label": "Azure OpenAI", "env": ["AZURE_OPENAI_API_KEY", "AZURE_OPENAI_ENDPOINT"], "base_url": True},
+    {"name": "bedrock", "label": "Amazon Bedrock", "env": ["BEDROCK_API_KEY", "AWS_REGION"], "base_url": False},
 ]
 _PROVIDER_NAMES = {p["name"] for p in PROVIDERS}
 
@@ -422,6 +426,18 @@ CHANNELS: list[dict] = [
         {"key": "port", "label": "Webhook port", "secret": False, "type": "int"},
     ]},
 ]
+# The main setup form must include the access list each adapter needs to
+# start. Share the same identity formats as the guided All settings editor.
+for _channel_spec in CHANNELS:
+    _access = CHANNEL_ALLOWLISTS.get(_channel_spec["name"])
+    if _access:
+        _, _, _key, _item, _hint, _pattern, _error = _access
+        _channel_spec["fields"].append({
+            "key": _key, "label": "Who can message Lightwork", "type": "list",
+            "help": f"Add each permitted {_item.lower()} on its own line. Example: {_hint}. "
+                    "Leave this blank to use a list supplied by your server; with no list, nobody can message Lightwork.",
+            "env": f"{_channel_spec['name'].upper()}_{_key.upper()}",
+        })
 _CHANNELS_BY_NAME = {c["name"]: c for c in CHANNELS}
 
 
@@ -638,7 +654,7 @@ def _dump_webhooks(lines: list[str], whk: dict) -> None:
 # page, and sign-in mode, Bedrock endpoint/region and Azure deployment/version
 # on the All settings page.
 _PROVIDER_FIELDS = ("api_key", "base_url", "auth_mode", "endpoint", "region",
-                    "deployment", "api_version")
+                    "model_id", "deployment", "api_version")
 
 
 def _dump_providers(lines: list[str], providers: dict) -> None:
@@ -870,6 +886,8 @@ def _verify_provider_rotation(
     observed: object,
     key_value: str,
     base_value: str,
+    details: dict[str, str] | None = None,
+    remove_key: bool = False,
 ) -> None:
     """Reject a post-commit generation that is not the authorized one."""
     import hashlib
@@ -902,6 +920,131 @@ def _verify_provider_rotation(
         raise ProviderRotationConflict(
             "provider base URL is not the effective endpoint; review the active source"
         )
+    if remove_key and str(observed.get("api_key") or "").strip():
+        raise ProviderRotationConflict("the previous key is still active; review its source")
+    for field, expected in (details or {}).items():
+        if str(observed.get(field) or "").strip() != expected:
+            raise ProviderRotationConflict(
+                f"provider {field.replace('_', ' ')} is controlled by another source"
+            )
+
+
+def _provider_setup_details(name: str, values: dict[str, str] | None) -> dict[str, str]:
+    """Accept only the native Azure/Bedrock fields exposed in the guided form."""
+    allowed = {
+        "azure": {"auth_mode", "deployment", "api_version"},
+        "bedrock": {"auth_mode", "endpoint", "region", "model_id"},
+    }.get(name, set())
+    details = {str(k): str(v).strip() for k, v in (values or {}).items() if str(v).strip()}
+    if set(details) - allowed:
+        raise ValueError("this provider does not accept those connection details")
+    if name == "azure":
+        if details.get("auth_mode") not in (None, "api_key", "entra_id"):
+            raise ValueError("choose Azure key or Microsoft sign-in")
+        if "deployment" in details and not re.fullmatch(r"[A-Za-z0-9._-]{1,64}", details["deployment"]):
+            raise ValueError("enter an Azure deployment name using letters, numbers, dots, dashes or underscores")
+        if "api_version" in details and not re.fullmatch(r"20[0-9]{2}-[0-9]{2}-[0-9]{2}(-preview)?", details["api_version"]):
+            raise ValueError("enter an Azure service version as YYYY-MM-DD")
+    if name == "bedrock":
+        if details.get("auth_mode") not in (None, "iam", "api_key"):
+            raise ValueError("choose AWS sign-in or a Bedrock access key")
+        if details.get("endpoint") not in (None, "mantle", "legacy"):
+            raise ValueError("choose the current or older Bedrock service")
+        if "region" in details and not re.fullmatch(r"[a-z]{2}(-gov)?-[a-z]+-[0-9]", details["region"]):
+            raise ValueError("enter an AWS region such as us-east-1")
+        if "model_id" in details and not re.fullmatch(r"[A-Za-z0-9_.:/-]{1,120}", details["model_id"]):
+            raise ValueError("enter the Claude model ID shown in your AWS account")
+    return details
+
+
+def _provider_detail_blocker(name: str, field: str) -> str | None:
+    """A value this page cannot make effective must never be saved as success."""
+    for label, path in (
+        ("operator settings", os.environ.get(config.CONFIG_OVERLAY_ENV, "")),
+        ("workspace settings", config.tenant_config_path()),
+    ):
+        if not path:
+            continue
+        loaded = config._load_config_file(Path(path).expanduser())
+        table = (loaded.get("providers") or {}).get(name) if isinstance(loaded, dict) else None
+        if isinstance(table, dict) and str(table.get(field) or "").strip():
+            return label
+    env_name = {
+        ("azure", "deployment"): "AZURE_OPENAI_DEPLOYMENT",
+        ("azure", "api_version"): "AZURE_OPENAI_API_VERSION",
+        ("bedrock", "region"): "AWS_REGION",
+        ("bedrock", "model_id"): "BEDROCK_MODEL_ID",
+    }.get((name, field))
+    if env_name and os.environ.get(env_name, "").strip():
+        return "server environment"
+    if name == "bedrock" and field == "region" and os.environ.get("AWS_DEFAULT_REGION", "").strip():
+        return "server environment"
+    return None
+
+
+def _checked_provider_setup(
+    name: str, key_value: str, base_value: str, details: dict[str, str] | None,
+) -> tuple[dict[str, str], bool]:
+    values = _provider_setup_details(name, details)
+    if name == "azure" and base_value:
+        from urllib.parse import urlsplit
+
+        address = urlsplit(base_value)
+        if (len(base_value) > 320 or address.scheme != "https" or not address.hostname
+                or address.username or address.password or address.query or address.fragment
+                or any(ch.isspace() for ch in base_value)):
+            raise ValueError("enter the secure Azure resource address, starting with https://")
+    if name in {"azure", "bedrock"} and len(key_value) > 500:
+        raise ValueError("the provider key is too long")
+    if key_value and values.get("auth_mode") in {"entra_id", "iam"}:
+        raise ValueError("a key cannot be combined with server sign-in")
+    if name == "bedrock" and values.get("auth_mode") == "iam" and any(
+        os.environ.get(env_name, "").strip()
+        for env_name in ("BEDROCK_API_KEY", "AWS_BEARER_TOKEN_BEDROCK")
+    ):
+        raise ValueError("remove the Bedrock access key from the server before choosing AWS sign-in")
+    return values, values.get("auth_mode") in {"entra_id", "iam"}
+
+
+def _confirm_cloud_setup(name: str, observed: dict) -> None:
+    if name == "azure" and config.azure_provider_configuration_missing(observed):
+        raise ProviderRotationConflict(
+            "Azure still needs a resource address, deployment and one sign-in method"
+        )
+    if name == "bedrock":
+        region = (os.environ.get("AWS_REGION", "").strip()
+                  or os.environ.get("AWS_DEFAULT_REGION", "").strip()
+                  or str(observed.get("region") or "").strip())
+        if not region or str(observed.get("auth_mode") or "").strip() not in {"iam", "api_key"}:
+            raise ProviderRotationConflict(
+                "Bedrock still needs an AWS region and a sign-in method"
+            )
+        if observed.get("auth_mode") == "api_key" and not (
+            observed.get("api_key") or os.environ.get("BEDROCK_API_KEY")
+            or os.environ.get("AWS_BEARER_TOKEN_BEDROCK")
+        ):
+            raise ProviderRotationConflict("enter a Bedrock access key or choose AWS sign-in")
+        if not (str(observed.get("model_id") or "").strip()
+                or os.environ.get("BEDROCK_MODEL_ID", "").strip()):
+            raise ProviderRotationConflict("enter the Claude model ID shown in your AWS account")
+
+
+def _provider_rotation_blockers(
+    name: str, state: dict, key_value: str, base_value: str,
+    details: dict[str, str], remove_key: bool,
+) -> list[str]:
+    blockers: list[str] = []
+    if key_value and not state["dashboard_can_set_api_key"]:
+        blockers.append(f"API key is controlled by {state['api_key_source']}")
+    if base_value and not state["dashboard_can_set_base_url"]:
+        blockers.append(f"base URL is controlled by {state['base_url_source']}")
+    if remove_key and not state["dashboard_can_set_api_key"]:
+        blockers.append("the existing key is controlled outside Settings")
+    for field in details:
+        source = _provider_detail_blocker(name, field)
+        if source:
+            blockers.append(f"{field.replace('_', ' ')} is controlled by {source}")
+    return blockers
 
 
 def _restore_provider_overlay(
@@ -930,6 +1073,7 @@ def rotate_provider(
     *,
     api_key: str | None = None,
     base_url: str | None = None,
+    details: dict[str, str] | None = None,
 ) -> dict:
     """Atomically publish a provider rotation only when it becomes effective.
 
@@ -944,7 +1088,8 @@ def rotate_provider(
         raise ValueError("unknown provider")
     key_value = str(api_key or "").strip()
     base_value = str(base_url or "").strip()
-    if not key_value and not base_value:
+    detail_values, remove_key = _checked_provider_setup(name, key_value, base_value, details)
+    if not key_value and not base_value and not detail_values:
         raise ValueError("enter a provider value to save")
 
     try:
@@ -988,15 +1133,9 @@ def rotate_provider(
                         "provider configuration changed while the rotation was being authorized"
                     )
 
-                blockers = []
-                if key_value and not before["dashboard_can_set_api_key"]:
-                    blockers.append(
-                        f"API key is controlled by {before['api_key_source']}"
-                    )
-                if base_value and not before["dashboard_can_set_base_url"]:
-                    blockers.append(
-                        f"base URL is controlled by {before['base_url_source']}"
-                    )
+                blockers = _provider_rotation_blockers(
+                    name, before, key_value, base_value, detail_values, remove_key,
+                )
                 if blockers:
                     raise ProviderRotationConflict(
                         "; ".join(blockers) + "; rotate that source instead"
@@ -1006,8 +1145,13 @@ def rotate_provider(
                 provider_table = data.setdefault("providers", {}).setdefault(name, {})
                 if key_value:
                     provider_table["api_key"] = key_value
+                elif remove_key:
+                    # Selecting server identity explicitly retires the saved
+                    # dashboard key. A higher-authority key is rejected above.
+                    provider_table.pop("api_key", None)
                 if base_value:
                     provider_table["base_url"] = base_value
+                provider_table.update(detail_values)
 
                 # Recheck immediately before commit. The post-commit check below is
                 # still required because higher-authority files do not share this
@@ -1035,7 +1179,10 @@ def rotate_provider(
                     observed=observed,
                     key_value=key_value,
                     base_value=base_value,
+                    details=detail_values,
+                    remove_key=remove_key,
                 )
+                _confirm_cloud_setup(name, observed)
                 _complete_provider_audit()
                 return observed_state
             except Exception as exc:
@@ -1083,10 +1230,11 @@ def clear_provider(name: str) -> None:
         data = _load_overlay_for_update()
         table = (data.get("providers") or {}).get(name)
         if isinstance(table, dict):
-            # Only the key and address are cleared; a sign-in method chosen on
-            # the All settings page stays.
-            table.pop("api_key", None)
-            table.pop("base_url", None)
+            # Guided cloud setup removes its whole dashboard-owned connection;
+            # other providers retain the All settings sign-in choices.
+            fields = _PROVIDER_FIELDS if name in {"azure", "bedrock"} else ("api_key", "base_url")
+            for field in fields:
+                table.pop(field, None)
             if not table:
                 data["providers"].pop(name, None)
         else:
@@ -1628,7 +1776,7 @@ def _prune_empty_tables(data: dict, tops: set[str]) -> None:
 
 SANDBOX_BACKENDS: tuple[str, ...] = ("local", "docker", "podman")
 CONTAINER_FILE_TOOLS: tuple[str, ...] = (
-    "shell", "write_file", "apply_patch", "str_replace_editor",
+    "shell", "write_file", "apply_patch", "str_replace_editor", "ast_edit",
 )
 
 
@@ -1781,6 +1929,29 @@ def set_active_tenant(tenant_id: str | None) -> None:
             if not data.get("dashboard"):
                 data.pop("dashboard", None)
         _write(data)
+
+
+def clear_deleted_active_tenant(tenant_id: str) -> bool:
+    """Remove the local operator's selection after its workspace is retired.
+
+    An empty dashboard overlay masks a lower-priority config.toml selection;
+    simply deleting the overlay key would expose that closed workspace again.
+    """
+    from maverick.paths import _tenant_namespace_key
+
+    target = _tenant_namespace_key(tenant_id)
+    with _locked():
+        config.reset_config_cache()
+        selected = active_tenant()
+        if selected is None or _tenant_namespace_key(selected) != target:
+            return False
+        data = _load_overlay_for_update()
+        data.setdefault("dashboard", {})["active_tenant"] = ""
+        _write(data)
+        config.reset_config_cache()
+        if active_tenant() is not None:
+            raise RuntimeError("removed workspace selection is still effective")
+        return True
 
 
 def set_model_cost_tier(model: str, band: str | None) -> None:
@@ -2230,6 +2401,27 @@ def set_channel(name: str, enabled: bool, values: dict | None = None) -> None:
             key = field["key"]
             raw = values.get(key)
             val = raw.strip() if isinstance(raw, str) else raw
+            if field.get("type") == "list" and key in values:
+                _access = CHANNEL_ALLOWLISTS[name]
+                pattern, error = _access[5], _access[6]
+                entries = (re.split(r"[,\r\n]+", val) if isinstance(val, str)
+                           else val if isinstance(val, list) else None)
+                if entries is None or len(entries) > 200:
+                    raise ValueError("Add no more than 200 permitted people")
+                people = []
+                for entry in entries:
+                    person = str(entry).strip()
+                    if not person:
+                        continue
+                    if not re.fullmatch(pattern, person):
+                        raise ValueError(f"Enter {error}")
+                    if person not in people:
+                        people.append(person)
+                if people:
+                    ccfg[key] = people
+                else:
+                    ccfg.pop(key, None)
+                continue
             if val in (None, ""):
                 continue  # blank -> keep the stored value (don't wipe a hidden secret)
             if field.get("type") == "int":
@@ -2307,10 +2499,33 @@ def state() -> dict:
         ov = ov_providers.get(name) or {}
         raw = raw_providers.get(name) or {}
         effective = config.provider_configuration_state(name)
+        provider_config = config.get_provider_config(name) or {}
         key = ov.get("api_key") or raw.get("api_key")
+        setup_fields = {
+            "azure": ("auth_mode", "deployment", "api_version"),
+            "bedrock": ("auth_mode", "endpoint", "region", "model_id"),
+        }.get(name, ())
+        setup = {field: str(provider_config.get(field) or "").strip() for field in setup_fields}
+        if name == "azure":
+            setup["auth_mode"] = setup.get("auth_mode") or os.environ.get("AZURE_OPENAI_AUTH", "").strip()
+            setup["deployment"] = (os.environ.get("AZURE_OPENAI_DEPLOYMENT", "").strip()
+                                   or setup.get("deployment", ""))
+        if name == "bedrock":
+            setup["auth_mode"] = setup.get("auth_mode") or os.environ.get("BEDROCK_AUTH_MODE", "").strip()
+            setup["region"] = (os.environ.get("AWS_REGION", "").strip()
+                               or os.environ.get("AWS_DEFAULT_REGION", "").strip()
+                               or setup.get("region", ""))
+            setup["model_id"] = (os.environ.get("BEDROCK_MODEL_ID", "").strip()
+                                 or setup.get("model_id", ""))
+        setup_locked = {field: bool(_provider_detail_blocker(name, field)) for field in setup_fields}
+        via = effective["via"]
+        if not via and ov and setup.get("auth_mode") in {"iam", "entra_id"}:
+            via = "dashboard"
         providers.append({
             "name": name, "label": p["label"], "base_url_field": p["base_url"],
-            "configured": effective["configured"], "via": effective["via"],
+            "configured": effective["configured"],
+            "via": via,
+            "setup": setup, "setup_locked": setup_locked,
             "key_hint": _mask(key) if (ov.get("api_key") or raw.get("api_key")) else None,
             "base_url": effective["base_url"],
             "env_hint": ", ".join(p["env"]) if p["env"] else "",
@@ -2355,13 +2570,16 @@ def channels_state() -> list[dict]:
             ov_v = ov.get(f["key"])
             raw_v = raw.get(f["key"])
             v = ov_v if ov_v not in (None, "") else raw_v
-            configured = v not in (None, "")
+            configured = v not in (None, "", [])
             # A value set on the server (environment) wins over this page.
             from_server = bool(f.get("env") and os.environ.get(f["env"], "").strip())
             fields.append({
                 "key": f["key"], "label": f["label"],
                 "secret": bool(f.get("secret")), "type": f.get("type", "text"),
-                "value": "" if f.get("secret") else (str(v) if configured else ""),
+                "help": f.get("help", ""), "advanced": bool(f.get("advanced")),
+                "value": ("" if f.get("secret") else
+                          "\n".join(str(item) for item in v) if f.get("type") == "list" and isinstance(v, list)
+                          else str(v) if configured else ""),
                 "hint": ("on the server" if from_server else
                          _mask(v) if (configured and f.get("secret")) else ""),
                 "configured": configured or from_server,

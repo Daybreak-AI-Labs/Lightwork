@@ -8,11 +8,13 @@
 from __future__ import annotations
 
 import logging
+from types import SimpleNamespace
 
 import pytest
 from maverick.budget import Budget, UsageAccountingError
 from maverick.providers.ollama_provider import OllamaClient
 from maverick.providers.openai_provider import OpenAIClient
+from maverick.providers.openrouter_provider import OpenRouterClient
 
 
 class _Msg:
@@ -54,6 +56,24 @@ def test_self_hosted_missing_usage_does_not_abort():
                                     usage_required=False)
     assert r.text == "local answer"
     # $0 self-hosted: nothing was billed.
+    assert budget.dollars == 0.0
+
+
+def test_openrouter_free_model_response_records_the_provider_qualified_price(monkeypatch):
+    from maverick import model_discovery
+
+    monkeypatch.setenv("MAVERICK_BILLING_STRICT", "1")
+    monkeypatch.setattr(model_discovery, "free_models",
+                        lambda provider: ["vendor/free"] if provider == "openrouter" else [])
+    budget = Budget(max_dollars=1.0)
+    response = _Resp(_Msg("answer"), SimpleNamespace(prompt_tokens=10, completion_tokens=5))
+
+    result = OpenRouterClient._from_response(
+        response, budget, model="vendor/free",
+        price_model_prefix=OpenRouterClient.PRICE_MODEL_PREFIX,
+    )
+
+    assert result.text == "answer"
     assert budget.dollars == 0.0
 
 

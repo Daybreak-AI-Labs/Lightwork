@@ -40,6 +40,14 @@ _MAX_DRAFT_CONCURRENCY = 32
 _INPUT_KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,63}$")
 _TOOL_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]{1,128}$")
 _TOOL_PARAM_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_.-]{0,63}$")
+_SCHEDULE_INTENT_RE = re.compile(
+    r"(?i)\b(?:every|each)\s+(?:weekday|day|week|month|monday|tuesday|wednesday|"
+    r"thursday|friday|saturday|sunday)\b|\b(?:schedule|scheduled|recurring)\b"
+)
+_APPROVAL_INTENT_RE = re.compile(
+    r"(?i)\b(?:ask|get|require|wait for)\b.{0,80}\b(?:approv\w*|sign[ -]?off|before)\b|"
+    r"\b(?:approv\w*|sign[ -]?off)\b.{0,80}\bbefore\b"
+)
 _METADATA_INSTRUCTION_RE = re.compile(
     r"(?i)\b(ignore|override|system prompt|developer message|instruction|"
     r"exfiltrat|credential|secret|token)\b|https?://|webhook"
@@ -548,10 +556,24 @@ def draft_flow(description: str, *, tools=None, tool_docs=None, tool_schemas=Non
                 "preview only; install and risk-classify each action tool before "
                 "save or execution: " + "; ".join(unclassified[:3]))
         return flow, notes
-    except Exception as e:
-        notes.append(f"couldn't build a full graph ({type(e).__name__}); "
-                     "starting from a single agent step you can expand")
-        fallback = single_agent_flow(flow_id or "", description[:60] or "New flow", description)
+    except Exception:
+        missing = []
+        if _SCHEDULE_INTENT_RE.search(description):
+            missing.append("schedule")
+        if _APPROVAL_INTENT_RE.search(description):
+            missing.append("approval step")
+        if missing:
+            notes.insert(0, "Only one AI task was drafted. The requested " +
+                         " and ".join(missing) +
+                         (" were not included. Add them before publishing."
+                          if len(missing) > 1 else
+                          " was not included. Add it before publishing."))
+        else:
+            notes.insert(0, "Only one AI task was drafted. Review the steps you asked for before publishing.")
+        title = description[:60].rstrip()
+        if len(description) > 60 and " " in title:
+            title = title.rsplit(" ", 1)[0]
+        fallback = single_agent_flow(flow_id or "", title or "New flow", description)
         return fallback, notes
 
 

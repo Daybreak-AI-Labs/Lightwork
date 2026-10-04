@@ -3298,6 +3298,39 @@ class WorldModel:
             )
         return [_question_from_row(r) for r in rows]
 
+    def open_channel_questions(
+        self, conversation_id: int, owner: str, execution_principal: str,
+    ) -> list[Question]:
+        """Only questions from blocked goals started in this exact conversation."""
+        rows = self._read_all(
+            "SELECT q.* FROM questions q JOIN goals g ON g.id = q.goal_id "
+            "WHERE q.answer IS NULL AND g.status = 'blocked' "
+            "AND g.owner = ? AND g.execution_principal = ? "
+            "AND EXISTS (SELECT 1 FROM turns t WHERE t.goal_id = g.id "
+            "AND t.conversation_id = ? AND t.role = 'user') ORDER BY q.id",
+            (owner, execution_principal, conversation_id),
+        )
+        return [_question_from_row(r) for r in rows]
+
+    def answer_open_channel_question(
+        self, question_id: int, goal_id: int, answer: str, *,
+        conversation_id: int, owner: str, execution_principal: str,
+    ) -> bool:
+        """Claim an exact open question once, with its conversation and owner."""
+        with self._writing() as conn:
+            changed = conn.execute(
+                "UPDATE questions SET answer = ?, answered_at = ? "
+                "WHERE id = ? AND goal_id = ? AND answer IS NULL "
+                "AND EXISTS (SELECT 1 FROM goals g WHERE g.id = questions.goal_id "
+                "AND g.status = 'blocked' AND g.owner = ? "
+                "AND g.execution_principal = ? "
+                "AND EXISTS (SELECT 1 FROM turns t WHERE t.goal_id = g.id "
+                "AND t.conversation_id = ? AND t.role = 'user'))",
+                (_enc_field(answer), time.time(), question_id, goal_id,
+                 owner, execution_principal, conversation_id),
+            )
+            return changed.rowcount == 1
+
     def all_questions(self, goal_id: int) -> list[Question]:
         rows = self._read_all(
             "SELECT * FROM questions WHERE goal_id = ? ORDER BY id", (goal_id,)

@@ -19,6 +19,31 @@ test('normalizeNode fills defaults and an id fallback', () => {
   assert.equal(n.next, null);
 });
 
+test('disconnected steps are identified by all routing paths and explained plainly', () => {
+  const flow = { start: 'start', nodes: [
+    { id: 'start', kind: 'branch', condition: 'amount > 1000', if_true: 'review' },
+    { id: 'review', kind: 'approval', prompt: 'Approve?', label: 'Approve payment', on_expire: 'escalate' },
+    { id: 'escalate', kind: 'agent', brief: 'Escalate' },
+    { id: 'orphan', kind: 'agent', brief: 'Record payment', label: 'Record payment' },
+  ] };
+  assert.deepEqual(FDCore.unreachableNodeIds(flow), ['orphan']);
+  assert.match(FDCore.plainProblems(flow).join(' '), /Record payment.*can never run/);
+  flow.nodes[1].next = 'orphan';
+  assert.deepEqual(FDCore.unreachableNodeIds(flow), []);
+  flow.nodes[0].if_false = 'orphan';
+  flow.nodes[0].next = 'unused-default';
+  flow.nodes.push({ id: 'unused-default', kind: 'agent', brief: 'Never selected' });
+  assert.deepEqual(FDCore.unreachableNodeIds(flow), ['unused-default']);
+});
+
+test('a wait inside repeated work is stopped with a usable explanation', () => {
+  const flow = { start: 'loop', nodes: [{ id: 'loop', kind: 'foreach', items: 'orders', body: {
+    start: 'wait', nodes: [{ id: 'wait', kind: 'wait_event', label: 'Wait for payment', prompt: 'Paid?' }]
+  } }] };
+  assert.match(FDCore.validateFlow(flow).join(' '), /cannot wait inside/);
+  assert.match(FDCore.plainProblems(flow).join(' '), /Wait for payment.*Move it to the main flow/);
+});
+
 test('learned operator survives an unrelated designer edit and explicit removal', () => {
   const envelope = {schema: 'flow-learned-operator-v1', work_sha256: 'binding',
     artifact: {examples: [{inputs: {x: 1}, output: 2}], candidates: [['field', 'x']]}};
