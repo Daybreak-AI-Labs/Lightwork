@@ -1220,6 +1220,36 @@ PAGES: tuple[dict, ...] = (
         "floor": "view",
         "default": "admin",
     },
+    # -- Personal, help and spending pages ------------------------------------
+    # Live screens the registry did not know, so the page finder could not
+    # offer them. Each floor mirrors the route's own check. Routes that also
+    # need a named account (or, for employee activation, its switch) are
+    # withheld per request by app._account_pages_unavailable. Reached from
+    # their parent pages and the top bar, never the sidebar.
+    {"path": "/help", "label": "Help and diagnostics", "group": "Operate",
+     "icon": "check", "floor": "view", "default": "view", "in_nav": False},
+    {"path": "/notifications", "label": "Your notifications", "group": "Operate",
+     "icon": "check", "floor": "view", "default": "view", "in_nav": False},
+    {"path": "/my-work", "label": "My background work", "group": "Operate",
+     "icon": "target", "floor": "view", "default": "view", "in_nav": False},
+    {"path": "/conversations", "label": "My conversations", "group": "Operate",
+     "icon": "chat", "floor": "view", "default": "view", "in_nav": False},
+    {"path": "/get-started/employee", "label": "Your first useful result", "group": "Operate",
+     "icon": "check", "floor": "view", "default": "view", "in_nav": False},
+    {"path": "/project-workspaces", "label": "Project workspaces", "group": "Operate",
+     "icon": "fleets", "floor": "view", "default": "view", "in_nav": False},
+    {"path": "/devices", "label": "Your paired devices", "group": "Operate",
+     "icon": "settings", "floor": "view", "default": "view", "in_nav": False},
+    {"path": "/access-requests", "label": "Permission requests", "group": "Operate",
+     "icon": "key", "floor": "view", "default": "view", "in_nav": False},
+    {"path": "/budget", "label": "Your budget", "group": "Observe",
+     "icon": "spend", "floor": "view", "default": "view", "in_nav": False},
+    {"path": "/cost-reconciliation", "label": "Compare cost records", "group": "Observe",
+     "icon": "spend", "floor": "view", "default": "view", "in_nav": False},
+    # Its route requires an installation administrator.
+    {"path": "/provider-spending", "label": "Provider spending", "group": "Observe",
+     "icon": "spend", "floor": "admin", "default": "admin", "scope": "global",
+     "in_nav": False},
 )
 
 # Moderate sidebar declutter: keep a focused set of everyday destinations in the
@@ -1262,6 +1292,105 @@ for _pg in PAGES:
         _pg["in_nav"] = False
 
 _PAGES_BY_PATH = {p["path"]: p for p in PAGES}
+
+# What the page finder (Ctrl+K) matches beyond a page's label. HEADINGS holds
+# a page's own heading where it differs from the label, so typing the words a
+# person reads on the page finds it. SYNONYMS holds the plain words people
+# type for a job ("approve" -> Approvals). The finder ranks an exact label,
+# then an exact heading, then an exact synonym first (see
+# static/lightwork-navfinder.js). Neither ever changes who can see a page.
+HEADINGS: dict[str, str] = {
+    "/account": "Your account",
+    "/agent-control-plane": "Agent controls",
+    "/ai-entity-tasks": "AI system tasks",
+    "/assess/evidence-autopopulation": "Suggested assessment answers",
+    "/assurance/cloud-agents": "Cloud AI agents",
+    "/audit": "Activity log",
+    "/audit/evolution-ledger": "Learning history",
+    "/budget": "Your budget before work starts",
+    "/chat": "What should Lightwork take on?",
+    "/companion": "Your companion",
+    "/companion/admin": "Companion policies",
+    "/compliance/continuous-evidence": "Continuous Evidence Operations",
+    "/compliance/obligations": "Regulations and rules",
+    "/compliance/policy-links": "Policy Links",
+    "/compliance/scope-actions": "Turn scope into tasks",
+    "/compliance/scoping": "Find which controls apply",
+    "/consent/application-scans": "App Tracking Checks",
+    "/consent/bulk-jobs": "Bulk Consent Changes",
+    "/consent/custom-indexes": "Find People by Preference",
+    "/consent/delivery": "Send Choices to Other Systems",
+    "/consent/experiments": "Banner Experiments",
+    "/consent/global-opt-out": "Opt Out Everywhere",
+    "/consent/native": "Mobile App Consent",
+    "/consent/profile-data": "Preference Questions",
+    "/consent/public-clients": "Website and App Keys",
+    "/consent/publish-settings": "Website Banner Settings",
+    "/consent/publishing": "Banner and Preference Center",
+    "/consent/scan-inventory": "Tracker Scans",
+    "/consent/scan-notice-proposals": "Disclosure Suggestions",
+    "/consent/trust-center-authority": "Trust Center Access",
+    "/content-access": "Content access",
+    "/cortex": "Knowledge",
+    "/data-use": "Data Use Rules",
+    "/data-use/providers": "Snowflake and Databricks",
+    "/embed-demo": "Embedded analytics",
+    "/external-agents": "Outside agents",
+    "/finance": "Finance",
+    "/flows/analytics": "Flow results",
+    "/goal-builder": "Task builder",
+    "/governance-agents": "Governance assistants",
+    "/graph-editor": "Task map",
+    "/immune": "Safety monitoring",
+    "/knowledge-access": "Find knowledge you can use now",
+    "/perf": "Performance",
+    "/privacy/data-discovery": "Find personal data",
+    "/privacy/drop": "California DROP requests",
+    "/privacy/notice-governance": "Privacy notices",
+    "/privacy/regulatory-intelligence": "Privacy law research",
+    "/privacy/rights-consumer-delivery": "Send people their data",
+    "/privacy/rights-orchestration": "Privacy requests",
+    "/redact": "Redaction check",
+    "/replay": "Task replay",
+    "/run-tree": "Branches",
+    "/security/assurance": "AI assurance",
+    "/security/governance": "Governance workspace",
+    "/security/report": "Security & GRC readiness",
+    "/security/soc": "Threat monitoring",
+    "/security/threats": "Lightwork threat check",
+    "/shoring": "Hand a Team's Work to Lightwork",
+    "/simulate": "Test a Safety Rule",
+    "/styles": "Output styles",
+    "/task-handoffs": "Task handoffs",
+    "/third-party/contracts": "Contracts and Engagements",
+    "/users": "Users & roles",
+    "/walkthroughs": "Video Walkthroughs",
+    "/workflows": "Workflows",
+}
+SYNONYMS: dict[str, tuple[str, ...]] = {
+    "/approvals": ("approve", "approval", "decision", "decisions", "decide", "sign-off", "sign off"),
+    # Agent controls holds the emergency stop and resume controls, and every
+    # role that can find it can open it.
+    "/agent-control-plane": ("pause", "stop", "emergency stop", "halt", "stop all work", "resume work"),
+    "/billing": ("invoice", "invoices", "bill", "bills"),
+    "/spend": ("cost", "costs", "spending"),
+    "/help": ("help", "docs", "documentation", "support"),
+    # The Activity log is also where activity is downloaded for auditors.
+    "/audit": ("audit log", "history", "export"),
+    "/privacy/rights-orchestration": (
+        "dsar", "data subject request", "data subject access request", "rights request",
+    ),
+    "/users": ("invite", "people", "colleague", "colleagues", "add user", "members", "team members"),
+    "/notifications": ("notification", "notifications", "alerts"),
+    # Security & GRC keeps the incident register; Privacy keeps breaches.
+    "/security": ("incident", "incidents", "security incident"),
+    "/privacy": ("breach", "data breach"),
+    # The sidebar's "New task" button opens Chat.
+    "/chat": ("new task", "start a task", "new chat", "ask"),
+    "/get-started/employee": ("get started", "first task"),
+    "/conversations": ("chats", "chat history", "past chats"),
+    "/access-requests": ("request access", "ask for permission"),
+}
 
 # Lockout guard: the pages an admin needs to *undo* a bad matrix save. Always
 # visible + reachable for the admin role, no matter what the store says.
@@ -1513,6 +1642,8 @@ def _grouped_links(
                 "label": page["label"],
                 "icon": page["icon"],
                 "aliases": page.get("aliases", ""),
+                "heading": HEADINGS.get(page["path"], ""),
+                "synonyms": SYNONYMS.get(page["path"], ()),
             }
         )
     # Technical setup and diagnostics stay discoverable after everyday work.
@@ -1578,4 +1709,6 @@ __all__ = [
     "nav_groups",
     "finder_pages",
     "matrix",
+    "HEADINGS",
+    "SYNONYMS",
 ]

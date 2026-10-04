@@ -12,7 +12,18 @@ from .auth import (
     require_suite,
     suite_allowed,
 )
-from .record_search import SOURCE_LIMIT, Source, item, link
+from .record_search import SOURCE_LIMIT, Source, SourceOff, item, link
+
+
+def _workspace(tenant_id):
+    """The selected workspace; a workspace-bound source with none selected is
+    off rather than failed (its own check answers 409)."""
+    try:
+        return tenant_id()
+    except HTTPException as exc:
+        if exc.status_code == 409:
+            raise SourceOff("no workspace selected") from exc
+        raise
 
 
 def _tasks(request):
@@ -36,7 +47,10 @@ def _vendors(request):
 
     require_permission(request, "operate")
     require_suite(request, "privacy")
-    rows = vendor_management.list_vendors()
+    try:
+        rows = vendor_management.list_vendors()
+    except vendor_management.VendorManagementConfigError as exc:
+        raise SourceOff("vendor management is off") from exc
     return Source([item("vendor", row["id"], row.get("name"),
                         href="/privacy/vendors/" + quote(row["id"], safe=""),
                         state=row.get("status"), revision=row.get("revision"), source="vendor register")
@@ -44,8 +58,12 @@ def _vendors(request):
 
 
 def _onboarding(request):
+    from maverick.paths import current_tenant_id_strict
+
     from .vendor_onboarding_api import _binding, _call
 
+    if not current_tenant_id_strict():
+        raise SourceOff("no workspace selected")
     rows = _call(_binding(request), "list")
     out = []
     for row in rows[:SOURCE_LIMIT]:
@@ -95,7 +113,7 @@ def _vault(request):
     from .governed_document_vault_composition import governed_document_vault_enabled
 
     require_permission(request, "view")
-    tenant = _tenant_id()
+    tenant = _workspace(_tenant_id)
     probe = getattr(request.app.state, "governed_document_vault_enabled_probe", None)
     if (probe if callable(probe) else governed_document_vault_enabled)(tenant) is not True:
         raise HTTPException(403, "disabled")
@@ -111,7 +129,7 @@ def _reports(request):
     from .third_party_executive_reports_api import _require_report_permission, _tenant_id
 
     _require_report_permission(request, "view")
-    tenant = _tenant_id()
+    tenant = _workspace(_tenant_id)
     selected = request.app.state.third_party_executive_reports_runtime_factory(tenant_id=tenant, request=request)
     rows = selected.store.list_reports(caller_role=selected.role_view, limit=500)
     return Source([item("report", row.report_id, getattr(getattr(row, "brand", None), "report_title", "Executive report"),

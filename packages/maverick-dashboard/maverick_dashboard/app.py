@@ -498,6 +498,29 @@ def _page_role(request: Request, *, global_scope: bool = False) -> str | None:
         return ""
 
 
+def _account_pages_unavailable(request: Request) -> set[str]:
+    """Registered pages whose route also needs a named account (employee
+    activation also needs its switch). Like the companion pages, navigation
+    offers each one only when that route's own check admits the caller."""
+    from . import (
+        device_pairing_api,
+        employee_activation,
+        permission_requests_api,
+        personal_notifications_api,
+    )
+
+    unavailable = set()
+    for path, admit in (("/access-requests", permission_requests_api.authority),
+                        ("/devices", device_pairing_api._principal),
+                        ("/get-started/employee", employee_activation.actor),
+                        ("/notifications", personal_notifications_api.page_authority)):
+        try:
+            admit(request)
+        except Exception:  # a refused or unreadable check hides the link
+            unavailable.add(path)
+    return unavailable
+
+
 def _nav_context(request: Request) -> dict:
     from . import ui_visibility
     from .api import _shared_halt_backend
@@ -512,10 +535,18 @@ def _nav_context(request: Request) -> dict:
 
     unavailable = {path for path, admin in (("/companion", False), ("/companion/admin", True))
                    if not navigation_available(request, admin=admin)}
+    unavailable |= _account_pages_unavailable(request)
     for collection in (groups, finder):
         for group in collection:
             group["links"] = [link for link in group["links"] if link["href"] not in unavailable]
         collection[:] = [group for group in collection if group["links"]]
+    finder_hrefs = {link["href"] for group in finder for link in group["links"]}
+
+    def can_open_page(path: str) -> bool:
+        """In-page links to another screen use the finder's own answer, so a
+        link appears only for people that screen admits."""
+        page = ui_visibility.page_for(path.split("#")[0].split("?")[0])
+        return page is not None and page["path"] in finder_hrefs
     # The topbar's Settings gear follows the same policy as the sidebar entry.
     show_settings = any(link["href"] == "/settings" for g in groups for link in g["links"])
     # A deployment-wide halt backend is a global control even when the caller
@@ -565,6 +596,7 @@ def _nav_context(request: Request) -> dict:
         "viewer_global_admin": viewer_global_admin,
         "nav_groups": groups,
         "finder_pages": finder,
+        "can_open_page": can_open_page,
         "show_settings_link": show_settings,
         "can_create_goal": can_create_goal,
         "can_halt": can_halt,
@@ -621,6 +653,7 @@ templates.env.globals.setdefault("docs_learn_more", None)
 # permitted destinations, including full navigation in verified local mode.
 templates.env.globals.setdefault("nav_groups", [])
 templates.env.globals.setdefault("finder_pages", [])
+templates.env.globals.setdefault("can_open_page", lambda path: False)
 
 
 def _set_theme_cookie(response, theme: str) -> None:

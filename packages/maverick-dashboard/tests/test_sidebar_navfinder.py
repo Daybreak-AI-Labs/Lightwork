@@ -1,6 +1,8 @@
 """Rendered contracts for the registry-backed sidebar page finder."""
 from __future__ import annotations
 
+import re
+from html import unescape
 from html.parser import HTMLParser
 
 from fastapi.testclient import TestClient
@@ -14,6 +16,7 @@ class _NavFinderMarkup(HTMLParser):
         self.sidebar_hrefs: list[str] = []
         self.finder_hrefs: list[str] = []
         self.finder_search: dict[str, str] = {}
+        self.finder_attrs: dict[str, dict[str, str | None]] = {}
         self.ids: dict[str, dict[str, str | None]] = {}
         self.scripts: list[str] = []
 
@@ -36,6 +39,7 @@ class _NavFinderMarkup(HTMLParser):
         if self.in_finder and "data-navfinder-target" in values:
             self.finder_hrefs.append(values["href"])
             self.finder_search[values["href"]] = values.get("data-search") or ""
+            self.finder_attrs[values["href"]] = values
 
     def handle_endtag(self, tag: str) -> None:
         if tag == "aside" and self.in_sidebar:
@@ -69,6 +73,7 @@ def _overview_markup(monkeypatch, tmp_path) -> _NavFinderMarkup:
     fragment.feed('<dialog id="navfinder-dialog">' + items.text + "</dialog>")
     markup.finder_hrefs = fragment.finder_hrefs
     markup.finder_search = fragment.finder_search
+    markup.finder_attrs = fragment.finder_attrs
     return markup
 
 
@@ -99,7 +104,10 @@ def test_page_finder_destinations_cover_the_visible_registry_beyond_the_sidebar(
     from maverick_dashboard import employee_companion_api, ui_visibility
 
     monkeypatch.setattr(employee_companion_api, "navigation_available", lambda request, *, admin: False)
-    unavailable = {"/companion", "/companion/admin"}
+    # Like the companions, these screens' routes need a named account the local
+    # owner does not have, so the finder withholds them.
+    unavailable = {"/companion", "/companion/admin", "/notifications", "/access-requests",
+                   "/devices", "/get-started/employee"}
 
     markup = _overview_markup(monkeypatch, tmp_path)
 
@@ -124,3 +132,33 @@ def test_page_finder_accepts_the_workflow_name_for_the_grc_builder(monkeypatch, 
     search_terms = markup.finder_search["/compliance/grc-studio"].lower()
     assert "workflow" in search_terms
     assert "builder" in search_terms
+
+
+def test_page_finder_indexes_each_page_heading_and_plain_synonyms(monkeypatch, tmp_path):
+    from maverick_dashboard import ui_visibility
+
+    markup = _overview_markup(monkeypatch, tmp_path)
+    for href, attrs in markup.finder_attrs.items():
+        assert attrs["data-label"].split("|")[0] == ui_visibility.page_for(href)["label"]
+        assert attrs["data-heading"].split("|")[0] == ui_visibility.HEADINGS.get(href, "")
+        assert attrs["data-synonyms"] == "|".join(ui_visibility.SYNONYMS.get(href, ()))
+    assert markup.finder_attrs["/audit"]["data-heading"].startswith("Activity log")
+    assert "Activity log" in markup.finder_search["/audit"]
+    assert "approve" in markup.finder_attrs["/approvals"]["data-synonyms"].split("|")
+    assert "emergency stop" in markup.finder_search["/agent-control-plane"]
+
+
+# The heading the finder indexes is the one the page shows, whichever way the
+# label and the heading are later brought together.
+def test_indexed_heading_is_the_heading_the_page_shows(monkeypatch, tmp_path):
+    from maverick_dashboard import ui_visibility
+
+    client = _client(monkeypatch, tmp_path)
+    for path in ("/audit", "/immune", "/replay", "/redact", "/simulate", "/run-tree", "/external-agents",
+                 "/styles", "/perf", "/walkthroughs", "/workflows", "/users", "/help", "/my-work"):
+        response = client.get(path)
+        assert response.status_code == 200, path
+        shown = re.search(r"<h1[^>]*>(.*?)</h1>", response.text, re.DOTALL).group(1)
+        shown = " ".join(unescape(re.sub(r"<[^>]+>", "", shown)).split()).casefold()
+        page = ui_visibility.page_for(path)
+        assert shown in {page["label"].casefold(), ui_visibility.HEADINGS.get(path, "").casefold()}, path

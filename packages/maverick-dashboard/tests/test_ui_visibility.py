@@ -387,3 +387,28 @@ def test_approved_self_connect_keeps_page_overrides_and_native_admin_floor(monke
     assert not ui_visibility.is_visible(page, "operator")
     assert ui_visibility.is_visible(page, "admin")
     assert not ui_visibility.is_visible(ui_visibility.page_for("/settings"), "operator")
+
+
+def test_newly_registered_screens_join_the_matrix_like_other_folded_pages(monkeypatch, tmp_path):
+    """Screens that only had their own route checks are now governed pages:
+    folded out of the sidebar, listed in the Settings matrix, and hidden for a
+    role (finder and direct address) when an administrator turns them off."""
+    monkeypatch.setenv("MAVERICK_DASHBOARD_ADMINS", "")
+    c = _client(monkeypatch, tmp_path)
+    from maverick_dashboard import rbac, ui_visibility
+
+    screens = ("/help", "/notifications", "/my-work", "/conversations", "/get-started/employee",
+               "/project-workspaces", "/devices", "/access-requests", "/budget",
+               "/cost-reconciliation", "/provider-spending")
+    rows = {row["path"]: row for group in ui_visibility.matrix() for row in group["pages"]}
+    for path in screens:
+        assert rows[path]["in_nav"] is False
+        assert path not in {ln["href"] for g in ui_visibility.nav_groups(None) for ln in g["links"]}
+    viewer = {cell["role"]: cell for cell in rows["/provider-spending"]["cells"]}["viewer"]
+    assert viewer["eligible"] is False and viewer["visible"] is False
+    rbac.set_role("user:vy", "viewer")
+    _as(monkeypatch, "user:vy")
+    assert c.get("/help").status_code == 200
+    ui_visibility.set_visibility("/help", "viewer", False)
+    assert "/help" not in {ln["href"] for g in ui_visibility.finder_pages("viewer") for ln in g["links"]}
+    assert c.get("/help").status_code == 403
