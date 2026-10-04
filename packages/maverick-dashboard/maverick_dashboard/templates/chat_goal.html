@@ -103,6 +103,15 @@
   .signoff__actions { display: flex; gap: var(--space-2); }
   .signoff textarea.input { width: 100%; margin-bottom: var(--space-3); }
 
+  /* What to know before relying on the answer: check, agent version, backup model. */
+  .answer-facts { margin-top: var(--space-3); display: grid; gap: var(--space-1); font-size: var(--text-sm); color: var(--muted); }
+  .answer-facts p { margin: 0; }
+  .answer-check__label { font-weight: var(--font-semibold); color: var(--text); margin-inline-end: var(--space-2); }
+  .answer-check[data-state="checked"] .answer-check__label { color: var(--accent); }
+  .answer-check[data-state="concerns"] .answer-check__label { color: var(--warn); }
+  .answer-fallback { border-inline-start: 3px solid var(--warn); padding-inline-start: var(--space-2); color: var(--text); }
+  .answer-agent__changes summary { cursor: pointer; width: max-content; }
+  .answer-agent__changes ul { margin: var(--space-1) 0 0; padding-inline-start: 1.25em; }
   /* Feedback: the always-available thumbs up/down on any finished result. */
   .feedback { margin-top: var(--space-3); display: flex; align-items: center; gap: var(--space-1); flex-wrap: wrap; }
   .feedback__q { font-size: var(--text-sm); }

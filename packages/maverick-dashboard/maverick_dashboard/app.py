@@ -7071,11 +7071,22 @@ async def agents_page(request: Request) -> HTMLResponse:
             creating = False  # editing an existing agent wins over the new form
     except Exception:  # never 500 the page if the factory layer is unavailable
         agents = []
+    agent_changes: list = []
+    if selected:
+        try:
+            from . import agent_changelog
+
+            agent_changes = agent_changelog.entries(selected["name"], limit=10)
+        except Exception:  # pragma: no cover -- the history is best effort
+            agent_changes = []
     return templates.TemplateResponse(
         request,
         "agents.html",
         {"agents": agents, "rejected_agents": rejected_agents,
-         "selected": selected, "editable": editable, "creating": creating},
+         "selected": selected, "editable": editable, "creating": creating,
+         "agent_changes": agent_changes,
+         # Names of the people who changed an agent are shown to administrators.
+         "show_change_authors": has_global_permission(request, "admin")},
     )
 
 
@@ -11573,6 +11584,7 @@ def chat_goal(request: Request, goal_id: int) -> HTMLResponse:
     from maverick.runner import configured_goal_ceiling_dollars
 
     from ._event_stream import TERMINAL_RUN_STATUSES
+    from .answer_checks import answer_facts
     from .answer_projection import version_for
 
     try:
@@ -11639,6 +11651,7 @@ def chat_goal(request: Request, goal_id: int) -> HTMLResponse:
             "signoff": signoff,
             "artifacts": artifacts,
             "answer_version": version_for(g, contract, signoff, artifacts),
+            **answer_facts(w, g, frozenset(_withheld_event_markers())),
             "projects": projects,
             "share_links": share_links,
             "withheld_markers": _withheld_event_markers(),

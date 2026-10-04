@@ -53,6 +53,9 @@ def projection(request, world, goal_id: int) -> dict:
     can_download, download_note = _chat_answer_download_state(world, fresh)
     from maverick.stop_reasons import stop_payload
 
+    from .answer_checks import answer_facts
+    from .app import _withheld_event_markers
+
     stop = stop_payload(fresh.status, fresh.result)
     # Exceptional content grants never become permission to mutate the task.
     context.update(can_operate=not context["handoff_closed"] and has_permission(request, "operate") and
@@ -60,5 +63,6 @@ def projection(request, world, goal_id: int) -> dict:
                    conversation_context=context_for(request), voice_only=_voice_only_mode(),
                    stop=stop,
                    can_download_chat_answer=can_download, chat_answer_download_note=download_note,
-                   chat_answer_text=_chat_answer_text(fresh))
+                   chat_answer_text=_chat_answer_text(fresh),
+                   **answer_facts(world, fresh, frozenset(_withheld_event_markers())))
     return context

@@ -315,6 +315,8 @@ async def settings_set_model(request: Request) -> RedirectResponse:
     allow = await run_in_threadpool(allowed_models)
     if model and allow and model not in allow:
         raise HTTPException(status_code=400, detail="model not in the allowed list")
+    from maverick.runtime_overrides import default_model_override
+    previous = await run_in_threadpool(default_model_override)
     try:
         with _setting_write(request, "models", "default", lambda d:
                             (d.get("models") or {}).get("default")):
@@ -329,6 +331,10 @@ async def settings_set_model(request: Request) -> RedirectResponse:
             "Model settings could not be confirmed. Refresh Settings and Activity before retrying."
         )) from exc
     _admin_audit(request, "settings_models")
+    from . import agent_changelog
+    agent_changelog.record(agent_changelog.EVERY_AGENT,
+                           agent_changelog.describe_default_model(previous, model or None),
+                           by=auth.caller_principal(request) or "")
     return RedirectResponse("/settings?saved=models", status_code=303)
 
 
@@ -540,6 +546,8 @@ async def settings_set_role_models(request: Request) -> RedirectResponse:
             if spec and spec not in allow:
                 raise HTTPException(
                     status_code=400, detail="model not in the allowed list")
+    from maverick.runtime_overrides import role_model_override
+    previous = {r: await run_in_threadpool(role_model_override, r) for r in roles}
     try:
         with _setting_write(request, "models", "roles", lambda d:
                             {k: v for k, v in (d.get("models") or {}).items()
@@ -552,6 +560,11 @@ async def settings_set_role_models(request: Request) -> RedirectResponse:
             "Role models could not be confirmed. Refresh Settings and Activity before retrying."
         )) from exc
     _admin_audit(request, "settings_roles")
+    from . import agent_changelog
+    agent_changelog.record(agent_changelog.EVERY_AGENT,
+                           agent_changelog.describe_role_models(
+                               previous, {r: (spec or None) for r, spec in updates.items()}),
+                           by=auth.caller_principal(request) or "")
     return RedirectResponse("/settings?saved=roles", status_code=303)
 
 @router.post("/settings/models/allowed")

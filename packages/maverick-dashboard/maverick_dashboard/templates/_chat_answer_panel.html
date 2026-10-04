@@ -15,6 +15,33 @@
       {% else %}
         <span class="sr-only" id="answer-result-label">{{ ui("Goal result") }}</span><div id="result" tabindex="0" aria-labelledby="answer-result-label" class="prose" data-markdown lang="und" dir="auto" data-user-content>{{ goal.result or '' }}</div>
       {% endif %}
+      {# How far to trust this answer, read from the task's own record:
+         whether the extra check reviewed it, which agent version answered,
+         and whether the backup model stood in (answer_checks.py). #}
+      {% if answer_check %}
+      <div class="answer-facts" id="answer-facts">
+        <p class="answer-check" id="answer-check" data-state="{{ answer_check.state }}">
+          <span class="answer-check__label">{{ ui(answer_check.label) }}</span><span class="answer-check__reason">{{ ui(answer_check.reason) }}</span>
+        </p>
+        {% if answer_fallback %}<p class="answer-fallback" id="answer-fallback">{{ ui('The backup AI model was used for this answer because the main one was unavailable.') }}</p>{% endif %}
+        {% if answer_agent %}
+        <p class="answer-agent" id="answer-agent">
+          {{ ui('Agent: {agent}', agent=answer_agent.agent) }} ·
+          {% if answer_agent.updated_text %}{{ ui('updated {date}', date=answer_agent.updated_text) }}{% else %}{{ ui('no recorded changes') }}{% endif %}
+        </p>
+        {% if answer_agent.changed_since %}
+        <p class="answer-agent__since" id="answer-agent-since">{{ ui('This agent has changed since this answer:') }}
+          {% for row in answer_agent.changed_since %}{{ row.date_text }}, {{ row.changes | join('; ') }}{% if not loop.last %} · {% endif %}{% endfor %}</p>
+        {% endif %}
+        {% if answer_agent.changes %}
+        <details class="answer-agent__changes">
+          <summary>{{ ui('What changed in this agent') }}</summary>
+          <ul>{% for row in answer_agent.changes %}<li>{{ row.date_text }}: {{ row.changes | join('; ') }}</li>{% endfor %}</ul>
+        </details>
+        {% endif %}
+        {% endif %}
+      </div>
+      {% endif %}
       {% if deliverable and deliverable.gate %}
         <div class="signoff" id="signoff">
           {% if signoff %}

@@ -13543,14 +13543,17 @@ async def save_agent_override(request: Request, name: str, payload: AgentOverrid
     """Persist a tenant override for ``name``. 403 if pack editing is disabled,
     422 if the merged pack fails lint (the override is rejected, not written)."""
     _require_pack_editing(request)
-    from maverick.domain_edit import OverrideConflict, write_override
+    from maverick.domain_edit import OverrideConflict, resolved_view, write_override
 
     try:
         errors = _agent_action_errors(name, payload)
         if errors:
             raise ValueError("; ".join(errors))
-        return write_override(name, payload.model_dump(exclude_unset=True, exclude={"expected_generation"}),
+        before = resolved_view(name)
+        view = write_override(name, payload.model_dump(exclude_unset=True, exclude={"expected_generation"}),
                               expected_generation=payload.expected_generation, return_view=True)
+        _record_agent_change(request, name, before, view)
+        return view
     except OverrideConflict as e:
         raise HTTPException(status_code=409, detail=str(e)) from e
     except ValueError as e:
@@ -13572,11 +13575,24 @@ async def delete_agent_override(request: Request, name: str, expected_generation
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e)) from e
     view = resolved_view(name)
+    if removed:
+        from . import agent_changelog
+
+        agent_changelog.record(name, ["Reset to the built-in version" if view else "Removed this agent"],
+                               by=caller_principal(request) or "")
     if view is None:
         if removed:
             return {"removed": True, "agent": None}
         raise HTTPException(status_code=404, detail=f"no such agent: {name!r}")
     return {"removed": removed, "agent": view}
+
+
+def _record_agent_change(request: Request, name: str, before: dict | None, after: dict | None) -> None:
+    """One plain-words changelog entry per saved agent change (who, when, what)."""
+    from . import agent_changelog
+
+    agent_changelog.record(name, agent_changelog.describe_agent_change(before, after),
+                           by=caller_principal(request) or "")
 
 
 # ---- JD hiring: map a job description onto the roster / draft a new pack ----
@@ -13778,11 +13794,18 @@ async def save_role_override(role: str, payload: RoleOverrideIn, request: Reques
     _require_role_editing(request)
     from maverick.role_edit import resolved_role, write_role_override
 
+    from . import agent_changelog
+
+    before = resolved_role(role)
     try:
         write_role_override(role, payload.model_dump(exclude_unset=True))
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e)) from e
-    return resolved_role(role)
+    after = resolved_role(role)
+    agent_changelog.record(agent_changelog.EVERY_AGENT,
+                           agent_changelog.describe_role_change(role, before, after),
+                           by=caller_principal(request) or "")
+    return after
 
 
 @router.delete("/roles/{role}/override")
@@ -13791,10 +13814,17 @@ async def delete_role_override(role: str, request: Request) -> dict:
     _require_role_editing(request)
     from maverick.role_edit import remove_role_override, resolved_role
 
+    from . import agent_changelog
+
+    before = resolved_role(role)
     removed = remove_role_override(role)
     view = resolved_role(role)
     if view is None:
         raise HTTPException(status_code=404, detail=f"no such role: {role!r}")
+    if removed:
+        agent_changelog.record(agent_changelog.EVERY_AGENT,
+                               agent_changelog.describe_role_change(role, before, view),
+                               by=caller_principal(request) or "")
     return {"removed": removed, "role": view}
 
 

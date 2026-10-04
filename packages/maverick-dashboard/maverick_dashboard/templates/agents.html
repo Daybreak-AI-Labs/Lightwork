@@ -437,6 +437,22 @@
         {% for w in selected.warnings %}<div class="muted">⚠ {{ w }}</div>{% endfor %}
       </div>
       {% endif %}
+      {% if selected %}
+      {# Who changed this agent, when, and what -- the same record answers cite. #}
+      <section class="panel" id="agent-changelog" aria-labelledby="agent-changelog-title" style="margin-top: 1rem;">
+        <h3 id="agent-changelog-title" style="margin-top: 0;">Change history</h3>
+        {% if agent_changes %}
+        <ul class="agent-changelog__list">
+          {% for row in agent_changes %}
+          <li><span class="muted">{{ row.ts | datetime }} · {{ 'Every agent' if row.agent == '*' else 'This agent' }} · {{ (row.by | identity).name if (row.by and show_change_authors) else ('An administrator' if row.by else 'The administrator on this computer') }}</span>
+            <div>{{ row.changes | join('; ') }}</div></li>
+          {% endfor %}
+        </ul>
+        {% else %}
+        <p class="muted">No changes recorded yet. Saved changes to this agent's instructions, allowed actions or AI model appear here, and answers show when the agent last changed.</p>
+        {% endif %}
+      </section>
+      {% endif %}
       {% else %}
       <p class="muted">Pick a specialist above to tailor it — or start a <a href="/agents?new=1#agent-form">new custom agent</a>.</p>
       {% endif %}
