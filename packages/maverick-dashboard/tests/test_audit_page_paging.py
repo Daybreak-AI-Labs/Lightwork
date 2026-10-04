@@ -43,7 +43,7 @@ def client(monkeypatch, tmp_path):
 def _rows(page):
     table = page[page.index('<table id="audit-table">'):]
     body = table[table.index("<tbody>"):table.index("</tbody>")]
-    return re.findall(r"<tr>(.*?)</tr>", body, re.S)
+    return re.findall(r"<tr>(.*?)</tr>", body, re.DOTALL)
 
 
 def _older_link(page):

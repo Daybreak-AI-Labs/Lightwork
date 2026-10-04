@@ -117,7 +117,7 @@ def test_chat_entrance_motion_never_hides_the_main_content():
     assert rules, "the entrance rule moved; update this test with it"
     for rule in rules:
         assert "opacity" not in rule
-    frames = re.search(r"@keyframes csUp\s*\{(.*?)\}\s*\}", shell, re.S)
+    frames = re.search(r"@keyframes csUp\s*\{(.*?)\}\s*\}", shell, re.DOTALL)
     assert frames is not None and "opacity" not in frames.group(1)
     # Reduced motion still means no entrance animation at all.
     assert re.search(r"@media \(prefers-reduced-motion: no-preference\)\s*\{\s*\.cs-anim", shell)
