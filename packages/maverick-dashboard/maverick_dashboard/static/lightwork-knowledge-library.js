@@ -66,7 +66,10 @@
     var payload = await call("GET", "/reindex-jobs", undefined, "refresh rebuild jobs");
     if (jobsContext && jobsContext !== payload.context) { jobsPanel.replaceChildren(); pendingRebuild = null; throw new Error("Your workspace changed. Reload to review rebuilds."); }
     jobsContext = payload.context; jobsPanel.replaceChildren(el("h3", "Search index rebuild jobs"));
-    if (!payload.jobs.length) jobsPanel.appendChild(el("p", "No rebuild jobs to show. Archived operation receipts remain recorded."));
+    if (!payload.jobs.length) {
+      var title = "No rebuild jobs to show", body = "Rebuilds you start appear here with their progress and cost. Archived operation receipts remain recorded.";
+      jobsPanel.appendChild(window.mvEmpty ? window.mvEmpty(title, body, null, { compact: true }) : el("p", title + ". " + body));
+    }
     payload.jobs.forEach(function(job) {
       var section = el("section"), progress = el("progress"); progress.max = Math.max(1,job.count); progress.value = job.done; progress.setAttribute("aria-label", "Rebuild progress");
       section.append(el("h4",human(job.collection)), el("p", human(job.state) + ": " + job.done + " of " + job.count + " passages. " + job.message),progress);
