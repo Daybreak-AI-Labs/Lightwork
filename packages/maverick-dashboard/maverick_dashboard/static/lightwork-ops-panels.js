@@ -418,7 +418,7 @@
         out.appendChild(table(['Gap', 'Fix', 'Actions'], data.fixes.map(function (f) {
           var actions = el('span', 'ops-actions');
           if (f.can_apply && canInstall) {
-            var apply = button('Apply this fix', 'btn btn--primary');
+            var apply = button('Apply this fix', 'btn');
             apply.addEventListener('click', busy(apply, async function () {
               if (!(await confirmed('Apply this fix: ' + f.label + '? Lightwork\'s own settings change, the change is recorded in the activity log, and it takes effect after Lightwork restarts.', 'Apply'))) return;
               try {
@@ -744,7 +744,7 @@
         var started = await request('/api/v1/governance-ops/underwriting-pack', {method: 'POST', json: {asset_id: asset || null}});
         waitForDownload('/api/v1/governance-ops/underwriting-pack/' + encodeURIComponent(started.job), function (problem, href) {
           if (problem) { say(out, problem); return; }
-          var a = el('a', 'btn btn--primary', 'Save the pack');
+          var a = el('a', 'btn', 'Save the pack');
           a.href = href; a.setAttribute('download', '');
           link.appendChild(a);
           say(out, 'The pack is ready.');

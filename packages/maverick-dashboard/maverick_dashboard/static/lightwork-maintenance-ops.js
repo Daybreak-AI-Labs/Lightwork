@@ -260,7 +260,7 @@
       var data = await call(BASE + '/settings-file');
       var nodes = [para(data.summary)];
       if (data.can_update) {
-        var update = el('button', 'btn btn--primary', 'Update the settings file');
+        var update = el('button', 'btn', 'Update the settings file');
         update.type = 'button';
         update.addEventListener('click', updateSettingsFile);
         nodes.push(update);

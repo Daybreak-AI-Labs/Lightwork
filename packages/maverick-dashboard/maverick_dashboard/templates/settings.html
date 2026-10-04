@@ -5,7 +5,7 @@
   {% from "_integration_readiness.html" import provider_status %}
   {# The main action is the AI-service setup step the workspace still needs;
      each section's own Save stays a plain button. #}
-  {% set settings_actions %}{% if workspace.next_action %}<a class="btn" href="{{ workspace.next_action.href }}">{{ workspace.next_action.label }}</a>{% endif %}{% endset %}
+  {% set settings_actions %}{% if workspace.next_action %}<a class="btn btn--primary" href="{{ workspace.next_action.href }}">{{ workspace.next_action.label }}</a>{% endif %}{% endset %}
   {% call hero('Administration', 'Settings',
                subtitle='Set up Lightwork',
                lede='Appearance, AI models, spending, connections and features.
@@ -235,7 +235,7 @@
     </form>
     <div id="model-test-review-card" hidden tabindex="-1">
       <p id="model-test-review-text"></p>
-      <button class="btn btn--primary" type="button" id="model-test-confirm">Confirm one potentially paid test</button>
+      <button class="btn" type="button" id="model-test-confirm">Confirm one potentially paid test</button>
       <button class="btn" type="button" id="model-test-abandon">Cancel review</button>
     </div>
     <p id="model-test-status" role="status" aria-live="polite"></p>
