@@ -13297,7 +13297,10 @@ async def copilot_context_endpoint(request: Request, page: str = "") -> dict[str
         result["model_route_reason"] = reason
     from maverick.config import get_features
 
+    from .copilot_context import intro_for
+
     result["operations_enabled"] = get_features().get("copilot_operations") is True
+    result["intro"] = intro_for(context_for_page(page), changes_enabled=result["operations_enabled"])
     if not configured:
         result["provider_setup"] = _copilot_provider_setup(permissions, route_status)
     from .provider_readiness import public_verdict, workspace_readiness
@@ -13396,6 +13399,15 @@ async def copilot_endpoint(request: Request, payload: CopilotIn) -> dict:
         live = await run_in_threadpool(live_answer, request, msg, payload.page,
                                        payload.selected_goal_id)
         return {**live, "page_context": public_context(context, permissions)}
+
+    # Something people come to this page to do: plain steps and a link that
+    # opens the page and focuses the control. Navigation only; nothing changes.
+    from .copilot_tasks import match as match_task
+    from .copilot_tasks import reply as task_reply
+
+    task = match_task(context.path, msg, permissions)
+    if task is not None:
+        return {**task_reply(task), "page_context": public_context(context, permissions)}
 
     # The browser offers only registered, reviewed operations before it asks
     # this read-only guide. A direct action request that reaches this endpoint
@@ -13503,16 +13515,13 @@ async def copilot_endpoint(request: Request, payload: CopilotIn) -> dict:
             "page_context": public_context(context, permissions),
             "action_link": {"href": context.path, "label": f"Open {context.title}"},
         }
-    qualified_reply = sanitize_model_reply(
-        f"I haven't changed anything in Lightwork. Here's my answer: {safe_reply}"
-    )
     return {
-        "reply": qualified_reply,
+        "reply": safe_reply,
         "mode": "model",
         "model_output_verified": False,
         "warning": (
-            "Model-generated guidance is unverified; confirm readiness and outcomes "
-            "against live status, retained evidence, and authorized human review."
+            "This answer is from AI and unverified. Copilot hasn't changed anything; "
+            "check the page before you act on it."
         ),
         "page_context": public_context(context, permissions),
     }

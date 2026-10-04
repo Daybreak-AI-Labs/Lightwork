@@ -499,9 +499,10 @@ def test_model_success_is_unverified_bounded_and_ignores_assistant_history(
     assert payload["model_output_verified"] is False
     assert "unverified" in payload["warning"].lower()
     assert "grounded" not in payload["warning"].lower()
-    assert payload["reply"].startswith(
-        "I haven't changed anything in Lightwork. Here's my answer: "
-    )
+    # The answer reads as the answer; the panel's intro and this warning say
+    # that Copilot changed nothing, instead of a boilerplate prefix on every reply.
+    assert not payload["reply"].startswith("I haven't changed anything")
+    assert "hasn't changed anything" in payload["warning"]
     assert "\n" not in payload["reply"]
     assert "\u202e" not in payload["reply"]
     assert len(payload["reply"].split()) <= 120

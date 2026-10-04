@@ -1662,11 +1662,11 @@ def _registered_page_context(path: str) -> CopilotPageContext | None:
     group = str(page.get("group") or "workspace")
     floor = str(page.get("floor") or "view")
     authority = {
-        "view": "This page is viewable with read access; its mutation endpoints may require more authority.",
-        "operate": "Using this page's operations requires current operator authority.",
-        "audit": "This page is limited to authorized audit review.",
-        "admin": "This page is a deployment administration surface and requires global administrator authority.",
-    }.get(floor, "The server rechecks current authority for every operation.")
+        "view": "Anyone who can open this page can look; some changes need more access.",
+        "operate": "Making changes here needs operator access.",
+        "audit": "This page is for people who review the audit record.",
+        "admin": "This page is for administrators.",
+    }.get(floor, "Lightwork checks your access again for every change.")
     return _ensure_read_only(
         CopilotPageContext(
             path=path,
@@ -1688,9 +1688,9 @@ def _registered_page_context(path: str) -> CopilotPageContext | None:
                 "After any permitted operation, verify the returned result and retained evidence before relying on it.",
             ),
             suggested_questions=(
-                f"What can I inspect on {title}?",
-                "What authority and readiness does this page require?",
-                "What should I verify after an operation?",
+                f"What can I do on {title}?",
+                "Where do I start on this page?",
+                "What should I check before I rely on it?",
             ),
         )
     )
@@ -1733,7 +1733,31 @@ def public_context(
         order = ("view", "operate", "audit", "admin")
         result["caller_permissions"] = [item for item in order if item in permissions]
         result["authority_notice"] = _authority_notice(permissions)
+        result["intro"] = intro_for(context)
+        result["suggestions"] = suggestions_for(context, permissions)
     return result
+
+
+def intro_for(context: CopilotPageContext, *, changes_enabled: bool = False) -> str:
+    """One short line on what Copilot can do here, instead of a list of boundaries."""
+    lead = (f"I can explain {context.title}, answer questions about it and take you to the right control."
+            if context.path != "/" else
+            "I can explain this page, answer questions about it and take you to the right control.")
+    return lead + (" Changes always need your confirmation." if changes_enabled
+                   else " I don't change anything for you.")
+
+
+def suggestions_for(context: CopilotPageContext, permissions: frozenset[str]) -> list[str]:
+    """Three things people come to this page to do, phrased as tasks."""
+    from .copilot_tasks import tasks_for
+
+    tasks = [task.label for task in tasks_for(context.path, permissions)]
+    for question in context.suggested_questions:
+        if len(tasks) >= 3:
+            break
+        if question not in tasks:
+            tasks.append(question)
+    return tasks[:3]
 
 
 def built_in_reply(
@@ -1871,8 +1895,10 @@ __all__ = [
     "CopilotPageContext",
     "built_in_reply",
     "context_for_page",
+    "intro_for",
     "is_action_request",
     "model_claims_completed_action",
     "public_context",
     "sanitize_model_reply",
+    "suggestions_for",
 ]

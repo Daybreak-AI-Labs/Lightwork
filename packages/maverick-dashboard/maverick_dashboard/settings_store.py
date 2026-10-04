@@ -186,7 +186,7 @@ FEATURE_INFO = {
     ),
     "employee_task_diagnostics": "Show bounded diagnostics and support guidance for the signed-in person's own tasks. No diagnostic control grants access to another person's work.",
     "employee_activation": "Guide each signed-in person through their allowed first task and readiness checks. Existing policy, cost limits and provider configuration stay in force.",
-    "copilot_operations": "Let Copilot open registered product controls in the action families enabled by your organization. Every change requires a fresh review and explicit confirmation; native controls remain available when this is off.",
+    "copilot_operations": "Let Copilot open controls that change things, in the action families enabled by your organization. Every change requires a fresh review and explicit confirmation. When this is off, Copilot can still open pages, focus controls and show current status, but it cannot change anything.",
     "support_center": "Allow installation administrators to prepare, review and download redacted diagnostics in Help. Reports are never sent automatically.",
     "workflow_readiness": "Show available workflows, their supported boundaries, and the live or platform validation still required. Enablement never establishes customer acceptance.",
     "project_reviews": "Share selected, fixed task results with assigned workspace reviewers. Review does not execute or sign off the live task.",

@@ -124,16 +124,54 @@
     pending.forEach(function (row) { log.appendChild(row); });
   }
 
+  // Navigation actions only: open a page, focus a control, or filter a list.
+  // The server names the destination from a closed registry; nothing changes.
+  var LINK_HREF = /^\/[a-z0-9/-]{0,159}(\?[a-z_]{1,20}=[a-z0-9_-]{1,40})?$/;
+  var FOCUS_ID = /^[a-z][a-z0-9-]{0,63}$/;
+  var FOCUSABLE = 'input:not([type=hidden]):not([readonly]):not([disabled]), select:not([disabled]), ' +
+    'textarea:not([readonly]):not([disabled]), button:not([disabled]), summary, a[href], [tabindex]:not([tabindex="-1"])';
+  function focusControl(id) {
+    if (!FOCUS_ID.test(String(id || ''))) return false;
+    var target = document.getElementById(id);
+    if (!target || panel.contains(target)) return false;
+    if (target.tagName === 'DETAILS') target.open = true;
+    var control = target.matches(FOCUSABLE) ? target : target.querySelector(FOCUSABLE);
+    if (!control) {
+      // A heading names a section: use the first control that follows it.
+      var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_ELEMENT);
+      walker.currentNode = target;
+      for (var i = 0; i < 400 && walker.nextNode(); i++) {
+        if (!panel.contains(walker.currentNode) && walker.currentNode.matches(FOCUSABLE)) { control = walker.currentNode; break; }
+      }
+    }
+    if (typeof target.scrollIntoView === 'function') target.scrollIntoView({block: 'center'});
+    if (!control) return false;
+    control.focus();
+    control.classList.add('mv-copilot-focus');
+    setTimeout(function () { control.classList.remove('mv-copilot-focus'); }, 2400);
+    return true;
+  }
+  function samePage(href) {
+    var target = new URL(href, window.location.origin);
+    return target.pathname === window.location.pathname && target.search === window.location.search;
+  }
   function addMessage(role, text, actionLink) {
     var message = document.createElement("div");
     message.className = "mv-copilot__msg mv-copilot__msg--" + role;
     message.textContent = String(text);
     if (role === "bot" && actionLink && typeof actionLink.href === "string" &&
-        /^\/[a-z0-9/-]{0,159}$/.test(actionLink.href) &&
-        typeof actionLink.label === "string") {
+        LINK_HREF.test(actionLink.href) && typeof actionLink.label === "string") {
+      var focus = typeof actionLink.focus === "string" && FOCUS_ID.test(actionLink.focus) ? actionLink.focus : "";
       var link = document.createElement("a");
-      link.href = actionLink.href;
+      link.href = actionLink.href + (focus ? "#lw-focus=" + focus : "");
       link.textContent = actionLink.label.slice(0, 80);
+      link.className = "mv-copilot__goto";
+      link.addEventListener("click", function (event) {
+        // Already on that page: move straight to the control instead of reloading.
+        if (!samePage(actionLink.href)) return;
+        event.preventDefault();
+        if (focus) { close(); focusControl(focus); }
+      });
       message.appendChild(document.createElement("br"));
       message.appendChild(link);
     }
@@ -141,6 +179,17 @@
     log.scrollTop = log.scrollHeight;
     return message;
   }
+  // Arriving from a Copilot link: focus the control it named, then tidy the address.
+  (function focusFromAddress() {
+    var match = /^#lw-focus=([a-z][a-z0-9-]{0,63})$/.exec(window.location.hash || '');
+    if (!match) return;
+    var run = function () {
+      focusControl(match[1]);
+      try { window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search); }
+      catch (_) { /* The address keeps the marker; focus already moved. */ }
+    };
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', run); else setTimeout(run, 0);
+  })();
 
   function completeReply(question, reply, actionLink) {
     input.value = '';
@@ -154,23 +203,24 @@
 
   function renderContext(context) {
     var selected = context && typeof context === "object" ? context : fallback;
-    clear(tips);
-    (selected.boundaries || fallback.boundaries).slice(0, 3).forEach(function (text) {
-      var item = document.createElement("li");
-      item.textContent = String(text);
-      tips.appendChild(item);
-    });
+    // One short line instead of a list of rules: what Copilot can do here.
+    clear(tips); tips.hidden = true;
+    if (hello && typeof selected.intro === "string" && selected.intro) hello.textContent = selected.intro;
     clear(prompts);
-    (selected.suggested_questions || fallback.suggested_questions).slice(0, 3)
+    var suggestions = Array.isArray(selected.suggestions) && selected.suggestions.length
+      ? selected.suggestions : (selected.suggested_questions || fallback.suggested_questions);
+    suggestions.slice(0, 3)
       .forEach(function (question) {
         var button = document.createElement("button");
         button.type = "button";
         button.className = "mv-copilot__prompt";
         button.textContent = String(question);
+        // One click asks; the answer links to the control when there is one.
         button.addEventListener("click", function () {
           if (sending) return;
           input.value = String(question);
-          input.focus();
+          if (typeof form.requestSubmit === "function") form.requestSubmit();
+          else form.dispatchEvent(new Event("submit", {cancelable: true}));
         });
         prompts.appendChild(button);
       });
@@ -192,8 +242,8 @@
       hello.textContent = String(payload.model_route_reason || "Choose an available AI model in Settings.") +
         " Live task and decision answers and the page guide remain available.";
     } else if (readiness && readiness.verdict !== "ready" && hello) {
-      hello.textContent = "Live task and decision answers work without an AI service. Connect an AI service for broader Copilot questions. " +
-        String(readiness.reason || "") + " The page guide also works now.";
+      hello.textContent = (payload && typeof payload.intro === "string" && payload.intro ? payload.intro + " " : "") +
+        "Connect an AI service for other questions. " + String(readiness.reason || "");
     }
     if (!modelBlocked && next && typeof next.href === "string" && setupLinks.indexOf(next.href) !== -1) {
       setup = {href: next.href, label: next.label};

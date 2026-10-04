@@ -102,7 +102,7 @@
   <fieldset class="composer__controls"{% if not model_route_ready or not can_create_goal %} disabled{% endif %}>
   <legend class="sr-only">{{ ui('Start governed AI work') }}</legend>
   <textarea
-    lang="und" dir="auto" data-user-content name="title"
+    lang="und" dir="auto" data-user-content name="title" id="composer-title"
     class="composer__field"
     rows="2"
     placeholder="{{ ut('Message Lightwork…') }}"
