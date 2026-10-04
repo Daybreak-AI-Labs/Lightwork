@@ -707,6 +707,9 @@
               {% if r.status == 'awaiting_erasure' and r.fulfillment %}
                 <br><span class="muted pw-erase-note">Open the request to delete this person&rsquo;s data.</span>
               {% endif %}
+              {% if r.status == 'closed' and not r.answer and (r.outcome or {}).get('kind') != 'withdrawn' %}
+                <br><span class="badge warn">No answer on record</span>
+              {% endif %}
             </td>
             <td {% if r.overdue %}class="pw-due-warn"{% endif %}>
               {% if r.status in ('open', 'unverified', 'awaiting_erasure') %}
@@ -720,7 +723,8 @@
                   {{ 'Gather their data' if r.kind in ('access', 'portability') else 'Prepare deletion' if r.kind == 'erasure' else 'Mark answered' }}</button>
               {% endif %}
               {% if r.status != 'closed' %}
-                <button class="btn pw-dsar-act" data-id="{{ r.id }}" data-act="close" data-kind="{{ r.kind }}" type="button">Close</button>
+                {# Closing records what happened, on the request's own page. #}
+                <a class="btn" href="/privacy/dsar/{{ r.id }}#close">Close</a>
               {% endif %}
               <button class="btn" data-pe-worksheet="{{ r.id }}" type="button">Where to search</button>
               <button class="btn pw-dsar-fulfillment" data-id="{{ r.id }}" type="button">Send response</button>
@@ -761,11 +765,17 @@
         </div>
         <label><span>Context for the estimate (optional)</span>
           <input class="input" name="affected_estimate" maxlength="100" placeholder="For example: about 1.2k customers, based on access logs"></label>
+        <label><span>When did you become aware of it?</span>
+          <input class="input" type="datetime-local" name="aware_at" id="pw-inc-aware" required
+            aria-describedby="pw-inc-aware-help"></label>
+        <p class="muted" id="pw-inc-aware-help" style="font-size:var(--text-sm); margin:0;">The 72-hour deadline to tell
+          the regulator runs from when your organisation became aware of the breach, not from when you open this record.
+          It is filled in with now; change it if you found out earlier.</p>
         <label><span>Description (optional)</span>
           <textarea class="textarea" name="description" rows="2"
-            placeholder="What is known so far. The 72-hour deadline to tell the regulator starts when you open the record."></textarea></label>
+            placeholder="What is known so far."></textarea></label>
         <div class="pw-form-actions">
-          <button class="btn btn--primary" type="submit">Open incident (the 72-hour deadline starts now)</button>
+          <button class="btn btn--primary" type="submit">Open incident</button>
           <span class="pw-form-err" role="alert"></span>
         </div>
       </form>
@@ -782,7 +792,8 @@
             <td><span class="badge {{ 'blocked' if r.severity == 'high' else 'warn' if r.severity == 'medium' else 'done' }}">{{ (r.severity or '') | capitalize }}</span></td>
             <td><span class="badge {{ 'blocked' if r.status == 'notify' else 'done' if r.status in ('documented', 'closed') else 'info' }}">{{ {'open': 'Open', 'notify': 'Must notify', 'documented': 'No notification needed', 'closed': 'Closed'}.get(r.status, (r.status or '') | capitalize) }}</span></td>
             <td {% if r.clock_breached %}class="pw-due-warn"{% endif %}>
-              {% if r.notification %}Decided{% elif r.clock_breached %}{{ (0 - r.hours_left) }} hours past the deadline{% else %}{{ r.hours_left }} hours left{% endif %}</td>
+              {% if r.notification %}Decided{% elif r.clock_breached %}{{ (0 - r.hours_left) }} hours past the deadline{% else %}{{ r.hours_left }} hours left{% endif %}
+              <br><span class="muted" style="font-size:var(--text-xs);">{% if r.aware_at %}72 hours from when you became aware: {{ r.aware_at | datetime('absolute') }}{% else %}72 hours from when the record was opened: {{ r.created_at | datetime('absolute') }}{% endif %}</span></td>
             <td class="pw-clip" {% if r.notification %}title="{{ r.notification.rationale }}"{% endif %}>
               {% if r.notification %}{{ 'Tell the regulator' if r.notification.notifiable else 'No notification needed' }}: {{ r.notification.rationale }}{% else %}—{% endif %}</td>
             <td>
@@ -806,8 +817,9 @@
         your decision either way, with the reason. It never contacts a regulator itself. &ldquo;Who must we tell?&rdquo;
         lists each law&rsquo;s deadlines from checked rules: support for your lawyers, not legal advice.</p>
       {% else %}
-        <p class="muted">No incidents recorded. Opening one starts the 72-hour deadline to tell the
-          regulator; whether you must tell them stays a decision a person records, with the reason.</p>
+        <p class="muted">No incidents recorded. When you open one, Lightwork tracks the 72-hour deadline to tell the
+          regulator from when you became aware of the breach; whether you must tell them stays a decision a person
+          records, with the reason.</p>
       {% endif %}
     </div>
   </div>
@@ -1221,6 +1233,7 @@
             if (!r.ok) {
               var failure = new Error('request failed');
               failure.status = r.status;
+              failure.headers = r.headers;  // carries the turned-off reason
               throw failure;
             }
             return d;
@@ -1487,7 +1500,7 @@
           box.textContent = 'Working out where to search…';
           fetch('/api/v1/privacy/dsar/' + encodeURIComponent(btn.dataset.peWorksheet) + '/estate-worksheet')
             .then(function (r) {
-              if (!r.ok) { var failure = new Error('request failed'); failure.status = r.status; throw failure; }
+              if (!r.ok) { var failure = new Error('request failed'); failure.status = r.status; failure.headers = r.headers; throw failure; }
               return r.json();
             })
             .then(function (d) {
@@ -1624,9 +1637,24 @@
     });
   });
 
+  // An incident's awareness time starts as now, in the viewer's own time
+  // zone, and cannot be later than now.
+  var awareInput = document.getElementById('pw-inc-aware');
+  if (awareInput) {
+    var localNow = function () {
+      var d = new Date();
+      d.setSeconds(0, 0);
+      return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+    };
+    if (!awareInput.value) awareInput.value = localNow();
+    awareInput.max = localNow();
+    awareInput.addEventListener('focus', function () { awareInput.max = localNow(); });
+  }
+
   function failed(r) {
     var failure = new Error('request failed');
     failure.status = r.status;
+    failure.headers = r.headers;  // carries the turned-off reason (feature_gate.py)
     return failure;
   }
   function errText(e, action) {
@@ -1656,7 +1684,14 @@
       ev.preventDefault();
       var body = {};
       form.querySelectorAll('[name]').forEach(function (el) {
-        if (el.value) body[el.name] = el.value;
+        if (!el.value) return;
+        if (el.type === 'datetime-local') {
+          // The viewer's local date and time, sent as an exact moment.
+          var at = new Date(el.value).getTime();
+          if (!isNaN(at)) body[el.name] = Math.floor(at / 1000);
+          return;
+        }
+        body[el.name] = el.value;
       });
       var err = form.querySelector('.pw-form-err');
       err.textContent = '';
@@ -1860,7 +1895,7 @@
   var playbook = document.getElementById('pw-playbook');
   if (playbook) {
     // Local helpers keep this editor self-contained.
-    var pbFailed = function (r) { var f = new Error('request failed'); f.status = r.status; return f; };
+    var pbFailed = function (r) { var f = new Error('request failed'); f.status = r.status; f.headers = r.headers; return f; };
     var pbErrText = function (e, action) {
       if (typeof window !== 'undefined' && window.mvErrorText) { return window.mvErrorText(e, action); }
       return 'Could not ' + action + (e && e.status === 403 ? '. You do not have permission to do this. Ask an administrator.' : '. Please try again.');
@@ -2225,9 +2260,9 @@
           out.appendChild(note);
         })
         .catch(function (e) {
-          out.textContent = e && e.status === 403
-            ? 'The breach deadline planner is turned off. Ask an administrator to turn it on in Settings.'
-            : errText(e, 'work out the deadlines');
+          // Turned off is not "no permission": offer Turn on in place when allowed.
+          if (window.mvShowFeatureOff && window.mvShowFeatureOff(out, e)) return;
+          out.textContent = errText(e, 'work out the deadlines');
         });
     });
   });

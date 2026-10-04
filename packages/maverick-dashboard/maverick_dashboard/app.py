@@ -567,12 +567,13 @@ def _nav_context(request: Request) -> dict:
     try:
         from maverick import config as core_config
         from maverick import experience_preferences
+        from maverick.personal_notifications import personal_alerts_on
 
         show_personal_notifications = bool(caller_principal(request)) and has_permission(request, "view")
         personal_notifications_enabled = (
             show_personal_notifications and experience_preferences.enabled()
             and not core_config.config_source_errors(include_tenant=True)
-            and (core_config.load_config().get("notifications") or {}).get("personal_alerts") is True
+            and personal_alerts_on(core_config.load_config().get("notifications"))
         )
     except Exception:  # pragma: no cover -- shell rendering stays fail-closed
         show_personal_notifications = personal_notifications_enabled = False
@@ -2740,6 +2741,13 @@ def _wants_html(request: Request) -> bool:
 @app.exception_handler(StarletteHTTPException)
 async def http_exception_handler(request: Request, exc: StarletteHTTPException):
     """Branded, actionable HTML for browser failures; JSON for API callers."""
+    from . import feature_gate
+
+    headers = exc.headers
+    if exc.status_code == 403 and feature_gate.REASON_HEADER not in (headers or {}):
+        # A feature that is turned off is not a missing permission: say which.
+        headers = {**(headers or {}), **feature_gate.refusal_headers(exc.detail)} or headers
+    feature_off = (headers or {}).get(feature_gate.REASON_HEADER) == feature_gate.FEATURE_OFF
     if exc.status_code == 404 and _wants_html(request):
         return templates.TemplateResponse(
             request,
@@ -2826,7 +2834,20 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
             message = BOARD_SCOPE_DETAIL
         gate = ""
         reauthenticate = ""
-        if status == 403 and isinstance(exc.detail, str):
+        feature = {}
+        if status == 403 and feature_off:
+            from urllib.parse import unquote
+
+            gate = "off"
+            label = unquote(headers.get(feature_gate.LABEL_HEADER, ""))
+            title = f"{label} is turned off" if label else "This page is turned off"
+            message = (
+                "This feature is turned off for your workspace, or its settings "
+                "could not be read. An administrator can turn it on in Settings."
+            )
+            if label and headers.get(feature_gate.SWITCH_HEADER) == "module":
+                feature = {"section": headers[feature_gate.FEATURE_HEADER], "label": label}
+        elif status == 403 and isinstance(exc.detail, str):
             # Feature switches and named sign-in gates raise 403 with these
             # fixed server phrases; show the real reason instead of the
             # generic role message. The check itself is unchanged.
@@ -2850,13 +2871,6 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
                 gate = "ip"
                 title = "This address isn't allowed"
                 message = exc.detail
-            elif "disabled in Settings" in exc.detail:
-                gate = "off"
-                title = "This page is turned off"
-                message = (
-                    "This feature is turned off for your workspace, or its settings "
-                    "could not be read. An administrator can turn it on in Settings."
-                )
             elif exc.detail.startswith("Sign in with a named account"):
                 gate = "sign_in"
                 title = "Sign in with your own account"
@@ -2874,9 +2888,10 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
                 "path": request.url.path,
                 "gate": gate,
                 "reauthenticate": reauthenticate,
+                "feature": feature,
             },
             status_code=status,
-            headers=exc.headers,
+            headers=headers,
         )
     body: dict = {"detail": exc.detail}
     reauthenticate = getattr(exc, "reauthenticate", "")
@@ -2887,7 +2902,7 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
     return JSONResponse(
         body,
         status_code=exc.status_code,
-        headers=exc.headers,
+        headers=headers,
     )
 
 
@@ -3526,10 +3541,14 @@ def public_demo(request: Request) -> HTMLResponse:
 @app.get("/overview", response_class=HTMLResponse)
 def overview(request: Request) -> HTMLResponse:
     require_unscoped_board(request)
+    from .value_views import value_scope
+
     w = _world()
-    # Use SQL aggregation instead of pulling every goal into Python. Owner-scope
-    # the rollup to the caller (auth-off/admin -> all; see goal_owner_filter).
-    owner = goal_owner_filter(request)
+    # Use SQL aggregation instead of pulling every goal into Python. Count the
+    # caller's own goals; a read-only role counts the whole workspace (totals
+    # only -- see value_views).
+    value_view = value_scope(request)
+    owner = value_view["owner"]
     if owner is None:
         rows = w.query("SELECT status, COUNT(*) FROM goals GROUP BY status")
     else:
@@ -3553,7 +3572,7 @@ def overview(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(
         request,
         "index.html",
-        {"counts": counts, "facts": facts, "skills": skills[:10]},
+        {"counts": counts, "facts": facts, "skills": skills[:10], "value_view": value_view},
     )
 
 
@@ -4187,7 +4206,12 @@ def spend_page(request: Request) -> HTMLResponse:
     # Scope both reads to the caller (matches /api/v1/spend and the on-page
     # charts) so a non-admin never sees the whole tenant's spend/episodes.
     # goal_owner_filter returns None for admins / auth-off, preserving that view.
+    from .value_views import value_scope
+
     owner = goal_owner_filter(request)
+    # The heading total follows the value view (a read-only role sees the
+    # workspace total); the task table always stays the caller's own rows.
+    value_view = value_scope(request)
     w = _world()
     episodes = w.list_episodes(limit=50, owner=owner)
     from maverick.cost_provenance import for_goal, runtime_basis
@@ -4211,8 +4235,9 @@ def spend_page(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(
         request,
         "spend.html",
-        {"episodes": episodes, "total": w.total_spend(owner=owner),
-         "goal_titles": goal_titles, "csv_months": months, "episode_provenance": episode_provenance},
+        {"episodes": episodes, "total": w.total_spend(owner=value_view["owner"]),
+         "goal_titles": goal_titles, "csv_months": months, "episode_provenance": episode_provenance,
+         "value_view": value_view},
     )
 
 
@@ -4367,6 +4392,8 @@ def _privacy_page_data() -> tuple[dict, dict]:
         records["ai"] = privacy_ops.list_ai_systems()
         records["ropa"] = privacy_ops.list_ropa()
         records["dsar"] = privacy_ops.list_dsars()
+        for row in records["dsar"]:
+            row["answer"] = privacy_ops.dsar_answer(row)
         records["incidents"] = privacy_ops.list_incidents()
         records["paper"] = privacy_ops.list_paper_reviews()
         for rows in (
@@ -4532,8 +4559,11 @@ async def dsar_detail_page(request: Request, request_id: str) -> HTMLResponse:
     import time as _time
 
     from maverick import dsar_fulfillment, privacy_ops
+
+    from .feature_gate import feature_off
+
     if not privacy_ops.enabled():
-        raise HTTPException(status_code=403, detail="privacy_ops is not enabled")
+        raise feature_off("privacy_ops", "The privacy register")
     record = privacy_ops.get_dsar(request_id[:64])
     if record is None or "status" not in record:
         raise HTTPException(status_code=404, detail="no such DSAR")
@@ -4541,6 +4571,7 @@ async def dsar_detail_page(request: Request, request_id: str) -> HTMLResponse:
     now = _time.time()
     record.update(privacy_ops.dsar_clock(record, now=now))
     record["created_date"] = _date(record.get("created_at"))
+    record["received_date"] = _date(record.get("received_at") or record.get("created_at"))
     record["due_date"] = _date(record.get("effective_due_at"))
     record["acknowledge_date"] = _date(record.get("acknowledge_by"))
     record["extended_date"] = _date(record.get("extended_until"))
@@ -4556,15 +4587,25 @@ async def dsar_detail_page(request: Request, request_id: str) -> HTMLResponse:
         if fulfillment and fulfillment.get("response"):
             fulfillment["response"]["expires_date"] = _date(
                 fulfillment["response"].get("expires_at"))
+    # Which secure-link step the "Completed" notice can point to.
+    fulfillment_state = (
+        "off" if not fulfillment_enabled else "not_started" if not fulfillment
+        else "ready" if (fulfillment.get("identity") or {}).get("status") == "verified"
+        else "unverified")
+    from maverick import public_rights_form
+
     from .webhooks_api import record_alerts
 
     return templates.TemplateResponse(
         request, "dsar_detail.html",
         {"dsar": record, "fulfillment": fulfillment,
          "fulfillment_enabled": fulfillment_enabled,
+         "fulfillment_state": fulfillment_state,
          "record_alerts": record_alerts("dsar", record["id"]),
          "can_admin": has_permission(request, "admin"),
-         "email_log": (record.get("public_form") or {}).get("emails") or []})
+         "can_manage_email": has_global_permission(request, "admin"),
+         "notices": public_rights_form.notice_log(record),
+         "answer": privacy_ops.dsar_answer(record)})
 
 
 @app.get("/consent", response_class=HTMLResponse)
@@ -6181,11 +6222,13 @@ def savings_page(request: Request, days: int = 90) -> HTMLResponse:
     from maverick import savings as savings_mod
 
     from .api import _value_assumptions_resolution
+    from .value_views import assumptions_confirmed, value_scope
 
     days = max(1, min(days, 730))
     resolution = _value_assumptions_resolution()
     cfg = resolution["effective_assumptions"]
-    report = savings_mod.compute(_world(), window_days=days, cfg=cfg, owner=goal_owner_filter(request))
+    value_view = value_scope(request)
+    report = savings_mod.compute(_world(), window_days=days, cfg=cfg, owner=value_view["owner"])
     return templates.TemplateResponse(
         request,
         "savings.html",
@@ -6195,6 +6238,8 @@ def savings_page(request: Request, days: int = 90) -> HTMLResponse:
             "report": savings_mod.to_dict(report),
             "value_resolution": resolution,
             "can_manage_assumptions": has_global_permission(request, "operate"),
+            "value_view": value_view,
+            "assumptions_confirmed": assumptions_confirmed(),
         },
     )
 

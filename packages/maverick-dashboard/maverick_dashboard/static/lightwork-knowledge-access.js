@@ -355,7 +355,7 @@
     if (response.status === 409) {
       return "This changed since you loaded it, or current access couldn't be confirmed. Refresh and try again.";
     }
-    if (typeof window.mvErrorText === "function") return window.mvErrorText({status: response.status}, "finish this");
+    if (typeof window.mvErrorText === "function") return window.mvErrorText({status: response.status, headers: response.headers}, "finish this");
     return "Something went wrong. Please try again.";
   }
 

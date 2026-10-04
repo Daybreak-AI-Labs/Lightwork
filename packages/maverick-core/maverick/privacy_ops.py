@@ -3289,26 +3289,135 @@ def fulfill_dsar(request_id: str, *, fulfilled_by: str = "") -> dict | None:
     return saved
 
 
-def close_dsar(request_id: str, *, closed_by: str = "") -> dict | None:
-    changed = False
+#: How a request ended. ``answered`` and ``refused`` mean the requester was
+#: told (the date and where the proof is kept are required); ``withdrawn``
+#: and ``no_response`` close a request without an answer.
+DSAR_OUTCOMES = ("answered", "refused", "withdrawn", "no_response")
+#: For a deletion request: what happened to the data.
+DSAR_ERASURE_RESULTS = ("erased", "not_erased")
+_DAY_RE = re.compile(r"\d{4}-\d{2}-\d{2}\Z")
+
+
+def _utc_day(stamp: object) -> str:
+    """The UTC calendar day (YYYY-MM-DD) of an epoch stamp; "" when unset."""
+    import datetime
+
+    try:
+        value = float(stamp or 0)
+    except (TypeError, ValueError):
+        return ""
+    if not math.isfinite(value) or value <= 0:
+        return ""
+    return datetime.datetime.fromtimestamp(value, tz=datetime.timezone.utc).strftime("%Y-%m-%d")
+
+
+def _dsar_outcome(record: dict, outcome: object, *, actor: str, now: float) -> dict:
+    """Check what the person closing a request says happened, so a closed
+    request never reads as answered without the facts that make it true."""
+    import datetime
+
+    if not isinstance(outcome, dict) or outcome.get("kind") not in DSAR_OUTCOMES:
+        raise ValueError("Choose what happened to the request.")
+
+    def text(key: str, limit: int) -> str:
+        return str(outcome.get(key) or "").strip()[:limit]
+
+    result = {"kind": outcome["kind"], "recorded_by": _actor_label(actor), "recorded_at": now}
+    if result["kind"] in ("withdrawn", "no_response"):
+        result["note"] = text("note", 2000)
+        return result
+    day = text("answered_on", 10)
+    try:
+        datetime.date.fromisoformat(day if _DAY_RE.fullmatch(day) else "")
+    except ValueError:
+        raise ValueError("Enter the date the answer was sent.") from None
+    # A person's local "today" can be a day ahead of UTC (up to UTC+14).
+    if day > _utc_day(now + 14 * 3600):
+        raise ValueError("The answer date cannot be in the future.")
+    if day < _utc_day(record.get("received_at") or record.get("created_at")):
+        raise ValueError("The answer date cannot be before the request arrived.")
+    reference = text("reference", 512)
+    if not reference:
+        raise ValueError("Say where the proof of the answer is kept.")
+    result.update(answered_on=day, reference=reference)
+    lawful_basis = text("lawful_basis", 2000)
+    if result["kind"] == "refused" and not lawful_basis:
+        raise ValueError("Give the lawful reason for refusing.")
+    if result["kind"] == "answered" and record.get("kind") == "erasure":
+        erasure = text("erasure", 32)
+        if erasure not in DSAR_ERASURE_RESULTS:
+            raise ValueError("Say whether their data was erased.")
+        if erasure == "not_erased" and not lawful_basis:
+            raise ValueError("Give the lawful reason for keeping their data.")
+        result["erasure"] = erasure
+    if lawful_basis:
+        result["lawful_basis"] = lawful_basis
+    return result
+
+
+def dsar_answer(record: dict) -> dict | None:
+    """The answer on record for a request, or ``None`` when there is none.
+
+    Counted: an outcome recorded when closing (``answered`` or ``refused``),
+    a request a named person marked answered, whether or not it was closed
+    afterwards (never a deletion -- that needs its erasure result), and a
+    refusal or completion notice that was actually sent (a completion for a
+    deletion request still needs its erasure result). Returns
+    ``{"kind", "on"}`` with the UTC day of the answer."""
+    outcome = record.get("outcome")
+    if isinstance(outcome, dict):
+        if outcome.get("kind") in ("answered", "refused") and outcome.get("answered_on"):
+            return {"kind": outcome["kind"], "on": str(outcome["answered_on"])}
+        return None
+    erasure = record.get("kind") == "erasure"
+    if record.get("fulfilled_at") and not erasure:
+        return {"kind": "answered", "on": _utc_day(record["fulfilled_at"])}
+    emails = (record.get("public_form") or {}).get("emails") or []
+    for entry in emails if isinstance(emails, list) else ():
+        if not isinstance(entry, dict) or entry.get("sent") is not True:
+            continue
+        if entry.get("kind") == "refusal" or (entry.get("kind") == "completion" and not erasure):
+            day = _utc_day(entry.get("at"))
+            if day:
+                return {"kind": "answered" if entry["kind"] == "completion" else "refused", "on": day}
+    return None
+
+
+def close_dsar(request_id: str, *, closed_by: str = "", outcome: dict | None = None) -> dict | None:
+    """Close a request, recording what happened when ``outcome`` is given.
+
+    A request closed without an outcome can have it recorded later, once;
+    a recorded outcome is never rewritten."""
+    changed = closed = False
 
     def _close(r: dict) -> None:
-        nonlocal changed
+        nonlocal changed, closed
+        now = time.time()
         if r.get("status") == "closed":
+            if outcome is None:
+                return
+            if r.get("outcome"):
+                raise RecordConflict("the outcome of this request is already on record")
+            r["outcome"] = _dsar_outcome(r, outcome, actor=closed_by, now=now)
+            _queue_audit(r, "record_outcome", closed_by)
+            changed = True
             return
+        recorded = None if outcome is None else _dsar_outcome(r, outcome, actor=closed_by, now=now)
         _secure_erasure_handoff(r)
         r["status"] = "closed"
-        r["closed_at"] = time.time()
+        r["closed_at"] = now
         r["closed_by"] = _actor_label(closed_by)
+        if recorded is not None:
+            r["outcome"] = recorded
         _queue_audit(r, "close", closed_by)
-        changed = True
+        changed = closed = True
 
     saved = _DSAR.update(request_id, _close)
     if saved is not None and (
         changed or isinstance(saved.get("_audit_pending"), (dict, list))
     ):
         saved = _audit_mutation(_DSAR, "dsar", saved)
-    if changed:
+    if closed:
         _emit_record_event("dsar.closed", "dsar", saved)
     return saved
 
@@ -3321,14 +3430,20 @@ INCIDENT_SEVERITIES = ("low", "medium", "high")
 BREACH_NOTIFY_HOURS = 72  # Art. 33(1): without undue delay, within 72h
 
 
+#: Clocks on two machines differ a little; a time this far ahead is a typo.
+_AWARE_SKEW_SECONDS = 5 * 60
+
+
 def open_incident(title: str, *, severity: str = "medium",
                   description: str = "", categories: str = "",
                   affected_estimate: str = "", affected_people: int | None = None,
-                  reported_by: str = "") -> dict:
-    """Open a privacy-incident record; the Art. 33 clock starts at discovery
-    (= now). Whether the incident is a notifiable breach stays a HUMAN
-    decision recorded via :func:`decide_incident_notification` -- the
-    register tracks the clock, it never notifies anyone itself."""
+                  aware_at: float | None = None, reported_by: str = "") -> dict:
+    """Open a privacy-incident record. The Art. 33 clock runs from when the
+    organisation became aware of the breach (``aware_at``; now when not
+    given), not from when the record was opened. Whether the incident is a
+    notifiable breach stays a HUMAN decision recorded via
+    :func:`decide_incident_notification` -- the register tracks the clock,
+    it never notifies anyone itself."""
     severity = (severity or "medium").strip().lower()
     if severity not in INCIDENT_SEVERITIES:
         raise ValueError(f"severity must be one of {INCIDENT_SEVERITIES}")
@@ -3338,6 +3453,16 @@ def open_incident(title: str, *, severity: str = "medium",
     ):
         raise ValueError("affected_people must be a non-negative integer or None")
     now = time.time()
+    aware = now
+    if aware_at is not None:
+        try:
+            aware = float(aware_at)
+        except (TypeError, ValueError):
+            aware = math.nan
+        if isinstance(aware_at, bool) or not math.isfinite(aware) or aware <= 0:
+            raise ValueError("Enter when you became aware of the breach.")
+        if aware > now + _AWARE_SKEW_SECONDS:
+            raise ValueError("The time you became aware cannot be in the future.")
     record = {
         "id": _INCIDENT.new_id(),
         "title": (title or "").strip()[:200],
@@ -3348,7 +3473,8 @@ def open_incident(title: str, *, severity: str = "medium",
         "severity": severity,
         "reported_by": _actor_label(reported_by),
         "created_at": now,
-        "notify_deadline_at": now + BREACH_NOTIFY_HOURS * 3600,
+        "aware_at": aware,
+        "notify_deadline_at": aware + BREACH_NOTIFY_HOURS * 3600,
         "status": "open",
         "notification": None,
     }
@@ -3545,20 +3671,27 @@ def program_report(assessment_types: set | None = None) -> dict:
     }
 
     dsars = list_dsars()
-    closed_like = [d for d in dsars if d["status"] in ("fulfilled", "closed",
-                                                       "awaiting_erasure")]
-    on_time = sum(1 for d in closed_like
-                  if float(d.get("fulfilled_at")
-                           or d.get("closed_at")
-                           or d.get("created_at") or 0)
-                  <= float(d.get("due_at") or 0))
+    # Handled = closed or marked answered. A deletion waiting for its erasure
+    # is still open work. "On time" needs an answer on record by the
+    # deadline in force (an extension included); a request closed without
+    # one is counted as exactly that.
+    handled = [d for d in dsars if d["status"] in ("fulfilled", "closed")]
+    answers = [(d, dsar_answer(d)) for d in handled]
+    answered = [(d, a) for d, a in answers if a is not None]
+    on_time = sum(1 for d, a in answered if a["on"] <= _utc_day(d.get("effective_due_at")))
+    withdrawn = sum(1 for d, a in answers
+                    if a is None and (d.get("outcome") or {}).get("kind") == "withdrawn")
     dsar = {
         "total": len(dsars),
-        "open": sum(1 for d in dsars if d["status"] == "open"),
+        "open": sum(1 for d in dsars if d["status"] in ("open", "unverified", "awaiting_erasure")),
         "overdue": sum(1 for d in dsars if d.get("overdue")),
         "by_kind": dict(Counter(d["kind"] for d in dsars)),
-        "handled": len(closed_like),
+        "handled": len(handled),
+        "answered": len(answered),
         "handled_on_time": on_time,
+        "answered_late": len(answered) - on_time,
+        "withdrawn": withdrawn,
+        "closed_without_response": len(handled) - len(answered) - withdrawn,
     }
 
     incidents = list_incidents()
@@ -3619,7 +3752,8 @@ def program_report(assessment_types: set | None = None) -> dict:
 
 __all__ = [
     "AI_ACT_NOTE", "BREACH_NOTIFY_HOURS", "DPA_CHECKLIST", "DSAR_DUE_DAYS",
-    "DSAR_DUE_SOON_DAYS", "DSAR_KINDS", "DSAR_SOURCES", "acknowledge_dsar",
+    "DSAR_DUE_SOON_DAYS", "DSAR_ERASURE_RESULTS", "DSAR_KINDS", "DSAR_OUTCOMES",
+    "DSAR_SOURCES", "acknowledge_dsar", "dsar_answer",
     "annotate_dsar", "dsar_clock", "extend_dsar", "iter_dsar_records",
     "verify_dsar", "close_incident", "decide_incident_notification",
     "list_incidents", "open_incident", "privacy_program_context_heads", "program_report",

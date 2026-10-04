@@ -139,10 +139,11 @@
     list.replaceChildren(); coverage.replaceChildren();
     summary.textContent = `${model.counts.unread} unread · ${model.counts.overdue} overdue · ${model.counts.snoozed} snoozed`;
     model.coverage.forEach(source => {
-      if (source.status !== "current") coverage.append(node("li", `${labels[source.kind]} ${source.status === "partial" ? "include only the most recent 2,000 source records. Open the full module for older records." : "could not be loaded. Refresh or open that module; this list is incomplete."}`));
+      // A module that is turned off is not a load error.
+      if (source.status !== "current" && source.status !== "disabled") coverage.append(node("li", `${labels[source.kind]} ${source.status === "partial" ? "include only the most recent 2,000 source records. Open the full module for older records." : "could not be loaded. Refresh or open that module; this list is incomplete."}`));
     });
     if (!model.items.length) {
-      const partial = model.coverage.some(source=>source.status !== "current");
+      const partial = model.coverage.some(source=>source.status !== "current" && source.status !== "disabled");
       const empty = node("div", undefined, "mv-empty");
       empty.append(node("p", partial ? "No items are visible in this filter. Some sources are incomplete or unavailable." : "You're all caught up.", "mv-empty__title"));
       const filtered = form.elements.view.value !== "active" || form.elements.kind.value !== "all" || form.elements.assignment.value !== "all";

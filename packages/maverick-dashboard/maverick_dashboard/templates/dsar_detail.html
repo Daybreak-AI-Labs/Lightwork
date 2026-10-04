@@ -33,6 +33,7 @@
   'graph:onedrive_files': 'OneDrive files',
 } %}
 {% set kind_label = kind_labels.get(dsar.kind, dsar.kind | humanize) %}
+{% set sent_answers = notices['items'] | selectattr('sent') | selectattr('kind', 'in', ['completion', 'refusal']) | list %}
 <style>
   .dsar-actions { display: flex; gap: .5rem; flex-wrap: wrap; margin-top: .75rem; }
   .dsar-link { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; }
@@ -46,7 +47,11 @@
      data-kind="{{ dsar.kind }}"
      data-source="{{ dsar.source or 'dashboard' }}"
      data-status="{{ dsar.status }}"
+     data-identity="{{ (dsar.verification or {}).status or '' }}"
      data-extended="{{ 'yes' if dsar.extended_until else 'no' }}"
+     data-fulfillment-state="{{ fulfillment_state }}"
+     data-received="{{ dsar.received_date }}"
+     data-answer-hint="{% if sent_answers %}Sent the &ldquo;{{ sent_answers[-1].label }}&rdquo; notice from Lightwork on {{ sent_answers[-1].date }}{% endif %}"
      {% if fulfillment %}data-fulfillment-id="{{ fulfillment.id }}" data-revision="{{ fulfillment.revision }}"{% endif %}>
   <p class="muted" style="margin-bottom: var(--space-2);"><a href="/privacy">← Back to Privacy</a></p>
   <h1 class="page-title">{{ kind_label }}: request from {{ dsar.subject_id }}</h1>
@@ -79,6 +84,8 @@
         confirmed ({{ method_labels.get(dsar.verification.method, dsar.verification.method | humanize) }}).
       {% elif dsar.status == 'unverified' %}
         not yet confirmed — the requester has not opened their email link.
+      {% elif dsar.verification and dsar.verification.status == 'unverified' %}
+        never confirmed — the requester did not open their email link.
       {% else %}
         not recorded on the request.
       {% endif %}
@@ -114,6 +121,8 @@
       {% endif %}
       {% if dsar.status != 'closed' %}
         <button type="button" class="btn btn--ghost" id="dsar-close">Close request</button>
+      {% elif not dsar.outcome and not answer %}
+        <button type="button" class="btn btn--primary" id="dsar-record-outcome">Record how it was answered</button>
       {% endif %}
     </div>
     <div class="dsar-actions" aria-label="Send a notice to the requester">
@@ -124,15 +133,44 @@
       <button type="button" class="btn dsar-send" data-kind="completion">Completed (with secure link)</button>
       <button type="button" class="btn dsar-send" data-kind="refusal">Refusal (with lawful basis)</button>
     </div>
-    {% if email_log %}
-      <details style="margin-top: var(--space-2);">
-        <summary>Notices sent ({{ email_log | length }})</summary>
+    {% if notices['items'] %}
+      {# Only notices that actually went out count as sent; an unsent one
+         says why and what to do next. Setting names stay in technical details. #}
+      <details class="dsar-notices" style="margin-top: var(--space-2);"{% if notices.not_sent %} open{% endif %}>
+        <summary>Notices: {{ notices.sent }} sent{% if notices.not_sent %} · {{ notices.not_sent }} not sent{% endif %}</summary>
         <ul class="dsar-list">
-          {% for e in email_log %}
-            <li>{{ e.kind | humanize }} — {{ 'sent' if e.sent else 'not sent: ' ~ e.reason }} (template version {{ e.template_version }})</li>
+          {% for n in notices['items'] %}
+            <li>
+              <strong>{{ n.label }}</strong>{% if n.date %} · {{ n.date }}{% endif %}
+              {% if n.sent %}<span class="badge done">Sent</span>
+              {% else %}<span class="badge warn">Not sent</span> {{ n.problem }}
+                <br>Next: {{ n.next_step }}
+                {% if n.problem.startswith('Lightwork has no email account') and can_manage_email %}
+                  <a href="/settings/all?id=email.user">Set up the email account</a>
+                {% endif %}
+              {% endif %}
+              <details class="muted" style="font-size: var(--text-sm);"><summary>Technical details</summary>{{ n.technical }}</details>
+            </li>
           {% endfor %}
         </ul>
       </details>
+    {% endif %}
+    {% if dsar.status in ('closed', 'fulfilled') %}
+      <p id="dsar-answer" style="margin: var(--space-2) 0 0;">
+        {% set outcome = dsar.outcome or {} %}
+        {% if answer %}
+          <span class="badge done">{{ 'Refused' if answer.kind == 'refused' else 'Answered' }}</span>
+          {{ 'Refused' if answer.kind == 'refused' else 'Answered' }} on {{ answer.on }}{% if dsar.due_date %} (due {{ dsar.due_date }}){% endif %}.
+          {% if outcome.erasure == 'erased' %}Their data was erased.{% elif outcome.erasure == 'not_erased' %}Their data was kept.{% endif %}
+          {% if outcome.lawful_basis %}Lawful reason: {{ outcome.lawful_basis }}.{% endif %}
+          {% if outcome.reference %}Proof: {{ outcome.reference }}.{% endif %}
+        {% elif outcome.kind == 'withdrawn' %}
+          <span class="badge">Withdrawn</span> The requester withdrew the request.{% if outcome.note %} {{ outcome.note }}{% endif %}
+        {% elif dsar.status == 'closed' %}
+          <span class="badge warn">Closed without a recorded answer</span>
+          {% if outcome.note %}{{ outcome.note }}{% else %}Nothing on record shows the requester was answered. The program report counts it that way.{% endif %}
+        {% endif %}
+      </p>
     {% endif %}
     <div id="dsar-status" role="status" aria-live="polite" class="muted"></div>
     <div id="dsar-worksheet-result"></div>

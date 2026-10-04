@@ -1,10 +1,16 @@
 # Personal in-product notifications
 
-Your preferences links to **Your notifications**. With personal preferences and
-`[notifications] personal_alerts` enabled, named accounts can choose immediate
-alerts, a daily digest, event subscriptions, a time zone, quiet hours, project
-watches and temporary task mutes. Installation administrators can enable this
-in All settings; the installer provides the same choice.
+Your preferences links to **Your notifications**. In-app alerts (the bell) are
+on by default: `[notifications] personal_alerts` is treated as on unless an
+administrator sets it to `false`, and an explicit `false` always stays off.
+Out of the box a named account hears when its tasks finish (or do not finish),
+need an answer or need attention, and when an approval waits on it. With
+personal preferences on (the default), people can choose immediate alerts, a
+daily digest, event subscriptions, a time zone, quiet hours, project watches
+and temporary task mutes. Installation administrators can turn in-app alerts
+off in All settings; the installer asks the same question. Email, Slack and
+Teams delivery stays off until it is set up (`personal_background`,
+`personal_external`).
 
 The in-product inbox refreshes every 30 seconds while visible. Administrators
 can also enable `personal_background` in All settings or the installer. The

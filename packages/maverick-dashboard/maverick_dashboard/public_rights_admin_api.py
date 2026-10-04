@@ -27,21 +27,21 @@ def _prf():
 
 
 def _module_or_403():
+    from .feature_gate import feature_off
+
     prf = _prf()
     if not prf.enabled():
-        raise HTTPException(
-            status_code=403,
-            detail="the rights request form is turned off "
-                   "([privacy_automation.public_rights_form] enable)",
-        )
+        raise feature_off("privacy_automation.public_rights_form")
     return prf
 
 
 def _ops_or_403():
     from maverick import privacy_ops
 
+    from .feature_gate import feature_off
+
     if not privacy_ops.enabled():
-        raise HTTPException(status_code=403, detail="privacy ops are disabled ([privacy_ops] enable)")
+        raise feature_off("privacy_ops", "The privacy register")
     return privacy_ops
 
 

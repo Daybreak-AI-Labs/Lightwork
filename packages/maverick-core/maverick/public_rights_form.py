@@ -11,9 +11,11 @@ progress without an account.
 Anti-abuse without a third-party service: a signed arithmetic challenge,
 a honeypot field, per-address and per-email sliding-window limits, and
 bounded field sizes. Answers to the public never confirm or deny whether an
-email address is known here: submission always says "if the address is
-valid we sent a link", and every unknown, expired or used token reads as
-the same "not found".
+email address is known here: a submission is answered with the request's
+reference and says "if the address is valid we sent a link" only when the
+confirmation email went out (otherwise it says it could not be sent and who
+to contact), and every unknown, expired or used token reads as the same
+"not found".
 
 Config (``[privacy_automation.public_rights_form]``): ``enable``,
 ``verification_ttl_hours``, ``status_ttl_days``, ``requests_per_ip_per_hour``,
@@ -443,21 +445,77 @@ def _context(record: Mapping[str, Any], prop: Mapping[str, Any] | None,
     }
 
 
-def _log_email(request_id: str, kind: str, sent: bool, reason: str, version: int) -> None:
+def _log_email(request_id: str, kind: str, sent: bool, reason: str, version: int,
+               *, lawful_basis: str = "") -> None:
     from . import privacy_ops
 
     def mutate(record: dict[str, Any]) -> bool:
         form = dict(record.get("public_form") or {})
         emails = list(form.get("emails") or [])[-49:]
-        emails.append({
+        entry = {
             "kind": kind, "sent": sent, "reason": reason, "at": time.time(),
             "template_version": version,
-        })
+        }
+        if lawful_basis:
+            # A sent refusal is the requester's answer; keep its stated reason.
+            entry["lawful_basis"] = lawful_basis[:2000]
+        emails.append(entry)
         form["emails"] = emails
         record["public_form"] = form
         return True
 
     privacy_ops.annotate_dsar(request_id, mutate, action=f"email_{kind}", actor=ACTOR)
+
+
+#: What the privacy team reads for each notice; the same words as the
+#: request page's Send buttons.
+NOTICE_LABELS = {
+    "acknowledgement": "We received it",
+    "verification": "Confirm the email address",
+    "identity_followup": "Need more identity proof",
+    "extension": "Extension notice",
+    "completion": "Completed (with secure link)",
+    "refusal": "Refusal (with lawful basis)",
+}
+
+
+def notice_problem(reason: str) -> tuple[str, str]:
+    """Why a notice was not sent and what to do next, in plain words. The
+    raw reason (setting names, server replies) stays technical detail."""
+    text = str(reason or "")
+    if text.startswith("no sending account configured"):
+        return ("Lightwork has no email account to send from.",
+                "An administrator can set one up in Settings, under Email account. "
+                "Until then, contact the requester another way and note it on the request.")
+    if text == "the requester has no email address":
+        return ("The request has no email address to send to.",
+                "Contact the requester another way and note it on the request.")
+    return ("The email could not be sent.",
+            "Try again. If it fails again, ask an administrator to check the email settings, "
+            "or contact the requester another way.")
+
+
+def notice_log(record: Mapping[str, Any]) -> dict[str, Any]:
+    """The request's notices for the privacy team: only notices that were
+    actually sent count as sent; each unsent one says why and what next."""
+    emails = (record.get("public_form") or {}).get("emails") or []
+    items = []
+    for entry in emails if isinstance(emails, list) else ():
+        if not isinstance(entry, Mapping):
+            continue
+        kind = str(entry.get("kind") or "")
+        sent = entry.get("sent") is True
+        problem, next_step = ("", "") if sent else notice_problem(str(entry.get("reason") or ""))
+        technical = f"Template version {entry.get('template_version', 0)}"
+        if not sent and entry.get("reason"):
+            technical = f"{entry['reason']} · {technical}"
+        items.append({
+            "kind": kind, "label": NOTICE_LABELS.get(kind, kind.replace("_", " ").capitalize()),
+            "sent": sent, "date": _date(entry.get("at")), "problem": problem,
+            "next_step": next_step, "technical": technical,
+        })
+    sent_count = sum(1 for item in items if item["sent"])
+    return {"sent": sent_count, "not_sent": len(items) - sent_count, "items": items}
 
 
 def send_notice(
@@ -492,9 +550,12 @@ def send_notice(
     sent, reason = (False, "the requester has no email address")
     if _EMAIL_RE.fullmatch(to):
         sent, reason = _send(to, rendered["subject"], rendered["body"])
-    _log_email(str(record["id"]), kind, sent, reason, int(template["version"]))
+    _log_email(str(record["id"]), kind, sent, reason, int(template["version"]),
+               lawful_basis=str(extras.get("lawful_basis") or "") if kind == "refusal" else "")
     log.info("rights-form notice %s for %s by %s: sent=%s", kind, record["id"], actor, sent)
+    problem, next_step = ("", "") if sent else notice_problem(reason)
     return {"request_id": record["id"], "kind": kind, "sent": sent, "reason": reason,
+            "problem": problem, "next_step": next_step,
             "subject": rendered["subject"], "template_version": template["version"]}
 
 
@@ -561,19 +622,51 @@ def _validate_submission(payload: Mapping[str, Any], prop: Mapping[str, Any],
     }
 
 
-_ACCEPTED = (
-    "Thank you. If that email address is valid, we have sent it a link to "
-    "confirm your request. The link works once and expires soon."
-)
+def _mail_ready() -> bool:
+    """Whether a confirmation email can be attempted at all (a sending
+    account, or a transport swapped in by a deployment adapter)."""
+    if _sender is not None:
+        return True
+    from . import mailer
+
+    try:
+        return mailer.configured()
+    except Exception:  # noqa: BLE001 - unreadable mail settings cannot send
+        return False
+
+
+def _accepted(reference: str, *, email_sent: bool, prop: Mapping[str, Any],
+              cfg: Mapping[str, Any]) -> dict[str, Any]:
+    """The acceptance the requester reads: always their reference, and an
+    email promise only when the confirmation email went out."""
+    if email_sent:
+        hours = int(cfg["verification_ttl_hours"])
+        message = (
+            "Thank you. If that email address is valid, we have sent it a link to "
+            f"confirm your request. The link works once and expires in {hours} "
+            f"hour{'' if hours == 1 else 's'}. Your reference is {reference}."
+        )
+    else:
+        message = (
+            "Thank you. We received your request, but we could not send you an "
+            f"email to confirm it. Your reference is {reference}. To confirm the "
+            f"request, contact {prop.get('organisation') or 'us'} at "
+            f"{prop.get('contact_email') or 'the privacy contact on this page'} "
+            "and quote your reference."
+        )
+    return {"accepted": True, "reference": reference, "email_sent": email_sent,
+            "message": message}
 
 
 def submit(
     slug: str, payload: Mapping[str, Any], *, client_ip: str, base_url: str,
     now: float | None = None,
 ) -> dict[str, Any]:
-    """Accept one public submission. Returns the same neutral acceptance
-    whether or not anything was created (honeypot hits are dropped
-    silently); raises :class:`RateLimited`, :class:`ChallengeFailed` or
+    """Accept one public submission. Returns the acceptance with the
+    request's reference, promising an email only when the confirmation
+    email was sent. Honeypot hits are dropped silently with a reply of the
+    same shape (an unrecorded reference) so a bot cannot tell; raises
+    :class:`RateLimited`, :class:`ChallengeFailed` or
     :class:`PublicRightsFormError` for the public-safe failures."""
     cfg = _require_enabled()
     prop = get_property(slug)
@@ -585,7 +678,8 @@ def submit(
     if str(payload.get("website") or "").strip():
         # Honeypot: a bot filled the hidden field. Say nothing different.
         log.info("rights-form honeypot hit for %s", slug)
-        return {"accepted": True, "message": _ACCEPTED}
+        return _accepted(f"DSAR-{secrets.token_hex(5)}", email_sent=_mail_ready(),
+                         prop=prop, cfg=cfg)
     if not _IP_LIMIT.hit(_digest(f"ip:{client_ip}"), cfg["requests_per_ip_per_hour"], moment):
         raise RateLimited("too many requests from your connection; try again later")
     if not check_challenge(str(payload.get("challenge_token") or ""),
@@ -626,11 +720,11 @@ def submit(
 
     privacy_ops.annotate_dsar(record["id"], attach, action="public_form_tokens", actor=ACTOR)
     base = str(base_url or "").rstrip("/")
-    send_notice(record["id"], "verification", extra={
+    notice = send_notice(record["id"], "verification", extra={
         "verify_link": f"{base}/rights/verify/{verify_token}",
         "status_link": f"{base}/rights/status/{status_token}",
     })
-    return {"accepted": True, "message": _ACCEPTED}
+    return _accepted(str(record["id"]), email_sent=notice["sent"] is True, prop=prop, cfg=cfg)
 
 
 # --------------------------------------------------------------------------- #
@@ -752,10 +846,11 @@ def status(token: str, *, now: float | None = None) -> dict[str, Any] | None:
 
 
 __all__ = [
-    "ACTOR", "ChallengeFailed", "PublicRightsFormConfigError",
+    "ACTOR", "ChallengeFailed", "NOTICE_LABELS", "PublicRightsFormConfigError",
     "PublicRightsFormError", "RELATIONSHIPS", "REQUEST_TYPE_LABELS", "RateLimited",
     "SlidingWindowLimit", "check_challenge", "delete_property", "enabled",
     "form_definition", "get_config", "get_property", "list_properties",
-    "new_challenge", "public_view", "reset_limits", "send_notice",
+    "new_challenge", "notice_log", "notice_problem", "public_view", "reset_limits",
+    "send_notice",
     "set_mail_sender", "status", "submit", "upsert_property", "verify",
 ]
