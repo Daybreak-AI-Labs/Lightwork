@@ -63,6 +63,44 @@ for (const hash of ['', '#api-keys', '#settings-', '#constructor', '#settings-mo
   });
 }
 
+// Writing a fragment while the page loads made Chrome scroll to it when
+// loading finished (scrollY 739) and start Tab there instead of the skip link.
+test('loading Settings without a fragment writes none', () => {
+  const dom = load('');
+  const writes = [];
+  const original = dom.window.history.replaceState.bind(dom.window.history);
+  dom.window.history.replaceState = (state, title, url) => { writes.push(url); return original(state, title, url); };
+  dom.window.eval(pageScript);
+  assert.deepEqual(writes, []);
+  assert.equal(dom.window.location.hash, '');
+  // Clearing a search returns to the group without writing one either.
+  const search = dom.window.document.getElementById('settings-search');
+  search.value = 'models'; search.dispatchEvent(new dom.window.Event('input'));
+  search.value = ''; search.dispatchEvent(new dom.window.Event('input'));
+  assert.deepEqual(writes, []);
+  dom.window.close();
+});
+
+test('a deep link keeps its own address and still opens its group', () => {
+  const dom = load('#features');
+  dom.window.eval(pageScript);
+  assert.equal(dom.window.location.hash, '#features');
+  assert.deepEqual(selectedTabs(dom.window.document), ['controls']);
+  dom.window.close();
+});
+
+test('a person switching groups is remembered in the address', () => {
+  const dom = load('');
+  const doc = dom.window.document;
+  dom.window.eval(pageScript);
+  doc.querySelector('[data-settings-tab="access"]').click();
+  assert.equal(dom.window.location.hash, '#settings-access');
+  doc.querySelector('[data-settings-tab="access"]').dispatchEvent(new dom.window.KeyboardEvent('keydown', {key: 'ArrowRight', bubbles: true}));
+  assert.equal(dom.window.location.hash, '#settings-maintenance');
+  assert.equal(doc.activeElement, doc.querySelector('[data-settings-tab="maintenance"]'));
+  dom.window.close();
+});
+
 test('the page script takes over the painted group without switching it', () => {
   const dom = load('#settings-access');
   const doc = dom.window.document;

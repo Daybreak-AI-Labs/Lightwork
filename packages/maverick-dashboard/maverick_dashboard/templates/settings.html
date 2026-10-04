@@ -903,7 +903,11 @@
         return {head: head, panel: panel, group: head.dataset.settingsGroup, title: head.textContent.trim()};
       });
     }
-    function selectGroup(group, focus) {
+    // Only a person's own switch (a tab, the arrow keys or a jump link) is
+    // written to the address, so a reload returns to it. Loading the page
+    // never writes a fragment: Chrome scrolls to it when loading finishes and
+    // starts keyboard focus there instead of at the skip link.
+    function selectGroup(group, focus, remember) {
       active = groups.indexOf(group) === -1 ? 'general' : group;
       if (search) search.value = '';
       grouped.forEach(function (node) { node.hidden = node.dataset.settingsGroup !== active; });
@@ -915,7 +919,7 @@
       });
       document.querySelectorAll('[data-settings-search-item]').forEach(function (item) { item.hidden = false; });
       if (filterStatus) filterStatus.textContent = sections().filter(function (section) { return section.group === active; }).length + ' sections shown.';
-      if (window.history && window.history.replaceState) window.history.replaceState(null, '', '#settings-' + active);
+      if (remember && window.history && window.history.replaceState) window.history.replaceState(null, '', '#settings-' + active);
     }
     function applySearch() {
       var query = String(search.value || '').trim().toLocaleLowerCase();
@@ -939,13 +943,13 @@
       if (filterStatus) filterStatus.textContent = visible ? visible + ' matching sections shown.' : 'No settings match “' + search.value.trim() + '”.';
     }
     tabs.forEach(function (tab, position) {
-      tab.addEventListener('click', function () { selectGroup(tab.dataset.settingsTab, false); });
+      tab.addEventListener('click', function () { selectGroup(tab.dataset.settingsTab, false, true); });
       tab.addEventListener('keydown', function (event) {
         var direction = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0;
         if (!direction) return;
         event.preventDefault();
         var next = (position + direction + tabs.length) % tabs.length;
-        selectGroup(tabs[next].dataset.settingsTab, true);
+        selectGroup(tabs[next].dataset.settingsTab, true, true);
       });
     });
     if (search) search.addEventListener('input', applySearch);
@@ -1140,7 +1144,7 @@
     document.querySelectorAll('[data-settings-jump]').forEach(function (link) {
       link.addEventListener('click', function (event) {
         event.preventDefault();
-        selectGroup(link.dataset.settingsJump, true);
+        selectGroup(link.dataset.settingsJump, true, true);
       });
     });
 
