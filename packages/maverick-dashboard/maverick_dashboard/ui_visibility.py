@@ -249,12 +249,13 @@ PAGES: tuple[dict, ...] = (
         "default": "operate",
     },
     {
+        # Its route requires operate permission.
         "path": "/oversight",
         "label": "Oversight",
         "group": "Observe",
         "icon": "eye",
-        "floor": "view",
-        "default": "view",
+        "floor": "operate",
+        "default": "operate",
     },
     {
         "path": "/discovery",
@@ -951,12 +952,13 @@ PAGES: tuple[dict, ...] = (
         "in_nav": False,
     },
     {
+        # Its route requires audit permission.
         "path": "/safety",
         "label": "Safety",
         "group": "Govern",
         "icon": "shield",
-        "floor": "view",
-        "default": "view",
+        "floor": "audit",
+        "default": "audit",
     },
     # Privacy / security / AI-risk assessments of every agent & flow: auto-drafted
     # from the declared capability surface, reviewed + signed off, re-assessed on
@@ -1172,12 +1174,14 @@ PAGES: tuple[dict, ...] = (
         "module": "connections",
     },
     {
+        # Its route requires an installation administrator.
         "path": "/plugins",
         "label": "Plugins",
         "group": "Advanced tools",
         "icon": "plugins",
-        "floor": "view",
-        "default": "operate",
+        "floor": "admin",
+        "default": "admin",
+        "scope": "global",
     },
     # Output-style customization: mutations are operate-gated, so it lives with
     # the other operator-facing extension surfaces, not admin plumbing.

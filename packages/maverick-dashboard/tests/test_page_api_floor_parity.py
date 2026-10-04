@@ -151,3 +151,22 @@ def test_registered_screens_are_offered_exactly_where_their_routes_admit(scoped_
         assert offered == (status == 200), (role, path, status)
     # The installation-wide spending page stays with administrators.
     assert ('href="/provider-spending"' in finder.text) == (role == "admin")
+
+
+# Pages whose registry floor once sat below their route's own check, so search
+# and the sidebar offered them to roles the route then refused.
+FLOOR_MATCHED_SCREENS = ("/safety", "/oversight", "/plugins")
+
+
+@pytest.mark.parametrize("role", ["viewer", "auditor", "operator", "admin"])
+def test_floor_matched_screens_are_offered_exactly_where_their_routes_admit(scoped_client, role):
+    from maverick_dashboard import rbac
+
+    rbac.set_role("user:customer", role)
+    finder = scoped_client.get("/nav/finder")
+    assert finder.status_code == 200
+    for path in FLOOR_MATCHED_SCREENS:
+        offered = f'href="{path}"' in finder.text
+        status = scoped_client.get(path).status_code
+        assert status in {200, 403}, (role, path, status)
+        assert offered == (status == 200), (role, path, status)
