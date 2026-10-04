@@ -111,3 +111,61 @@ def test_interface_language_never_changes_response_language_or_prompt(isolated):
         write('user:alice', {'interface_language': 'de'}, thread=12)
     with pytest.raises(ValueError, match='available preference'):
         write('user:alice', {'interface_language': 'not-a-language'})
+
+
+# Recent pages: the sidebar's short "Recent pages" list for one person.
+
+def test_recent_pages_are_personal_newest_first_distinct_and_bounded(isolated):
+    for path in ('/goals', '/approvals', '/goals', '/deliverables'):
+        prefs.record_visit('user:alice', path)
+    assert prefs.recent_pages('user:alice') == ['/deliverables', '/goals', '/approvals']
+    assert prefs.recent_pages('user:bob') == []
+    for index in range(prefs.RECENT_KEEP + 5):
+        prefs.record_visit('user:alice', f'/page-{index}')
+    kept = prefs.recent_pages('user:alice')
+    assert len(kept) == prefs.RECENT_KEEP
+    assert kept[0] == f'/page-{prefs.RECENT_KEEP + 4}'
+
+
+def test_recording_a_visit_never_changes_the_preference_revision(isolated):
+    # A page view must not turn another tab's preference draft into a conflict.
+    before = prefs.state('user:alice')['revision']
+    prefs.record_visit('user:alice', '/goals')
+    assert prefs.state('user:alice')['revision'] == before
+    assert 'recent_pages' not in prefs.state('user:alice')['values']
+
+
+@pytest.mark.parametrize('address', ['', 'goals', '//evil.example/x', '/goals?tab=1', '/goals#top',
+                                     'https://evil.example/', '/' + 'a' * 300, None, 5, '/bad path'])
+def test_only_plain_page_addresses_are_remembered(isolated, address):
+    with pytest.raises(ValueError):
+        prefs.record_visit('user:alice', address)
+    assert prefs.recent_pages('user:alice') == []
+
+
+def test_recent_pages_follow_the_personal_preferences_switch(isolated, monkeypatch):
+    prefs.record_visit('user:alice', '/goals')
+    monkeypatch.setattr(prefs.config, 'load_global_config', lambda: {'features': {'personal_preferences': False}})
+    with pytest.raises(ValueError, match='turned off'):
+        prefs.record_visit('user:alice', '/approvals')
+    assert prefs.recent_pages('user:alice') == []
+
+
+def test_a_damaged_recent_list_reads_as_empty(isolated, tmp_path):
+    prefs.record_visit('user:alice', '/goals')
+    path, = (tmp_path / 'experience-preferences').glob('*-recent.enc')
+    path.write_bytes(b'{"values": {"pages": "not a list"}}')
+    assert prefs.recent_pages('user:alice') == []
+    prefs.record_visit('user:alice', '/approvals')
+    assert prefs.recent_pages('user:alice') == ['/approvals']
+
+
+def test_clearing_and_erasing_remove_recent_pages_for_that_person_only(isolated):
+    for person in ('user:alice', 'user:bob'):
+        prefs.record_visit(person, '/goals')
+    prefs.clear_recent('user:alice')
+    assert prefs.recent_pages('user:alice') == [] and prefs.recent_pages('user:bob') == ['/goals']
+    prefs.record_visit('user:alice', '/approvals')
+    write('user:alice', {'preferred_name': 'Alice'})
+    assert prefs.erase_personal('user:alice') == 2
+    assert prefs.recent_pages('user:alice') == [] and prefs.recent_pages('user:bob') == ['/goals']
