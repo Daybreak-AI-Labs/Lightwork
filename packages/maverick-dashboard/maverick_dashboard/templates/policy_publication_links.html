@@ -4,6 +4,7 @@
 {% block title %}Policy Links · Lightwork{% endblock %}
 {% block head_extra %}<link rel="stylesheet" href="/static/lightwork-consent-workbench.css">{% endblock %}
 {% block content %}
+{% from "_back_link.html" import back_link with context %}
 {% set ppl_admin = policy_links_can_admin if policy_links_can_admin is defined else true %}
 {% set ppl_audit = policy_links_can_audit if policy_links_can_audit is defined else true %}
 {% if not policy_publication_links_enabled %}
@@ -15,7 +16,7 @@
   <legend class="sr-only">Policy links</legend>
   {{ hero('Tech risk and compliance', 'Policy Links',
           lede='Write a policy, have it approved, and publish it at a web address that stays the same when you publish a new version. Earlier versions are kept for your records.') }}
-  <p><a class="btn btn--ghost" href="/compliance">Back to compliance</a></p>
+  <p>{{ back_link('/compliance', 'Compliance') }}</p>
   <p id="ppl-status" class="muted" role="status" aria-live="polite"></p>
 
   <section class="panel" aria-labelledby="ppl-policies-heading">

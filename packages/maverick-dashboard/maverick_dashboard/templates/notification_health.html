@@ -1,10 +1,11 @@
 {% extends "base.html" %}
 {% block title %}Notification delivery - Lightwork{% endblock %}
 {% block content %}
+{% from "_back_link.html" import back_link with context %}
 <div class="panel">
   <h1>Notification delivery</h1>
   <p>Review organization alerts and send a test to the channel currently saved in Settings. A service accepting a message does not mean a person saw it.</p>
-  <p><a href="/settings/all?q=alerts">Change notification settings</a> · <a href="/settings">Back to Settings</a></p>
+  <p><a href="/settings/all?q=alerts">Change notification settings</a> · {{ back_link('/settings', 'Settings') }}</p>
   <p id="notification-health-summary" role="status" aria-live="polite">Loading delivery history.</p>
   <button class="btn btn--primary" type="button" id="notification-test" disabled>Send a test message</button>
   <button class="btn btn--ghost" type="button" id="notification-refresh">Refresh delivery status</button>

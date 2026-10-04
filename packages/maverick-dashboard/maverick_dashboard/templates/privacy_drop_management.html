@@ -12,11 +12,12 @@
 </style>
 {% endblock %}
 {% block content %}
+{% from "_back_link.html" import back_link with context %}
 {% from "_hero.html" import hero %}
 {{ hero('Privacy', 'California DROP requests',
         subtitle='California Delete Request and Opt-out Platform (DROP)',
         lede="Handle deletion and opt-out requests received through California's DROP system, and keep evidence of each result.") }}
-<p><a class="btn btn--ghost" href="/privacy">Back to Privacy</a></p>
+<p>{{ back_link('/privacy', 'Privacy') }}</p>
 
 <details class="panel">
   <summary>About this page&rsquo;s safeguards</summary>

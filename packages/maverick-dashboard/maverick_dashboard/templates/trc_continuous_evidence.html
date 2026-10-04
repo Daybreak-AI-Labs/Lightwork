@@ -3,6 +3,7 @@
 {% from "_module_gate.html" import module_gate %}
 {% block title %}Continuous Evidence - Lightwork{% endblock %}
 {% block content %}
+{% from "_back_link.html" import back_link with context %}
 <style>
   .trc-actions { display:flex; gap:.5rem; flex-wrap:wrap; align-items:center; }
 </style>
@@ -12,7 +13,7 @@
 <div class="trc-actions">
   <button class="btn" id="trc-refresh" type="button"{% if not trc_continuous_evidence_enabled %} disabled aria-disabled="true"{% endif %}>Refresh</button>
   <button class="btn btn--primary" id="trc-run-cycle" type="button" disabled aria-disabled="true">Collect evidence now</button>
-  <a class="btn btn--ghost" href="/compliance">Back to Compliance</a>
+  {{ back_link('/compliance', 'Compliance') }}
 </div>
 <p id="trc-live-status" role="status" aria-live="polite"></p>
 <p class="muted">Collected evidence shows what was checked; it isn't a compliance certificate and doesn't prove every system is covered.</p>

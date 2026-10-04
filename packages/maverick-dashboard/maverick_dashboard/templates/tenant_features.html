@@ -2,6 +2,7 @@
 {% set tenant_name = tenant.display_name or (tenant.id | humanize) %}
 {% block title %}Features · {{ tenant_name }} · Lightwork{% endblock %}
 {% block content %}
+{% from "_back_link.html" import back_link with context %}
   {% from "_hero.html" import hero, state %}
   {% call hero('Administration', 'Workspace features',
                subtitle=tenant_name,
@@ -15,7 +16,7 @@
                    applies to this workspace only, until you change it back.') }}
   {% endcall %}
 
-  <p><a class="btn btn--ghost" href="/tenants">Back to workspaces</a></p>
+  <p>{{ back_link('/tenants', 'Workspaces') }}</p>
 
   {% macro feature_box(r) %}
     <label class="tf-row">

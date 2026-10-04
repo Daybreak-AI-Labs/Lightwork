@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Security readiness report · Lightwork{% endblock %}
 {% block content %}
+{% from "_back_link.html" import back_link with context %}
 <style>
   @media print { .sidebar,.topbar,.rpt-actions,#mv-sidebar,header { display:none!important; }
                  .content { margin:0!important; max-width:none!important; } }
@@ -36,7 +37,7 @@
 <div class="rpt-actions">
   <button class="btn btn--primary" type="button" id="rpt-print">Print or save as PDF</button>
   <a class="btn btn--ghost" href="/api/v1/security/report" download="security-report.json">Download data (for other tools)</a>
-  <a class="btn btn--ghost" href="/security">Back to the workspace</a>
+  {{ back_link('/security', 'Security & GRC') }}
 </div>
 <p class="rpt-note"><strong>Readiness, not certification.</strong> Lightwork’s suggestions help your review.
   People still decide which rules apply, whether evidence is enough, which risks to accept and what auditors conclude.</p>

@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Webhooks · Lightwork{% endblock %}
 {% block content %}
+{% from "_back_link.html" import back_link with context %}
 <style>
   #wh-page .input { box-sizing: border-box; width: 100%; max-width: 100%; }
   #wh-page label { display: block; margin-block: var(--space-2); }
@@ -10,7 +11,7 @@
   #wh-page .status-delivered { color: var(--ok, #2a7); }
 </style>
 <div id="wh-page">
-  <p class="muted" style="margin-bottom: var(--space-2);"><a href="/settings">← Back to Settings</a></p>
+  <p class="muted" style="margin-bottom: var(--space-2);">{{ back_link('/settings', 'Settings') }}</p>
   <h1 class="page-title">Webhooks</h1>
   <p class="page-subtitle">Send a signed message to another system when something happens to a request, incident, assessment, vendor contract, approval or policy. Each delivery is logged and retried up to five times over about an hour; after that it is marked dead until you retry it.</p>
   <p id="wh-msg" role="status" aria-live="polite" class="muted"></p>

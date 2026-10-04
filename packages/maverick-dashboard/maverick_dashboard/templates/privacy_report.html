@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Privacy Program Report · Lightwork{% endblock %}
 {% block content %}
+{% from "_back_link.html" import back_link with context %}
 <style>
   .rpt-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr)); gap: var(--space-4); margin: var(--space-3) 0 var(--space-4); }
   .rpt-actions { display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap; margin-bottom: var(--space-4); }
@@ -30,7 +31,7 @@
     <button class="btn btn--primary" id="rpt-print" type="button">Print or save as PDF</button>
     <a class="btn btn--ghost" href="/api/v1/privacy/report" download="privacy-program-report.json">Download data</a>
     <a class="btn btn--ghost" href="/privacy/board">Open the privacy dashboard</a>
-    <a class="btn btn--ghost" href="/privacy">Back to Privacy</a>
+    {{ back_link('/privacy', 'Privacy') }}
   </div>
 
   {% set nothing = (r.assessments.total + r.dsar.total + r.incidents.total + r.dpa.total + r.ai.total + r.ropa.total) == 0 %}

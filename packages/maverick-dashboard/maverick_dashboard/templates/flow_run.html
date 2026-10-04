@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Flow run · Lightwork{% endblock %}
 {% block content %}
+{% from "_back_link.html" import back_link with context %}
 <style>
   .fr { max-width: 900px; }
   .fr__head { display: flex; align-items: baseline; gap: var(--space-3); flex-wrap: wrap; margin-bottom: var(--space-3); }
@@ -51,7 +52,7 @@
     <a class="btn btn--ghost" href="/flows/{{ flow_id | urlencode }}/teach#teach-recipe">Learn from reviewed runs</a>
     <a class="btn btn--ghost" href="/automations">All automations</a>
   </p>
-  <p id="fr-review-links" hidden><a class="btn btn--ghost" href="/approvals">Back to Approvals</a></p>
+  <p id="fr-review-links" hidden>{{ back_link('/approvals', 'Approvals') }}</p>
   <div class="fr__error" id="fr-error" role="alert" hidden></div>
   <div class="fr__actions" id="fr-actions"></div>
   <span class="fr__msg" id="fr-msg" role="status" aria-live="polite"></span>
@@ -582,9 +583,11 @@
       st.textContent = pendingAction.reviewOnly ? 'Decision recorded'
         : (pendingAction.kind === 'retry' ? 'Trying again' : 'Decision recorded');
       if (pendingAction.reviewOnly) {
-        var back = document.createElement('a');
-        back.className = 'btn btn--ghost'; back.href = '/approvals';
-        back.textContent = 'Back to Approvals'; actions.appendChild(back);
+        // Same markup as the back_link macro: the arrow is decoration.
+        var back = document.createElement('a'), arrow = document.createElement('span');
+        back.className = 'back-link'; back.href = '/approvals';
+        arrow.setAttribute('aria-hidden', 'true'); arrow.textContent = '\u2190 ';
+        back.append(arrow, 'Back to Approvals'); actions.appendChild(back);
       } else if (pendingAction.exhausted) {
         var check = document.createElement('button');
         check.type = 'button'; check.className = 'btn btn--ghost';

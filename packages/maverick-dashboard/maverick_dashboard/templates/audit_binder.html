@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Audit binder · Lightwork{% endblock %}
 {% block content %}
+{% from "_back_link.html" import back_link with context %}
 <style>
   .bnd-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr)); gap: var(--space-4); margin: var(--space-3) 0 var(--space-4); }
   .bnd-stat .v { font-size: var(--text-2xl); font-weight: var(--font-semibold); font-variant-numeric: tabular-nums; }
@@ -32,7 +33,7 @@
       <option value="{{ value }}"{% if value == days %} selected{% endif %}>{{ label }}</option>
       {% endfor %}
     </select>
-    <a class="btn btn--ghost" href="/audit">Back to the activity log</a>
+    {{ back_link('/audit', 'Activity log') }}
   </div>
 
   <div class="section-head"><h2>Tamper-evident activity log</h2></div>

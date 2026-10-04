@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Teach this flow · Lightwork{% endblock %}
 {% block content %}
+{% from "_back_link.html" import back_link with context %}
 {% from "_hero.html" import hero, state %}
 <div class="ft" id="flow-teach" data-flow="{{ flow.id }}" data-questions="{{ '1' if questions_on else '0' }}"
      data-examples="{{ '1' if examples_on else '0' }}" data-lineage="{{ '1' if lineage_on else '0' }}">
@@ -9,7 +10,7 @@
     {{ state('Current state', 'Version ' ~ flow.version, badge='Saved flow', badge_class='ok',
              copy='Publishing stays a separate step in the flow designer.') }}
   {% endcall %}
-  <p><a class="btn btn--ghost" href="/flows/designer/{{ flow.id | urlencode }}">Back to the flow</a>
+  <p>{{ back_link('/flows/designer/' ~ (flow.id | urlencode), 'Flow designer') }}
     <a class="btn btn--ghost" href="/learning/examples">Review learning examples</a></p>
   <p id="ft-status" role="status" aria-live="polite" tabindex="-1"></p>
 

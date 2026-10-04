@@ -68,7 +68,7 @@ def test_page_renders_full_operator_contract(page_client: TestClient) -> None:
     assert "/static/lightwork-record-workflows.js" in text
     assert text.count("/static/lightwork-privacy-data-discovery.js") == 1
     assert 'data-can-admin="false"' in text
-    assert 'href="/privacy">Back to Privacy</a>' in text
+    assert '<a class="back-link" href="/privacy">' in text and ">Back to Privacy<" in text
     template = (
         Path(__file__).resolve().parents[1]
         / "maverick_dashboard"
