@@ -14,7 +14,7 @@ from __future__ import annotations
 import hmac
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from maverick import experience_preferences as preferences
 from pydantic import BaseModel, Field
@@ -243,7 +243,7 @@ def people_available(request: Request) -> bool:
 
 
 @router.get("/nav/finder/people", include_in_schema=False)
-def people_results(request: Request, q: str = "") -> JSONResponse:
+def people_results(request: Request, q: str = Query("", max_length=200)) -> JSONResponse:
     """People for the command menu's ``@`` search: exactly the people the
     Users page lists for this person, matched by name, opening that page."""
     auth.require_permission(request, "admin")
