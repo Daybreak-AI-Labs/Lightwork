@@ -320,6 +320,7 @@ def build(
         reviewed_outcome = reviewed_goal(world, owner=owner)
     steps = [
         {
+            "key": "connect",
             "title": "Connect your AI service",
             "done": provider_ok,
             "body": readiness["reason"],
@@ -331,6 +332,7 @@ def build(
             "command": "maverick preflight",
         },
         {
+            "key": "build",
             "title": "Choose a workflow or agent",
             "done": built,
             "body": (
@@ -345,6 +347,7 @@ def build(
             "command": "",
         },
         {
+            "key": "run",
             "title": "Start your first task",
             "done": activated,
             "body": (
@@ -360,6 +363,7 @@ def build(
         },
     ]
     steps.append({
+        "key": "review",
         "title": "Review and accept your first result", "done": reviewed_outcome.get("complete") is True,
         "body": reviewed_outcome["detail"], "status": reviewed_outcome["status"],
         "cta": reviewed_outcome.get("href", "/deliverables"), "cta_label": "Review the result",
@@ -379,6 +383,8 @@ def build(
         "done_count": done_count,
         "total": len(steps),
         "next_step": next_step,
+        # Get started leads with this one step and its one primary action.
+        "next_index": steps.index(next_step) if next_step is not None else None,
         "model_route_state": model_route_state,
         "workspace": readiness,
         "can_operate": bool(can_operate),
