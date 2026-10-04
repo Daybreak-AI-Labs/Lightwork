@@ -70,7 +70,8 @@
         {% for row in sample.outcomes %}<option value="{{ row.department }}" data-goal="{{ row.goal }}" data-lands-in="{{ row.lands_in }}" {% if row.department == sample.selected %}selected{% endif %}>{{ row.label }}</option>{% endfor %}
       </select></label>
       {% if sample.ready %}
-      <button class="btn {{ 'btn--primary' if primary else '' }}" type="submit" id="first-outcome-run">Run the sample task</button>
+      {% set run_button_class = 'btn btn--primary' if primary else 'btn' %}
+      <button class="{{ run_button_class }}" type="submit" id="first-outcome-run">Run the sample task</button>
       {% elif sample.can_connect %}
       {# Not a button that answers "not ready" after a click: say it first. #}
       <a class="btn btn--ghost" id="first-outcome-connect" href="{{ sample.connect_href }}">Connect an AI service first</a>
