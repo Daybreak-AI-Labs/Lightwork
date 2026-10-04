@@ -499,6 +499,7 @@
             </select></label>
           <details class="settings-field"><summary>Azure service version</summary>
             <input class="input" name="api_version" value="{{ p.setup.api_version }}" placeholder="Use Lightwork's standard version"
+                   aria-label="Azure service version"
                    {% if p.setup_locked.api_version %}disabled{% endif %} /></details>
           <p class="muted provider-row__meta">The Microsoft sign-in option uses the identity already set up on this server and removes a key saved here. After saving, test the connection below, choose the deployment under Models, and <a href="#settings-model-prices" data-settings-jump="models">review its spending ceiling</a>.</p>
           {% elif p.name == 'bedrock' %}
