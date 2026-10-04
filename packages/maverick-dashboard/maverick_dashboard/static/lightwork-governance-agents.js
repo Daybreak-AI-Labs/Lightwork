@@ -74,8 +74,9 @@
     if (window.crypto && typeof window.crypto.randomUUID === "function") return prefix + "-" + window.crypto.randomUUID();
     return prefix + "-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 12);
   }
-  function plain(status, action) {
-    if (typeof window.mvErrorText === "function") return window.mvErrorText({ status: status }, action);
+  function plain(status, action, headers) {
+    // Headers carry the turned-off reason, so "off" is never read as "no permission".
+    if (typeof window.mvErrorText === "function") return window.mvErrorText({ status: status, headers: headers }, action);
     if (status === 403) return "Could not " + action + ". You do not have permission to do this.";
     if (status === 409) return "Could not " + action + ". This changed since you opened it. Refresh and try again.";
     return "Could not " + action + ". Something went wrong. Please try again.";
@@ -118,7 +119,7 @@
     var body;
     try { body = text ? JSON.parse(text) : {}; } catch (_error) { throw unexpected(); }
     if (!response.ok) {
-      var error = new Error(plain(response.status, action || "finish this"));
+      var error = new Error(plain(response.status, action || "finish this", response.headers));
       error.status = response.status;
       error.technical = body && typeof body.detail === "string" ? body.detail : "";
       throw error;

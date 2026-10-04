@@ -2295,10 +2295,10 @@ async def graph_rebuild(request: Request) -> dict:
 def _privacy_ops_or_403():
     from maverick import privacy_ops
 
+    from .feature_gate import feature_off
+
     if not privacy_ops.enabled():
-        raise HTTPException(
-            status_code=403, detail="privacy ops are disabled ([privacy_ops] enable)"
-        )
+        raise feature_off("privacy_ops", "The privacy register")
     return privacy_ops
 
 
@@ -3205,10 +3205,11 @@ async def data_map_masking_sql(request: Request,
 
 def _breach_notification_or_403():
     from maverick import breach_notification
+
+    from .feature_gate import feature_off
+
     if not breach_notification.enabled():
-        raise HTTPException(status_code=403,
-                            detail="the breach planner is disabled "
-                                   "([breach_notification] enable)")
+        raise feature_off("breach_notification", "Breach deadline planner")
     return breach_notification
 
 
@@ -3274,10 +3275,11 @@ async def incident_notification_plan(request: Request, incident_id: str,
 
 def _dsar_fulfillment_or_403():
     from maverick import dsar_fulfillment
+
+    from .feature_gate import feature_off
+
     if not dsar_fulfillment.enabled():
-        raise HTTPException(status_code=403,
-                            detail="DSAR fulfillment is disabled "
-                                   "([dsar_fulfillment] enable)")
+        raise feature_off("dsar_fulfillment", "Answering data requests")
     return dsar_fulfillment
 
 

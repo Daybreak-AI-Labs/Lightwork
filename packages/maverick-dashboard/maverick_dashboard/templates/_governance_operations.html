@@ -1239,7 +1239,8 @@
   };
   // One plain sentence per failure: never a status code or server wording.
   const safeDetail = async (response, fallback) => {
-    if (typeof window.mvErrorText === "function") return window.mvErrorText({status: response.status}, fallback);
+    // Headers carry the turned-off reason, so "off" is never read as "no permission".
+    if (typeof window.mvErrorText === "function") return window.mvErrorText({status: response.status, headers: response.headers}, fallback);
     if (response.status === 403) return "You do not have permission to do this. Ask an administrator.";
     if (response.status === 404) return "That item no longer exists. Refresh the page to see the latest.";
     if (response.status === 409) return "This was changed since you opened it. Choose it again in the table and retry.";

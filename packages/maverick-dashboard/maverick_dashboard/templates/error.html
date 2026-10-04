@@ -4,6 +4,11 @@
   <section class="panel" style="text-align: center; padding: 3rem 1.5rem;" aria-labelledby="request-error-title">
     <h1 id="request-error-title" style="font-size: 1.4rem; margin-bottom: .75rem;">{{ title }}</h1>
     <p class="muted" style="max-width: 36rem; margin: 0 auto 1.5rem;">{{ message }}</p>
+    {% if gate == 'off' and feature %}
+      {# The feature is off, not forbidden: whoever may turn it on can do so here. #}
+      {% from "_module_gate.html" import module_gate %}
+      <div style="max-width: 40rem; margin: 0 auto; text-align: left;">{{ module_gate(feature.section, feature.label) }}</div>
+    {% endif %}
     <div style="display: flex; justify-content: center; gap: var(--space-3); flex-wrap: wrap; margin-top: 1.5rem;">
       {% if gate == 'off' %}<a class="btn btn--primary" href="/settings#settings-sections">Open Settings</a>{% endif %}
       {% if gate == 'step_up' %}<a class="btn btn--primary" href="{{ reauthenticate or path }}">Sign in again</a>{% endif %}

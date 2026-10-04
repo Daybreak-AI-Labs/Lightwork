@@ -377,7 +377,12 @@
         }
         if (status === 400 || status === 422) return what + 'Some of the details need fixing. Check what you entered and try again.';
         if (status === 401) return what + 'Your sign-in has expired. Sign in again to continue.';
-        if (status === 403) return what + 'You do not have permission to do this. Ask an administrator.';
+        if (status === 403) {
+          // Reason code from the server: a feature that is turned off is not a missing permission.
+          var off = typeof window.mvFeatureOff === 'function' && window.mvFeatureOff(failure);
+          if (off) return what + window.mvFeatureOffText(off);
+          return what + 'You do not have permission to do this. Ask an administrator.';
+        }
         if (status === 404) return what + 'That item no longer exists. Refresh the page to see the latest.';
         if (status === 409) {
           // A conflict can mean an existing item, missing setup, or a changed
@@ -1133,6 +1138,69 @@
       });
     })();
 
+    // "Turned off" versus "not allowed": the server marks a refusal because a
+    // feature is off with X-Lightwork-Reason: feature-off (feature_gate.py).
+    // mvFeatureOff(failure) reads it from a fetch Response, a Headers-carrying
+    // error or a page-supplied {feature: {...}}; mvShowFeatureOff renders the
+    // module-gate notice in place, with Turn on for whoever may turn it on.
+    (function () {
+      function lowerFirst(text) {
+        return /^[A-Z][a-z]/.test(text) ? text.charAt(0).toLowerCase() + text.slice(1) : text;
+      }
+      window.mvFeatureOff = function (failure) {
+        if (!failure) return null;
+        if (failure.feature && typeof failure.feature === 'object') return failure.feature;
+        var h = failure.headers;
+        if (!h) return null;
+        var get = typeof h.get === 'function' ? function (k) { return h.get(k) || ''; }
+          : function (k) { return h[k] || h[k.toLowerCase()] || ''; };
+        if (get('X-Lightwork-Reason') !== 'feature-off') return null;
+        var label = '';
+        try { label = decodeURIComponent(get('X-Lightwork-Feature-Label')); } catch (_) { label = ''; }
+        return { section: get('X-Lightwork-Feature'), label: label,
+                 switchable: get('X-Lightwork-Feature-Switch') === 'module' };
+      };
+      window.mvFeatureOffText = function (off) {
+        var name = off && off.label ? off.label : '';
+        var admin = document.body && document.body.getAttribute('data-global-admin') === '1';
+        return (name ? name + ' is turned off.' : 'This feature is turned off.') + ' ' +
+          (admin ? 'You can turn it on in Settings.'
+            : 'Ask an administrator to turn ' + (name ? 'on ' + lowerFirst(name) : 'it on') + '.');
+      };
+      window.mvShowFeatureOff = function (element, failure, action) {
+        var off = window.mvFeatureOff(failure);
+        if (!element || !off) return false;
+        var prefix = action ? 'Could not ' + action + '. ' : '';
+        if (!off.section || !off.switchable || !off.label) {
+          element.textContent = prefix + window.mvFeatureOffText(off);
+          return true;
+        }
+        // A span: the notice lands inside the page's own status line.
+        var gate = document.createElement('span');
+        gate.className = 'mg-banner';
+        gate.setAttribute('data-module-gate', off.section);
+        gate.setAttribute('data-module-label', off.label);
+        gate.setAttribute('data-mg-inline', '1');
+        var head = document.createElement('strong');
+        head.textContent = prefix + off.label + ' is turned off.';
+        var actions = document.createElement('span');
+        actions.className = 'mg-actions mg-admin-only';
+        var button = document.createElement('button');
+        button.type = 'button'; button.className = 'btn btn--primary mg-on';
+        button.textContent = 'Turn on ' + lowerFirst(off.label);
+        actions.appendChild(button);
+        var note = document.createElement('span');
+        note.className = 'mg-actions muted mg-nonadmin-note';
+        note.setAttribute('role', 'note');
+        note.textContent = 'Ask an administrator to turn on ' + lowerFirst(off.label) + '.';
+        var err = document.createElement('span');
+        err.className = 'mg-err'; err.setAttribute('role', 'alert'); err.setAttribute('aria-live', 'assertive');
+        gate.append(head, actions, note, err);
+        element.replaceChildren(gate);
+        return true;
+      };
+    })();
+
     // Module-gate banners (_module_gate.html): one delegated handler turns a
     // disabled governance module on in-app via /api/v1/features/modules.
     // Failures are LOUD -- the exact server reason lands in the banner's
@@ -1157,6 +1225,16 @@
             denied.plain = true; throw denied;
           }
           if (!r.ok) throw r;
+          if (gate.hasAttribute('data-mg-inline')) {
+            // An in-place notice (mvShowFeatureOff) keeps what the person typed:
+            // no reload. Other notices for the same module are now stale.
+            document.querySelectorAll('[data-module-gate]').forEach(function (other) {
+              if (other !== gate && other.getAttribute('data-module-gate') === section) other.hidden = true;
+            });
+            gate.replaceChildren(document.createTextNode(
+              (gate.getAttribute('data-module-label') || 'It') + ' is on now. Try again.'));
+            return;
+          }
           location.reload();   // re-render with the module live
         }).catch(function (e) {
           if (err) err.textContent = (e && e.plain) ? e.message : window.mvErrorText(e, 'turn this on');

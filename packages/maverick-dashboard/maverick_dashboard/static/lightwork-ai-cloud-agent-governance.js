@@ -69,9 +69,10 @@
     var span = el("span", pair[0], "badge " + pair[1]);
     return span;
   }
-  function plainError(status, action) {
+  function plainError(status, action, headers) {
     if (typeof window.mvErrorText === "function") {
-      return window.mvErrorText({ status: status }, action);
+      // Headers carry the turned-off reason, so "off" is never read as "no permission".
+      return window.mvErrorText({ status: status, headers: headers }, action);
     }
     if (status === 403) { return "Could not " + action + ". You do not have permission to do this."; }
     if (status === 409) { return "Could not " + action + ". This changed since you opened it. Refresh the page and try again."; }
@@ -107,7 +108,7 @@
     }
     if (!response.ok) {
       var detail = body && typeof body.detail === "string" ? body.detail : "";
-      var error = new Error(CONFLICTS[detail] || plainError(response.status, action));
+      var error = new Error(CONFLICTS[detail] || plainError(response.status, action, response.headers));
       error.status = response.status;
       error.technical = detail;
       throw error;

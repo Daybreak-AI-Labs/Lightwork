@@ -2725,6 +2725,13 @@ def _wants_html(request: Request) -> bool:
 @app.exception_handler(StarletteHTTPException)
 async def http_exception_handler(request: Request, exc: StarletteHTTPException):
     """Branded, actionable HTML for browser failures; JSON for API callers."""
+    from . import feature_gate
+
+    headers = exc.headers
+    if exc.status_code == 403 and feature_gate.REASON_HEADER not in (headers or {}):
+        # A feature that is turned off is not a missing permission: say which.
+        headers = {**(headers or {}), **feature_gate.refusal_headers(exc.detail)} or headers
+    feature_off = (headers or {}).get(feature_gate.REASON_HEADER) == feature_gate.FEATURE_OFF
     if exc.status_code == 404 and _wants_html(request):
         return templates.TemplateResponse(
             request,
@@ -2811,7 +2818,20 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
             message = BOARD_SCOPE_DETAIL
         gate = ""
         reauthenticate = ""
-        if status == 403 and isinstance(exc.detail, str):
+        feature = {}
+        if status == 403 and feature_off:
+            from urllib.parse import unquote
+
+            gate = "off"
+            label = unquote(headers.get(feature_gate.LABEL_HEADER, ""))
+            title = f"{label} is turned off" if label else "This page is turned off"
+            message = (
+                "This feature is turned off for your workspace, or its settings "
+                "could not be read. An administrator can turn it on in Settings."
+            )
+            if label and headers.get(feature_gate.SWITCH_HEADER) == "module":
+                feature = {"section": headers[feature_gate.FEATURE_HEADER], "label": label}
+        elif status == 403 and isinstance(exc.detail, str):
             # Feature switches and named sign-in gates raise 403 with these
             # fixed server phrases; show the real reason instead of the
             # generic role message. The check itself is unchanged.
@@ -2835,13 +2855,6 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
                 gate = "ip"
                 title = "This address isn't allowed"
                 message = exc.detail
-            elif "disabled in Settings" in exc.detail:
-                gate = "off"
-                title = "This page is turned off"
-                message = (
-                    "This feature is turned off for your workspace, or its settings "
-                    "could not be read. An administrator can turn it on in Settings."
-                )
             elif exc.detail.startswith("Sign in with a named account"):
                 gate = "sign_in"
                 title = "Sign in with your own account"
@@ -2859,9 +2872,10 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
                 "path": request.url.path,
                 "gate": gate,
                 "reauthenticate": reauthenticate,
+                "feature": feature,
             },
             status_code=status,
-            headers=exc.headers,
+            headers=headers,
         )
     body: dict = {"detail": exc.detail}
     reauthenticate = getattr(exc, "reauthenticate", "")
@@ -2872,7 +2886,7 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
     return JSONResponse(
         body,
         status_code=exc.status_code,
-        headers=exc.headers,
+        headers=headers,
     )
 
 
@@ -4522,8 +4536,11 @@ async def dsar_detail_page(request: Request, request_id: str) -> HTMLResponse:
     import time as _time
 
     from maverick import dsar_fulfillment, privacy_ops
+
+    from .feature_gate import feature_off
+
     if not privacy_ops.enabled():
-        raise HTTPException(status_code=403, detail="privacy_ops is not enabled")
+        raise feature_off("privacy_ops", "The privacy register")
     record = privacy_ops.get_dsar(request_id[:64])
     if record is None or "status" not in record:
         raise HTTPException(status_code=404, detail="no such DSAR")

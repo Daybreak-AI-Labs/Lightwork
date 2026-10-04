@@ -39,7 +39,9 @@ async def collect_microsoft365(request: Request, request_id: str, body: CollectI
     from .api import _request_actor
 
     if not df.enabled():
-        raise HTTPException(status_code=403, detail="Data-request fulfilment is turned off.")
+        from .feature_gate import feature_off
+
+        raise feature_off("dsar_fulfillment", "Answering data requests")
     try:
         result = await run_in_threadpool(
             df.collect_graph_sources,
