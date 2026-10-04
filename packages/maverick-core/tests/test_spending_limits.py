@@ -231,3 +231,64 @@ async def test_unreadable_limits_pause_new_work(tmp_path, fake_llm, make_llm_res
     assert "spending limits could not be read" in out
     assert fake_llm.calls == []
     assert goal.status == "blocked"
+
+
+def test_each_limit_remembers_who_set_it_and_when():
+    spending_limits.set_workspace_limit("100", "month", actor="user:ann")
+    spending_limits.set_default_limit("20", "day", actor="user:ben")
+    spending_limits.set_user_limit("user:alice", "5", "task", actor="user:cat")
+    marks = spending_limits.provenance()
+    assert marks["workspace"]["by"] == "user:ann"
+    assert marks["default"]["by"] == "user:ben"
+    assert marks["users"]["user:alice"]["by"] == "user:cat"
+    assert marks["users"]["user:alice"]["at"] > 0
+    # Changing one limit leaves the other marks alone; clearing drops its mark.
+    spending_limits.set_user_limit("user:bob", "9", "day", actor="user:dan")
+    assert spending_limits.provenance()["users"]["user:alice"]["by"] == "user:cat"
+    spending_limits.clear_user_limit("user:alice", actor="user:dan")
+    assert "user:alice" not in spending_limits.provenance()["users"]
+    spending_limits.clear_workspace_limit(actor="user:dan")
+    assert spending_limits.provenance()["workspace"] is None
+    assert spending_limits.provenance()["default"]["by"] == "user:ben"
+    # The limits themselves keep their saved shape.
+    assert spending_limits.load()["users"] == {"user:bob": {"amount": 9.0, "period": "day"}}
+
+
+def test_a_damaged_mark_never_changes_a_limit():
+    import json
+    spending_limits.set_user_limit("user:alice", "5", "day", actor="user:cat")
+    path = spending_limits._path()
+    document = json.loads(path.read_text(encoding="utf-8"))
+    document["set_by"] = {"users": {"user:alice": "not a mark"}, "workspace": {"by": "", "at": 1}}
+    path.write_text(json.dumps(document), encoding="utf-8")
+    assert spending_limits.provenance() == {"workspace": None, "default": None, "users": {}}
+    assert spending_limits.load()["users"]["user:alice"] == {"amount": 5.0, "period": "day"}
+    spending_limits.admit(_budget(), projected=4.0)
+    with pytest.raises(SpendingLimitReached):
+        spending_limits.admit(_budget(), projected=6.0)
+
+
+def test_standing_shows_what_admission_enforces():
+    spending_limits.set_default_limit("10", "day", actor="user:ben")
+    spending_limits.set_workspace_limit("15", "day", actor="user:ann")
+    UsageLedger().record("user:alice", 4.0, 0, 0)
+    UsageLedger().record("user:bob", 7.0, 0, 0)
+    person, workspace = spending_limits.standing("user:alice")["limits"]
+    assert person["kind"] == "everyone" and person["set"]["by"] == "user:ben"
+    assert person["spent"] == 4.0 and person["remaining"] == 6.0
+    assert workspace["kind"] == "workspace" and workspace["set"]["by"] == "user:ann"
+    assert workspace["spent"] == 11.0 and workspace["remaining"] == 4.0
+    # Admission agrees: the smaller amount left decides.
+    spending_limits.admit(_budget("user:alice"), projected=3.99)
+    with pytest.raises(SpendingLimitReached):
+        spending_limits.admit(_budget("user:alice"), projected=4.01)
+    # A personal per-task limit has no running total.
+    spending_limits.set_user_limit("user:alice", "2", "task", actor="user:cat")
+    person = spending_limits.standing("user:alice")["limits"][0]
+    assert person["kind"] == "person" and person["set"]["by"] == "user:cat"
+    assert "remaining" not in person and "spent" not in person
+    assert spending_limits.standing("user:alice")["installer_defaults"] is False
+
+
+def test_standing_without_limits_is_empty():
+    assert spending_limits.standing("user:alice") == {"limits": [], "installer_defaults": True}

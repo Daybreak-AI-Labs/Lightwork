@@ -985,6 +985,7 @@ def _users_context(request: Request) -> dict:
         # Do not even load the installation roster, invitations or department
         # grants for a workspace administrator. Only current members belong in
         # this picker; adding a new installation identity remains global work.
+        from .access_explanations import role_descriptions
         from .identity_format import role_label
         members = rbac.list_tenant_roles(wm_tenant) if wm_tenant else {}
         people = _people(members, {}, [])
@@ -994,6 +995,7 @@ def _users_context(request: Request) -> dict:
             "role_labels": {r: role_label(r) for r in rbac.known_roles()},
             "roles": rbac.known_roles(), "users": [], "invite_labels": {},
             "role_permissions": {r: sorted(rbac.permissions_for(r)) for r in rbac.known_roles()},
+            "role_descriptions": role_descriptions(),
             "bootstrap_admins": [], "auth_on": True, "default_role": rbac.default_role(),
             "you": auth.caller_principal(request), "saved": "",
             "workspace_options": workspace_options, "wm_tenant": wm_tenant,
@@ -1046,7 +1048,7 @@ def _users_context(request: Request) -> dict:
     labels = _invite_labels(all_invites)
     grants = suite_grants.list_grants()
     people = _people(role_map, labels, [*grants, *bootstrap, *_signed_in_principals()])
-    from .access_explanations import standard_role
+    from .access_explanations import role_descriptions, standard_role
     from .first_login_defaults import preview as first_login_preview
     from .identity_format import role_label
     defaults = set(default_suites) if default_suites is not None else None
@@ -1059,6 +1061,7 @@ def _users_context(request: Request) -> dict:
         "global_admin": True,
         "first_login": first_login_preview(),
         "role_permissions": {r: sorted(rbac.permissions_for(r)) for r in rbac.known_roles()},
+        "role_descriptions": role_descriptions(),
         "channel_links": channel_links,
         "people": people,
         "people_labels": {p["principal"]: p["label"] for p in people},
@@ -1098,6 +1101,37 @@ def users_page(request: Request) -> HTMLResponse:
     auth.require_permission(request, "admin")
     return _app().templates.TemplateResponse(request, "users.html",
                                              _users_context(request))
+
+
+@router.get("/users/access", response_class=HTMLResponse)
+def users_access_page(request: Request, person: str = "") -> HTMLResponse:
+    """Admin: what one person can do and which rule allows each thing.
+
+    Read-only. Global administrators only: the answer reads the installation
+    roster, every workspace membership and the department grants."""
+    auth.require_global_permission(request, "admin")
+    principal = person.strip()
+    if not principal.startswith("user:") or len(principal) > 1024:
+        raise HTTPException(status_code=404, detail="Choose a person on the Users page to check their access.")
+    from . import effective_access, invites, rbac, suite_grants
+    try:
+        labels = _invite_labels(invites.list_invites())
+    except Exception:  # noqa: BLE001 -- an unreadable invite store only loses the email label
+        labels = {}
+    try:
+        known = (principal in rbac.list_users() or principal in labels
+                 or suite_grants.get_grant(principal) is not None
+                 or auth.is_dashboard_admin(principal)
+                 or principal in _signed_in_principals(limit=10_000))
+    except Exception:  # noqa: BLE001 -- the roster note is advisory
+        known = True
+    from maverick.oidc import oidc_enabled
+    from maverick.proxy_auth import proxy_auth_enabled
+    auth_on = auth.caller_principal(request) is not None or oidc_enabled() or proxy_auth_enabled()
+    return _app().templates.TemplateResponse(request, "user_access.html", {
+        "report": effective_access.person(principal), "name": labels.get(principal, ""),
+        "known": known, "auth_on": auth_on,
+    }, headers={"Cache-Control": "private, no-store"})
 
 
 @router.post("/users/set")

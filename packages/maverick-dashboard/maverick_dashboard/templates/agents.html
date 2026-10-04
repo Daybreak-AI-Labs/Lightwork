@@ -34,6 +34,10 @@
 
 {% block content %}
 <style>
+  .agent-access { margin-bottom: var(--space-3); }
+  .agent-access > summary { cursor: pointer; }
+  .agent-access__head { font-size: var(--text-md, 1rem); margin: var(--space-4) 0 var(--space-2); }
+  .agent-access__list { margin: 0; padding-inline-start: 1.2rem; }
   /* Agent Factory — the two-column "build a specialist + department roster"
      composition. Glass throughout; every agent-form id the save/validate
      script reads is preserved (the tool chips + approval toggle sync into the
@@ -341,6 +345,38 @@
         <button type="button" class="btn" id="btn-jobcard">📋 View job card</button>
         <span class="sub">the specialist's job description, manager scorecard &amp; cost tier</span>
       </div>
+      {% if access %}
+      <details class="panel agent-access" id="agent-access">
+        <summary><strong>Check access</strong> <span class="sub">— what this specialist can do, and which rule allows it</span></summary>
+        <h3 class="agent-access__head">Independence by risk</h3>
+        <table>
+          <caption class="sr-only">How this specialist handles consequential actions at each risk level</caption>
+          <thead><tr><th scope="col">Actions</th><th scope="col">Level</th><th scope="col">What it does</th><th scope="col">Rule that sets it</th></tr></thead>
+          <tbody>
+          {% for t in access.tiers %}
+            <tr><th scope="row">{{ t.title }}</th><td><span class="badge">{{ t.label }}</span></td><td>{{ t.means }}</td><td>{{ t.rule }}.</td></tr>
+          {% endfor %}
+          </tbody>
+        </table>
+        <p class="sub">Allowed actions, the highest risk it may take ({{ access.max_risk if access.max_risk else 'not set' }}), approvals and its refusals apply at every level.</p>
+        <h3 class="agent-access__head">Actions</h3>
+        <p><strong>{{ access.readiness.label or 'Setup check unavailable' }}.</strong>
+          {% if access.required %}Its steps need: {{ access.required | map('humanize') | join(', ') }}.{% else %}Its steps need no particular action.{% endif %}
+          {% if access.readiness.missing_labels %}Not available here yet: {{ access.readiness.missing_labels | join(', ') }}.{% endif %}</p>
+        <p>{% if access.allowed %}It may use: {{ access.allowed | map('humanize') | join(', ') }}.{% else %}It may use only the actions its steps need.{% endif %}
+          {% if access.blocked %}Never: {{ access.blocked | map('humanize') | join(', ') }}.{% endif %}</p>
+        <h3 class="agent-access__head">Spending limits</h3>
+        {% if access.spending_error %}
+        <p role="alert"><strong>That didn't work.</strong> The spending limits could not be read, so paid work stops until they can be read again.</p>
+        {% else %}
+        <ul class="agent-access__list">
+          <li>{% if access.task_ceiling is not none %}Each task it works on stops at <strong>{{ access.task_ceiling | money }}</strong>, the spending limit per task for everyone.{% else %}There is no spending limit per task.{% endif %}</li>
+          <li>{% if access.workspace_limit %}The whole workspace may spend {{ access.workspace_limit.limit.amount | money }} {{ 'per day' if access.workspace_limit.limit.period == 'day' else 'per month' }}: {{ access.workspace_limit.remaining | money }} left.{% else %}The workspace has no spending limit.{% endif %}</li>
+          <li>Tasks it works on also count against the spending limit of the person who starts them. There is no separate limit for one specialist.</li>
+        </ul>
+        {% endif %}
+      </details>
+      {% endif %}
       {% endif %}
       {% if selected or creating %}
       <div id="agent-msg" role="status" aria-live="polite" class="muted" style="min-height: 1.2rem;"></div>

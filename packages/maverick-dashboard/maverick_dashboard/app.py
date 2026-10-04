@@ -7079,11 +7079,20 @@ async def agents_page(request: Request) -> HTMLResponse:
             creating = False  # editing an existing agent wins over the new form
     except Exception:  # never 500 the page if the factory layer is unavailable
         agents = []
+    access = None
+    if selected:
+        try:
+            from .effective_access import agent as agent_access
+
+            access = agent_access(selected["name"], selected)
+        except Exception:  # noqa: BLE001 -- the access check is read-only help
+            log.warning("specialist access check unavailable", exc_info=True)
     return templates.TemplateResponse(
         request,
         "agents.html",
         {"agents": agents, "rejected_agents": rejected_agents,
-         "selected": selected, "editable": editable, "creating": creating},
+         "selected": selected, "editable": editable, "creating": creating,
+         "access": access},
     )
 
 
