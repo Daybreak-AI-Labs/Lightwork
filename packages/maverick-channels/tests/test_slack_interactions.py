@@ -192,6 +192,8 @@ def test_channel_message_needs_a_mention_and_answers_in_thread(monkeypatch, tmp_
     asyncio.run(ch._on_request(client, _req("events_api", mention)))
     sent = ch.handler.call_args.args[0]
     assert sent.text == "summarise this"
+    assert sent.conversation_ref == "1.2"
+    assert sent.question_reply_only is False
     kw = ch._web.chat_postMessage.call_args.kwargs
     assert kw["channel"] == "C9" and kw["thread_ts"] == "1.2"
     app_mention = {"team_id": "T1", "event": {"type": "app_mention", "user": "U123", "channel": "G7",
@@ -200,6 +202,17 @@ def test_channel_message_needs_a_mention_and_answers_in_thread(monkeypatch, tmp_
     asyncio.run(ch._on_request(client, _req("events_api", app_mention)))
     assert ch.handler.call_args.args[0].text == "status?"
     assert ch._web.chat_postMessage.call_args.kwargs["thread_ts"] == "1.0"
+
+    # A plain reply in an existing thread can answer a pending question.
+    # The server will ignore it when that sender/thread has no open question.
+    plain_answer = {"team_id": "T1", "event": {"type": "message", "user": "U123",
+                                              "channel": "C9", "channel_type": "channel",
+                                              "text": "Acme", "ts": "1.4", "thread_ts": "1.2"}}
+    asyncio.run(ch._on_request(client, _req("events_api", plain_answer)))
+    sent = ch.handler.call_args.args[0]
+    assert sent.text == "Acme"
+    assert sent.conversation_ref == "1.2"
+    assert sent.question_reply_only is True
 
 
 def test_dm_and_file_share_behave_as_before(monkeypatch, tmp_path):

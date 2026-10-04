@@ -55,6 +55,125 @@ class TestRosterAndView:
 
 
 class TestOverrideLifecycle:
+    def test_independence_control_round_trips_and_requires_explicit_preservation(self, monkeypatch):
+        import maverick.audit as audit
+
+        monkeypatch.setattr(audit, "audit_event", lambda *_args, **_kwargs: True)
+        name = _clean_builtin_name()
+        current = client.get(f"/api/v1/agents/{name}").json()
+        policy = {**current["autonomy"]["pack"], "default": "observe"}
+        saved = client.post(f"/api/v1/agents/{name}/override", json={
+            "expected_generation": current["generation"], "autonomy": policy,
+        })
+        assert saved.status_code == 200, saved.text
+        assert saved.json()["autonomy"]["pack"]["default"] == "observe"
+        assert "autonomy" in saved.json()["overridden"]
+        from maverick.domain_edit import read_override
+
+        assert read_override(name)["autonomy"]["default"] == "observe"
+        stale_editor = client.post(f"/api/v1/agents/{name}/override", json={
+            "expected_generation": saved.json()["generation"], "description": "new brief",
+        })
+        assert stale_editor.status_code == 409
+        assert client.get(f"/api/v1/agents/{name}").json()["autonomy"]["pack"]["default"] == "observe"
+
+    def test_editor_explains_effective_independence(self):
+        name = _clean_builtin_name()
+        html = client.get(f"/agents?name={name}").text
+        assert 'id="agent-autonomy"' in html
+        assert 'id="f-auto-low"' in html
+        assert 'id="f-auto-high"' in html
+        assert 'id="f-auto-onboarding"' in html
+        assert "Supervision lowers each chosen level by one step" in html
+        assert "Act on its own needs proof for the specific actions" in html
+
+    def test_aggregate_approvals_cannot_graduate_act_policy(self, monkeypatch):
+        from types import SimpleNamespace
+
+        import maverick.agent_autonomy as autonomy
+        import maverick.audit as audit
+
+        monkeypatch.setattr(autonomy, "levels_enabled", lambda: True)
+        monkeypatch.setattr(autonomy, "graduation_status", lambda *_args: SimpleNamespace(
+            graduated=True, sample=100))
+        monkeypatch.setattr(audit, "audit_event", lambda *_args, **_kwargs: True)
+        name = _clean_builtin_name()
+        current = client.get(f"/api/v1/agents/{name}").json()
+        policy = {"default": "suggest", "low": "request", "medium": "request",
+                  "high": "auto", "onboarding": True}
+        saved = client.post(f"/api/v1/agents/{name}/override", json={
+            "expected_generation": current["generation"], "autonomy": policy,
+        })
+        assert saved.status_code == 200, saved.text
+        generation = saved.json()["generation"]
+
+        graduated = client.post(f"/api/v1/agents/{name}/graduate", json={
+            "expected_generation": generation,
+        })
+        assert graduated.status_code == 409
+        assert "overall approval record cannot prove" in graduated.json()["detail"]
+        assert client.get(f"/api/v1/agents/{name}").json()["autonomy"]["onboarding"]
+
+        policy["onboarding"] = False
+        proposed = {"expected_generation": generation, "autonomy": policy}
+        checked = client.post(f"/api/v1/agents/{name}/validate", json=proposed)
+        assert checked.status_code == 200
+        assert any("overall approval record cannot prove" in error
+                   for error in checked.json()["errors"])
+        rejected = client.post(f"/api/v1/agents/{name}/override", json=proposed)
+        assert rejected.status_code == 422
+
+        policy["high"] = "request"
+        safe = client.post(f"/api/v1/agents/{name}/override", json={
+            "expected_generation": generation, "autonomy": policy,
+        })
+        assert safe.status_code == 200, safe.text
+        policy["high"] = "auto"
+        widened = client.post(f"/api/v1/agents/{name}/override", json={
+            "expected_generation": safe.json()["generation"], "autonomy": policy,
+        })
+        assert widened.status_code == 422
+
+    def test_graduation_rechecks_evidence_and_generation(self, monkeypatch):
+        from types import SimpleNamespace
+
+        import maverick.agent_autonomy as autonomy
+        import maverick.audit as audit
+
+        name = _clean_builtin_name()
+        monkeypatch.setattr(autonomy, "levels_enabled", lambda: True)
+        view = client.get(f"/api/v1/agents/{name}").json()
+        generation = view["generation"]
+        monkeypatch.setattr(autonomy, "graduation_status", lambda *_args: SimpleNamespace(
+            graduated=False, sample=2))
+        denied = client.post(f"/api/v1/agents/{name}/graduate", json={
+            "expected_generation": generation,
+        })
+        assert denied.status_code == 409
+        assert client.get(f"/api/v1/agents/{name}").json()["autonomy"]["onboarding"]
+
+        events = []
+        monkeypatch.setattr(autonomy, "graduation_status", lambda *_args: SimpleNamespace(
+            graduated=True, sample=8))
+        monkeypatch.setattr(audit, "audit_event", lambda *_args, **_kwargs: False)
+        no_record = client.post(f"/api/v1/agents/{name}/graduate", json={
+            "expected_generation": generation,
+        })
+        assert no_record.status_code == 503
+        assert client.get(f"/api/v1/agents/{name}").json()["autonomy"]["onboarding"]
+        monkeypatch.setattr(audit, "audit_event", lambda *args, **kwargs: events.append(kwargs) or True)
+        granted = client.post(f"/api/v1/agents/{name}/graduate", json={
+            "expected_generation": generation,
+        })
+        assert granted.status_code == 200, granted.text
+        assert granted.json()["autonomy"]["onboarding"] is False
+        assert events and events[0]["verb"] == "specialist_independence_change_requested"
+        assert events[0]["approved_samples"] == 8
+        stale = client.post(f"/api/v1/agents/{name}/graduate", json={
+            "expected_generation": generation,
+        })
+        assert stale.status_code == 409
+
     def test_save_override_persists_and_marks_provenance(self, tmp_path):
         name = _clean_builtin_name()
         r = client.post(f"/api/v1/agents/{name}/override",
@@ -123,16 +242,38 @@ class TestOverrideLifecycle:
         assert client.post(f"/api/v1/agents/{name}/validate", json=body).json()["ok"]
         assert client.post(f"/api/v1/agents/{name}/override", json=body).status_code == 200
 
-    def test_delete_override_reverts(self):
+    def test_delete_override_reverts(self, monkeypatch):
+        import maverick.audit as audit
+
+        events = []
+        monkeypatch.setattr(audit, "audit_event", lambda *_args, **kwargs: events.append(kwargs) or True)
         name = _clean_builtin_name()
         client.post(f"/api/v1/agents/{name}/override", json={"description": "temp"})
+        current = client.get(f"/api/v1/agents/{name}").json()
+        assert current["is_override"] is True
+        missing_revision = client.delete(f"/api/v1/agents/{name}/override")
+        assert missing_revision.status_code == 409
+        assert not events
+        monkeypatch.setattr(audit, "audit_event", lambda *_args, **_kwargs: False)
+        no_record = client.delete(f"/api/v1/agents/{name}/override", params={
+            "expected_generation": current["generation"],
+        })
+        assert no_record.status_code == 503
         assert client.get(f"/api/v1/agents/{name}").json()["is_override"] is True
-        r = client.delete(f"/api/v1/agents/{name}/override")
+        monkeypatch.setattr(audit, "audit_event", lambda *_args, **kwargs: events.append(kwargs) or True)
+        r = client.delete(f"/api/v1/agents/{name}/override", params={
+            "expected_generation": current["generation"],
+        })
         assert r.status_code == 200
+        assert events and events[0]["verb"] == "specialist_override_reset_requested"
+        assert "description" in events[0]["removed_fields"]
         assert client.get(f"/api/v1/agents/{name}").json()["is_override"] is False
 
-    def test_rejected_builtin_can_be_restored_in_app_with_generation(self, tmp_path):
+    def test_rejected_builtin_can_be_restored_in_app_with_generation(self, tmp_path, monkeypatch):
+        import maverick.audit as audit
         from maverick.domain_edit import rejected_override_view
+
+        monkeypatch.setattr(audit, "audit_event", lambda *_args, **_kwargs: True)
 
         name = _clean_builtin_name()
         path = tmp_path / "domains" / f"{name}.toml"
@@ -160,7 +301,10 @@ class TestOverrideLifecycle:
         assert not path.exists()
         assert client.get(f"/api/v1/agents/{name}").status_code == 200
 
-    def test_rejected_custom_specialist_can_be_removed_in_app(self, tmp_path):
+    def test_rejected_custom_specialist_can_be_removed_in_app(self, tmp_path, monkeypatch):
+        import maverick.audit as audit
+
+        monkeypatch.setattr(audit, "audit_event", lambda *_args, **_kwargs: True)
         path = tmp_path / "domains" / "custom_bad.toml"
         path.parent.mkdir()
         path.write_text('name = "custom_bad"\nmax_risk = "low"\n', encoding="utf-8")
@@ -203,6 +347,9 @@ class TestPackEditingGate:
         assert client.post(f"/api/v1/agents/{name}/override",
                            json={"description": "x"}).status_code == 403
         assert client.delete(f"/api/v1/agents/{name}/override").status_code == 403
+        assert client.post(f"/api/v1/agents/{name}/graduate", json={
+            "expected_generation": "0" * 64,
+        }).status_code == 403
         # Read-only access still works.
         assert client.get(f"/api/v1/agents/{name}").status_code == 200
 
@@ -216,6 +363,9 @@ class TestPackEditingAuthorization:
         assert client.post(f"/api/v1/agents/{name}/override",
                            json={"description": "blocked"}).status_code == 403
         assert client.delete(f"/api/v1/agents/{name}/override").status_code == 403
+        assert client.post(f"/api/v1/agents/{name}/graduate", json={
+            "expected_generation": "0" * 64,
+        }).status_code == 403
         assert client.get(f"/api/v1/agents/{name}").status_code == 200
 
     def test_dashboard_admin_can_mutate_overrides(self, monkeypatch):

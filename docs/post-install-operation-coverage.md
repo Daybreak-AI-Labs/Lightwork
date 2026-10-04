@@ -17,6 +17,28 @@ Local service tests and synthetic browser fixtures provide distinct evidence;
 neither alone is an authenticated installed-application acceptance test. Track
 those gaps explicitly instead of calling a screen complete because it renders.
 
+## Everyday task controls (October 4, 2026)
+
+The default-off product-operation catalog now exposes task discovery and a
+reviewed new-task start on Chat, Tasks and Today. The native task API and
+Copilot share task admission, current spending-limit resolution, rate limits,
+provider readiness, owner authority and a keyed submission receipt. A lost
+start response can be read back by its exact operation identity; a repeated
+confirmation does not dispatch another task. Search returns bounded task links
+after re-reading each full task and checking current department authority. The
+native task-search API now applies the same full-row check.
+
+| Customer job | Direct UI and Copilot operation | Observable result and recovery | Remaining boundary |
+| --- | --- | --- | --- |
+| Find a task | Tasks search; `tasks.find` on Chat, Tasks, Today and task pages | Read-only owner-scoped match list with current status and a link to task progress | Search examines the latest 1,000 tasks; older work needs the paginated task history. |
+| Start a task | Chat composer or task API; `tasks.start` on Chat, Tasks and Today | Sealed preview of task text and effective limits, separate confirmation, native admission receipt and task-progress link; exact-key replay | Accepted admission is not completed work. Source attachments, specialist/template starts and connected-account choices remain in native controls. |
+| Stop or restart | Native task progress; existing `tasks.stop` and `tasks.resume` | Current-owner checks, separate reviewed Stop/restart, exact receipts and progress readback | Stop is cooperative; prior external effects remain. A restart is a new attempt. |
+| Review work | Project reviews; existing `reviews.respond` | Fixed-version response with current reviewer authority and receipt recovery | The separate high-risk Approvals queue and task deliverable sign-off still need typed Copilot decision adapters. |
+
+Focused local product-operation and native-submission tests passed (27 checks).
+No installed-app, real provider, customer-content or narrow-screen acceptance
+was run for these additions. Whole-product Copilot parity remains open.
+
 ## High-impact action review (October 3, 2026)
 
 Safety settings keep practice predictions in watch-only mode by default. An

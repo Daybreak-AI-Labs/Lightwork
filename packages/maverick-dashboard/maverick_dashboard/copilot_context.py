@@ -202,6 +202,48 @@ _CONTEXTS = tuple(
             ),
         ),
         CopilotPageContext(
+            path="/agents", title="Specialists",
+            summary="Browse specialists, check required actions, and review each specialist's guardrails and independence level.",
+            capabilities=(
+                "Check whether required workflow actions are present before choosing a specialist.",
+                "Administrators can edit a specialist's independence by risk level and keep new specialists supervised.",
+            ),
+            boundaries=(
+                "A Can start label checks registered actions; live connections, permissions and the AI service are checked when work starts.",
+                "A server-configured specialist policy takes priority over the editor. The server checks authority and current approval evidence before ending supervision.",
+            ),
+            next_steps=(
+                "Use the ready-first picker and open a specialist's job card to see its current setup.",
+                "If an action needs setup, follow Review setup. Administrators can review Independence in the specialist editor.",
+            ),
+            suggested_questions=(
+                "Why can this specialist not start?",
+                "What do Watch, Suggest, Ask, and Act mean?",
+                "Why is this specialist still supervised?",
+            ),
+        ),
+        CopilotPageContext(
+            path="/workforce", title="Workforce",
+            summary="See departments, specialist setup status, and how independently specialists may work.",
+            capabilities=(
+                "See how many specialists in each department have their required actions available.",
+                "Administrators can grant independence to a candidate after a current approval-record check.",
+            ),
+            boundaries=(
+                "Department counts check registered actions only; live connections, permissions and the AI service are checked when work starts.",
+                "Independence levels must be enabled, and a candidate's current approval record and specialist revision are rechecked before a grant.",
+            ),
+            next_steps=(
+                "Open a department to review the specialists that need setup.",
+                "Review each candidate's policy before granting independence; use the specialist editor to set per-risk levels.",
+            ),
+            suggested_questions=(
+                "Which departments need setup?",
+                "How do I change a specialist's independence?",
+                "What evidence is needed before a specialist graduates?",
+            ),
+        ),
+        CopilotPageContext(
             path="/approvals", title="Approvals",
             summary="Review work Lightwork has paused for a person's decision.",
             capabilities=(

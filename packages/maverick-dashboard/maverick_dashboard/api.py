@@ -59,6 +59,7 @@ from ._shared import _world_cache as _world_cache  # re-export: tests clear api.
 from ._shared import dashboard_token as _dashboard_token
 from .api_schemas import (
     ActiveTenantIn,
+    AgentGraduationIn,
     AgentOverrideIn,
     AiSystemIn,
     AnswerIn,
@@ -529,10 +530,7 @@ async def set_active_tenant(request: Request, body: ActiveTenantIn) -> dict:
 def workforce_posture(request: Request) -> dict:
     """The workforce autonomy dial: fleet posture + graduation candidates.
 
-    Read-only surface for the dashboard -- whether per-agent autonomy levels are
-    on, the distribution of baseline authority rungs across the roster, how many
-    hires are still onboarding, and which have earned graduation from a clean
-    approval record (advisory; the client lifts onboarding to act on it).
+    Current authority posture and candidates who can be reviewed for graduation.
     """
     require_permission(request, "view")
     from maverick.agent_autonomy import graduation_candidates, levels_enabled
@@ -544,22 +542,40 @@ def workforce_posture(request: Request) -> dict:
         "autonomy_posture": s.get("autonomy_posture", {}),
         "packs_onboarding": s.get("packs_onboarding", 0),
         "graduation_candidates": [],
+        "can_manage": pack_editing_denial(request) is None,
     }
     try:
-        from maverick.domain import available_domains
+        from maverick.domain import available_domains, suites_for_domain
+        from maverick.domain_edit import resolved_view
 
         wm = _world()
-        cands = graduation_candidates(wm.list_approvals(limit=5000), sorted(available_domains()))
-        out["graduation_candidates"] = [
-            {
+        domains = available_domains()
+        allowed = caller_suites(request)
+        names = [name for name, profile in sorted(domains.items())
+                 if allowed is None or suites_for_domain(name, profile) <= allowed]
+        cands = graduation_candidates(wm.list_approvals(limit=5000), names)
+        visible_candidates = []
+        for c in cands:
+            view = resolved_view(c.name)
+            if view is None or not view["autonomy"]["onboarding"]:
+                continue
+            auto_risks = _autonomy_auto_risks(view["autonomy"]["pack"])
+            visible_candidates.append({
                 "name": c.name,
                 "sample": c.sample,
                 "approve_rate": c.approve_rate,
                 "confidence": c.confidence,
                 "reason": c.reason,
-            }
-            for c in cands
-        ]
+                "generation": view["generation"],
+                "can_grant": out["can_manage"] and out["levels_enabled"]
+                and view["autonomy"]["onboarding"]
+                and not view["autonomy"]["config_override"] and not auto_risks,
+                "grant_block_reason": _autonomy_auto_graduation_reason(auto_risks) if auto_risks else None,
+                "needs_supervision": view["autonomy"]["onboarding"],
+            })
+            if len(visible_candidates) >= 100:
+                break
+        out["graduation_candidates"] = visible_candidates
     except Exception:  # pragma: no cover -- no DB / empty install -> empty list
         pass
     return out
@@ -1447,6 +1463,19 @@ def create_goal(
     bg: BackgroundTasks,
     response: Response,
 ) -> GoalOut:
+    return _create_goal(request, payload, bg, response,
+                        idempotency_key=request.headers.get("Idempotency-Key") or "")
+
+
+def _create_goal(
+    request: Request,
+    payload: GoalIn,
+    bg: BackgroundTasks,
+    response: Response,
+    *,
+    idempotency_key: str,
+) -> GoalOut:
+    """Native launch authority shared with reviewed Copilot task starts."""
     require_permission(request, "operate")
     require_provider_or_400()
     # Shared sliding-window cap across /chat/send + this route, so a
@@ -1499,7 +1528,7 @@ def create_goal(
     # Keyed admission uses the same atomic goal/receipt transaction as chat
     # attachments, binding the complete reviewed payload and effective limits.
     # Replays and read reconciliation never dispatch work a second time.
-    idem_key = (request.headers.get("Idempotency-Key") or "").strip()
+    idem_key = idempotency_key.strip()
     # A director autonomy level can only lower the cap (None = no own cap).
     max_dollars = clamp_task_limit(getattr(director, "max_dollars", None),
                                    requested_goal_dollars(payload.max_dollars))
@@ -1737,8 +1766,13 @@ def search_goals(request: Request, q: str, limit: int = 50) -> list[GoalOut]:
     if not query:
         return []
     limit = max(1, min(int(limit or 50), 200))
-    goals = _world().search_goals(query, owner=goal_owner_filter(request), limit=limit)
-    return [_to_goal_out(g) for g in goals]
+    world = _world()
+    goals = world.search_goals(query, owner=goal_owner_filter(request), limit=200)
+    # The search projection omits the domain used by suite authorization.
+    # Resolve the current full goal before exposing task text in search.
+    current = [world.get_goal(goal.id) for goal in goals]
+    visible = [goal for goal in current if goal is not None and can_access_goal(request, goal)]
+    return [_to_goal_out(goal) for goal in visible[:limit]]
 
 
 @router.get("/goals/{goal_id}", response_model=GoalOut)
@@ -13479,6 +13513,84 @@ def _agent_action_errors(name: str, payload: AgentOverrideIn) -> list[str]:
             for tool in sorted(added - available)]
 
 
+def _autonomy_auto_risks(policy: dict) -> list[str]:
+    """Risk bands that would allow unreviewed action after supervision ends."""
+    return [risk for risk in ("usual", "low", "medium", "high")
+            if (policy.get("default") if risk == "usual" else
+                policy.get(risk) or policy.get("default")) == "auto"]
+
+
+def _autonomy_auto_graduation_reason(risks: list[str]) -> str:
+    return ("This specialist is set to Act on its own for " + ", ".join(risks)
+            + " actions. Its overall approval record cannot prove those actions are safe. "
+            "Set each of those levels to Ask or lower before ending supervision.")
+
+
+def _agent_autonomy_errors(name: str, payload: AgentOverrideIn) -> list[str]:
+    """Check the live authority and evidence before widening a specialist's dial."""
+    if payload.autonomy is None:
+        return []
+    from maverick.agent_autonomy import graduation_status, levels_enabled
+    from maverick.domain_edit import resolved_view
+
+    view = resolved_view(name)
+    if view and view["autonomy"]["config_override"]:
+        if payload.autonomy.model_dump() == view["autonomy"]["pack"]:
+            return []  # preserve the existing pack setting during another edit
+        return ["A server-configured independence policy controls this specialist. Remove it before editing here."]
+    auto_risks = _autonomy_auto_risks(payload.autonomy.model_dump())
+    if not payload.autonomy.onboarding and auto_risks:
+        return [_autonomy_auto_graduation_reason(auto_risks)]
+    if payload.autonomy.onboarding or (view and not view["autonomy"]["onboarding"]):
+        return []
+    if not levels_enabled():
+        return ["Turn on per-agent independence levels before ending supervision."]
+    if view is None:
+        return ["A new specialist must start under supervision."]
+    try:
+        verdict = graduation_status(name, _world().list_approvals(limit=5000))
+    except Exception:
+        return ["The specialist's approval record is unavailable. Keep supervision on and retry."]
+    if not verdict.graduated:
+        return ["This specialist has not yet earned graduation from its approval record."]
+    return []
+
+
+def _record_agent_autonomy_intent(request: Request, name: str, before: dict, after: dict,
+                                  *, sample: int = 0) -> None:
+    """Require a tenant-scoped activity record before any authority increase."""
+    from maverick.audit import AuditRefused, EventKind, audit_event
+
+    try:
+        recorded = audit_event(
+            EventKind.CONTROL_PLANE_ACTION, agent="dashboard",
+            verb="specialist_independence_change_requested",
+            actor=caller_principal(request) or "local administrator", specialist=name,
+            before=before, requested=after, approved_samples=sample,
+        )
+    except AuditRefused as exc:
+        raise HTTPException(status_code=503, detail="The activity record is unavailable; no change was made.") from exc
+    if not recorded:
+        raise HTTPException(status_code=503, detail="The activity record is unavailable; no change was made.")
+
+
+def _record_agent_reset_intent(request: Request, name: str, fields: list[str]) -> None:
+    """Record an override removal before built-in permissions can return."""
+    from maverick.audit import AuditRefused, EventKind, audit_event
+
+    try:
+        recorded = audit_event(
+            EventKind.CONTROL_PLANE_ACTION, agent="dashboard",
+            verb="specialist_override_reset_requested",
+            actor=caller_principal(request) or "local administrator", specialist=name,
+            removed_fields=fields, requested={"reset_to_builtin": True},
+        )
+    except AuditRefused as exc:
+        raise HTTPException(status_code=503, detail="The activity record is unavailable; no change was made.") from exc
+    if not recorded:
+        raise HTTPException(status_code=503, detail="The activity record is unavailable; no change was made.")
+
+
 @router.post("/agents/{name}/validate")
 async def validate_agent_override(request: Request, name: str, payload: AgentOverrideIn) -> dict:
     """Lint the merged result of a proposed override without persisting it."""
@@ -13487,7 +13599,8 @@ async def validate_agent_override(request: Request, name: str, payload: AgentOve
     _require_pack_editing(request)
     from maverick.domain_edit import validate_override
 
-    errors, warnings = validate_override(name, payload.model_dump(exclude_unset=True))
+    errors, warnings = validate_override(name, payload.model_dump(exclude_unset=True, exclude_none=True))
+    errors.extend(await run_in_threadpool(_agent_autonomy_errors, name, payload))
     try:
         errors.extend(_agent_action_errors(name, payload))
     except Exception as exc:
@@ -13500,29 +13613,111 @@ async def save_agent_override(request: Request, name: str, payload: AgentOverrid
     """Persist a tenant override for ``name``. 403 if pack editing is disabled,
     422 if the merged pack fails lint (the override is rejected, not written)."""
     _require_pack_editing(request)
-    from maverick.domain_edit import OverrideConflict, write_override
+    from maverick.domain_edit import OverrideConflict, read_override, resolved_view, write_override
 
     try:
-        errors = _agent_action_errors(name, payload)
+        errors = await run_in_threadpool(_agent_autonomy_errors, name, payload)
+        errors += _agent_action_errors(name, payload)
         if errors:
             raise ValueError("; ".join(errors))
-        return write_override(name, payload.model_dump(exclude_unset=True, exclude={"expected_generation"}),
+        if payload.autonomy is not None and payload.expected_generation is None:
+            raise OverrideConflict("Reload the specialist before changing independence settings.")
+        previous = read_override(name)
+        if payload.autonomy is None and "autonomy" in previous:
+            raise OverrideConflict("This specialist has independence settings. Reload the editor before saving.")
+        if payload.autonomy is not None:
+            current = resolved_view(name)
+            before = (current or {}).get("autonomy", {}).get("pack", {})
+            after = payload.autonomy.model_dump()
+            if before != after:
+                await run_in_threadpool(
+                    _record_agent_autonomy_intent, request, name, before, after)
+        return write_override(name, payload.model_dump(exclude_unset=True, exclude_none=True,
+                                                       exclude={"expected_generation"}),
                               expected_generation=payload.expected_generation, return_view=True)
     except OverrideConflict as e:
         raise HTTPException(status_code=409, detail=str(e)) from e
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e)) from e
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=503, detail="Available actions could not be checked. Try again shortly.") from e
+
+
+@router.post("/agents/{name}/graduate")
+async def graduate_agent(request: Request, name: str, payload: AgentGraduationIn) -> dict:
+    """Grant a candidate its configured levels after a fresh approval check."""
+    _require_pack_editing(request)
+    from maverick.agent_autonomy import graduation_status, levels_enabled
+    from maverick.domain_edit import (
+        OverrideConflict,
+        read_override,
+        resolved_view,
+        write_override,
+    )
+
+    view = await run_in_threadpool(resolved_view, name)
+    if view is None:
+        raise HTTPException(status_code=404, detail="No such specialist.")
+    if view["generation"] != payload.expected_generation:
+        raise HTTPException(status_code=409, detail="This specialist changed. Refresh before granting independence.")
+    if not levels_enabled():
+        raise HTTPException(status_code=409, detail="Turn on per-agent independence levels first.")
+    if view["autonomy"]["config_override"]:
+        raise HTTPException(status_code=409, detail="A server-configured policy controls this specialist.")
+    if not view["autonomy"]["onboarding"]:
+        raise HTTPException(status_code=409, detail="This specialist is already out of supervision.")
+    auto_risks = _autonomy_auto_risks(view["autonomy"]["pack"])
+    if auto_risks:
+        raise HTTPException(status_code=409, detail=_autonomy_auto_graduation_reason(auto_risks))
+    try:
+        verdict = await run_in_threadpool(
+            lambda: graduation_status(name, _world().list_approvals(limit=5000)))
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="The approval record could not be checked.") from exc
+    if not verdict.graduated:
+        raise HTTPException(status_code=409, detail="This specialist has not earned graduation yet.")
+    patch = await run_in_threadpool(read_override, name)
+    after = dict(view["autonomy"]["pack"])
+    after["onboarding"] = False
+    patch["autonomy"] = after
+    await run_in_threadpool(
+        _record_agent_autonomy_intent, request, name, view["autonomy"]["pack"], after,
+        sample=verdict.sample)
+    try:
+        return await run_in_threadpool(
+            write_override, name, patch, expected_generation=payload.expected_generation,
+            return_view=True)
+    except OverrideConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.delete("/agents/{name}/override")
 async def delete_agent_override(request: Request, name: str, expected_generation: str | None = Query(None, pattern=r"^[0-9a-f]{64}$")) -> dict:
     """Drop a tenant override, reverting the agent to its built-in pack."""
     _require_pack_editing(request)
-    from maverick.domain_edit import OverrideConflict, remove_override, resolved_view
+    from maverick.domain_edit import (
+        OverrideConflict,
+        read_override,
+        rejected_override_view,
+        remove_override,
+        resolved_view,
+    )
 
     try:
+        current = read_override(name)
+        if expected_generation is None:
+            raise OverrideConflict("Reload the specialist before resetting its settings.")
+        view_before = resolved_view(name) or rejected_override_view(name)
+        if view_before and view_before["generation"] != expected_generation:
+            raise OverrideConflict("This specialist changed. Reload its latest version before resetting it.")
+        if current or (view_before and "is_builtin" in view_before):
+            await run_in_threadpool(
+                _record_agent_reset_intent, request, name,
+                sorted(current) if current else ["unavailable_override"])
         removed = remove_override(name, expected_generation=expected_generation)
     except OverrideConflict as e:
         raise HTTPException(status_code=409, detail=str(e)) from e

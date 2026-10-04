@@ -242,6 +242,12 @@ class TestExecution:
         assert paused.status == "paused_approval"
         assert paused.prompt == "Approve paying Acme Corp 5000?"
         assert paused.human["approval_card"]["summary"] == paused.prompt
+        card = paused.human["approval_card"]
+        assert card["target"]["label"] == "AI task"
+        assert card["parameters"]["summary"][-1] == "Next: AI task"
+        assert not any("digest" in text or "node" in text
+                       for text in card["parameters"]["summary"])
+        assert "current permissions" in card["preview"]["after"]
 
     def test_pause_resume_across_persisted_state(self, tmp_path, monkeypatch):
         _patch_home(tmp_path, monkeypatch)
@@ -262,6 +268,41 @@ class TestExecution:
                                      ))
         assert resumed.status == "completed" and resumed.data["done"] == "ran"
         assert resumed.run_id == paused.run_id          # same run, resumed in place
+
+    def test_approval_saved_before_copy_change_can_resume(self, tmp_path, monkeypatch):
+        _patch_home(tmp_path, monkeypatch)
+        from maverick.approval_cards import digest
+        from maverick.flow import approvals
+
+        flow = Flow(id="old-card", name="Old card", start="approve", nodes={
+            "approve": FlowNode(id="approve", kind="approval", prompt="Continue?", next="do"),
+            "do": FlowNode(id="do", kind=NODE_AGENT, brief="finish", output="result"),
+        })
+        presentation = approvals.approval_card_presentation
+        with monkeypatch.context() as patch:
+            patch.setattr(
+                approvals, "approval_card_presentation",
+                lambda flow, paused, next_node, prompt: presentation(
+                    flow, paused, next_node, prompt, legacy=True,
+                    run_data_sha256=digest({"n": 1}),
+                ),
+            )
+            paused = execution.execute(
+                flow, agent_runner=lambda brief, data: ("done", 1.0),
+                action_runner=lambda *args: ("", None), data={"n": 1},
+            )
+        assert paused.status == "paused_approval"
+        assert paused.human["approval_card"]["parameters"]["summary"][1].startswith(
+            "Continue after approval node:")
+        resumed = execution.execute(
+            flow, agent_runner=lambda brief, data: ("done", 1.0),
+            action_runner=lambda *args: ("", None),
+            resume_run_id=paused.run_id, decision="approved",
+            decided_by="system:direct",
+            approval_binding_sha256=_approval_binding(paused),
+            approval_decision_attestation=_approval_attestation(paused),
+        )
+        assert resumed.status == "completed"
 
     def test_resume_merges_free_form_human_inputs(self, tmp_path, monkeypatch):
         # An approval can also COLLECT data: inputs given at resume merge into the

@@ -237,6 +237,18 @@ class EmailChannel(Channel):
                         return None
                     await self.process_message(incoming, external_id=row["external_id"], account=self._account(),
                                                authorize=authority, send=send_saved, receipt=row, journal=journal)
+                    current = await asyncio.to_thread(journal.get, row["id"])
+                    if current and current.get("question_watch"):
+                        from .delivery import notify_queued_question
+
+                        async def send_question(message, reply, route):
+                            return await self.send(message.user_id, reply.text,
+                                                   subject=route["subject"])
+
+                        await notify_queued_question(
+                            current, authorize=lambda message: authority(),
+                            send=send_question, journal=journal,
+                        )
                 await asyncio.to_thread(journal.finish_recovery_window, checkpoint)
             except Exception:
                 log.warning("Email durable recovery window requires review")

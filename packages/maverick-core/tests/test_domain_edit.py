@@ -62,6 +62,19 @@ def tenant_dir(tmp_path, monkeypatch):
 
 
 class TestOverlayToml:
+    def test_autonomy_policy_round_trips_before_workflow_tables(self):
+        loaded = tomllib.loads(overlay_toml({
+            "name": "p",
+            "autonomy": {"default": "request", "low": "auto", "medium": None,
+                         "high": "suggest", "onboarding": False},
+            "workflow": [{"name": "review", "tools": ["read_file"]}],
+        }))
+        assert loaded["autonomy"] == {
+            "default": "request", "low": "auto", "high": "suggest",
+            "onboarding": False,
+        }
+        assert loaded["workflow"][0]["name"] == "review"
+
     def test_round_trips_through_loader(self):
         patch = {
             "name": "p",

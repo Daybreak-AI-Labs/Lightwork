@@ -12742,7 +12742,7 @@ async def workflow_builder_page(
             # expose, so a save (which replaces the override) can't drop them.
             preserve = {
                 k: raw[k]
-                for k in ("knowledge_sources", "models", "compartment", "extends")
+                for k in ("knowledge_sources", "models", "compartment", "extends", "autonomy")
                 if k in raw
             }
             edit_agent_prefill = {

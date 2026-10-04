@@ -27,6 +27,71 @@ _DECISIONS = ("approved", "rejected")
 FLOW_DECISION_ATTESTATION_SCHEMA = "lightwork.flow-decision-attestation.v1"
 
 
+def approval_card_presentation(flow, paused, next_node, prompt: str | None,
+                               *, legacy: bool = False,
+                               run_data_sha256: str = "") -> dict:
+    """One presentation contract for pause creation and resume verification.
+
+    The card binds customer-facing copy as well as the operation. Both paths must
+    derive that copy identically or a valid approval becomes impossible to use.
+    """
+    if legacy:
+        target_label = (
+            f"{next_node.kind} node {next_node.label or next_node.id}"
+            if next_node is not None else f"complete flow {flow.id}"
+        )
+        return {
+            "target_label": target_label,
+            "parameter_summary": [
+                f"Flow: {flow.name or flow.id}",
+                f"Continue after approval node: {paused.id}",
+                f"Current input digest: {run_data_sha256}",
+                f"Next node: {target_label}",
+            ],
+            "known_effects": [
+                "Resumes only the immutable published flow release recorded on this run.",
+                "The remaining flow may invoke its reviewed external action nodes once.",
+            ],
+            "unresolved_assumptions": [
+                "Connector credentials and target records must still pass dispatch-time authorization.",
+                "External systems may apply notifications or automation after a tool action.",
+            ],
+            "before": "The run remains paused and no continuation node has executed.",
+            "after": "The pinned continuation may execute once under current worker authority.",
+        }
+    step_words = {
+        "agent": "AI task", "action": "Connected action",
+        "branch": "Decision", "switch": "Choice",
+        "foreach": "Repeat for each item", "while": "Repeat while needed",
+        "parallel": "Run together", "setvar": "Update information",
+        "subflow": "Run another flow", "scope": "Handle a failure",
+        "delay": "Wait", "wait_event": "Wait for another app",
+        "approval": "Ask for approval",
+    }
+    target_label = (
+        next_node.label or step_words.get(next_node.kind, "Next step")
+        if next_node is not None else f"Finish {flow.name or 'this flow'}"
+    )
+    return {
+        "target_label": target_label,
+        "parameter_summary": [
+            f"Flow: {flow.name or 'Untitled flow'}",
+            f"Decision: {prompt or paused.label or 'Continue this flow?'}",
+            f"Next: {target_label}",
+        ],
+        "known_effects": [
+            "This approval continues the reviewed version of this flow once.",
+            "Remaining steps may use connected services under current permissions.",
+        ],
+        "unresolved_assumptions": [
+            "Connected services and target records are checked again before use.",
+            "A connected service may act after a step is sent to it.",
+        ],
+        "before": "This flow is waiting for your decision.",
+        "after": "If approved, Lightwork may continue the remaining steps under current permissions.",
+    }
+
+
 def _secret() -> str | None:
     from ..webhooks import inbound_secret
     return inbound_secret()
@@ -493,11 +558,7 @@ def require_current_paused_operation(
             if next_node is not None
             else {"kind": "complete", "id": "end"}
         )
-        target_label = (
-            f"{next_node.kind} node {next_node.label or next_node.id}"
-            if next_node is not None
-            else f"complete flow {flow.id}"
-        )
+        presentation = approval_card_presentation(flow, paused, next_node, run.prompt)
         persisted_data = approval_data(run.data or {}, card)
         runtime_authority = current_flow_runtime_authority(
             owner=str(run.owner or ""),
@@ -505,22 +566,17 @@ def require_current_paused_operation(
             execution_channel=str(run.execution_channel or ""),
             allowed_suites=run.allowed_suites,
         )
-        expected_card = build_approval_card(
+        card_kwargs = dict(
             action="flow.resume",
             summary=run.prompt or f"Resume {flow.name or flow.id}",
-            target_label=target_label,
+            target_label=presentation["target_label"],
             target={
                 "flow_id": flow.id,
                 "pause_node": paused.id,
                 "continuation": continuation,
             },
             parameters={"data": persisted_data, "continuation": continuation},
-            parameter_summary=[
-                f"Flow: {flow.name or flow.id}",
-                f"Continue after approval node: {paused.id}",
-                f"Current input digest: {digest(persisted_data)}",
-                f"Next node: {target_label}",
-            ],
+            parameter_summary=presentation["parameter_summary"],
             actor=run.owner or "local:operator",
             workspace=runtime_authority["workspace"],
             role=runtime_authority["role"],
@@ -555,24 +611,30 @@ def require_current_paused_operation(
                 "authority_sha256": runtime_authority["budget_authority_sha256"],
             },
             expires_at=float(card["expires_at"]),
-            known_effects=[
-                "Resumes only the immutable published flow release recorded on this run.",
-                "The remaining flow may invoke its reviewed external action nodes once.",
-            ],
-            unresolved_assumptions=[
-                "Connector credentials and target records must still pass dispatch-time authorization.",
-                "External systems may apply notifications or automation after a tool action.",
-            ],
-            before="The run remains paused and no continuation node has executed.",
-            after="The pinned continuation may execute once under current worker authority.",
+            known_effects=presentation["known_effects"],
+            unresolved_assumptions=presentation["unresolved_assumptions"],
+            before=presentation["before"],
+            after=presentation["after"],
             irreversible=bool(next_node is not None and next_node.kind == "action"),
         )
+        expected_card = build_approval_card(**card_kwargs)
         if not hmac.compare_digest(
             card["binding_sha256"], expected_card["binding_sha256"]
         ):
-            raise ApprovalCardError(
-                "approval card no longer describes the durable operation"
+            # A pause saved before the customer-facing copy changed must still
+            # resume against its exact historical card. Rebuild that fixed
+            # previous presentation; never trust submitted card text as input.
+            old = approval_card_presentation(
+                flow, paused, next_node, run.prompt, legacy=True,
+                run_data_sha256=digest(persisted_data),
             )
+            legacy_card = build_approval_card(**{**card_kwargs, **old})
+            if not hmac.compare_digest(
+                card["binding_sha256"], legacy_card["binding_sha256"]
+            ):
+                raise ApprovalCardError(
+                    "approval card no longer describes the durable operation"
+                )
         binding = paused_operation_binding(run, inputs=submitted)
         if not expected_binding or not hmac.compare_digest(
             binding, str(expected_binding)

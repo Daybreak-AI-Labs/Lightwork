@@ -331,10 +331,13 @@ class SlackChannel(Channel):
             return await self._on_slash_command(client, req)
         event = req.payload.get("event", {}) if req.type == "events_api" else {}
         sender = event.get("user", "")
+        addressed = self._addressed_to_bot(event)
+        threaded_reply = bool(event.get("thread_ts") and event.get("channel_type")
+                              in ("channel", "group", "mpim"))
         accepted = (event.get("type") in ("message", "app_mention") and "bot_id" not in event
                     and event.get("subtype") in (None, "file_share")
                     and is_allowed(sender, self.allowed_user_ids)
-                    and self._addressed_to_bot(event))
+                    and (addressed or threaded_reply))
         if accepted:
             # auth_test binds this transport to its immutable workspace/bot.
             # Persist only the envelope before ACK; file downloads and agent
@@ -346,18 +349,20 @@ class SlackChannel(Channel):
                 "id", "name", "mimetype", "size", "url_private", "url_private_download",
             }} for item in (event.get("files") or [])[:10]]
             text = self._strip_mention(event.get("text") or "")
+            in_room = (event.get("type") == "app_mention"
+                       or event.get("channel_type") in ("channel", "group", "mpim"))
+            thread = event.get("thread_ts") or event["ts"]
             msg = IncomingMessage(
                 user_id=event["channel"], text=text or
                 ("Process the attached file(s)." if files else ""), channel=self.name,
                 sender_id=sender, message_id=event["ts"],
                 provider_tenant_id=self._team_id, provider_sender_id=sender,
+                conversation_ref=thread if in_room else None,
+                question_reply_only=threaded_reply and not addressed,
             )
             account = self._account_id
             # A mention in a channel or group answers in its thread so the
             # room is not flooded; DMs keep the configured threading.
-            in_room = (event.get("type") == "app_mention"
-                       or event.get("channel_type") in ("channel", "group", "mpim"))
-            thread = event.get("thread_ts") or event["ts"]
             route = {"reply_to": thread if (self.thread_replies or in_room) else None,
                      "files": files}
             external_id = event["channel"] + ":" + event["ts"]

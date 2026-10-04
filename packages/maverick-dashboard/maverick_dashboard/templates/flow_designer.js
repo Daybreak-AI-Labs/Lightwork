@@ -359,15 +359,19 @@
         if (p.label) gEdges.appendChild(el('text', { class: 'fd-edge-label', x: px + 4, y: py + 14 }, p.label));
       });
     });
+    var unreachable = flow.start && FDCore.unreachableNodeIds
+      ? FDCore.unreachableNodeIds(flow) : [];
     // nodes
     flow.nodes.forEach(function (n) {
       var g = el('g', { class: 'fd-node' + ((n.id === selected || multiSel[n.id]) ? ' selected' : '') + (n.id === flow.start ? ' start' : '') + runClass(n.id),
                         transform: 'translate(' + n.x + ',' + n.y + ')' });
+      if (unreachable.indexOf(n.id) >= 0) g.setAttribute('opacity', '0.45');
       g.setAttribute('data-node', n.id);
       g.setAttribute('tabindex', '0');
       g.setAttribute('role', 'button');
       g.setAttribute('aria-label', (n.label || summary(n)) + ', ' + kindLabel(n.kind)
         + ' step' + (n.id === flow.start ? ', first step' : '')
+        + (unreachable.indexOf(n.id) >= 0 ? ', not connected and will never run' : '')
         + '. Press Enter to edit; use arrow keys to move.');
       g.setAttribute('aria-pressed', n.id === selected ? 'true' : 'false');
       g.appendChild(el('rect', { class: 'card', width: W, height: H, rx: 10 }));
@@ -1623,7 +1627,10 @@
       }
       markClean(savedDraftSnapshot);
       canonicalizeSavedFlow(rootFlow.id);
-      say('Saved ✓');
+      var disconnected = FDCore.unreachableNodeIds ? FDCore.unreachableNodeIds(body) : [];
+      say(disconnected.length ? 'Saved draft. ' + disconnected.length +
+        ' step' + (disconnected.length === 1 ? ' is' : 's are') +
+        ' not connected and will not run until connected.' : 'Saved ✓', !!disconnected.length);
       if (window.__fdStepsRefresh) window.__fdStepsRefresh();
       return true;
     } catch (e) {
@@ -1639,6 +1646,10 @@
     // a draft, then bind activation to the exact CAS tokens the save returned.
     try {
       if (!(await save())) return;
+      if (FDCore.unreachableNodeIds && FDCore.unreachableNodeIds(rootFlow).length) {
+        say('Before publishing: ' + problemText(rootFlow), true);
+        return;
+      }
       var response = await apiFetch('/api/v1/flows/' + encodeURIComponent(rootFlow.id) + '/publish', {
         method: 'POST', body: JSON.stringify({
           version: rootFlow.version, revision: rootFlow.revision
@@ -1933,8 +1944,9 @@
       }
       pushHistory();                    // the pre-draft canvas is one Ctrl+Z away
       fromApiFlow(draftedFlow);
-      say(Array.isArray(result.notes) && typeof result.notes[0] === 'string'
-        ? result.notes[0] : 'Drafted ✓ — review the steps, then save.');
+      var draftNotes = Array.isArray(result.notes) ? result.notes : [];
+      say(typeof draftNotes[0] === 'string'
+        ? draftNotes[0] : 'Drafted ✓ — review the steps, then save.', !!draftNotes.length);
     } catch (e) {
       if (generation === draftGeneration) say(e.message || 'Could not draft the flow. Please try again.', true);
     } finally {
@@ -2655,15 +2667,8 @@
   function autoLayoutForce() { flow.nodes.forEach(function (n) { n.x = 0; n.y = 0; }); autoLayout(); }
   // The steps a run can reach from the first step, over every way out of a step.
   function reachableIds() {
-    var seen = {}, queue = rootFlow.start ? [rootFlow.start] : [];
-    var byId = {}; rootFlow.nodes.forEach(function (n) { byId[n.id] = n; });
-    while (queue.length) {
-      var n = byId[queue.shift()];
-      if (!n || seen[n.id]) continue;
-      seen[n.id] = true;
-      ['next', 'if_true', 'if_false', 'on_error', 'on_expire'].forEach(function (k) { if (n[k]) queue.push(n[k]); });
-      (n.cases || []).forEach(function (c) { if (c.to) queue.push(c.to); });
-    }
+    var seen = {}, unreachable = FDCore.unreachableNodeIds(rootFlow);
+    rootFlow.nodes.forEach(function (n) { if (unreachable.indexOf(n.id) < 0) seen[n.id] = true; });
     return seen;
   }
   // Where a new step can still be attached: the end of each path that leads nowhere.

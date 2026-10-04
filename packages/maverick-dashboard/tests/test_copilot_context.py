@@ -6,6 +6,8 @@ from maverick_dashboard import copilot_context
 CANONICAL_CONTEXTS = {
     "/commitment-reviews": "Promise reviews",
     "/workflows": "Flows",
+    "/agents": "Specialists",
+    "/workforce": "Workforce",
     "/approvals": "Approvals",
     "/facts": "Shared business facts",
     "/content-access": "Employee content access",

@@ -231,6 +231,12 @@ class IncomingMessage:
     # (Slack ts, Telegram message_id, ...). Lets the reply thread onto it via
     # Channel.send_threaded; None on platforms without addressable messages.
     message_id: str | None = None
+    # Stable platform thread/topic anchor when it differs from the recipient.
+    # Kept in the durable intake so a recovered answer cannot jump threads.
+    conversation_ref: str | None = None
+    # A room thread reply without a bot mention may answer an open question,
+    # but must never create an unrelated goal when none is pending.
+    question_reply_only: bool = False
 
     @property
     def principal_id(self) -> str:

@@ -114,6 +114,49 @@ def test_seen_ack_occurs_after_durable_intake_and_restart_recovers(environment, 
     assert delivery.DeliveryJournal().get(rows[0]["id"])["delivery"] == "delivered"
 
 
+def test_queued_email_question_is_sent_after_ack_from_saved_sender(environment, monkeypatch):
+    from maverick import server as server_mod
+
+    channel, _ = environment
+
+    async def handler(msg):
+        msg._channel_question_watch = {
+            "goal_id": 4, "conversation_id": 8, "tenant": None,
+            "owner": "user:email:alice@example.test",
+            "execution_principal": "user:email:alice@example.test",
+        }
+        return "Task queued"
+
+    channel.handler = handler
+    journal = delivery.DeliveryJournal()
+    message = delivery.IncomingMessage(
+        user_id="alice@example.test", text="Prepare report", channel="email",
+        message_id="42:7",
+    )
+    row = journal.admit(message, external_id="42:7", account=channel._account(),
+                        route={"subject": "Re: Review", "sender_auth": "trusted_dmarc_pass"})
+    monkeypatch.setattr(channel, "_fetch_unseen", list)
+    monkeypatch.setattr(server_mod, "queued_channel_question",
+                        lambda *a: ("Question #9 for task #4: Which customer?", False))
+    sent = []
+
+    async def send(user_id, text, subject):
+        sent.append((user_id, text, subject))
+
+    monkeypatch.setattr(channel, "send", send)
+
+    async def no_sleep(*args):
+        channel._stop = True
+
+    monkeypatch.setattr("maverick_channels.email.asyncio.sleep", no_sleep)
+    asyncio.run(channel.start())
+    assert sent == [
+        ("alice@example.test", "Task queued", "Re: Review"),
+        ("alice@example.test", "Question #9 for task #4: Which customer?", "Re: Review"),
+    ]
+    assert journal.get(row["id"])["question_watch"] is None
+
+
 def test_failed_intake_does_not_ack_seen(environment, monkeypatch):
     channel, runs = environment
     _imap(monkeypatch, lambda: pytest.fail("Acknowledged before durable intake"))

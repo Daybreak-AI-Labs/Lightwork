@@ -196,6 +196,13 @@ def overlay_toml(patch: dict) -> str:
         lines.append("[models]")
         for role, model in dict(patch["models"]).items():
             lines.append(f"{role} = {json.dumps(model)}")
+    if patch.get("autonomy"):
+        lines.append("")
+        lines.append("[autonomy]")
+        for key in ("default", "low", "medium", "high", "onboarding"):
+            value = patch["autonomy"].get(key)
+            if value is not None:
+                lines.append(f"{key} = {json.dumps(value)}")
     out = patch.get("output")
     if out:
         lines.append("")
@@ -362,6 +369,13 @@ def _resolved_view(name: str, directory: str | Path | None = None) -> dict | Non
     raw = read_override(name, directory)
     errors, warnings = lint_profile(prof)
     readiness = workflow_readiness(prof)
+    from .agent_autonomy import default_profile_for, effective_profile, levels_enabled, resolve
+    from .config import get_workforce
+
+    pack_autonomy = prof.autonomy or default_profile_for(name)
+    current_autonomy = effective_profile(name, prof.autonomy)
+    config_override = bool(get_workforce().get("agents", {}).get(name))
+    autonomy_enabled = levels_enabled()
     return {
         "name": name,
         "generation": _override_generation(name, (Path(directory) if directory else user_dir()) / f"{name}.toml"),
@@ -386,6 +400,27 @@ def _resolved_view(name: str, directory: str | Path | None = None) -> dict | Non
         "errors": errors,
         "warnings": warnings,
         "readiness": readiness,
+        "autonomy": {
+            "default": current_autonomy.default.value,
+            "low": current_autonomy.low.value if current_autonomy.low else None,
+            "medium": current_autonomy.medium.value if current_autonomy.medium else None,
+            "high": current_autonomy.high.value if current_autonomy.high else None,
+            "onboarding": current_autonomy.onboarding,
+            "levels_enabled": autonomy_enabled,
+            "config_override": config_override,
+            "pack_default": pack_autonomy.default.value,
+            "pack": {
+                "default": pack_autonomy.default.value,
+                "low": pack_autonomy.low.value if pack_autonomy.low else None,
+                "medium": pack_autonomy.medium.value if pack_autonomy.medium else None,
+                "high": pack_autonomy.high.value if pack_autonomy.high else None,
+                "onboarding": pack_autonomy.onboarding,
+            },
+            "effective": {
+                risk: resolve(current_autonomy, risk=risk, levels_enabled=autonomy_enabled).level.value
+                for risk in ("low", "medium", "high")
+            },
+        },
     }
 
 

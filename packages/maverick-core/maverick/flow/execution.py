@@ -684,16 +684,14 @@ def execute(flow: Flow, *, agent_runner: AgentRunner, action_runner: ActionRunne
         paused_node = flow.node(res.cursor)
         if paused_node is not None:
             from ..approval_cards import build_approval_card, digest
-            from .approvals import current_flow_runtime_authority
+            from .approvals import approval_card_presentation, current_flow_runtime_authority
 
             next_node = flow.node(paused_node.next) if paused_node.next else None
             continuation = next_node.to_dict() if next_node is not None else {
                 "kind": "complete", "id": "end",
             }
-            target_label = (
-                f"{next_node.kind} node {next_node.label or next_node.id}"
-                if next_node is not None
-                else f"complete flow {flow.id}"
+            presentation = approval_card_presentation(
+                flow, paused_node, next_node, res.prompt,
             )
             expiry = (
                 float(res.resume_at)
@@ -713,19 +711,14 @@ def execute(flow: Flow, *, agent_runner: AgentRunner, action_runner: ActionRunne
             approval_card = build_approval_card(
                 action="flow.resume",
                 summary=res.prompt or f"Resume {flow.name or flow.id}",
-                target_label=target_label,
+                target_label=presentation["target_label"],
                 target={
                     "flow_id": flow.id,
                     "pause_node": paused_node.id,
                     "continuation": continuation,
                 },
                 parameters={"data": persisted_data, "continuation": continuation},
-                parameter_summary=[
-                    f"Flow: {flow.name or flow.id}",
-                    f"Continue after approval node: {paused_node.id}",
-                    f"Current input digest: {digest(persisted_data)}",
-                    f"Next node: {target_label}",
-                ],
+                parameter_summary=presentation["parameter_summary"],
                 actor=owner or "local:operator",
                 workspace=runtime_authority["workspace"],
                 role=runtime_authority["role"],
@@ -761,16 +754,10 @@ def execute(flow: Flow, *, agent_runner: AgentRunner, action_runner: ActionRunne
                     ],
                 },
                 expires_at=expiry,
-                known_effects=[
-                    "Resumes only the immutable published flow release recorded on this run.",
-                    "The remaining flow may invoke its reviewed external action nodes once.",
-                ],
-                unresolved_assumptions=[
-                    "Connector credentials and target records must still pass dispatch-time authorization.",
-                    "External systems may apply notifications or automation after a tool action.",
-                ],
-                before="The run remains paused and no continuation node has executed.",
-                after="The pinned continuation may execute once under current worker authority.",
+                known_effects=presentation["known_effects"],
+                unresolved_assumptions=presentation["unresolved_assumptions"],
+                before=presentation["before"],
+                after=presentation["after"],
                 irreversible=bool(next_node is not None and next_node.kind == "action"),
             )
             human = {"choices": list(paused_node.choices),

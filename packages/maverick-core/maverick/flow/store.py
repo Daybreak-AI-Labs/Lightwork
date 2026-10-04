@@ -530,7 +530,9 @@ def _store_flow_object(raw: dict) -> str:
     return digest
 
 
-def _snapshot_flow_bundle_locked(flow: Flow) -> tuple[str, int, dict[str, str | None]]:
+def _snapshot_flow_bundle_locked(
+    flow: Flow, *, validate_reachability: bool = False,
+) -> tuple[str, int, dict[str, str | None]]:
     """Snapshot a root and its transitive children under ``_definitions_lock``."""
     # Unsaved dry-run drafts reach this boundary without passing save_flow.
     # Apply the same size/secret persistence policy before writing CAS objects.
@@ -572,6 +574,12 @@ def _snapshot_flow_bundle_locked(flow: Flow) -> tuple[str, int, dict[str, str | 
                 raise FlowSnapshotError(
                     f"subflow {ref!r} is unavailable to this flow owner"
                 )
+            if validate_reachability:
+                errors = child.reachability_errors()
+                if errors:
+                    raise FlowSnapshotError(
+                        f"subflow {ref!r} cannot be published: " + "; ".join(errors[:3])
+                    )
             child_raw = child.to_dict()
             # Mark visited for cycles, but write no objects until the entire
             # selected graph passes persistence and lineage policy.
@@ -726,12 +734,14 @@ def _publish_flow_under_activation(
             raise FlowVersionConflict(
                 f"flow {flow_id!r} was replaced or changed generation"
             )
-        errors = flow.validate()
+        errors = flow.validate() + flow.reachability_errors()
         if errors:
             raise FlowSnapshotError(
                 "flow cannot be published: " + "; ".join(errors[:3])
             )
-        digest, version, subflows = _snapshot_flow_bundle_locked(flow)
+        digest, version, subflows = _snapshot_flow_bundle_locked(
+            flow, validate_reachability=True,
+        )
         import secrets
 
         release_digest = release_digest_for(digest, subflows)

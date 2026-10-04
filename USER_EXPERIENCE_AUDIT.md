@@ -706,6 +706,7 @@ no images without alt, axe violations limited to nine distinct rules).
   - [C5c-007] packages/maverick-core/maverick/server.py:303-319 — a follow-up message creates a new goal; no channel path answers an open question
   - [C5c-007] cmd: audit/C5c_repro/r06_channel_ask.py (fake OpenAI-compatible model, '[ask]' prompt) → CHANNEL REPLY: 'Goal #1 finished with status blocked, but its result is not available in this process.'; world.db: goals [(1,'blocked',None)], questions [(1,1,<encrypted question>)] (output: audit/C5c_repro/r06.out)
 - **Recommendation (effort M):** When a channel goal blocks on ask_user, reply with the question text; bind the next message in the same conversation/thread as the answer (world.answer + resume) with an explicit 'this answers your question' echo; cover with a test in test_server_dispatcher.py.
+- **Implementation status (2026-10-04):** Channel intake shows open questions and resumes the original goal after a bound answer. Slack room threads accept a plain reply; Slack DMs, Telegram and email require `#<question-id> answer`, while an ordinary message starts a new task. Queued runs retain the original sender, tenant and route in the durable intake receipt; Slack, Telegram and email recovery deliver a later question with chunk receipts. Uncertain sends remain held for review to avoid duplicates. Focused local tests cover all three channels, a second queued question, isolation and uncertain delivery. No live provider acceptance or Postgres run was performed.
 - Source: C3-029, C5c-007
 
 #### UX-037 · P1 · Bug · Channel readiness says 'channel adapter dependency is importable' (passed) when the chat SDK is not installed; the channel server then refuses to start it
@@ -810,6 +811,8 @@ no images without alt, axe violations limited to nine distinct rules).
 - Source: U4-032
 
 #### UX-045 · P1 · Bug · Steps view silently disconnects every step added after a Decision; the flow publishes, runs and reports "Finished" while the approval and later steps are never reached
+
+- **Current branch (2026-10-04):** Steps view now asks which Decision path receives a new step and shows disconnected steps. Publication refuses a draft with steps unreachable from its first step, including nested flow steps; Save retains the draft with a warning. The canvas dims disconnected steps. Focused graph, publication and editor checks passed; an installed customer run remains unverified.
 
 - **Who / where:** workspace admin, end user, evaluator · `/flows/designer (Steps view, 'Add step')`
 - **User impact:** A non-programmer builds 'if the amount is over $1,000, ask for approval, then record the payment' in the default Steps view. It looks correct, saves and publishes without complaint, and every run ends 'Finished' — but the approval never happens and the payment step never runs. The user believes the automation works.
@@ -1385,6 +1388,7 @@ no images without alt, axe violations limited to nine distinct rules).
   - packages/maverick-core/maverick/domain_edit.py:73-110 — overlay_toml never serialises [autonomy], so even a pack override cannot carry it (map/08 §7.12); agents.html has no autonomy field (grep 'autonomy' templates/agents.html -> 0 hits)
   - live: /workforce shows 'No specialist has earned more independence yet. They qualify after a run of approved work.' with no way to act when one does
 - **Recommendation (effort M):** Add an 'Independence' control to each specialist's job card/editor (per risk level, with the onboarding clamp shown), a 'Grant' button on each graduation candidate that records an audited decision, persist via a tenant store (not config.toml), and serialise [autonomy] in domain_edit overrides.
+- **Implementation status (current branch, local verification):** Specialist editor and job card now expose the effective Watch/Suggest/Ask/Act policy and supervision; tenant overrides persist `[autonomy]`. Workforce offers a revision-checked, audited Grant action and links blocked candidates to their policy. Aggregate approval history cannot grant an unsupervised Act level: the API refuses graduation and editor saves for any Act risk until risk- and action-bound evidence exists. Reset requires the current revision, warns that built-in permissions may broaden, and records the intent before removal. Installed tenant acceptance remains open.
 - Source: U3-015
 
 #### UX-074 · P1 · Customization · Azure OpenAI and AWS Bedrock cannot be set up in the product: Settings > Provider keys offers only 9 providers, while the kernel supports 14
@@ -3061,6 +3065,8 @@ no images without alt, axe violations limited to nine distinct rules).
 
 #### UX-192 · P2 · Bug · No check anywhere for steps that can never run (unreachable from the first step): client and server validation accept orphaned steps
 
+- **Current branch (2026-10-04):** The flow editor identifies and explains unreachable steps; publication checks the saved graph server-side before activation. Drafts may retain disconnected work for editing. The canvas dims those steps and names the issue for assistive technology. Existing published releases are not retroactively changed.
+
 - **Who / where:** workspace admin, developer · `/flows/designer Save/Publish; POST /api/v1/flows; flow/ir.py Flow.validate`
 - **User impact:** Steps that are disconnected by editing (delete a connector, add after a decision, import) stay in the flow looking live but never execute; nothing tells the builder.
 - **Evidence (code-verified):**
@@ -3071,6 +3077,8 @@ no images without alt, axe violations limited to nine distinct rules).
 - Source: U4-002
 
 #### UX-193 · P2 · Bug · 'Wait for another app' inside a Repeat-for-each passes Save and Publish, then every run ends 'Rejected' with no reason (D1)
+
+- **Current branch (2026-10-04):** Client and server authoring checks now refuse a nested event wait with a plain instruction to move it into the main flow. If an existing release still reaches this runtime path, it fails with that reason instead of reporting a human rejection. A live installed migration journey has not been run.
 
 - **Who / where:** workspace admin · `POST /api/v1/flows, /publish, /run; run page`
 - **User impact:** The flow looks valid, then every run appears to have been 'Rejected' (as if a person said no); the admin has no clue the loop is the cause.
@@ -3108,6 +3116,8 @@ no images without alt, axe violations limited to nine distinct rules).
 
 #### UX-242 · P2 · Reliability · Drafter fallback silently drops the requested schedule and approval gate: 'every weekday at 9am … ask the finance lead to approve before posting to Slack' becomes one unscheduled AI task with no approval step
 
+- **Current branch (2026-10-04):** The fallback now warns plainly when a requested schedule or approval step is missing, and the editor displays that warning. It still produces an editable one-step draft that a person can publish after reviewing; there is no persistent requirement check or installed browser acceptance yet.
+
 - **Who / where:** workspace admin, compliance · `/flows/designer → ✨ Draft`
 - **User impact:** A user who publishes the fallback thinks approval is enforced because the words 'ask … to approve' are in the step; in fact nothing pauses for a human and nothing is scheduled.
 - **Evidence (reproduced):**
@@ -3131,6 +3141,8 @@ no images without alt, axe violations limited to nine distinct rules).
 
 #### UX-297 · P2 · Ux · Approval card is written in engine jargon: 'agent node n3', 'Continue after approval node: n2', a 64-hex 'input digest', 'pinned continuation may execute once under current worker authority'
 
+- **Current branch (2026-10-04):** The visible card now names the flow, decision and next step in customer language, and explains before/after in plain terms. The hashes and exact continuation binding remain in the machine-checkable card fields. Focused card creation passed; an installed approval journey has not been rerun.
+
 - **Who / where:** end user, workspace admin · `/flows/{id}/runs/{run}; /automations`
 - **User impact:** A business approver cannot tell what happens after approving ('agent node n3'); hashes and 'worker authority' language make a routine decision look alarming.
 - **Evidence (reproduced):**
@@ -3141,6 +3153,8 @@ no images without alt, axe violations limited to nine distinct rules).
 - Source: U4-011
 
 #### UX-298 · P2 · Ux · When the plain-English drafter fails, the user sees a Python exception name ('couldn't build a full graph (ValueError)') and gets one AI step whose name is the description cut mid-word
+
+- **Current branch (2026-10-04):** Fallback notes no longer expose Python exception names, and the draft title stops at a word boundary. The fallback still needs a dedicated retry control and a better short summary.
 
 - **Who / where:** workspace admin, evaluator · `/flows/designer → ✨ Draft`
 - **User impact:** On any model hiccup the evaluator sees developer jargon and a meaningless one-box flow with a truncated title, with no suggestion to retry or rephrase.

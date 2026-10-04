@@ -103,6 +103,55 @@ def test_workforce_page_renders():
     assert "/workforce" in r.text
 
 
+def test_workforce_candidate_has_current_revision_and_grant_gate(monkeypatch):
+    from types import SimpleNamespace
+
+    import maverick.agent_autonomy as autonomy
+    from maverick.departments import get_department
+
+    name = get_department("finance").members[0]
+    monkeypatch.setattr(autonomy, "levels_enabled", lambda: True)
+    monkeypatch.setattr(autonomy, "graduation_candidates", lambda _history, _names: [
+        SimpleNamespace(name=name, sample=12, approve_rate=1.0, confidence=0.95,
+                        reason="clean approval record"),
+    ])
+    response = client.get("/api/v1/workforce/posture")
+    assert response.status_code == 200
+    candidate = response.json()["graduation_candidates"][0]
+    assert candidate["name"] == name
+    assert len(candidate["generation"]) == 64
+    assert candidate["can_grant"] is True
+
+
+def test_act_policy_is_review_only_even_with_clean_aggregate_approvals(monkeypatch):
+    from types import SimpleNamespace
+
+    import maverick.agent_autonomy as autonomy
+    import maverick.domain_edit as domain_edit
+    from maverick.departments import get_department
+
+    name = get_department("finance").members[0]
+    original_view = domain_edit.resolved_view
+
+    def act_view(candidate: str):
+        view = original_view(candidate)
+        if candidate == name and view:
+            view["autonomy"]["pack"]["high"] = "auto"
+        return view
+
+    monkeypatch.setattr(domain_edit, "resolved_view", act_view)
+    monkeypatch.setattr(autonomy, "levels_enabled", lambda: True)
+    monkeypatch.setattr(autonomy, "graduation_candidates", lambda _history, _names: [
+        SimpleNamespace(name=name, sample=100, approve_rate=1.0, confidence=1,
+                        reason="clean approval record"),
+    ])
+    response = client.get("/api/v1/workforce/posture")
+    assert response.status_code == 200
+    candidate = response.json()["graduation_candidates"][0]
+    assert candidate["can_grant"] is False
+    assert "overall approval record cannot prove" in candidate["grant_block_reason"]
+
+
 def test_workforce_connector_search_is_race_safe():
     """The connector search script must only render the latest response.
 
