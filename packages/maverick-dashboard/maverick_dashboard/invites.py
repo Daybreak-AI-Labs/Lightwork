@@ -103,6 +103,7 @@ class Invite:
     used_at: float | None = None
     used_by: str | None = None
     tenant: str = ""  # set: the role applies inside this workspace only
+    workspace_admin_invite: bool = False  # recheck the issuing member's authority on acceptance
 
     @property
     def pending(self) -> bool:
@@ -209,6 +210,9 @@ def _validate_record(invite_id: str, rec: object) -> dict:
     tenant = rec.get("tenant", "")
     if not isinstance(tenant, str) or len(tenant) > 128 or tenant != tenant.strip():
         raise InviteStoreError(f"invite store corrupt: invalid workspace for {invite_id!r}")
+    workspace_admin_invite = rec.get("workspace_admin_invite", False)
+    if not isinstance(workspace_admin_invite, bool) or (workspace_admin_invite and not tenant):
+        raise InviteStoreError(f"invite store corrupt: invalid workspace issuer for {invite_id!r}")
     clean = dict(rec)
     clean["created_at"] = created
     clean["expires_at"] = expires
@@ -227,11 +231,13 @@ def _to_invite(rec: dict) -> Invite:
                   created_at=float(rec.get("created_at", 0)),
                   expires_at=float(rec.get("expires_at", 0)),
                   used_at=rec.get("used_at"), used_by=rec.get("used_by"),
-                  tenant=rec.get("tenant", ""))
+                  tenant=rec.get("tenant", ""),
+                  workspace_admin_invite=rec.get("workspace_admin_invite", False))
 
 
 def create_invite(email: str, role: str, *, created_by: str,
-                  ttl_hours: float = INVITE_TTL_HOURS, tenant: str = "") -> tuple[Invite, str]:
+                  ttl_hours: float = INVITE_TTL_HOURS, tenant: str = "",
+                  workspace_admin_invite: bool = False) -> tuple[Invite, str]:
     """Mint an invite; returns ``(invite, token)``. The token is shown ONCE —
     only its sha256 is stored, so a copied store file yields no working links.
     With ``tenant`` the role is granted inside that workspace only (a
@@ -249,7 +255,7 @@ def create_invite(email: str, role: str, *, created_by: str,
     if not math.isfinite(ttl):
         raise ValueError("invite TTL must be a finite number")
     tenant = (tenant or "").strip()
-    if len(tenant) > 128:
+    if len(tenant) > 128 or (workspace_admin_invite and not tenant):
         raise ValueError("invalid workspace")
     token = "inv_" + secrets.token_urlsafe(32)
     inv_id = "invite_" + secrets.token_hex(8)
@@ -259,6 +265,8 @@ def create_invite(email: str, role: str, *, created_by: str,
            "token_sha256": _hash(token), "used_at": None, "used_by": None}
     if tenant:
         rec["tenant"] = tenant
+    if workspace_admin_invite:
+        rec["workspace_admin_invite"] = True
     with _locked(store_path()):
         data = _load()
         pending = sum(1 for r in data.values()
@@ -344,8 +352,9 @@ def send_invite_email(invite: Invite, link: str, *, invited_by: str) -> tuple[bo
     if not mailer.configured():
         return False, "no sending account configured ([email] / EMAIL_USER)"
     days = max(1, int((invite.expires_at - invite.created_at) / 86400))
+    destination = f"the {invite.tenant} workspace" if invite.tenant else "a Lightwork dashboard"
     body = (
-        f"You've been invited to a Lightwork dashboard as {invite.role} "
+        f"You've been invited to {destination} as {invite.role} "
         f"(invited by {invited_by}).\n\n"
         f"Open this link to accept:\n\n    {link}\n\n"
         f"The link works once and expires in {days} day{'s' if days != 1 else ''}. "
@@ -407,15 +416,18 @@ def local_session_secret() -> str:
 
 def local_login_mode() -> bool:
     """True when invite acceptance must itself sign the browser in: invites are
-    on and no OIDC browser login is configured (with SSO, the IdP signs in and
-    the invite only binds the role)."""
+    on and no OIDC or SAML browser login is configured (with SSO, the IdP signs
+    in and the invite only binds the role)."""
     if not invites_enabled():
         return False
     try:
         from maverick.oidc import login_enabled
-        return not login_enabled()
-    except Exception:  # pragma: no cover - oidc config never blocks this gate
-        return True
+
+        from .saml import saml_enabled
+
+        return not login_enabled() and not saml_enabled()
+    except Exception:  # pragma: no cover - an unavailable SSO config cannot enable local login
+        return False
 
 
 def session_ttl_seconds() -> int:

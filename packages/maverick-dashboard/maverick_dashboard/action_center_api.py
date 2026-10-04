@@ -18,6 +18,7 @@ from .auth import (
     caller_suites,
     domain_suites_allowed,
     goal_owner_filter,
+    has_permission,
     require_permission,
     suite_allowed,
 )
@@ -142,7 +143,10 @@ def _model(request):
         project_reviews=project_reviews, vendor_reconciliations=vendor_reconciliations,
         connection_attention=connection_attention,
         flow_approvals=lambda: pending_for_request(request, limit=action_center.SOURCE_LIMIT),
-        approval_allowed=lambda row: can_read_approval(request, row, world=_world()),
+        approval_allowed=lambda row: (
+            has_permission(request, "operate", api_scope="approvals:decide")
+            and can_read_approval(request, row, world=_world())
+        ),
         task_allowed=lambda goal: can_access_goal(request, goal) and domain_suites_allowed(request, goal.domain))
 
 

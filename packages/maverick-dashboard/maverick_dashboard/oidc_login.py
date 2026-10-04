@@ -354,6 +354,12 @@ def session_claims(payload: dict, request: Request, *, via: str) -> dict | None:
     it expires."""
     sid = payload.get("sid")
     claims: dict = {"via": via, "mfa": False, "mfa_at": None, "sid": ""}
+    # A workspace invitation needs the email asserted for THIS signed session.
+    # The subject directory retains historical aliases and cannot prove which
+    # address the provider asserted at the current login.
+    idp_email = _normalized_invite_email(payload.get("idp_email"))
+    if via == "session" and idp_email:
+        claims["idp_email"] = idp_email
     if not isinstance(sid, str) or not sid:
         return claims
     from . import session_registry
@@ -373,6 +379,25 @@ def session_claims(payload: dict, request: Request, *, via: str) -> dict | None:
         claims["mfa"] = True
         claims["mfa_at"] = payload.get("mfa_at", payload.get("iat"))
     return claims
+
+
+def _normalized_invite_email(value: object) -> str:
+    """A provider-asserted email suitable for matching a workspace invite."""
+    if not isinstance(value, str):
+        return ""
+    email = value.strip().casefold()
+    return email if 3 <= len(email) <= 254 and "@" in email and not any(c.isspace() for c in email) else ""
+
+
+def _oidc_invite_email(claims: dict) -> str:
+    """Keep the current login's signed address, never a historical alias."""
+    if claims.get("email_verified") is False:
+        return ""
+    for key in ("email", "upn", "preferred_username", "sub"):
+        email = _normalized_invite_email(claims.get(key))
+        if email:
+            return email
+    return ""
 
 
 def mint_browser_session(request: Request, *, sub: str, secret: str, via: str, mfa: bool,
@@ -618,7 +643,8 @@ async def auth_callback(request: Request):
             request, sub=principal.sub, secret=cfg.session_secret, via="session",
             mfa=mfa, ttl=_SESSION_TTL,
             extra={"oidc_issuer": principal.issuer,
-                   "oidc_audience": principal.audience},
+                   "oidc_audience": principal.audience,
+                   "idp_email": _oidc_invite_email(principal.claims or {})},
         )
     except Exception:
         log.warning("OIDC callback: session record unavailable; refusing sign-in")

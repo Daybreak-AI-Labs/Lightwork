@@ -185,4 +185,5 @@ async def request_access(request: Request, body: AccessIn):
 
 @router.post("/api/v1/content-access/{request_id}/decision")
 async def decide_access(request: Request, request_id: str, body: DecisionIn):
+    auth.require_api_key_scope(request, "approvals:decide")
     return await _call(lambda: decide_current_access(request, request_id, body))

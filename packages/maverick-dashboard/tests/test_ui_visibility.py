@@ -182,6 +182,30 @@ def test_nav_groups_per_role(monkeypatch, tmp_path):
     assert hrefs("admin") == in_nav
 
 
+def test_global_admin_destinations_match_their_route_gates(monkeypatch, tmp_path):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    from maverick_dashboard import ui_visibility
+
+    paths = {"/plugins", "/mcp", "/channels", "/tenants", "/workspace/recovery"}
+    for path in paths:
+        page = ui_visibility.page_for(path)
+        assert page["scope"] == "global"
+        assert page["floor"] == page["default"] == "admin"
+
+    def hrefs(role, global_role):
+        return {
+            link["href"]
+            for group in ui_visibility.nav_groups(role, scope_roles={"global": global_role})
+            for link in group["links"]
+        }
+
+    # A workspace administrator cannot enter an installation-wide console.
+    assert paths.isdisjoint(hrefs("admin", "viewer"))
+    assert "/companion/admin" in hrefs("admin", "viewer")
+    assert paths <= hrefs("viewer", "admin")
+    assert paths <= hrefs(None, None)  # auth off retains local owner navigation
+
+
 def test_not_ready_pages_are_offered_on_no_customer_surface(monkeypatch, tmp_path):
     """``ready: False`` = an operator workbench (record ids, fingerprints, raw
     status documents) or a module that ships switched off: governed and
@@ -259,6 +283,65 @@ def test_operator_blocked_from_admin_group_pages(monkeypatch, tmp_path):
     assert c.get("/automations").status_code == 200
     assert c.get("/cache").status_code == 403
     assert c.get("/tenants").status_code == 403
+
+
+def test_tenant_admin_does_not_see_global_admin_dead_ends(monkeypatch, tmp_path):
+    monkeypatch.setenv("MAVERICK_DASHBOARD_ADMINS", "")
+    c = _client(monkeypatch, tmp_path)
+    from maverick.paths import reset_tenant, set_tenant
+    from maverick_dashboard import rbac
+
+    principal = "user:tenant-admin"
+    rbac.set_role(principal, "viewer")
+    rbac.set_tenant_role("acme", principal, "admin")
+    _as(monkeypatch, principal)
+    blocked = ("/plugins", "/mcp", "/channels", "/tenants", "/workspace/recovery")
+    token = set_tenant("acme")
+    try:
+        shell = c.get("/goals")
+        assert shell.status_code == 200
+        finder = c.get("/nav/finder")
+        assert finder.status_code == 200
+        for path in blocked:
+            assert f'href="{path}"' not in shell.text
+            assert f'href="{path}"' not in finder.text
+            assert c.get(path).status_code == 403
+    finally:
+        reset_tenant(token)
+
+
+def test_api_key_navigation_matches_its_scope_and_page_gates(monkeypatch, tmp_path):
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
+    monkeypatch.setenv("MAVERICK_DASHBOARD_ADMINS", "")
+    monkeypatch.setattr("maverick.audit.audit_event", lambda *a, **k: True)
+    from maverick import config
+    from maverick_dashboard import api_keys, rbac
+
+    config.reset_config_cache()
+    rbac.set_role("user:boss", "admin")
+    c = _client(monkeypatch, tmp_path)
+    _, read_secret = api_keys.create_key(
+        label="read only", scopes=["tasks:read"],
+        owner="user:boss", created_by="user:boss",
+    )
+    headers = {"Authorization": f"Bearer {read_secret}"}
+    shell = c.get("/goals", headers=headers)
+    finder = c.get("/nav/finder", headers=headers)
+    assert shell.status_code == finder.status_code == 200
+    assert 'href="/goals"' in shell.text
+    for path in ("/plugins", "/mcp", "/channels", "/tenants", "/workspace/recovery",
+                 "/approvals"):
+        assert f'href="{path}"' not in shell.text
+        assert f'href="{path}"' not in finder.text
+        assert c.get(path, headers=headers).status_code == 403
+
+    _, approval_secret = api_keys.create_key(
+        label="approve", scopes=["approvals:decide"],
+        owner="user:boss", created_by="user:boss",
+    )
+    headers = {"Authorization": f"Bearer {approval_secret}"}
+    assert 'href="/approvals"' in c.get("/goals", headers=headers).text
+    assert c.get("/approvals", headers=headers).status_code == 200
 
 
 def test_admin_override_hides_page_but_not_api(monkeypatch, tmp_path):

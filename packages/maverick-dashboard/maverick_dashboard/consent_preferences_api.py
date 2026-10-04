@@ -644,7 +644,7 @@ async def list_scan_observations(
 
 @router.post("/decisions")
 async def decide(request: Request, body: EnforcementDecisionIn) -> dict:
-    require_permission(request, "operate")
+    require_permission(request, "operate", api_scope="approvals:decide")
     ops = _ops()
     tenant_id = _tenant_id()
     return _jsonable(

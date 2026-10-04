@@ -16,6 +16,14 @@
   const expected=()=>root.dataset.expected!==undefined?root.dataset.expected:tenant();
   const label=principal=>labels[principal]||"A colleague";
   const roleLabel=role=>roleNames[role]||(window.mvHuman?window.mvHuman(role):String(role));
+  const inviteTenant=document.getElementById("wi-tenant"),inviteRole=document.getElementById("wi-role");
+  function syncInviteRoles(){
+    if(!inviteTenant||!inviteRole||globalAdmin)return;
+    const selected=inviteRole.value;inviteRole.replaceChildren();
+    for(const role of roleOptions[inviteTenant.value]||[]){const option=node("option",roleLabel(role));option.value=role;inviteRole.append(option);}
+    inviteRole.value=Array.from(inviteRole.options).some(option=>option.value===selected)?selected:"viewer";
+  }
+  if(inviteTenant){inviteTenant.addEventListener("change",syncInviteRoles);syncInviteRoles();}
   const workspaceName=()=>{if(picker&&picker.selectedIndex>=0&&picker.options[picker.selectedIndex])return picker.options[picker.selectedIndex].textContent.trim();return root.dataset.tenantName||"this workspace";};
   const ask=(message,okText)=>window.mvConfirm?window.mvConfirm(message,{okText}):Promise.resolve(false);
   const access=window.LightworkAccessState.create(()=>tenant()+":"+expected(),lock);

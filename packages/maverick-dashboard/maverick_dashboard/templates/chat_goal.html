@@ -238,7 +238,7 @@
     @page { margin: 18mm; }
     html, body.chat-shell { display: block !important; height: auto !important; overflow: visible !important; background: #fff !important; color: #111 !important; }
     body.chat-shell main, .cs-scroll, .cs-column { display: block !important; width: auto !important; max-width: none !important; height: auto !important; overflow: visible !important; padding: 0 !important; margin: 0 !important; }
-    .cs-side, .cs-topbar, .cs-dock, .cs-backdrop, .navfinder, .mv-toasts, dialog,
+    .cs-side, .cs-topbar, .cs-dock, .cs-backdrop, .navfinder, .mv-toasts, .mv-copilot, dialog,
     .activity, .feedback, .answer-actions, .share-panel, .more, .planning-steps,
     .task-tabs, .print-control, #newer-chat-turn, #conversation-inbox,
     .halt-card, .goal-share, #edit-box, #attachments-panel, #goal-action-msg, #stream-error,
@@ -280,6 +280,8 @@
 <div class="convo">
   {% from "_task_tabs.html" import task_tabs %}
   {{ task_tabs(goal, 'result') }}
+  <p class="print-control"><button type="button" class="btn btn--ghost" data-copilot-toggle
+      aria-controls="mv-copilot" aria-expanded="false">{{ ui('Ask Copilot about this task') }}</button></p>
   <div id="earlier-history" data-goal="{{ goal.id }}" data-before="{{ thread_turns[0].id if thread_turns else '' }}">
     <button type="button" class="btn btn--ghost" id="history-load">{{ ui('Load earlier conversation') }}</button>
     <p id="history-status" role="status" aria-live="polite">{{ ui('Earlier conversation is loaded in pages.') }}</p>

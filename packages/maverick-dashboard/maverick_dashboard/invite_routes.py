@@ -10,7 +10,8 @@ Security mechanics (see :mod:`maverick_dashboard.invites` for the store):
   invitee has no credential yet — the token in the path is the credential).
 - **SSO mode** (OIDC browser login configured): accepting requires signing in
   first — the page links to ``/auth/login?return_to=<this invite>`` — and the
-  invite then binds the IdP-verified principal to the invited role. The
+  current signed session must assert the invited email before the role is
+  bound to that principal. SAML-only deployments use ``/saml/login``. The
   session comes from the IdP; the invite never mints one.
 - **Local mode** (no IdP): accepting mints a signed ``mvk_session`` cookie for
   ``user:<invited email>`` and binds the role. The link is the credential —
@@ -32,6 +33,10 @@ from . import invites
 log = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+class _InviteBindFailed(RuntimeError):
+    """The one-time link was redeemed, but the role store refused the grant."""
 
 
 def _page(title: str, body: str, status: int = 200) -> HTMLResponse:
@@ -89,9 +94,121 @@ def _bind_role(principal: str, inv) -> None:
     (a client's first administrator), otherwise dashboard-wide."""
     from . import rbac
     if inv.tenant:
-        rbac.set_tenant_role(inv.tenant, principal, inv.role)
+        rbac.set_tenant_role(inv.tenant, principal, inv.role, actor=inv.created_by)
     else:
-        rbac.set_role(principal, inv.role)
+        rbac.set_role(principal, inv.role, actor=inv.created_by)
+
+
+def _workspace_invite_allowed(inv, principal: str) -> bool:
+    """Recheck a pending workspace grant before it can change membership."""
+    if not inv.tenant:
+        return True
+    from maverick.paths import tenant_by_user_enabled
+    from maverick.tenant.registry import get_tenant
+
+    from . import rbac
+
+    workspace = get_tenant(inv.tenant)
+    if tenant_by_user_enabled() or workspace is None or not workspace.active:
+        return False
+    members = rbac.list_tenant_roles(inv.tenant)
+    current = members.get(principal)
+    invited_permissions = rbac.permissions_for(inv.role)
+    if inv.workspace_admin_invite:
+        issuer_permissions = rbac.permissions_for(members.get(inv.created_by))
+        if ("admin" not in issuer_permissions
+                or not invited_permissions.issubset(issuer_permissions)
+                or (current is not None
+                    and not rbac.permissions_for(current).issubset(issuer_permissions))
+                or (principal == inv.created_by and "admin" not in invited_permissions)):
+            return False
+    if (current is not None and "admin" in rbac.permissions_for(current)
+            and "admin" not in invited_permissions
+            and sum("admin" in rbac.permissions_for(role) for role in members.values()) <= 1):
+        return False
+    return True
+
+
+def _global_invite_issuer_allowed(inv) -> bool:
+    """A named installation admin must still have that authority at acceptance.
+
+    Existing records already carry ``created_by``. ``caller_principal`` uses
+    ``VerifiedPrincipal.principal`` (``user:<sub>``) for OIDC, SAML and proxy
+    identities. Principal-less local and static-token invites have no durable
+    person to recheck, so preserve their existing one-time-link contract.
+    Scoped workspace issuers are checked by ``_workspace_invite_allowed``.
+    """
+    issuer = inv.created_by
+    if inv.workspace_admin_invite or not issuer.startswith("user:"):
+        return True
+    from . import auth, rbac, scim_groups
+
+    try:
+        if scim_groups.active_for_principal(issuer) is False:
+            return False
+        permissions = rbac.permissions_for(auth.global_role_for_principal(issuer))
+        return "admin" in permissions and rbac.permissions_for(inv.role).issubset(permissions)
+    except Exception:
+        return False
+
+
+def _consume_and_bind(token: str, principal=None):
+    """Redeem under the role-change fence, including the issuing admin check."""
+    from maverick.authority_effects import authority_effect_fence
+
+    with authority_effect_fence():
+        pending = invites.peek_invite(token)
+        if pending is None:
+            return None
+        target = principal.principal if principal is not None else f"user:{pending.email}"
+        if ((principal is not None and not _matches_invited_account(principal, pending))
+                or not _global_invite_issuer_allowed(pending)
+                or not _workspace_invite_allowed(pending, target)):
+            return None
+        consumed = invites.consume_invite(token, used_by=target)
+        if consumed is None:
+            return None
+        try:
+            _bind_role(target, consumed)
+        except Exception as exc:
+            # Two distinct control-plane stores cannot commit atomically. Burn
+            # the bearer token on uncertainty rather than let it grant another
+            # identity; tell the person to request a replacement link.
+            log.exception("invitation role binding failed after redemption")
+            raise _InviteBindFailed from exc
+        return consumed
+
+
+def _matches_invited_account(principal, inv) -> bool:
+    """An SSO invite can bind only the email asserted for this login."""
+    from .oidc_login import _normalized_invite_email
+
+    claims = principal.claims or {}
+    asserted = _normalized_invite_email(claims.get("idp_email"))
+    return bool(asserted) and asserted == inv.email.casefold()
+
+
+def _wrong_account() -> HTMLResponse:
+    return _page("Use the invited account",
+                 "<p>Sign in with the email address on this invitation. Your "
+                 "company sign-in must share that address with Lightwork. "
+                 "The invitation link has not been used.</p>", status=403)
+
+
+def _bind_failed() -> HTMLResponse:
+    return _page("Invitation could not be completed",
+                 "<p>Access could not be saved. Ask your workspace administrator "
+                 "for a new invitation link.</p>", status=503)
+
+
+def _scope_label(inv) -> str:
+    if not inv.tenant:
+        return "this Lightwork dashboard"
+    from maverick.tenant.registry import get_tenant
+
+    workspace = get_tenant(inv.tenant)
+    name = (workspace.display_name or workspace.id) if workspace else inv.tenant
+    return f"the {html.escape(name)} workspace"
 
 
 @router.get("/auth/invite/{token}")
@@ -103,10 +220,11 @@ async def invite_confirm(request: Request, token: str):
     if inv is None:
         return _gone()
     email = html.escape(inv.email)
+    scope = _scope_label(inv)
     if invites.local_login_mode():
         return _page("You're invited",
-                     f"<p>This invitation signs you in to this Lightwork "
-                     f"dashboard as <code>{email}</code> with the "
+                     f"<p>This invitation signs you in to {scope} "
+                     f"as <code>{email}</code> with the "
                      f"<code>{html.escape(inv.role)}</code> role.</p>"
                      f"<form method='post'><button type='submit'>"
                      f"Accept invitation</button></form>")
@@ -114,17 +232,24 @@ async def invite_confirm(request: Request, token: str):
     if principal is None:
         # SSO mode, not signed in yet: sign in first, then land back here.
         target = quote(f"/auth/invite/{token}", safe="/")
+        from maverick.oidc import login_enabled
+
+        from .saml import saml_enabled
+
+        login_path = "/auth/login" if login_enabled() else "/saml/login" if saml_enabled() else "/auth/login"
         return _page("You're invited",
                      f"<p>This invitation (for <code>{email}</code>) grants the "
-                     f"<code>{html.escape(inv.role)}</code> role on this "
-                     f"Lightwork dashboard.</p>"
-                     f"<p><a href='/auth/login?return_to={target}'>Sign in with "
+                     f"<code>{html.escape(inv.role)}</code> role in "
+                     f"{scope}.</p>"
+                     f"<p><a href='{login_path}?return_to={target}'>Sign in with "
                      f"your company account to accept</a></p>")
+    if not _matches_invited_account(principal, inv):
+        return _wrong_account()
     return _page("Accept invitation",
                  f"<p>Signed in as <code>{html.escape(principal.sub)}</code>. "
                  f"Accepting binds this account to the "
                  f"<code>{html.escape(inv.role)}</code> role "
-                 f"(invitation sent to <code>{email}</code>).</p>"
+                 f"in {scope} (invitation sent to <code>{email}</code>).</p>"
                  f"<form method='post'><button type='submit'>"
                  f"Accept invitation</button></form>")
 
@@ -139,12 +264,11 @@ async def invite_accept(request: Request, token: str):
                                 "invitation link directly and try again.</p>",
                      status=400)
     if invites.local_login_mode():
-        inv = invites.consume_invite(token)
-        if inv is None:
-            return _gone()
         try:
-            _bind_role(f"user:{inv.email}", inv)
-        except ValueError:  # pragma: no cover - role validated at mint time
+            inv = _consume_and_bind(token)
+        except _InviteBindFailed:
+            return _bind_failed()
+        if inv is None:
             return _gone()
         log.info("invite accepted (local): %s as %s", inv.email, inv.role)
         response = RedirectResponse("/", status_code=303)
@@ -158,12 +282,16 @@ async def invite_accept(request: Request, token: str):
         return _page("Sign in required",
                      "<p>Sign in with your company account first, then reopen "
                      "the invitation link.</p>", status=401)
-    inv = invites.consume_invite(token, used_by=principal.principal)
-    if inv is None:
+    pending = invites.peek_invite(token)
+    if pending is None:
         return _gone()
+    if not _matches_invited_account(principal, pending):
+        return _wrong_account()
     try:
-        _bind_role(principal.principal, inv)
-    except ValueError:  # pragma: no cover - role validated at mint time
+        inv = _consume_and_bind(token, principal)
+    except _InviteBindFailed:
+        return _bind_failed()
+    if inv is None:
         return _gone()
     log.info("invite accepted (sso): %s bound to %s (invite for %s)",
              principal.principal, inv.role, inv.email)

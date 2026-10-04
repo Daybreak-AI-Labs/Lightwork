@@ -833,3 +833,78 @@ def test_copilot_context_does_not_claim_evidence_or_agent_status_verifies_readin
 def test_copilot_input_contract_rejects_extra_or_unbounded_data(payload: dict) -> None:
     with pytest.raises(ValidationError):
         CopilotIn.model_validate(payload)
+
+
+def test_task_detail_uses_current_authorized_record_without_model_or_history(client, monkeypatch):
+    from maverick_dashboard import api, auth
+    from maverick_dashboard import app as dashboard_app
+
+    task = SimpleNamespace(id=7, title="Private planning task", status="failed",
+                           result="provider_error:rate_limit", owner="alice")
+    monkeypatch.setattr(dashboard_app, "_world", lambda: SimpleNamespace(
+        get_goal=lambda identifier: task if identifier == 7 else None,
+    ))
+
+    def allow_read(request, goal):
+        assert request.method == "GET" and goal is task
+
+    monkeypatch.setattr(auth, "assert_goal_access", allow_read)
+    page = "/goals/7/errors"
+    context = client.get("/api/v1/copilot/context", params={"page": page})
+    assert context.status_code == 200
+    assert context.headers["cache-control"] == "private, no-store"
+    assert "Private planning task’ has status: failed" in context.json()["summary"]
+    assert "The AI service is busy" in context.json()["summary"]
+
+    monkeypatch.setattr(api, "_copilot_model_route_status", lambda: pytest.fail("record sent to model route"))
+    answer = client.post("/api/v1/copilot", json={"page": page, "message": "What should I check here?"})
+    assert answer.status_code == 200
+    body = answer.json()
+    assert body["mode"] == "live"
+    assert "Private planning task’ has status: failed" in body["reply"]
+    assert "The AI service is busy" in body["reply"]
+    assert "conversation_token" not in body
+
+
+def test_task_detail_denial_matches_missing_record(client, monkeypatch):
+    from maverick_dashboard import app as dashboard_app
+    from maverick_dashboard import auth
+
+    task = SimpleNamespace(id=8, title="Another person's task", status="failed", owner="bob")
+    monkeypatch.setattr(dashboard_app, "_world", lambda: SimpleNamespace(
+        get_goal=lambda identifier: task if identifier == 8 else None,
+    ))
+    monkeypatch.setattr(auth, "assert_goal_access", lambda _request, _goal: (
+        (_ for _ in ()).throw(HTTPException(404, "no such goal"))
+    ))
+    for page in ("/goals/8/errors", "/goals/9/errors"):
+        response = client.get("/api/v1/copilot/context", params={"page": page})
+        assert response.status_code == 404
+        assert "Another person's task" not in response.text
+        response = client.post("/api/v1/copilot", json={"page": page, "message": "What happened here?"})
+        assert response.status_code == 404
+        assert "Another person's task" not in response.text
+
+
+def test_flow_run_detail_checks_owner_and_path_before_showing_state(client, monkeypatch):
+    from maverick import flow
+    from maverick_dashboard import api, auth
+
+    monkeypatch.setattr(flow, "enabled", lambda: True)
+    monkeypatch.setattr(auth, "has_permission", lambda _request, permission: permission == "operate")
+    run = SimpleNamespace(flow_id="my-flow", status="paused_approval", error="private connector output")
+    monkeypatch.setattr(api, "_load_owned_run", lambda _request, _run_id, **_kwargs: run)
+    run_id = "a" * 32
+    page = f"/flows/my-flow/runs/{run_id}"
+    response = client.get("/api/v1/copilot/context", params={"page": page})
+    assert response.status_code == 200
+    assert "waiting for a person's decision" in response.json()["summary"]
+    assert "private connector output" not in response.text
+    monkeypatch.setattr(api, "_copilot_model_route_status", lambda: pytest.fail("run sent to model route"))
+    answer = client.post("/api/v1/copilot", json={"page": page, "message": "What is this run's status?"})
+    assert answer.status_code == 200
+    assert "waiting for a person's decision" in answer.json()["reply"]
+    assert "conversation_token" not in answer.json()
+    assert "private connector output" not in answer.text
+    mismatch = client.get("/api/v1/copilot/context", params={"page": f"/flows/other/runs/{run_id}"})
+    assert mismatch.status_code == 404

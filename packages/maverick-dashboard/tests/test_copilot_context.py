@@ -4,6 +4,7 @@ import pytest
 from maverick_dashboard import copilot_context
 
 CANONICAL_CONTEXTS = {
+    "/chat": "Chat",
     "/commitment-reviews": "Promise reviews",
     "/workflows": "Flows",
     "/agents": "Specialists",
@@ -161,6 +162,35 @@ def test_unknown_or_malicious_page_uses_generic_fallback(page: object) -> None:
 
 def test_benign_outer_whitespace_is_normalized() -> None:
     assert copilot_context.context_for_page("  /consent  ").path == "/consent"
+
+
+@pytest.mark.parametrize(
+    ("page", "title"),
+    [
+        ("/goals/3", "Task result"),
+        ("/goals/3/plan", "Task plan"),
+        ("/goals/3/trajectory", "Task timeline"),
+        ("/goals/3/errors", "Task errors"),
+        ("/chat/goal/3", "Current chat task"),
+        ("/flows/designer/my-flow", "Flow designer"),
+        ("/flows/my-flow/runs/" + "a" * 32, "Flow run"),
+        ("/settings/all", "All settings"),
+    ],
+)
+def test_major_detail_routes_have_page_specific_guidance(page: str, title: str) -> None:
+    context = copilot_context.context_for_page(page)
+    assert context.path == page
+    assert context.title == title
+    assert context.summary != copilot_context.context_for_page("/").summary
+
+
+@pytest.mark.parametrize("page", [
+    "/goals/0", "/goals/3/extra", "/goals/3%2ferrors", "/chat/goal/3/errors",
+    "/flows/designer/../other", "/flows/f1/runs/not-a-run",
+    "/flows/f1/runs/" + "a" * 32 + "/extra",
+])
+def test_invalid_detail_routes_do_not_get_record_guidance(page: str) -> None:
+    assert copilot_context.context_for_page(page).path == "/"
 
 
 @pytest.mark.parametrize(

@@ -501,6 +501,7 @@ def _page_role(request: Request, *, global_scope: bool = False) -> str | None:
 def _nav_context(request: Request) -> dict:
     from . import ui_visibility
     from .api import _shared_halt_backend
+    from .auth import api_key_permissions, api_key_scopes
 
     role = _page_role(request)
     scope_roles = {"global": _page_role(request, global_scope=True)}
@@ -512,9 +513,27 @@ def _nav_context(request: Request) -> dict:
 
     unavailable = {path for path, admin in (("/companion", False), ("/companion/admin", True))
                    if not navigation_available(request, admin=admin)}
+    key_permissions = api_key_permissions(request)
+    key_scopes = api_key_scopes(request)
+
+    def key_can_open(link: dict) -> bool:
+        if key_permissions is None:
+            return True
+        page = ui_visibility.page_for(link["href"])
+        if page is None:
+            return False
+        permission = ui_visibility._permission(page, "floor")
+        if permission not in key_permissions:
+            return False
+        if permission == "operate":
+            scope = "approvals:decide" if page["path"] == "/approvals" else "tasks:write"
+            return key_scopes is not None and ("admin" in key_scopes or scope in key_scopes)
+        return True
+
     for collection in (groups, finder):
         for group in collection:
-            group["links"] = [link for link in group["links"] if link["href"] not in unavailable]
+            group["links"] = [link for link in group["links"]
+                              if link["href"] not in unavailable and key_can_open(link)]
         collection[:] = [group for group in collection if group["links"]]
     # The topbar's Settings gear follows the same policy as the sidebar entry.
     show_settings = any(link["href"] == "/settings" for g in groups for link in g["links"])
@@ -6972,7 +6991,8 @@ async def agents_page(request: Request) -> HTMLResponse:
         request,
         "agents.html",
         {"agents": agents, "rejected_agents": rejected_agents,
-         "selected": selected, "editable": editable, "creating": creating},
+         "selected": selected, "editable": editable, "creating": creating,
+         "can_set_model_cost_tier": has_global_permission(request, "admin")},
     )
 
 

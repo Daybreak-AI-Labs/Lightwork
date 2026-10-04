@@ -16,6 +16,8 @@
   var hello = document.getElementById("mv-copilot-hello");
   var sendButton = document.getElementById("mv-copilot-send");
   var clearButton = document.getElementById("mv-copilot-clear");
+  var current = document.getElementById("mv-copilot-current");
+  var pageTriggers = Array.prototype.slice.call(document.querySelectorAll("[data-copilot-toggle]"));
   if (!fab || !panel || !closeButton || !tips || !prompts || !log ||
       !form || !input || !note || !sendButton || !clearButton || !providerSetup) return;
 
@@ -155,6 +157,10 @@
 
   function renderContext(context) {
     var selected = context && typeof context === "object" ? context : fallback;
+    if (current) {
+      current.hidden = !document.body.classList.contains("chat-shell") || selected === fallback || !selected.summary;
+      current.textContent = current.hidden ? "" : String(selected.summary);
+    }
     clear(tips);
     (selected.boundaries || fallback.boundaries).slice(0, 3).forEach(function (text) {
       var item = document.createElement("li");
@@ -371,6 +377,7 @@
     opener = document.activeElement;
     panel.hidden = false;
     fab.setAttribute("aria-expanded", "true");
+    pageTriggers.forEach(function (trigger) { trigger.setAttribute("aria-expanded", "true"); });
     loadContext();
     verifyScope(generation).catch(function () { note.textContent = "Current workspace could not be checked. Your draft will not be sent until access is confirmed."; });
     loadOperations(generation);
@@ -385,10 +392,20 @@
     if (window.LightworkProductOperations) window.LightworkProductOperations.close();
     panel.hidden = true;
     fab.setAttribute("aria-expanded", "false");
+    pageTriggers.forEach(function (trigger) { trigger.setAttribute("aria-expanded", "false"); });
     if (opener && opener.isConnected && typeof opener.focus === "function") opener.focus();
   }
 
   fab.addEventListener("click", function () { panel.hidden ? open() : close(); });
+  pageTriggers.forEach(function (trigger) {
+    trigger.addEventListener("click", function () {
+      if (document.body.classList.contains("cs-drawer-open")) {
+        var closeMenu = document.getElementById("cs-menu-close");
+        if (closeMenu) closeMenu.click();
+      }
+      panel.hidden ? open() : close();
+    });
+  });
   closeButton.addEventListener("click", close);
   document.addEventListener("keydown", function (event) {
     if (event.key === "Escape" && !panel.hidden) {

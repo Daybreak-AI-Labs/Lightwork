@@ -1297,12 +1297,13 @@
         {% if editable %}<p><a href="#agent-autonomy" id="jc-autonomy-open">Review independence settings</a></p>{% endif %}
       </div>
       <div class="jc-cards" id="jc-stats"></div>
+      <p class="muted" id="jc-stats-note">Finishing a run does not prove the result was useful. Approved deliverables require a person's sign-off; this card does not estimate savings or return on investment without customer evidence.</p>
       <div class="jc-sec"><h3>Cost level</h3>
         <div class="jc-tier">
           <span class="jc-band" id="jc-band"></span>
           <span class="sub" id="jc-model"></span>
           <span style="margin-inline-start:auto;"></span>
-          <label class="sub" for="jc-band-set">Cost level</label>
+          {% if can_set_model_cost_tier %}<label class="sub" for="jc-band-set">Cost band for this model across Lightwork</label>
           <select id="jc-band-set" class="ctl">
             <option value="">Automatic</option>
             <option value="low">Low</option>
@@ -1310,7 +1311,9 @@
             <option value="high">High</option>
             <option value="very_high">Very High</option>
           </select>
+          {% endif %}
         </div>
+        <p class="muted">This is the configured agent route now. A task can use a different model when routing or a task override applies.{% if can_set_model_cost_tier %} Changing its cost band affects every specialist and workspace that uses that model.{% endif %}</p>
       </div>
       <div class="jc-sec"><h3>Mission</h3><p id="jc-mission"></p></div>
       <div class="jc-sec"><h3>Responsibilities</h3><ol class="jc-steps" id="jc-resp"></ol></div>
@@ -1338,7 +1341,13 @@
     }
     function stat(n,l){ return '<div class="jc-stat"><div class="n">'+n+
       '</div><div class="l">'+l+'</div></div>'; }
-    function money(v){ return v==null?'—':'$'+Number(v).toLocaleString(undefined,{maximumFractionDigits:0}); }
+    function money(v){
+      if(v==null) return '—';
+      var amount=Number(v);
+      if(!Number.isFinite(amount)) return '—';
+      if(amount>0&&amount<0.01) return '<$0.01';
+      return '$'+amount.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
+    }
     function render(d){
       var jd=d.job_description||{}, sc=d.scorecard||{}, ct=d.cost_tier||{};
       el('jc-name').textContent=jd.name||NAME;
@@ -1354,16 +1363,15 @@
       chips(el('jc-tools'), (jd.tools||[]).map(function(t){ return window.mvHuman?mvHuman(t):t; }));
       chips(el('jc-guard'), jd.guardrails, 'deny');
       el('jc-stats').innerHTML =
-        stat(money(sc.value), 'Value delivered') +
-        stat(money(sc.cost), 'Cost') +
-        stat(sc.roi_multiple!=null?(sc.roi_multiple+'×'):'—', 'ROI') +
-        stat(sc.success_rate!=null?(sc.success_rate+'%'):'—', 'Success rate');
-      var band=ct.band||'medium';
-      var b=el('jc-band'); b.className='jc-band '+band; b.textContent=(ct.label||band)+' cost';
-      el('jc-model').textContent=(ct.overridden?'Set by hand':'Chosen automatically')+
-        (ct.blended_rate!=null?(' · about $'+ct.blended_rate.toFixed(1)+' per million words'):'');
-      el('jc-band-set').value=ct.overridden?band:'';
-      el('jc-band-set').dataset.model=ct.model||'';
+        stat(Number(sc.runs)||0, 'Runs') +
+        stat(Number(sc.completed)||0, 'Finished runs') +
+        stat(Number(sc.delivered)||0, 'Approved deliverables') +
+        stat(money(sc.cost), 'AI cost');
+      var band=ct.band||'unknown';
+      var b=el('jc-band'); b.className='jc-band '+band; b.textContent=ct.model?(ct.label||band)+' cost':'Model unavailable';
+      el('jc-model').textContent=ct.model?('Configured agent model: '+ct.model):'The configured model could not be checked.';
+      var bandSet=el('jc-band-set');
+      if(bandSet){bandSet.value=ct.overridden?band:'';bandSet.dataset.original=bandSet.value;bandSet.dataset.model=ct.model||'';bandSet.disabled=!ct.model;}
     }
     function open(){
       dlg.showModal();
@@ -1376,19 +1384,21 @@
     var autoLink=el('jc-autonomy-open'); if(autoLink) autoLink.addEventListener('click', function(){ dlg.close(); });
     el('jc-close').addEventListener('click', function(){ dlg.close(); });
     dlg.addEventListener('click', function(e){ if(e.target===dlg) dlg.close(); });
-    el('jc-band-set').addEventListener('change', function(){
+    var bandSet=el('jc-band-set'); if(bandSet)bandSet.addEventListener('change', async function(){
       var model=this.dataset.model; if(!model) return;
       var band=this.value||null;
+      var before=this.dataset.original||'';
+      if(!(await mvConfirm('Change the cost band for '+model+' across every specialist and workspace that uses it?', {okText:'Change cost band'}))){this.value=before;return;}
       fetch('/api/v1/model-cost-tiers', {method:'POST',
         headers:{'Content-Type':'application/json'},
         body:JSON.stringify({model:model, band:band})})
         .then(function(r){ if(r.ok) return r.json(); throw r; })
         .then(function(ct){
           var b=el('jc-band'); b.className='jc-band '+ct.band; b.textContent=(ct.label||ct.band)+' cost';
-          el('jc-model').textContent=(ct.overridden?'Set by hand':'Chosen automatically')+
-            (ct.blended_rate!=null?(' · about $'+ct.blended_rate.toFixed(1)+' per million words'):'');
+          el('jc-model').textContent='Configured agent model: '+ct.model;
+          bandSet.dataset.original=band||'';
         })
-        .catch(function(e){ window.mvFail ? mvFail(e, 'change the cost level') : null; });
+        .catch(function(e){ bandSet.value=before; window.mvFail ? mvFail(e, 'change the cost level') : null; });
     });
   })();
   </script>

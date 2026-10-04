@@ -135,6 +135,7 @@
   </div>
   </fieldset>
 </form>
+<p id="chat-stop-note" class="cs-dock__note" role="status" hidden>{{ ui('Work is paused. Your message is still here; you can start it after work resumes.') }}</p>
 <p id="goal-error" role="alert" aria-live="assertive"
    style="display: none; margin: var(--space-3) 0 0; color: var(--danger); font-size: var(--text-sm); text-align: center;"></p>
 {% if can_create_goal and not flows_enabled %}

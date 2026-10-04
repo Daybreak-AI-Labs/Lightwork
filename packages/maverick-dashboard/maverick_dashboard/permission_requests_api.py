@@ -90,4 +90,5 @@ def submit(request: Request, body: SubmitIn):
 
 @router.post("/api/v1/access-requests/{identifier}/decision")
 def decide(request: Request, identifier: str, body: DecisionIn):
+    auth.require_api_key_scope(request, "approvals:decide")
     return _call(lambda: service.decide(request, identifier, body.expected_revision, body.decision, body.note))

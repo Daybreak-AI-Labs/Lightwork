@@ -40,6 +40,7 @@ from . import rbac
 from .auth import (
     caller_principal,
     has_global_permission,
+    require_api_key_scope,
     require_global_permission,
     require_permission,
     role_for_principal,
@@ -564,6 +565,7 @@ async def decide_request(
     request: Request,
     response: Response,
 ):
+    require_api_key_scope(request, "approvals:decide")
     tenant, actor, context = _binding(
         request,
         response,

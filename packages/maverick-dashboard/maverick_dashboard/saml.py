@@ -472,6 +472,22 @@ def _record_session_subject(identity: SamlIdentity) -> None:
         return
 
 
+def _saml_invite_email(identity: SamlIdentity) -> str:
+    """The current signed assertion's email for workspace invitation matching."""
+    from .oidc_login import _normalized_invite_email
+
+    attrs = identity.attributes or {}
+    for key in (
+        "email", "mail", "emailaddress", "emailAddress",
+        "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress",
+    ):
+        for value in attrs.get(key) or ():
+            email = _normalized_invite_email(value)
+            if email:
+                return email
+    return _normalized_invite_email(identity.name_id)
+
+
 # --- routes -----------------------------------------------------------------
 
 
@@ -642,6 +658,7 @@ async def saml_acs(request: Request):
         cookie = mint_browser_session(
             request, sub=identity.name_id, secret=secret, via="session", mfa=mfa,
             ttl=_SESSION_TTL,
+            extra={"idp_email": _saml_invite_email(identity)},
         )
     except SamlUnavailable as e:
         return _tx_error(str(e), status_code=503)

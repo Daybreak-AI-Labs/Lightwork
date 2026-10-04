@@ -109,6 +109,12 @@ def can_read_approval(request, approval, world=None) -> bool:
     if approval is None:
         return False
     from . import auth, settings_quorum
+    # Approval cards also appear in Oversight, Action Center and personal
+    # notifications. Those projections must honor the same key scope as the
+    # queue, even when the card belongs to the key's owner.
+    if (auth.api_key_permissions(request) is not None
+            and not auth.has_permission(request, "operate", api_scope="approvals:decide")):
+        return False
     if settings_quorum.is_settings_approval(approval) and auth.has_global_permission(request, "admin"):
         if settings_quorum.has_bound_admin_review(approval):
             return True

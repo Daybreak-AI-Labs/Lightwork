@@ -8,7 +8,7 @@ from __future__ import annotations
 from maverick import flow
 from maverick.flow import store
 
-from .auth import caller_principal, goal_owner_filter, has_permission
+from .auth import api_key_permissions, caller_principal, goal_owner_filter, has_permission
 
 SOURCE_LIMIT = 2000
 
@@ -56,8 +56,11 @@ def _assignee_fields_current(run) -> bool:
 
 def assigned_review_allowed(request, run) -> bool:
     """A named assignee may see only the current approval, never the owner's run."""
+    allowed = (has_permission(request, "operate", api_scope="approvals:decide")
+               if api_key_permissions(request) is not None
+               else has_permission(request, "operate"))
     if (run is None or run.status != "paused_approval"
-            or not has_permission(request, "operate")):
+            or not allowed):
         return False
     # Local auth-off access already uses the ordinary owner/legacy path.
     actor = caller_principal(request)
@@ -75,7 +78,10 @@ def assigned_review_allowed(request, run) -> bool:
 
 def pending_for_request(request, *, limit: int = SOURCE_LIMIT) -> dict:
     """Return only pauses this caller can actually review, with honest coverage."""
-    if not has_permission(request, "operate"):
+    allowed = (has_permission(request, "operate", api_scope="approvals:decide")
+               if api_key_permissions(request) is not None
+               else has_permission(request, "operate"))
+    if not allowed:
         return {"items": [], "coverage": "unavailable"}
     if not flow.enabled():
         return {"items": [], "coverage": "current"}

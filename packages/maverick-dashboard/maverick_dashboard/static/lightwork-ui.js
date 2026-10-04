@@ -607,6 +607,18 @@
       // is easy to miss; the banner names the state and offers the resume
       // action to people allowed to take it.
       const banner = document.getElementById('halt-banner');
+      const chatControls = typeof document.querySelector === 'function'
+        ? document.querySelector('form.composer[action="/chat/send"] fieldset.composer__controls')
+        : null;
+      const chatControlsInitiallyDisabled = !!(chatControls && chatControls.disabled);
+      const chatStopNote = document.getElementById('chat-stop-note');
+      let chatStopped = false;
+      function renderChatStop(state) {
+        if (state === 'armed' || state === 'partial') chatStopped = true;
+        else if (state === 'clear') chatStopped = false;
+        if (chatControls) chatControls.disabled = chatControlsInitiallyDisabled || chatStopped;
+        if (chatStopNote) chatStopNote.hidden = !chatStopped;
+      }
       function renderBanner(show) {
         if (!banner) return;
         banner.hidden = !show;
@@ -635,6 +647,7 @@
         if (window.LightworkI18n) window.LightworkI18n.set(label, copy);
         else { label.textContent = copy; label.lang = 'en'; label.dir = 'ltr'; }
         renderBanner(armed && !pending);
+        renderChatStop(state);
         if (canHalt) {
           pill.setAttribute('aria-pressed', known ? (armed ? 'true' : 'false') : 'mixed');
         } else {

@@ -526,6 +526,24 @@ def test_shared_halt_requires_admin(monkeypatch, tmp_path):
     assert r.status_code == 403
 
 
+def test_workspace_viewer_can_see_stop_without_incident_details(monkeypatch, tmp_path):
+    monkeypatch.setenv("MAVERICK_DASHBOARD_ADMINS", "")
+    c = _client(monkeypatch, tmp_path)
+    from maverick_dashboard import api, rbac
+
+    path = tmp_path / "HALT-viewer"
+    monkeypatch.setenv("MAVERICK_HALT_FILE", str(path))
+    monkeypatch.setattr(api, "_shared_halt_backend", lambda: False)
+    rbac.set_role("user:viewer-halt", "viewer")
+    _as(monkeypatch, "user:viewer-halt")
+    path.write_text('{"reason":"private incident","actor":"private actor"}', encoding="utf-8")
+
+    status = c.get("/api/v1/halt")
+    assert status.status_code == 200
+    assert status.json() == {"active": True, "scope": "local"}
+    assert c.delete("/api/v1/halt").status_code == 403
+
+
 def test_shared_halt_allows_admin(monkeypatch, tmp_path):
     # Dashboard admins retain the ability to toggle the global shared halt.
     monkeypatch.setenv("MAVERICK_DASHBOARD_ADMINS", "user:root")

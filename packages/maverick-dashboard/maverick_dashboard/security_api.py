@@ -497,7 +497,7 @@ async def decide_evidence(
     evidence_id: str,
     body: schemas.SecurityEvidenceDecisionIn,
 ) -> dict:
-    require_permission(request, "operate")
+    require_permission(request, "operate", api_scope="approvals:decide")
     ops = _ops()
     return await _ops_record_call(
         ops,
@@ -735,7 +735,7 @@ async def get_vendor(request: Request, vendor_id: str) -> dict:
 async def decide_vendor(
     request: Request, vendor_id: str, body: schemas.SecurityDecisionIn,
 ) -> dict:
-    require_permission(request, "operate")
+    require_permission(request, "operate", api_scope="approvals:decide")
     ops = _ops()
     return await _ops_record_call(
         ops,

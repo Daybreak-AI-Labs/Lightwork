@@ -22,7 +22,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from starlette.concurrency import run_in_threadpool
 from starlette.responses import JSONResponse
 
-from .auth import require_permission
+from .auth import require_api_key_scope, require_permission
 from .draft_api import context_for
 
 router = APIRouter(prefix="/vendor-onboarding", tags=["vendor-onboarding"])
@@ -337,6 +337,7 @@ async def upload_document(request: Request, case_id: str,
 
 @router.post("/cases/{case_id}/review")
 def review(request: Request, case_id: str, body: ReviewBody):
+    require_api_key_scope(request, "approvals:decide")
     return _call_case(_binding(request), "review", case_id, **body.model_dump())
 
 

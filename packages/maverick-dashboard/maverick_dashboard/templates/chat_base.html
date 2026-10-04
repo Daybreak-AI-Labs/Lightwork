@@ -99,6 +99,14 @@
     .cs-account a:hover { color: var(--text); }
     .cs-account .cs-spacer { flex: 1; }
     .cs-halt { padding: var(--space-2) var(--space-2) 0; }
+    .chat-shell > #mv-copilot-fab { display: none; }
+    .chat-shell > .mv-copilot {
+      top: 1rem; bottom: 1rem; right: 1rem; left: auto;
+      max-height: none; width: min(25rem, calc(100vw - 2rem));
+    }
+    [dir="rtl"] .chat-shell > .mv-copilot { right: auto; left: 1rem; }
+    .cs-topbar__copilot { display: inline-flex; align-items: center; gap: var(--space-1); }
+    .cs-topbar__copilot svg { width: 1rem; height: 1rem; fill: none; stroke: currentColor; stroke-width: 1.5; }
 
     /* ---- composer (shared by the landing and the thread) ---- */
     .composer, .ask {
@@ -185,7 +193,12 @@
       body.cs-drawer-open .cs-side { visibility: visible; transform: none; transition: transform 0.18s ease; }
       body.cs-drawer-open .cs-backdrop { display: block; position: fixed; inset: 0; z-index: 55; background: var(--scrim, rgba(0,0,0,.45)); }
       .cs-side__close { display: flex; }
+      .chat-shell > .mv-copilot {
+        top: 3.6rem; bottom: .65rem; right: .65rem; left: .65rem; width: auto;
+      }
+      [dir="rtl"] .chat-shell > .mv-copilot { right: .65rem; left: .65rem; }
     }
+    @media (max-width: 480px) { .cs-topbar__copilot span { display: none; } }
     @media (prefers-reduced-motion: reduce) { .cs-side { transition: none !important; } }
     @media (prefers-reduced-motion: no-preference) {
       .cs-anim { opacity: 0; transform: translateY(8px); animation: csUp 0.4s ease forwards; }
@@ -252,7 +265,11 @@
       {% from "_chat_threads.html" import chat_threads with context %}
       {{ chat_threads(threads or []) }}
     </div>
-    {% with copilot_chat_shell=true %}{% include "_copilot.html" %}{% endwith %}
+    <button type="button" class="cs-item cs-item--button" data-copilot-toggle
+            aria-controls="mv-copilot" aria-expanded="false" aria-label="{{ ut('Open Copilot') }}">
+      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3.5h10v7H8l-3.5 2v-2H3z"/></svg>
+      {{ ui('Copilot') }}
+    </button>
     <div class="cs-halt">
       {% if can_halt %}
       <a href="#" id="halt-pill" class="halt-pill" role="button" data-can-halt="true"
@@ -282,6 +299,11 @@
     <div class="cs-topbar">
       <button type="button" class="btn btn--ghost" id="cs-menu" aria-controls="cs-side" aria-expanded="false">{{ ui("Menu") }}</button>
       <span class="cs-topbar__title">Lightwork</span>
+      <button type="button" class="btn btn--ghost cs-topbar__copilot" data-copilot-toggle
+              aria-controls="mv-copilot" aria-expanded="false" aria-label="{{ ut('Open Copilot') }}" title="{{ ut('Copilot') }}">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3.5h10v7H8l-3.5 2v-2H3z"/></svg>
+        <span>{{ ui('Copilot') }}</span>
+      </button>
       {% if show_personal_notifications %}<a class="iconbtn iconbtn--notifications personal-notification-link" href="/notifications"
          data-enabled="{{ 'true' if personal_notifications_enabled else 'false' }}"
          aria-label="Your notifications" title="Your notifications">
@@ -301,6 +323,7 @@
       </div>
     </div>
   </main>
+  {% include "_copilot.html" %}
 
   <div class="mv-toasts">
     <div id="mv-toasts-alert" class="mv-toasts__list" role="alert" aria-live="assertive" aria-atomic="false"></div>

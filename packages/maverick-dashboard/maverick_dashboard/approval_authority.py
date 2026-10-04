@@ -40,10 +40,19 @@ def require_approval_authority(
     resource: str,
     tenant: str | None = None,
 ) -> object:
-    """Require ``operate`` and record a non-sensitive denial when it is absent."""
-    from .auth import caller_principal, has_permission
+    """Require approval authority and record a non-sensitive denial when absent."""
+    from .auth import api_key_permissions, caller_principal, has_permission
 
-    if has_permission(request, "operate"):
+    # This authority also protects flow decisions and reviewed vendor actions
+    # whose URL is outside the main approval queue. Explicitly require the
+    # decision scope there; a task key must not inherit approval authority
+    # just because both scopes belong to the operator RBAC role. Credential
+    # minting uses this authority for attribution, not to decide an approval.
+    api_scope = None if action == "external_agents.credential_mint" else "approvals:decide"
+    allowed = (has_permission(request, "operate", api_scope=api_scope)
+               if api_key_permissions(request) is not None
+               else has_permission(request, "operate"))
+    if allowed:
         if action in {"approval.approve", "approval.deny", "approval.revise"}:
             from .content_access import require_approval_content
             row = require_approval_content(request, resource)

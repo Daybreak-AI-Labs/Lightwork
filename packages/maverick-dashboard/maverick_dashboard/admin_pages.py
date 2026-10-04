@@ -975,19 +975,28 @@ def _users_context(request: Request) -> dict:
     from . import rbac
     global_admin = auth.has_global_permission(request, "admin")
     workspace_options, wm_tenant = _workspace_options(request)
+    workspace_names = {option["id"]: option["name"] for option in workspace_options}
     if not global_admin:
-        # Do not even load the installation roster, invitations or department
-        # grants for a workspace administrator. Only current members of the
-        # workspaces they administer belong in the picker; new identities are
-        # invited by an installation administrator.
+        # Never expose the installation roster, global invitations or department
+        # grants to a workspace administrator. Invitation labels and pending
+        # links are limited to workspaces they currently administer.
+        from . import invites
         from .identity_format import role_label
+
+        try:
+            workspace_invites = [inv for inv in invites.list_invites()
+                                 if inv.tenant in workspace_names]
+        except invites.InviteStoreError:
+            workspace_invites = []
         member_rosters = {
             option["id"]: rbac.list_tenant_roles(option["id"])
             for option in workspace_options
         }
         members = {principal: role for roster in member_rosters.values()
                    for principal, role in roster.items()}
-        people = _people(members, {}, [])
+        labels = {principal: label for principal, label in _invite_labels(workspace_invites).items()
+                  if principal in members}
+        people = _people(members, labels, [])
         role_permissions = {r: sorted(rbac.permissions_for(r)) for r in rbac.known_roles()}
         workspace_role_options = {}
         for option in workspace_options:
@@ -1001,14 +1010,20 @@ def _users_context(request: Request) -> dict:
             "global_admin": False, "people": people,
             "people_labels": {p["principal"]: p["label"] for p in people},
             "role_labels": {r: role_label(r) for r in rbac.known_roles()},
-            "roles": rbac.known_roles(), "users": [], "invite_labels": {},
+            "roles": rbac.known_roles(), "users": [], "invite_labels": labels,
             "role_permissions": role_permissions,
             "workspace_role_options": workspace_role_options,
             "workspace_roles": workspace_role_options.get(wm_tenant, []),
             "workspace_member_count": len(member_rosters.get(wm_tenant, {})),
             "bootstrap_admins": [], "auth_on": True, "default_role": rbac.default_role(),
-            "you": auth.caller_principal(request), "saved": "",
+            "you": auth.caller_principal(request),
+            "saved": ("Workspace invitation revoked."
+                      if request.query_params.get("saved") == "workspace_invite_revoked" else ""),
             "workspace_options": workspace_options, "wm_tenant": wm_tenant,
+            "workspace_names": workspace_names,
+            "invites_on": invites.invites_enabled(),
+            "invite_sso_on": invites.invites_enabled() and not invites.local_login_mode(),
+            "workspace_pending_invites": [inv for inv in workspace_invites if inv.pending],
         }
     auth_on = (auth.caller_principal(request) is not None
                or oidc_enabled() or proxy_auth_enabled())
@@ -1100,10 +1115,14 @@ def _users_context(request: Request) -> dict:
         "default_suites": (sorted(default_suites)
                            if default_suites is not None else None),
         "invites_on": invites.invites_enabled(),
-        "pending_invites": [i for i in all_invites if i.pending],
+        "invite_sso_on": invites.invites_enabled() and not invites.local_login_mode(),
+        "pending_invites": [i for i in all_invites if i.pending and not i.tenant],
+        "workspace_pending_invites": [i for i in all_invites
+                                      if i.pending and i.tenant in workspace_names],
         "invite_labels": labels,
         "workspace_options": workspace_options,
         "wm_tenant": wm_tenant,
+        "workspace_names": workspace_names,
     }
 
 
@@ -1260,6 +1279,88 @@ def users_invite_revoke(request: Request,
     invites.revoke_invite(invite_id.strip())
     _admin_audit(request, "invite_revoked", invite_id=invite_id.strip())
     return RedirectResponse("/users?saved=invite_revoked", status_code=303)
+
+
+def _workspace_invite_authority(request: Request, tenant: str, role: str | None = None) -> bool:
+    """Authorize a workspace invitation against its exact workspace.
+
+    Return whether the caller is an installation administrator. Scoped callers
+    may offer only a role no more powerful than their current direct role.
+    """
+    from . import api, rbac
+
+    installation_admin = api._require_tenant_roles_admin(request, tenant)
+    if not api._get_tenant_or_404(tenant).active:
+        raise HTTPException(403, "This workspace is not active.")
+    if role is not None:
+        if not rbac.is_known_role(role):
+            raise HTTPException(400, "Choose an available role.")
+        if not installation_admin:
+            actor_role = rbac.get_tenant_role(tenant, auth.caller_principal(request))
+            if not rbac.permissions_for(role).issubset(rbac.permissions_for(actor_role)):
+                raise HTTPException(409, "Your workspace role cannot invite this level of access.")
+    return installation_admin
+
+
+@router.post("/users/workspace-invite", response_class=HTMLResponse)
+def users_workspace_invite(
+    request: Request, tenant: str = Form(...), email: str = Form(...), role: str = Form(...),
+) -> HTMLResponse:
+    """Create a single-use invitation for one existing workspace only."""
+    _app()._require_same_origin(request)
+    from maverick.authority_effects import authority_effect_fence
+
+    from . import api, invites
+
+    if not invites.invites_enabled():
+        raise HTTPException(404, "Invitations are not enabled.")
+    api._reject_tenant_role_assignment_under_per_user_tenancy()
+    _workspace_invite_authority(request, tenant, role)
+    step_up.require_recent_mfa(request, "change_role")
+    invited_by = auth.caller_principal(request) or "local-admin"
+    with authority_effect_fence():
+        installation_admin = _workspace_invite_authority(request, tenant, role)
+        try:
+            inv, token = invites.create_invite(
+                email, role, created_by=invited_by, tenant=tenant,
+                workspace_admin_invite=not installation_admin,
+            )
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+    link = str(request.base_url).rstrip("/") + f"/auth/invite/{token}"
+    _admin_audit(request, "workspace_invite_created", workspace=tenant,
+                 email=inv.email, role=inv.role)
+    sent, send_note = invites.send_invite_email(inv, link, invited_by=invited_by)
+    return _app().templates.TemplateResponse(request, "users.html", {
+        **_users_context(request), "workspace_invite_link": link,
+        "workspace_invite_email": inv.email, "workspace_invite_tenant": tenant,
+        "workspace_invite_sent": sent, "workspace_invite_send_note": send_note,
+    })
+
+
+@router.post("/users/workspace-invite/revoke")
+def users_workspace_invite_revoke(
+    request: Request, invite_id: str = Form(...),
+) -> RedirectResponse:
+    """Cancel a pending invite only when the caller administers its workspace."""
+    _app()._require_same_origin(request)
+    from maverick.authority_effects import authority_effect_fence
+
+    from . import invites
+
+    if not invites.invites_enabled():
+        raise HTTPException(404, "Invitations are not enabled.")
+    with authority_effect_fence():
+        invite = next((item for item in invites.list_invites()
+                       if item.id == invite_id.strip() and item.tenant and item.pending), None)
+        if invite is None:
+            raise HTTPException(404, "Invitation not found.")
+        _workspace_invite_authority(request, invite.tenant)
+        if not invites.revoke_invite(invite.id):
+            raise HTTPException(404, "Invitation not found.")
+    _admin_audit(request, "workspace_invite_revoked", workspace=invite.tenant,
+                 invite_id=invite.id)
+    return RedirectResponse("/users?saved=workspace_invite_revoked", status_code=303)
 
 
 @router.post("/users/suites/set")

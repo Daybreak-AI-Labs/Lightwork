@@ -56,18 +56,25 @@ function haltSource() {
   return source.slice(start, end);
 }
 
-function fixture(fetchImpl, { canHalt = true, haltTimeoutMs = 1000 } = {}) {
+function fixture(fetchImpl, { canHalt = true, haltTimeoutMs = 1000, chatHome = false } = {}) {
   const pill = new Element(canHalt);
   pill.dataset.haltTimeoutMs = String(haltTimeoutMs);
   const label = new Element(canHalt);
   const toasts = [];
   const confirms = [];
   const intervals = [];
+  const chatControls = chatHome ? { disabled: false } : null;
+  const chatStopNote = chatHome ? { hidden: true } : null;
+  const banner = chatHome ? { hidden: true, querySelector() { return null; } } : null;
   const context = {
     document: {
+      body: { classList: new ClassList() },
+      querySelector() { return chatControls; },
       getElementById(id) {
         if (id === "halt-pill") return pill;
         if (id === "halt-label") return label;
+        if (id === "halt-banner") return banner;
+        if (id === "chat-stop-note") return chatStopNote;
         return null;
       },
     },
@@ -87,11 +94,31 @@ function fixture(fetchImpl, { canHalt = true, haltTimeoutMs = 1000 } = {}) {
   return {
     pill,
     label,
+    chatControls,
+    chatStopNote,
+    banner,
     toasts,
     confirms,
     poll() { return intervals[0](); },
   };
 }
+
+test("verified emergency stop pauses the chat composer until a verified resume", async () => {
+  let armed = true;
+  const ui = fixture(async () => response({ active: armed, scope: "local" }),
+    { canHalt: false, chatHome: true });
+  await turn();
+  assert.equal(ui.banner.hidden, false);
+  assert.equal(ui.chatControls.disabled, true);
+  assert.equal(ui.chatStopNote.hidden, false);
+
+  armed = false;
+  await ui.poll();
+  await turn();
+  assert.equal(ui.banner.hidden, true);
+  assert.equal(ui.chatControls.disabled, false);
+  assert.equal(ui.chatStopNote.hidden, true);
+});
 
 async function turn() {
   await new Promise((resolve) => setImmediate(resolve));

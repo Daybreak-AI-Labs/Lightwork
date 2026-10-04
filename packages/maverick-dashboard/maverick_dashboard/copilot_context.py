@@ -159,6 +159,27 @@ _CONTEXTS = tuple(
     _ensure_read_only(context)
     for context in (
         CopilotPageContext(
+            path="/chat", title="Chat",
+            summary="Describe the work you want Lightwork to do, add files if helpful, and choose how to start it. You can return to recent chats from the menu.",
+            capabilities=(
+                "Start a task from your message, or draft a flow or specialist when those choices are available.",
+                "Attach files, review the task budget, and continue work in a saved chat.",
+            ),
+            boundaries=(
+                "Sending a message starts work and may use a paid AI service; spending limits and approval rules still apply.",
+                "Starting or continuing work depends on your access and whether an AI service is ready.",
+            ),
+            next_steps=(
+                "Describe the result you need, then add any useful files or details.",
+                "Check the budget and the choice beside Send before starting work.",
+            ),
+            suggested_questions=(
+                "What can I ask Lightwork to do here?",
+                "How do I add files to a task?",
+                "What happens when I send this message?",
+            ),
+        ),
+        CopilotPageContext(
             path="/commitment-reviews", title="Promise reviews",
             summary="Review whether two accepted orders can still be delivered with the capacity and materials your team reports.",
             capabilities=(
@@ -1704,6 +1725,28 @@ _DETAIL_PAGE_CONTEXTS: tuple[tuple[str, str, Pattern[str]], ...] = (
     ("/privacy/dsar/", "/privacy", compile_regex(r"DSAR-[0-9a-f]{10}\Z")),
 )
 
+_RECORD_DETAIL_ROUTES: tuple[tuple[str, Pattern[str]], ...] = (
+    ("task", compile_regex(r"/goals/([1-9][0-9]{0,17})(?:/(plan|trajectory|errors))?\Z")),
+    ("task_chat", compile_regex(r"/chat/goal/([1-9][0-9]{0,17})\Z")),
+    ("flow_designer", compile_regex(r"/flows/designer/([A-Za-z0-9_-]{1,120})\Z")),
+    ("flow_run", compile_regex(r"/flows/([A-Za-z0-9_-]{1,120})/runs/([0-9a-f]{32})\Z")),
+)
+
+
+def record_detail_for_page(page: object) -> tuple[str, tuple[str, ...]] | None:
+    """Recognize only bounded detail URLs issued by Lightwork routes."""
+
+    if not isinstance(page, str) or len(page) > 200:
+        return None
+    path = page.strip()
+    if not path.startswith("/") or path.startswith("//") or any(char in path for char in "?#\\"):
+        return None
+    for kind, pattern in _RECORD_DETAIL_ROUTES:
+        match = pattern.fullmatch(path)
+        if match:
+            return kind, tuple(match.groups(default=""))
+    return None
+
 
 def _canonical_context_path(path: str) -> str:
     """Map a valid server-issued detail route to its closed parent context."""
@@ -1782,6 +1825,47 @@ def context_for_page(page: object) -> CopilotPageContext:
         or "\\" in path
     ):
         return _GENERIC
+    detail = record_detail_for_page(path)
+    if detail is not None:
+        from dataclasses import replace
+
+        kind, parts = detail
+        if kind in {"task", "task_chat"}:
+            section = parts[1] if kind == "task" else ""
+            label = "Current chat task" if kind == "task_chat" else {"plan": "Task plan", "trajectory": "Task timeline", "errors": "Task errors"}.get(section, "Task result")
+            base = _registered_page_context("/goals")
+            assert base is not None
+            return replace(
+                base, path=path, title=label,
+                summary=("This conversation shows the current task, its answers and any next action."
+                         if kind == "task_chat" else f"This is a task's {section or 'result'} page. Check its current status before using a control."),
+                next_steps=("Review this task's current status and answer.", "Use the task tabs to inspect its plan, timeline, or errors."),
+                suggested_questions=("What is this task's status?", "What should I do next on this task?"),
+            )
+        if kind == "flow_designer":
+            base = _CONTEXT_BY_PATH["/workflows"]
+            return replace(
+                base, path=path, title="Flow designer",
+                summary="This is the visual designer for a saved flow. Review its steps and current setup before saving or running it.",
+                next_steps=("Review the saved flow's steps and inputs.", "Check required access and setup before saving or running it."),
+                suggested_questions=("What flow am I editing?", "What should I check before running this flow?"),
+            )
+        base = _CONTEXT_BY_PATH["/workflows"]
+        return replace(
+            base, path=path, title="Flow run",
+            summary="This is a saved flow run. Review its current state and step timeline before choosing a recovery action.",
+            next_steps=("Check this run's current status and step timeline.", "If a step failed or paused, review its native details before retrying or approving."),
+            suggested_questions=("What is this run's status?", "What should I check before retrying this run?"),
+        )
+    if path == "/settings/all":
+        return CopilotPageContext(
+            path=path, title="All settings",
+            summary="Browse installation settings by group, search for a setting, and review saved values and their source.",
+            capabilities=("Find and review installation settings available to administrators.", "Save or reset a setting through its reviewed page controls."),
+            boundaries=("Only an installation administrator may open or change these settings.", _READ_ONLY_BOUNDARY),
+            next_steps=("Open a group or search for the setting you need.", "Review the saved value, its source, and any restart note before making a change."),
+            suggested_questions=("How do I find a setting?", "What happens when I reset a setting?"),
+        )
     canonical = _canonical_context_path(path)
     return _CONTEXT_BY_PATH.get(canonical) or _registered_page_context(canonical) or _GENERIC
 
@@ -1790,6 +1874,7 @@ def context_for_page(page: object) -> CopilotPageContext:
 # the server's model context; implementation details do not need to fill the
 # three visible tip slots on every page.
 _PANEL_TIPS = {
+    "/chat": "A chat starts work when you send it. Check your budget and what Lightwork will create first.",
     "/commitment-reviews": "These estimates use your team's inputs. They do not check supplier stock or reserve capacity.",
     "/workflows": "The guide can explain a flow. Use the designer to create or change one.",
     "/agents": "A Can start label checks required actions. Connections, access and the AI service are checked when work starts.",

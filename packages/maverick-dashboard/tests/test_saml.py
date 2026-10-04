@@ -279,7 +279,8 @@ def test_acs_verifies_sets_session_and_redirects(_enabled, monkeypatch):
         seen["response"] = response
         seen["request_id"] = request_id
         return saml_mod.SamlIdentity(
-            name_id="alice@example.com", assertion_id="assertion-login-1"
+            name_id="opaque-name-id", attributes={"mail": ["alice@example.com"]},
+            assertion_id="assertion-login-1"
         )
 
     monkeypatch.setattr(
@@ -300,7 +301,8 @@ def test_acs_verifies_sets_session_and_redirects(_enabled, monkeypatch):
     cookie = res.cookies.get("mvk_session")
     assert cookie
     payload = verify_session(cookie, SECRET)
-    assert payload["sub"] == "alice@example.com"
+    assert payload["sub"] == "opaque-name-id"
+    assert payload["idp_email"] == "alice@example.com"
 
 
 def test_acs_rejects_replayed_assertion(_enabled, monkeypatch, tmp_path):

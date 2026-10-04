@@ -1666,15 +1666,15 @@ no images without alt, axe violations limited to nine distinct rules).
 
 #### UX-087 · P1 · Feature · Only one all-powerful shared bearer token for the whole REST API: no per-user/per-app API keys, scopes, expiry or overlap rotation
 
-- **October 4 current branch (partial):** Named, expiring, owner-bound API keys already provide rotation and revocation, with service accounts available alongside the static break-glass token. This change refuses API-key bearers at create, rotate, revoke and service-account create/disable routes, even when the bearer has an administrator scope; interactive sign-in and the legacy break-glass token remain credential-management paths. Key bearers may still list keys their role permits. The current scope-to-RBAC mapping is coarse: `tasks:write` and `approvals:decide` both grant every operator action, while `settings:write` grants administrator-gated actions. Split route-level action scopes before presenting these as least-privilege task-only or approval-only keys. Local API tests cover the credential-mutation denial; installed integration acceptance remains open.
+- **October 4 current branch (partial):** Named, expiring, owner-bound API keys provide rotation and revocation, with service accounts alongside the static break-glass token. API-key bearers cannot create, rotate or revoke keys, or create or disable service accounts, even with `admin`; interactive sign-in and the legacy break-glass token remain credential-management paths. Key bearers may still list keys their role permits. Action checks now separate the shared approval queue, paused workflow decisions and selected domain decisions (security evidence/vendor, consumer consent, employee content access, finance alerts, FRIA/PMM governance, vendor onboarding, access and knowledge requests): these require `approvals:decide`. An approval-only key cannot use unrelated operator-gated routes, while an `admin` key retains both capabilities within its owner's current role. Local tests cover cross-scope refusal, domain decision denial, approval-content projections, flow decision authority, owner demotion and credential-mutation denial. This is still partial: `tasks:write` reaches other operator actions, `settings:write` reaches administrator-gated controls beyond settings, and some domain decisions require a second task or admin scope. Other domain approvals remain to be scoped. Installed integration acceptance remains open.
 - **Who / where:** developer, IT/security, workspace admin · `Settings > All settings > Server access token ([dashboard] token / MAVERICK_DASHBOARD_TOKEN)`
-- **User impact:** Every integration (CI job, Zapier, mobile app, script) must share an admin-equivalent secret; you cannot tell which program made a call, cannot limit a script to read-only or one workspace, and rotating the token breaks every integration at once.
-- **Evidence (code-verified):**
+- **Original user impact:** Every integration (CI job, Zapier, mobile app, script) had to share an admin-equivalent secret; it was impossible to attribute, limit or overlap-rotate individual integrations.
+- **Original evidence (code-verified before the current branch):**
   - packages/maverick-dashboard/maverick_dashboard/_shared.py:43-58 — dashboard_token() returns ONE token (env or sealed [dashboard] token)
   - packages/maverick-dashboard/maverick_dashboard/settings_catalog_access.py:232-241 — 'Server access token' … warning: 'Programs using the old token will be refused, and anyone holding the new one can do everything an administrator can.'
   - packages/maverick-dashboard/maverick_dashboard/app.py:2271-2276 — bearer compared with hmac against that single value
   - grep -rli 'personal access token' packages/maverick-dashboard → only copy strings, no token-issuing store/route (per-agent tokens exist only for /api/v1/external via external-agents mint)
-- **Remaining work:** Enforce the advertised task, approval and settings scopes at each action route; qualify key attribution, overlap rotation, revocation and owner/role changes in an installed integration. Retain the explicit break-glass boundary.
+- **Remaining work:** Narrow `tasks:write` and `settings:write` to their advertised actions, scope remaining admin-gated and domain-specific approval routes, and review multi-scope decisions. Qualify key attribution, overlap rotation, revocation and owner/role changes in an installed integration. Retain the explicit break-glass boundary.
 - Source: C3-003
 
 #### UX-088 · P1 · Perf · Provider spend ledger grows by one never-pruned row per model call and is rewritten whole twice per call: accounting cost grows linearly, then all AI calls are blocked at 16 MB
@@ -2711,6 +2711,8 @@ no images without alt, axe violations limited to nine distinct rules).
 
 #### UX-094 · P2 · Trust · A specialist's job-card scorecard counts every finished run as 'delivered' and values it at an undisclosed $120 each, showing '100% success' and '26,785× ROI' after three unverified test runs
 
+- **October 4 partial fix:** The job card now separates run count, finished runs, and unique currently approved deliverables. It shows small AI costs to the cent and no longer displays a default dollar value, savings, ROI or fabricated success rate. An explicit comparison assumption remains possible for internal callers, but it is not customer value; measured outcomes and installed acceptance still need qualification.
+
 - **Who / where:** workspace admin, compliance, evaluator · `/agents?name=cx_triage -> View job card (GET /api/v1/agents/{name}/jobcard)`
 - **User impact:** Managers are shown fabricated-looking ROI and a perfect success rate for work that failed verification, which is exactly the evidence they would use to grant the specialist more independence or report value upward.
 - **Evidence (reproduced):**
@@ -2732,6 +2734,8 @@ no images without alt, axe violations limited to nine distinct rules).
 - Source: U3-017
 
 #### UX-158 · P2 · Bug · The job card's 'Cost level' reports a model the specialist does not run on (claude-sonnet-4-6 while every call went to the configured fake-model), and its selector silently changes a deployment-wide model setting
+
+- **October 4 partial fix:** The job card resolves the configured agent route with runtime overrides rather than the ignored pack declaration, shows the model name and says live routing may differ. Only installation administrators see the cost-band control, whose label and confirmation now state its installation-wide effect. A real routed run and a true per-specialist model choice remain open.
 
 - **Who / where:** workspace admin · `/agents?name=cx_triage -> View job card -> Cost level`
 - **User impact:** Admins make cost decisions from a model name that is not in use, and changing 'Cost level' on one specialist's card re-bands the model for every specialist and every workspace without saying so.
@@ -3461,7 +3465,7 @@ no images without alt, axe violations limited to nine distinct rules).
 
 #### UX-226 · P2 · Bug · Workspace-level administrators see 'Workspace members' controls on Users but the members API requires installation-wide admin, so they cannot list or change their own workspace's members
 
-- **October 4 current branch (partial):** A current workspace administrator can list, change and clear **existing direct members** in their active workspace through Users and the tenant-role API. The API rechecks the path workspace and current role at the change boundary, prevents grants beyond the administrator's own permissions, prevents clearing access into a broader global fallback, and blocks self-demotion/removal or loss of the final direct workspace administrator. The page offers only eligible existing members and roles. Inviting a new identity or assigning a first direct role still requires an installation administrator; this is delegated maintenance, not workspace-owned onboarding. Local API and UI tests cover the bounded path; authenticated installed-app use remains unverified.
+- **October 4 current branch (local verification):** A current workspace administrator can list, change and clear existing direct members in their active workspace through Users and the tenant-role API. The API rechecks the path workspace and current role at the change boundary, prevents grants beyond the administrator's own permissions, prevents clearing access into a broader global fallback, and blocks self-demotion/removal or loss of the final direct workspace administrator. Users now also issues and cancels single-use invitations for new identities in managed workspaces. The invite is scoped to that workspace, capped to the issuer's role, and checked again when accepted so a revoked or reduced issuer cannot grant access later. Installation administrators can invite the first member of an existing workspace; the Workspaces page already creates a new workspace with its first administrator invitation. Pending invitations from named installation administrators also require their current global authority before acceptance; principal-less local/static-token links keep their existing behavior. SSO acceptance requires a matching email asserted in the current session. Local Python and JavaScript tests pass; authenticated installed-app use remains unverified.
 - **Who / where:** workspace admin · `/users → Workspace members; /api/v1/admin/tenants/{id}/roles`
 - **User impact:** Delegated workspace owners (the whole point of per-workspace roles) get a permission error when adding a colleague, so every membership change escalates to the installation admin.
 - **Evidence (code-verified):**
@@ -3471,7 +3475,7 @@ no images without alt, axe violations limited to nine distinct rules).
   - [C5c-069] packages/maverick-dashboard/maverick_dashboard/admin_pages.py:612-640 — _workspace_options offers non-global admins the workspaces they belong to
   - [C5c-069] packages/maverick-dashboard/maverick_dashboard/static/lightwork-workspace-members.js:12 — calls /api/v1/admin/tenants/{id}/roles
   - [C5c-069] packages/maverick-dashboard/maverick_dashboard/api.py:1210-1256 — GET/PUT/DELETE roles require require_global_permission('admin')
-- **Remaining work:** Provide a governed path for onboarding a new identity or assigning its first direct workspace role if that responsibility is delegated; keep installation-wide identity/role changes under installation authority. Qualify the existing-member controls with authenticated installed workspace administrators.
+- **Remaining work:** Qualify the full invite and existing-member journeys with authenticated installed workspace administrators, including SSO providers that omit an email claim. Installation-wide identity/role changes remain with installation administrators. A role-store failure after one-time token redemption requires a fresh invitation.
 - Source: U5-040, C5c-069 · prior audit: map/12 D5
 
 #### UX-228 · P2 · Bug · Workspaces: two workspaces can have the same name ('Acme Finance' twice); the page's 'name already exists' message is dead code
@@ -3508,6 +3512,8 @@ no images without alt, axe violations limited to nine distinct rules).
 - Source: U5-021
 
 #### UX-291 · P2 · Ux · During an emergency stop the chat home shows no stopped banner; a user's new request immediately fails as 'Lightwork stopped — halted' with a 'Try again' button that cannot work
+
+- **October 4 partial fix:** The read-only stop status is now visible to authorized workspace readers, without exposing incident details or granting stop controls. A verified stop shows the Chat banner, holds the new-task composer and preserves its draft until a verified resume. Goal restart and queued-follow-up controls still need installed-app stop/resume acceptance.
 
 - **Who / where:** end user, workspace admin · `/ (chat home) while /api/v1/halt active`
 - **User impact:** Business users keep submitting work into a stopped system, see the internal word 'halted', and retry pointlessly; nothing tells them an administrator paused all work or when it will resume.
@@ -4344,6 +4350,8 @@ no images without alt, axe violations limited to nine distinct rules).
 
 #### UX-284 · P2 · Ux · Copilot is absent from the landing Chat page and all chat conversations — the pages a new user sees first
 
+- **October 4 current branch (partial):** Chat now exposes Copilot from its desktop sidebar, mobile top bar and the current task page. The panel sits outside the mobile menu's hidden subtree, returns focus to the opener and shows a plain page summary or the authorized task title and status. A synthetic desktop/mobile browser journey passed. Whole-platform task actions and installed-app acceptance remain open.
+
 - **Who / where:** end user, evaluator · `/ , /chat, /chat/goal/{id} (chat_base.html)`
 - **User impact:** A user stuck on the home/chat page (including a failed task) has no in-product helper to ask; Copilot only appears after they navigate into the dashboard.
 - **Evidence (reproduced):**
@@ -4353,6 +4361,8 @@ no images without alt, axe violations limited to nine distinct rules).
 - Source: U8-009
 
 #### UX-285 · P2 · Ux · Copilot treats every record/detail page (a task, a flow run, All settings) as the generic home page, so it doesn't know which record the user is looking at
+
+- **October 4 current branch (partial):** Valid task, chat-task, flow designer and flow-run routes plus All settings now receive distinct page guidance. Task and flow details are re-read with the native access checks; visible record context stays in a local reply and never enters an external model prompt or later guide history. Installed, interactive record actions and broader detail-page coverage remain open.
 
 - **Who / where:** end user, workspace admin · `GET /api/v1/copilot/context for /goals/{id}, /flows/{id}/runs/{id}, /settings/all, /chat/goal/{id}`
 - **User impact:** On the page where a user most needs help — a specific failed task or run — Copilot answers 'Lightwork is a governed work and assurance platform…'.
@@ -4404,6 +4414,8 @@ no images without alt, axe violations limited to nine distinct rules).
 - Source: U8-023 · prior audit: W3-4
 
 #### UX-294 · P2 · Ux · A provider failure offers the wrong remedy: the halt card's only options are 'Try again' and 'Set a spending limit for this attempt'
+
+- **October 4 partial fix:** The spending control is hidden unless the stop was classified as a spending limit. An unavailable AI service now tells the user to retry when service returns or ask an administrator to check the connection; it does not send a viewer to an administrator-only page. A live provider outage and its recovery have not been checked in an installed app.
 
 - **Who / where:** end user · `/chat/goal/{id} halt card`
 - **User impact:** Users are nudged to change their budget when the problem is an unreachable or misconfigured provider; 'Try again' immediately re-fails during an outage.
@@ -7689,12 +7701,11 @@ no images without alt, axe violations limited to nine distinct rules).
 
 #### UX-123 · P2 · Trust · With SSO on, an invitation link grants its role (possibly global) to whoever signs in with it, regardless of the invited email
 
+- **October 4 current branch (local verification):** Workspace and installation-wide SSO invitations now require the current signed-in provider session to assert the invited email before redemption. A different or missing address leaves the link unused. OIDC and SAML sign-in capture the address from the current signed token or assertion; local invite login still treats the link itself as the credential. Local tests pass; provider-specific installed acceptance remains unverified.
 - **Who / where:** IT/security, workspace admin · `/auth/invite/{token} accept`
-- **User impact:** A forwarded or leaked admin invite gives admin to any person in the IdP; the confirm page even shows the mismatch but lets it through.
-- **Evidence (code-verified):**
-  - packages/maverick-dashboard/maverick_dashboard/invite_routes.py:156-170 — binds inv.role to the signed-in principal without comparing to inv.email (both are logged)
-  - map 13b D6: invites.py:12-14 'the link IS the credential'; _bind_role can grant global roles
-- **Recommendation (effort S):** In SSO mode require the IdP email to match the invite (configurable), or require an admin confirmation on mismatch.
+- **User impact (baseline):** A forwarded or leaked admin invite could give admin to any person in the IdP; the confirm page showed the mismatch but let it through.
+- **Evidence (code-verified):** The original `invite_routes.py` acceptance bound the signed-in principal without comparing the invited email. The current route checks the email asserted for the present SSO session before consuming either workspace or installation-wide invites; a mismatch leaves the token pending.
+- **Remaining work:** Qualify OIDC and SAML email-claim mappings with installed customer identity providers. A provider that omits an email address now needs a configuration change or a new login before its users can accept an invite.
 - Source: C5c-091
 
 #### UX-131 · P2 · Trust · Installing a plugin from the dashboard installs whatever version is latest on PyPI, unpinned and unhashed
@@ -8095,6 +8106,8 @@ no images without alt, axe violations limited to nine distinct rules).
 - Source: C5c-027
 
 #### UX-288 · P2 · Ux · Sidebar shows Plugins, MCP, Channels, Workspaces and Recovery to people who then get 403 when they click
+
+- **October 4 current branch (partial):** These five installation-wide destinations now require the global administrator floor in the navigation registry. Sidebar and finder also filter links by verified API-key scope. Focused HTTP checks confirm the listed destinations match direct page access for workspace administrators and read-only keys. Other registry entries and installed-app navigation still need a full route-by-route parity review.
 
 - **Who / where:** workspace admin, end user · `Sidebar and page finder`
 - **User impact:** Operators and workspace-level admins see menu items that dead-end in 'Forbidden', which reads as a broken product and generates support tickets.

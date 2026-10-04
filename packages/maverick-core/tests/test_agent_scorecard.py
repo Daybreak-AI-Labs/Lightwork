@@ -11,15 +11,20 @@ class _FakeWorld:
     """Minimal world stub: episodes carry goal_id + cost + outcome; goals
     carry the domain (the specialist pack that ran)."""
 
-    def __init__(self, episodes, goal_domains):
+    def __init__(self, episodes, goal_domains, signoffs=None):
         self._episodes = episodes
         self._domains = goal_domains
+        self._signoffs = signoffs or {}
 
     def list_episodes(self, limit=5000):
         return self._episodes
 
     def get_goal(self, goal_id):
-        return SimpleNamespace(domain=self._domains.get(goal_id, ""))
+        return SimpleNamespace(domain=self._domains.get(goal_id, ""), status="done")
+
+    def signoff_for(self, goal_id):
+        decision = self._signoffs.get(goal_id)
+        return {"decision": decision} if decision else None
 
 
 def _ep(goal_id, cost, outcome, started):
@@ -28,7 +33,7 @@ def _ep(goal_id, cost, outcome, started):
                            output_tokens=2000)
 
 
-def test_groups_by_pack_and_computes_value_cost_roi(monkeypatch):
+def test_only_approved_goals_count_as_delivered_and_value_needs_assumption():
     import time
     now = time.time()
     world = _FakeWorld(
@@ -39,18 +44,24 @@ def test_groups_by_pack_and_computes_value_cost_roi(monkeypatch):
             _ep(4, 0.20, "done", now - 400),      # hr_onboarding
         ],
         goal_domains={1: "finance_ap", 2: "finance_ap",
-                      3: "finance_ap", 4: "hr_onboarding"})
-    scores = {s.agent: s for s in sc.compute(world, human_cost=120.0, now=now)}
+                      3: "finance_ap", 4: "hr_onboarding"},
+        signoffs={1: "approved", 4: "rejected"})
+    scores = {s.agent: s for s in sc.compute(world, now=now)}
     ap = scores["finance_ap"]
-    assert ap.runs == 3 and ap.delivered == 2
+    assert (ap.runs, ap.completed, ap.reviewed, ap.delivered) == (3, 2, 1, 1)
     assert ap.cost == 0.50 + 0.30 + 0.40
-    assert ap.value == 2 * 120.0                  # two delivered
-    assert ap.roi_multiple == round(240.0 / 1.20, 1)
-    assert ap.success_rate == round(100.0 * 2 / 3, 1)
+    assert ap.value is None and ap.roi_multiple is None
+    assert ap.approval_rate == 100.0
     d = ap.to_dict()
-    assert d["cost_avoided"] == round(240.0 - 1.20, 2)
-    # hr_onboarding delivered its one run.
-    assert scores["hr_onboarding"].success_rate == 100.0
+    assert d["cost_avoided"] is None and d["value_basis"] is None
+    assert d["success_rate"] is None and d["approval_rate"] == 100.0
+    assert scores["hr_onboarding"].completed == 1
+    assert scores["hr_onboarding"].delivered == 0
+    assert scores["hr_onboarding"].approval_rate == 0.0
+
+    assumed = sc.for_agent(world, "finance_ap", human_cost=120.0, now=now)
+    assert assumed.value == 120.0
+    assert assumed.roi_multiple == round(120.0 / 1.20, 1)
 
 
 def test_window_excludes_old_episodes():
@@ -68,4 +79,4 @@ def test_empty_and_defensive():
     assert sc.compute(None) == []           # no world -> empty, no raise
     empty = sc.for_agent(None, "finance_ap")
     assert empty.agent == "finance_ap" and empty.runs == 0
-    assert empty.roi_multiple is None and empty.success_rate is None
+    assert empty.roi_multiple is None and empty.approval_rate is None

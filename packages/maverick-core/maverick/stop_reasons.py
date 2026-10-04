@@ -113,7 +113,7 @@ _RULES: tuple[tuple[str, re.Pattern[str], str, str, str | None, str | None], ...
         _rx(r"^provider_error:unavailable$", r"\bInternalServerError\b",
             r"Error code: 5\d\d\b"),
         "The AI service is not responding.",
-        "Try again in a few minutes. If it keeps happening, ask an administrator to check the connection.",
+        "Try again when the service is back. Ask an administrator to check the AI connection if it continues.",
         None, None,
     ),
     (

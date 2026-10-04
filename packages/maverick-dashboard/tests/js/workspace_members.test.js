@@ -83,3 +83,15 @@ test("workspace admin picker shows only the selected workspace's members and pro
   assert.deepEqual(Array.from(el("principal").options).map(option=>option.value),["","user:beta","user:owner"]);
   assert.deepEqual(Array.from(el("role").options).map(option=>option.value),["","admin"]);
 });
+
+test("workspace invite roles follow the selected workspace's authority",t=>{
+  const dom=new JSDOM('<select id="wi-tenant"><option value="acme" selected>Acme</option><option value="beta">Beta</option></select><select id="wi-role"><option value="viewer" selected>Viewer</option></select><section id="wm-root" data-tenant="acme" data-global-admin="false" data-role-options=\'{"acme":["viewer"],"beta":["admin","viewer"]}\' data-role-labels=\'{"admin":"Administrator","viewer":"Viewer"}\'><select id="wm-tenant"><option value="acme">Acme</option></select><p id="wm-status"></p><button id="wm-refresh">Refresh</button><ul id="wm-list"></ul><form id="wm-form"><select id="wm-principal"></select><select id="wm-role"></select></form></section>',{url:"https://lightwork.example/users",runScripts:"outside-only"}),{window}=dom;
+  t.after(()=>window.close());window.fetch=async()=>new Response("{}");
+  window.eval(fs.readFileSync(path.resolve(__dirname,"../../maverick_dashboard/static/lightwork-access-state.js"),"utf8"));window.eval(source);
+  const tenant=window.document.getElementById("wi-tenant"),role=window.document.getElementById("wi-role");
+  assert.deepEqual(Array.from(role.options).map(option=>option.value),["viewer"]);
+  tenant.value="beta";tenant.dispatchEvent(new window.Event("change"));
+  assert.deepEqual(Array.from(role.options).map(option=>option.value),["admin","viewer"]);
+  tenant.value="acme";tenant.dispatchEvent(new window.Event("change"));
+  assert.deepEqual(Array.from(role.options).map(option=>option.value),["viewer"]);
+});

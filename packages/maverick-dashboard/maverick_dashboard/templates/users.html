@@ -36,8 +36,7 @@
     allowed to do. A new person who signs in starts as
     <strong>{{ default_role | role_label }}</strong> until you change it here.
     {% else %}
-    Review and change the roles of people already in the workspaces you administer.
-    An installation administrator can invite a new colleague.
+    Invite colleagues and manage their roles in the workspaces you administer.
     {% endif %}
   {% endset %}
   {% call hero('Administration', 'Users & roles',
@@ -227,7 +226,7 @@
       {% else %}
       <strong>Invitation for {{ invite_email }} created.</strong>
       <p class="muted users-help">Copy this link and send it to them. It is shown only once, works once and
-        expires in 7 days. Anyone who opens it can accept, so send it only to the person you invited.</p>
+        expires in 7 days. {% if invite_sso_on %}They must sign in with the email address you invited.{% else %}Anyone who opens it can accept, so send it only to the person you invited.{% endif %}</p>
       {% endif %}
       <div class="users-row-form">
         <label class="users-field users-grow"><span>Invite link</span>
@@ -253,7 +252,7 @@
     </form>
     <p class="muted users-help" id="invite-role-help">The invite starts as <strong>{{ 'viewer' | role_label }}</strong> (can look at dashboards and results but change nothing), the safest choice for someone new. Pick <strong>{{ 'operator' | role_label }}</strong> for people who will run work and approve actions, or <strong>{{ 'admin' | role_label }}</strong> for someone who will manage people and settings. You can change it later on this page.</p>
     <p class="muted users-help">
-      {% if auth_on %}The link asks them to sign in with your company account and then gives them the role.
+      {% if invite_sso_on %}The link asks them to sign in with a company account whose email matches the invitation before giving them the role.
       {% else %}Opening the link signs them in with their email address.{% endif %}
       If email sending is set up, the link is also emailed to them.</p>
     {% if pending_invites %}
@@ -289,7 +288,57 @@
 
   {% endif %}
   <div class="section-head"><h2>Workspace members</h2></div>
-  {% if not global_admin %}<p class="muted">You can change roles for current members in the workspaces listed below. Ask an installation administrator to invite a new colleague or change installation-wide access.</p>{% endif %}
+  {% if not global_admin %}<p class="muted">You can invite colleagues and change roles in the workspaces listed below. Installation-wide access remains with installation administrators.</p>{% endif %}
+  {% if workspace_options and invites_on %}
+  <section class="panel" aria-labelledby="wi-title">
+    <h3 id="wi-title" class="users-subhead">Invite someone to a workspace</h3>
+    <p class="muted">Their role applies only in the workspace you choose. Send the one-time link to the person you invite; it expires in 7 days.</p>
+    {% if workspace_invite_link %}
+    <div class="panel users-saved" role="status" data-mv-toast="Workspace invitation for {{ workspace_invite_email }} created. Copy the link below.">
+      <strong>Invitation for {{ workspace_invite_email }} to {{ workspace_names.get(workspace_invite_tenant, workspace_invite_tenant) }} created.</strong>
+      <p class="muted users-help">{% if workspace_invite_sent %}The invitation was emailed.{% elif workspace_invite_send_note and 'disabled' not in workspace_invite_send_note and 'no sending account' not in workspace_invite_send_note %}We couldn't email it. Send the link below yourself.{% else %}Copy the link below and send it yourself.{% endif %} The link is shown only once. {% if invite_sso_on %}They must sign in with the email address you invited.{% else %}Anyone with it can accept, so send it only to them.{% endif %}</p>
+      <div class="users-row-form">
+        <label class="users-field users-grow" for="workspace-invite-link">Invite link
+          <input class="input" id="workspace-invite-link" type="text" readonly value="{{ workspace_invite_link }}" />
+        </label>
+        <button type="button" class="btn" data-copy-target="workspace-invite-link">Copy link</button>
+      </div>
+    </div>
+    {% endif %}
+    <form method="post" action="/users/workspace-invite" class="users-row-form">
+      {{ workspace_binding() }}
+      <label class="users-field" for="wi-tenant">Workspace
+        <select id="wi-tenant" name="tenant" class="select" required>{% for w in workspace_options %}<option value="{{ w.id }}"{% if w.id == wm_tenant %} selected{% endif %}>{{ w.name }}</option>{% endfor %}</select>
+      </label>
+      <label class="users-field users-grow" for="wi-email">Email address
+        <input id="wi-email" class="input" type="email" name="email" placeholder="colleague@company.com" autocomplete="off" required />
+      </label>
+      <label class="users-field" for="wi-role">Role in this workspace
+        <select id="wi-role" name="role" class="select" required>{% for r in workspace_roles %}<option value="{{ r }}"{% if r == 'viewer' %} selected{% endif %}>{{ r | role_label }}</option>{% endfor %}</select>
+      </label>
+      <button type="submit" class="btn btn--primary">Create workspace invite</button>
+    </form>
+    {% if workspace_pending_invites %}
+    <h3 class="users-subhead">Waiting to join a workspace</h3>
+    <ul class="users-list">
+      {% for inv in workspace_pending_invites %}
+      <li>
+        <span class="users-grow">{{ inv.email }} · {{ workspace_names.get(inv.tenant, inv.tenant) }}</span>
+        <span class="badge">{{ inv.role | role_label }}</span>
+        <form method="post" action="/users/workspace-invite/revoke" class="users-inline"
+              data-users-confirm="Cancel the workspace invitation for {{ inv.email }}? The link will stop working." data-users-ok="Cancel invitation">
+          {{ workspace_binding() }}
+          <input type="hidden" name="invite_id" value="{{ inv.id }}" />
+          <button type="submit" class="btn btn--danger" aria-label="Cancel the workspace invitation for {{ inv.email }}">Cancel invitation</button>
+        </form>
+      </li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+  </section>
+  {% elif workspace_options and not global_admin %}
+  <p class="muted">Invitations are turned off. Ask an installation administrator to enable them before adding a new colleague.</p>
+  {% endif %}
   <section id="wm-root" class="panel" data-tenant="{{ wm_tenant }}" data-expected="{{ workspace_tenant_selection }}"
            data-labels='{{ people_labels | tojson }}' data-role-labels='{{ role_labels | tojson }}'
            data-global-admin="{{ 'true' if global_admin else 'false' }}" data-you="{{ you or '' }}"

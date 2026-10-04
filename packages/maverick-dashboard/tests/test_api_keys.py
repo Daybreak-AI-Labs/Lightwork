@@ -174,6 +174,125 @@ def test_write_scope_allows_the_write_route(monkeypatch):
     assert c.post("/api/v1/graph/rebuild", headers=_key(secret)).status_code != 403
 
 
+def test_task_and_approval_scopes_do_not_cross_authorize(monkeypatch):
+    _sign_in_map(monkeypatch)
+    from maverick_dashboard import rbac
+
+    rbac.set_role("user:alice", "operator")
+    c = _client()
+    task_key = _create(c, "alice", scopes=["tasks:write"]).json()["secret"]
+    approval_key = _create(c, "alice", scopes=["approvals:decide"]).json()["secret"]
+    both_key = _create(c, "alice", scopes=["tasks:write", "approvals:decide"]).json()["secret"]
+
+    assert c.post("/api/v1/graph/rebuild", headers=_key(task_key)).status_code != 403
+    assert c.post("/api/v1/graph/rebuild", headers=_key(approval_key)).status_code == 403
+    assert c.get("/api/v1/approvals", headers=_key(task_key)).status_code == 403
+    assert c.get("/api/v1/approvals", headers=_key(approval_key)).status_code == 200
+    assert c.get("/approvals", headers=_key(task_key)).status_code == 403
+    assert c.get("/approvals", headers=_key(approval_key)).status_code == 200
+    # Queue claim and vote are action gates, even without a matching approval.
+    for suffix in ("claim", "approve"):
+        path = f"/api/v1/approvals/424242/{suffix}"
+        assert c.post(path, headers=_key(task_key)).status_code == 403
+        assert c.post(path, headers=_key(approval_key)).status_code == 404
+    assert c.get("/api/v1/approvals", headers=_key(both_key)).status_code == 200
+    assert c.post("/api/v1/graph/rebuild", headers=_key(both_key)).status_code != 403
+
+
+def test_flow_decision_authority_uses_approval_scope_off_queue(monkeypatch):
+    _sign_in_map(monkeypatch)
+    from fastapi import HTTPException, Request
+    from maverick_dashboard import auth, rbac
+    from maverick_dashboard.approval_authority import require_approval_authority
+
+    rbac.set_role("user:alice", "operator")
+    c = _client()
+    task_key = _create(c, "alice", scopes=["tasks:write"]).json()["secret"]
+    approval_key = _create(c, "alice", scopes=["approvals:decide"]).json()["secret"]
+
+    def request_for(secret):
+        request = Request({"type": "http", "method": "POST",
+                           "path": "/api/v1/flows/runs/run-1/resume", "headers": [],
+                           "client": ("testclient", 1234)})
+        request.state.principal = auth._authenticate_api_key(request, secret)
+        return request
+
+    with pytest.raises(HTTPException) as denied:
+        require_approval_authority(
+            request_for(task_key), action="flow.approval.decide", resource="run-1",
+        )
+    assert denied.value.status_code == 403
+    authority = require_approval_authority(
+        request_for(approval_key), action="flow.approval.decide", resource="run-1",
+    )
+    assert authority.action == "flow.approval.decide"
+
+
+def test_task_key_cannot_read_approval_cards_through_other_pages(monkeypatch, tmp_path):
+    _sign_in_map(monkeypatch)
+    from fastapi import Request
+    from maverick.world_model import WorldModel
+    from maverick_dashboard import auth, rbac
+    from maverick_dashboard.content_access import can_read_approval
+
+    rbac.set_role("user:alice", "operator")
+    c = _client()
+    task_key = _create(c, "alice", scopes=["tasks:write"]).json()["secret"]
+    approval_key = _create(c, "alice", scopes=["approvals:decide"]).json()["secret"]
+    world = WorldModel(tmp_path / "world.db")
+    approval = world.get_approval(world.create_approval(
+        "reviewed change", requested_by="user:alice", detail="private approval card",
+    ))
+
+    def request_for(secret):
+        request = Request({"type": "http", "method": "GET", "path": "/oversight",
+                           "headers": [], "client": ("testclient", 1234)})
+        request.state.principal = auth._authenticate_api_key(request, secret)
+        return request
+
+    assert not can_read_approval(request_for(task_key), approval, world)
+    assert can_read_approval(request_for(approval_key), approval, world)
+
+
+def test_task_key_cannot_make_domain_review_decisions(monkeypatch):
+    _sign_in_map(monkeypatch)
+    from maverick_dashboard import rbac
+
+    rbac.set_role("user:alice", "operator")
+    c = _client()
+    task_key = _create(c, "alice", scopes=["tasks:write"]).json()["secret"]
+    decisions = (
+        ("/api/v1/security/evidence/missing/decision",
+         {"decision": "approved", "rationale": "Reviewed", "expected_revision": 1}),
+        ("/api/v1/security/vendors/missing/decision",
+         {"decision": "approved", "rationale": "Reviewed", "expected_revision": 1}),
+        ("/api/v1/consent/decisions", {"profile_id": "profile", "purpose_id": "purpose"}),
+        ("/api/v1/content-access/missing/decision",
+         {"decision": "approve", "expected_revision": 1}),
+    )
+    for path, body in decisions:
+        response = c.post(path, json=body, headers=_key(task_key))
+        assert response.status_code == 403, (path, response.text)
+        assert "does not have a scope" in response.json()["detail"]
+
+
+def test_admin_scope_keeps_both_actions_and_owner_demotion_caps_approval(monkeypatch):
+    _sign_in_map(monkeypatch)
+    from maverick_dashboard import rbac
+
+    rbac.set_role("user:alice", "admin")
+    rbac.set_role("user:bob", "operator")
+    c = _client()
+    admin_key = _create(c, "alice", scopes=["admin"]).json()["secret"]
+    approval_key = _create(c, "bob", scopes=["approvals:decide"]).json()["secret"]
+
+    assert c.get("/api/v1/approvals", headers=_key(admin_key)).status_code == 200
+    assert c.post("/api/v1/graph/rebuild", headers=_key(admin_key)).status_code != 403
+    assert c.get("/api/v1/approvals", headers=_key(approval_key)).status_code == 200
+    rbac.set_role("user:bob", "viewer")
+    assert c.get("/api/v1/approvals", headers=_key(approval_key)).status_code == 403
+
+
 def test_key_cannot_exceed_owner_role(monkeypatch):
     _sign_in_map(monkeypatch)
     from maverick_dashboard import rbac

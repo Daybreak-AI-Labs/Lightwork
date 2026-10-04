@@ -568,12 +568,59 @@ def api_key_permissions(request) -> frozenset[str] | None:
     return value if isinstance(value, frozenset) else None
 
 
-def _api_key_allows(request, permission: str) -> bool:
+def api_key_scopes(request) -> frozenset[str] | None:
+    """Verified scope names for this API-key request, or ``None`` otherwise."""
+    value = getattr(getattr(request, "state", None), "api_key_scopes", None)
+    return value if isinstance(value, frozenset) else None
+
+
+def _api_key_allows(request, permission: str, *, api_scope: str | None = None) -> bool:
     scoped = api_key_permissions(request)
-    return scoped is None or permission in scoped
+    if scoped is None:
+        return True
+    if permission not in scoped:
+        return False
+    if permission != "operate":
+        return True
+    scopes = api_key_scopes(request)
+    if scopes is None:
+        return False
+    if "admin" in scopes:
+        return True
+    if api_scope is None:
+        # The approval queue has operator-gated reads as well as decisions and
+        # claim/release actions. A task key must not borrow their shared RBAC
+        # atom, while an approval key must not operate unrelated task routes.
+        path = str(getattr(getattr(request, "url", None), "path", "") or "")
+        vendor_decision = (path.startswith("/api/v1/vendor-onboarding/cases/")
+                           and path.endswith(("/review", "/approve-action")))
+        api_scope = (
+            "approvals:decide"
+            if (path in {"/api/v1/approvals", "/approvals"}
+                or path.startswith("/api/v1/approvals/") or vendor_decision)
+            else "tasks:write"
+        )
+    return api_scope in scopes
 
 
-def has_permission(request: Request, permission: str) -> bool:
+def require_api_key_scope(request: Request, scope: str) -> None:
+    """Check a named action scope for key bearers without changing browser RBAC.
+
+    A decision may have a different role floor (for example, a content owner
+    can review their own employee-content request). Keys still need the
+    approval scope and their owner's current role must retain ``operate``.
+    """
+    if api_key_permissions(request) is not None and not _api_key_allows(
+        request, "operate", api_scope=scope,
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail="This API key does not have a scope that allows this. "
+                   "Create a key with the scope you need on your account page.",
+        )
+
+
+def has_permission(request: Request, permission: str, *, api_scope: str | None = None) -> bool:
     """Whether the caller may perform ``permission`` ("admin"/"operate"/"view").
 
     Auth off -> True (legacy single-user; the local operator owns everything).
@@ -583,14 +630,15 @@ def has_permission(request: Request, permission: str) -> bool:
     principal = _authorization_principal(request)
     if principal is None:
         return True
-    if not _api_key_allows(request, permission):
+    if not _api_key_allows(request, permission, api_scope=api_scope):
         return False
     from . import rbac
     return permission in rbac.permissions_for(role_for_principal(principal))
 
 
-def _permission_denied(request: Request, permission: str, *, installation: bool = False) -> HTTPException:
-    if not _api_key_allows(request, permission):
+def _permission_denied(request: Request, permission: str, *, installation: bool = False,
+                       api_scope: str | None = None) -> HTTPException:
+    if not _api_key_allows(request, permission, api_scope=api_scope):
         return HTTPException(
             status_code=403,
             detail="This API key does not have a scope that allows this. "
@@ -600,10 +648,15 @@ def _permission_denied(request: Request, permission: str, *, installation: bool 
     return HTTPException(status_code=403, detail=denial(request, permission, installation=installation))
 
 
-def require_permission(request: Request, permission: str) -> None:
+def require_permission(request: Request, permission: str, *, api_scope: str | None = None) -> None:
     """Raise ``HTTPException(403)`` unless the caller's role grants ``permission``."""
-    if not has_permission(request, permission):
-        raise _permission_denied(request, permission)
+    # The action override is meaningful only for a key bearer. Preserve the
+    # ordinary two-argument role check for browser/session callers.
+    allowed = (has_permission(request, permission, api_scope=api_scope)
+               if api_scope is not None and api_key_permissions(request) is not None
+               else has_permission(request, permission))
+    if not allowed:
+        raise _permission_denied(request, permission, api_scope=api_scope)
 
 
 def has_global_permission(request: Request, permission: str) -> bool:
@@ -921,6 +974,7 @@ def _authenticate_api_key(connection, token: str) -> VerifiedPrincipal:
         _enforce_scim_active(principal)
     if connection is not None:
         connection.state.api_key_permissions = verified.permissions
+        connection.state.api_key_scopes = frozenset(key.scopes)
         connection.state.api_key_id = key.id
     return principal
 

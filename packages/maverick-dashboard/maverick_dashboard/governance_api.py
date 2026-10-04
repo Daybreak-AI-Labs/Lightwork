@@ -538,7 +538,7 @@ async def record_fria_review(
     record_id: str,
     body: schemas.FRIAReviewIn,
 ) -> dict[str, Any]:
-    require_permission(request, "operate")
+    require_permission(request, "operate", api_scope="approvals:decide")
     conformity = _module("eu_conformity", "eu_conformity")
     return await _call(
         conformity.record_fria_review,
@@ -582,7 +582,7 @@ async def record_pmm_review(
     asset_id: str,
     body: schemas.PMMReviewIn,
 ) -> dict[str, Any]:
-    require_permission(request, "operate")
+    require_permission(request, "operate", api_scope="approvals:decide")
     conformity = _module("eu_conformity", "eu_conformity")
     return await _call(
         conformity.record_pmm_review,

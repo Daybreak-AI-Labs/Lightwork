@@ -176,7 +176,8 @@ def test_callback_happy_path_sets_session_and_redirects(login_env, client, monke
         ol, "verify_oidc_token",
         lambda token: VerifiedPrincipal(
             sub="user-xyz", issuer=ISSUER, audience="maverick",
-            claims={"sub": "user-xyz", "nonce": nonce},
+            claims={"sub": "user-xyz", "nonce": nonce,
+                    "email": "Alice@Example.com", "email_verified": True},
         ),
     )
 
@@ -198,8 +199,16 @@ def test_callback_happy_path_sets_session_and_redirects(login_env, client, monke
     assert session_raw
     payload = verify_session(session_raw, SESSION_SECRET)
     assert payload is not None and payload["sub"] == "user-xyz"
+    assert payload["idp_email"] == "alice@example.com"
     set_cookie = resp.headers["set-cookie"].lower()
     assert "httponly" in set_cookie and "samesite=lax" in set_cookie
+
+
+def test_invite_email_uses_signed_subject_only_when_email_not_rejected():
+    from maverick_dashboard.oidc_login import _oidc_invite_email
+
+    assert _oidc_invite_email({"sub": "Alice@Example.com"}) == "alice@example.com"
+    assert _oidc_invite_email({"sub": "Alice@Example.com", "email_verified": False}) == ""
 
 
 def test_session_cookie_authenticates_gated_route(login_env, client, monkeypatch):

@@ -41,16 +41,16 @@ from pathlib import Path
 
 SERVICE_ACCOUNT_SUBJECT_PREFIX = "svc:"
 
-# Scope vocabulary -> RBAC permission atom. Route handlers gate on atoms
-# (``require_permission(request, "operate")``), so this is the granularity the
-# product can enforce today: ``tasks:write`` and ``approvals:decide`` both map
-# to ``operate`` and therefore grant the same routes. Every scope implies
-# ``view`` (every role grants it; a caller who cannot view has no working
-# API). ``admin`` grants every atom, like the admin role.
+# Scope vocabulary -> RBAC permission atom. The atom is still capped by the
+# owner's current role. For operator actions, ``auth`` also checks the actual
+# key scope: approval decisions and their queue require ``approvals:decide``;
+# other operator routes require ``tasks:write``. Every scope implies ``view``
+# (every role grants it; a caller who cannot view has no working API).
+# ``admin`` grants every atom, like the admin role.
 SCOPES: dict[str, tuple[str, str]] = {
     "tasks:read": ("view", "Read information available to your viewer role"),
-    "tasks:write": ("operate", "Perform any operator action, including approval decisions"),
-    "approvals:decide": ("operate", "Perform any operator action, including task changes"),
+    "tasks:write": ("operate", "Run tasks and use other operator actions outside the approval queue"),
+    "approvals:decide": ("operate", "Review the shared approval queue and decide queued or paused workflow approvals"),
     "audit:read": ("audit", "Read viewer information and audit-gated records"),
     "settings:write": ("admin", "Use administrator-gated controls, but not operator or audit controls"),
     "admin": ("admin", "Use all viewer, operator, audit and administrator controls"),

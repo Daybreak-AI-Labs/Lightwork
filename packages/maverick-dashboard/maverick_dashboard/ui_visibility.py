@@ -1086,11 +1086,12 @@ PAGES: tuple[dict, ...] = (
     },
     {
         "path": "/plugins",
+        "scope": "global",
         "label": "Plugins",
         "group": "Advanced tools",
         "icon": "plugins",
-        "floor": "view",
-        "default": "operate",
+        "floor": "admin",
+        "default": "admin",
     },
     # Output-style customization: mutations are operate-gated, so it lives with
     # the other operator-facing extension surfaces, not admin plumbing.
@@ -1104,6 +1105,7 @@ PAGES: tuple[dict, ...] = (
     },
     {
         "path": "/mcp",
+        "scope": "global",
         "label": "Tool Servers",
         "group": "Advanced tools",
         "icon": "mcp",
@@ -1112,6 +1114,7 @@ PAGES: tuple[dict, ...] = (
     },
     {
         "path": "/channels",
+        "scope": "global",
         "label": "Channels",
         "group": "Extend",
         "icon": "channels",
@@ -1130,6 +1133,7 @@ PAGES: tuple[dict, ...] = (
     },
     {
         "path": "/workspace/recovery",
+        "scope": "global",
         "label": "Workspace recovery",
         "group": "Admin",
         "icon": "settings",
@@ -1185,6 +1189,7 @@ PAGES: tuple[dict, ...] = (
     },
     {
         "path": "/tenants",
+        "scope": "global",
         "label": "Workspaces",
         "group": "Admin",
         "icon": "tenants",

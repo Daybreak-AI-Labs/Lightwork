@@ -9946,9 +9946,9 @@ def _local_halt_details(path) -> dict:
 
 @router.get("/halt")
 def halt_status(request: Request) -> dict:
-    """Return a verified halt state; sensitive incident detail is audit-only."""
+    """Show every workspace reader if work is stopped; keep incident detail global."""
 
-    require_global_permission(request, "view")
+    require_permission(request, "view")
     shared_backend = _halt_backend_or_503()
 
     from maverick.killswitch import Halted, _halt_file_path, check
@@ -12372,29 +12372,22 @@ async def get_agent_endpoint(request: Request, name: str) -> dict:
 
 
 def _agent_model(view: dict) -> str:
-    """The model a specialist runs on: its pack override if any, else the
-    deployment's default agent-role model."""
-    models = view.get("models") or {}
-    for role in ("agent", "worker", "default"):
-        if models.get(role):
-            return str(models[role])
-    if models:
-        return str(next(iter(models.values())))
-    from maverick.llm import MODEL_SONNET
-
+    """Configured agent route; live routing can choose differently at run time."""
+    del view  # pack model declarations do not control runtime dispatch
     try:
-        from maverick.config import get_role_model
+        from maverick.llm import offline_model_for_role
 
-        return get_role_model("agent") or MODEL_SONNET
-    except Exception:  # pragma: no cover -- config read never breaks the card
-        return MODEL_SONNET
+        return offline_model_for_role("agent")
+    except Exception:  # pragma: no cover -- an unreadable route is unknown
+        return ""
 
 
 @router.get("/agents/{name}/jobcard")
 async def agent_jobcard(request: Request, name: str, days: int = 90) -> dict:
     """The Agent Manager card in one call: the specialist's job description
     (role, mission, responsibilities, deliverable, tools, guardrails, risk,
-    department), its manager scorecard (runs, cost, value, ROI, success rate),
+    department), its manager scorecard (runs, approval, cost and optional
+    comparison assumptions),
     and its model's cost tier. Read-only. Suite-scoped like /agents/{name}."""
     from maverick.domain_edit import resolved_view
 
@@ -12430,10 +12423,19 @@ async def agent_jobcard(request: Request, name: str, days: int = 90) -> dict:
         "max_risk": view.get("max_risk", ""),
         "knowledge_sources": view.get("knowledge_sources") or [],
     }
+    tier = (model_cost_tier.band_detail(model) if model else {
+        "model": "", "band": None, "label": "Unknown",
+        "blended_rate": None, "overridden": False,
+    })
+    if tier["blended_rate"] is None and not tier["overridden"]:
+        # An unpriced custom endpoint can be paid; a guessed Low badge would
+        # falsely reassure the person reviewing this specialist's cost.
+        tier["band"] = None
+        tier["label"] = "Unknown"
     return {
         "job_description": jd,
         "scorecard": scorecard,
-        "cost_tier": model_cost_tier.band_detail(model),
+        "cost_tier": tier,
     }
 
 
@@ -13592,14 +13594,19 @@ def _copilot_model_route_reason(route_status: str) -> str | None:
 
 
 @router.get("/copilot/context")
-async def copilot_context_endpoint(request: Request, page: str = "") -> dict[str, object]:
+async def copilot_context_endpoint(request: Request, response: Response, page: str = "") -> dict[str, object]:
     """Return closed page help for the shared Copilot without model access."""
 
     require_permission(request, "view")
+    from starlette.concurrency import run_in_threadpool as run_detail_in_threadpool
+
     from .copilot_context import context_for_page, public_context
+    from .copilot_detail_context import authorized_detail_context
 
     permissions = _copilot_permissions(request)
-    result = public_context(context_for_page(page), permissions)
+    context, _ = await run_detail_in_threadpool(authorized_detail_context, request, page, context_for_page(page))
+    response.headers["Cache-Control"] = "private, no-store"
+    result = public_context(context, permissions)
     from .draft_api import context_for
 
     result["client_context"] = context_for(request)
@@ -13672,6 +13679,8 @@ async def copilot_endpoint(request: Request, payload: CopilotIn, response: Respo
     context as prompt material. Read-only by design: it explains and points, it
     never acts."""
     require_permission(request, "view")
+    from starlette.concurrency import run_in_threadpool as run_detail_in_threadpool
+
     from maverick_dashboard.app import check_goal_rate_limit
 
     from .copilot_context import (
@@ -13680,9 +13689,11 @@ async def copilot_endpoint(request: Request, payload: CopilotIn, response: Respo
         is_action_request,
         model_claims_completed_action,
         public_context,
+        record_detail_for_page,
         sanitize_model_reply,
     )
     from .copilot_conversation import ConversationConflict, issue, read
+    from .copilot_detail_context import authorized_detail_context
     from .draft_api import context_for
 
     response.headers["Cache-Control"] = "private, no-store"
@@ -13696,7 +13707,10 @@ async def copilot_endpoint(request: Request, payload: CopilotIn, response: Respo
     msg = payload.message.strip()
     if not msg:
         raise HTTPException(status_code=400, detail="empty message")
-    context = context_for_page(payload.page)
+    context, record_context = await run_detail_in_threadpool(
+        authorized_detail_context, request, payload.page, context_for_page(payload.page),
+    )
+    is_detail_page = record_detail_for_page(payload.page) is not None
     permissions = _copilot_permissions(request)
     try:
         prior_exchanges = read(request, payload.conversation_token, permissions)
@@ -13705,6 +13719,10 @@ async def copilot_endpoint(request: Request, payload: CopilotIn, response: Respo
 
     def guide_result(result: dict) -> dict:
         """Only ordinary guide replies become authenticated model history."""
+        if is_detail_page:
+            # Record names and status are shown only to this authorized caller.
+            # They must not enter a later model prompt through sealed history.
+            return result
         try:
             result["conversation_token"] = issue(
                 request, permissions, prior_exchanges, msg, result["reply"],
@@ -13714,6 +13732,17 @@ async def copilot_endpoint(request: Request, payload: CopilotIn, response: Respo
             # the current plain-language answer from the person asking.
             result["conversation_context_status"] = "unavailable"
         return result
+
+    if is_detail_page and not is_action_request(msg):
+        # A detail URL identifies one current record. Keep its authorized
+        # name, status, and stop explanation out of external model prompts and
+        # out of later guide history, including for exact status questions.
+        return {
+            "reply": built_in_reply(context, msg, permissions),
+            "mode": "live" if record_context else "built_in",
+            "source": context.title,
+            "page_context": public_context(context, permissions),
+        }
 
     # Exact read questions use live, request-authorized native records. Their
     # contents stay on this server; no model receives private tasks or reviews.
