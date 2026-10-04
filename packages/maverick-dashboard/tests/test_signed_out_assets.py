@@ -219,3 +219,21 @@ def test_a_dead_share_link_shows_a_public_page_not_the_app(isolated, mode):
     assets = _refs(page.text)
     assert "/static/lightwork.css" in assets
     assert {asset: client.get(asset).status_code for asset in assets} == dict.fromkeys(assets, 200)
+
+
+@pytest.mark.parametrize("reason", ["", "mfa", "store"])
+def test_sign_in_error_pages_use_the_public_shell(isolated, monkeypatch, reason):
+    """Someone whose company sign-in failed has no session: the page is the
+    styled public shell, never the signed-in app (and keeps its plain words)."""
+    from maverick_dashboard import oidc_login
+
+    monkeypatch.setattr(oidc_login, "login_enabled", lambda: True)
+    page = _anonymous().get("/auth/error" + (f"?reason={reason}" if reason else ""),
+                            headers={"Accept": "text/html"})
+    assert page.status_code == (403 if reason else 401)
+    assert "/static/lightwork.css" in page.text and 'class="brand__logo"' in page.text
+    assert 'id="sidebar"' not in page.text and "Start a task" not in page.text
+    expected = {"": "Restart sign-in", "mfa": "include a second factor",
+                "store": "could not record this sign-in"}[reason]
+    assert expected in page.text
+    assert page.headers["cache-control"] == "no-store"

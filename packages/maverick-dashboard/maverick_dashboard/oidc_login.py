@@ -829,10 +829,11 @@ async def auth_error(request: Request):
         from .mfa_policy import MFA_MISSING_MESSAGE
 
         title, message = _ERROR_REASONS[reason]
+        # The person has no session yet: the public shell, not the app's.
         return templates.TemplateResponse(
-            request, "error.html",
-            {"status": 403, "title": title, "message": message or MFA_MISSING_MESSAGE,
-             "path": "/auth/login?fresh=1", "gate": "step_up"},
+            request, "auth_error.html",
+            {"title": title, "message": message or MFA_MISSING_MESSAGE,
+             "action_href": "/auth/login?fresh=1", "action_label": "Sign in again"},
             status_code=403, headers={"Cache-Control": "no-store"},
         )
     return _login_error_response(request.query_params.get("return_to"))
