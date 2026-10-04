@@ -318,8 +318,17 @@ def _chat_approvers(approval) -> set[str]:
     """People linked in a chat app where this request's card is posted.
 
     Slack posts every card to its approvals channel and Teams to each linked
-    approver; protected-settings requests are decided in the dashboard only."""
+    approver; protected-settings requests are decided in the dashboard only.
+    With company sign-in (OIDC) a chat decision is resolved through the sign-in
+    bridge instead of these links, so nobody is counted from them."""
     if getattr(approval, "provenance", None) == SETTINGS_PROVENANCE:
+        return set()
+    try:
+        from maverick.oidc import oidc_enabled
+
+        if oidc_enabled():
+            return set()
+    except Exception:  # unreadable sign-in settings count nobody from chat
         return set()
     people: set[str] = set()
     try:

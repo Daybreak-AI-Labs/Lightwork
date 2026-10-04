@@ -191,6 +191,22 @@ def test_linked_chat_approvers_count_where_cards_are_posted(env, monkeypatch):
     assert other_eligible_approvers(world, approval, SAM) == [DANA, "user:tom@northwind.example"]
 
 
+def test_with_company_sign_in_chat_links_count_nobody(env, monkeypatch):
+    # With OIDC a chat decision resolves through the sign-in bridge, not these
+    # links, so they can't show that anyone else could decide.
+    from maverick import channel_approvals, channel_identities, oidc
+    from maverick_dashboard.approval_decisions import other_eligible_approvers
+
+    _client, world = env
+    _roles(monkeypatch)
+    approval_id, _goal, _headers = _approval(world)
+    monkeypatch.setattr(channel_identities, "all_links", lambda: {
+        DANA: [{"channel": "slack", "external_id": "U2", "linked_at": 1.0}]})
+    monkeypatch.setattr(channel_approvals, "slack_announcements_configured", lambda: True)
+    monkeypatch.setattr(oidc, "oidc_enabled", lambda: True)
+    assert other_eligible_approvers(world, world.get_approval(approval_id), SAM) == []
+
+
 def test_protected_settings_requests_never_count_chat_approvers(env, monkeypatch):
     from maverick import channel_approvals, channel_identities
     from maverick_dashboard.approval_decisions import eligible_approvers
