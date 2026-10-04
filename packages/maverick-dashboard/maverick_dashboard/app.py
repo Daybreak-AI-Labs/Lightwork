@@ -4573,6 +4573,15 @@ def _date(stamp) -> str:
     return _plain_labels.datetime_text(value, date_only=True) if value else "—"
 
 
+def _day(stamp) -> str:
+    """The UTC calendar day of a deadline stamp ("2026-10-04"; "" when unset)."""
+    try:
+        value = float(stamp or 0)
+    except (TypeError, ValueError):
+        return ""
+    return time.strftime("%Y-%m-%d", time.gmtime(value)) if value > 0 else ""
+
+
 @app.get("/privacy/vendors/{vendor_id}", response_class=HTMLResponse)
 async def vendor_detail_page(request: Request, vendor_id: str) -> HTMLResponse:
     """One vendor's full governed record: lifecycle, contracts and their
@@ -4678,11 +4687,12 @@ async def dsar_detail_page(request: Request, request_id: str) -> HTMLResponse:
     record = dict(record)
     now = _time.time()
     record.update(privacy_ops.dsar_clock(record, now=now))
-    record["created_date"] = _date(record.get("created_at"))
     record["received_date"] = _date(record.get("received_at") or record.get("created_at"))
-    record["due_date"] = _date(record.get("effective_due_at"))
-    record["acknowledge_date"] = _date(record.get("acknowledge_by"))
-    record["extended_date"] = _date(record.get("extended_until"))
+    # Deadlines are calendar days: the page shows that same day in each
+    # reader's own style (|datetime('date')), never shifted by a time zone.
+    record["due_day"] = _day(record.get("effective_due_at"))
+    record["acknowledge_day"] = _day(record.get("acknowledge_by"))
+    record["extended_day"] = _day(record.get("extended_until"))
     from maverick import rights_deadlines
 
     regime = rights_deadlines.REGIMES.get(str(record.get("jurisdiction") or ""))
@@ -4692,9 +4702,6 @@ async def dsar_detail_page(request: Request, request_id: str) -> HTMLResponse:
     fulfillment_enabled = dsar_fulfillment.enabled()
     if fulfillment_enabled:
         fulfillment = dsar_fulfillment.get_fulfillment(record["id"])
-        if fulfillment and fulfillment.get("response"):
-            fulfillment["response"]["expires_date"] = _date(
-                fulfillment["response"].get("expires_at"))
     # Which secure-link step the "Completed" notice can point to.
     fulfillment_state = (
         "off" if not fulfillment_enabled else "not_started" if not fulfillment

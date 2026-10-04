@@ -484,11 +484,26 @@
       //   hover) | "absolute" ("30 Sep 2026, 17:15 BST") | "both" | "date"
       //   ("30 Sep 2026"; a "2026-09-30" value is a calendar date, not UTC midnight).
       // Elements added later are formatted by calling window.mvFormatTimes(root).
-      // English pages read the same in every browser ("4 Oct 2026, 14:01 BST",
-      // a 24-hour clock); a translated interface uses its own locale's order.
+      // Each reader sees one style, their browser's regional setting: an en-US
+      // browser reads "Oct 4, 2026, 2:01 PM EDT", an en-GB one "4 Oct 2026,
+      // 19:01 BST"; a translated interface uses its own locale. The same
+      // choice is made in lightwork-i18n.js (formatDate), so both agree.
+      function mvBrowserLocale() {
+        var wanted = [].concat(navigator.languages || [], navigator.language || []);
+        for (var i = 0; i < wanted.length; i++) {
+          try { if (wanted[i] && Intl.DateTimeFormat.supportedLocalesOf([wanted[i]]).length) return wanted[i]; } catch (e) {}
+        }
+        return 'en-GB';
+      }
       function mvFormatLocale() {
         var i18n = window.LightworkI18n;
-        return i18n && i18n.language && i18n.language !== 'en' ? (i18n.locale || i18n.language) : 'en-GB';
+        return i18n && i18n.language && i18n.language !== 'en' ? (i18n.locale || i18n.language) : mvBrowserLocale();
+      }
+      // Phrases ("2 minutes ago") are words, so they stay in the interface
+      // language even when the browser's regional style is another language.
+      function mvPhraseLocale() {
+        var locale = mvFormatLocale();
+        return /^en\b/i.test(locale) || (window.LightworkI18n && window.LightworkI18n.language && window.LightworkI18n.language !== 'en') ? locale : 'en';
       }
       function mvParseTime(raw) {
         if (raw === null || raw === undefined || raw === '') return null;
@@ -501,7 +516,7 @@
       window.mvTimeAbsolute = function (raw, zone) {
         var d = mvParseTime(raw);
         if (!d) return '';
-        var options = { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', timeZoneName: 'short' };
+        var options = { day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' };
         if (zone) options.timeZone = zone;
         try { return new Intl.DateTimeFormat(mvFormatLocale(), options).format(d); }
         catch (e) { return zone ? window.mvTimeAbsolute(raw) : d.toUTCString(); }
@@ -557,7 +572,7 @@
         while (Math.round(abs / units[i][0]) * units[i][0] >= units[i][2]) i++;
         var size = units[i][0], unit = units[i][1], value = Math.round(abs / size);
         if (typeof Intl !== 'undefined' && Intl.RelativeTimeFormat) {
-          try { return new Intl.RelativeTimeFormat(mvFormatLocale(), { numeric: 'auto' }).format(past ? -value : value, unit); } catch (e) {}
+          try { return new Intl.RelativeTimeFormat(mvPhraseLocale(), { numeric: 'auto' }).format(past ? -value : value, unit); } catch (e) {}
         }
         var word = value + ' ' + unit + (value === 1 ? '' : 's');
         return past ? word + ' ago' : 'in ' + word;
@@ -597,7 +612,7 @@
       Array.prototype.forEach.call(realDocument ? document.querySelectorAll('[data-mv-utc-midnight]') : [], function (el) {
         try {
           var next = new Date(); next.setUTCHours(24, 0, 0, 0);
-          var local = next.toLocaleTimeString(mvFormatLocale(), { hour: '2-digit', minute: '2-digit' });
+          var local = next.toLocaleTimeString(mvFormatLocale(), { hour: 'numeric', minute: '2-digit' });
           var zone = (Intl.DateTimeFormat().resolvedOptions().timeZone || '').replace(/_/g, ' ');
           if (next.getTimezoneOffset() !== 0) el.textContent = ', which is ' + local + ' in your time zone' + (zone ? ' (' + zone + ')' : '');
         } catch (e) {}
