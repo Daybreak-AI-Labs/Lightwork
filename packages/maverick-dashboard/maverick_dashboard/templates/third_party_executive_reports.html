@@ -20,11 +20,6 @@
 {% endblock %}
 {% block content %}
 {% from "_module_gate.html" import module_gate %}
-{% if not reports_module_enabled %}
-{{ module_gate('third_party_management.executive_reports', 'Executive vendor reports',
-               detail='Turns on branded PDF summaries of your vendors, assessments, contracts and vendor questionnaires.',
-               can_activate=reports_can_activate) }}
-{% endif %}
 <div id="tper-workbench" data-api-base="{{ api_base }}" data-copilot-page="{{ page_path }}"
      data-module-enabled="{{ 'true' if reports_module_enabled else 'false' }}"
      data-can-admin="{{ 'true' if reports_can_admin else 'false' }}"
@@ -38,6 +33,11 @@
       <p><button class="btn btn--ghost" id="tper-refresh" type="button">Refresh</button></p>
     </div>
   {% endcall %}
+  {% if not reports_module_enabled %}
+  {{ module_gate('third_party_management.executive_reports', 'Executive vendor reports',
+                 detail='Turns on branded PDF summaries of your vendors, assessments, contracts and vendor questionnaires.',
+                 can_activate=reports_can_activate) }}
+  {% endif %}
   <p class="muted">Reports are plain text and your chosen colors only. Check each report against your current vendor list before sharing it.</p>
 
   <div class="section-head"><h2>Your Reports</h2>

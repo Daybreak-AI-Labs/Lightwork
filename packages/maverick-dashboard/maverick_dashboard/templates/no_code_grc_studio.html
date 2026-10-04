@@ -24,13 +24,13 @@
 {% endblock %}
 {% block content %}
 {% from "_module_gate.html" import module_gate %}
-{% if not studio_module_enabled %}
-{{ module_gate('tech_risk_compliance.grc_studio', 'No-code GRC studio',
-               detail='Turns on Tech Risk &amp; Compliance and the studio together.',
-               can_activate=studio_can_activate) }}
-{% endif %}
 <div class="grcs-shell" id="grc-studio-shell" data-api-base="{{ api_base }}" data-copilot-page="{{ page_path }}" data-can-operate="{{ 'true' if studio_can_operate else 'false' }}" data-can-audit="{{ 'true' if studio_can_audit else 'false' }}" data-can-admin="{{ 'true' if studio_can_admin else 'false' }}">
   {{ hero('Technology risk and compliance', 'No-code GRC studio', lede='Build your own risk, control, vendor and evidence records, with forms, rules and reports, without writing code. Each version is reviewed and approved by different people before it becomes active in this studio, and you can restore an earlier version at any time.') }}
+  {% if not studio_module_enabled %}
+  {{ module_gate('tech_risk_compliance.grc_studio', 'No-code GRC studio',
+                 detail='Turns on Tech Risk & Compliance and the studio together.',
+                 can_activate=studio_can_activate) }}
+  {% endif %}
 
   <section class="panel" aria-labelledby="grcs-status-title">
     <div class="section-head"><h2 id="grcs-status-title">Availability</h2><button class="btn btn--ghost" id="grcs-refresh-status" type="button">Refresh</button></div>

@@ -21,17 +21,17 @@
 </style>
 {% endblock %}
 {% block content %}
-{% if not task_module_enabled %}
-{{ module_gate('ai_entity_tasks', 'AI system tasks',
-               detail='Turn this on (together with the AI inventory) to assign review and fix-up work for each AI system your organization uses.',
-               can_activate=task_can_activate) }}
-{% endif %}
 <div class="aet-shell" id="ai-entity-task-shell"
      data-api-base="{{ api_base }}" data-copilot-page="{{ page_path }}"
      data-can-operate="{{ 'true' if task_can_operate else 'false' }}"
      data-can-audit="{{ 'true' if task_can_audit else 'false' }}"
      data-can-admin="{{ 'true' if task_can_admin else 'false' }}">
   {{ hero('Governance', 'AI system tasks', lede='Assign review and fix-up work for each AI system in your inventory, and track who owns it, how it is going and when it is due.') }}
+  {% if not task_module_enabled %}
+  {{ module_gate('ai_entity_tasks', 'AI system tasks',
+                 detail='Turn this on (together with the AI inventory) to assign review and fix-up work for each AI system your organization uses.',
+                 can_activate=task_can_activate) }}
+  {% endif %}
 {% if task_workspace_missing %}
   <section class="panel" aria-labelledby="aet-workspace-title">
     <h2 id="aet-workspace-title">Choose a workspace first</h2>

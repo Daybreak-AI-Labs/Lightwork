@@ -6,17 +6,17 @@
   <link rel="stylesheet" href="/static/lightwork-ai-evidence-analysis.css">
 {% endblock %}
 {% block content %}
-{% if not evidence_module_enabled %}
-{{ module_gate('ai_evidence_analysis', 'AI evidence analysis',
-               detail='Turn this on to have AI check documents against your review criteria. A person still approves every result.',
-               can_activate=evidence_can_activate) }}
-{% endif %}
 <div class="evidence-workbench" id="evidence-shell" data-api-base="{{ api_base }}"
      data-can-operate="{{ 'true' if evidence_can_operate else 'false' }}"
      data-can-audit="{{ 'true' if evidence_can_audit else 'false' }}"
      data-can-admin="{{ 'true' if evidence_can_admin else 'false' }}"
      data-can-register="{{ 'true' if evidence_can_activate else 'false' }}">
   {{ hero('Governance', 'AI evidence analysis', lede='Check a document against your review criteria, then have a second person approve or reject the findings.') }}
+  {% if not evidence_module_enabled %}
+  {{ module_gate('ai_evidence_analysis', 'AI evidence analysis',
+                 detail='Turn this on to have AI check documents against your review criteria. A person still approves every result.',
+                 can_activate=evidence_can_activate) }}
+  {% endif %}
 
 {% if evidence_workspace_missing %}
   <section class="panel" aria-labelledby="workspace-title">

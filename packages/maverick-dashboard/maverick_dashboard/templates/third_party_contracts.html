@@ -16,11 +16,6 @@
 {% endblock %}
 {% block content %}
 {% from "_module_gate.html" import module_gate %}
-{% if not contracts_module_enabled %}
-{{ module_gate('third_party_management.contracts', 'Contracts and engagements',
-               detail='Turns on Third-Party Management and contract records together.',
-               can_activate=contracts_can_activate) }}
-{% endif %}
 <div id="third-party-contracts-shell" data-api-base="{{ api_base }}" data-copilot-page="{{ page_path }}"
      data-can-operate="{{ 'true' if contracts_can_operate else 'false' }}"
      data-can-audit="{{ 'true' if contracts_can_audit else 'false' }}"
@@ -34,6 +29,11 @@
       <p><button class="btn btn--ghost" id="tpc-refresh-status" type="button">Refresh</button></p>
     </div>
   {% endcall %}
+  {% if not contracts_module_enabled %}
+  {{ module_gate('third_party_management.contracts', 'Contracts and engagements',
+                 detail='Turns on Third-Party Management and contract records together.',
+                 can_activate=contracts_can_activate) }}
+  {% endif %}
   <p class="muted">Record the key facts here, not the full contract text.</p>
 
   <fieldset class="tpc-fieldset" id="tpc-operations" disabled>
