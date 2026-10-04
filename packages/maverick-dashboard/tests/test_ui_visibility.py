@@ -169,7 +169,7 @@ def test_nav_groups_per_role(monkeypatch, tmp_path):
         "Operate", "Observe", "Govern", "Privacy", "Consent",
         "AI oversight", "Third parties", "Work"}
     # auditor: the audit read surfaces, nothing operational. (/replay is folded
-    # out of the sidebar in the moderate declutter; reached from Audit in-page.)
+    # out of the sidebar; the Activity log and a task's Steps page link to it.)
     a = hrefs("auditor")
     assert {"/audit", "/compliance", "/overview", "/agent-control-plane"} <= a
     assert a.isdisjoint({"/chat", "/settings", "/automations", "/replay"})

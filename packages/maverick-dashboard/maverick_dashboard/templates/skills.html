@@ -16,6 +16,7 @@
              copy='Create one here, or add one from a web address you trust.
                    It is used from the next task.') }}
   {% endcall %}
+  {% if can_open_page('/store') %}<p><a href="/store">Browse ready-made skills</a> that other people have written and checked.</p>{% endif %}
 
   <div class="sk-grid">
     <section class="panel" aria-labelledby="sk-create-title">

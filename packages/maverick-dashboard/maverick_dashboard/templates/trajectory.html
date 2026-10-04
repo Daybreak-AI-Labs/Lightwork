@@ -49,6 +49,8 @@
   <a class="btn btn--ghost" href="/static/lightwork-archive-viewer.html" download="lightwork-archive-viewer.html">Download offline archive viewer</a>
   {% if can_operate %}<button class="btn btn--ghost" type="button" id="goal-gist">Share a private copy on GitHub</button>{% endif %}
   <p class="muted" id="goal-export-msg" role="status" aria-live="polite">The technical archive includes the task record, recorded steps and work summaries within supported limits; larger histories are refused rather than silently shortened. It excludes attachment contents and is not a resumable task. It is not redacted: review business content before sharing.</p>
+  {% if can_open_page('/redact') %}<p class="muted"><a href="/redact">Check text for passwords and personal details</a> before you share it.</p>{% endif %}
+  {% if can_open_page('/replay') %}<p class="muted"><a href="/replay?goal={{ goal.id }}">Replay this task</a> to see every action in order and check that its record has not been changed.</p>{% endif %}
 </div>
 
 {% if events %}

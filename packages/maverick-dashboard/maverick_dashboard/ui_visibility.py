@@ -866,8 +866,8 @@ PAGES: tuple[dict, ...] = (
         "floor": "view",
         "default": "operate",
     },
-    # Redaction workbench (its preview API requires operate); reached from
-    # goal/trajectory surfaces rather than the sidebar.
+    # Redaction check (its preview API requires operate); linked from a task's
+    # Steps page (trajectory.html) rather than the sidebar.
     {
         "path": "/redact",
         "label": "Redaction",

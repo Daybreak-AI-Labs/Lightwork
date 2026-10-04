@@ -555,6 +555,9 @@
       integrations" under All settings to let people create them.
       {% endif %}
     </p>
+    {% if can_open_page('/embed-demo') %}
+    <p class="muted">To show a live card with spending and activity on an internal page, such as a team wiki, use <a href="/embed-demo">Embedded analytics</a>.</p>
+    {% endif %}
     {% if static_token_set %}
     <p class="settings-lead" role="note"><strong>The shared server access token is set.</strong>
       Anyone holding it can do everything an administrator can, it never expires and it is
@@ -678,6 +681,15 @@
     <p class="muted" role="status" aria-live="polite" data-maintenance-status="diagnostics"></p>
     <div data-maintenance-out="diagnostics"></div>
   </div>
+
+  {% if can_open_page('/perf') or can_open_page('/cache') %}
+  <div class="section-head" data-settings-group="maintenance"><h2 id="maintenance-performance">Performance and cache</h2></div>
+  <div class="panel" data-settings-group="maintenance">
+    <p class="muted settings-lead">How fast this server answers, and the temporary copies Lightwork keeps of what it has read so it can work faster.</p>
+    <p class="settings-row-form">{% if can_open_page('/perf') %}<a class="btn" href="/perf">Performance</a>{% endif %}
+      {% if can_open_page('/cache') %}<a class="btn btn--ghost" href="/cache">Cache</a>{% endif %}</p>
+  </div>
+  {% endif %}
 
   <div class="section-head" data-settings-group="maintenance"><h2>Safety checks for this installation</h2></div>
   <div class="panel" data-settings-group="maintenance" data-maintenance="checks">
