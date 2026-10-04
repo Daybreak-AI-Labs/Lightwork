@@ -144,6 +144,33 @@ export FORWARDED_ALLOW_IPS="10.0.1.20"
 - To check, send requests from two devices and look at the dashboard's request
   log: it should show each device's own address instead of the balancer's.
 
+### Sign-in attempts behind a proxy
+
+Signing in with an email and passphrase allows 10 attempts a minute from each
+address, for the owner and colleagues alike; the 11th gets "Too many sign-in
+attempts. Wait a minute and try again." The address is the connection's, and
+the `X-Forwarded-For` chain counts only when the connection comes from an
+address listed in `[auth.proxy] trusted_proxies`. The public rights-request
+form and the allowed-addresses list (`[auth.ip_allowlist]`) read the address
+the same way. Behind a load balancer or reverse proxy that is not listed,
+everyone signing in shares one allowance, so a few mistyped passphrases can
+lock the whole office out for a minute. List your proxies:
+
+```toml
+[auth.proxy]
+trusted_proxies = ["10.0.1.20"]   # your proxy's address, or a range such as "10.0.0.0/16"
+```
+
+- This works whether or not reverse-proxy sign-in (`[auth.proxy] enabled`) is
+  on. With reverse-proxy sign-in off it only changes which address is counted;
+  it does not let the proxy sign anyone in.
+- The list is exact: only the addresses listed count, so include `127.0.0.1`
+  if a proxy runs on the same computer.
+- List only proxies you run. Lightwork walks the chain from the right and stops
+  at the first address none of your proxies vouched for, so a caller cannot
+  choose the address it is counted under.
+- Settings shows the same setting as "Proxy addresses to trust".
+
 ## Phone (companion mode)
 
 Lightwork itself runs on Desktop or VPS — your phone is a frontend that
