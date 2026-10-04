@@ -256,6 +256,20 @@ def undo_seconds_left(approval: Any, *, now: float | None = None) -> float:
 # Signed-audit delivery: the ONE implementation the dashboard and channels share.
 # ----------------------------------------------------------------------------
 
+def _self_approval(world, event) -> dict[str, bool]:
+    """``{"self_approval": True}`` when the requester approved their own request."""
+    if event.status != "approved":
+        return {}
+    try:
+        approval = world.get_approval(int(event.approval_id))
+    except Exception:  # noqa: BLE001 -- the flag is evidence detail, never authority
+        return {}
+    requester = str(getattr(approval, "requested_by", "") or "").strip()
+    if requester and requester == str(event.decided_by or "").strip():
+        return {"self_approval": True}
+    return {}
+
+
 def deliver_approval_audit_event(world, event) -> bool:
     """Deliver exactly one queued vote and persist its delivery marker."""
     if event.delivered_at is not None:
@@ -272,6 +286,7 @@ def deliver_approval_audit_event(world, event) -> bool:
             decided_by=event.decided_by,
             occurred_at=float(event.created_at),
             summary=decision_summary(world, event),
+            **_self_approval(world, event),
         )
     except AuditRefused as exc:
         # Not refusal swallowing: no approval becomes effective. The exact event
@@ -471,6 +486,7 @@ def require_acknowledgement(approval: Any, *, who: str, channel: str, decision: 
     recorded = audit.audit_event(
         audit.EventKind.CONSENT_RESULT,
         agent=who,
+        actor=who,
         action="approval_confirmation",
         approval_id=int(approval.id),
         risk=risk,
@@ -634,6 +650,7 @@ def undo_decision(world: Any, approval_id: int, *, undone_by: str, channel: str,
     recorded = audit.audit_event(
         audit.EventKind.CONSENT_RESULT,
         agent=who,
+        actor=who,
         action="approval_decision_undone",
         approval_id=int(approval_id),
         previous_status=before.status,

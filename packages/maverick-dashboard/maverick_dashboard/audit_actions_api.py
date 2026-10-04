@@ -55,6 +55,15 @@ KIND_LABELS: dict[str, str] = {
     "tenant_deleted": "Workspace removed",
     "codebase_action": "Code project action", "immune_action": "Safety monitoring action",
     "approval_decision": "Approval decided", "approval_requested": "Approval requested",
+    "channel_approval_decision": "Approval decided in a chat app",
+}
+# Approval steps recorded as consent results, named for what the person did.
+APPROVAL_ACTION_LABELS: dict[str, str] = {
+    "approval_decision_undone": "Approval decision undone",
+    "approval_confirmation": "Approval confirmed",
+    "approval_rejection_reason": "Rejection reason recorded",
+    "approval_revision_requested": "Sent back for changes",
+    "approval_decided_via_channel": "Approval decided in a chat app",
 }
 FIELD_LABELS: dict[str, str] = {
     "goal_id": "Task", "tool": "Tool", "name": "Name", "reason": "Reason", "detail": "Details",
@@ -68,6 +77,8 @@ FIELD_LABELS: dict[str, str] = {
     "phase": "Step", "repo": "Code project", "proposal": "Change",
     "email": "Email", "channel": "Chat app", "enabled": "Turned on", "suites": "Departments",
     "occurred_at": "Occurred at", "approval_id": "Approval", "scope": "Recorded in",
+    "decided_by": "Decided by", "previously_decided_by": "Earlier decision by",
+    "self_approval": "Approved own request",
 }
 _HIDDEN = {"v", "ts", "kind", "agent", "goal_id", "hash", "prev_hash", "sig", "key_id", "projection"}
 # Machine identifiers (event ids, fingerprints, 64-hex tokens) are kept for
@@ -91,6 +102,12 @@ def kind_label(kind: object) -> str:
 
 def event_label(event: dict) -> str:
     """Name a known administrator action without exposing arbitrary audit text."""
+    if event.get("kind") == "consent_result":
+        action = event.get("action")
+        if action is None and isinstance(event.get("payload"), dict):
+            action = event["payload"].get("action")
+        if isinstance(action, str) and action in APPROVAL_ACTION_LABELS:
+            return APPROVAL_ACTION_LABELS[action]
     if event.get("kind") == "control_plane_action":
         from .content_access import VISIBLE_CONTROL_ACTIONS
 

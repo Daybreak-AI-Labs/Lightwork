@@ -7282,7 +7282,7 @@ def oversight_page(request: Request) -> HTMLResponse:
     except Exception:
         approvals, pending = [], None
         source_errors.append("Your approval queue is unavailable. Its current size is unknown.")
-    approval_context = _approval_queue_context(approvals)
+    approval_context = _approval_queue_context(approvals, request)
     try:
         active = len(w.list_goals(status="active", owner=owner_filter))
     except Exception:
@@ -8440,7 +8440,19 @@ def _approval_source(provenance: str | None) -> str | None:
     return None
 
 
-def _approval_queue_context(approvals: list) -> dict:
+def _approval_viewer_context(request: Request | None) -> dict:
+    """Who is looking at the queue, so a card can say "your own request"
+    exactly when the enforced rule treats it as one."""
+    if request is None:
+        return {"approval_viewer": "", "self_approval_allowed": False}
+    from maverick.safety.dual_control import allow_self_approval
+
+    from .api import _supervisor
+
+    return {"approval_viewer": _supervisor(request), "self_approval_allowed": allow_self_approval()}
+
+
+def _approval_queue_context(approvals: list, request: Request | None = None) -> dict:
     """Build the exact-operation review context shared by approval surfaces."""
 
     from maverick.approval_cards import ApprovalCardError, decode_approval_detail
@@ -8504,6 +8516,7 @@ def _approval_queue_context(approvals: list) -> dict:
         "approval_actions": approval_actions,
         "approval_scopes": approval_scopes,
         "assessment_ids": assessment_ids,
+        **_approval_viewer_context(request),
     }
 
 
@@ -8538,7 +8551,7 @@ def approvals_page(request: Request) -> HTMLResponse:
             "flow_approvals": flow_approvals["items"],
             "flow_approval_coverage": flow_approvals["coverage"],
             "private_count": len(pending) - len(approvals),
-            **_approval_queue_context(approvals),
+            **_approval_queue_context(approvals, request),
         },
         headers={"Cache-Control": "private, no-store"},
     )

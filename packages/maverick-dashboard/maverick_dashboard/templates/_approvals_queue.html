@@ -27,7 +27,11 @@
     {% set card = cards.get(a.id) if cards else None %}
     {% set card_status = card_statuses.get(a.id, 'legacy') if card_statuses else 'legacy' %}
     {% set scope_text = approval_scopes.get(a.id, '') if approval_scopes and approval_scopes.get(a.id) else 'The item described' %}
-    <article class="approval-item" data-id="{{ a.id }}" data-label="{{ action_label }}" data-risk="{{ a.risk }}"
+    {# What is enforced: one approver may be the person who asked; under
+       two-person approval their vote counts only if self-approval is on. #}
+    {% set own_request = approval_viewer|default('') and a.requested_by and a.requested_by == approval_viewer %}
+    {% set own_vote_counts = (a.approvals_required or 1) <= 1 or self_approval_allowed|default(false) %}
+    <article class="approval-item" data-id="{{ a.id }}" data-label="{{ action_label }}" data-risk="{{ a.risk }}"{% if own_request %} data-own-request="yes"{% endif %}
              data-scope="{{ scope_text }}"
              {% if card %}data-target="{{ card.target.label }}" data-spending="{{ _budget_text(card.budget) | trim }}" data-irreversible="{{ 'yes' if card.consequences.irreversible else 'no' }}"{% endif %}
              {% if assessment_id %} data-assessment-id="{{ assessment_id }}"{% endif %} id="approval-{{ a.id }}"
@@ -79,8 +83,9 @@
         {% endif %}
       </div>
       <p class="approval-item__decided muted" hidden></p>
+      {% if own_request and not own_vote_counts %}<p class="muted approval-own-note">You asked for this, so other people must approve it.</p>{% endif %}
       <div class="approval-actions">
-        <button type="button" class="btn btn--primary approval-btn" data-id="{{ a.id }}" data-action="approve"{% if card %} data-binding="{{ card.binding_sha256 }}"{% endif %}{% if card_status in ('expired', 'invalid', 'legacy') %} disabled title="A new request is needed before this can be approved"{% endif %}>Approve</button>
+        <button type="button" class="btn btn--primary approval-btn" data-id="{{ a.id }}" data-action="approve"{% if card %} data-binding="{{ card.binding_sha256 }}"{% endif %}{% if card_status in ('expired', 'invalid', 'legacy') %} disabled title="A new request is needed before this can be approved"{% elif own_request and not own_vote_counts %} disabled title="You asked for this, so other people must approve it."{% endif %}>Approve</button>
         <button type="button" class="btn btn--ghost approval-btn" data-id="{{ a.id }}" data-action="deny">Reject</button>
         <button type="button" class="btn btn--ghost approval-btn" data-id="{{ a.id }}" data-action="revise">Send back for changes</button>
       </div>
@@ -110,6 +115,7 @@
   <form id="approval-confirm-form" class="mv-confirm__body" method="dialog">
     <h2 id="approval-confirm-title" class="mv-form__title">Approve this action?</h2>
     <p id="approval-confirm-risk" class="approval-confirm__risk"></p>
+    <p id="approval-confirm-own" class="approval-confirm__own" hidden><strong>You're approving your own request.</strong></p>
     <dl class="approval-confirm__facts">
       <div><dt>What it will do</dt><dd><ul id="approval-confirm-does"></ul></dd></div>
       <div><dt>Systems and data affected</dt><dd id="approval-confirm-affects"></dd></div>
@@ -278,6 +284,8 @@
         'Approve "' + (item.dataset.label || 'this request') + '"?';
       document.getElementById('approval-confirm-risk').textContent = critical
         ? 'This is a critical risk action.' : 'This is a high risk action.';
+      // Say so when the person deciding is the person who asked.
+      document.getElementById('approval-confirm-own').hidden = item.dataset.ownRequest !== 'yes';
       const does = document.getElementById('approval-confirm-does');
       does.replaceChildren();
       const bullets = item.querySelectorAll('.approval-parameters li');
@@ -560,7 +568,17 @@
       if (!cell || state.status !== 'pending') return;
       var text = cell.querySelector('[data-approval-quorum-status]');
       if (!text) { text = document.createElement('p'); text.setAttribute('role', 'status'); text.dataset.approvalQuorumStatus = '1'; cell.append(text); }
-      text.textContent = state.approved_count + ' of ' + state.approvals_required + ' required approvals received.' + (state.your_approval_recorded ? ' Your approval is recorded.' : ' An independent decision is needed.');
+      // The words follow what is enforced: one approver may be the person
+      // who asked; under two-person approval their own vote may not count.
+      var required = Number(state.approvals_required) || 1;
+      var words = [required <= 1 ? 'One approval is needed.'
+        : state.approved_count + ' of ' + required + ' required approvals received.'];
+      if (state.your_approval_recorded) words.push('Your approval is recorded.');
+      else if (state.requested_by_you) words.push(!state.self_approval_counts
+        ? 'You asked for this, so other people must approve it.'
+        : required <= 1 ? 'You asked for this, so approving it approves your own request.'
+          : 'You asked for this; your approval counts as one of them.');
+      text.textContent = words.join(' ');
       if (state.your_approval_recorded) { var approve = row.querySelector('[data-action="approve"]'); if (approve) approve.disabled = true; }
     } catch (_) { /* Existing decision controls retain their server-side checks. */ }
   });

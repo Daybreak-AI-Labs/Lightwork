@@ -87,7 +87,7 @@
           <td>{{ (a.requested_by | identity) if a.requested_by else '—' }}</td>
           <td>{{ (a.decided_by | identity) if a.decided_by else '—' }}</td>
           <td>{{ a.approved_count }} of {{ a.approvals_required }}</td>
-          <td>{% if a.approvers %}{% for p in a.approvers %}{{ p | identity }}{% if not loop.last %}, {% endif %}{% endfor %}{% else %}—{% endif %}</td>
+          <td>{% if a.approvers %}{% for p in a.approvers %}{{ p | identity }}{% if p == a.requested_by %} (their own request){% endif %}{% if not loop.last %}, {% endif %}{% endfor %}{% else %}—{% endif %}</td>
           <td>{{ ('Waiting (' ~ a.audit_pending_count ~ ')') if a.audit_pending_count else 'Yes' }}</td>
         </tr>
         {% endfor %}

@@ -1,0 +1,137 @@
+"""The record says who decided: activity log, CSV export and audit binder.
+
+A person approves (and undoes, and approves again) a request on the Approvals
+page; the activity log and its spreadsheet download name that person rather
+than "Lightwork", the undo is on the record with who undid it, and the binder
+counts the approval and its approver.
+"""
+from __future__ import annotations
+
+import csv
+import io
+import re
+import time
+
+import pytest
+from fastapi.testclient import TestClient
+
+ORIGIN = {"Origin": "http://testserver"}
+REQUESTER = "user:sam.lee@northwind.example"
+APPROVER = "user:dana.admin@northwind.example"
+
+
+@pytest.fixture
+def env(monkeypatch, tmp_path):
+    from maverick import world_model
+    from maverick.world_model import WorldModel
+
+    monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
+    monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
+    world = WorldModel(tmp_path / "world.db")
+    from maverick_dashboard.app import app
+
+    yield TestClient(app, headers=ORIGIN), world
+    world.close()
+
+
+def _approval(world, *, requested_by=None):
+    from maverick.approval_cards import build_approval_card, encode_approval_detail
+
+    card = build_approval_card(
+        action="shell", summary="Run one command in the sandbox.", target_label="sandbox:/work",
+        target={"workdir": "/work"}, parameters={"command": "ls"},
+        parameter_summary=["Runs the command once."], actor=requested_by or REQUESTER, workspace="local",
+        role="operator", authority_versions={}, input_versions={}, credential_versions={},
+        budget={}, expires_at=time.time() + 600, known_effects=["Runs one command."],
+        unresolved_assumptions=[], before="Not run.", after="Run once.", irreversible=True,
+    )
+    approval_id = world.create_approval("shell", risk="high", scope="sandbox:/work",
+                                        detail=encode_approval_detail(card), requested_by=requested_by)
+    return approval_id, {"X-Lightwork-Approval-Binding": card["binding_sha256"]}
+
+
+def _as(monkeypatch, principal):
+    from maverick_dashboard import api
+
+    monkeypatch.setattr(api, "_supervisor", lambda request: principal)
+
+
+def _approve(client, approval_id, headers):
+    response = client.post(f"/api/v1/approvals/{approval_id}/approve",
+                           json={"acknowledged": True}, headers=headers)
+    assert response.status_code == 204, response.text
+    return response
+
+
+def _visible(html):
+    return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", html))
+
+
+def _csv_rows(client):
+    response = client.get("/api/v1/audit/download", params={"format": "csv"})
+    assert response.status_code == 200, response.text
+    return list(csv.reader(io.StringIO(response.text)))
+
+
+def test_activity_log_and_download_name_the_person_who_decided(env, monkeypatch):
+    client, world = env
+    approval_id, headers = _approval(world)
+    _as(monkeypatch, APPROVER)
+    _approve(client, approval_id, headers)
+
+    rows = _csv_rows(client)
+    decided = [row for row in rows if row[1] == "Approval decided"]
+    assert decided, rows
+    assert decided[-1][2] == "dana.admin@northwind.example"
+    assert "Lightwork" not in {row[2] for row in decided}
+
+    page = _visible(client.get("/audit").text)
+    assert re.search(r"Approval decided\s+dana\.admin@northwind\.example", page), page[:2000]
+
+
+def test_an_undo_is_on_the_record_with_who_undid_it(env, monkeypatch):
+    client, world = env
+    monkeypatch.setenv("MAVERICK_APPROVAL_UNDO_GRACE_SECONDS", "30")
+    approval_id, headers = _approval(world)
+    _as(monkeypatch, APPROVER)
+    _approve(client, approval_id, headers)
+    undo = client.post(f"/api/v1/approvals/{approval_id}/undo")
+    assert undo.status_code == 200, undo.text
+    _approve(client, approval_id, headers)
+
+    rows = _csv_rows(client)
+    undone = [row for row in rows if row[1] == "Approval decision undone"]
+    assert len(undone) == 1, rows
+    assert undone[0][2] == "dana.admin@northwind.example"
+    assert len([row for row in rows if row[1] == "Approval decided"]) == 2
+
+
+def test_binder_counts_a_single_approval_and_its_approver(env, monkeypatch):
+    client, world = env
+    approval_id, headers = _approval(world)
+    _as(monkeypatch, APPROVER)
+    _approve(client, approval_id, headers)
+
+    binder = client.get("/api/v1/audit/binder", params={"days": 30}).json()
+    (row,) = [item for item in binder["approvals"] if item["id"] == approval_id]
+    assert row["status"] == "approved"
+    assert row["decided_by"] == APPROVER
+    assert row["approved_count"] == 1
+    assert row["approvers"] == [APPROVER]
+
+    page = _visible(client.get("/audit/binder", params={"days": 30}).text)
+    assert "1 of 1" in page
+    assert "0 of 1" not in page
+
+
+def test_a_rejection_does_not_count_as_an_approver(env, monkeypatch):
+    client, world = env
+    approval_id, _headers = _approval(world)
+    _as(monkeypatch, APPROVER)
+    assert client.post(f"/api/v1/approvals/{approval_id}/deny").status_code == 204
+
+    binder = client.get("/api/v1/audit/binder", params={"days": 30}).json()
+    (row,) = [item for item in binder["approvals"] if item["id"] == approval_id]
+    assert row["status"] == "denied"
+    assert row["approved_count"] == 0
+    assert row["approvers"] == []
