@@ -25,8 +25,8 @@
   function words(value){return String(value==null?"":value).replace(/_/g," ");}
   // Every destructive or sharing step still asks first (shared dialog).
   async function ask(message,okText,values={}){return typeof window.mvConfirm==="function"?!!(await window.mvConfirm(window.LightworkI18n?message:text(message,values),{okText,productCopy:!!window.LightworkI18n,values})):false;}
-  function failure(status,action){
-    if(typeof window.mvErrorText==="function")return window.mvErrorText({status},action);
+  function failure(status,action,headers){
+    if(typeof window.mvErrorText==="function")return window.mvErrorText({status,headers},action);
     const what="Could not "+action+". ";
     if(status===404)return what+"That item no longer exists or you no longer have access. Refresh the page to see the latest.";
     if(status===409)return what+"This was changed since you opened it. Refresh the page and try again.";
@@ -41,7 +41,7 @@
     const response=await fetch(base+path,{...options,credentials:"same-origin",cache:"no-store",headers:{"Content-Type":"application/json","X-Lightwork-Review-Context":root.dataset.context}});
     if([401,403].includes(response.status)){expired=true;invalidateView();throw problem("Your sign-in or access changed. Sign in again and reload project reviews.");}
     const raw=await response.text();if(new TextEncoder().encode(raw).byteLength>2*1024*1024)throw problem("There is too much to show at once. Search for a task or project to narrow the list.");
-    if(!response.ok){const error=problem(failure(response.status,options.method&&options.method!=="GET"?"save that":"load the review"));error.status=response.status;throw error;}
+    if(!response.ok){const error=problem(failure(response.status,options.method&&options.method!=="GET"?"save that":"load the review",response.headers));error.status=response.status;throw error;}
     let data;try{data=JSON.parse(raw);}catch(_){throw problem("Could not read the reply from Lightwork. Refresh the page and try again.");}
     return data;
   }

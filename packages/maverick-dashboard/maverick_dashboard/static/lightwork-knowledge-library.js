@@ -21,8 +21,9 @@
     var text = String(value || "").replace(/[_.-]+/g, " ").trim();
     return text ? text.charAt(0).toUpperCase() + text.slice(1) : "";
   }
-  function plain(status, action) {
-    if (typeof window.mvErrorText === "function") return window.mvErrorText({ status: status }, action);
+  function plain(status, action, headers) {
+    // Headers carry the turned-off reason, so "off" is never read as "no permission".
+    if (typeof window.mvErrorText === "function") return window.mvErrorText({ status: status, headers: headers }, action);
     return "Could not " + action + ". Please try again.";
   }
   async function call(method, path, body, action) {
@@ -39,7 +40,7 @@
     var payload = {};
     try { payload = await response.json(); } catch (_error) { payload = null; }
     if (!response.ok || !payload || typeof payload !== "object") {
-      throw new Error(response.ok ? "Could not " + action + ". Lightwork returned something unexpected." : (payload && typeof payload.detail === "string" ? payload.detail : plain(response.status, action)));
+      throw new Error(response.ok ? "Could not " + action + ". Lightwork returned something unexpected." : (payload && typeof payload.detail === "string" ? payload.detail : plain(response.status, action, response.headers)));
     }
     return payload;
   }

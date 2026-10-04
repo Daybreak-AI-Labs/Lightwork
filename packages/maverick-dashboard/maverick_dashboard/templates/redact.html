@@ -46,7 +46,7 @@
           return;
         }
         if (!res.ok) {
-          const msg = window.mvErrorText ? window.mvErrorText({ status: res.status }, "check the text") : "Could not check the text. Please try again.";
+          const msg = window.mvErrorText ? window.mvErrorText({ status: res.status, headers: res.headers }, "check the text") : "Could not check the text. Please try again.";
           badge.className = "badge failure"; badge.textContent = msg;
           mvToast(msg, { error: true });
           return;

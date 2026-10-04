@@ -349,12 +349,12 @@
         button.disabled = true; button.setAttribute('aria-busy', 'true');
         fetch(form.action, {method: 'POST', body: new URLSearchParams(new FormData(form)),
                             headers: {'Accept': 'application/json'}, credentials: 'same-origin'})
-          .then(function (r) { return r.json().then(function (j) { return {ok: r.ok, status: r.status, body: j}; }); })
+          .then(function (r) { return r.json().then(function (j) { return {ok: r.ok, status: r.status, body: j, headers: r.headers}; }); })
           .then(function (res) {
             var body = res.body || {};
             if (!res.ok) {
               var plain = window.mvPlainDetail ? window.mvPlainDetail(body.detail) : '';
-              throw new Error(plain || window.mvErrorText({status: res.status}, isSend ? 'send the test message' : 'test the connection'));
+              throw new Error(plain || window.mvErrorText({status: res.status, headers: res.headers}, isSend ? 'send the test message' : 'test the connection'));
             }
             result.className = 'ch-result ' + (body.ok ? 'ch-result--ok' : 'ch-result--failed');
             result.textContent = body.message || (body.ok ? 'Passed.' : 'Failed.');
