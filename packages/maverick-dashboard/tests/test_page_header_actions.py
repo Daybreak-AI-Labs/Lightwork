@@ -83,7 +83,8 @@ MIGRATED_HEADERS = {
     "errors.html": "'Problems in: ' ~ goal.title",
     "rights_form.html": "rf.heading.replace('{organisation}', form.property.organisation)",
     "rights_status.html": "rf.status_title", "rights_unavailable.html": "rf.page_title",
-    "rights_verify.html": "rf.verify_title",
+    "rights_verify.html": "rf.verify_title", "form_automation.html": "form.title",
+    "form_questionnaire.html": "questionnaire.vendor ~ ' — security & risk questionnaire'",
 }
 
 
