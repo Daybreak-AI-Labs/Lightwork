@@ -161,7 +161,7 @@ def test_governance_panels_render_api_values_as_text_only():
     page = response.text
     fragment = page[
         page.index('<section class="panel" id="governance-operations-panel"'):
-        page.index('<p><a class="btn" href="/security">')
+        page.index('<p><a class="back-link" href="/security">')
     ]
     assert "td.textContent = asText(value)" in fragment
     assert "target.textContent = JSON.stringify(value" in fragment
@@ -368,7 +368,7 @@ def test_governance_operations_inline_javascript_has_valid_syntax(tmp_path):
     assert response.status_code == 200
     page = response.text
     start = page.index('<section class="panel" id="governance-operations-panel"')
-    end = page.index('<p><a class="btn" href="/security">', start)
+    end = page.index('<p><a class="back-link" href="/security">', start)
     fragment = page[start:end]
     match = re.search(r"<script>(.*?)</script>", fragment, flags=re.DOTALL)
     assert match is not None
@@ -609,7 +609,7 @@ _BANNED = re.compile(
 def _governance_fragment(page: str) -> str:
     return page[
         page.index('<section class="panel" id="governance-operations-panel"'):
-        page.index('<p><a class="btn" href="/security">')
+        page.index('<p><a class="back-link" href="/security">')
     ]
 
 
