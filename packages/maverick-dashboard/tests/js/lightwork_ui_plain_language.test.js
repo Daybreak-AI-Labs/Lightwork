@@ -23,7 +23,7 @@ test("request failures read as plain sentences, never codes or exception names",
     [{ status: 400 }, /details need fixing/], [{ status: 422 }, /details need fixing/],
     [{ status: 401 }, /sign-in has expired/], [{ status: 403 }, /do not have permission/],
     [{ status: 404 }, /no longer exists/], [{ status: 409 }, /cannot be done right now/],
-    [{ status: 429 }, /Too many requests/], [{ status: 503 }, /temporarily unavailable\. Please try again in a few minutes/],
+    [{ status: 429 }, /Too many requests/], [{ status: 503 }, /temporarily unavailable\. Try again in a few minutes/],
     [{ status: 500 }, /went wrong on our side/], [new TypeError("Failed to fetch"), /could not be reached/],
     [{ name: "AbortError" }, /took too long/], [new Error("SyntaxError: Unexpected token"), /went wrong/],
   ];
@@ -32,11 +32,24 @@ test("request failures read as plain sentences, never codes or exception names",
     assert.match(text, /^Could not save the policy\. /);
     assert.match(text, expected);
     assert.doesNotMatch(text, /\b\d{3}\b|HTTP|Error|Syntax/);
+    assert.doesNotMatch(text, /\b(please|sorry|oops|invalid)\b/i);
   }
   assert.equal(w.mvErrorText({ status: 404 }), "That item no longer exists. Refresh the page to see the latest.");
   const shown = w.mvFail({ status: 403 }, "delete it");
   assert.match(w.document.getElementById("mv-toasts-alert").textContent, /Could not delete it/);
   assert.match(shown, /permission/);
+});
+
+test("mvErrorText has one definition, shared by the toast and render helpers", () => {
+  assert.equal(source.match(/window\.mvErrorText\s*=/g).length, 1);
+  const w = load();
+  const shown = w.mvFail({ status: 500 }, "save the policy");
+  assert.equal(shown, w.mvErrorText({ status: 500 }, "save the policy"));
+  assert.equal(shown, "Could not save the policy. Something went wrong on our side. Try again in a minute.");
+  const box = w.document.createElement("p");
+  w.mvRenderError(box, { status: 403 }, "open the report");
+  assert.equal(box.textContent, "Could not open the report. You do not have permission to do this. Ask an administrator.");
+  w.close();
 });
 
 test("conflicts show safe server guidance instead of assuming a stale edit", async () => {

@@ -361,19 +361,20 @@
       // Plain-language error text for a failed request. Pass the fetch
       // Response (or a thrown error) and, optionally, what the person was
       // trying to do ("save the policy"). Never shows HTTP codes, exception
-      // class names or server internals.
-      window.mvErrorText = function (failure, action) {
+      // class names or server internals. One definition: the English sentence
+      // comes from plainErrorText and a translated interface localizes it.
+      function plainErrorText(failure, action) {
         var business = window.mvBusinessError(failure);
         if (business) return business.message;
         var what = action ? ('Could not ' + action + '. ') : '';
         var status = failure && typeof failure.status === 'number' ? failure.status : 0;
         if (!status) {
           var name = failure && failure.name;
-          if (name === 'AbortError') return what + 'It took too long. Please try again.';
+          if (name === 'AbortError') return what + 'It took too long. Try again.';
           if (name === 'TypeError' || (failure && /fetch|network/i.test(String(failure.message || failure)))) {
             return what + 'Lightwork could not be reached. Check your connection and try again.';
           }
-          return what + 'Something went wrong. Please try again.';
+          return what + 'Something went wrong. Try again.';
         }
         if (status === 400 || status === 422) return what + 'Some of the details need fixing. Check what you entered and try again.';
         if (status === 401) return what + 'Your sign-in has expired. Sign in again to continue.';
@@ -395,18 +396,17 @@
             /\b(turned off|is disabled|not enabled)\b/i.test(typeof failure.detail === 'string' ? failure.detail : '');
           return what + (off
             ? 'This feature is turned off. An administrator can turn it on in Settings.'
-            : 'This is temporarily unavailable. Please try again in a few minutes.');
+            : 'This is temporarily unavailable. Try again in a few minutes.');
         }
-        if (status >= 500) return what + 'Something went wrong on our side. Please try again in a minute.';
-        return what + 'Something went wrong. Please try again.';
-      };
-      var originalErrorText = window.mvErrorText;
-      window.mvErrorText = function(failure, action) {
-        var value=originalErrorText(failure,action), locale=window.LightworkI18n;
-        if(!locale || locale.language==='en')return value;
-        var prefix=action ? 'Could not '+action+'. ' : '';
-        var reason=prefix && value.startsWith(prefix) ? value.slice(prefix.length) : value;
-        if(prefix && locale.has(reason))return locale.text('This action could not be completed. {reason}',{reason:locale.text(reason)});
+        if (status >= 500) return what + 'Something went wrong on our side. Try again in a minute.';
+        return what + 'Something went wrong. Try again.';
+      }
+      window.mvErrorText = function (failure, action) {
+        var value = plainErrorText(failure, action), locale = window.LightworkI18n;
+        if (!locale || locale.language === 'en') return value;
+        var prefix = action ? 'Could not ' + action + '. ' : '';
+        var reason = prefix && value.startsWith(prefix) ? value.slice(prefix.length) : value;
+        if (prefix && locale.has(reason)) return locale.text('This action could not be completed. {reason}', {reason: locale.text(reason)});
         return locale.text(value);
       };
       // A server message is shown only when it is already a plain sentence
