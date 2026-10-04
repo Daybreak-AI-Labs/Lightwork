@@ -51,11 +51,27 @@ test("every required field gets one hidden-from-assistive-tech Required marker b
   w.close();
 });
 
+test("a label whose words sit in their own element keeps the marker on that line", () => {
+  const w = load(
+    '<label id="column" style="display:flex;flex-direction:column"><span>Person</span>\n  <select required><option>Ana</option></select></label>' +
+    '<label id="amount"><span>Amount</span><span>$ <input type="number" required></span></label>' +
+    '<label id="mixed">Owner <span class="muted">(shown on reports)</span> and backup <input required></label>');
+  const doc = w.document;
+  assert.equal(doc.querySelector("#column > span").textContent, "PersonRequired");
+  assert.equal(doc.querySelector("#amount > span").textContent, "AmountRequired");
+  // Words written straight into the label: the marker goes just before the field.
+  assert.equal(doc.querySelector("#mixed input").previousElementSibling.className, "mv-required");
+  w.close();
+});
+
 test("labels that already say required are left as written", () => {
   const w = load(
     '<label id="star">Name <span aria-hidden="true">*</span><input required></label>' +
-    '<label id="words">Reason (required) <input required></label>');
-  assert.equal(markers(w.document.body).length, 0);
+    '<label id="words">Reason (required) <input required></label>' +
+    '<label id="pattern">Events (dsar.* for a family) <input required></label>');
+  assert.equal(markers(w.document.getElementById("star")).length, 0);
+  assert.equal(markers(w.document.getElementById("words")).length, 0);
+  assert.equal(markers(w.document.getElementById("pattern")).length, 1); // an asterisk inside words is not a marker
   w.close();
 });
 

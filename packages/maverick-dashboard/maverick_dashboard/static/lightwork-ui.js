@@ -976,14 +976,20 @@
       }
       function mark(control) {
         var label = labelFor(control);
-        if (!label || label.querySelector('.mv-required') || /\*|\brequired\b/i.test(ownText(label))) return;
+        if (!label || label.querySelector('.mv-required') || /(?:^|\s)\*(?:\s|$)|\brequired\b/i.test(ownText(label))) return;
         var marker = document.createElement('span');
         marker.className = 'mv-required'; marker.setAttribute('aria-hidden', 'true');
         marker.setAttribute('data-mv-required', ''); marker.lang = 'en'; marker.textContent = 'Required';
-        // Beside the words: before a field the label wraps, after a checkbox's words.
+        // Beside the words: inside the element holding them (<span>Person</span>),
+        // else just before a field the label wraps, else after a checkbox's words.
         var field = label.contains(control) && !/^(checkbox|radio)$/.test(control.type) ? control : null;
         while (field && field.parentNode !== label) field = field.parentNode;
-        if (field) label.insertBefore(marker, field); else label.appendChild(marker);
+        var words = field && field.previousSibling;
+        while (words && words.nodeType === 3 && !words.nodeValue.trim()) words = words.previousSibling;
+        if (words && words.nodeType === 1 && words.textContent.trim() && !words.matches('input, select, textarea, button') &&
+            !words.querySelector('input, select, textarea, button')) words.appendChild(marker);
+        else if (field) label.insertBefore(marker, field);
+        else label.appendChild(marker);
       }
       function unmark(control) {
         var label = labelFor(control);
