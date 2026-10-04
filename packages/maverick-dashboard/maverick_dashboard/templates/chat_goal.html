@@ -122,6 +122,12 @@
   .more > summary::-webkit-details-marker { display: none; }
   .more[open] > summary { color: var(--text); }
   .feedback .btn.is-active { border-color: var(--accent); background: var(--surface-sunken); }
+  .feedback-reason { margin-top: var(--space-2); padding: var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-md); display: grid; gap: var(--space-2); max-width: 36rem; }
+  .feedback-reason__q { margin: 0; font-weight: var(--font-medium); }
+  .feedback-reason__chips { display: flex; flex-wrap: wrap; gap: var(--space-1); }
+  .feedback-reason__chip[aria-pressed="true"] { border-color: var(--accent); background: var(--surface-sunken); color: var(--text); }
+  .feedback-reason__label { font-size: var(--text-sm); color: var(--muted); }
+  .feedback-reason__actions { display: flex; gap: var(--space-2); }
 
   /* Artifacts: a goal's versioned, kind-tagged outputs. */
   .artifacts { margin-top: var(--space-5); }

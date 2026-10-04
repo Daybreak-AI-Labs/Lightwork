@@ -446,6 +446,8 @@ class FeedbackIn(BaseModel):
     (unlike the gated sign-off). Grounds a real outcome into the learning loop."""
     rating: str = Field(..., pattern="^(up|down)$")
     note: str | None = Field(default=None, max_length=2000)
+    # Optional reason chip on a thumbs-down (goal_feedback_store.REASONS).
+    reason: str | None = Field(default=None, pattern="^(wrong|incomplete|not_asked|unclear|too_long|other)$")
 
 
 class DeliverableEditIn(BaseModel):

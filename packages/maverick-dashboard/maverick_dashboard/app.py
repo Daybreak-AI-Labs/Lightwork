@@ -282,6 +282,10 @@ from .run_status import status_label as _run_status_label  # noqa: E402
 templates.env.filters["approval_spending"] = _approval_spending
 
 templates.env.globals["run_status_label"] = _run_status_label
+# The optional reasons a thumbs-down offers (shared by the page and its live refresh).
+from .goal_feedback_store import REASONS as _FEEDBACK_REASONS  # noqa: E402
+
+templates.env.globals["feedback_reasons"] = list(_FEEDBACK_REASONS.items())
 # Plain labels for model ids, setting sources and sizes (administration pages).
 from . import plain_labels as _plain_labels  # noqa: E402
 
@@ -3749,8 +3753,23 @@ async def learning_page(request: Request) -> HTMLResponse:
         {
             "snap": _learning_snapshot(request),
             "learning_can_manage": has_global_permission(request, "admin"),
+            "agent_feedback": _agent_feedback_summary(),
         },
     )
+
+
+def _agent_feedback_summary() -> list[dict]:
+    """Ratings and picked reasons per agent for the administrator's Learning page."""
+    try:
+        from . import goal_feedback_store
+        from .agent_changelog import agent_title
+
+        rows = goal_feedback_store.summary_by_agent()
+        for row in rows:
+            row["title"] = agent_title(row["agent"])
+        return rows
+    except Exception:  # pragma: no cover -- the page renders without the summary
+        return []
 
 
 @app.get("/perf", response_class=HTMLResponse)

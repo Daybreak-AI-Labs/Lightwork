@@ -720,6 +720,33 @@
 })();
 </script>
 
+  {# Per-agent ratings and the reasons people picked on a thumbs-down. Written
+     comments stay with the person and their task, so they are not listed. #}
+  <div class="section-head"><h2 id="agent-feedback-title">What people said about each agent</h2></div>
+  <section class="panel" id="agent-feedback" aria-labelledby="agent-feedback-title">
+    {% if agent_feedback %}
+    <div class="fa-scroll">
+      <table>
+        <thead><tr><th scope="col">Agent</th><th scope="col">Useful</th><th scope="col">Not useful</th><th scope="col">Reasons picked</th><th scope="col">Most recent reasons</th></tr></thead>
+        <tbody>
+        {% for row in agent_feedback %}
+          <tr>
+            <th scope="row">{% if row.agent %}<a href="/agents?name={{ row.agent | urlencode }}">{{ row.title }}</a>{% else %}{{ row.title }}{% endif %}</th>
+            <td>{{ row.up }}</td>
+            <td>{{ row.down }}</td>
+            <td>{% if row.reasons %}{% for item in row.reasons %}{{ item.label }} ({{ item.count }}){% if not loop.last %}, {% endif %}{% endfor %}{% else %}<span class="muted">None picked</span>{% endif %}</td>
+            <td>{% if row.recent %}{% for item in row.recent %}{{ item.label }} <span class="muted">{{ item.ts | datetime }}</span>{% if not loop.last %}; {% endif %}{% endfor %}{% else %}<span class="muted">None yet</span>{% endif %}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <p class="muted">Counts use each person's latest rating of an answer. People can add a written comment to a thumbs-down; it stays with them and their task and is not shown here.</p>
+    {% else %}
+    <p class="muted">No one has rated an answer yet. When people press thumbs up or down on an answer, each agent's ratings and the reasons they picked appear here.</p>
+    {% endif %}
+  </section>
+
   <div class="section-head"><h2 id="fa-flywheel-title">What Lightwork learned from results</h2></div>
   <section class="panel" aria-labelledby="fa-flywheel-title">
     <p class="muted" id="fa-flywheel-status" role="status" aria-live="polite">Loading…</p>

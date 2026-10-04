@@ -10311,12 +10311,29 @@ def post_feedback(request: Request, goal_id: int, payload: FeedbackIn) -> dict:
     who = _supervisor(request)
     from maverick_dashboard import goal_feedback_store
 
+    agent = g.domain or ""
+    previous = goal_feedback_store.latest_for_goal(goal_id, owner=g.owner or "")
     row = goal_feedback_store.record(
-        goal_id, g.owner or "", payload.rating, value=value, note=payload.note or "", by=who
+        goal_id, g.owner or "", payload.rating, value=value, note=payload.note or "", by=who,
+        reason=payload.reason or "", agent=agent,
     )
     observed = _ground_outcome(w, goal_id, value, kind="feedback")
+    follow_up = goal_feedback_store.should_follow_up(who, agent, previous=previous, rating=payload.rating)
     return {"feedback": row, "saved": True, "learning_observation": "recorded" if observed else "not_recorded",
-            "training_completed": False}
+            "training_completed": False,
+            "acknowledgement": _feedback_acknowledgement(observed, bool(payload.reason or payload.note)),
+            "follow_up": {"question": "What would make this better?"} if follow_up else None}
+
+
+def _feedback_acknowledgement(observed: bool, explained: bool) -> str:
+    """Where feedback goes and how it is used, true to what just happened."""
+    text = ("Thanks. Saved with this task and recorded as a learning signal. Your workspace's "
+            "learning policy decides how it is used to improve this agent." if observed else
+            "Thanks. Saved with this task. It was not recorded as a learning signal, "
+            "so it does not change this agent.")
+    if explained:
+        text += " The administrators' summary shows counts and the reasons picked for this agent, not what you wrote."
+    return text
 
 
 @router.post("/goals/{goal_id}/deliverable/edit")

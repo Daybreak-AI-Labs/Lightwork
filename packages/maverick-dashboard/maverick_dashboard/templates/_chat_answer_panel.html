@@ -81,7 +81,22 @@
                   data-rating="down" aria-label="{{ ut('No, not useful') }}" lang="{{ ul('No, not useful') }}">👎</button>
           <span id="feedback-msg" role="status" aria-live="polite" class="muted"
                 style="min-height: 1em;"></span>
-        </div>{% endif %}
+        </div>
+        {# After a thumbs-down: an optional reason, one tap to skip. #}
+        <form id="feedback-reason" class="feedback-reason" hidden>
+          <p class="feedback-reason__q" id="feedback-reason-q">{{ ui('What was wrong? This is optional.') }}</p>
+          <div class="feedback-reason__chips" role="group" aria-labelledby="feedback-reason-q">
+            {% for key, label in feedback_reasons %}
+            <button type="button" class="btn btn--ghost feedback-reason__chip" data-reason="{{ key }}" aria-pressed="false">{{ ui(label) }}</button>
+            {% endfor %}
+          </div>
+          <label for="feedback-note" class="feedback-reason__label">{{ ui('Anything else? Your comment stays with this task.') }}</label>
+          <textarea id="feedback-note" class="input" rows="2" maxlength="500" lang="und" dir="auto" data-user-content></textarea>
+          <div class="feedback-reason__actions">
+            <button type="submit" class="btn" id="feedback-reason-send">{{ ui('Send') }}</button>
+            <button type="button" class="btn btn--ghost" id="feedback-reason-skip">{{ ui('Skip') }}</button>
+          </div>
+        </form>{% endif %}
         {% if goal.result %}<div class="answer-actions" role="group" aria-label="{{ ut('Answer actions') }}">
           <button id="copy-result" class="btn btn--ghost" type="button">{{ ui('Copy answer') }}</button>
           <button id="print-result" class="btn btn--ghost" type="button">{{ ui('Print conversation') }}</button>
