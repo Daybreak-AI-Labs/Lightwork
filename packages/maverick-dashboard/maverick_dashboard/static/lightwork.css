@@ -121,6 +121,13 @@
     body.font-dyslexic { line-height: 1.8; }
 
     * { box-sizing: border-box; }
+    /* Controls use the product face. Browsers give buttons, fields and menus
+       their own system font, so <button class="btn"> rendered in Arial while
+       <a class="btn"> used Manrope. Zero specificity: any class that sets a
+       font still wins. Chips also take their size and line height from their
+       surroundings unless their page sets one. */
+    :where(button, input, select, textarea) { font-family: inherit; }
+    :where(.chip, .fd__chip) { font: inherit; }
     /* The hidden attribute must always win. Shared classes such as .btn, .section-head
        and .grid set an author-level display, which beats the UA [hidden] rule and left
        "hidden" controls rendered (Settings tab headings, the Ekko buttons, the copilot
