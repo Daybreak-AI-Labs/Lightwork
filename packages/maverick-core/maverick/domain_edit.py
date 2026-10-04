@@ -32,6 +32,7 @@ from .domain import (
     _OVERLAYABLE,
     DomainProfile,
     _coerce,
+    _disabled_suites,
     _envelope_errors,
     _load_raw_domains,
     _profile_field_type_errors,
@@ -137,13 +138,23 @@ def _configured_tool_names() -> frozenset[str] | None:
 
 def workflow_readiness(
     profile: DomainProfile, known_tools: frozenset[str] | None | object = _TOOL_NAMES_UNSET,
+    *, disabled_suites: frozenset[str] | None = None,
 ) -> dict:
-    """Explain whether a pack's required workflow actions are registered.
+    """Explain whether a pack's department and required actions can run.
 
     This is deliberately narrower than live readiness: credentials, permissions,
     remote service health and provider availability are checked when work runs.
     The run-time factory still makes the final admission decision.
     """
+    if disabled_suites is None:
+        disabled_suites = frozenset(_disabled_suites())
+    if suites_for_domain(profile.name, profile) & disabled_suites:
+        return {
+            "state": "needs_setup", "missing_tools": [], "missing_labels": [],
+            "missing_optional_tools": [],
+            "fix_url": "/settings/all?group=people-access&id=suites.%2A#sa-suites-all-label",
+            "label": "Department turned off",
+        }
     if known_tools is _TOOL_NAMES_UNSET:
         known_tools = _configured_tool_names()
     required = {tool for step in profile.workflow for tool in step.tools}
@@ -453,6 +464,7 @@ def list_agents(directory: str | Path | None = None) -> list[dict]:
     client has overridden it and whether it carries a workflow."""
     overrides = _load_raw_domains(Path(directory) if directory else user_dir())
     known_tools = _configured_tool_names()
+    disabled_suites = frozenset(_disabled_suites())
     out: list[dict] = []
     for name, prof in sorted(available_domains().items()):
         out.append({
@@ -462,7 +474,7 @@ def list_agents(directory: str | Path | None = None) -> list[dict]:
             "description": prof.description,
             "is_override": name in overrides,
             "has_workflow": bool(prof.workflow),
-            "readiness": workflow_readiness(prof, known_tools),
+            "readiness": workflow_readiness(prof, known_tools, disabled_suites=disabled_suites),
         })
     return out
 

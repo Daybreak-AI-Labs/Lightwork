@@ -96,6 +96,8 @@ def _full(**overrides) -> OIDCConfig:
         issuer="https://idp.example.com",
         audience="maverick",
         client_id="cid",
+        client_secret="client-secret",  # pragma: allowlist secret
+        redirect_uri="https://dash.example.com/auth/callback",
         session_secret="hmac",  # pragma: allowlist secret
     )
     base.update(overrides)
@@ -114,6 +116,11 @@ def test_login_enabled_requires_client_id():
     assert login_enabled(_full(client_id="")) is False
 
 
+def test_login_enabled_requires_callback_secret_and_audience():
+    for field in ("redirect_uri", "client_secret", "audience"):
+        assert login_enabled(_full(**{field: ""})) is False
+
+
 def test_login_enabled_requires_session_secret():
     assert login_enabled(_full(session_secret="")) is False
 
@@ -122,13 +129,13 @@ def test_login_enabled_with_issuer():
     assert login_enabled(_full()) is True
 
 
-def test_login_enabled_with_explicit_endpoints_no_issuer():
+def test_login_disabled_with_explicit_endpoints_but_no_issuer():
     cfg = _full(
         issuer="",
         authorization_endpoint="https://idp.example.com/authorize",
         token_endpoint="https://idp.example.com/token",
     )
-    assert login_enabled(cfg) is True
+    assert login_enabled(cfg) is False
 
 
 def test_login_disabled_without_issuer_or_endpoints():

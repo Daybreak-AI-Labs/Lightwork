@@ -935,6 +935,10 @@ def all_settings_page(
         for g in groups:
             g["settings"] = loaded.get(g["slug"], [])
             g["loaded"] = g["slug"] == group and not words and not changed
+    from maverick.oidc import login_enabled
+
+    from .saml import _session_secret, saml_enabled
+
     return _app().templates.TemplateResponse(request, "settings_all.html", {
         "groups": groups,
         "modules": _module_rows(),
@@ -945,6 +949,8 @@ def all_settings_page(
         "only_changed": changed,
         "focus_id": focus.id if focus is not None else "",
         "served": bool(words or changed),
+        "oidc_login_active": login_enabled(),
+        "saml_login_active": saml_enabled() and bool(_session_secret()),
     })
 
 

@@ -67,7 +67,7 @@
           <table style="margin-top: 0.75rem;">
             <thead><tr>
               <th scope="col">Agent</th><th scope="col">Job role</th>
-              <th scope="col">What it does</th>
+              <th scope="col">What it does</th><th scope="col">Can it start?</th>
             </tr></thead>
             <tbody>
             {% for agent in fleet.agents %}
@@ -75,15 +75,21 @@
                 <td>{{ agent.name|humanize }}</td>
                 <td><span class="badge active">{{ agent.role|role_label if agent.role else 'No role' }}</span></td>
                 <td class="muted">{{ agent.description or '' }}</td>
+                {% set check = specialist_readiness.get(agent.domain) if agent.domain else none %}
+                <td>{% if check %}
+                  {{ check.label }}{% if check.state != 'action_ready' %} · <a href="{{ check.fix_url }}">Review setup</a>{% endif %}
+                {% else %}Checked when the task starts{% endif %}</td>
               </tr>
             {% endfor %}
             </tbody>
           </table>
           <form class="fleet-run-form fl-run" data-fleet="{{ fleet.name }}">
             <label>Give it to
-              <select class="input" name="agent">
+              <select class="input" name="agent" required>
+                <option value="">Choose an agent</option>
                 {% for agent in fleet.agents %}
-                  <option value="{{ agent.name }}">{{ agent.name|humanize }} ({{ agent.role|role_label if agent.role else 'no role' }})</option>
+                  {% set check = specialist_readiness.get(agent.domain) if agent.domain else none %}
+                  <option value="{{ agent.name }}"{% if check and check.state != 'action_ready' %} disabled{% endif %}>{{ agent.name|humanize }} ({{ agent.role|role_label if agent.role else 'no role' }}){% if check %} · {{ check.label }}{% endif %}</option>
                 {% endfor %}
               </select>
             </label>
@@ -91,9 +97,11 @@
               <input class="input" name="prompt" type="text" maxlength="4000"
                      placeholder="What should this agent do?" />
             </label>
-            <button type="submit" class="btn btn--primary">Start task</button>
+            <button type="submit" class="btn btn--primary"{% if not fleet_can_start[fleet.name] %} disabled{% endif %}>Start task</button>
             <span class="fleet-run-msg muted" role="status" aria-live="polite"></span>
           </form>
+          <p class="muted fl-help">Specialist status checks required actions. Connections, permissions and the AI service are checked when work starts.</p>
+          {% if not fleet_can_start[fleet.name] %}<p class="muted">No specialist on this team passed the action check. Review setup above, then return to this team.</p>{% endif %}
         {% else %}
           <p class="muted" style="margin-bottom: 0;">No agents on this team yet.</p>
         {% endif %}
@@ -207,6 +215,7 @@
           const prompt = form.querySelector('[name=prompt]').value.trim();
           const msg = form.querySelector('.fleet-run-msg');
           const btn = form.querySelector('button[type=submit]');
+          if (!agent) { say(msg, 'Choose an available agent first.', true); return; }
           if (!prompt) { say(msg, 'Describe the task first.', true); return; }
           btn.disabled = true; say(msg, 'Starting…');
           try {

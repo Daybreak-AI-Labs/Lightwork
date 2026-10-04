@@ -299,10 +299,10 @@
                  spellcheck="false" style="flex:1;" class="input"
                  aria-label="Choose a specialist to tailor"
                  placeholder="Type to search, for example “forecasting” or “onboarding”"
-                 value="{{ ((selected.description or (selected.name | humanize)) if selected else '') }}">
+                 value="{{ selected.picker_label if selected else '' }}">
           <datalist id="agent-picker-list">
-            {% for a in agents %}
-            <option value="{{ (a.description or (a.name | humanize)) }}{% if a.is_override %} (custom){% endif %}" data-name="{{ a.name }}" data-ready="{{ '1' if a.readiness.state == 'action_ready' else '0' }}" label="{{ a.readiness.label }}"{% if a.readiness.state != 'action_ready' %} disabled{% endif %}></option>
+            {% for a in agents | sort(attribute='readiness.state') %}
+            <option value="{{ a.picker_label }}" data-name="{{ a.name }}" label="{{ a.readiness.label }}{% if a.is_override %} · Customized{% endif %}"></option>
             {% endfor %}
           </datalist>
           <button type="button" class="btn" id="agent-picker-open">Open</button>
@@ -311,10 +311,10 @@
           <a class="btn{% if creating %} btn--primary{% endif %}" href="/agents?new=1#agent-form" id="btn-new-agent">＋ New custom agent</a>
           {% endif %}
         </div>
-        <label class="sub" style="display:inline-flex;align-items:center;gap:var(--space-2);margin-top:var(--space-2);">
-          <input id="agent-show-needs-setup" type="checkbox"> Show specialists that need setup
-        </label>
-        <p class="sub" style="margin:var(--space-1) 0 0;">The list starts with specialists whose required actions are available. Live connections, permissions and the AI service are checked when work starts.</p>
+        {% set ready_count = agents | selectattr('readiness.state', 'equalto', 'action_ready') | list | length %}
+        {% set setup_count = agents | selectattr('readiness.state', 'equalto', 'needs_setup') | list | length %}
+        {% set unknown_count = agents | selectattr('readiness.state', 'equalto', 'unknown') | list | length %}
+        <p class="sub" style="margin:var(--space-1) 0 0;">{{ ready_count }} can start · {{ setup_count }} {{ 'needs' if setup_count == 1 else 'need' }} setup · {{ unknown_count }} {{ 'needs' if unknown_count == 1 else 'need' }} a setup check. Search any specialist to see what it needs. Live connections, permissions and the AI service are checked when work starts.</p>
         {% elif editable %}
         <a class="btn btn--primary" href="/agents?new=1#agent-form" id="btn-new-agent">＋ New custom agent</a>
         {% endif %}
@@ -324,10 +324,12 @@
       <div class="panel" role="status" style="margin-bottom:var(--space-3);">
         <strong>{{ selected.readiness.label }}</strong>
         {% if selected.readiness.state == 'needs_setup' %}
+        {% if selected.readiness.missing_labels %}
         <p class="muted">Required actions are unavailable here: {{ selected.readiness.missing_labels | join(', ') }}.</p>
+        {% else %}<p class="muted">This specialist cannot start while its department is turned off.</p>{% endif %}
         <a href="{{ selected.readiness.fix_url }}">Review setup</a>
         {% elif selected.readiness.state == 'unknown' %}
-        <p class="muted">Lightwork could not check this specialist's required actions. Ask an administrator to review setup before assigning work.</p>
+        <p class="muted">Lightwork could not check this specialist's required actions. Ask an administrator to review setup before assigning work. <a href="{{ selected.readiness.fix_url }}">Review setup</a></p>
         {% else %}
         <p class="muted">The required actions are present. Live connections, permissions and the AI service are checked when work starts.</p>
         {% endif %}
@@ -587,25 +589,20 @@
     (function () {
       var picker = document.getElementById('agent-picker');
       if (!picker) return;
-      var showAll = document.getElementById('agent-show-needs-setup');
-      if (showAll) showAll.addEventListener('change', function () {
-        document.querySelectorAll('#agent-picker-list option').forEach(function (option) {
-          option.disabled = !showAll.checked && option.dataset.ready !== '1';
-        });
-      });
       function go() {
-        var v = picker.value.trim(); if (!v) return;
+        var v = picker.value.trim(); if (!v) return false;
         var match = Array.prototype.find.call(document.querySelectorAll('#agent-picker-list option'), function (o) {
-          return !o.disabled && (o.value.toLowerCase() === v.toLowerCase() || o.dataset.name === v);
+          return o.value.toLowerCase() === v.toLowerCase() || o.dataset.name === v;
         });
-        if (match) location.href = '/agents?name=' + encodeURIComponent(match.dataset.name);
+        if (!match) return false;
+        location.href = '/agents?name=' + encodeURIComponent(match.dataset.name);
+        return true;
       }
       picker.addEventListener('change', go);
       var open = document.getElementById('agent-picker-open');
       if (open) open.addEventListener('click', function () {
-        go();
-        if (!Array.prototype.some.call(document.querySelectorAll('#agent-picker-list option'), function (o) { return !o.disabled && o.value.toLowerCase() === picker.value.trim().toLowerCase(); })) {
-          mvToast('Choose a specialist from the list, or show those needing setup.', { error: true });
+        if (!go()) {
+          mvToast('Choose a specialist from the list.', { error: true });
         }
       });
     })();
@@ -1279,9 +1276,10 @@
       <div class="jc-sec" role="status"><h3>Can this specialist start?</h3>
         <p><strong>{{ selected.readiness.label }}</strong></p>
         {% if selected.readiness.state == 'needs_setup' %}
-        <p class="muted">Required actions: {{ selected.readiness.missing_labels | join(', ') }}. <a href="{{ selected.readiness.fix_url }}">Review setup</a></p>
+        {% if selected.readiness.missing_labels %}<p class="muted">Required actions: {{ selected.readiness.missing_labels | join(', ') }}. <a href="{{ selected.readiness.fix_url }}">Review setup</a></p>
+        {% else %}<p class="muted">This department is turned off. <a href="{{ selected.readiness.fix_url }}">Review setup</a></p>{% endif %}
         {% elif selected.readiness.state == 'unknown' %}
-        <p class="muted">Lightwork could not check the required actions. Ask an administrator to review setup before assigning work.</p>
+        <p class="muted">Lightwork could not check the required actions. Ask an administrator to review setup before assigning work. <a href="{{ selected.readiness.fix_url }}">Review setup</a></p>
         {% else %}
         <p class="muted">This checks required actions only; live connections, permissions and the AI service are checked when work starts.</p>
         {% endif %}

@@ -418,6 +418,34 @@ def test_specialist_agent_goal_is_stamped_with_its_pack(monkeypatch, tmp_path):
     assert not world.get_goal(r2.json()["goal_id"]).domain
 
 
+def test_fleets_show_missing_specialist_action_and_refuse_assignment(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    _install_specialist_pack(monkeypatch, tmp_path)
+    pack = tmp_path / "packs" / "ledger_reviewer.toml"
+    with pack.open("a", encoding="utf-8") as handle:
+        handle.write('\n[[workflow]]\nname = "lookup"\ntools = ["web_search"]\n')
+    _save_specialist_fleet()
+    from maverick import domain_edit
+
+    monkeypatch.setattr(domain_edit, "_configured_tool_names", lambda: frozenset({"read_file"}))
+    calls = _stub_runner(monkeypatch)
+    page = _client().get("/fleets")
+    assert page.status_code == 200
+    assert "Needs Web search" in page.text
+    assert 'value="ledger_reviewer" disabled' in page.text
+    assert 'href="/settings/all?id=capabilities.web_search"' in page.text
+
+    denied = _client().post("/api/v1/fleets/dept-ledger/run", json={
+        "agent": "ledger_reviewer", "prompt": "review the March ledger",
+    })
+    assert denied.status_code == 409
+    assert "needs setup" in denied.json()["detail"]
+    assert not calls
+    from maverick.world_model import WorldModel
+
+    assert WorldModel(tmp_path / "world.db").list_goals() == []
+
+
 def test_specialist_agent_run_reaches_the_model_as_the_specialist(monkeypatch, tmp_path):
     """The real orchestrator runs the goal: the specialist's persona is what the
     model is briefed with, and the run stays inside the role's grant."""

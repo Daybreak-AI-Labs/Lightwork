@@ -119,6 +119,46 @@ def reclaim_registered_postgres(
     return reclaimed
 
 
+def reclaim_registered_sqlite(
+    world_factory: Callable,
+    *,
+    resolved_window_seconds: float | None = None,
+) -> int:
+    """Visit existing world files for registered UI workspaces in bounded batches.
+
+    An unbound dashboard's background thread has no request tenant. Its default
+    world is only one of the worlds used by chat, so sweeping that file alone
+    leaves crashed workspace chats active forever. Do not create a missing
+    tenant database merely to inspect it.
+    """
+    from maverick.paths import tenant_scope
+    from maverick.workspace import Workspace
+    from maverick.world_model import reclaim_window_seconds
+
+    window = (reclaim_window_seconds() if resolved_window_seconds is None
+              else float(resolved_window_seconds))
+    if not math.isfinite(window) or window < MIN_WINDOW_SECONDS:
+        return 0
+    try:
+        selected = _periodic_batch(_registered_tenant_ids())
+    except Exception:
+        log.exception("stopped-task reclaim skipped: tenant registry unavailable")
+        return 0
+    reclaimed = 0
+    for tenant_id in selected:
+        try:
+            with tenant_scope(tenant=tenant_id):
+                if Workspace(tenant_id).db_path.is_file():
+                    reclaimed += world_factory().reclaim_orphan_goals(
+                        statuses=("active",), resolved_window_seconds=window,
+                    )
+        except Exception:
+            # A tenant-local SQLite failure must not starve every later tenant.
+            log.exception("stopped-task reclaim failed for workspace %r", tenant_id)
+        _mark_tenant_scanned(tenant_id)
+    return reclaimed
+
+
 def sweep_interval() -> float:
     """Wait half the configured stale window, bounded to 5–30 seconds."""
     from maverick.world_model import reclaim_window_seconds
@@ -164,6 +204,10 @@ def sweep_once() -> int:
         reclaimed = _world().reclaim_orphan_goals(
             statuses=("active",), resolved_window_seconds=window,
         )
+        if current_tenant_id_strict() is None:
+            reclaimed += reclaim_registered_sqlite(
+                _world, resolved_window_seconds=window,
+            )
     if reclaimed:
         log.warning("marked %d stopped task(s) as stuck", reclaimed)
     return reclaimed

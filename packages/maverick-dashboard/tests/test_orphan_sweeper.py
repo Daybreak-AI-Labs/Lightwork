@@ -52,6 +52,55 @@ def test_quick_restart_recovers_after_window_without_another_restart(world):
     assert goal.result == "partial [process restarted mid-run]"
 
 
+def test_unbound_sqlite_dashboard_recovers_registered_workspace_chats(
+    tmp_path, monkeypatch,
+):
+    from maverick import client, paths, world_model_backends
+    from maverick.tenant import registry
+    from maverick_dashboard import _shared
+
+    app_module = importlib.import_module("maverick_dashboard.app")
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
+    monkeypatch.setenv("MAVERICK_ORPHAN_RECLAIM_SECONDS", "60")
+    monkeypatch.delenv("MAVERICK_TENANT", raising=False)
+    monkeypatch.setattr(client, "strict_client_id", lambda: None)
+    monkeypatch.setattr(world_model_backends, "is_postgres_configured", lambda: False)
+    monkeypatch.setattr(registry, "list_tenants", lambda: [
+        registry.TenantRecord(id="client-a"),
+        registry.TenantRecord(id="client-b"),
+        registry.TenantRecord(id="client-c"),
+    ])
+    worlds = {
+        None: WorldModel(tmp_path / "world.db"),
+        "client-a": WorldModel(tmp_path / "tenants" / "client-a" / "world.db"),
+        "client-b": WorldModel(tmp_path / "tenants" / "client-b" / "world.db"),
+    }
+    def factory():
+        return worlds[paths.current_tenant_id_strict()]
+
+    monkeypatch.setattr(_shared, "_world", factory)
+    monkeypatch.setattr(app_module, "_world", factory)
+    monkeypatch.setattr(orphan_sweeper, "start_orphan_sweeper", lambda: True)
+    monkeypatch.setattr(orphan_sweeper, "_last_periodic_tenant", None)
+    try:
+        shared = _active(worlds[None], age=61)
+        stale = _active(worlds["client-a"], age=61)
+        recent = _active(worlds["client-b"], age=5)
+
+        asyncio.run(app_module._reclaim_orphans())
+        assert worlds[None].get_goal(shared).status == "blocked"
+        assert worlds["client-a"].get_goal(stale).status == "blocked"
+        assert worlds["client-b"].get_goal(recent).status == "active"
+
+        _age(worlds["client-b"], recent, 61)
+        assert orphan_sweeper.sweep_once() == 1
+        assert worlds["client-b"].get_goal(recent).status == "blocked"
+        assert not (tmp_path / "tenants" / "client-c" / "world.db").exists()
+    finally:
+        for handle in worlds.values():
+            handle.close()
+
+
 def test_live_heartbeat_prevents_reclaim_then_stopping_allows_it(world):
     goal_id = _active(world, age=61)
     # Separate connections stand in for the dashboard and a surviving worker.

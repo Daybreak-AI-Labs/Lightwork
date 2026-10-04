@@ -35,6 +35,38 @@ class TestRosterAndView:
         assert r.status_code == 200
         assert "agents" in r.text.lower()
 
+    def test_picker_shows_ready_first_and_keeps_setup_recovery_discoverable(self, monkeypatch):
+        from maverick import domain_edit
+
+        monkeypatch.setattr(domain_edit, "list_agents", lambda: [
+            {"name": "unknown_pack", "suites": [], "description": "Unknown specialist",
+             "is_override": False, "readiness": {"state": "unknown", "label": "Setup check unavailable"}},
+            {"name": "blocked_pack", "suites": [], "description": "Blocked specialist",
+             "is_override": False, "readiness": {"state": "needs_setup", "label": "Needs Web search"}},
+            {"name": "ready_pack", "suites": [], "description": "Ready specialist",
+             "is_override": False, "readiness": {"state": "action_ready", "label": "Can start"}},
+            {"name": "ready-pack", "suites": [], "description": "Ready specialist",
+             "is_override": False, "readiness": {"state": "action_ready", "label": "Can start"}},
+        ])
+        response = client.get("/agents")
+        assert response.status_code == 200
+        picker = response.text.split('<datalist id="agent-picker-list">', 1)[1].split("</datalist>", 1)[0]
+        assert picker.index('data-name="ready_pack"') < picker.index('data-name="blocked_pack"')
+        assert picker.index('data-name="blocked_pack"') < picker.index('data-name="unknown_pack"')
+        assert 'value="Ready specialist · Ready pack" data-name="ready_pack"' in picker
+        assert 'value="Ready specialist · Ready pack (ready-pack)" data-name="ready-pack"' in picker
+        assert " disabled" not in picker
+        assert "2 can start · 1 needs setup · 1 needs a setup check" in response.text
+
+    def test_unknown_setup_check_has_recovery_link(self, monkeypatch):
+        from maverick import domain_edit
+
+        monkeypatch.setattr(domain_edit, "_configured_tool_names", lambda: None)
+        response = client.get(f"/agents?name={_clean_builtin_name()}")
+        assert response.status_code == 200
+        assert "Setup check unavailable" in response.text
+        assert 'href="/settings">Review setup</a>' in response.text
+
     def test_list_endpoint_includes_builtin(self):
         name = _clean_builtin_name()
         r = client.get("/api/v1/agents")

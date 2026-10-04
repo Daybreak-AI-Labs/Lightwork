@@ -1169,9 +1169,14 @@ no images without alt, axe violations limited to nine distinct rules).
 - **Current branch (code review, 2026-10-03):** The dashboard now starts a
   periodic orphan sweeper after startup recovery. Active runs heartbeat while
   working, and the sweeper revisits stale active runs after the restart window;
-  the shutdown supervisor stops it. This addresses the one-shot recovery gap
-  described below, though an actual crash/restart browser journey is still
-  needed on a customer installation.
+  the shutdown supervisor stops it. An October 4 correction also visits the
+  default world and registered SQLite workspace worlds in bounded batches;
+  the earlier unbound background sweep missed nondefault workspace chats.
+  Missing tenant databases are not created, and a failed workspace scan does
+  not prevent later workspaces from being visited. A recovered chat explains
+  the restart, advises review of saved and external work before retrying, and
+  shows Stopped. Focused local recovery and stop-copy checks passed. An actual
+  crash/restart browser journey is still needed on a customer installation.
 
 - **Who / where:** end user, workspace admin, evaluator · `/chat/goal/{id}; dashboard startup`
 - **User impact:** After an OOM kill, container restart or power loss, the user's chat shows a live spinner indefinitely; follow-up messages are refused ('still working on the previous message') until they think to press Stop, and nothing tells them the run died.
@@ -1388,6 +1393,17 @@ no images without alt, axe violations limited to nine distinct rules).
 
 #### UX-070 · P1 · Ux · Nearly half the catalog (964 of 2,031 specialists) refuses to run under default settings, and no catalog, department card or picker says which ones
 
+- **Current branch (October 4, local verification):** The Specialists picker now
+  searches every visible pack, sorts action-ready choices first, distinguishes
+  duplicate display names, counts ready/setup/unknown honestly, and links
+  setup-needed or unchecked packs to a recovery page. Workforce deployment
+  admits only action-ready members. Saved Fleets show each specialist's current
+  setup state, disable known-unready task choices, and the task API rechecks
+  that state before creating a goal. A required action's presence does not
+  prove that live credentials, permissions, the AI service, or customer work
+  will succeed. The full catalog, every picker, and installed acceptance remain
+  separate verification work.
+
 - **Who / where:** end user, workspace admin, evaluator · `/agents, /workforce, /agents?name=…, POST /api/v1/goals {domain}`
 - **User impact:** A user browses 2,031 specialists and 54 departments that all look equally available, picks one, and only after submitting work learns it 'cannot deploy'. Entire departments (Commerce) can be deployed and staffed although none of their members can run.
 - **Evidence (reproduced):**
@@ -1459,6 +1475,19 @@ no images without alt, axe violations limited to nine distinct rules).
 - Source: U1-022, U5-004
 
 #### UX-075 · P1 · Customization · Single sign-on (OIDC/SAML/proxy) has no guided setup: only raw rows in All settings, SAML certificate/key as server file paths, no copyable callback/entity values, no end-to-end test sign-in
+
+- **Current branch (October 4, partial):** All settings now has a guided company
+  sign-in panel with copyable OIDC/SAML return addresses, the SAML identity,
+  links to matching fields, and bounded provider-detail checks. OIDC browser
+  readiness requires the client credential, callback, audience and issuer;
+  SAML metadata checks parse an identity-provider sign-in service rather than
+  accepting a matching word in arbitrary text. Disabled OIDC details can be
+  staged without pausing local owner login. The access guard no longer treats
+  provider discovery as proof that a human has signed in and refuses a save
+  that would remove the current way back on that evidence alone. This leaves
+  live IdP activation from a local-only install, an actual verified sign-in
+  receipt, SAML upload and role mapping unfinished. The page states that
+  limit; no installed IdP acceptance was performed.
 
 - **Who / where:** IT/security, workspace admin · `/settings/all → People & access → Company sign-in / Single sign-on`
 - **User impact:** An identity admin must know OIDC/SAML field semantics, copy certificate files onto the server, and turn sign-in on blind; a mistake can lock everyone out or leave the dashboard open. Competing enterprise platforms offer a guided Okta/Entra/Google setup with metadata import and a test login.

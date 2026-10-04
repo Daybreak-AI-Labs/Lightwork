@@ -14,9 +14,8 @@ leave saved records unreadable. Before such a save is written this module:
   way in or their administrator role and no working replacement is proven,
   or when Lightwork would refuse to start;
 * otherwise asks for confirmation (the page shows the sentence) whenever the
-  person will be signed out or must sign in a new way -- only after the
-  sign-in provider or key service passed the same check its "Test
-  connection" button runs.
+  person will be signed out or must sign in a new way. A provider connection
+  check is not proof that a person can sign in again.
 
 The server's access token set in the environment is the break-glass way in:
 a person using it can never be locked out by a change here, because nothing
@@ -25,6 +24,8 @@ on this page can change it.
 from __future__ import annotations
 
 import copy
+import hashlib
+import json
 import os
 from dataclasses import dataclass
 from typing import Any
@@ -128,7 +129,9 @@ class Access:
     proxy_header: str
     proxy_table: dict
     invites: bool
+    local_owner_login_open: bool
     invite_secret: str
+    auth_policy_fingerprint: str
     require_auth: bool
     client_enforced: bool
     claimed: bool
@@ -157,10 +160,12 @@ def _oidc(cfg: dict) -> dict:
     issuer = _text("MAVERICK_OIDC_ISSUER", table, "issuer")
     client_id = _text("MAVERICK_OIDC_CLIENT_ID", table, "client_id")
     secret = _secret("MAVERICK_OIDC_SESSION_SECRET", table, "session_secret")
-    endpoints = (_text("MAVERICK_OIDC_AUTHORIZATION_ENDPOINT", table, "authorization_endpoint")
-                 and _text("MAVERICK_OIDC_TOKEN_ENDPOINT", table, "token_endpoint"))
+    client_secret = _secret("MAVERICK_OIDC_CLIENT_SECRET", table, "client_secret")
+    redirect_uri = _text("MAVERICK_OIDC_REDIRECT_URI", table, "redirect_uri")
+    audience = _text("MAVERICK_OIDC_AUDIENCE", table, "audience")
     return {"enabled": enabled, "issuer": issuer, "secret": secret,
-            "login": bool(enabled and client_id and secret and (issuer or endpoints))}
+            "login": bool(enabled and client_id and client_secret and redirect_uri
+                          and audience and secret and issuer)}
 
 
 def _saml(cfg: dict, oidc_secret: str) -> tuple[bool, bool]:
@@ -234,7 +239,11 @@ def access_for(cfg: dict) -> Access:
         proxy_header=(os.environ.get("MAVERICK_PROXY_AUTH_HEADER")
                       or str(proxy_table.get("header") or "") or "X-Forwarded-User").strip(),
         proxy_table=proxy_table, invites=bool(invites_flag),
+        local_owner_login_open=local_owner.sign_in_available_for(cfg),
         invite_secret=_secret("MAVERICK_DASHBOARD_SESSION_SECRET", dashboard, "session_secret"),
+        auth_policy_fingerprint=hashlib.sha256(
+            json.dumps(cfg.get("auth"), sort_keys=True, default=str).encode("utf-8")
+        ).hexdigest(),
         require_auth=bool(require), client_enforced=_client_enforced(cfg), claimed=claimed,
         admins=_admins(cfg), default_role=str(dashboard.get("default_role") or "operator"),
         group_roles={str(k).strip().casefold(): str(v).strip().lower()
@@ -299,13 +308,17 @@ def _route_survives(route: str, request, before: Access, after: Access) -> bool:
         return (after.proxy and bool(request.headers.get(after.proxy_header))
                 and _proxy_trusts(after.proxy_table, host))
     if route == "invite":
-        # Invitation sessions only count while company sign-in is not set up.
-        return (after.invites and not after.oidc_login
+        # Existing local sessions are not a recovery path when the owner
+        # passphrase route would refuse the next sign-in.
+        return (after.invites and after.local_owner_login_open and not after.oidc_login
                 and after.invite_secret == before.invite_secret)
     if route == "session":
-        return (after.oidc_login or after.saml_login) and after.oidc_secret == before.oidc_secret
+        return ((after.oidc_login or after.saml_login)
+                and after.oidc_secret == before.oidc_secret
+                and after.auth_policy_fingerprint == before.auth_policy_fingerprint)
     # A sign-in token presented by a program.
-    return after.oidc and after.oidc_issuer == before.oidc_issuer
+    return (after.oidc and after.oidc_issuer == before.oidc_issuer
+            and after.auth_policy_fingerprint == before.auth_policy_fingerprint)
 
 
 def _owner_can_return(request, principal: str | None, after_cfg: dict, after: Access) -> bool:
@@ -362,27 +375,25 @@ def _someone_is_admin(after: Access) -> bool:
 
 # ------------------------------------------------------------------- review
 def _proven_sign_in(after: Access, values: dict) -> tuple[bool, str]:
-    """A browser sign-in that exists after the save and passed its check."""
+    """Provider checks cannot prove that a human can sign in after this save."""
     from . import settings_tests
 
     failure = ""
     if after.oidc_login:
-        outcome = settings_tests.check_oidc(values)
-        if outcome.ok:
-            return True, ""
-        failure = outcome.message
+        outcome = settings_tests.check_oidc_login(values)
+        failure = ("Provider details are reachable, but no person has completed a sign-in "
+                   "through this configuration yet." if outcome.ok else outcome.message)
     if after.saml_login:
-        outcome = settings_tests.check_saml(values)
-        if outcome.ok:
-            return True, ""
-        failure = failure or outcome.message
+        outcome = settings_tests.check_saml_login(values)
+        failure = failure or ("Provider metadata is reachable, but no person has completed a "
+                              "sign-in through this configuration yet." if outcome.ok else outcome.message)
     return False, failure
 
 
 def _unproven_message(route: str, after: Access, failure: str) -> str:
     if failure:
-        return (f"{failure} Until your company sign-in passes this check, this change would "
-                "lock you out, so nothing was changed.")
+        return (f"{failure} This change would lock you out before a verified sign-in or "
+                "recovery route is available, so nothing was changed.")
     if route == "token":
         return ("This change would stop the access token you are using from working, and you "
                 "would have no other working way back in. Set up and test a sign-in method "
@@ -460,8 +471,10 @@ def review_sign_in(request, changes: list[dict], layers: dict[str, Any], writes:
 
 
 def _owner_sign_in_open(cfg: dict) -> bool:
-    """The owner's passphrase sign-in is allowed by this configuration."""
-    return not (cfg.get("auth") or cfg.get("proxy_auth") or _token(cfg))
+    """Disabled OIDC details are drafts; they do not pause local owner login."""
+    from .local_owner import sign_in_available_for
+
+    return sign_in_available_for(cfg)
 
 
 def _is_owner(principal: str | None) -> bool:

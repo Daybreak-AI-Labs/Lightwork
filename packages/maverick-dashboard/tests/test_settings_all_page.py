@@ -82,6 +82,10 @@ def test_page_lists_groups_controls_and_speaks_plain_language():
     assert "Save changes in Safety" in page
     assert 'id="settings-all-search"' in page
     assert "/static/lightwork-settings-all.js" in page
+    assert 'id="settings-signin-guide"' in page
+    for setting in ("auth.oidc.redirect_uri", "auth.saml.acs_url", "auth.saml.sp_entity_id"):
+        assert f"/settings/all?id={setting}" in page
+    assert 'data-signin-check="oidc"' in page and 'data-signin-check="saml"' in page
     assert "What can&#39;t be changed here" in page or "What can't be changed here" in page
     assert developer_terms(page) == []
     group = client.get("/settings/all?group=safety").text

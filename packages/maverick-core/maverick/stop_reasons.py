@@ -80,6 +80,13 @@ def _rx(*parts: str) -> re.Pattern[str]:
 # (kind, pattern, message, action, link, link_label) -- first match wins.
 _RULES: tuple[tuple[str, re.Pattern[str], str, str, str | None, str | None], ...] = (
     (
+        "process_restart",
+        _rx(r"\[process restarted mid-run\]\s*$"),
+        "Lightwork restarted while this task was running.",
+        "Review the saved work and any changes already made before trying again. This task will not restart on its own.",
+        None, None,
+    ),
+    (
         "provider_authentication",
         _rx(r"^provider_error:authentication$", r"\bAuthenticationError\b"),
         "The AI connection needs attention.",

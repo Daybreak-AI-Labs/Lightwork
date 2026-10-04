@@ -9,6 +9,67 @@
   var root = document.getElementById('settings-all-groups');
   if (!root) return;
 
+  // Company sign-in setup uses the address in this browser, which is the
+  // public address the identity provider must return to after sign-in.
+  var signInGuide = document.getElementById('settings-signin-guide');
+  if (signInGuide) {
+    var secureSignInAddress = window.location.protocol === 'https:';
+    var signInAddresses = {
+      oidc: window.location.origin + '/auth/callback',
+      'saml-return': secureSignInAddress ? window.location.origin + '/saml/acs' : '',
+      'saml-name': secureSignInAddress ? window.location.origin + '/saml/metadata' : ''
+    };
+    signInGuide.querySelectorAll('[data-signin-address]').forEach(function (field) {
+      field.value = signInAddresses[field.dataset.signinAddress] || '';
+    });
+    signInGuide.querySelectorAll('[data-signin-copy]').forEach(function (button) {
+      if (!signInAddresses[button.dataset.signinCopy]) {
+        button.disabled = true;
+        return;
+      }
+      button.addEventListener('click', async function () {
+        var field = signInGuide.querySelector('[data-signin-address="' + button.dataset.signinCopy + '"]');
+        if (!field) return;
+        try {
+          await navigator.clipboard.writeText(field.value);
+          button.textContent = 'Copied';
+        } catch (_) {
+          field.focus(); field.select();
+          button.textContent = 'Select the address and copy it';
+        }
+      });
+    });
+    if (!secureSignInAddress) {
+      signInGuide.querySelector('[data-signin-status="saml"]').textContent =
+        'Open Lightwork at its public HTTPS address before copying or registering SAML values.';
+    }
+    signInGuide.querySelectorAll('[data-signin-check]').forEach(function (button) {
+      button.addEventListener('click', async function () {
+        var kind = button.dataset.signinCheck;
+        var status = signInGuide.querySelector('[data-signin-status="' + kind + '"]');
+        button.disabled = true;
+        status.textContent = 'Checking saved provider details…';
+        try {
+          var response = await fetch(API + '/test', {
+            method: 'POST', credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id: kind === 'oidc' ? 'auth.oidc.issuer' : 'auth.saml.idp_metadata_url' })
+          });
+          var result = await response.json();
+          if (!response.ok || result.ok !== true) {
+            status.textContent = result.message || 'The provider connection could not be checked. Review the saved details and try again.';
+          } else {
+            status.textContent = result.message + " This checks the provider connection, not a person's sign-in.";
+          }
+        } catch (_) {
+          status.textContent = 'The provider connection could not be checked. Try again.';
+        } finally {
+          button.disabled = false;
+        }
+      });
+    });
+  }
+
   function errorText(failure, action) {
     return window.mvErrorText ? window.mvErrorText(failure, action) : 'Could not ' + action + '. Please try again.';
   }

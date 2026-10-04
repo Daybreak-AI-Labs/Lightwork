@@ -47,6 +47,16 @@ def test_workflow_readiness_names_missing_actions_without_claiming_live_service(
     assert workflow_readiness(profile, None)["state"] == "unknown"
 
 
+def test_workflow_readiness_does_not_call_a_turned_off_department_ready():
+    profile = DomainProfile(name="gtm_example", allow_tools=["read_file"])
+    blocked = workflow_readiness(
+        profile, frozenset({"read_file"}), disabled_suites=frozenset({"sales_gtm"}),
+    )
+    assert blocked["state"] == "needs_setup"
+    assert blocked["label"] == "Department turned off"
+    assert "suites.%2A" in blocked["fix_url"]
+
+
 def _clean_builtin():
     for name, prof in sorted(load_domains(builtin_dir()).items()):
         if not lint_profile(prof)[0]:

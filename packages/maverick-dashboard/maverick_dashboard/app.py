@@ -1855,11 +1855,12 @@ async def persist_theme(request: Request, call_next):
 
 
 async def _reclaim_orphans() -> None:
-    """Mark stale active goals as blocked after a crash on PostgreSQL.
+    """Mark stale goals as blocked after a crash in each configured world.
 
     Without this, SIGKILL/OOM mid-run strands rows in 'active' forever
     and `active_goal()` returns a ghost. SQLite retains its established
-    active/pending startup policy; PostgreSQL leaves pending to dispatchers.
+    active/pending startup policy for the default world and visits registered
+    workspace worlds in bounded batches. PostgreSQL leaves pending to dispatchers.
     """
     try:
         from maverick.world_model_backends import is_postgres_configured
@@ -1890,6 +1891,10 @@ async def _reclaim_orphans() -> None:
                 )
         else:
             n = _world().reclaim_orphan_goals()
+            from maverick.paths import current_tenant_id_strict
+            if current_tenant_id_strict() is None:
+                from .orphan_sweeper import reclaim_registered_sqlite
+                n += reclaim_registered_sqlite(_world)
         if n:
             log.warning("reclaimed %d orphan goal(s) from prior crash", n)
     except Exception:
@@ -6930,6 +6935,22 @@ async def agents_page(request: Request) -> HTMLResponse:
             agent for agent in list_agents()
             if allowed is None or set(agent["suites"]) <= allowed
         ]
+        # Datalist values are what the browser returns to the input. Give each
+        # visible choice an unambiguous value even when two packs have the same
+        # description or their names look identical after humanizing them.
+        picker_values: set[str] = set()
+        for agent in agents:
+            name = agent["name"]
+            base = f"{agent.get('description') or _idfmt.humanize(name)} · {_idfmt.humanize(name)}"
+            value = base
+            if value in picker_values:
+                value = f"{base} ({name})"
+            suffix = 2
+            while value in picker_values:
+                value = f"{base} ({name}, {suffix})"
+                suffix += 1
+            agent["picker_label"] = value
+            picker_values.add(value)
         if editable:
             rejected_agents = [
                 view for name in sorted(rejected_workspace_domains())
@@ -6940,6 +6961,10 @@ async def agents_page(request: Request) -> HTMLResponse:
             view = resolved_view(name)
             if view and (allowed is None or set(view["suites"]) <= allowed):
                 selected = view
+                selected["picker_label"] = next(
+                    (agent["picker_label"] for agent in agents if agent["name"] == name),
+                    f"{view.get('description') or _idfmt.humanize(name)} · {_idfmt.humanize(name)}",
+                )
             creating = False  # editing an existing agent wins over the new form
     except Exception:  # never 500 the page if the factory layer is unavailable
         agents = []
@@ -8628,6 +8653,44 @@ def fleets_page(request: Request) -> HTMLResponse:
     owner = goal_owner_filter(request)
     if owner is not None:
         fleets = [f for f in fleets if f.owner == owner]
+    # Saved teams can outlive a specialist's department setting or pack file.
+    # Show the current check beside the task form, rather than discovering a
+    # missing required action after the person has already assigned work.
+    domains = {agent.domain for fleet in fleets for agent in fleet.agents if agent.domain}
+    specialist_readiness: dict[str, dict] = {}
+    if domains:
+        try:
+            from maverick.domain import _disabled_suites, available_domains
+            from maverick.domain_edit import _configured_tool_names, workflow_readiness
+
+            catalog = available_domains()
+            known_tools = _configured_tool_names()
+            disabled_suites = frozenset(_disabled_suites())
+            for domain in domains:
+                profile = catalog.get(domain)
+                if profile is None:
+                    specialist_readiness[domain] = {
+                        "state": "needs_setup", "label": "Specialist no longer available",
+                        "fix_url": "/agents", "missing_tools": [],
+                    }
+                else:
+                    specialist_readiness[domain] = workflow_readiness(
+                        profile, known_tools, disabled_suites=disabled_suites,
+                    )
+        except Exception:
+            specialist_readiness = {
+                domain: {"state": "unknown", "label": "Setup check unavailable",
+                         "fix_url": "/settings"}
+                for domain in domains
+            }
+    fleet_can_start = {
+        fleet.name: any(
+            not agent.domain
+            or specialist_readiness.get(agent.domain, {}).get("state") == "action_ready"
+            for agent in fleet.agents
+        )
+        for fleet in fleets
+    }
     # Per-fleet recent runs (newest-first), scoped to the fleets already shown.
     runs_by_fleet = {f.name: _fleet_recent_runs(f.name, owner=owner) for f in fleets}
     try:  # role picker for new agents (same roles the access page offers)
@@ -8641,6 +8704,8 @@ def fleets_page(request: Request) -> HTMLResponse:
         "fleets.html",
         {
             "fleets": fleets,
+            "specialist_readiness": specialist_readiness,
+            "fleet_can_start": fleet_can_start,
             "role_options": role_options,
             "runs_by_fleet": runs_by_fleet,
             "holds": _recent_governance_holds(),

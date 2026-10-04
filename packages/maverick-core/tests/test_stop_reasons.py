@@ -87,6 +87,16 @@ def test_halt_and_internal_errors_are_plain():
     assert "KeyError" not in stop.message
 
 
+def test_recovered_crash_explains_saved_work_without_exposing_partial_result():
+    raw = "Customer-private partial answer [process restarted mid-run]"
+    stop = explain_stop(raw)
+    assert stop.kind == "process_restart"
+    assert "restarted" in stop.message.lower()
+    assert "Review the saved work" in stop.action
+    assert "Customer-private" not in stop.message + stop.action
+    assert stop.as_dict()["kind"] == "process_restart"
+
+
 def test_plain_kernel_sentences_pass_through_and_technical_ones_do_not():
     plain = ("Paused: the review checkpoint stopped this run at step 3 because "
              "the reviewer did not approve continuing.")

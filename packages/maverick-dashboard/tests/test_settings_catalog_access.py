@@ -455,6 +455,40 @@ def test_the_sign_in_provider_check(monkeypatch):
     assert not settings_tests.check_oidc({}).ok
 
 
+def test_browser_sign_in_check_rejects_missing_or_wrong_return_address(monkeypatch):
+    monkeypatch.setattr(settings_tests, "fetch", _oidc_fetch())
+    values = {
+        "auth.oidc.issuer": "https://login.example.com/realm",
+        "auth.oidc.client_id": "lightwork",
+        "auth.oidc.client_secret": "client-secret",
+        "auth.oidc.audience": "lightwork",
+        "auth.oidc.session_secret": _SECRET,
+        "auth.oidc.redirect_uri": "https://lightwork.example.com/auth/callback",
+    }
+    assert settings_tests.check_oidc_login(values).ok
+    assert not settings_tests.check_oidc_login({**values, "auth.oidc.client_secret": ""}).ok
+    assert not settings_tests.check_oidc_login({**values, "auth.oidc.redirect_uri": "https://lightwork.example.com/wrong"}).ok
+
+
+def test_single_sign_on_check_requires_real_metadata_and_callback(monkeypatch):
+    metadata = (
+        b'<EntityDescriptor xmlns="urn:oasis:names:tc:SAML:2.0:metadata">'
+        b'<IDPSSODescriptor><SingleSignOnService Location="https://idp.example.com/login"/>'
+        b'</IDPSSODescriptor></EntityDescriptor>'
+    )
+    monkeypatch.setattr(settings_tests, "fetch", lambda _url: (200, metadata))
+    values = {
+        "auth.saml.idp_metadata_url": "https://idp.example.com/metadata",
+        "auth.saml.sp_entity_id": "https://lightwork.example.com/saml/metadata",
+        "auth.saml.acs_url": "https://lightwork.example.com/saml/acs",
+        "auth.oidc.session_secret": _SECRET,
+    }
+    assert settings_tests.check_saml(values).ok
+    assert not settings_tests.check_saml_login({**values, "auth.saml.acs_url": "https://lightwork.example.com/wrong"}).ok
+    monkeypatch.setattr(settings_tests, "fetch", lambda _url: (200, b'<EntityDescriptor/>'))
+    assert not settings_tests.check_saml(values).ok
+
+
 def test_the_key_service_check_opens_the_keys_already_in_use(tmp_path, monkeypatch):
     pytest.importorskip("cryptography")
     from maverick.tenant import kms as tenant_kms
@@ -536,6 +570,9 @@ def test_key_service_changes_are_checked_then_confirmed(monkeypatch, as_token, a
 def test_turning_on_company_sign_in_needs_a_passing_test(monkeypatch, audit_rows):
     base = [{"id": "auth.oidc.issuer", "value": _TEXT["auth.oidc.issuer"]},
             {"id": "auth.oidc.client_id", "value": "lightwork"},
+            {"id": "auth.oidc.client_secret", "value": "client-secret"},
+            {"id": "auth.oidc.audience", "value": "lightwork"},
+            {"id": "auth.oidc.redirect_uri", "value": _TEXT["auth.oidc.redirect_uri"]},
             {"id": "auth.oidc.session_secret", "value": _SECRET}]
     fail = settings_tests.Outcome(False, "Lightwork could not reach this address. Check it "
                                          "and try again.")
@@ -548,16 +585,14 @@ def test_turning_on_company_sign_in_needs_a_passing_test(monkeypatch, audit_rows
     monkeypatch.setattr(settings_tests, "check_oidc",
                         lambda values: settings_tests.Outcome(True, "ok"))
     r = _save([*base, {"id": "auth.oidc.enabled", "value": True}], confirm=True)
-    assert r.status_code == 409 and "nobody would be an administrator" in r.json()["message"]
+    assert r.status_code == 409 and "no person has completed a sign-in" in r.json()["message"]
 
     with_admin = [*base, {"id": "dashboard.admins", "value": ["user:ada@example.com"]},
                   {"id": "auth.oidc.enabled", "value": True}]
-    r = _save(with_admin)
-    assert r.status_code == 409
-    confirm = [item for item in r.json()["confirm"] if item.get("kind") == "access"]
-    assert confirm and "sign in again with your company sign-in" in confirm[0]["warning"]
-    assert _save(with_admin, confirm=True).status_code == 200
-    assert _loaded()["auth"]["oidc"]["enabled"] is True
+    r = _save(with_admin, confirm=True)
+    assert r.status_code == 409 and r.json()["lockout"] is True
+    assert "no person has completed a sign-in" in r.json()["message"]
+    assert "auth" not in _loaded() and audit_rows == []
 
 
 def test_half_set_up_single_sign_on_is_refused(audit_rows):
@@ -636,19 +671,42 @@ def test_turning_off_the_way_you_signed_in_is_refused(audit_rows):
     assert _loaded()["dashboard"]["invites"] is True
 
 
-def test_the_owner_is_told_before_company_sign_in_details_pause_the_passphrase(monkeypatch,
+def test_disabled_company_sign_in_details_keep_the_owner_passphrase_available(monkeypatch,
                                                                               audit_rows):
     _base_config('[dashboard]\ninvites = true\nadmins = ["user:ada@example.com"]\n')
     monkeypatch.setattr(guard, "_is_owner", lambda principal: principal == "user:ada@example.com")
     ada = _invite_client("ada@example.com")
     change = [{"id": "auth.oidc.client_id", "value": "lightwork"}]
     r = _save(change, http=ada)
-    assert r.status_code == 409
-    [item] = [i for i in r.json()["confirm"] if i.get("kind") == "access"]
-    assert "passphrase is paused" in item["warning"]
-    assert _save(change, confirm=True, http=ada).status_code == 200
+    assert r.status_code == 200
+    from maverick_dashboard import local_owner
+
+    local_owner._policy()
     assert _save([{"id": "auth.oidc.redirect_uri", "value": _TEXT["auth.oidc.redirect_uri"]}],
-                 http=ada).status_code == 200  # already paused: nothing new to say
+                 http=ada).status_code == 200
+
+
+def test_partial_saml_save_cannot_strand_local_owner_after_sign_out(audit_rows):
+    password = "a long local owner fixture phrase"
+    with TestClient(app, base_url="http://127.0.0.1:8765", client=("127.0.0.1", 53210),
+                    headers={"Origin": "http://127.0.0.1:8765"},
+                    follow_redirects=False) as owner:
+        response = owner.post("/auth/local-owner", data={
+            "email": "owner@example.com", "password": password, "confirm": "yes"})
+        assert response.status_code == 303, response.text
+        # Disabled OIDC details can be staged without closing owner recovery.
+        assert _save([{"id": "auth.oidc.client_id", "value": "lightwork"}],
+                     http=owner).status_code == 200
+        refused = _save([{"id": "auth.saml.acs_url",
+                          "value": _TEXT["auth.saml.acs_url"]}], confirm=True, http=owner)
+        assert refused.status_code == 409 and refused.json()["lockout"] is True
+        assert "saml" not in _loaded().get("auth", {})
+        owner.cookies.clear()
+        assert owner.get("/auth/local-login").status_code == 200
+        response = owner.post("/auth/local-login", data={
+            "email": "owner@example.com", "password": password})
+        assert response.status_code == 303, response.text
+        assert owner.get(API).status_code == 200
 
 
 def _request(host="10.0.0.5", headers=None):
@@ -672,10 +730,34 @@ def test_a_proxy_session_survives_only_while_its_proxy_stays_trusted():
 def test_invitation_sessions_end_when_company_sign_in_takes_over():
     before = guard.access_for({"dashboard": {"invites": True}})
     after = guard.access_for({"dashboard": {"invites": True}, "auth": {"oidc": {
-        "enabled": True, "client_id": "x", "session_secret": _SECRET,
+        "enabled": True, "client_id": "x", "client_secret": "client-secret",
+        "redirect_uri": "https://lightwork.example.com/auth/callback",
+        "audience": "x", "session_secret": _SECRET,
         "issuer": "https://login.example.com"}}})
     assert guard._route_survives("invite", _request(), before, before)
     assert not guard._route_survives("invite", _request(), before, after)
+
+
+def test_provider_changes_do_not_count_existing_session_or_bearer_as_recovery():
+    original = {"enabled": True, "issuer": "https://login.example.com",
+                "client_id": "lightwork", "client_secret": "client-secret",
+                "redirect_uri": "https://lightwork.example.com/auth/callback",
+                "audience": "lightwork", "jwks_uri": "https://login.example.com/keys",
+                "algorithms": ["RS256"], "session_secret": _SECRET}
+    before = guard.access_for({"auth": {"oidc": original}})
+    assert guard._route_survives("session", _request(), before, before)
+    assert guard._route_survives("bearer", _request(), before, before)
+    for key, changed_value in (
+        ("issuer", "https://other.example.com"),
+        ("client_secret", "different-secret"),
+        ("redirect_uri", "https://other.example.com/auth/callback"),
+        ("audience", "other-audience"),
+        ("jwks_uri", "https://other.example.com/keys"),
+        ("algorithms", ["ES256"]),
+    ):
+        after = guard.access_for({"auth": {"oidc": {**original, key: changed_value}}})
+        assert not guard._route_survives("session", _request(), before, after), key
+        assert not guard._route_survives("bearer", _request(), before, after), key
 
 
 def test_turning_everything_off_on_this_computer_opens_it_again(monkeypatch):

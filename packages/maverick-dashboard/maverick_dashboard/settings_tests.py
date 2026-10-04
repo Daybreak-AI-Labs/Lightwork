@@ -148,6 +148,30 @@ def check_oidc(values: Mapping[str, object]) -> Outcome:
         return failed.outcome
 
 
+def check_oidc_login(values: Mapping[str, object]) -> Outcome:
+    """Check the saved browser-login contract before it can replace current access.
+
+    Provider discovery alone cannot establish that a person can sign in, but
+    missing local fields guarantee that the callback cannot complete.
+    """
+    needed = (
+        ("auth.oidc.client_id", "Lightwork's name at the provider"),
+        ("auth.oidc.client_secret", "Lightwork's password at the provider"),
+        ("auth.oidc.audience", "Accepted sign-in audience"),
+        ("auth.oidc.session_secret", "Sign-in session key"),
+    )
+    for key, label in needed:
+        if not str(values.get(key) or "").strip():
+            return Outcome(False, f"Fill in {label} before turning on company sign-in.")
+    redirect = urlparse(str(values.get("auth.oidc.redirect_uri") or "").strip())
+    if (redirect.path != "/auth/callback" or not redirect.hostname
+            or redirect.username or redirect.password or redirect.query or redirect.fragment
+            or not (redirect.scheme == "https" or
+                    (redirect.scheme == "http" and redirect.hostname in {"localhost", "127.0.0.1", "::1"}))):
+        return Outcome(False, "Set the return address to this Lightwork site's /auth/callback page before turning on company sign-in.")
+    return check_oidc(values)
+
+
 def _oidc_details(values: Mapping[str, object]) -> Outcome:
     issuer = _oidc_issuer(values)
     status, body = fetch(issuer.rstrip("/") + "/.well-known/openid-configuration")
@@ -174,6 +198,8 @@ def _check_oidc(value: object, values: Mapping[str, object]) -> Outcome:
 
 def check_saml(values: Mapping[str, object]) -> Outcome:
     """The sign-in provider's details (its metadata) can be read."""
+    from xml.etree import ElementTree
+
     url = str(values.get("auth.saml.idp_metadata_url") or "").strip()
     if not url:
         return Outcome(False, "Fill in the address of your sign-in provider's details first.")
@@ -181,10 +207,38 @@ def check_saml(values: Mapping[str, object]) -> Outcome:
         status, body = fetch(_address(url))
     except _Failed as failed:
         return failed.outcome
-    text = body.decode("utf-8", errors="replace") if status == 200 else ""
-    if "EntityDescriptor" not in text or "IDPSSODescriptor" not in text:
+    try:
+        root = ElementTree.fromstring(body) if status == 200 else None
+    except ElementTree.ParseError:
+        root = None
+    if root is None or not any(
+        node.tag.rsplit("}", 1)[-1] == "SingleSignOnService"
+        and str(node.attrib.get("Location") or "").startswith("https://")
+        for descriptor in root.iter()
+        if descriptor.tag.rsplit("}", 1)[-1] == "IDPSSODescriptor"
+        for node in descriptor.iter()
+    ):
         return Outcome(False, "Lightwork reached the address, but it did not find a sign-in provider's details there.")
     return Outcome(True, "Lightwork read your sign-in provider's details.")
+
+
+def check_saml_login(values: Mapping[str, object]) -> Outcome:
+    """Require the local SAML callback contract as well as valid provider metadata."""
+    for key, label in (
+        ("auth.saml.sp_entity_id", "Lightwork's name for single sign-on"),
+        ("auth.oidc.session_secret", "Sign-in session key"),
+    ):
+        if not str(values.get(key) or "").strip():
+            return Outcome(False, f"Fill in {label} before turning on single sign-on.")
+    callback = urlparse(str(values.get("auth.saml.acs_url") or "").strip())
+    if (callback.scheme != "https" or not callback.hostname or callback.path != "/saml/acs"
+            or callback.username or callback.password or callback.query or callback.fragment):
+        return Outcome(False, "Set the single sign-on return address to this Lightwork site's /saml/acs page.")
+    try:
+        import saml2  # noqa: F401 -- needed by the real login route
+    except ImportError:
+        return Outcome(False, "Single sign-on support is not installed here. Ask the installation owner to add it before turning this on.")
+    return check_saml(values)
 
 
 def _check_saml(value: object, values: Mapping[str, object]) -> Outcome:

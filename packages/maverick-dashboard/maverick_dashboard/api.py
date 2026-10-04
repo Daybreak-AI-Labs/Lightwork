@@ -15320,12 +15320,14 @@ def run_fleet_agent(
     # the role + caller grants. domain_capability only narrows (never broadens),
     # and an unknown/disabled pack leaves the grant unchanged.
     if agent.domain:
-        from maverick.domain import available_domains, domain_capability, enabled_domains
+        from maverick.domain import domain_capability, enabled_domains
+        from maverick.domain_edit import workflow_readiness
 
         # Same rule as POST /goals: a specialist whose pack is gone, or whose
         # department is switched off, cannot run. Refuse it rather than quietly
         # running an unbriefed generic agent under the specialist's name.
-        if agent.domain not in enabled_domains():
+        active_packs = enabled_domains()
+        if agent.domain not in active_packs:
             raise HTTPException(
                 status_code=400,
                 detail=(
@@ -15334,9 +15336,15 @@ def run_fleet_agent(
                     "department back on or deploy it again, then try again."
                 ),
             )
-        prof = available_domains().get(agent.domain)
-        if prof is not None:
-            cap = domain_capability(prof, cap, agent_principal)
+        prof = active_packs[agent.domain]
+        readiness = workflow_readiness(prof)
+        if readiness["state"] != "action_ready":
+            raise HTTPException(
+                status_code=409,
+                detail=("This specialist needs setup before it can start. "
+                        "Open Specialists to review its required actions, then try again."),
+            )
+        cap = domain_capability(prof, cap, agent_principal)
     max_dollars = requested_goal_dollars(payload.max_dollars)
 
     w = _world()

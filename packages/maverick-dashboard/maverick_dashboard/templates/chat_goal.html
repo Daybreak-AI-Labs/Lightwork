@@ -683,7 +683,7 @@
         withheld: 'M8 2.5a5.5 5.5 0 110 11 5.5 5.5 0 010-11zM5.5 8h5',
       };
       const STATUS_LABELS = { pending: 'Queued', running: 'Working', done: 'Done', blocked: 'Paused', failed: 'Failed', cancelled: 'Stopped' };
-      const STOPPED_KINDS = new Set(['provider_not_ready', 'provider_authentication', 'provider_rate_limit', 'provider_model_not_found', 'provider_unavailable', 'provider_connection', 'provider_configuration', 'internal_error', 'unpriced_model']);
+      const STOPPED_KINDS = new Set(['provider_not_ready', 'provider_authentication', 'provider_rate_limit', 'provider_model_not_found', 'provider_unavailable', 'provider_connection', 'provider_configuration', 'internal_error', 'unpriced_model', 'process_restart']);
       // The kernel replaces model-derived events with one fixed sentence when
       // the evidence gateway is on; the page folds those into a single line.
       const WITHHELD = new Set({{ (withheld_markers or [])|tojson }});

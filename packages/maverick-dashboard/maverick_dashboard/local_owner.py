@@ -80,6 +80,33 @@ def _local(request: Request, *, mutate=False):
         raise HTTPException(403, "Open this Lightwork page before submitting the form.")
 
 
+def sign_in_available_for(cfg: dict, *, bootstrap: bool = False) -> bool:
+    """Whether this configuration still permits the loopback owner login.
+
+    Only disabled OIDC details are stageable. A nonempty SAML or proxy table
+    changes the identity boundary, so it must not be counted as recovery.
+    """
+    auth_table = cfg.get("auth")
+    if "auth" in cfg and not isinstance(auth_table, dict):
+        return False
+    if auth_table:
+        if (bootstrap or set(auth_table) != {"oidc"}
+                or not isinstance(auth_table["oidc"], dict)):
+            return False
+        enabled = config.env_flag("MAVERICK_OIDC_ENABLED")
+        oidc_enabled = enabled if enabled is not None else bool(auth_table["oidc"].get("enabled", False))
+        if oidc_enabled:
+            return False
+    dashboard = cfg.get("dashboard") or {}
+    if not isinstance(dashboard, dict):
+        return False
+    proxy_enabled = config.env_flag("MAVERICK_PROXY_AUTH")
+    return not (cfg.get("proxy_auth") or proxy_enabled is True
+                or any(os.environ.get(name) for name in (
+                    "MAVERICK_DASHBOARD_TOKEN", "LIGHTWORK_DASHBOARD_TOKEN"))
+                or dashboard.get("token"))
+
+
 def _policy(*, bootstrap=False):
     from . import auth
 
@@ -92,10 +119,7 @@ def _policy(*, bootstrap=False):
     # Partial enterprise identity configuration also denies local enrollment.
     from ._shared import dashboard_token
 
-    if (cfg.get("auth") or cfg.get("proxy_auth")
-            or any(os.environ.get(name) for name in (
-                "MAVERICK_DASHBOARD_TOKEN", "LIGHTWORK_DASHBOARD_TOKEN"))
-            or dashboard_token()
+    if (not sign_in_available_for(cfg, bootstrap=bootstrap) or dashboard_token()
             or auth.oidc_enabled() or auth.proxy_auth_enabled()
             or auth._saml_policy_configured()):
         raise HTTPException(409, "This installation uses managed sign-in. Use its configured sign-in method.")
