@@ -163,7 +163,10 @@
           });
         }
         if (!data.checkpoints.length) {
-          rows.appendChild(el('p', 'muted', 'No checkpoints yet. Choose a day and publish its checkpoint to start.'));
+          var how = daySel ? 'Choose a day above and publish its checkpoint to start.' : 'An administrator publishes them.';
+          rows.appendChild(window.mvEmpty
+            ? window.mvEmpty('No checkpoints yet', 'Published checkpoints appear here, one per day. ' + how, null, { compact: true })
+            : el('p', 'muted', 'No checkpoints yet. ' + how));
           return;
         }
         rows.appendChild(table(['Day', 'Kind', 'Entries covered', 'Published', 'Actions'],
@@ -263,7 +266,13 @@
         say($('ops-ckpt-where'), where);
         var list = $('ops-ckpt-keys');
         list.textContent = '';
-        if (!data.keys.length) list.appendChild(el('li', 'muted', 'No keys are pinned.'));
+        if (!data.keys.length) {
+          var none = el('li');
+          none.appendChild(window.mvEmpty
+            ? window.mvEmpty('No keys pinned', 'Pinned keys appear here. Until you pin one, checkpoints signed by any key this installation trusts are accepted.', null, { compact: true })
+            : el('span', 'muted', 'No keys are pinned.'));
+          list.appendChild(none);
+        }
         data.keys.forEach(function (k) {
           var li = el('li');
           li.appendChild(el('span', null, (k.own ? 'This installation\'s key' : 'Key') + ', fingerprint '));
