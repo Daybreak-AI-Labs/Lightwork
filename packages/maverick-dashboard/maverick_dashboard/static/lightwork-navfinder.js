@@ -269,6 +269,22 @@
       emptyScope = scope;
     }
 
+    // In a list of commands a setting reads as one: "Open setting: Theme".
+    function setVerb(option, on) {
+      var label = option.querySelector && option.querySelector(".navfinder__label");
+      if (!label) return;
+      var verb = label.querySelector("[data-navfinder-verb]");
+      if (on && !verb) {
+        verb = doc.createElement("span"); verb.setAttribute("data-navfinder-verb", "");
+        copy(verb, "Open setting:");
+        label.insertBefore(doc.createTextNode(" "), label.firstChild);
+        label.insertBefore(verb, label.firstChild);
+      } else if (!on && verb) {
+        if (verb.nextSibling && verb.nextSibling.nodeType === 3) verb.nextSibling.remove();
+        verb.remove();
+      }
+    }
+
     function matchesChoice(option, text) {
       var terms = normalise(text).split(" ").filter(Boolean);
       var haystack = normalise(option.textContent);
@@ -289,9 +305,7 @@
       recordOptions.forEach(function (option) { hide(option, !(scope === "all" || scope === "records")); });
       settingOptions.forEach(function (option) {
         hide(option, !SETTING_SCOPES[scope]);
-        // In a list of commands a setting reads as one: "Open setting: Theme".
-        var verb = option.querySelector && option.querySelector("[data-navfinder-verb]");
-        if (verb) verb.hidden = !(scope === "actions" || scope === "settings");
+        setVerb(option, scope === "actions" || scope === "settings");
       });
       peopleOptions.forEach(function (option) { hide(option, scope !== "people"); });
       choiceOptions.forEach(function (option) { hide(option, scope !== mode || !matchesChoice(option, query.text)); });
@@ -525,11 +539,8 @@
         var option = doc.createElement("a"); option.id = "navfinder-setting-" + index; option.href = row.href;
         option.setAttribute("role", "option"); option.setAttribute("tabindex", "-1"); option.setAttribute("aria-selected", "false");
         var label = doc.createElement("span"); label.className = "navfinder__label";
-        var verb = doc.createElement("span"); verb.setAttribute("data-navfinder-verb", ""); verb.hidden = true;
-        copy(verb, "Open setting:");
         var title = doc.createElement("bdi"); title.lang = "und"; title.dir = "auto"; title.setAttribute("data-user-content", "");
-        title.textContent = row.title;
-        label.append(verb, doc.createTextNode(" "), title);
+        title.textContent = row.title; label.appendChild(title);
         var group = doc.createElement("span"); group.className = "navfinder__group";
         var prefix = doc.createElement("span"); copy(prefix, "Setting");
         var metadata = doc.createElement("bdi"); metadata.lang = "und"; metadata.dir = "auto"; metadata.setAttribute("data-user-content", "");

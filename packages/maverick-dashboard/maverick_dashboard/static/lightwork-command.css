@@ -73,7 +73,6 @@
 }
 .navfinder__mode[hidden] { display: none; }
 .navfinder__results a [data-navfinder-verb] { color: var(--muted); font-weight: var(--font-normal); }
-.navfinder__results a [data-navfinder-verb][hidden] { display: none; }
 
 /* ---------- Help and shortcuts dialog ---------- */
 .shortcuts {
