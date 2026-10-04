@@ -63,7 +63,9 @@
       color-scheme: light;
       --bg: #f4f6fa; --panel: #ffffff; --border: #dde2ea;
       --text: #18202e; --muted: #505b6b; --accent: #176a3a;
-      --warn: #80560d; --danger: #b02e22; --danger-fg: #ffffff;
+      /* Deep enough to read on its own 18% badge tint over a raised card
+         ("Can't be undone" on approvals): 4.6:1, where #80560d gave 3.8:1. */
+      --warn: #6d4a0b; --danger: #b02e22; --danger-fg: #ffffff;
       --brand: #21426f; --brand-hi: #2d5790; --brand-fg: #ffffff; --info: #245e88;
       --shadow-sm: 0 1px 2px rgba(20,28,46,0.06);
       --shadow-md: 0 4px 16px rgba(20,28,46,0.08);
@@ -138,6 +140,11 @@
       position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
       overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
     }
+    /* Keyboard focus and in-page links stop below the sticky top bar, never
+       under it (WCAG 2.4.11). lightwork-ui.js keeps --shell-topbar-h equal to
+       the bar's measured height, which grows when a phone header wraps. */
+    html { scroll-padding-top: calc(var(--shell-topbar-h) + var(--space-3)); }
+    #content { scroll-margin-top: var(--space-2); }
     body {
       margin: 0;
       font: var(--text-base)/var(--leading) -apple-system, BlinkMacSystemFont,
@@ -153,6 +160,17 @@
     }
     a { color: var(--brand); text-decoration: none; }
     a:hover { text-decoration: underline; }
+    /* A link inside running text is underlined, so it never depends on colour
+       alone (WCAG 1.4.1): sentences, list items, table cells and help text.
+       Navigation, buttons, tabs and chips keep their own look. The high
+       contrast theme underlines every link in the page content. */
+    main :where(p, li, td, dd, figcaption, blockquote, [id$="-help"]) a:where(:not(.btn, .iconbtn, .mv-tab, .chip, .badge, [role="button"], [role="tab"], [role="menuitem"], [role="option"], nav a, .task-tabs a, [role="tablist"] a)),
+    .active-workspace-banner a, .cs-workspace a {
+      text-decoration: underline; text-underline-offset: 0.16em;
+    }
+    body.theme-hicontrast main a:where(:not(.btn, .iconbtn, .mv-tab, .chip, .badge, [role="button"], [role="tab"], [role="menuitem"], [role="option"], nav a, .task-tabs a, [role="tablist"] a)) {
+      text-decoration: underline; text-underline-offset: 0.16em;
+    }
     a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible,
     textarea:focus-visible, summary:focus-visible, [role="button"]:focus-visible,
     [tabindex="0"]:focus-visible {
@@ -1509,7 +1527,10 @@ body[data-global-admin="1"] .mg-banner .mg-nonadmin-note { display: none; }
   --text: #EEF1F7; --muted: #8E97AC; --accent: #3DDC97;
   --warn: #FFB547; --danger: #FF6B6B;
 }
-body.theme-dark { --brand: #3D8BFF; --brand-hi: #79ACFF; --brand-fg: #000000; --info: #37D7FF; }
+/* Brand blue one step lighter than the website's #3D8BFF: brand text sits on
+   raised surfaces (--surface-2) too, where #3D8BFF measured 4.1:1; #5297FF
+   gives 4.7:1 there (tests/test_ui_semantic_contrast.py). */
+body.theme-dark { --brand: #5297FF; --brand-hi: #79ACFF; --brand-fg: #000000; --info: #37D7FF; }
 body:not(.font-dyslexic) { font-family: var(--font-sans); }
 .mono, code, pre, kbd { font-family: var(--font-mono); }
 

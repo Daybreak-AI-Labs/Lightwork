@@ -205,3 +205,16 @@ test('recent-chat filtering searches original titles, excluding translated pin l
   input.value='';input.dispatchEvent(new w.Event('input'));assert.equal(status.textContent,'');
   dom.window.close();
 });
+
+test('a quiet toast is shown without being read a second time', async()=>{
+  const dom=page('',{language:'ar'});
+  const w=dom.window,doc=w.document;
+  try {
+    w.mvToast('Write file authorized.',{quiet:true});
+    w.mvToast('Saved.');
+    const [quiet,spoken]=doc.querySelectorAll('#mv-toasts .mv-toast');
+    assert.equal(quiet.textContent,'Write file authorized.');
+    assert.equal(quiet.getAttribute('aria-hidden'),'true');
+    assert.equal(spoken.hasAttribute('aria-hidden'),false);
+  } finally {w.close();}
+});

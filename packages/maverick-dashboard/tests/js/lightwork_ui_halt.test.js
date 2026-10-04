@@ -56,21 +56,24 @@ function haltSource() {
   return source.slice(start, end);
 }
 
-function fixture(fetchImpl, { canHalt = true, haltTimeoutMs = 1000 } = {}) {
+function fixture(fetchImpl, { canHalt = true, haltTimeoutMs = 1000, loaded = true } = {}) {
   const pill = new Element(canHalt);
   pill.dataset.haltTimeoutMs = String(haltTimeoutMs);
   const label = new Element(canHalt);
   const toasts = [];
   const confirms = [];
   const intervals = [];
+  let onLoad;
   const context = {
     document: {
+      readyState: loaded ? "complete" : "interactive",
       getElementById(id) {
         if (id === "halt-pill") return pill;
         if (id === "halt-label") return label;
         return null;
       },
     },
+    addEventListener(type, callback) { if (type === "load") onLoad = callback; },
     fetch: fetchImpl,
     mvToast(message, options) { toasts.push({ message, options }); },
     async mvConfirm(message, options) {
@@ -90,6 +93,7 @@ function fixture(fetchImpl, { canHalt = true, haltTimeoutMs = 1000 } = {}) {
     toasts,
     confirms,
     poll() { return intervals[0](); },
+    load() { onLoad(); },
   };
 }
 
@@ -267,4 +271,44 @@ test("a refused stop change reads as a plain sentence, never a code or server te
   const message = ui.toasts.at(-1).message;
   assert.match(message, /Emergency stop change failed|Could not change the emergency stop/);
   assert.doesNotMatch(message, /\b403\b|error \d|principal|admin scope/);
+});
+
+test("the label is announced only after the first read, and only when its words change", async () => {
+  const first = deferred();
+  const reads = [first.promise, response({ active: false, scope: "local" }), response({ active: true, scope: "local" })];
+  const ui = fixture(async () => reads.shift());
+  // Loading the page: "Checking…" then "Emergency stop" are not announced.
+  assert.equal(ui.label.getAttribute("aria-live"), undefined);
+  first.resolve(response({ active: false, scope: "local" }));
+  await turn();
+  await turn();
+  assert.equal(ui.label.textContent, "Emergency stop");
+  assert.equal(ui.label.getAttribute("aria-live"), "polite");
+
+  let writes = 0;
+  let text = ui.label.textContent;
+  Object.defineProperty(ui.label, "textContent", {
+    get() { return text; },
+    set(value) { writes += 1; text = value; },
+  });
+  // The same state on the next poll leaves the live label untouched.
+  await ui.poll();
+  assert.equal(writes, 0);
+  // A real change is written, and so announced.
+  await ui.poll();
+  assert.equal(ui.label.textContent, "STOPPED — click to resume");
+  assert.equal(writes, 1);
+});
+
+test("a page still loading keeps the label quiet until it has loaded", async () => {
+  const ui = fixture(async () => response({ active: false, scope: "local" }), { loaded: false });
+  await turn();
+  await turn();
+  // The first read is done, but the localization pass may still rewrite the
+  // label when the document finishes loading.
+  assert.equal(ui.label.textContent, "Emergency stop");
+  assert.equal(ui.label.getAttribute("aria-live"), undefined);
+  ui.load();
+  await turn();
+  assert.equal(ui.label.getAttribute("aria-live"), "polite");
 });

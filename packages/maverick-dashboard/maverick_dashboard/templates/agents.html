@@ -326,7 +326,7 @@
       </div>
 
       {% if selected %}
-      <div class="panel" role="status" style="margin-bottom:var(--space-3);">
+      <div class="panel" style="margin-bottom:var(--space-3);">
         <strong>{{ selected.readiness.label }}</strong>
         {% if selected.readiness.state == 'needs_setup' %}
         <p class="muted">Required actions are unavailable here: {{ selected.readiness.missing_labels | join(', ') }}.</p>
@@ -1286,7 +1286,7 @@
         </div>
         <button type="button" class="btn btn--ghost jc-close" id="jc-close">Close</button>
       </div>
-      <div class="jc-sec" role="status"><h3>Can this specialist start?</h3>
+      <div class="jc-sec"><h3>Can this specialist start?</h3>
         <p><strong>{{ selected.readiness.label }}</strong></p>
         {% if selected.readiness.state == 'needs_setup' %}
         <p class="muted">Required actions: {{ selected.readiness.missing_labels | join(', ') }}. <a href="{{ selected.readiness.fix_url }}">Review setup</a></p>

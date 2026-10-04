@@ -55,7 +55,9 @@
               <input class="input" type="search" id="sc-tool-filter" placeholder="Find a tool…"
                      aria-label="Find a tool" autocomplete="off" />
             </label>
-            <div id="sc-tool-list" class="sk-tool-list" aria-live="polite">
+            {# A scroll box a keyboard can reach. Not a live region: reading every
+               tool aloud when the list loads was noise. #}
+            <div id="sc-tool-list" class="sk-tool-list" role="region" tabindex="0" aria-label="Tools to choose from">
               <p class="muted sk-small">Loading tools…</p>
             </div>
           </fieldset>

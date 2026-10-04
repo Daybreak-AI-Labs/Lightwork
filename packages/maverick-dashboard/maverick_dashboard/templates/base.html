@@ -37,9 +37,9 @@
 {% include "_journey_i18n.html" %}
 </head>
 <body class="theme-{{ theme or 'dark' }} font-{{ font or 'default' }} density-{{ density or 'comfortable' }}" data-global-admin="{{ '1' if viewer_global_admin else '0' }}">
-  <p class="muted active-workspace-banner" aria-label="{{ ut('Active workspace') }}" lang="{{ ul('Active workspace') }}">{{ ui('Workspace:') }} <a href="/workspace/tenant">{% if workspace_tenant_name %}<bdi lang="und" dir="auto" data-user-content>{{ workspace_tenant_name }}</bdi>{% else %}{{ ui('Main workspace') }}{% endif %}</a></p>
-  {% if lang and lang != 'en' %}<aside class="locale-coverage" aria-label="{{ ut('Translation coverage') }}" lang="{{ ul('Translation coverage') }}">{{ ui('Some controls are translated. Other sections remain in English. These draft translations need language and consequence-copy review.') }} {{ ui('User-written content is kept in its original language.') }}</aside>{% endif %}
+  {# The skip link is the first keyboard stop on every page. #}
   <a class="skip-link" href="#content"{% if lang and page_lang and lang != page_lang %} lang="{{ lang }}"{% endif %}>{{ t('chrome.skip_to_content') }}</a>
+  {% if lang and lang != 'en' %}<aside class="locale-coverage" aria-label="{{ ut('Translation coverage') }}" lang="{{ ul('Translation coverage') }}">{{ ui('Some controls are translated. Other sections remain in English. These draft translations need language and consequence-copy review.') }} {{ ui('User-written content is kept in its original language.') }}</aside>{% endif %}
   {% include "_icon_sprite.html" %}
   <header class="topbar">
     <button type="button" class="topbar__menu" id="nav-toggle"
@@ -57,16 +57,20 @@
     </a>
     <span class="topbar__controls">
       {% if can_halt %}
+      {# #halt-label becomes a polite live region only after the first status
+         read (lightwork-ui.js), so loading a page never announces it. #}
       <a href="#" id="halt-pill" class="halt-pill" role="button" data-can-halt="true" aria-label="{{ ut('Emergency stop: stop or resume work') }}" lang="{{ ul('Emergency stop: stop or resume work') }}">
         <span class="dot" aria-hidden="true"></span>
-        <span id="halt-label" aria-live="polite">{{ ui('checking') }}</span>
+        <span id="halt-label">{{ ui('checking') }}</span>
       </a>
       {% else %}
+      {# A plain status, not a control: aria-label is not allowed on a <span>,
+         so the explanation is visually hidden text that is read with it. #}
       <span id="halt-pill" class="halt-pill" data-can-halt="false" aria-disabled="true"
-            aria-label="{{ ut('Emergency stop status. Halt permission is required to change it.') }}" lang="{{ ul('Emergency stop status. Halt permission is required to change it.') }}"
             title="{{ ut('You do not have permission to stop or resume this work.') }}">
         <span class="dot" aria-hidden="true"></span>
-        <span id="halt-label" aria-live="polite">{{ ui('checking') }}</span>
+        <span class="sr-only" lang="{{ ul('Emergency stop status. Halt permission is required to change it.') }}">{{ ut('Emergency stop status. Halt permission is required to change it.') }}</span>
+        <span id="halt-label">{{ ui('checking') }}</span>
       </span>
       {% endif %}
       {% if show_settings_link is not defined or show_settings_link %}
@@ -83,7 +87,7 @@
       </a>
       {% endif %}
       <a class="iconbtn iconbtn--text" href="{{ docs_learn_more.url if docs_learn_more else docs_home }}" target="_blank" rel="noopener noreferrer"
-         aria-label="Documentation (opens in a new tab)" title="Documentation (opens in a new tab)"><svg viewBox="0 0 16 16" aria-hidden="true"><use href="#i-walkthroughs"></use></svg><span class="iconbtn__text">Docs</span></a>
+         aria-label="Docs (opens in a new tab)" title="Docs (opens in a new tab)"><svg viewBox="0 0 16 16" aria-hidden="true"><use href="#i-walkthroughs"></use></svg><span class="iconbtn__text">Docs</span></a>
       <a class="iconbtn" href="/help" aria-label="{{ ut('Help and diagnostics') }}" title="{{ ut('Help and diagnostics') }}" lang="{{ ul('Help and diagnostics') }}"><svg viewBox="0 0 16 16" aria-hidden="true"><use href="#i-facts"></use></svg></a>
       {% include "_display_preferences.html" %}
       <a class="iconbtn" href="/account" aria-label="{{ t('chrome.account') }}" title="{{ t('chrome.account') }}"{% if lang and page_lang and lang != page_lang %} lang="{{ lang }}"{% endif %}>
@@ -98,6 +102,10 @@
   </header>
   <div class="nav-backdrop" id="nav-backdrop"></div>
   <aside class="sidebar" id="sidebar">
+    {# The workspace this page works in, at the top of the sidebar (the chat
+       shell shows it in its sidebar too). As a loose child of <body> the grid
+       placed it after the footer, behind the sidebar, as the first Tab stop. #}
+    <p class="muted active-workspace-banner">{{ ui('Workspace:') }} <a href="/workspace/tenant">{% if workspace_tenant_name %}<bdi lang="und" dir="auto" data-user-content>{{ workspace_tenant_name }}</bdi>{% else %}{{ ui('Main workspace') }}{% endif %}</a></p>
     <nav aria-label="{{ ut('Primary') }}" lang="{{ ul('Primary') }}">
       {% if can_create_goal %}
       <a class="btn btn--primary navquick" href="/chat">

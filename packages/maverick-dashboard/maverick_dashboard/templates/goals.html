@@ -17,10 +17,11 @@
   .g-row__main{ flex: 1 1 12rem; min-width: 0; }
   .g-row__title{ font-weight: var(--font-semibold); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .g-row__desc{ color: var(--muted); font-size: var(--text-sm); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .g-row__actions{ display: flex; flex-wrap: wrap; gap: var(--space-2); flex: 0 1 auto; min-width: 0; margin-inline-start: auto; opacity: 0.72; }
+  /* Quiet but readable: muted text at full strength (an opacity of 0.72 on
+     top of --muted measured 3.97:1 in the dark theme). */
+  .g-row__actions{ display: flex; flex-wrap: wrap; gap: var(--space-2); flex: 0 1 auto; min-width: 0; margin-inline-start: auto; }
   .g-row__actions a{ font-size: var(--text-sm); color: var(--muted); }
   .g-row__actions a:hover{ color: var(--brand-hi); }
-  .g-row:hover .g-row__actions{ opacity: 1; }
   @media(max-width:540px){
     .g-row__main{flex-basis:100%;order:2}
   }
@@ -75,11 +76,13 @@
         <div class="g-row__title"><a href="/chat/goal/{{ g.id }}">{{ g.title }}</a></div>
         {% if g.description %}<div class="g-row__desc" title="{{ g.description }}">{{ (g.description or '')[:160] }}</div>{% endif %}
       </span>
+      {# Each link names its task for screen readers ("Result: <title>"); the
+         visible word comes first, so voice control still matches it. #}
       <span class="g-row__actions">
-        <a href="/chat/goal/{{ g.id }}">Result</a>
-        <a href="/goals/{{ g.id }}/trajectory">Steps</a>
-        <a href="/goals/{{ g.id }}/plan">Plan</a>
-        {% if g.status in ('failed', 'blocked') %}<a href="/goals/{{ g.id }}/errors">Problems</a>{% endif %}
+        <a href="/chat/goal/{{ g.id }}">Result<span class="sr-only">: {{ g.title }}</span></a>
+        <a href="/goals/{{ g.id }}/trajectory">Steps<span class="sr-only">: {{ g.title }}</span></a>
+        <a href="/goals/{{ g.id }}/plan">Plan<span class="sr-only">: {{ g.title }}</span></a>
+        {% if g.status in ('failed', 'blocked') %}<a href="/goals/{{ g.id }}/errors">Problems<span class="sr-only">: {{ g.title }}</span></a>{% endif %}
       </span>
     </div>
     {% endfor %}
@@ -134,10 +137,10 @@
           '<span class="g-row__main"><div class="g-row__title"><a href="/chat/goal/' + gid + '">' + esc(g.title) + '</a></div>' +
           (d ? '<div class="g-row__desc">' + esc(d) + '</div>' : '') + '</span>' +
           '<span class="g-row__actions">' +
-          '<a href="/chat/goal/' + gid + '">Result</a>' +
-          '<a href="/goals/' + gid + '/trajectory">Steps</a>' +
-          '<a href="/goals/' + gid + '/plan">Plan</a>' +
-          (g.status === 'failed' || g.status === 'blocked' ? '<a href="/goals/' + gid + '/errors">Problems</a>' : '') + '</span></div>';
+          '<a href="/chat/goal/' + gid + '">Result<span class="sr-only">: ' + esc(g.title) + '</span></a>' +
+          '<a href="/goals/' + gid + '/trajectory">Steps<span class="sr-only">: ' + esc(g.title) + '</span></a>' +
+          '<a href="/goals/' + gid + '/plan">Plan<span class="sr-only">: ' + esc(g.title) + '</span></a>' +
+          (g.status === 'failed' || g.status === 'blocked' ? '<a href="/goals/' + gid + '/errors">Problems<span class="sr-only">: ' + esc(g.title) + '</span></a>' : '') + '</span></div>';
     }
     // "Show more": the next page from the API, appended to the rows on
     // screen (the server rendered only the first page).

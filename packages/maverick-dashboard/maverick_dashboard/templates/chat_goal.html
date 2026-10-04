@@ -711,6 +711,10 @@
       // the evidence gateway is on; the page folds those into a single line.
       const WITHHELD = new Set({{ (withheld_markers or [])|tojson }});
       const TOOL_LINE = /^tool=([\w.:-]+)\s*->\s*([\s\S]*)$/;
+      // The kernel's own planning trace ("role=orchestrator depth=0 brief=…")
+      // stays on screen for operators but out of the spoken log: the step's
+      // label already says "Planning".
+      const INTERNAL_TRACE = /^role=\S+ depth=\d+ brief=/;
 
       function stepIcon(kind) {
         const span = document.createElement('span');
@@ -854,7 +858,9 @@
           label = tool[1] === 'ask_user' ? 'Asked you a question' : cgText('Used {tool}',{tool:humanTool(tool[1])});
           text = tool[2].trim();
         }
-        eventsEl.appendChild(stepRow(kind, label, text, fmtAgent(e.agent)));
+        const row = stepRow(kind, label, text, fmtAgent(e.agent));
+        if (INTERNAL_TRACE.test(text)) row.querySelector('.step__text').setAttribute('aria-hidden', 'true');
+        eventsEl.appendChild(row);
       }
 
       document.addEventListener('lightwork:answer-panel-updated', function () {

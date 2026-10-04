@@ -228,7 +228,8 @@ def test_goal_id_resolves_and_every_task_page_shares_the_tabs():
     assert "This task has one step, so there is no map of smaller steps" in plan
     assert 'id="plan-tree-list"' in plan and "<noscript>" not in plan
     listing = client.get("/goals").text
-    assert f'<a href="/chat/goal/{g.id}">Result</a>' in listing
+    # The row link names its task for screen readers after the visible word.
+    assert f'<a href="/chat/goal/{g.id}">Result<span class="sr-only">: Summarize vendor contracts</span></a>' in listing
 
 
 # ---- owner creation --------------------------------------------------------
