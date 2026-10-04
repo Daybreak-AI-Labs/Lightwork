@@ -108,6 +108,7 @@
       var B = window.LWBoard, DATA = null, statusFilter = '';
 
       function rel(ts) {
+        if (window.mvTimeRelative) return window.mvTimeRelative(ts);
         var secs = Math.floor(Date.now() / 1000 - ts);
         if (secs < 60) return 'just now';
         if (secs < 3600) return Math.floor(secs / 60) + 'm ago';
@@ -155,7 +156,7 @@
           a.textContent = g.title;
           td3.appendChild(a);
           var td4 = B.el('td', 'muted', rel(g.updated_at));
-          td4.title = new Date(g.updated_at * 1000).toLocaleString();
+          td4.title = (window.mvTimeAbsolute ? window.mvTimeAbsolute(g.updated_at) : new Date(g.updated_at * 1000).toLocaleString());
           tr.appendChild(td1); tr.appendChild(td2);
           tr.appendChild(td3); tr.appendChild(td4);
           tbody.appendChild(tr);

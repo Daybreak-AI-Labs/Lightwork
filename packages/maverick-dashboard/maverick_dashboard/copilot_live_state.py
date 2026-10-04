@@ -51,7 +51,9 @@ def intent(message: str) -> str | None:
 
 
 def _checked_at() -> str:
-    return datetime.now(timezone.utc).strftime("%b %d, %Y at %I:%M %p UTC")
+    from .plain_labels import datetime_text
+
+    return "on " + datetime_text(datetime.now(timezone.utc).timestamp())
 
 
 def _answer(reply: str, href: str, label: str, source: str) -> dict:

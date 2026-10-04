@@ -594,7 +594,7 @@
       : 'The record does not have a complete, authenticated single-currency total.';
   }
   function displayTime(value) {
-    return new Date(value * 1000).toISOString();
+    return window.mvTimeAbsolute ? window.mvTimeAbsolute(value) : new Date(value * 1000).toISOString();
   }
 
   function renderAssurance(validated) {

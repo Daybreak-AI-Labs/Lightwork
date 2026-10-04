@@ -247,20 +247,12 @@ async def run_deadline_alerts(request: Request) -> dict[str, Any]:
 def record_alerts(record_type: str, record_id: str) -> list[dict]:
     """The "Alerts" section of a record page; empty (never an error) when the
     ledger is unavailable."""
-    import time
-
     from maverick import deadline_alerts as alerts
 
     try:
-        rows = alerts.alerts_for(record_type, record_id, world=_world())
+        return alerts.alerts_for(record_type, record_id, world=_world())
     except Exception:
         return []
-    for row in rows:
-        try:
-            row["sent_date"] = time.strftime("%d %b %Y %H:%M", time.localtime(float(row["sent_at"])))
-        except (TypeError, ValueError, OverflowError, OSError):
-            row["sent_date"] = "—"
-    return rows
 
 
 def create_webhooks_page_router(templates: Jinja2Templates) -> APIRouter:

@@ -618,7 +618,7 @@
     function cgCopy(node,source,values) { if(window.LightworkI18n)window.LightworkI18n.set(node,source,values);else node.textContent=cgText(source,values); }
     function cgAppend(node,source,values) { var span=document.createElement('span');cgCopy(span,source,values);node.append(' ',span); }
     function cgNumber(value,options) { return window.LightworkI18n ? window.LightworkI18n.number(value,options) : String(value); }
-    function cgDate(value) { return window.LightworkI18n ? window.LightworkI18n.formatDate(value) : new Date(value*1000).toLocaleString(); }
+    function cgDate(value) { return window.LightworkI18n ? window.LightworkI18n.formatDate(value) : (window.mvTimeAbsolute ? window.mvTimeAbsolute(value) : new Date(value*1000).toLocaleString()); }
     // Plain-language failure text for this page (no status codes or server text).
     function cgErr(failure, what) {
       return window.mvErrorText ? window.mvErrorText(failure, what) : 'Could not ' + what + '. Try again.';
@@ -1253,7 +1253,7 @@
           // EventSource auto-reconnects; if it permanently fails (network
           // gone, server down), fall back to polling so the UI still works.
           if (stream !== es) return;
-          showStreamError('Updates interrupted. Task state is unknown until reconnected.' + (lastPayloadAt ? ' Last refreshed ' + new Date(lastPayloadAt).toLocaleTimeString() + '.' : ''));
+          showStreamError('Updates interrupted. Task state is unknown until reconnected.' + (lastPayloadAt ? ' Last refreshed ' + (window.mvTimeAbsolute ? window.mvTimeAbsolute(lastPayloadAt) : new Date(lastPayloadAt).toLocaleTimeString()) + '.' : ''));
           document.getElementById('stream-retry').hidden = false;
           if (es.readyState === EventSource.CLOSED) openPollingFallback();
           else if (!reconnectTimer) reconnectTimer = setTimeout(function () { if (stream === es) openPollingFallback(); }, 10000);

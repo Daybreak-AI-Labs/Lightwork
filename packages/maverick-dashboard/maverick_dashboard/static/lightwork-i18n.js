@@ -77,6 +77,8 @@
     (root || document).querySelectorAll('[data-product-date]').forEach(function (element) { if (!element.closest('[data-user-content]')) { element.textContent = formatDate(element.dataset.productDate); element.lang = data.locale || data.language; element.dir = 'auto'; } });
     (root || document).querySelectorAll('[data-product-number]').forEach(function (element) { if (!element.closest('[data-user-content]')) { element.textContent = number(element.dataset.productNumber); element.lang = data.locale || data.language; element.dir = 'auto'; } });
     (root || document).querySelectorAll('form[data-product-validation]').forEach(validation);
+    // lightwork-ui.js formatted server times before this locale was known.
+    if (data.language && data.language !== 'en' && window.mvFormatTimes) window.mvFormatTimes(root || document);
   }
   window.LightworkI18n = {text: text, set: set, languageFor: function (source) { return lookup(source).lang; }, has: function (source) { return Object.prototype.hasOwnProperty.call(data.catalog || {}, source); },
     number: number, formatDate: formatDate, plural: plural, translate: translate, validation: validation, locale: data.locale, language: data.language};

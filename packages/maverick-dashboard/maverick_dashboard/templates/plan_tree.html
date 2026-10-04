@@ -175,7 +175,7 @@
             cy.layout({name: 'breadthfirst', directed: true, padding: 20}).run();
           } catch (_) { cy.destroy(); cy = null; container.hidden = true; }
         }
-        lastRefresh = new Date().toLocaleTimeString(); failures = 0;
+        lastRefresh = (window.mvTimeAbsolute ? window.mvTimeAbsolute(Date.now()) : new Date().toLocaleTimeString()); failures = 0;
         stopped = TERMINAL.includes(tree.status);
         statusEl.textContent = (stopped ? 'Task ' : 'Live — ') + String(tree.status || 'running').replace(/_/g, ' ') + '. Refreshed ' + lastRefresh + '.';
       } catch (e) {

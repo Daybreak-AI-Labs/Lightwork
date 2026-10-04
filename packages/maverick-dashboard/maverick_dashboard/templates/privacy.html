@@ -1637,7 +1637,7 @@
     return t.charAt(0).toUpperCase() + t.slice(1);
   }
   function day(ts) {
-    return ts ? new Date(ts * 1000).toLocaleDateString() : '';
+    return ts ? (window.mvDateAbsolute ? window.mvDateAbsolute(ts) : new Date(ts * 1000).toLocaleDateString()) : '';
   }
   function post(url, body) {
     return fetch(url, {
@@ -1760,7 +1760,7 @@
       });
     };
     var when = function (ts) {
-      return ts ? new Date(ts * 1000).toLocaleDateString() : '';
+      return ts ? (window.mvDateAbsolute ? window.mvDateAbsolute(ts) : new Date(ts * 1000).toLocaleDateString()) : '';
     };
     var RECORD_PAGES = { dsar: '/privacy/dsar/', vendor: '/privacy/vendors/' };
     var RECORD_NAMES = { dpa_review: 'data agreement check', paper_review: 'vendor contract review',
@@ -2215,7 +2215,7 @@
             var row = body.insertRow();
             row.insertCell().textContent = o.name || human(o.regime);
             row.insertCell().textContent = o.authority;
-            row.insertCell().textContent = o.authority_due_at ? new Date(o.authority_due_at * 1000).toLocaleString() : 'As the law sets out';
+            row.insertCell().textContent = o.authority_due_at ? (window.mvTimeAbsolute ? window.mvTimeAbsolute(o.authority_due_at) : new Date(o.authority_due_at * 1000).toLocaleString()) : 'As the law sets out';
             row.insertCell().textContent = o.threshold_note || '';
           });
           var wrap = document.createElement('div'); wrap.className = 'pw-scroll';

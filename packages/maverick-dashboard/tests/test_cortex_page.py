@@ -143,7 +143,7 @@ def test_recent_reads_and_writes_come_from_the_audit_tail_newest_first(monkeypat
     first = body.index('data-kind="cortex_deposit"')
     assert first < body.rindex('data-kind="cortex_recall"')
     assert 'title="user:jo">jo<' in body and 'title="agent:copilot">copilot<' in body
-    assert "2026-01-01 00:00:00 UTC" in body
+    assert "1 Jan 2026, 00:00 UTC" in body
     assert "Documents: 2" in body and "Skills: 1" in body
     assert "<strong>Outside assistants&#39; notes</strong>: fleet memory answers enrolled external agents" in body
     assert "Agent not on the roster" in body

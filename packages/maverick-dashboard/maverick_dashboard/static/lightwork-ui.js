@@ -484,12 +484,15 @@
         try { return new Intl.DateTimeFormat(mvFormatLocale(), options).format(d); }
         catch (e) { return zone ? window.mvTimeAbsolute(raw) : d.toUTCString(); }
       };
+      // A calendar day ("2026-10-04" or a moment) reads "4 Oct 2026"; an
+      // accounting month ("2026-09") reads "September 2026".
       window.mvDateAbsolute = function (raw) {
-        var parts = typeof raw === 'string' && /^(\d{4})-(\d{2})-(\d{2})$/.exec(raw.trim());
-        var d = parts ? new Date(Number(parts[1]), Number(parts[2]) - 1, Number(parts[3])) : mvParseTime(raw);
+        var parts = typeof raw === 'string' && /^(\d{4})-(\d{2})(?:-(\d{2}))?$/.exec(raw.trim());
+        var d = parts ? new Date(Number(parts[1]), Number(parts[2]) - 1, Number(parts[3] || 1)) : mvParseTime(raw);
         if (!d || isNaN(d.getTime())) return '';
         try {
-          return new Intl.DateTimeFormat(mvFormatLocale(), { day: 'numeric', month: 'short', year: 'numeric' }).format(d);
+          return new Intl.DateTimeFormat(mvFormatLocale(), parts && !parts[3] ? { month: 'long', year: 'numeric' }
+            : { day: 'numeric', month: 'short', year: 'numeric' }).format(d);
         } catch (e) { return d.toDateString(); }
       };
       // Money reads "$1,234.56" everywhere (the |money filter matches it):

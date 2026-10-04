@@ -15,6 +15,8 @@
   var states = {available:'Available', blocked:'Blocked', unavailable:'Unavailable', unidentified:'No named account', not_bound:'Not bound', requested:'Requested', assigned:'Assigned', evidence_needed:'Evidence needed', reviewing:'Under review', verified:'Verified', pending:'Pending', reserved:'Reserved', settled:'Recorded', released:'Released', unknown:'Unknown', estimated:'Estimated', observed:'Observed'};
   function state(value) { return Object.prototype.hasOwnProperty.call(states, value) ? text(states[value]) : value; }
   function dimension(value) { var labels = {task:'Task ceiling', person:'Personal allowance', workspace:'Workspace allowance'}; return Object.prototype.hasOwnProperty.call(labels, value) ? text(labels[value]) : value && value.indexOf('provider:') === 0 ? text('Provider: {provider}', {provider:value.slice(9)}) : value; }
+  // An accounting period key ("2026-09", "2026-10-04") reads as a month or day; requests keep the key.
+  function period(value) { return window.mvDateAbsolute && window.mvDateAbsolute(value) || value; }
   function money(v) { return v === null || v === undefined ? text('Unavailable or uncapped (see basis)') : window.mvMoney(v); }
   function link(label, href, sourceContent) { var a = sourceContent ? content('a', label) : node('a', label); a.href = href; return a; }
   // Only the authored business message is shown; anything else (a dropped
@@ -48,7 +50,7 @@
     paragraph(out, value.provider_coverage || 'Provider coverage unavailable.');
     (value.providers || []).forEach(function (row) {
       var section = node('section'); section.className = 'panel'; section.appendChild(content('h2', row.provider));
-      paragraph(section, 'Period {period}; {state}; ceiling {cap}; remaining {remaining}.', {period:row.period, state:state(row.state), cap:money(row.cap), remaining:money(row.remaining)});
+      paragraph(section, 'Period {period}; {state}; ceiling {cap}; remaining {remaining}.', {period:period(row.period), state:state(row.state), cap:money(row.cap), remaining:money(row.remaining)});
       if (row.basis) paragraph(section, row.basis);
       if (row.state === 'blocked' || row.state === 'unavailable') {
         var button = node('button', 'Request accounting help'); button.type = 'button'; button.className = 'btn btn--ghost';
@@ -58,7 +60,7 @@
     });
     if (value.task_receipts && value.task_receipts.length) {
       out.appendChild(node('h2', "This task's provider receipts"));
-      value.task_receipts.forEach(function (row) { paragraph(out, '{reference}: {provider}, {period}, {state}; projected {projected}, recorded {actual}; basis {basis}.', {reference:row.reference, provider:row.provider, period:row.period, state:state(row.state), projected:money(row.projected), actual:money(row.actual), basis:state(row.cost_basis)}); });
+      value.task_receipts.forEach(function (row) { paragraph(out, '{reference}: {provider}, {period}, {state}; projected {projected}, recorded {actual}; basis {basis}.', {reference:row.reference, provider:row.provider, period:period(row.period), state:state(row.state), projected:money(row.projected), actual:money(row.actual), basis:state(row.cost_basis)}); });
     }
     var forecast = document.getElementById('budget-forecast'); forecast.replaceChildren();
     paragraph(forecast, value.forecast.message || value.forecast.price_basis || states[value.forecast.state] || 'Forecast unavailable.');
@@ -80,7 +82,7 @@
       out.replaceChildren();
       if (!data.items.length) paragraph(out, 'No accounting help requests in your current scope.');
       data.items.forEach(function (row) {
-        var card = node('section'); card.className = 'panel'; var heading = node('h3'); heading.appendChild(content('bdi', row.provider)); heading.append(' · '); heading.appendChild(content('bdi', row.period)); card.appendChild(heading);
+        var card = node('section'); card.className = 'panel'; var heading = node('h3'); heading.appendChild(content('bdi', row.provider)); heading.append(' · '); heading.appendChild(content('bdi', period(row.period))); card.appendChild(heading);
         paragraph(card, '{reference}: {state}. Assigned to: {assignee}', {reference:row.id, state:state(row.state), assignee:row.assigned_to || text('Installation administrator queue')});
         paragraph(card, row.verification); if (row._audit_pending) paragraph(card, 'Audit delivery is pending; this is not a completed audited review.');
         if (data.admin) {

@@ -245,7 +245,7 @@ def _format_datetime(ts, mode: str = "relative"):
         except ValueError:
             return str(ts)
         return Markup(f'<time datetime="{day.isoformat()}" data-mv-time="{day.isoformat()}"'
-                      f' data-mv-time-mode="date">{day.day} {day.strftime("%b %Y")}</time>')
+                      f' data-mv-time-mode="date">{_plain_labels.day_text(day)}</time>')
     try:
         if isinstance(ts, str) and not re.fullmatch(r"\s*-?\d+(?:\.\d+)?\s*", ts):
             when = _dt.datetime.fromisoformat(ts.strip().replace("Z", "+00:00"))
@@ -256,7 +256,7 @@ def _format_datetime(ts, mode: str = "relative"):
             when = _dt.datetime.fromtimestamp(stamp, tz=_dt.timezone.utc)
     except (TypeError, ValueError, OverflowError, OSError):
         return str(ts)
-    text = f"{when.day} {when.strftime('%b %Y')}" if mode == "date" else f"{when.day} {when.strftime('%b %Y, %H:%M')} UTC"
+    text = _plain_labels.datetime_text(stamp, date_only=mode == "date")
     return Markup(
         f'<time datetime="{when.isoformat()}" data-mv-time="{stamp:.3f}"'
         f' data-mv-time-mode="{escape(mode)}">{text}</time>'
@@ -4349,7 +4349,6 @@ async def privacy_page(request: Request) -> HTMLResponse:
 def _privacy_page_data() -> tuple[dict, dict]:
     """The Privacy workspace's data plane: privacy-ops records plus the
     estate registers (vendors, consent, data map), each its own opt-in."""
-    import time as _time
 
     from maverick import privacy_ops
 
@@ -4380,9 +4379,7 @@ def _privacy_page_data() -> tuple[dict, dict]:
         ):
             for r in rows:
                 created = float(r.get("created_at") or 0)
-                r["created"] = (
-                    _time.strftime("%Y-%m-%d", _time.localtime(created)) if created else "—"
-                )
+                r["created"] = _plain_labels.datetime_text(created, date_only=True) if created else "—"
         records["dsar_open"] = sum(
             1 for r in records["dsar"] if r.get("status") in ("open", "awaiting_erasure")
         )
@@ -4434,13 +4431,11 @@ def _privacy_page_data() -> tuple[dict, dict]:
 
 
 def _date(stamp) -> str:
-    import time as _time
-
     try:
         value = float(stamp or 0)
     except (TypeError, ValueError):
         return "—"
-    return _time.strftime("%Y-%m-%d", _time.localtime(value)) if value else "—"
+    return _plain_labels.datetime_text(value, date_only=True) if value else "—"
 
 
 @app.get("/privacy/vendors/{vendor_id}", response_class=HTMLResponse)
@@ -4993,14 +4988,13 @@ async def privacy_report_page(request: Request) -> HTMLResponse:
     """The privacy program report: a print-friendly board pack over every
     register. Same operate floor as the workspace it summarizes."""
     require_permission(request, "operate")
-    import time as _time
 
     from maverick import privacy_ops
 
     if not privacy_ops.enabled():
         raise HTTPException(status_code=404, detail="privacy ops are disabled")
     report = privacy_ops.program_report()
-    report["generated"] = _time.strftime("%Y-%m-%d %H:%M", _time.localtime(report["generated_at"]))
+    report["generated"] = _plain_labels.datetime_text(report["generated_at"])
     return templates.TemplateResponse(request, "privacy_report.html", {"r": report})
 
 
@@ -5197,7 +5191,7 @@ async def security_report_page(request: Request) -> HTMLResponse:
     report = security_ops.program_report()
     generated_at = report.get("generated_at")
     if isinstance(generated_at, (int, float)):
-        report["generated"] = time.strftime("%Y-%m-%d %H:%M %Z", time.localtime(generated_at))
+        report["generated"] = _plain_labels.datetime_text(generated_at)
     else:
         report["generated"] = "unknown"
     # The click-through must carry substance: each control with what it does,
@@ -6608,14 +6602,13 @@ async def audit_binder_page(request: Request, days: int = 90) -> HTMLResponse:
     and the acceptance-learning KPIs. Audit-gated like /audit; the product
     generates its own workpapers."""
     require_permission(request, "audit")
-    import time as _time
 
     from starlette.concurrency import run_in_threadpool as _rit
 
     from .api import _binder_payload
 
     b = await _rit(_binder_payload, max(1, min(days, 730)))
-    generated = _time.strftime("%Y-%m-%d %H:%M UTC", _time.gmtime(b["generated_at"]))
+    generated = _plain_labels.datetime_text(b["generated_at"])
     from .audit_actions_api import kind_label
 
     return templates.TemplateResponse(

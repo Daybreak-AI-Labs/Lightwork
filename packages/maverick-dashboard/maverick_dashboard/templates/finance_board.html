@@ -135,7 +135,7 @@
     if (!r.ok) throw r;
     return r.json();
   }).then(function (d) {
-    $('fb-stamp').textContent = 'Updated ' + new Date().toLocaleTimeString();
+    $('fb-stamp').textContent = 'Updated ' + (window.mvTimeAbsolute ? window.mvTimeAbsolute(Date.now()) : new Date().toLocaleTimeString());
     var k = $('fb-kpis');
     var kp = d.kpis || {};
     tile(k, 'Assessments', fmt(kp.assessments), 'finance assessments', 'var(--brand)');

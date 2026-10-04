@@ -76,6 +76,7 @@ test("absolute times read one way in the viewer's zone, whatever the browser loc
   assert.equal(w.mvDateAbsolute("2026-10-04"), "4 Oct 2026");
   assert.equal(w.mvDateAbsolute(Date.UTC(2026, 9, 4, 23, 30) / 1000), "5 Oct 2026");
   assert.equal(w.mvDateAbsolute("2026-13-45x"), "");
+  assert.equal(w.mvDateAbsolute("2026-09"), "September 2026"); // an accounting month
   w.close();
 });
 
@@ -131,4 +132,14 @@ test("money reads one way: dollars and cents, separators, never a run of decimal
   const en = load("", { language: "en" });
   assert.equal(en.mvMoney(1234.5), "$1,234.50");
   en.close();
+});
+
+test("server-rendered times follow the interface locale once it is known", async (t) => {
+  const seconds = NOW / 1000;
+  const page = load(`<time id="t" data-mv-time="${seconds}" data-mv-time-mode="absolute">x</time>`, { language: "fr" });
+  t.after(() => page.close());
+  await new Promise((done) => setImmediate(done)); // the runtime translates once the document has loaded
+  const expected = new Intl.DateTimeFormat("fr-CA", { day: "numeric", month: "short", year: "numeric",
+    hour: "2-digit", minute: "2-digit", timeZoneName: "short" }).format(new Date(NOW));
+  assert.equal(page.document.getElementById("t").textContent, expected);
 });

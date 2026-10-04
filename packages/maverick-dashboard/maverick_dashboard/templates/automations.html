@@ -410,11 +410,11 @@
       if (!Array.isArray(data.schedules) || typeof data.context!=='string' || data.schedules.some(function (item) { return !item || typeof item.id!=='number'; })) throw new Error('Unreadable schedules.');
       if (schedContext && schedContext!==data.context) { forgetSchedules(); schedStatus.textContent='Workspace changed. Refresh this page to review current schedules.'; return; }
       schedContext=data.context; schedReady=true; schedLoadedAt=new Date();
-      schedStatus.textContent='Schedules checked at '+schedLoadedAt.toLocaleTimeString()+'.';
+      schedStatus.textContent='Schedules checked at '+(window.mvTimeAbsolute ? window.mvTimeAbsolute(schedLoadedAt.getTime()) : schedLoadedAt.toLocaleTimeString())+'.';
       document.getElementById('auto-sched-signin').hidden=true;
     } catch (error) {
       if (serial!==schedSerial) return;
-      schedStatus.textContent='Schedules are unavailable. '+(schedLoadedAt ? 'Rows below were last checked at '+schedLoadedAt.toLocaleString()+'. ' : '')+'Refresh to try again. No changes can be made until the current list is known.'; return;
+      schedStatus.textContent='Schedules are unavailable. '+(schedLoadedAt ? 'Rows below were last checked at '+(window.mvTimeAbsolute ? window.mvTimeAbsolute(schedLoadedAt.getTime()) : schedLoadedAt.toLocaleString())+'. ' : '')+'Refresh to try again. No changes can be made until the current list is known.'; return;
     } finally { clearTimeout(timer); }
     var items=data.schedules;
     schedList.textContent='';
@@ -928,7 +928,7 @@
                   });
                   heldCard.appendChild(heldFields);
                   heldCard.appendChild(el('p', 'muted', 'Recorded reason: ' + held.reason));
-                  heldCard.appendChild(el('p', 'muted', 'Recorded by ' + held.decided_by + ' on ' + new Date(Number(held.decided_at) * 1000).toLocaleString()));
+                  heldCard.appendChild(el('p', 'muted', 'Recorded by ' + held.decided_by + ' on ' + (window.mvTimeAbsolute ? window.mvTimeAbsolute(Number(held.decided_at)) : new Date(Number(held.decided_at) * 1000).toLocaleString())));
                   var repair = el('button', 'btn btn--ghost', 'Confirm recorded decision');
                   repair.type = 'button'; heldCard.appendChild(repair);
                   var repairStatus = el('span', 'muted'); repairStatus.setAttribute('role', 'status');
@@ -970,7 +970,7 @@
                 result.submissions.forEach(function (submission) {
                   var card = el('div', 'mv-row');
                   var received = new Date(Number(submission.received_at) * 1000);
-                  card.appendChild(el('strong', '', 'Received ' + (isNaN(received.getTime()) ? 'earlier' : received.toLocaleString())));
+                  card.appendChild(el('strong', '', 'Received ' + (isNaN(received.getTime()) ? 'earlier' : window.mvTimeAbsolute ? window.mvTimeAbsolute(received.getTime()) : received.toLocaleString())));
                   var details = document.createElement('dl');
                   Object.entries(submission.fields || {}).forEach(function (pair) {
                     details.appendChild(el('dt', '', mvHuman(pair[0])));

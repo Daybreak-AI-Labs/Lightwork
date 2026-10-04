@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
+from datetime import datetime, timezone
 
 _UPPER_WORDS = {"gpt": "GPT", "ai": "AI", "llm": "AI model", "vl": "VL", "api": "API",
                 "sms": "SMS", "ros": "ROS", "ui": "UI", "pro": "Pro"}
@@ -275,6 +276,32 @@ def unique_slug(name: object, taken, *, fallback: str = "item", max_len: int = 4
     while f"{base}-{n}" in taken:
         n += 1
     return f"{base}-{n}"
+
+
+def day_text(day) -> str:
+    """A calendar day the way browsers write it on English pages: "4 Oct 2026",
+    "30 Sept 2026" (en-GB spells September "Sept")."""
+    month = day.strftime("%b")
+    return f"{day.day} {'Sept' if month == 'Sep' else month} {day.year}"
+
+
+def datetime_text(value: object, *, seconds: bool = False, date_only: bool = False) -> str:
+    """Epoch seconds as the shared server-side text: "4 Oct 2026, 14:01 UTC".
+
+    The |datetime filter wraps this text in a <time> the browser rewrites in the
+    viewer's zone; plain strings (option labels, chat replies, printed reports)
+    use it directly. ``seconds`` adds ":05" where two moments a minute apart must
+    stay distinct; ``date_only`` gives "4 Oct 2026". "" when unreadable.
+    """
+    if isinstance(value, bool):
+        return ""
+    try:
+        when = datetime.fromtimestamp(float(value), tz=timezone.utc)
+    except (TypeError, ValueError, OverflowError, OSError):
+        return ""
+    if date_only:
+        return day_text(when)
+    return f"{day_text(when)}, {when.strftime('%H:%M:%S' if seconds else '%H:%M')} UTC"
 
 
 def money(value: object, decimals: int = 2, currency: str = "USD") -> str:

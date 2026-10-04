@@ -7,7 +7,7 @@
     <tbody>
     {% for a in record_alerts %}
       <tr>
-        <td>{{ a.sent_date }}</td>
+        <td>{{ a.sent_at | datetime('absolute') }}</td>
         <td>{{ a.message }}</td>
         <td>{{ a.recipient }}{% if a.recipient_kind == 'owner' %} <span class="muted">(workspace owner)</span>{% endif %}</td>
         <td>{{ a.backends }}</td>

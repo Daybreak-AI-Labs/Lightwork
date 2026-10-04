@@ -8,7 +8,7 @@
     <button class="btn btn--primary" type="submit">Compare current records</button></form>
   <p><a href="/spend">Spend</a> · <a href="/budget">Your budget</a></p>
   {% for ledger in report.ledgers %}
-  <section class="panel"><h2>{{ ledger.name }}</h2><p>{{ ledger.state }}{% if ledger.period %} · {{ ledger.period }}{% endif %}</p>
+  <section class="panel"><h2>{{ ledger.name }}</h2><p>{{ ledger.state }}{% if ledger.period %} · {{ ledger.period | datetime('date') }}{% endif %}</p>
     <p>{% if ledger.amount is not none %}<span title="{{ '%.6f'|format(ledger.amount) }} {{ ledger.currency }} exactly">{{ ledger.amount | money(currency=ledger.currency) }}</span>{% else %}Amount unavailable or separately accounted{% endif %}</p>
     <p>{{ ledger.scope }}</p><p>{{ ledger.basis or '' }}</p>
     {% if ledger.unknown_count %}<p>{{ ledger.unknown_count }} attempts have unknown costs; the subtotal is incomplete.</p>{% endif %}

@@ -211,6 +211,7 @@
     function stepLabel(kind) { return STEP[kind] || human(kind); }
     function ago(ts) {
       if (!ts) return '';
+      if (window.mvTimeRelative) return window.mvTimeRelative(ts);
       var s = Math.max(0, Math.floor(Date.now() / 1000 - ts));
       if (s < 60) return 'Just now';
       if (s < 3600) { var m = Math.floor(s / 60); return m + (m === 1 ? ' minute ago' : ' minutes ago'); }
@@ -431,7 +432,7 @@
         } else {
           var notice = document.createElement('p'); notice.setAttribute('role', 'status');
           notice.textContent = name + ': ' + source.state + '. Current state is not known. ';
-          if (lastKnown[name]) notice.textContent += 'Last known: ' + lastKnown[name].value + ' at ' + new Date(lastKnown[name].at * 1000).toLocaleString() + '. ';
+          if (lastKnown[name]) notice.textContent += 'Last known: ' + lastKnown[name].value + ' at ' + (window.mvTimeAbsolute ? window.mvTimeAbsolute(lastKnown[name].at) : new Date(lastKnown[name].at * 1000).toLocaleString()) + '. ';
           var repair = document.createElement('a'); repair.href = source.repair_href || '/help'; repair.textContent = 'Review this source'; notice.appendChild(repair); k.appendChild(notice);
         }
       });
