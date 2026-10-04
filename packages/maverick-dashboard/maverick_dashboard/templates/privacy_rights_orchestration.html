@@ -150,8 +150,7 @@
   }
   // Failures read as plain sentences: never "HTTP 403", "Error:" or raw server text.
   function requestProblem(status, detail) {
-    return (status === 400 || status === 422) && window.mvPlainDetail(detail) ||
-      window.mvErrorText({status: status, detail: detail}, "complete the request");
+    return window.mvPlainDetail(detail) || window.mvErrorText({status: status, detail: detail}, "complete the request");
   }
   function problemText(error) {
     var kind = error && error.name;
