@@ -6579,10 +6579,12 @@ async def audit_page(request: Request) -> HTMLResponse:
 
     from . import audit_actions_api as _audit_plain
 
+    # 50 entries a page: the 200-row default made a 400 KB page that blocked a
+    # phone for most of a second. "Show older activity" continues the search.
     try:
-        n = max(1, min(int(request.query_params.get("n") or 200), 1000))
+        n = max(1, min(int(request.query_params.get("n") or 50), 1000))
     except (TypeError, ValueError):
-        n = 200
+        n = 50
     raw_day = request.query_params.get("day")
     day = safe_audit_day(raw_day)
     if raw_day not in (None, "") and day is None:
