@@ -2,8 +2,10 @@
 {% block title %}Task handoffs — Lightwork{% endblock %}
 {% block content %}
 <div id="handoff-root" data-context="{{ handoff_context }}" data-bundle="{{ handoff_bundle }}">
-<h1>Task handoffs</h1>
-<p>Offer a named colleague a separate continuation using only a selected deliverable bundle. They must accept before responsibility changes. Acceptance starts no paid work.</p>
+{% from "_hero.html" import hero %}
+{{ hero('Your work', 'Task handoffs',
+        lede='Offer a named colleague a separate continuation using only a selected deliverable bundle. They must accept before responsibility changes. Acceptance starts no paid work.',
+        compact=true) }}
 <p><a href="/deliverable-bundles">Choose or prepare selected evidence</a></p>
 <p id="handoff-status" role="status" aria-live="polite">Loading your handoffs.</p>
 <button class="btn" id="handoff-refresh" type="button">Refresh handoffs</button>

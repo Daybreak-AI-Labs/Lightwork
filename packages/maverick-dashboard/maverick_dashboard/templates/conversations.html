@@ -2,8 +2,10 @@
 {% block title %}My conversations · Lightwork{% endblock %}
 {% block content %}
 <main id="conversation-browser" data-context="{{ conversation_context }}" style="max-width:68rem">
-  <h1>My conversations</h1>
-  <p>Names, pins and archive status apply to every turn in your conversation. Archiving hides a conversation from recents; it does not delete its history or change workspace retention and access rules.</p>
+  {% from "_hero.html" import hero %}
+  {{ hero('Your work', 'My conversations',
+          lede='Names, pins and archive status apply to every turn in your conversation. Archiving hides a conversation from recents; it does not delete its history or change workspace retention and access rules.',
+          compact=true) }}
   <form id="conversation-search" data-draft-recovery="off">
     <label for="conversation-query">Search stored message history</label><input id="conversation-query" type="search" maxlength="200" class="input">
     <label for="conversation-view">Show</label><select id="conversation-view" class="input"><option value="active">Active</option><option value="pinned">Pinned</option><option value="archived">Archived</option><option value="all">All</option></select>

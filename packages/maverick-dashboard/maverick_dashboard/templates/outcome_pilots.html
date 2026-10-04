@@ -1,9 +1,11 @@
 {% extends "base.html" %}
 {% block title %}Workflow pilots · Lightwork{% endblock %}
 {% block content %}
-<h1>Workflow pilots</h1>
-<p>Compare the same cases with and without AI. Plan the cases and acceptance criteria before work starts,
-  then record observed effort, corrections, cost evidence, and the current reviewed outcome.</p>
+{% from "_hero.html" import hero %}
+{{ hero('Your AI workforce', 'Workflow pilots',
+        lede='Compare the same cases with and without AI. Plan the cases and acceptance criteria before work starts,
+              then record observed effort, corrections, cost evidence, and the current reviewed outcome.',
+        compact=true) }}
 <p>These are your recorded observations. Provider invoice accuracy, customer acceptance of the pilot itself,
   and isolation from model training require separate evidence. <a href="/savings">View savings estimates</a>.</p>
 <style>

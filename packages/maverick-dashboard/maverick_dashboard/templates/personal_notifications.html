@@ -1,17 +1,20 @@
 {% extends "base.html" %}
 {% block title %}Your notifications - Lightwork{% endblock %}
 {% block content %}
+{% from "_hero.html" import hero %}
 {% if personal_alerts_unavailable %}
+{% set alerts_actions %}<a class="btn btn--primary" href="/settings/all">Open All settings</a>{% endset %}
+{{ hero('Your account', 'Your notifications',
+        lede='Personal task alerts can tell you when your work finishes, needs an answer, or needs attention. They stay with your account.',
+        actions=alerts_actions if viewer_global_admin else '', compact=true) }}
 <section class="panel">
-  <h1>Your notifications</h1>
   <p role="status">{{ personal_alerts_unavailable }}</p>
-  <p>Personal task alerts can tell you when your work finishes, needs an answer, or needs attention. They stay with your account.</p>
-  {% if viewer_global_admin %}<p><a class="btn btn--primary" href="/settings/all">Open All settings</a></p>{% endif %}
 </section>
 {% else %}
+{{ hero('Your account', 'Your notifications',
+        lede='Personal alerts for your own tasks and decisions assigned to you. The shared organization channel, including ntfy, does not receive private task updates. Choose a verified private conversation below if you want alerts outside Lightwork.',
+        compact=true) }}
 <section class="panel">
-  <h1>Your notifications</h1>
-  <p>Personal alerts for your own tasks and decisions assigned to you. The shared organization channel, including ntfy, does not receive private task updates. Choose a verified private conversation below if you want alerts outside Lightwork.</p>
   <p class="muted">The inbox includes current unresolved work and recent activity from the last seven days. Changes resolved before observation are combined into the current actionable state. Repeated streaming updates do not create alerts.</p>
   <p><a href="/preferences">Your preferences</a> · <a href="/action-center">Action Center</a></p>
   <p id="personal-notification-status" role="status" aria-live="polite">Loading your inbox.</p>

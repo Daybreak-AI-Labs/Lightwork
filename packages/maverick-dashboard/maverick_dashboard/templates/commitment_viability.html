@@ -18,8 +18,9 @@
   .cmv-card p { overflow-wrap:anywhere; }
   #cmv-report[hidden],#cmv-enabled[hidden] { display:none; }
 </style>
-<h1>Promise reviews</h1>
-<p class="cmv-intro">Review how two accepted orders share reported stock and working capacity before a buying or delivery window closes. See what is known, what is uncertain, and which conditional choice needs an owner's decision.</p>
+{% from "_hero.html" import hero %}
+{% set cmv_lede %}Review how two accepted orders share reported stock and working capacity before a buying or delivery window closes. See what is known, what is uncertain, and which conditional choice needs an owner's decision.{% endset %}
+{{ hero('Operations', 'Promise reviews', lede=cmv_lede, compact=true) }}
 {% if not review_enabled %}
 <section class="panel"><h2>Promise reviews are off</h2>
   <p>{% if review_admin %}Enable Promise reviews in <a href="/settings?focus=feature-commitment_viability">Settings</a> to start using this pilot.{% else %}Ask an administrator to enable Promise reviews in Settings.{% endif %}</p>

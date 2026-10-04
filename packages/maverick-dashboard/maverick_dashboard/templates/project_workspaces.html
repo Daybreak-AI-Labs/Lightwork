@@ -3,8 +3,10 @@
 {% block content %}
 <div id="pw-root" data-project="{{ project_id or '' }}" data-context="{{ project_context }}">
   <p><a href="/projects">Projects</a> · <a href="/project-workspaces">All project workspaces</a></p>
-  <h1 id="pw-title">Project workspaces</h1>
-  <p>Plan an outcome, connect the work that supports it, and keep the current accepted result in view.</p>
+  {% from "_hero.html" import hero %}
+  {{ hero('Projects', 'Project workspaces', title_id='pw-title',
+          lede='Plan an outcome, connect the work that supports it, and keep the current accepted result in view.',
+          compact=true) }}
   <p id="pw-status" role="status" aria-live="polite">Loading current project access.</p>
   <button id="pw-refresh" type="button" class="btn">Refresh current status</button>
   <button id="pw-cancel" type="button" class="btn" hidden>Stop waiting</button>

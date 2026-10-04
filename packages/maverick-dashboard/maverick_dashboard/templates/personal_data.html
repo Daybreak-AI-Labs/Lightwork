@@ -1,8 +1,11 @@
 {% extends "base.html" %}
 {% block title %}My Data - Lightwork{% endblock %}
 {% block content %}
-<h1>My Data</h1>
-<section class="panel"><p>Your personal memory, verified channel identities and retained work in this workspace. Personal choices can narrow administrator policy; they cannot enable tools, expand companion sources or remove preservation holds.</p>
+{% from "_hero.html" import hero %}
+{{ hero('Your account', 'My Data',
+        lede='Your personal memory, verified channel identities and retained work in this workspace. Personal choices can narrow administrator policy; they cannot enable tools, expand companion sources or remove preservation holds.',
+        compact=true) }}
+<section class="panel">
 <p id="pd-status" role="status" aria-live="polite">Current account controls loaded.</p><button class="btn" id="pd-refresh" type="button">Refresh saved state</button></section>
 <section class="panel"><h2>Verified channel identities</h2>
 <p>Choose a channel, send the generated text to Lightwork from your own account, then confirm the sender here. Linking alone shares nothing. Send the text as a normal message, not a slash command.</p>
