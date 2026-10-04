@@ -34,8 +34,7 @@
     else paragraph(out, 'Headroom is unavailable because at least one required ledger or identity is unknown.');
     if (value.binding_ceiling) paragraph(out, 'Binding ceiling: {ceiling}.', {ceiling:dimension(value.binding_ceiling)});
     paragraph(out, value.admission_allowed ? 'Dispatch will recheck authority and allowance before paid work.' : 'A current limit or accounting uncertainty may block paid work. Review the details before starting.');
-    var reset = new Date(value.reset_at);
-    paragraph(out, 'Daily reset: {local} ({zone}); {utc} UTC. Provider periods are shown separately.', {local:date(value.reset_at), zone:Intl.DateTimeFormat().resolvedOptions().timeZone, utc:reset.toISOString()});
+    paragraph(out, 'Daily reset: {local} (midnight UTC). Provider periods are shown separately.', {local:date(value.reset_at)});
     if (!root) { out.appendChild(link('Review reservations, schedules and accounting help', '/budget' + (value.goal_id ? '?goal_id=' + value.goal_id : ''))); return; }
     paragraph(out, value.notice); paragraph(out, value.increase_owner); paragraph(out, value.task_error); paragraph(out, value.provider_error);
     ['person', 'workspace'].forEach(function (name) {

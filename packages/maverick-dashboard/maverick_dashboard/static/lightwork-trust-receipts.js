@@ -78,7 +78,7 @@
   function when(ts) {
     var n = Number(ts);
     if (!isFinite(n) || n <= 0) { return "—"; }
-    return new Date(n * 1000).toLocaleString();
+    return window.mvTimeAbsolute(n);
   }
 
   function readFile(input, what) {
@@ -126,7 +126,7 @@
     status.days.forEach(function (day, index) {
       var option = document.createElement("option");
       option.value = day;
-      var label = new Date(day + "T12:00:00").toLocaleDateString();
+      var label = window.mvDateAbsolute(day) || day;
       option.textContent = label + (index === 0 ? " (latest)" : "");
       daySelect.appendChild(option);
     });

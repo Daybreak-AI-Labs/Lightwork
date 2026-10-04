@@ -452,15 +452,22 @@
         // Unix epoch: (ts || 0) would turn 0/null/undefined/NaN into 1/1/1970,
         // which then leaks into visible text and aria-labels.
         if (!ts || !isFinite(ts)) return '';
-        try { return window.LightworkI18n ? window.LightworkI18n.formatDate(ts) : new Date(ts * 1000).toLocaleString(); } catch (e) { return ''; }
+        return window.mvTimeAbsolute(ts);
       };
       // One shared time formatter for every timestamp people read. Servers
       // send an epoch (seconds) or an ISO string; the viewer sees it in their
       // own time zone. Convention (any page, any markup owner):
       //   <time data-mv-time="1790790000">fallback</time>
       //   data-mv-time-mode="relative" (default: "2 minutes ago", absolute on
-      //   hover) | "absolute" ("30 Sep 2026, 17:15 BST") | "both".
+      //   hover) | "absolute" ("30 Sep 2026, 17:15 BST") | "both" | "date"
+      //   ("30 Sep 2026"; a "2026-09-30" value is a calendar date, not UTC midnight).
       // Elements added later are formatted by calling window.mvFormatTimes(root).
+      // English pages read the same in every browser ("4 Oct 2026, 14:01 BST",
+      // a 24-hour clock); a translated interface uses its own locale's order.
+      function mvFormatLocale() {
+        var i18n = window.LightworkI18n;
+        return i18n && i18n.language && i18n.language !== 'en' ? (i18n.locale || i18n.language) : 'en-GB';
+      }
       function mvParseTime(raw) {
         if (raw === null || raw === undefined || raw === '') return null;
         var n = Number(raw);
@@ -471,15 +478,23 @@
         var d = mvParseTime(raw);
         if (!d) return '';
         try {
-          return d.toLocaleString(undefined, { day: 'numeric', month: 'short', year: 'numeric',
-            hour: '2-digit', minute: '2-digit', timeZoneName: 'short' });
-        } catch (e) { return d.toLocaleString(); }
+          return new Intl.DateTimeFormat(mvFormatLocale(), { day: 'numeric', month: 'short', year: 'numeric',
+            hour: '2-digit', minute: '2-digit', timeZoneName: 'short' }).format(d);
+        } catch (e) { return d.toUTCString(); }
+      };
+      window.mvDateAbsolute = function (raw) {
+        var parts = typeof raw === 'string' && /^(\d{4})-(\d{2})-(\d{2})$/.exec(raw.trim());
+        var d = parts ? new Date(Number(parts[1]), Number(parts[2]) - 1, Number(parts[3])) : mvParseTime(raw);
+        if (!d || isNaN(d.getTime())) return '';
+        try {
+          return new Intl.DateTimeFormat(mvFormatLocale(), { day: 'numeric', month: 'short', year: 'numeric' }).format(d);
+        } catch (e) { return d.toDateString(); }
       };
       window.mvTimeRelative = function (raw) {
         var d = mvParseTime(raw);
         if (!d) return '';
         var diff = (d.getTime() - Date.now()) / 1000;
-        var abs = Math.abs(diff), past = diff < 0;
+        var abs = Math.abs(diff), past = diff <= 0;
         // [seconds in one unit, unit, size of the next unit]. Each value is
         // counted in its own unit; one that rounds up to the next unit
         // ("60 minutes") is shown in that unit instead ("1 hour").
@@ -490,7 +505,7 @@
         while (Math.round(abs / units[i][0]) * units[i][0] >= units[i][2]) i++;
         var size = units[i][0], unit = units[i][1], value = Math.round(abs / size);
         if (typeof Intl !== 'undefined' && Intl.RelativeTimeFormat) {
-          try { return new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' }).format(past ? -value : value, unit); } catch (e) {}
+          try { return new Intl.RelativeTimeFormat(mvFormatLocale(), { numeric: 'auto' }).format(past ? -value : value, unit); } catch (e) {}
         }
         var word = value + ' ' + unit + (value === 1 ? '' : 's');
         return past ? word + ' ago' : 'in ' + word;
@@ -505,7 +520,8 @@
           var absolute = window.mvTimeAbsolute(raw);
           var relative = window.mvTimeRelative(raw);
           if (el.tagName === 'TIME' && !el.getAttribute('datetime')) el.setAttribute('dateTime', d.toISOString());
-          if (mode === 'absolute') { el.textContent = absolute; el.title = relative; }
+          if (mode === 'date') el.textContent = window.mvDateAbsolute(raw);
+          else if (mode === 'absolute') { el.textContent = absolute; el.title = relative; }
           else if (mode === 'both') { el.textContent = absolute + ' (' + relative + ')'; }
           else { el.textContent = relative; el.title = absolute; }
           el.setAttribute('data-mv-time-done', mode);
@@ -529,7 +545,7 @@
       Array.prototype.forEach.call(realDocument ? document.querySelectorAll('[data-mv-utc-midnight]') : [], function (el) {
         try {
           var next = new Date(); next.setUTCHours(24, 0, 0, 0);
-          var local = next.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+          var local = next.toLocaleTimeString(mvFormatLocale(), { hour: '2-digit', minute: '2-digit' });
           var zone = (Intl.DateTimeFormat().resolvedOptions().timeZone || '').replace(/_/g, ' ');
           if (next.getTimezoneOffset() !== 0) el.textContent = ', which is ' + local + ' in your time zone' + (zone ? ' (' + zone + ')' : '');
         } catch (e) {}

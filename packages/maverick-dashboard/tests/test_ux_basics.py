@@ -95,6 +95,20 @@ def test_datetime_filter_renders_a_time_element_with_date_and_zone():
     assert _format_datetime(None) == "-"
 
 
+def test_datetime_filter_reads_one_format_from_epochs_iso_text_and_calendar_days():
+    from maverick_dashboard.app import _format_datetime
+    # 2026-10-04 14:01:12 UTC: day without a leading zero, 24-hour clock, zone.
+    assert ">4 Oct 2026, 14:01 UTC</time>" in str(_format_datetime(1791122472))
+    iso = str(_format_datetime("2026-10-04T15:01:12+01:00", "absolute"))
+    assert ">4 Oct 2026, 14:01 UTC</time>" in iso and 'data-mv-time="1791122472.000"' in iso
+    assert ">4 Oct 2026, 14:01 UTC</time>" in str(_format_datetime("2026-10-04T14:01:12Z"))
+    day = str(_format_datetime("2026-10-04", "date"))
+    assert day == ('<time datetime="2026-10-04" data-mv-time="2026-10-04"'
+                   ' data-mv-time-mode="date">4 Oct 2026</time>')
+    assert ">4 Oct 2026</time>" in str(_format_datetime(1791122472, "date"))
+    assert _format_datetime("not a time") == "not a time"
+
+
 # ---- activity log ----------------------------------------------------------
 
 def test_activity_log_records_invites_channels_and_workspace_pauses(monkeypatch, tmp_path):
