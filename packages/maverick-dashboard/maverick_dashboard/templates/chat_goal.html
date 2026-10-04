@@ -696,7 +696,7 @@
       // the orchestrator's "active" reads "Working", never the raw word. If
       // that file could not load, Stop still follows the working states.
       const RunStatus = window.LightworkRunStatus || {
-        label: function () { return ''; },
+        label: function (status) { return {pending: 'Queued', active: 'Working', running: 'Working', done: 'Done', blocked: 'Paused', failed: 'Failed', cancelled: 'Stopped'}[status] || ''; },
         stoppable: function (status, asking) { return ['pending', 'active', 'running'].includes(status) || (status === 'blocked' && asking === true); },
         settled: function (status, asking) { return ['done', 'failed', 'cancelled'].includes(status) || (status === 'blocked' && asking !== true); },
         syncRecents: function () { return false; }
@@ -1456,10 +1456,10 @@
       var spin = document.getElementById('work-spin');
       if (!activity || !events || !nowEl) return;
       // The shared words (lightwork-run-status.js); without that file the
-      // strip still settles on the finished states.
+      // strip still settles on the finished states with the same words.
       var RunStatus = window.LightworkRunStatus || {
         settled: function (st) { return ['done', 'completed', 'failed', 'error', 'cancelled', 'blocked'].indexOf(st) >= 0; },
-        label: function () { return ''; }
+        label: function (st) { return {done: 'Done', completed: 'Done', blocked: 'Paused', failed: 'Failed', error: 'Failed', cancelled: 'Stopped'}[st] || ''; }
       };
 
       function stepTotal() { return Number(events.dataset && events.dataset.steps || 0) || events.children.length; }
