@@ -1255,7 +1255,12 @@
     } catch (_error) {
       throw new Error("Could not reach the server — check your connection and try again.");
     }
-    if (!response.ok) throw new Error(await safeDetail(response, action));
+    if (!response.ok) {
+      // The refusal's body is never read: release it so the request ends
+      // instead of staying open (the page never went quiet).
+      try { if (response.body) response.body.cancel().catch(() => {}); } catch (_error) { /* already closed */ }
+      throw new Error(await safeDetail(response, action));
+    }
     if (response.status === 204) return null;
     return response.json();
   };

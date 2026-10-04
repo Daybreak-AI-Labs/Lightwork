@@ -338,3 +338,25 @@ def test_page_is_plain_language_with_a_task_table_and_row_actions(client: TestCl
     source = (PACKAGE / "static" / "lightwork-ai-entity-tasks.js").read_text(encoding="utf-8")
     assert '"/api/v1/people/assignable"' in source and '"/api/v1/security/assurance/ai-inventory"' in source
     assert "window.mvConfirm" in source
+
+
+@pytest.mark.parametrize("enabled", (False, True))
+def test_turned_off_module_shows_its_gate_instead_of_loaders(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, enabled: bool,
+) -> None:
+    from maverick_dashboard import api
+
+    monkeypatch.setattr(api, "module_activation_enabled", lambda _section: enabled)
+    page_text = client.get(ROUTE).text
+    main = page_text[page_text.index('<div class="aet-shell"'):page_text.index("<noscript>")]
+    assert f'data-module-enabled="{"true" if enabled else "false"}"' in main
+    if enabled:
+        assert "data-module-gate" not in main
+        assert "Loading tasks…" in main
+        return
+    # The gate follows the title; the workbench neither checks availability
+    # (the gate already says it is off) nor shows a loader that never ends.
+    assert main.index('class="page-title hero-title"') < main.index("data-module-gate")
+    assert '<section class="panel" aria-labelledby="aet-status-title" hidden>' in main
+    assert "Loading" not in main
+    assert "Tasks appear here once AI system tasks are turned on." in main

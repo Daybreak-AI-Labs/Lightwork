@@ -21,17 +21,18 @@
 </style>
 {% endblock %}
 {% block content %}
-{% if not task_module_enabled %}
-{{ module_gate('ai_entity_tasks', 'AI system tasks',
-               detail='Turn this on (together with the AI inventory) to assign review and fix-up work for each AI system your organization uses.',
-               can_activate=task_can_activate) }}
-{% endif %}
 <div class="aet-shell" id="ai-entity-task-shell"
      data-api-base="{{ api_base }}" data-copilot-page="{{ page_path }}"
+     data-module-enabled="{{ 'true' if task_module_enabled else 'false' }}"
      data-can-operate="{{ 'true' if task_can_operate else 'false' }}"
      data-can-audit="{{ 'true' if task_can_audit else 'false' }}"
      data-can-admin="{{ 'true' if task_can_admin else 'false' }}">
   {{ hero('Governance', 'AI system tasks', lede='Assign review and fix-up work for each AI system in your inventory, and track who owns it, how it is going and when it is due.') }}
+  {% if not task_module_enabled %}
+  {{ module_gate('ai_entity_tasks', 'AI system tasks',
+                 detail='Turn this on (together with the AI inventory) to assign review and fix-up work for each AI system your organization uses.',
+                 can_activate=task_can_activate) }}
+  {% endif %}
 {% if task_workspace_missing %}
   <section class="panel" aria-labelledby="aet-workspace-title">
     <h2 id="aet-workspace-title">Choose a workspace first</h2>
@@ -47,7 +48,7 @@
     </ul>
   </details>
 
-  <section class="panel" aria-labelledby="aet-status-title">
+  <section class="panel" aria-labelledby="aet-status-title"{% if not task_module_enabled %} hidden{% endif %}>
     <div class="section-head"><h2 id="aet-status-title">Availability</h2><button class="btn btn--ghost" id="aet-refresh-status" type="button">Check again</button></div>
     <p><strong id="aet-readiness">Checking…</strong> <span class="badge idle" id="aet-status-mark" data-state="checking">Checking</span></p>
     <p class="muted" id="aet-readiness-detail" role="status" aria-live="polite">Checking availability before enabling actions.</p>
@@ -91,7 +92,7 @@
           <button class="btn btn--ghost" id="aet-clear-filters" type="button">Clear filters</button>
         </div>
       </form>
-      <p class="muted" id="aet-list-status" role="status" aria-live="polite">Loading tasks…</p>
+      <p class="muted" id="aet-list-status" role="status" aria-live="polite">{{ 'Loading tasks…' if task_module_enabled else 'Tasks appear here once AI system tasks are turned on.' }}</p>
       <div class="aet-table"><table><caption class="sr-only">AI system tasks and what you can do with each</caption>
         <thead><tr><th scope="col">Task</th><th scope="col">AI system</th><th scope="col">Status</th><th scope="col">Priority</th><th scope="col">Assigned to</th><th scope="col">Due</th><th scope="col">Actions</th></tr></thead>
         <tbody id="aet-task-list"></tbody></table></div>

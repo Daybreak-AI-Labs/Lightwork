@@ -469,3 +469,26 @@ test("a filing reference is copied from the authority and checked before it is r
   await h.until(() => h.posted(route).length, "the filing to be recorded");
   assert.equal(plain(h.posted(route)[0].body).submission_reference, "DE-2026/0042");
 });
+
+test("refused sections release their responses and leave no table or list at Loading", async t => {
+  const html = pageHtml();
+  const inline = html.match(/<script>([\s\S]*?)<\/script>/)[1];
+  const dom = new JSDOM(`<!doctype html><body>${html.replace(/<script[\s\S]*?<\/script>/g, "")}</body>`,
+    {runScripts: "outside-only", url: "https://lightwork.test/security/assurance"});
+  t.after(() => dom.window.close());
+  const w = dom.window;
+  let released = 0;
+  Object.defineProperty(w, "crypto", {value: globalThis.crypto, configurable: true});
+  w.TextEncoder = TextEncoder;
+  w.mvErrorText = (failure, action) => `Could not ${action}. (${failure.status})`;
+  // Every section is refused, as on a fresh install where these modules are off.
+  w.fetch = async () => ({ok: false, status: 403, body: {cancel: async () => { released += 1; }}, json: async () => ({})});
+  w.eval(fs.readFileSync(path.join(base, "static/lightwork-assurance-forms.js"), "utf8"));
+  w.eval(inline);
+  for (let i = 0; i < 60; i += 1) await new Promise(resolve => setImmediate(resolve));
+  assert.ok(released >= 10, `released ${released} refused responses`);
+  const stuck = Array.from(w.document.querySelectorAll("td, li, p, span"))
+    .filter(node => node.children.length === 0 && /^Loading\b/.test(node.textContent.trim()))
+    .map(node => (node.closest("[id]") || {}).id + ": " + node.textContent.trim());
+  assert.deepEqual(stuck, []);
+});

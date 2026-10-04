@@ -344,3 +344,25 @@ def test_workbench_is_plain_language_with_lists_and_row_actions(client: TestClie
     source = (PACKAGE / "static" / "lightwork-ai-evidence-analysis.js").read_text(encoding="utf-8")
     for label in ('"View findings"', '"Approve"', '"Reject"', '"Withdraw"', '"History"'):
         assert label in source
+
+
+@pytest.mark.parametrize("enabled", (False, True))
+def test_turned_off_module_shows_its_gate_instead_of_loaders(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, enabled: bool,
+) -> None:
+    from maverick_dashboard import api
+
+    monkeypatch.setattr(api, "module_activation_enabled", lambda _section: enabled)
+    text = client.get(ROUTE).text
+    main = text[text.index('<div class="evidence-workbench"'):text.index("<noscript>")]
+    assert f'data-module-enabled="{"true" if enabled else "false"}"' in main
+    if enabled:
+        assert "data-module-gate" not in main
+        assert main.count("Loading…") == 3
+        return
+    # The gate follows the title; no availability check repeats it and no
+    # loader is left saying "Loading".
+    assert main.index('class="page-title hero-title"') < main.index("data-module-gate")
+    assert 'aria-labelledby="status-title" hidden>' in main
+    assert "Loading" not in main
+    assert "Analyses appear here once AI evidence analysis is turned on." in main

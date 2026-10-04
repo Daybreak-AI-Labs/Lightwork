@@ -252,3 +252,46 @@ test("creating a task pins the AI system version from the picker", async (t) => 
   assert.equal(post.body.entity_revision, 8);
   assert.equal(post.body.assignee_ref, "person:abc");
 });
+
+// ---- no loader keeps saying "Loading" ---------------------------------------
+function settledPage(t, answer, moduleEnabled = "") {
+  const dom = new JSDOM(`<main>${pageBody}</main>`, { url: "https://lightwork.test/ai-entity-tasks", runScripts: "outside-only" });
+  t.after(() => dom.window.close());
+  const w = dom.window;
+  w.TextDecoder = TextDecoder;
+  w.document.getElementById("ai-entity-task-shell").dataset.moduleEnabled = moduleEnabled;
+  w.mvErrorText = (failure, action) => "Could not " + action + ". Try again in a few minutes.";
+  const calls = [];
+  w.fetch = async (url) => { calls.push(String(url)); return answer(String(url)); };
+  w.eval(pageSource);
+  const settle = async () => { for (let i = 0; i < 40; i += 1) await new Promise((r) => setImmediate(r)); };
+  return { w, calls, settle, text: (id) => w.document.getElementById(id).textContent };
+}
+
+test("a failed availability check leaves no task loader spinning", async (t) => {
+  const h = settledPage(t, () => streamed({ detail: "unavailable" }, 503));
+  await h.settle();
+  assert.equal(h.text("aet-readiness"), "Unavailable");
+  assert.equal(h.text("aet-list-status"), "Could not load the tasks. Try again in a few minutes.");
+  assert.doesNotMatch(h.text("aet-list-status") + h.text("aet-readiness-detail"), /Loading|Checking/);
+});
+
+test("unfinished setup says when tasks will appear instead of loading forever", async (t) => {
+  const h = settledPage(t, () => streamed({ enabled: true, configured: false, ready: false }));
+  await h.settle();
+  assert.equal(h.text("aet-readiness"), "Setup not finished");
+  assert.equal(h.text("aet-list-status"), "Tasks appear here once an administrator finishes the setup.");
+});
+
+test("a server that reports the module off says so without pointing at a missing gate", async (t) => {
+  const h = settledPage(t, () => streamed({ enabled: false, configured: false, ready: false }));
+  await h.settle();
+  assert.equal(h.text("aet-readiness-detail"), "AI system tasks are turned off. Ask an administrator to turn them on.");
+  assert.equal(h.text("aet-list-status"), "Tasks appear here once AI system tasks are turned on.");
+});
+
+test("a turned-off module starts no checks or loads behind its gate", async (t) => {
+  const h = settledPage(t, () => { throw new Error("no request expected"); }, "false");
+  await h.settle();
+  assert.deepEqual(h.calls, []);
+});

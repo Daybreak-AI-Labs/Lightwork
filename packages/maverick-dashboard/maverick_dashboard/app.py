@@ -3511,13 +3511,18 @@ def public_demo(request: Request) -> HTMLResponse:
             "</article>"
         )
     body = "".join(cards) or "<p class='empty'>No seeded demo goals are available yet.</p>"
+    # The public proxy serves only this path, so the page cannot load
+    # lightwork.css; it repeats the shared --font-sans token (a test keeps the
+    # two identical).
     return HTMLResponse(
         "<!doctype html>"
         "<html lang='en'><head><meta charset='utf-8'>"
         "<meta name='viewport' content='width=device-width, initial-scale=1'>"
         "<title>Lightwork public demo</title>"
         "<style>"
-        ":root{color-scheme:dark;font-family:Inter,system-ui,sans-serif;"
+        ":root{color-scheme:dark;"
+        "--font-sans:'Manrope',-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;"
+        "font-family:var(--font-sans);"
         "background:#0d1117;color:#e6edf3}"
         "body{margin:0;padding:2rem;max-width:1100px;margin-inline:auto}"
         "header{margin-bottom:2rem}.eyebrow,.status{color:#2ea043;"

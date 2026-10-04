@@ -704,5 +704,18 @@
     byId('research-run-form').elements.run_id.value = `run-${crypto.randomUUID()}`;
   }
   syncConditionalFields();
-  act(refresh);
+  // A failed first load leaves nothing to show: say so in each list instead of
+  // "Loading…" (the reason is also shown in the status line above them).
+  async function firstLoad() {
+    try {
+      await refresh();
+    } catch (error) {
+      const why = action => (typeof window.mvErrorText === 'function' ? window.mvErrorText(error, action)
+        : `Could not ${action}. Refresh the page to try again.`);
+      byId('research-registry-items').replaceChildren(element('li', why('load datasets and models')));
+      byId('research-governed-runs').replaceChildren(element('li', why('load runs')));
+      throw error;
+    }
+  }
+  act(firstLoad);
 })();

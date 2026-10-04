@@ -28,8 +28,11 @@
       --text-xs: 0.75rem;  --text-sm: 0.8125rem; --text-base: 0.875rem;
       --text-md: 1rem;     --text-lg: 1.125rem;  --text-xl: 1.375rem;
       --text-2xl: 1.75rem; --text-3xl: 2.25rem;
-      --font-normal: 400; --font-medium: 500; --font-semibold: 600;
+      --font-normal: 400; --font-medium: 500; --font-semibold: 600; --font-bold: 700;
       --leading-tight: 1.25; --leading: 1.55;
+      /* The product face (Manrope, self-hosted below) with the system stack
+         it falls back to. */
+      --font-sans: "Manrope", -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
       /* Serif display face for greetings/headlines (system serif — New York on
          Apple, Georgia elsewhere — no webfont, stays offline-first). */
       --font-serif: ui-serif, Georgia, "Iowan Old Style", "Palatino Linotype", "Times New Roman", serif;
@@ -118,6 +121,13 @@
     body.font-dyslexic { line-height: 1.8; }
 
     * { box-sizing: border-box; }
+    /* Controls use the product face. Browsers give buttons, fields and menus
+       their own system font, so <button class="btn"> rendered in Arial while
+       <a class="btn"> used Manrope. Zero specificity: any class that sets a
+       font still wins. Chips also take their size and line height from their
+       surroundings unless their page sets one. */
+    :where(button, input, select, textarea) { font-family: inherit; }
+    :where(.chip, .fd__chip) { font: inherit; }
     /* The hidden attribute must always win. Shared classes such as .btn, .section-head
        and .grid set an author-level display, which beats the UA [hidden] rule and left
        "hidden" controls rendered (Settings tab headings, the Ekko buttons, the copilot
@@ -445,9 +455,11 @@
       letter-spacing: -0.012em; line-height: 1.14; color: var(--text); margin: 0 0 var(--space-2);
     }
     .page-subtitle { color: var(--muted); margin: 0 0 var(--space-5); }
-    /* Section label (the established uppercase "eyebrow" used across pages). */
+    /* Section title. A bare <h2> is a panel's title, the same job as the
+       h2 in .section-head, so both use one size (it used to be a 12px
+       eyebrow here and 18px there). Small labels use their own classes. */
     h2 {
-      margin: 0 0 var(--space-3); font-size: var(--text-xs); color: var(--muted);
+      margin: 0 0 var(--space-3); font-size: var(--text-lg); color: var(--muted);
       text-transform: uppercase; letter-spacing: 0.08em; font-weight: var(--font-semibold);
     }
 
@@ -535,20 +547,19 @@
     }
     .btn:hover { border-color: var(--border-strong); text-decoration: none; }
     .btn:active { transform: translateY(1px); }
-    /* Primary action: brand fill + a soft brand-tinted lift so it reads as
-       the tactile, glass-era button used across the redesigned screens. */
+    /* Primary action, high contrast theme: brand fill with a soft lift. Every
+       other theme uses the text-coloured primary under "controls" at the end
+       of this sheet; those two rules are the only primary-button looks. */
     .btn--primary { background: var(--brand); border-color: transparent; color: var(--brand-fg);
       box-shadow: 0 2px 10px color-mix(in srgb, var(--brand) 32%, transparent); }
     .btn--primary:hover { background: var(--brand-hi); border-color: transparent;
       box-shadow: 0 4px 14px color-mix(in srgb, var(--brand) 40%, transparent); }
     .btn--ghost { background: transparent; }
+    /* Quiet buttons: transparent until hovered, then a faint fill. */
+    .btn--ghost:where(:not(.btn--primary, .btn--danger, :disabled)):hover {
+      background-color: color-mix(in srgb, var(--text) 8%, transparent);
+    }
     .btn--danger { background: var(--danger); border-color: var(--danger); color: var(--danger-fg); }
-    /* Class names some pages used that never existed; they render as the
-       real primary button instead of an unstyled one. */
-    .btn-primary, .btn.primary { background: var(--brand); border-color: transparent; color: var(--brand-fg);
-      box-shadow: 0 2px 10px color-mix(in srgb, var(--brand) 32%, transparent); }
-    .btn-primary:hover, .btn.primary:hover { background: var(--brand-hi); border-color: transparent; }
-    .btn-danger, .btn.danger { background: var(--danger); border-color: var(--danger); color: var(--danger-fg); }
     /* A plain <button> in page content gets the standard button look rather
        than the browser default. */
     #content button:not([class]) {
@@ -908,17 +919,6 @@
         border-color: color-mix(in srgb, var(--text) 24%, transparent);
         box-shadow: var(--shadow-md), var(--glass-edge);
       }
-      /* Primary action: a glass-era button — subtle vertical gradient with a
-         specular top edge, so it reads as a lit key, not a flat rectangle. */
-      body:not(.theme-hicontrast) .btn--primary {
-        background: linear-gradient(180deg, var(--brand-hi), var(--brand));
-        box-shadow: 0 2px 14px color-mix(in srgb, var(--brand) 38%, transparent),
-          inset 0 1px 0 0 color-mix(in srgb, #ffffff 22%, transparent);
-      }
-      body:not(.theme-hicontrast) .btn--primary:hover {
-        background: linear-gradient(180deg,
-          color-mix(in srgb, var(--brand-hi) 86%, #ffffff 14%), var(--brand-hi));
-      }
       body:not(.theme-hicontrast) :where(
         .btn:not(.btn--primary):not(.btn--danger), .ctl, .iconbtn, .halt-pill,
         .input, .select, .textarea, input:not([type="checkbox"]):not([type="radio"]),
@@ -981,9 +981,6 @@
         background: var(--scrim);
         -webkit-backdrop-filter: blur(3px);
         backdrop-filter: blur(3px);
-      }
-      body:not(.theme-hicontrast) .btn--primary {
-        box-shadow: 0 2px 14px color-mix(in srgb, var(--brand) 38%, transparent);
       }
       @media (prefers-reduced-transparency: reduce) {
         body:not(.theme-hicontrast) {
@@ -1052,6 +1049,15 @@
           -webkit-backdrop-filter: none;
           backdrop-filter: none;
         }
+      }
+      /* Quiet (ghost) buttons are not glass controls. Same weight as the two
+         control rules above and later, so it wins over both: no fill, no
+         blur, no edge highlight; the border stays. */
+      body:not(.theme-hicontrast) :where(.btn--ghost:not(.btn--primary):not(.btn--danger)) {
+        background-color: transparent;
+        -webkit-backdrop-filter: none;
+        backdrop-filter: none;
+        box-shadow: none;
       }
     }
 
@@ -1492,7 +1498,7 @@ body[data-global-admin="1"] .mg-banner .mg-nonadmin-note { display: none; }
   --warn: #FFB547; --danger: #FF6B6B;
 }
 body.theme-dark { --brand: #3D8BFF; --brand-hi: #79ACFF; --brand-fg: #000000; --info: #37D7FF; }
-body:not(.font-dyslexic) { font-family: "Manrope", -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; }
+body:not(.font-dyslexic) { font-family: var(--font-sans); }
 .mono, code, pre, kbd { font-family: var(--font-mono); }
 
 /* shell */
@@ -1547,6 +1553,7 @@ th, .stat .label, .hero-statebox__label { font-family: var(--font-mono); letter-
 
 /* controls */
 .btn { border-radius: 8px; font-weight: 600; }
+/* Primary action in every theme except high contrast (see .btn--primary). */
 body:not(.theme-hicontrast) .btn--primary { background: var(--text); border-color: transparent; color: var(--bg); box-shadow: none; }
 body:not(.theme-hicontrast) .btn--primary:hover { background: color-mix(in srgb, var(--text) 88%, var(--bg)); border-color: transparent; box-shadow: none; }
 .input, .select, .textarea { background: var(--bg); border-radius: 8px; }

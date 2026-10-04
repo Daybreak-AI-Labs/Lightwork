@@ -86,7 +86,7 @@
   border-radius: .8rem;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  background: color-mix(in srgb, var(--surface-strong, #10182a) 72%, transparent);
+  background: color-mix(in srgb, var(--surface-sunken) 72%, transparent);
 }
 
 .cas-shell :focus-visible {

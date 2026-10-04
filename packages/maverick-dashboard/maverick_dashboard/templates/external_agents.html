@@ -3,6 +3,8 @@
 {% block content %}
   {% from "_module_gate.html" import module_gate %}
   {% set _LIFECYCLE = {'active': 'Active', 'suspended': 'Paused', 'revoked': 'Access blocked', 'contained': 'Blocked for rule breaks', 'expired': 'Access expired'} %}
+  <h1 class="page-title">Outside agents</h1>
+  <p class="page-subtitle">Agents built on other platforms — Salesforce Agentforce, AWS Bedrock, Copilot Studio or your own — keep running where they are, but follow your rules here: access keys, spending limits, checks before risky actions, and a record of every run.</p>
   {% if not enabled %}
   {{ module_gate('external_agents', 'Outside agents',
                  detail='Lets AI agents from other products (Salesforce, AWS, Microsoft and others) work under your rules and budgets.',
@@ -11,8 +13,6 @@
   {% if enabled and not external_agents_entitled %}
   <div class="boundary" role="status"><strong>Adding outside agents isn’t available on your plan.</strong> Contact your account manager to add it. Agents already here, and their past work, stay visible.</div>
   {% endif %}
-  <h1 class="page-title">Outside agents</h1>
-  <p class="page-subtitle">Agents built on other platforms — Salesforce Agentforce, AWS Bedrock, Copilot Studio or your own — keep running where they are, but follow your rules here: access keys, spending limits, checks before risky actions, and a record of every run.</p>
 
   <div class="panel">
     <p style="margin: 0;">

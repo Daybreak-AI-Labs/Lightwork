@@ -282,3 +282,54 @@ test("without a destination list the page says who to ask", async (t) => {
   assert.match(h.$("grcs-projection-target-note").textContent, /Ask your administrator/);
   assert.doesNotMatch(h.$("grcs-projection-target-note").textContent, /fingerprint|revision|[0-9a-f]{64}/);
 });
+
+// ---- no loader keeps saying "Loading" ---------------------------------------
+function statusPage(t, status, moduleEnabled = "") {
+  const dom = new JSDOM(`<main id="content">${shell}</main>`, { url: "https://lightwork.test/compliance/grc-studio", runScripts: "outside-only" });
+  t.after(() => dom.window.close());
+  const w = dom.window;
+  w.TextDecoder = TextDecoder;
+  w.TextEncoder = TextEncoder;
+  w.document.getElementById("grc-studio-shell").dataset.moduleEnabled = moduleEnabled;
+  for (const [id, text] of [["grcs-list-status", "Loading your blueprints…"], ["grcs-backup-status", "Loading backups…"]]) w.document.getElementById(id).textContent = text;
+  for (const [id, text] of [["grcs-collector-choice", "Loading collectors…"], ["grcs-projection-target", "Loading destinations…"]]) w.document.getElementById(id).options[0].textContent = text;
+  w.mvErrorText = (failure, action) => "Could not " + action + ". Try again in a few minutes.";
+  const calls = [];
+  w.fetch = async (url) => { calls.push(String(url)); return status(); };
+  w.eval(source);
+  const settle = async () => { for (let i = 0; i < 30; i += 1) await new Promise((r) => setImmediate(r)); };
+  const body = () => w.document.querySelector("main").textContent + [...w.document.querySelectorAll("option")].map((o) => o.textContent).join(" ");
+  return { calls, settle, body, $: (id) => w.document.getElementById(id) };
+}
+const answer = (value, status = 200) => () => ({ ok: status < 400, status, headers: { get: () => null }, text: async () => JSON.stringify(value) });
+
+test("a studio that isn't set up settles every loader instead of loading forever", async (t) => {
+  const h = statusPage(t, answer({ enabled: true, configured: false, ready: false }));
+  await h.settle();
+  assert.equal(h.$("grcs-list-status").textContent, "Nothing to show until the studio is ready.");
+  assert.equal(h.$("grcs-collector-choice").options[0].textContent, "Not available until the studio is ready");
+  assert.equal(h.$("grcs-projection-target").options[0].textContent, "Not available until the studio is ready");
+  assert.equal(h.$("grcs-backup-status").textContent, "Backups appear here once the studio is ready.");
+  assert.doesNotMatch(h.body(), /Loading|Checking/);
+});
+
+test("a failed availability check says what happened in every loader", async (t) => {
+  const h = statusPage(t, answer({ detail: "unavailable" }, 503));
+  await h.settle();
+  assert.equal(h.$("grcs-status-mark").textContent, "Not available");
+  assert.equal(h.$("grcs-list-status").textContent, "Could not load your blueprints. Try again in a few minutes.");
+  assert.equal(h.$("grcs-version-list").textContent, "");
+  assert.doesNotMatch(h.body(), /Loading|Checking/);
+});
+
+test("a server that reports the studio off asks for it to be turned on, not set up", async (t) => {
+  const h = statusPage(t, answer({ enabled: false, configured: false, ready: false }));
+  await h.settle();
+  assert.equal(h.$("grcs-readiness-detail").textContent, "Ask an administrator to turn on the no-code GRC studio for this workspace.");
+});
+
+test("a turned-off studio starts no checks or loads behind its gate", async (t) => {
+  const h = statusPage(t, () => { throw new Error("no request expected"); }, "false");
+  await h.settle();
+  assert.deepEqual(h.calls, []);
+});
