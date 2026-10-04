@@ -121,3 +121,39 @@ test("declining the question leaves a switched-on set-up unchanged",async()=>{
     assert.equal(ui.d.getElementById("goo-config-panel").hidden,false);
   }finally{ui.dom.window.close();}
 });
+
+// ---- no loader keeps saying "Loading" ---------------------------------------
+async function statusPage(status,moduleEnabled="true"){
+  const html=expandLoops(read("templates/consent_global_opt_out.html")).replace(/\{%[\s\S]*?%\}/g,"").replace(/\{\{[\s\S]*?\}\}/g,"");
+  const dom=new JSDOM(html,{url:"https://lightwork.test/consent/global-opt-out",runScripts:"outside-only"});
+  const w=dom.window,d=w.document,calls=[];
+  Object.defineProperty(w,"crypto",{value:webcrypto});w.TextEncoder=TextEncoder;
+  const shell=d.getElementById("global-opt-out-shell");
+  shell.setAttribute("data-api-base","/api/v1/consent/global-opt-out");shell.setAttribute("data-can-admin","true");shell.setAttribute("data-can-audit","true");
+  shell.setAttribute("data-module-enabled",moduleEnabled);
+  d.getElementById("goo-table").innerHTML='<p class="muted">Loading…</p>';
+  w.mvErrorText=(failure,action)=>"Could not "+action+". Try again later.";
+  w.fetch=async url=>{calls.push(url);return status();};
+  w.eval(read("static/lightwork-consent-workbench.js"));
+  w.eval(read("static/lightwork-consent-global-opt-out.js"));
+  await flush();
+  return {dom,d,calls,table:()=>d.getElementById("goo-table").textContent};
+}
+
+test("a failed availability check replaces the opt-out list's Loading with what happened",async()=>{
+  const ui=await statusPage(()=>reply(503,{detail:"unavailable"}));
+  try{assert.equal(ui.table(),"Could not load opt-out set-ups. Try again later.");}finally{ui.dom.window.close();}
+});
+
+test("opt-out that is on but not ready says when set-ups will appear",async()=>{
+  const ui=await statusPage(()=>reply(200,{enabled:true,readiness:{ready:false}}));
+  try{assert.equal(ui.table(),"Opt-out set-ups appear here once your banner is published and a website or app key exists.");}finally{ui.dom.window.close();}
+});
+
+test("a turned-off opt-out module starts no checks and shows no red sentence under its gate",async()=>{
+  const ui=await statusPage(()=>{throw new Error("no request expected");},"false");
+  try{
+    assert.deepEqual(ui.calls,[]);
+    assert.equal(ui.d.getElementById("goo-runtime-status").textContent,"");
+  }finally{ui.dom.window.close();}
+});

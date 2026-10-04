@@ -225,11 +225,20 @@
         await loadKeys(); await load();
       } else if (value && value.enabled === true) {
         say(runtimeStatus, "Opt-out requests are turned on but not ready yet. Publish your banner and create a website or app key first.", true);
+        settleTable("Opt-out set-ups appear here once your banner is published and a website or app key exists.");
       } else {
         say(runtimeStatus, "Opt-out requests are not turned on for this workspace. Ask an administrator to turn them on.", true);
+        settleTable("Opt-out set-ups appear here once this is turned on.");
       }
-    } catch (error) { explain(runtimeStatus, error, "check availability"); }
+    } catch (error) {
+      explain(runtimeStatus, error, "check availability");
+      settleTable(CW.errorText(error, "load opt-out set-ups"));
+    }
   }
+  // The list never loads while opt-out is unavailable; say why instead of "Loading…".
+  function settleTable(message) { element("goo-table").replaceChildren(CW.el("p", "muted", message)); }
   if (!CW) { runtimeStatus.textContent = "This page could not finish loading. Reload the page."; return; }
-  refreshStatus();
+  // A turned-off module shows its gate instead: nothing is checked or loaded,
+  // and no second "not turned on" sentence appears under the banner.
+  if (shell.getAttribute("data-module-enabled") !== "false") refreshStatus();
 })();

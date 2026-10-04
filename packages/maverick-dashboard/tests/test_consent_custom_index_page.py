@@ -224,3 +224,20 @@ def test_workbench_lists_questions_with_row_buttons_and_speaks_plainly(client: T
                   "idempotency key", "Current version"):
         assert typed not in page_html
     assert developer_terms(page_html) == []
+
+
+@pytest.mark.parametrize("off", (True, False))
+def test_turned_off_module_shows_its_gate_instead_of_loaders(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, off: bool,
+) -> None:
+    monkeypatch.setattr(page, "_module_off", lambda _section: off)
+    text = client.get(ROUTE).text
+    main = text[text.index('id="custom-index-shell"'):text.index("<noscript>")]
+    assert f'data-module-enabled="{"false" if off else "true"}"' in main
+    if not off:
+        assert "data-module-gate" not in main and "Loading…" in main
+        return
+    # No availability check repeats the banner and no loader says "Loading".
+    assert '<p id="custom-index-runtime-status" class="muted" role="status" aria-live="polite" hidden></p>' in main
+    assert "Loading" not in main and "Checking" not in main
+    assert "Searchable questions appear here once this is turned on." in main

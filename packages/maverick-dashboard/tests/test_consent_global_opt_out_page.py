@@ -177,8 +177,17 @@ def test_turned_off_feature_shows_the_standard_banner(client: TestClient, monkey
     off = client.get(ROUTE).text
     assert 'data-module-gate="consent_preferences.global_opt_out"' in off
     assert "Global opt-out is turned off." in off
+    # The banner is the whole availability story: no check repeats it in red
+    # below and no loader is left saying "Loading".
+    main = off[off.index('id="global-opt-out-shell"'):off.index("<noscript>")]
+    assert 'data-module-enabled="false"' in main
+    assert '<p id="goo-runtime-status" class="muted" role="status" aria-live="polite" hidden></p>' in main
+    assert "Loading" not in main and "Checking" not in main
+    assert "Opt-out set-ups appear here once this is turned on." in main
     monkeypatch.setattr(api, "_module_switch_enabled", lambda _loaded, _section: True)
-    assert "data-module-gate=" not in client.get(ROUTE).text
+    on = client.get(ROUTE).text
+    assert "data-module-gate=" not in on
+    assert 'data-module-enabled="true"' in on and "Loading…" in on
 
 
 def test_global_opt_out_switch_is_registered_and_writable() -> None:
