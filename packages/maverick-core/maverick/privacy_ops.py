@@ -3429,14 +3429,20 @@ INCIDENT_SEVERITIES = ("low", "medium", "high")
 BREACH_NOTIFY_HOURS = 72  # Art. 33(1): without undue delay, within 72h
 
 
+#: Clocks on two machines differ a little; a time this far ahead is a typo.
+_AWARE_SKEW_SECONDS = 5 * 60
+
+
 def open_incident(title: str, *, severity: str = "medium",
                   description: str = "", categories: str = "",
                   affected_estimate: str = "", affected_people: int | None = None,
-                  reported_by: str = "") -> dict:
-    """Open a privacy-incident record; the Art. 33 clock starts at discovery
-    (= now). Whether the incident is a notifiable breach stays a HUMAN
-    decision recorded via :func:`decide_incident_notification` -- the
-    register tracks the clock, it never notifies anyone itself."""
+                  aware_at: float | None = None, reported_by: str = "") -> dict:
+    """Open a privacy-incident record. The Art. 33 clock runs from when the
+    organisation became aware of the breach (``aware_at``; now when not
+    given), not from when the record was opened. Whether the incident is a
+    notifiable breach stays a HUMAN decision recorded via
+    :func:`decide_incident_notification` -- the register tracks the clock,
+    it never notifies anyone itself."""
     severity = (severity or "medium").strip().lower()
     if severity not in INCIDENT_SEVERITIES:
         raise ValueError(f"severity must be one of {INCIDENT_SEVERITIES}")
@@ -3446,6 +3452,16 @@ def open_incident(title: str, *, severity: str = "medium",
     ):
         raise ValueError("affected_people must be a non-negative integer or None")
     now = time.time()
+    aware = now
+    if aware_at is not None:
+        try:
+            aware = float(aware_at)
+        except (TypeError, ValueError):
+            aware = math.nan
+        if isinstance(aware_at, bool) or not math.isfinite(aware) or aware <= 0:
+            raise ValueError("Enter when you became aware of the breach.")
+        if aware > now + _AWARE_SKEW_SECONDS:
+            raise ValueError("The time you became aware cannot be in the future.")
     record = {
         "id": _INCIDENT.new_id(),
         "title": (title or "").strip()[:200],
@@ -3456,7 +3472,8 @@ def open_incident(title: str, *, severity: str = "medium",
         "severity": severity,
         "reported_by": _actor_label(reported_by),
         "created_at": now,
-        "notify_deadline_at": now + BREACH_NOTIFY_HOURS * 3600,
+        "aware_at": aware,
+        "notify_deadline_at": aware + BREACH_NOTIFY_HOURS * 3600,
         "status": "open",
         "notification": None,
     }

@@ -3267,7 +3267,8 @@ async def incident_notification_plan(request: Request, incident_id: str,
         return bn.assess_breach(
             wanted,
             subjects_affected=subjects_affected,
-            discovered_at=float(record.get("created_at") or 0.0) or None,
+            # Awareness, not the moment the record was opened, starts the clocks.
+            discovered_at=float(record.get("aware_at") or record.get("created_at") or 0.0) or None,
         )
 
     return await _estate_call(build, not_found="no such incident")
@@ -4586,20 +4587,25 @@ async def list_privacy_incidents(request: Request) -> dict:
 
 @router.post("/privacy/incidents", status_code=201)
 async def open_privacy_incident(request: Request, body: IncidentIn) -> dict:
-    """Open an incident: the Art. 33 clock starts now; the register tracks
-    it and never notifies anyone itself."""
+    """Open an incident: the Art. 33 clock runs from when the organisation
+    became aware (``aware_at``, now when omitted); the register tracks it and
+    never notifies anyone itself."""
     require_permission(request, "operate")
     ops = _privacy_ops_or_403()
-    record = await run_in_threadpool(
-        ops.open_incident,
-        body.title,
-        severity=body.severity,
-        description=body.description,
-        categories=body.categories,
-        affected_estimate=body.affected_estimate,
-        affected_people=body.affected_people,
-        reported_by=_request_actor(request),
-    )
+    try:
+        record = await run_in_threadpool(
+            ops.open_incident,
+            body.title,
+            severity=body.severity,
+            description=body.description,
+            categories=body.categories,
+            affected_estimate=body.affected_estimate,
+            affected_people=body.affected_people,
+            aware_at=body.aware_at,
+            reported_by=_request_actor(request),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     from .incident_attachment_projection import project_incident_record
 
     return await run_in_threadpool(project_incident_record, request, record, "privacy")

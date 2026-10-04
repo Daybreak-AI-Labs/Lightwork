@@ -1145,6 +1145,24 @@ class TestIncidentRegister:
         with pytest.raises(ValueError, match="affected_people"):
             privacy_ops.open_incident("x", affected_people=-1)
 
+    def test_the_clock_runs_from_when_the_organisation_became_aware(self):
+        now = time.time()
+        aware = now - 30 * 3600
+        r = privacy_ops.open_incident("Laptop with a customer list stolen",
+                                      aware_at=aware, reported_by="dpo")
+        assert r["aware_at"] == aware
+        assert r["notify_deadline_at"] == pytest.approx(aware + 72 * 3600)
+        assert r["created_at"] >= now
+        listed = privacy_ops.list_incidents()[0]
+        assert 40 <= listed["hours_left"] <= 42
+        with pytest.raises(ValueError, match="future"):
+            privacy_ops.open_incident("Not yet", aware_at=now + 3600)
+        with pytest.raises(ValueError, match="aware"):
+            privacy_ops.open_incident("Garbage", aware_at=float("nan"))
+        default = privacy_ops.open_incident("Found today")
+        assert default["aware_at"] == pytest.approx(default["created_at"])
+        assert default["notify_deadline_at"] == pytest.approx(default["aware_at"] + 72 * 3600)
+
     def test_notification_decision_documents_both_ways(self):
         r = privacy_ops.open_incident("Lost badge with cached emails")
         assert r["revision"] == 1

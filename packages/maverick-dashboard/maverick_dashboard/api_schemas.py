@@ -1097,15 +1097,17 @@ class DsarCloseIn(BaseModel):
 
 
 class IncidentIn(BaseModel):
-    """Open a privacy-incident record; the Art. 33 72-hour clock starts at
-    discovery. Whether it is a notifiable breach stays a separate, human
-    decision."""
+    """Open a privacy-incident record; the Art. 33 72-hour clock runs from
+    when the organisation became aware (``aware_at``, epoch seconds; now
+    when omitted). Whether it is a notifiable breach stays a separate,
+    human decision."""
     title: str = Field(..., min_length=1, max_length=200)
     severity: str = Field("medium", pattern="^(low|medium|high)$")
     description: str = Field("", max_length=4000)
     categories: str = Field("", max_length=500)
     affected_estimate: str = Field("", max_length=100)
     affected_people: int | None = Field(None, ge=0)
+    aware_at: float | None = Field(None, gt=0)
 
 
 class IncidentAffectedPeopleIn(BaseModel):

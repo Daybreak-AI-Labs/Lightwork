@@ -664,3 +664,33 @@ def test_dsar_close_records_what_happened_and_explains_missing_facts():
     assert client.post(f"/api/v1/privacy/dsar/{other}/close").status_code == 200
     report = client.get("/api/v1/privacy/report").json()["dsar"]
     assert report["handled"] == 2 and report["closed_without_response"] == 1
+
+
+def test_incident_deadline_runs_from_awareness_and_the_plan_uses_it(tmp_path):
+    import time
+
+    from maverick import config
+
+    aware = time.time() - 10 * 3600
+    opened = client.post("/api/v1/privacy/incidents", json={
+        "title": "Statements emailed to the wrong customers", "aware_at": aware})
+    assert opened.status_code == 201
+    assert opened.json()["aware_at"] == aware
+    assert opened.json()["notify_deadline_at"] == aware + 72 * 3600
+    future = client.post("/api/v1/privacy/incidents", json={
+        "title": "Not yet", "aware_at": time.time() + 7200})
+    assert future.status_code == 422
+    assert future.json()["detail"] == "The time you became aware cannot be in the future."
+    (tmp_path / "config.toml").write_text(
+        "[privacy_ops]\nenable = true\n\n[breach_notification]\nenable = true\n", encoding="utf-8")
+    config.reset_config_cache()
+    plan = client.get(f"/api/v1/privacy/incidents/{opened.json()['id']}/notification-plan",
+                      params={"jurisdictions": "eu_gdpr"})
+    assert plan.status_code == 200, plan.text
+    gdpr = plan.json()["obligations"][0]
+    assert abs(gdpr["authority_due_at"] - (aware + 72 * 3600)) < 1
+    page = client.get("/privacy").text
+    assert 'name="aware_at"' in page and 'type="datetime-local"' in page
+    assert "72 hours from when you became aware" in page
+    assert "72-hour deadline starts now" not in page
+    assert "starts when you open the record" not in page
