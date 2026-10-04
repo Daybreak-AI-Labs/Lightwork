@@ -40,8 +40,9 @@ def test_trajectory_renders_agent_filter(client, world_with_events):
     # The agent filter select element is present with its id/class.
     assert 'id="filter-agent"' in body
     assert "filter-agent" in body
-    # Distinct agents from the rendered events become options.
-    assert ">Orchestrator<" in body
+    # Distinct agents from the rendered events become options, named as
+    # people know them (the orchestrator role is the Planner).
+    assert ">Planner<" in body
     assert ">Coder<" in body
 
 
@@ -66,3 +67,29 @@ def test_trajectory_rows_carry_filter_data_attrs(client, world_with_events):
     # Rows expose the data-agent attribute so the inline JS can filter them.
     assert 'data-agent="orchestrator"' in body
     assert 'data-kind="error"' in body
+
+
+def test_trajectory_steps_read_in_plain_words_with_the_recording_folded_away(tmp_path, monkeypatch):
+    from maverick.world_model import WorldModel
+    from maverick_dashboard import app as app_mod
+
+    w = WorldModel(tmp_path / "plain.db")
+    try:
+        gid = w.create_goal("Summarize vendor spend", "")
+        brief = "role=orchestrator depth=0 brief=Top-level goal: Summarize vendor spend"
+        w.append_event(gid, "orchestrator-0-72eb85", "plan", brief)
+        w.append_event(gid, "orchestrator-0-72eb85", "verify",
+                       "verification skipped (conversational answer: no tools, no code)")
+        w.append_event(gid, "orchestrator-0-72eb85", "finding", "**Total:** $412,800")
+        monkeypatch.setattr(app_mod, "_world", lambda: w)
+        body = TestClient(app_mod.app).get(f"/goals/{gid}/trajectory").text
+    finally:
+        w.close()
+    assert '<p class="ev-step">Started working on your request</p>' in body
+    assert "Skipped the extra check: a short conversational answer" in body
+    assert '<p class="ev-step">Wrote the answer</p>' in body
+    # The recorded brief is still there for support, but only under Technical details.
+    before, _, after = body.partition('<details class="ev-technical"><summary>Technical details</summary>')
+    assert "role=orchestrator depth=0 brief=" not in before
+    assert "role=orchestrator depth=0 brief=" in after
+    assert ">Orchestrator 0 72eb85<" not in body and ">Planner<" in body

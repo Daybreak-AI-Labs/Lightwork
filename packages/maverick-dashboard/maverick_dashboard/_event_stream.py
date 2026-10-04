@@ -100,6 +100,13 @@ def _event_dict(event):
             "content": event.content, "ts": event.ts}
 
 
+def _chat_event_dict(event):
+    """The conversation page's shape: the event plus its plain-words step."""
+    from .step_narration import event_payload
+
+    return event_payload(event)
+
+
 def sse_event(event) -> str:
     kind = str(event.kind or "message").replace("\n", " ").replace("\r", " ")
     return f"id: {event.id}\nevent: {kind}\ndata: {json.dumps(_event_dict(event))}\n\n"
@@ -142,7 +149,7 @@ async def goal_stream(request, world, goal_id, *, since, lease, visible,
                     payload = {"status": current.status, "result": current.result or "",
                                "stop": stop_payload(current.status, current.result),
                                "next_id": last, "terminal": False,
-                               "events": [_event_dict(event) for event in events]}
+                               "events": [_chat_event_dict(event) for event in events]}
                     yield f"id: {last}\ndata: {json.dumps(payload)}\n\n"
                     cadence.sent(clock())
                 else:

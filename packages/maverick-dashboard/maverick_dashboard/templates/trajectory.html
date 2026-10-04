@@ -27,6 +27,8 @@
     background: var(--surface-1); padding: 0.4rem 0.6rem; border-radius: 4px;
   }
   .ev-branch { margin-inline-start: auto; padding: 0.15rem 0.6rem; font-size: var(--text-xs); }
+  .ev-step { margin: 0.35rem 0 0; color: var(--text); }
+  .ev-technical > summary { cursor: pointer; width: max-content; color: var(--muted); font-size: 0.85em; margin-top: 0.25rem; }
   .controls { display: flex; gap: 0.5rem; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; }
   .controls input[type="range"] { flex: 1; min-width: 8rem; }
   .filters { display: flex; gap: 0.5rem; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; }
@@ -70,7 +72,7 @@
     <select id="filter-agent" class="select filter-agent">
       <option value="">Everyone</option>
       {% for agent in events | map(attribute="agent") | unique | sort %}
-        <option value="{{ agent }}">{{ agent | humanize }}</option>
+        <option value="{{ agent }}">{{ agents.get(agent) or (agent | humanize) }}</option>
       {% endfor %}
     </select>
     <label for="filter-severity">Step type</label>
@@ -88,25 +90,27 @@
   <ul class="timeline" id="timeline">
     {% for ev in events %}
       <li data-idx="{{ loop.index0 }}" data-agent="{{ ev.agent }}" data-kind="{{ ev.kind }}" class="{{ ev.kind }}">
+        {% set step = steps.get(ev.id) %}
         <span class="ev-meta">
           <span>{{ ev.ts | datetime }}</span>
-          <span class="ev-agent">{{ ev.agent | humanize }}</span>
+          <span class="ev-agent">{{ agents.get(ev.agent) or (ev.agent | humanize) }}</span>
           <span class="ev-kind">{{ KIND_LABELS.get(ev.kind) or (ev.kind | humanize) }}</span>
           {% if fork_enabled and can_operate %}
           <button type="button" class="btn btn--ghost ev-branch" data-event="{{ ev.id }}"
                   aria-label="Branch from step {{ loop.index }}">Branch from here</button>
           {% endif %}
         </span>
-        {% if ev.content and ev.kind == 'error' %}
-          <p class="ev-content">Something went wrong in this step. <a href="/goals/{{ goal.id }}/errors">See all problems</a></p>
-          <details><summary>Technical details (for support)</summary><div class="ev-content">{{ ev.content }}</div></details>
-        {% elif ev.content %}
+        {# The step in plain words; what Lightwork recorded is folded away. #}
+        <p class="ev-step">{{ step.text if step and step.text else 'Lightwork bookkeeping' }}{% if ev.kind == 'error' %} <a href="/goals/{{ goal.id }}/errors">See all problems</a>{% endif %}</p>
+        {% if ev.content %}
+          <details class="ev-technical"><summary>Technical details</summary>
           {% if ev.content|length > 2000 %}
           <div class="ev-content">{{ ev.content[:2000] }}…</div>
           <details><summary>Show the full step</summary><div class="ev-content">{{ ev.content }}</div></details>
           {% else %}
           <div class="ev-content">{{ ev.content }}</div>
           {% endif %}
+          </details>
         {% endif %}
       </li>
     {% endfor %}

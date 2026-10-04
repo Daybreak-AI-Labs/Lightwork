@@ -12071,10 +12071,15 @@ def trajectory_page(request: Request, goal_id: int) -> HTMLResponse:
         fork_enabled = session_tree.enabled()
     except Exception:  # pragma: no cover - branching is optional
         fork_enabled = False
+    from .step_narration import narrate, who
+
+    # Plain words for each step; the recorded text stays under Technical details.
+    steps = {e.id: narrate(e.kind, e.agent, e.content) for e in events}
+    agents = {e.agent: who(e.agent) for e in events}
     return templates.TemplateResponse(
         request,
         "trajectory.html",
-        {"goal": g, "events": events, "fork_enabled": fork_enabled,
+        {"goal": g, "events": events, "fork_enabled": fork_enabled, "steps": steps, "agents": agents,
          "can_operate": has_permission(request, "operate") and can_access_goal_principal(caller_principal(request), g)},
     )
 
@@ -12192,6 +12197,7 @@ def api_goal_events_legacy(
     limit: int = 200,
 ) -> dict:
     from ._event_stream import TERMINAL_RUN_STATUSES, event_page, replay_cursor
+    from .step_narration import event_payload
 
     w = _world()
     g = w.get_goal(goal_id)
@@ -12209,10 +12215,7 @@ def api_goal_events_legacy(
         "next_id": events[-1].id if events else since,
         "has_more": has_more,
         "terminal": g.status in TERMINAL_RUN_STATUSES and not has_more,
-        "events": [
-            {"id": e.id, "agent": e.agent, "kind": e.kind, "content": e.content, "ts": e.ts}
-            for e in events
-        ],
+        "events": [event_payload(e) for e in events],
     }
 
 
