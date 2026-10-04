@@ -1,7 +1,14 @@
 """Use-case guidance backed by current, authorized review records."""
 from __future__ import annotations
 
-from .auth import caller_principal, caller_role, goal_owner_filter, has_permission, suite_allowed
+from .auth import (
+    caller_principal,
+    caller_role,
+    goal_owner_filter,
+    has_global_permission,
+    has_permission,
+    suite_allowed,
+)
 
 PLANS = {
     "deliverable": {"label":"Review a completed AI deliverable", "suite":None,
@@ -110,6 +117,8 @@ def first_outcomes_for(request) -> dict:
         (rows[0]["department"] if rows else None))
     ready = provider_ready()
     return {"outcomes": rows, "selected": selected, "ready": ready, "can_operate": has_permission(request, "operate"),
+            # Only an administrator can connect an AI service; others are told who can.
+            "can_connect": has_global_permission(request, "admin"),
             "connect_href": CONNECT_HREF, "not_ready_detail": NOT_READY_DETAIL if not ready else "",
             "sample_workspace_created": recorded["sample_workspace_created"], "rule": sample_outcomes.SAMPLE_RULE}
 

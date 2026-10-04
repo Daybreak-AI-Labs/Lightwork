@@ -46,14 +46,19 @@ class FirstOutcome:
         return SAMPLE_TITLE_PREFIX + self.goal
 
 
+# Every sample's pack must start on a fresh install. The kernel refuses a
+# specialist whose workflow needs a tool the install lacks, so these are packs
+# that read workspace files themselves; packs that read live systems (an
+# accounts-payable connector, web search) stay for real work. Guarded by
+# test_every_offered_sample_specialist_can_start_on_a_fresh_install.
 FIRST_OUTCOMES: dict[str, FirstOutcome] = {o.department: o for o in (
-    FirstOutcome("finance", "Finance", "finance_ap",
+    FirstOutcome("finance", "Finance", "proc_p2p_exceptions",
         "Match this month's invoices to purchase orders and receipts, and list every exception before anything is paid.",
-        "approval", ("invoices.csv", "purchase_orders.csv", "receipts.csv", "vendor_master.csv")),
-    FirstOutcome("privacy", "Privacy & compliance", "privacy_compliance",
+        "review", ("invoices.csv", "purchase_orders.csv", "receipts.csv", "vendor_master.csv")),
+    FirstOutcome("privacy", "Privacy & compliance", "data_pii_scan",
         "Work out which systems hold this customer's data and what we must tell them to answer their rights request.",
         "review", ("data_map.csv", "rights_request.md")),
-    FirstOutcome("security", "Security", "sec_phishing",
+    FirstOutcome("security", "Security", "itgrc_incident_response",
         "Check these reported emails, tell me which ones are phishing and who needs warning, and propose containment steps.",
         "approval", ("mailbox_export.csv", "known_senders.md")),
     FirstOutcome("legal", "Legal", "legal_nda_desk",

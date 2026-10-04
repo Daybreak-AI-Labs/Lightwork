@@ -14,5 +14,6 @@ invoices: it flags INV-1043 as a duplicate of INV-1041 (same vendor, PO,
 amount and description two days apart); it flags INV-1044 as a price
 mismatch (invoiced 2,100.00 against PO-2203 for 1,900.00, a 200.00
 difference on 20 chairs); and it flags INV-1045 from Sunrise Facility
-Services as a vendor that is not on the vendor master. It does not stage
-or release any payment; the staged batch waits in Approvals for a person.
+Services as a vendor that is not on the vendor master. It does not stage,
+release or pay anything; the exception list waits in Results for a person
+to review.

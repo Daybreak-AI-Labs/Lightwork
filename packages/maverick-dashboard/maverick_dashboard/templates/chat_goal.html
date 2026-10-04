@@ -351,7 +351,13 @@
 
   <div class="msg msg--user">
     <div class="bubble">
-      {% if goal.description and goal.description.startswith(goal.title) %}
+      {# A sample task's description is the run's file instructions
+         (maverick.sample_outcomes.goal_description starts with SAMPLE_RULE);
+         the person asked only for the task itself. #}
+      {% if goal.title.startswith('Sample: ') and (goal.description or '').startswith('This task runs on bundled sample data.') %}
+      <div class="bubble__title" lang="und" dir="auto" data-user-content>{{ goal.title }}</div>
+      <div class="bubble__desc">{{ ui('Runs on made-up sample files. Everything it produces is marked as sample data.') }}</div>
+      {% elif goal.description and goal.description.startswith(goal.title) %}
       <div class="bubble__text" lang="und" dir="auto" data-user-content>{{ goal.description }}</div>
       {% else %}
       <div class="bubble__title" lang="und" dir="auto" data-user-content>{{ goal.title }}</div>

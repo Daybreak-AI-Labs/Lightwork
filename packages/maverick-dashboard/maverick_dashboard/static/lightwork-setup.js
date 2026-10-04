@@ -34,7 +34,9 @@
       event.preventDefault();
       var button = document.getElementById('first-outcome-run');
       var message = document.getElementById('first-outcome-message');
-      if (button.disabled) return;
+      // No run button until an AI service is ready: never send a request
+      // that can only answer "not ready".
+      if (!button || button.disabled) return;
       button.disabled = true; message.textContent = 'Creating the sample workspace and starting the task…';
       try {
         var response = await fetch('/api/v1/first-outcome/run', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({department:select.value})});
