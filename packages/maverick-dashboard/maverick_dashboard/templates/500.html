@@ -1,45 +1,38 @@
 {% extends "base.html" %}
 {% block title %}{{ "Safety settings need attention" if policy_error else "Something went wrong" }} · Lightwork{% endblock %}
 {% block content %}
-  <div class="panel" style="text-align: center; padding: 3rem 1.5rem;">
-    {% if policy_error %}
-      <h1 style="font-size: 1.4rem; color: var(--text); text-transform: none; letter-spacing: 0; font-weight: 600; margin-bottom: 0.75rem;">Safety settings need attention</h1>
-      <p class="muted" style="max-width: 520px; margin: 0 auto 1.5rem;">
-        Lightwork stopped safely because its policy configuration could not be
-        read or validated. An administrator must restore or repair it before
-        this operation can continue.
+  {% from "_hero.html" import hero %}
+  {% if policy_error %}
+    {% set failure_actions %}
+      <a class="btn btn--primary" href="/help">Run a health check</a>
+      <a class="btn" href="/settings#settings-features">Open safety settings</a>
+      <a class="btn btn--ghost" href="/">Back to home</a>
+    {% endset %}
+    {{ hero('', 'Safety settings need attention',
+            lede='Lightwork stopped safely because its policy configuration could not be
+                  read or validated. An administrator must restore or repair it before
+                  this operation can continue.',
+            actions=failure_actions) }}
+    <details class="panel">
+      <summary class="muted" style="cursor: pointer; font-size: var(--text-sm);">For administrators</summary>
+      <p class="muted" style="margin: 0.5rem 0 0;">
+        Lightwork’s safety settings couldn’t be read. Restore the last reviewed
+        safety settings, then run the health check before trying again. The
+        Help page can prepare a support report if you need assistance.
       </p>
-      <p style="display: flex; gap: var(--space-3); justify-content: center; flex-wrap: wrap;">
-        <a class="btn btn--primary" href="/help">Run a health check</a>
-        <a class="btn" href="/settings#settings-features">Open safety settings</a>
-      </p>
-      <details style="max-width: 520px; margin: 0 auto 1.5rem;">
-        <summary class="muted" style="cursor: pointer; font-size: var(--text-sm);">For administrators</summary>
-        <p class="muted" style="margin: 0.5rem 0 0;">
-          Lightwork’s safety settings couldn’t be read. Restore the last reviewed
-          safety settings, then run the health check before trying again. The
-          Help page can prepare a support report if you need assistance.
-        </p>
-      </details>
-    {% else %}
-      <h1 style="font-size: 1.4rem; color: var(--text); text-transform: none; letter-spacing: 0; font-weight: 600; margin-bottom: 0.75rem;">Something went wrong</h1>
-      <p class="muted" style="max-width: 480px; margin: 0 auto 1.5rem;">
-        {% if uncertain_mutation %}The change could not be confirmed. Check its current state before repeating it.
-        {% else %}This page could not be loaded. You can retry loading it.{% endif %}
-        If this keeps happening, contact your administrator with the support details below.
-      </p>
-      <details style="max-width: 480px; margin: 0 auto 1.5rem;">
-        <summary class="muted" style="cursor: pointer; font-size: var(--text-sm);">Support details</summary>
-        <p class="muted">Support reference: {{ failure_reference or 'Unavailable' }}</p>
-        {% if failure_time %}<p class="muted">Time: {{ failure_time }}</p>{% endif %}
-        <p class="muted" style="margin: 0.5rem 0 0;">An administrator can locate this reference in restricted server logs, or prepare a support report on the <a href="/help{% if failure_reference %}?failure={{ failure_reference }}{% endif %}">Help</a> page.</p>
-        <button type="button" class="btn btn--ghost" id="support-copy" data-copy="Support reference: {{ failure_reference or 'Unavailable' }}{% if failure_time %} | Time: {{ failure_time }}{% endif %}">Copy support details</button>
-      </details>
-    {% endif %}
-    <p style="margin-top: 1.5rem;">
-      <a class="btn" href="/">Back to home</a>
-    </p>
-  </div>
+    </details>
+  {% else %}
+    {% set failure_lede %}{% if uncertain_mutation %}The change could not be confirmed. Check its current state before repeating it.{% else %}This page could not be loaded. You can retry loading it.{% endif %} If this keeps happening, contact your administrator with the support details below.{% endset %}
+    {% set failure_actions %}<a class="btn" href="/">Back to home</a>{% endset %}
+    {{ hero('', 'Something went wrong', lede=failure_lede, actions=failure_actions) }}
+    <details class="panel">
+      <summary class="muted" style="cursor: pointer; font-size: var(--text-sm);">Support details</summary>
+      <p class="muted">Support reference: {{ failure_reference or 'Unavailable' }}</p>
+      {% if failure_time %}<p class="muted">Time: {{ failure_time }}</p>{% endif %}
+      <p class="muted" style="margin: 0.5rem 0 0;">An administrator can locate this reference in restricted server logs, or prepare a support report on the <a href="/help{% if failure_reference %}?failure={{ failure_reference }}{% endif %}">Help</a> page.</p>
+      <button type="button" class="btn btn--ghost" id="support-copy" data-copy="Support reference: {{ failure_reference or 'Unavailable' }}{% if failure_time %} | Time: {{ failure_time }}{% endif %}">Copy support details</button>
+    </details>
+  {% endif %}
   <script>
     (function () { var b = document.getElementById('support-copy'); if (b) b.addEventListener('click', function () { if (window.mvCopy) mvCopy(b.getAttribute('data-copy')); }); })();
   </script>

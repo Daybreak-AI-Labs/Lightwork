@@ -132,3 +132,9 @@ def test_hero_styles_define_actions_and_compact_variant():
     assert ".hero-actions {" in css
     assert ".hero--compact {" in css
     assert ".hero--compact .hero-title {" in css
+
+
+def test_hero_without_a_kicker_leaves_the_line_out():
+    body = _render("{{ hero('', 'Page not found', lede='That page moved.') }}")
+    assert "hero-kicker" not in body
+    assert '<h1 class="page-title hero-title" id="page-hero-title">Page not found</h1>' in body

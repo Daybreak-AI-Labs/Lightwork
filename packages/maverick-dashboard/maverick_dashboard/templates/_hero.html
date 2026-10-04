@@ -23,6 +23,8 @@
      A plain string passed as actions is escaped like any other text.
    compact — a shorter header for working pages (task tools, forms, detail
      views): smaller title and padding, actions beside the text.
+   kicker — the uppercase line above the title; pass '' where no section
+     name fits (error pages), and the line is left out.
 
    Styles live in lightwork.css (.hero*). Call without a {% call %} block for
    a full-width hero with no state box. Text arguments are autoescaped; use
@@ -43,7 +45,7 @@
 <section class="hero{{ '' if caller is defined else ' hero--solo' }}{{ ' hero--compact' if compact else '' }}"
          aria-labelledby="{{ title_id }}">
   <div>
-    <div class="hero-kicker">{{ kicker }}</div>
+    {% if kicker %}<div class="hero-kicker">{{ kicker }}</div>{% endif %}
     <h1 class="page-title hero-title" id="{{ title_id }}">{{ title }}</h1>
     {% if subtitle %}<div class="hero-subtitle">{{ subtitle }}</div>{% endif %}
     {% if lede %}<p class="hero-lede">{{ lede }}</p>{% endif %}
