@@ -115,12 +115,14 @@ def _audits(suite: str | None):
 
 def _inventory(suite: str | None) -> dict:
     from maverick.agent_autonomy import levels_enabled
+    from maverick.departments import department_title
     from maverick.domain_audit import summarize
     audits, suites = _audits(suite)
     s = summarize(audits)
     flagged = [a for a in audits if a.reachable_dangerous and not a.is_builder]
     return {
-        "suites": [{"value": x, "label": x.replace("_", " ").capitalize()} for x in suites],
+        "suites": [{"value": x, "label": department_title(x)}
+                   for x in sorted(suites, key=department_title)],
         "specialists": s["packs"], "departments": s["suites"], "builders": s["builders"],
         "can_change_things_while_drafting": s["drafting_agents_reaching_a_mutator"],
         "sign_off_enforced": s["packs_with_human_gate"],

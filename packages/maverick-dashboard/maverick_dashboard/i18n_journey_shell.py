@@ -131,6 +131,7 @@ ROWS = [
     ("Automations", "Automatisations", "Automatisierungen", "自動化", "自动化"),
     ("Sessions", "Sessions", "Sitzungen", "セッション", "会话"),
     ("Fleets", "Groupes d’agents", "Agentenflotten", "エージェント群", "智能体集群"),
+    ("Teams", "Équipes", "Teams", "チーム", "团队"),
     ("Overview", "Vue d’ensemble", "Übersicht", "概要", "概览"),
     ("Ekko", "Ekko", "Ekko", "Ekko", "Ekko"),
     ("Oversight", "Supervision", "Aufsicht", "監督", "监督"),

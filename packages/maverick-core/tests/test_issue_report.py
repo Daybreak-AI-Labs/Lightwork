@@ -4,7 +4,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 from urllib.parse import unquote
 
-from maverick.issue_report import DEFAULT_REPO, build_issue_url, build_report
+from maverick.issue_report import DEFAULT_REPO, build_issue_url, build_report, build_report_fields
 
 # A realistic-looking Anthropic key (matches the secret detector pattern).
 _FAKE_KEY = "sk-ant-api03-AbCdEf1234567890abcdefghijklmno_PQRST"
@@ -44,8 +44,28 @@ def test_build_report_redacts_secrets_and_includes_context():
 
 
 def test_build_report_empty_errors_has_placeholder():
-    goal = SimpleNamespace(id=1, title="t", status="succeeded")
+    goal = SimpleNamespace(id=1, title="t", status="succeeded", result="private completed output")
     url = build_report(goal, [])
     assert f"github.com/{DEFAULT_REPO}/issues/new" in url
     body = unquote(url.split("&body=", 1)[1])
     assert "no error events recorded" in body.lower()
+    assert "private completed output" not in body
+
+
+def test_explicit_failure_cause_is_redacted_bounded_and_replaces_empty_placeholder(monkeypatch):
+    goal = SimpleNamespace(id=9, title="Provider test", status="blocked")
+    draft = build_report_fields(
+        goal, [], version="2.4.1",
+        failure_cause=f"provider HTTP 500; authorization: Bearer {_FAKE_KEY}; " + "x" * 900,
+    )
+    assert "provider HTTP 500" in draft["body"]
+    assert "Version: 2.4.1" in draft["body"]
+    assert _FAKE_KEY not in draft["body"]
+    assert "no error events recorded" not in draft["body"].lower()
+    assert len(draft["body"]) <= 6000
+
+    from maverick.safety import secret_detector
+    monkeypatch.setattr(secret_detector, "redact", lambda _text: (_ for _ in ()).throw(ValueError("broken")))
+    failed_closed = build_report_fields(goal, [], failure_cause="private raw failure")
+    assert "private raw failure" not in failed_closed["body"]
+    assert "could not be safely prepared" in failed_closed["body"]

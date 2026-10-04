@@ -219,7 +219,7 @@ PAGES: tuple[dict, ...] = (
     },
     {
         "path": "/fleets",
-        "label": "Fleets",
+        "label": "Teams",
         "group": "Operate",
         "icon": "fleets",
         "floor": "view",
@@ -1239,7 +1239,6 @@ _NAV_FOLD: frozenset[str] = frozenset(
         "/start",
         "/projects",
         "/roles",
-        "/fleets",
         # Observe — analytical/advanced views reached from Overview & friends
         "/discovery",
         "/providers",

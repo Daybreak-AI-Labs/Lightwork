@@ -8,6 +8,7 @@ from maverick import goal_resume
 from maverick.attachment_submissions import SubmissionConflict
 from maverick.authority_effects import authority_effect_fence
 from maverick.goal_mutations import GoalMutationConflict
+from maverick.stop_reasons import stop_payload
 from maverick.task_execution_guard import TaskBusy
 from maverick.task_handoffs import require_open
 
@@ -40,6 +41,23 @@ def limits(request, goal_id, max_dollars):
     return ceiling
 
 
+def specialist_setup_block(goal):
+    """Do not spend another attempt on a known missing specialist action."""
+    stop = stop_payload(goal.status, goal.result)
+    if not stop or stop["kind"] != "specialist_setup":
+        return ""
+    try:
+        from maverick.domain import available_domains
+        from maverick.domain_edit import workflow_readiness
+
+        profile = available_domains().get(goal.domain)
+        if profile and workflow_readiness(profile)["state"] == "action_ready":
+            return ""
+    except Exception:
+        pass  # An unavailable check is not evidence that setup was fixed.
+    return "This specialist still needs setup. Ask an administrator to review it, or start a different task."
+
+
 def status(request, goal_id):
     world, goal, _actor = current(request, goal_id)
     closed = ""
@@ -49,7 +67,7 @@ def status(request, goal_id):
         closed = str(exc)
     return {"goal_id": goal_id, "title": goal.title, "status": goal.status, "context": context_for(request),
             "expected_updated_at": float(goal.updated_at), "expected_owner": goal.owner or "",
-            "workspace_ceiling": limits(request, goal_id, None), "blocked": closed or
+            "workspace_ceiling": limits(request, goal_id, None), "blocked": closed or specialist_setup_block(goal) or
             ("Only stopped, failed or blocked tasks can be resumed." if goal.status not in {"blocked", "cancelled", "failed"} else ""),
             "unanswered_questions": len(world.open_questions(goal_id=goal_id)),
             "consequence": "Starts a new billable attempt under current policy. Earlier external actions are not undone; inspect uncertain effects before retrying."}
@@ -77,6 +95,10 @@ def apply(request, goal_id, background, payload):
         prior = recover(request, goal_id, payload)
         if prior is not None:
             return prior
+        setup_block = specialist_setup_block(goal)
+        if setup_block:
+            raise product_error(409, "specialist_setup", setup_block,
+                next_action=next_action("Browse specialists", "/agents"))
         limits(request, goal_id, payload.max_dollars)
         try:
             result = goal_resume.reserve(world, goal_id, actor=actor,

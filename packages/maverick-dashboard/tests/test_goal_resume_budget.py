@@ -118,6 +118,31 @@ def test_reviewed_restart_exact_retry_recovers_without_second_dispatch(resume_en
     assert client.post(f"/api/v1/goals/{goal_id}/resume-receipt", json=body).json()["replayed"]
 
 
+def test_missing_specialist_action_blocks_restart_until_setup_check_passes(resume_env, monkeypatch):
+    from maverick import domain_edit
+
+    client, world, goal_id, calls = resume_env
+    world.set_goal_domain(goal_id, "legal_research")
+    world.set_goal_status(goal_id, "blocked", result=(
+        "domain 'legal_research' agent build failed: Domain 'legal_research' "
+        "cannot deploy: required workflow tools unavailable: web_search. No model work has started."))
+    review = client.get(f"/api/v1/goals/{goal_id}/resume-review")
+    assert review.status_code == 200
+    assert "needs setup" in review.json()["blocked"]
+    body = _review(client, goal_id)
+    refused = client.post(f"/api/v1/goals/{goal_id}/resume-reviewed", json=body)
+    assert refused.status_code == 409
+    assert world.get_goal(goal_id).status == "blocked" and not calls
+
+    monkeypatch.setattr(domain_edit, "workflow_readiness", lambda profile: {"state": "action_ready"})
+    ready = client.get(f"/api/v1/goals/{goal_id}/resume-review")
+    assert ready.status_code == 200, ready.text
+    assert ready.json()["blocked"] == ""
+    admitted = client.post(f"/api/v1/goals/{goal_id}/resume-reviewed", json=body)
+    assert admitted.status_code == 200, admitted.text
+    assert len(calls) == 1
+
+
 def test_reviewed_restart_stale_version_and_changed_reference_refuse(resume_env):
     client, world, goal_id, calls = resume_env
     body = _review(client, goal_id)

@@ -34,6 +34,10 @@ def test_lang_resolution_param_cookie_header():
     assert i18n.resolve_lang(_Req(q="ja")) == "ja"
     assert i18n.resolve_lang(_Req(c="de")) == "de"
     assert i18n.resolve_lang(_Req(h="zh-CN,zh;q=0.9")) == "zh"
+    assert i18n.resolve_lang(_Req(h="ar-SA,ar;q=0.9")) == "en"
+    assert i18n.resolve_lang(_Req(h="ar-SA,fr-CA;q=0.9")) == "fr"
+    assert i18n.resolve_lang(_Req(q="ar", h="fr-CA")) == "ar"
+    assert i18n.resolve_lang(_Req(c="ar", h="fr-CA")) == "ar"
     assert i18n.resolve_lang(_Req()) == "en"
     assert i18n.resolve_lang(_Req(q="xx", h="pt-BR")) == "en"
 
@@ -78,6 +82,27 @@ def test_arabic_browser_gets_a_left_to_right_english_page_on_both_shells():
         r = fresh.get(path, headers={"Accept-Language": "ar-SA,ar;q=0.9"})
         assert r.status_code == 200, path
         assert '<html lang="en" dir="ltr">' in r.text, path
+        assert 'lang="ar">تخطي إلى المحتوى</a>' not in r.text, path
+        assert 'lang="en" dir="ltr" data-product-copy' in r.text, path
+
+
+def test_arabic_browser_keeps_public_owner_sign_in_left_to_right(monkeypatch):
+    from maverick_dashboard import local_owner
+
+    monkeypatch.setattr(local_owner, "_local", lambda *args, **kwargs: None)
+    monkeypatch.setattr(local_owner, "claimed", lambda: False)
+    monkeypatch.setattr(local_owner, "available", lambda request: True)
+    with TestClient(app, base_url="http://127.0.0.1:8765", client=("127.0.0.1", 53210),
+                    follow_redirects=False) as fresh:
+        response = fresh.get("/auth/local-owner", headers={"Accept-Language": "ar-SA,ar;q=0.9"})
+    assert response.status_code == 200
+    assert '<html lang="en" dir="ltr">' in response.text
+    assert "Set up the owner of this installation" in response.text
+
+
+def test_auto_detected_languages_have_complete_catalogs():
+    assert frozenset({"en", "fr", "de", "ja", "zh"}) == i18n.AUTO_LANGS
+    assert all(entry.get(lang) for lang in i18n.AUTO_LANGS for entry in i18n.MESSAGES.values())
 
 
 def test_content_lang_declares_only_translated_bodies():

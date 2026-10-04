@@ -17,7 +17,7 @@ async function flush() {
   for (let i = 0; i < 5; i += 1) await new Promise(resolve => setTimeout(resolve, 0));
 }
 
-test("both Agent Factory deploy paths link to the working Fleets page", async () => {
+test("both Agent Factory deploy paths open the exact team with its next action", async () => {
   const dom = new JSDOM(`<div id="dept-roster"></div>
     <dialog id="dept-dialog">
       <span id="dept-dlg-avatar"></span><span id="dept-dlg-title"></span>
@@ -30,9 +30,16 @@ test("both Agent Factory deploy paths link to the working Fleets page", async ()
   w.document.getElementById("dept-dialog").showModal = () => {};
   w.document.getElementById("dept-dialog").close = () => {};
   w.mvConfirm = async () => true;
-  w.fetch = async url => String(url).endsWith("/deploy")
-    ? {ok: true, status: 201, json: async () => ({fleet: {id: "fleet-1"}})}
-    : {ok: true, json: async () => [{key: "sales", title: "Sales", entitled: true, members: ["sales_ops"]}]};
+  let deploys = 0;
+  w.fetch = async url => {
+    if (String(url).endsWith("/deploy")) {
+      deploys += 1;
+      return {ok: true, status: 201, json: async () => ({
+        fleet: {name: "dept-sales-user_alice_83a5de"}, deployed_count: deploys === 1 ? 1 : 0,
+      })};
+    }
+    return {ok: true, json: async () => [{key: "sales", title: "Sales", entitled: true, members: ["sales_ops"]}]};
+  };
   w.eval(source);
   await flush();
 
@@ -40,15 +47,15 @@ test("both Agent Factory deploy paths link to the working Fleets page", async ()
   roster.querySelector(".dep-deploy").click();
   await flush();
   const cardLink = roster.querySelector(".dep-msg a");
-  assert.equal(cardLink.getAttribute("href"), "/fleets");
-  assert.match(cardLink.parentElement.textContent, /Team set up\. Open Fleets to give it work\./);
+  assert.equal(cardLink.getAttribute("href"), "/fleets#team-dept-sales-user_alice_83a5de");
+  assert.match(cardLink.parentElement.textContent, /Team set up\. Give this team a task/);
+  assert.match(cardLink.className, /btn--primary/);
 
   roster.querySelector(".dep-details").click();
   w.document.getElementById("dept-dlg-deploy").click();
   await flush();
   const dialogLink = w.document.querySelector("#dept-dlg-msg a");
-  assert.equal(dialogLink.getAttribute("href"), "/fleets");
-  assert.match(dialogLink.parentElement.textContent, /Team set up\. Open Fleets to give it work\./);
-  assert.doesNotMatch(w.document.body.textContent, /Teams page/);
+  assert.equal(dialogLink.getAttribute("href"), "/fleets#team-dept-sales-user_alice_83a5de");
+  assert.match(dialogLink.parentElement.textContent, /Team saved\. No specialist is ready to start\. Review team setup/);
   w.close();
 });

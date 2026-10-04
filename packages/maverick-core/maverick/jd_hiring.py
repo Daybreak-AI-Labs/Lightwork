@@ -36,6 +36,8 @@ _STOPWORDS = frozenset({
     "role", "work", "team", "years", "experience", "ability", "strong",
     "skills", "including", "required", "preferred", "etc", "all", "any",
     "per", "into", "from", "across", "within", "such", "other", "more",
+    "specialist", "assistant", "process", "prepare", "support", "maintain",
+    "match", "matching", "manage", "help", "provide", "responsible",
 })
 
 
@@ -54,16 +56,17 @@ class JDMatch:
     department: str | None          # human department label
     max_risk: str | None
     matched_terms: list[str] = field(default_factory=list)
+    relevance: str = "weak"          # absolute evidence band, not model confidence
 
     def to_dict(self) -> dict:
         return {
             "name": self.name,
-            "fit": self.fit,
             "description": self.description,
             "suite": self.suite,
             "department": self.department,
             "max_risk": self.max_risk,
             "matched_terms": list(self.matched_terms),
+            "relevance": self.relevance,
         }
 
 
@@ -73,9 +76,9 @@ def match_jd(jd_text: str, k: int = 5, domains=None) -> list[JDMatch]:
     Pure and offline: hybrid lexical(+embedding when installed) scoring via
     :func:`maverick.domain_router.rank_specialists` over ``available_domains()``
     -- which already overlays tenant custom packs -- so "do we already employ
-    this role?" is answered against the whole workforce. ``fit`` is relative to
-    the top hit (1.0 = best match), ``matched_terms`` explains *why* a pack
-    matched so HR can sanity-check the mapping.
+    this role?" is answered against the whole workforce. The internal ``fit``
+    score is relative to the top hit and is deliberately not sent to the UI;
+    the visible relevance band counts distinctive shared terms instead.
     """
     jd_text = (jd_text or "").strip()[:MAX_JD_CHARS]
     if not jd_text:
@@ -96,7 +99,9 @@ def match_jd(jd_text: str, k: int = 5, domains=None) -> list[JDMatch]:
             continue
         pack_toks = _tokens(
             f"{name.replace('_', ' ')} {prof.description} {prof.persona}")
-        matched = sorted(jd_toks & pack_toks)[:8]
+        shared = jd_toks & pack_toks
+        matched = sorted(shared)[:8]
+        relevance = "strong" if len(shared) >= 4 else "partial" if len(shared) >= 2 else "weak"
         suite = suite_for(name)
         label = SUITE_LABELS[suite][0] if suite in SUITE_LABELS else None
         out.append(JDMatch(
@@ -107,6 +112,7 @@ def match_jd(jd_text: str, k: int = 5, domains=None) -> list[JDMatch]:
             department=label,
             max_risk=prof.max_risk,
             matched_terms=matched,
+            relevance=relevance,
         ))
     return out
 
@@ -120,22 +126,26 @@ _MAX_DRAFT_STEPS = 5
 def _jd_proposer(spec: IntakeSpec) -> dict:
     """Deterministic proposer: derive a draft pack from the JD's structure.
 
-    No LLM: responsibilities (bullet lines) become playbook steps, the first
-    prose line becomes the description. Everything returned here is coerced and
+    No LLM: responsibilities (bullet lines) become playbook steps, while the
+    role title becomes the short display name. Everything returned here is coerced and
     clamped by ``generate_profile``/``validate_profile`` exactly like an LLM
     proposal, so this path grants nothing an LLM path couldn't.
     """
     steps: list[dict] = []
-    summary = ""
     for line in spec.description.splitlines():
         m = _BULLET.match(line)
         if m and len(steps) < _MAX_DRAFT_STEPS:
             steps.append({"name": m.group(1).strip(), "gate": None})
-        elif not summary and line.strip() and not m:
-            summary = line.strip()
-    proposed: dict = {}
-    if summary:
-        proposed["description"] = summary[:200]
+    title_lines = (spec.name or "").strip().splitlines()
+    title = title_lines[0][:120] if title_lines else "Specialist"
+    proposed: dict = {
+        "description": title,
+        "persona": (
+            "You carry out this specialist's configured work steps. Ground each result "
+            "in the available source records, flag gaps, and hand consequential "
+            "decisions to the accountable person for review."
+        ),
+    }
     if len(steps) >= 3:
         # The deliverable is a human handoff: the last step carries the review
         # gate, matching the intake default-workflow convention.
@@ -145,7 +155,8 @@ def _jd_proposer(spec: IntakeSpec) -> dict:
 
 
 def draft_from_jd(role_title: str, jd_text: str, *, industry: str = "",
-                  llm=None, model: str | None = None, budget=None):
+                  llm=None, model: str | None = None, budget=None,
+                  return_source: bool = False):
     """Draft (do NOT save) a specialist pack for a job description.
 
     With ``llm`` the intake proposer writes the persona/playbook; without it a
@@ -182,9 +193,29 @@ def draft_from_jd(role_title: str, jd_text: str, *, industry: str = "",
         description=(jd_text or "").strip()[:MAX_JD_CHARS],
         industry=industry,
     )
-    propose = (build_llm_proposer(llm, model=model, budget=budget)
-               if llm is not None else _jd_proposer)
-    return generate_profile(spec, propose=propose)
+    fallback = _jd_proposer(spec)
+    source = "bullet_points" if "workflow" in fallback else "standard_outline"
+    proposal = fallback
+    if llm is not None:
+        try:
+            candidate = build_llm_proposer(llm, model=model, budget=budget)(spec)
+            steps = candidate.get("workflow") if isinstance(candidate, dict) else None
+            if (isinstance(candidate, dict)
+                    and str(candidate.get("persona") or "").strip()
+                    and isinstance(steps, list)
+                    and len([step for step in steps if isinstance(step, dict)
+                             and str(step.get("name") or "").strip()
+                             and str(step.get("instruction") or "").strip()]) >= 3):
+                # The editor's Name field is always the short role title, not
+                # a model paraphrase or the entire uploaded description.
+                proposal = {**candidate, "description": fallback["description"]}
+                source = "ai"
+            else:
+                log.warning("jd_hiring: AI proposal was incomplete; using the job description outline")
+        except Exception as exc:
+            log.warning("jd_hiring: AI proposal failed (%s); using the job description outline", exc)
+    profile = generate_profile(spec, propose=lambda _spec: proposal)
+    return (profile, source) if return_source else profile
 
 
 def add_pack_to_fleet(pack_name: str, fleet_name: str, owner: str, *,

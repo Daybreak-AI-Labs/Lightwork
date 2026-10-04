@@ -78,9 +78,17 @@ MESSAGES: dict[str, dict[str, str]] = {
 
 MESSAGES.update(_journey_messages())
 
+# Browser language detection is an implicit choice. It may select only a
+# catalog with a translation for every registered product string. Community
+# seeds remain available through explicit selection and saved preferences.
+AUTO_LANGS = frozenset(
+    lang for lang in LANGS
+    if lang not in SEED_LANGS and all(entry.get(lang) for entry in MESSAGES.values())
+)
+
 
 def resolve_lang(request) -> str:
-    """``?lang=`` → ``mvk_lang`` cookie → ``Accept-Language`` → en."""
+    """Explicit language → saved preference → complete browser catalog → en."""
     q = (request.query_params.get("lang") or "").strip().lower().split("-")[0]
     from .auth import caller_principal
 
@@ -94,7 +102,7 @@ def resolve_lang(request) -> str:
     from .i18n_journeys import accepted_locales
     for locale in accepted_locales(request):
         code = locale.lower().split("-")[0]
-        if code in LANGS:
+        if code in AUTO_LANGS:
             return code
     return DEFAULT_LANG
 
@@ -108,6 +116,6 @@ def t(key: str, lang: str = DEFAULT_LANG) -> str:
 
 
 __all__ = [
-    "LANGS", "DEFAULT_LANG", "SEED_LANGS", "RTL_LANGS", "CONTENT_LANGS", "MESSAGES",
+    "LANGS", "DEFAULT_LANG", "SEED_LANGS", "RTL_LANGS", "CONTENT_LANGS", "AUTO_LANGS", "MESSAGES",
     "content_lang", "dir_for", "resolve_lang", "t",
 ]

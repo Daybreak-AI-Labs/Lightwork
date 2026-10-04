@@ -275,6 +275,42 @@ def test_deploy_department_creates_a_fleet(tmp_path, monkeypatch):
     assert any(f["name"] == "dept-finance" for f in client.get("/api/v1/fleets").json()["fleets"])
 
 
+def test_repeat_deploy_keeps_customer_changes_and_reports_no_new_members(tmp_path, monkeypatch):
+    import maverick.domain_edit as domain_edit
+    from maverick.departments import get_department
+    from maverick.fleet import Fleet, FleetAgent, load_fleet, save_fleet
+
+    members = get_department("finance").members
+    monkeypatch.setattr(domain_edit, "list_agents", lambda: [
+        {"name": name, "readiness": {"state": "action_ready"}} for name in members
+    ])
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.delenv("MAVERICK_TENANT", raising=False)
+    first = client.post("/api/v1/departments/finance/deploy")
+    assert first.status_code == 201 and first.json()["created"] is True
+    original = load_fleet("dept-finance")
+    changed = FleetAgent(original.agents[0].name, "customer_role", "Customer instructions", original.agents[0].domain)
+    manual = FleetAgent("customer_added", "customer_role", "Customer addition")
+    save_fleet(Fleet(name=original.name, owner=original.owner,
+                     agents=(changed, *original.agents[2:], manual), created_at=original.created_at))
+
+    again = client.post("/api/v1/departments/finance/deploy")
+    assert again.status_code == 200
+    assert again.json()["created"] is False and again.json()["added_count"] == 0
+    kept = load_fleet("dept-finance")
+    assert kept.agents == (changed, *original.agents[2:], manual)
+    assert kept.created_at == original.created_at
+    assert next(row for row in client.get("/api/v1/departments").json()
+                if row["key"] == "finance")["deployed"] is True
+
+    monkeypatch.setattr(domain_edit, "list_agents", lambda: [
+        {"name": name, "readiness": {"state": "needs_setup"}} for name in members
+    ])
+    unavailable = client.post("/api/v1/departments/finance/deploy")
+    assert unavailable.status_code == 200 and unavailable.json()["added_count"] == 0
+    assert load_fleet("dept-finance").agents == kept.agents
+
+
 def test_deploy_excludes_specialists_that_need_setup_and_reports_them(tmp_path, monkeypatch):
     import maverick.domain_edit as domain_edit
     from maverick.departments import get_department

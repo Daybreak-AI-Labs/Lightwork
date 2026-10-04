@@ -115,15 +115,21 @@ async def issue_draft(body: IssueIn, request: Request, response: Response) -> di
     require_permission(request, "view")
     response.headers["Cache-Control"] = "private, no-store"
     from maverick.issue_report import build_report_fields
+
+    from . import __version__
     world = _world()
     goal = await run_in_threadpool(_task, request, world, body.task)
+    if goal.status not in _STOPPED:
+        raise HTTPException(409, "Choose a task that stopped with a problem.")
 
     def build() -> dict:
         errors = [e for e in world.goal_events(body.task, limit=10_000) if e.kind == "error"]
-        return build_report_fields(goal, errors)
+        return build_report_fields(goal, errors, version=__version__, failure_cause=goal.result)
 
     draft = await run_in_threadpool(build)
-    await run_in_threadpool(_task, request, world, body.task)
+    current = await run_in_threadpool(_task, request, world, body.task)
+    if current.status not in _STOPPED:
+        raise HTTPException(409, "The task changed while this report was prepared. Refresh and try again.")
     return {**draft, "summary": "Review the draft here. Remove business details you do not want to share. "
             "Copy or download it, then use the support channel your organization gave you. "
             "Nothing is sent automatically."}

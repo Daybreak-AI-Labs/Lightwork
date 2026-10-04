@@ -19,11 +19,14 @@ name and UTC date. **Find older tasks** continues through older history. A
 stopped task also links directly to its authorized selection in Help.
 
 Task report drafts are reviewed and edited inside Lightwork. They are held only
-in the page's memory. Recognized secrets are removed, but business details can
-remain and should be reviewed. Confirming the exact fields checks access and
-secret scrubbing; if scrubbing changes an edited draft, review the updated text
-again. The enabled **Copy reviewed draft** and **Download reviewed draft**
-buttons keep the page open and make a local copy. Send that copy through the
+in the page's memory. They include the installed dashboard version and a short
+recorded failure reason when the task has one, even when no separate error
+event was saved. The reason is bounded and recognized secrets are removed, but
+business details can remain and should be reviewed. Confirming the exact fields
+checks access and secret scrubbing; if scrubbing changes an edited draft, review
+the updated text again. The enabled **Copy reviewed draft** and
+**Download reviewed draft** buttons keep the page open and make a local copy.
+Send that copy through the
 support channel your organization gave you. This installation has no configured
 task-report support inbox, and Help does not send the draft to GitHub or another
 service. A blocked clipboard write leaves the draft visible for download or
@@ -37,8 +40,8 @@ Uncertain changes are checked before retrying; loading a failed read is safe to
 retry. An independent minimal failure page remains available if normal template
 rendering fails.
 
-Regression coverage for these changes is authored but unexecuted. Static syntax
-and whitespace checks are not browser or installed-application acceptance.
+Focused task-report builder and API checks pass locally. An installed-browser
+support journey remains unverified.
 
 Previews are encrypted, account/workspace-bound, valid for ten minutes, and
 bounded to sixteen retained copies per context. Downloads recheck current

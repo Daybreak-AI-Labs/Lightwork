@@ -154,6 +154,8 @@ def test_nav_groups_per_role(monkeypatch, tmp_path):
     assert hrefs(None) == in_nav
     # Saved flows are the sidebar entry; creation starts from that page.
     assert "/workflows" in in_nav
+    assert "/fleets" in in_nav
+    assert ui_visibility.page_for("/fleets")["label"] == "Teams"
     assert "/goal-builder" not in in_nav and "/flows/designer" not in in_nav \
         and "/workflow-builder" not in in_nav
     # viewer: read-only pages only -- no run/build/admin surfaces, and the

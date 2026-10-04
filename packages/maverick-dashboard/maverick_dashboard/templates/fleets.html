@@ -1,8 +1,8 @@
 {% extends "base.html" %}
-{% block title %}Fleets · Lightwork{% endblock %}
+{% block title %}Teams · Lightwork{% endblock %}
 {% block content %}
   {% from "_hero.html" import hero, state %}
-  {% call hero('Human in command', 'Fleets',
+  {% call hero('Human in command', 'Teams',
                subtitle='Each person\'s own team of agents',
                lede='Give someone a small team of agents, each with a job
                      role that limits what it may do. Your company rules can
@@ -55,7 +55,7 @@
 
   {% if fleets %}
     {% for fleet in fleets %}
-      <div class="panel">
+      <div class="panel" id="team-{{ fleet.name }}" tabindex="-1">
         <div class="fl-head">
           <h2 class="fl-title">{{ fleet.name|humanize }}</h2>
           <span class="muted">Owner: {{ fleet.owner|identity if fleet.owner else 'No one' }}</span>
@@ -181,6 +181,7 @@
     .fl-grow { flex: 1; min-width: 12rem; }
     .fl-actions { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
     .fl-head { display: flex; gap: 1rem; align-items: baseline; flex-wrap: wrap; }
+    .panel[id^="team-"] { scroll-margin-top: 6rem; }
     .fl-title { margin: 0; font-size: 1.1rem; }
     .fl-sub { margin: 0.9rem 0 0; font-size: 0.9rem; }
     .fl-run { margin-top: 0.75rem; }

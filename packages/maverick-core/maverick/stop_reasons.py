@@ -87,6 +87,21 @@ _RULES: tuple[tuple[str, re.Pattern[str], str, str, str | None, str | None], ...
         None, None,
     ),
     (
+        "specialist_setup",
+        _rx(r"agent build failed:.*required workflow tools unavailable:.*\bweb_search\b"),
+        "This specialist couldn't start because Web search is unavailable. No work has started.",
+        "Ask an administrator to turn on Web search.",
+        "/settings/all?id=capabilities.web_search", "Review Web search setup",
+    ),
+    (
+        "specialist_setup",
+        _rx(r"agent build failed:.*required workflow tools unavailable:",
+            r"cannot start because its setup needs review"),
+        "This specialist couldn't start because an action it needs is unavailable. No work has started.",
+        "Ask an administrator to review this specialist's setup.",
+        "/agents", "Browse specialists",
+    ),
+    (
         "provider_authentication",
         _rx(r"^provider_error:authentication$", r"\bAuthenticationError\b"),
         "The AI connection needs attention.",

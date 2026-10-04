@@ -181,6 +181,7 @@
   .halt-card__budget summary::-webkit-details-marker { display: none; }
   .halt-card__budget[open] summary { color: var(--text); }
   .halt-card__budget .field { margin-top: var(--space-2); max-width: 24rem; }
+  .halt-card [hidden] { display: none !important; }
   @media (prefers-reduced-motion: no-preference) { .convo { animation: convoIn 0.4s ease; } }
   @keyframes convoIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
   @media (prefers-reduced-motion: reduce) { .spinner { animation: none; } }
@@ -308,7 +309,7 @@
   {% endif %}
   {% set status_labels = {'pending': 'queued', 'running': 'working', 'done': 'done', 'blocked': 'paused', 'failed': 'failed', 'cancelled': 'cancelled'} %}
   {% set stopped_kinds = ('provider_not_ready', 'provider_authentication', 'provider_rate_limit', 'provider_model_not_found', 'provider_unavailable', 'provider_connection', 'provider_configuration', 'internal_error', 'unpriced_model') %}
-  <span id="status" class="badge {{ goal.status }}" data-status="{{ goal.status }}" hidden>{{ 'stopped' if goal.status == 'blocked' and stop and stop.kind in stopped_kinds else status_labels.get(goal.status, goal.status) }}</span>
+  <span id="status" class="badge {{ goal.status }}" data-status="{{ goal.status }}" hidden>{{ "can't start" if goal.status == 'blocked' and stop and stop.kind == 'specialist_setup' else 'stopped' if goal.status == 'blocked' and stop and stop.kind in stopped_kinds else status_labels.get(goal.status, goal.status) }}</span>
 
   {# Earlier turns of this chat: what was asked before, and what Lightwork answered. #}
   {% for t in thread_turns or [] %}
@@ -501,13 +502,16 @@
     </details>{% endif %}
     <div id="halt-card" class="halt-card" style="display: none;" data-stop-kind="{{ stop.kind if stop else '' }}">
       {% set pilot_prepared = goal.result == 'Prepared for a workflow pilot. Start this task after the pilot plan is frozen.' %}
-      <div class="halt-card__title">{{ ui('Ready to start' if pilot_prepared else 'Lightwork stopped') }}</div>
+      <div class="halt-card__title" id="halt-title">{{ ui('Ready to start' if pilot_prepared else "Can't start" if stop and stop.kind == 'specialist_setup' else 'Lightwork stopped') }}</div>
       {# The reason is the mapped plain-language stop (maverick.stop_reasons),
          never the kernel's raw text; the raw text is admin-only, below. #}
       <p id="halt-reason" class="muted" style="margin: var(--space-1) 0 0;">{{ stop.message if stop else '' }}</p>
       <p id="halt-action" class="muted" style="margin: var(--space-1) 0 0;">
         <span id="halt-action-text">{{ stop.action if stop else '' }}</span>
-        <a id="halt-action-link" href="{{ stop.link if stop and stop.link else '#' }}"{% if not (stop and stop.link) %} hidden{% endif %}>{{ stop.link_label if stop and stop.link_label else '' }}</a>
+        <a id="halt-action-link" href="{{ stop.link if stop and stop.link else '#' }}"{% if not (stop and stop.link and (stop.kind != 'specialist_setup' or not stop.link.startswith('/settings') or show_technical_details)) %} hidden{% endif %}>{{ stop.link_label if stop and stop.link_label else '' }}</a>
+      </p>
+      <p id="halt-specialist-alternative" class="muted"{% if not (stop and stop.kind == 'specialist_setup') %} hidden{% endif %}>
+        {{ ui('Need another route?') }} <a href="/agents">{{ ui('Browse specialists') }}</a> {{ ui('or') }} <a href="/chat">{{ ui('start a different task') }}</a>. {{ ui("This task won't switch specialists on its own.") }}
       </p>
       {% if show_technical_details %}
       <details class="halt-card__technical" id="halt-technical"{% if not (stop and stop.technical) %} hidden{% endif %}>
@@ -520,12 +524,16 @@
         {{ ui('This task was prepared without running it. Review and freeze its workflow pilot plan and spending limit before starting.') }} <a href="/outcome-pilots">{{ ui('Workflow pilot plan') }}</a>
       </p>
       {% endif %}
-      <details class="panel" data-budget-launch data-goal="{{ goal.id }}">
+      <details class="panel" data-budget-launch data-goal="{{ goal.id }}"{% if stop and stop.kind == 'specialist_setup' %} hidden{% endif %}>
         <summary>{{ ui('Review allowance before this attempt') }}</summary><p role="status" aria-live="polite"></p>
         <div data-budget-summary></div><button class="btn btn--ghost" type="button">{{ ui('Refresh budget') }}</button>
       </details>
       <script src="/static/lightwork-budget-guidance.js" defer></script>
-      {% if can_operate %}<form id="halt-resume-form" class="halt-card__row" data-goal="{{ goal.id }}" data-context="{{ conversation_context }}">
+      {% if can_operate %}<div id="halt-setup-check" class="halt-card__row"{% if not (stop and stop.kind == 'specialist_setup') %} hidden{% endif %}>
+        <button id="halt-check-setup" class="btn btn--ghost" type="button">{{ ui('Check setup again') }}</button>
+        <span id="halt-setup-message" role="status" aria-live="polite" class="muted"></span>
+      </div>
+      <form id="halt-resume-form" class="halt-card__row" data-goal="{{ goal.id }}" data-context="{{ conversation_context }}"{% if stop and stop.kind == 'specialist_setup' %} hidden{% endif %}>
         <button id="halt-resume" class="btn btn--primary" type="submit"{% if not can_operate %} disabled data-permission-disabled="1"{% endif %}>{{ ui('Start this task' if pilot_prepared else 'Try again') }}</button>
         <details class="halt-card__budget" id="halt-budget"{% if stop and stop.kind != 'spending_limit' %} hidden{% endif %}>
           <summary>{{ ui('Set a spending limit for this attempt') }}</summary>
@@ -714,7 +722,8 @@
         currentStatus = status;
         statusEl.className = 'badge ' + status;
         statusEl.dataset.status = status;
-        cgCopy(statusEl,status === 'blocked' && lastStop && STOPPED_KINDS.has(lastStop.kind)
+        cgCopy(statusEl,status === 'blocked' && lastStop && lastStop.kind === 'specialist_setup'
+          ? "Can't start" : status === 'blocked' && lastStop && STOPPED_KINDS.has(lastStop.kind)
           ? 'Stopped' : (STATUS_LABELS[status] || status));
       }
 
@@ -755,15 +764,26 @@
 
       function renderStop(stop) {
         const s = stop && typeof stop === 'object' ? stop : {};
+        const setup = s.kind === 'specialist_setup';
         haltCard.dataset.stopKind = s.kind || '';
+        const haltTitle = document.getElementById('halt-title');
+        if (haltTitle) cgCopy(haltTitle,setup ? "Can't start" : 'Lightwork stopped');
         haltReasonEl.textContent = s.message || 'The run stopped before producing a result.';
         const actionText = document.getElementById('halt-action-text');
         const actionLink = document.getElementById('halt-action-link');
         if (actionText) actionText.textContent = s.action || '';
         if (actionLink) {
-          if (s.link) { actionLink.href = s.link; actionLink.textContent = s.link_label || s.link; actionLink.hidden = false; }
+          if (s.link) { actionLink.href = s.link; actionLink.textContent = s.link_label || s.link; actionLink.hidden = setup && s.link.startsWith('/settings') && !SHOW_TECHNICAL; }
           else { actionLink.hidden = true; }
         }
+        const alternative = document.getElementById('halt-specialist-alternative');
+        if (alternative) alternative.hidden = !setup;
+        const setupCheck = document.getElementById('halt-setup-check');
+        const resumeForm = document.getElementById('halt-resume-form');
+        if (setupCheck) setupCheck.hidden = !setup;
+        if (resumeForm) resumeForm.hidden = setup;
+        const budgetLaunch = haltCard.querySelector('[data-budget-launch]');
+        if (budgetLaunch) budgetLaunch.hidden = setup;
         const budget = document.getElementById('halt-budget');
         if (budget) budget.hidden = Boolean(s.kind) && s.kind !== 'spending_limit';
         const technical = document.getElementById('halt-technical');
@@ -772,6 +792,7 @@
           document.getElementById('halt-technical-text').textContent = text || '';
           technical.hidden = !text;
         }
+        if (currentStatus === 'blocked') setStatus(currentStatus);
       }
 
       let withheldRow = null;  // the one folded line standing in for withheld steps
@@ -957,7 +978,8 @@
         if (submitting) return;
         const asking = currentQuestionId != null;
         const running = !done && !asking;
-        const stoppable = ['pending', 'running', 'blocked'].includes(currentStatus);
+        const stoppable = ['pending', 'running'].includes(currentStatus) ||
+          (currentStatus === 'blocked' && !done && !(lastStop && lastStop.kind === 'specialist_setup'));
         const inbox = window.mvConversationInbox;
         const inboxReady = !!(inbox && inbox.available);
         if (replyAttach) { replyAttach.disabled = !canOperate; replyAttach.title = cgText(asking ? 'Attach a document, PDF, image or text file to your answer' : 'Attach files to your next message'); }
@@ -1388,7 +1410,8 @@
         if (nowEl.classList) nowEl.classList.remove('is-live');
         if (spin) spin.style.display = 'none';
         cgCopy(nowEl,'Work log: {steps}',{steps:steps(stepTotal())});
-        cgCopy(metaEl,st === 'blocked' && status && status.textContent.trim().toLowerCase() === 'stopped'
+        cgCopy(metaEl,st === 'blocked' && status && status.textContent.trim().toLowerCase() === "can't start"
+          ? "Can't start" : st === 'blocked' && status && status.textContent.trim().toLowerCase() === 'stopped'
           ? 'Stopped' : (SETTLED[st] || (window.mvHuman ? window.mvHuman(st) : st)));
         return true;
       }

@@ -2808,6 +2808,8 @@ no images without alt, axe violations limited to nine distinct rules).
 
 #### UX-238 · P2 · Reliability · Pressing 'Deploy team' again on an already-deployed department silently rebuilds the team, deleting specialists the admin added to it
 
+- **Status (2026-10-04):** Repeat setup now merges newly eligible catalog specialists into the existing team while retaining manual additions, removals, roles and descriptions. Workforce distinguishes Set up from Update and links to the saved team. Older teams without a deployment marker conservatively add nothing on their first update because prior removals cannot be distinguished from newly shipped members; later updates can add new eligible catalog members. A full change preview remains open.
+
 - **Who / where:** workspace admin · `/workforce or /agents 'Deploy team' (POST /api/v1/departments/{key}/deploy)`
 - **User impact:** An admin who re-clicks Deploy (e.g. after new specialists were added to the department) loses their team customisations without warning; recent-run links to removed members also lose their team context.
 - **Evidence (reproduced):**
@@ -2819,6 +2821,8 @@ no images without alt, axe violations limited to nine distinct rules).
 
 #### UX-260 · P2 · Ux · Saving a specialist edit that is rejected shows only 'Some of the details need fixing'; the actual reason is discarded unless the user separately presses 'Check settings'
 
+- **Status (2026-10-04):** The editor now limits built-in action choices and risk levels to the inherited ceiling. Save and Check settings turn the common rejected-action/risk reasons into plain text beside the relevant control. Other lint failures still receive a generic prompt to review settings; full field-by-field explanations remain open.
+
 - **Who / where:** workspace admin · `/agents?name=cx_triage -> Save specialist`
 - **User impact:** Administrators cannot tell which change broke the save, and when they do press Check settings they get internal terms (declared tool, max_risk, allow_tools, 'scoped read tool').
 - **Evidence (reproduced):**
@@ -2829,6 +2833,8 @@ no images without alt, axe violations limited to nine distinct rules).
 - Source: U3-013
 
 #### UX-261 · P2 · Ux · When AI drafting from a job description returns nothing usable, the draft silently becomes a generic 'specialist assistant' with the whole JD pasted into the Name field, and is presented as 'Drafted from the job description'
+
+- **Status (2026-10-04):** An incomplete or failed AI proposal now falls back to the bullet-point outline, keeps the role title as the short Name, and tells the editor whether AI or the outline supplied the draft. If the JD has too few usable bullets, the editor explicitly calls it a standard outline. A local real-browser draft path and focused provider-failure checks passed; live provider quality still needs qualification.
 
 - **Who / where:** workspace admin · `/agents 'Hire from a job description' -> Draft a new specialist`
 - **User impact:** An HR admin believes the AP role was translated into a specialist, saves a generic assistant whose 'name' is a paragraph, and later gets generic results.
@@ -2842,6 +2848,8 @@ no images without alt, axe violations limited to nine distinct rules).
 
 #### UX-262 · P2 · Ux · JD matching shows raw pack ids as result titles, always rates the top hit '100% match', counts filler words like 'specialist' as evidence, and never warns that the match cannot run
 
+- **Status (2026-10-04):** Results now show the specialist display name, department, distinctive shared-term band, and a current action-readiness warning/link; assignment is disabled until required actions are present. The API no longer exports the relative fit as a percent-like field. Live connections and AI service readiness are still checked only when work starts, and the overlap bands are heuristic, not a calibrated quality score.
+
 - **Who / where:** workspace admin, end user · `/agents 'Find matching specialists' (POST /api/v1/agents/jd/match)`
 - **User impact:** HR sees cryptic ids and a reassuring '100%' even for a poor fit, then adds a specialist to a team that cannot run it.
 - **Evidence (reproduced):**
@@ -2853,6 +2861,8 @@ no images without alt, axe violations limited to nine distinct rules).
 - Source: U3-020
 
 #### UX-289 · P2 · Ux · 21 of 54 departments have no description and a machine-cased name ('Esg Sustainability', 'Food Beverage Cpg', 'Private Equity Vc', 'Oil Gas'); the Workforce filter uses raw keys ('Hr', 'It grc', 'Sales gtm', 'Manufacturing vertical')
+
+- **Status (2026-10-04):** The 54 shipped suites already had labels and charters on this branch; the 21 terse charters were sharpened, a completeness invariant was added, and the Workforce filter now uses the same department title as its cards. Installed-browser catalog review remains open.
 
 - **Who / where:** end user, workspace admin, evaluator · `/workforce Departments grid and 'What each specialist can do' filter; /agents 'Your departments'`
 - **User impact:** Buyers evaluating verticals the product markets (aerospace, pharma-adjacent med devices, private equity) see unfinished placeholders, and the same department is called two different things on one page.
@@ -2866,6 +2876,7 @@ no images without alt, axe violations limited to nine distinct rules).
 
 #### UX-290 · P2 · Ux · After 'Deploy team' the Agent Factory says 'Give it work from the Teams page' — there is no Teams page, and the Fleets page where deployed teams live is hidden from the sidebar
 
+- **October 4 current branch (bounded source fix):** Agent Factory now uses the deployed team's returned name to show **Give this team a task** after either deploy path, or **Review team setup** when the response says no specialist is ready. It opens that exact team's card and task form at `/fleets#team-…`; the destination is named **Teams** in the page and Work navigation, while the existing URL remains valid. The concurrent Workforce deployment change also links to the returned team. The linked team is still scoped by the current `/fleets` page's owner and workspace checks. Focused local UI, page, navigation and Copilot-context tests passed. Workforce's zero-ready wording and installed journey remain to be checked.
 - **Who / where:** workspace admin, end user · `/agents 'Your departments' Deploy team; /workforce Deploy team`
 - **User impact:** Having just deployed a department, the admin has no visible route to actually give it work; the deployed team is effectively lost unless they know the /fleets URL or use the finder.
 - **Evidence (code-verified):**
@@ -2913,6 +2924,8 @@ no images without alt, axe violations limited to nine distinct rules).
 - Source: U3-024 · prior audit: QA-056
 
 #### UX-338 · P2 · Ux · A specialist that cannot deploy stops the task with an internal error string, a 'Paused' badge, and a 'Try again' button that can only fail the same way
+
+- **Status (2026-10-04):** A missing required action now produces a distinct "Can't start" state in the task and chat list. The task offers setup review and a separate route to choose another specialist, hides impossible restart/budget actions, and rechecks current required-action readiness before a reviewed restart. The local browser failure-to-UI journey passed. This does not switch the existing task to another specialist; live connections and permissions still get checked when work starts.
 
 - **Who / where:** end user · `/chat/goal/{id} (goal routed to a pack)`
 - **User impact:** The business user sees jargon they cannot act on, a status that implies the work will resume, and a retry that is guaranteed to fail; there is no link to the setting (Web search) or connection that would fix it, and no offer to run it with another specialist.
@@ -4302,6 +4315,7 @@ no images without alt, axe violations limited to nine distinct rules).
 
 #### UX-197 · P2 · Bug · The prepared bug report omits the task's actual error: a provider failure is stored only in the task result, so the report says '_(no error events recorded)_'
 
+- **Current branch (2026-10-04, local verification):** The Help page's task-report draft now includes the installed dashboard version and a bounded, secret-redacted failure reason from the stopped task's result, even when there is no separate error event. A completed task cannot be used to expose its result through this endpoint. The customer sees and may edit the exact draft in Help before explicitly copying or downloading it; the app opens no external report link and sends nothing. Focused local builder/API checks passed (10 tests); installed-browser acceptance and a real provider failure remain unverified.
 - **Who / where:** end user, workspace admin · `POST /api/v1/support/issue-report`
 - **User impact:** Even if the report reached someone, it would contain no failure reason and no product version, so support cannot act on it.
 - **Evidence (reproduced):**
@@ -4314,6 +4328,7 @@ no images without alt, axe violations limited to nine distinct rules).
 
 #### UX-198 · P2 · Bug · A browser set to Arabic flips the entire English UI right-to-left (dir="rtl"), mirroring layout and misplacing punctuation ('.continue it', 'days 30', '...Search tasks')
 
+- **October 4 current branch (bounded source fix):** The shared template context already derives page direction from the actual body language, so English Overview, Chat and public sign-in content declares `lang="en" dir="ltr"` even when Arabic is explicitly selected for the few translated controls. Browser `Accept-Language` now selects only a catalog with every registered product string; the partial Arabic seed no longer auto-switches the interface. An explicit `?lang=ar` or saved Arabic choice still works, with untranslated regions in English. Focused local shell, catalog and journey checks passed; installed-browser acceptance and full Arabic page translation remain open.
 - **Who / where:** end user, evaluator · `Every page (base.html and chat_base.html), driven by Accept-Language`
 - **User impact:** Any user whose browser/OS is Arabic (or lists ar first) gets a mirrored, garbled English interface with no visible way to switch back (no language selector).
 - **Evidence (reproduced):**
@@ -4326,6 +4341,7 @@ no images without alt, axe violations limited to nine distinct rules).
 
 #### UX-282 · P2 · Ux · Every core everyday page (Chat home, Overview, Tasks, Approvals, Settings, Flows, Users, Connections, Spend, Workforce, Help…) gets only auto-generated boilerplate Copilot help; hand-written context exists only for 47 governance/consent/privacy pages
 
+- **October 4 current branch (local verification):** Thirty everyday pages now have hand-authored, control-specific Copilot guidance, including Overview, Tasks, Settings, Users, Connections, Spend, Learning, Help, Account, AI services and Billing. Existing Chat, Approvals, Flows, Workforce and specialist contexts remain. Every visible Work, Insights and Administration navigation page now has authored help, and a source check ties 20 first steps to controls present in their templates. The focused context suite passed (526 checks), and a real-browser fixture showed the distinct Settings, Tasks and Help tips and questions. Installed-customer wording review, dynamic feature/role states and the remaining Governance/third-party/advanced navigation pages still need qualification.
 - **Who / where:** end user, workspace admin, evaluator · `GET /api/v1/copilot/context`
 - **User impact:** On the pages people use most, Copilot's tips and answers say nothing specific (e.g. Settings never mentions providers, budgets or sections), so the helper is useless where help is most needed.
 - **Evidence (reproduced):**

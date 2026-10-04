@@ -20,7 +20,7 @@ import json
 import re
 import threading
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 # Concurrent runs of the same fleet append to one ``<name>.runs.json`` index.
@@ -73,18 +73,25 @@ class Fleet:
     owner: str
     agents: tuple[FleetAgent, ...] = ()
     created_at: float = field(default_factory=lambda: time.time())
+    # Catalog specialists this department deployment already offered. Keeping
+    # the names after an admin removes an agent prevents a later sync from
+    # silently undoing that choice. Generic fleets leave this empty.
+    department_members_added: tuple[str, ...] = ()
 
     def principal_for(self, agent_name: str) -> str:
         """The audit/capability principal for one of this fleet's agents."""
         return f"agent:{self.name}.{agent_name}"
 
     def to_dict(self) -> dict:
-        return {
+        result = {
             "name": self.name,
             "owner": self.owner,
             "agents": [a.to_dict() for a in self.agents],
             "created_at": self.created_at,
         }
+        if self.department_members_added:
+            result["department_members_added"] = list(self.department_members_added)
+        return result
 
     @classmethod
     def from_dict(cls, d: dict) -> Fleet:
@@ -93,6 +100,10 @@ class Fleet:
         agents = d.get("agents", []) or []
         if not isinstance(agents, list | tuple):
             raise ValueError("fleet agents must be a list")
+        added = d.get("department_members_added", []) or []
+        if (not isinstance(added, list | tuple)
+                or any(not isinstance(name, str) or not valid_name(name) for name in added)):
+            raise ValueError("department members must be valid names")
         try:
             created_at = float(d.get("created_at", 0.0) or 0.0)
         except (TypeError, ValueError) as exc:
@@ -102,6 +113,7 @@ class Fleet:
             owner=str(d.get("owner", "")),
             agents=tuple(FleetAgent.from_dict(a) for a in agents),
             created_at=created_at,
+            department_members_added=tuple(added),
         )
 
 
@@ -132,15 +144,19 @@ def save_fleet(fleet: Fleet, *, tenant: str | None = "__active__") -> Path:
     """Persist a fleet (0600). Raises ValueError on an invalid name."""
     if not valid_name(fleet.name):
         raise ValueError(f"invalid fleet name: {fleet.name!r}")
-    from .file_lock import atomic_write_text, ensure_private_directory
+    from .file_lock import atomic_write_text, cross_process_lock, ensure_private_directory
 
     d = fleets_dir(tenant=tenant)
     ensure_private_directory(d)
     path = d / f"{fleet.name}.json"
-    atomic_write_text(
-        path,
-        json.dumps(fleet.to_dict(), indent=2, sort_keys=True),
-    )
+    with cross_process_lock(path):
+        # The ordinary fleet editor and specialist-hiring paths rebuild Fleet
+        # objects. Preserve the department marker across those edits.
+        if not fleet.department_members_added:
+            prior = load_fleet(fleet.name, tenant=tenant)
+            if prior is not None and prior.owner == fleet.owner and prior.department_members_added:
+                fleet = replace(fleet, department_members_added=prior.department_members_added)
+        atomic_write_text(path, json.dumps(fleet.to_dict(), indent=2, sort_keys=True))
     return path
 
 

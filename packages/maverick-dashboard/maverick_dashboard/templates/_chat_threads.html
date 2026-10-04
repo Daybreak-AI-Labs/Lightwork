@@ -5,6 +5,7 @@
   {% for t in threads %}
   {% if t.status in ['pending', 'draft'] %}{% set state_label = ui('Queued') %}
   {% elif t.status in ['running', 'active'] %}{% set state_label = ui('Working') %}
+  {% elif t.status == 'blocked' and t.stop_kind|default('') == 'specialist_setup' %}{% set state_label = ui("Can't start") %}
   {% elif t.status == 'blocked' %}{% set state_label = ui('Paused') %}
   {% elif t.status == 'failed' %}{% set state_label = ui('Failed') %}
   {% elif t.status == 'cancelled' %}{% set state_label = ui('Stopped') %}

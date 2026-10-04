@@ -18,10 +18,9 @@ from dataclasses import dataclass, field
 
 from .domain import SUITE_PREFIXES, DomainProfile, enabled_domains, suites_for_domain
 
-# Human-facing label + one-line charter per suite key (the value side of
-# ``SUITE_PREFIXES``). A suite missing here still resolves to a derived title
-# (``key.replace("_", " ").title()``), so adding a suite prefix never crashes
-# this layer — it just reads better once a charter is authored.
+# Human-facing label + one-line charter per shipped suite key (the value side
+# of ``SUITE_PREFIXES``). Unknown extension keys retain a derived-title fallback;
+# every shipped suite is covered by the catalog invariant test.
 SUITE_LABELS: dict[str, tuple[str, str]] = {
     "finance": ("Finance",
                 "Close the books, forecast, and control spend — FP&A, "
@@ -115,47 +114,47 @@ SUITE_LABELS: dict[str, tuple[str, str]] = {
                  "search, compare, cart, product Q&A, and staged store "
                  "changes; checkout and every store write stay human."),
     "aerospace_defense": ("Aerospace & Defense",
-                          "Airworthiness, program and export-control operations."),
+                          "Prepare aircraft safety reviews, engineering changes, supplier-quality checks, and export-control work."),
     "agriculture": ("Agriculture",
-                    "Farm, crop and supply operations."),
+                    "Plan crops and farm operations, monitor supply risks, and prepare market decisions."),
     "automotive": ("Automotive",
-                   "Vehicle program, dealer and warranty operations."),
+                   "Support vehicle programs, dealer sales and service, warranty claims, and connected-car risks."),
     "chemicals": ("Chemicals",
-                  "Plant, product stewardship and regulatory operations."),
+                  "Review batch records, plant safety, product stewardship, and supply performance."),
     "crypto_digital_assets": ("Crypto & Digital Assets",
-                              "Digital-asset custody, compliance and market operations."),
+                              "Review digital-asset custody, transaction risk, compliance, and fund operations."),
     "enterprise_risk": ("Enterprise Risk",
-                        "Risk registers, controls and board reporting."),
+                        "Map business risks to controls, continuity plans, insurance coverage, and board reporting."),
     "esg_sustainability": ("ESG & Sustainability",
-                           "Sustainability reporting, emissions and supplier standards."),
+                           "Assemble emissions and supplier evidence, prepare sustainability disclosures, and track improvement plans."),
     "food_beverage_cpg": ("Food, Beverage & Consumer Goods",
-                          "Product, quality and trade operations for consumer goods."),
+                          "Support product quality, food safety, demand planning, and retailer trade programs."),
     "knowledge_management": ("Knowledge Management",
-                             "Curate, organize and share what the company knows."),
+                             "Turn scattered documents and lessons into findable, maintained answers for teams."),
     "maritime": ("Maritime",
-                 "Fleet, port and shipping operations."),
+                 "Prepare vessel, cargo, port, and crew work, including shipping documents and maintenance plans."),
     "medical_devices": ("Medical Devices",
-                        "Regulated device design, quality and post-market operations."),
+                        "Prepare device design and quality records, complaint reviews, and post-market follow-up."),
     "mining_metals": ("Mining & Metals",
-                      "Mine, plant and commodity operations."),
+                      "Support exploration, mine planning, plant performance, equipment upkeep, and commodity reporting."),
     "oil_gas": ("Oil & Gas",
-                "Upstream, midstream and downstream operations."),
+                "Support drilling plans, production, pipeline scheduling, safety, and environmental reporting."),
     "private_equity_vc": ("Private Equity & Venture Capital",
-                          "Deal, portfolio and investor operations."),
+                          "Assess deals, coordinate diligence and portfolio plans, and prepare investor reporting."),
     "process_automation": ("Process Automation",
-                           "Automate repeatable business processes end to end."),
+                           "Find repeatable work to automate, map its data and checks, and monitor the automations."),
     "public_sector": ("Public Sector",
-                      "Government program, citizen service and grant operations."),
+                      "Support public programs, benefits and case work, budgeting, and constituent service."),
     "renewables_cleantech": ("Renewables & Clean Tech",
-                             "Project, asset and grid operations for clean energy."),
+                             "Plan and monitor clean-energy projects, assets, grid connections, and performance."),
     "semiconductors": ("Semiconductors",
-                       "Fab, yield and supply operations."),
+                       "Support chip design, fabrication yield, failure analysis, supply planning, and export compliance."),
     "travel_aviation": ("Travel & Aviation",
-                        "Airline, airport and travel operations."),
+                        "Support airline and airport operations, bookings, baggage, cargo, and traveler service."),
     "trust_safety": ("Trust & Safety",
-                     "Content moderation, abuse and platform integrity."),
+                     "Review abuse and harmful content, account integrity, appeals, and escalation to people."),
     "water_utilities": ("Water Utilities",
-                        "Water and wastewater operations and compliance."),
+                        "Support water and wastewater assets, field work, treatment, billing, and compliance."),
 }
 
 
@@ -338,6 +337,28 @@ def fleet_from_department(dept: Department, owner: str, *,
                  owner=owner, agents=agents)
 
 
+def merge_department_fleet(candidate, existing, *, known_members: list[str]):
+    """Keep an edited team intact and append only specialists not offered before.
+
+    Older team files have no deployment marker. On their first update we treat
+    the current catalog as already offered, so a specialist the customer removed
+    cannot be silently recreated. A later release's genuinely new members can
+    then be added on the next update.
+    """
+    from dataclasses import replace
+
+    if existing is None:
+        return replace(candidate, department_members_added=tuple(a.name for a in candidate.agents)), len(candidate.agents)
+    if existing.name != candidate.name or existing.owner != candidate.owner:
+        raise ValueError("the existing team belongs to another owner")
+    seen = set(existing.department_members_added) if existing.department_members_added else set(known_members)
+    names = {agent.name for agent in existing.agents}
+    added = tuple(agent for agent in candidate.agents if agent.name not in seen and agent.name not in names)
+    seen.update(agent.name for agent in candidate.agents)
+    return replace(existing, agents=(*existing.agents, *added),
+                   department_members_added=tuple(sorted(seen))), len(added)
+
+
 def deploy_department(key: str, owner: str, *, cfg: dict | None = None,
                       tenant: str | None = None, name: str | None = None,
                       save: bool = True):
@@ -360,6 +381,13 @@ def deploy_department(key: str, owner: str, *, cfg: dict | None = None,
     ensure_suite_allowed(owner, key)
     fleet = fleet_from_department(dept, owner, cfg=cfg, name=name)
     if save:
-        from .fleet import save_fleet
-        save_fleet(fleet, tenant=tenant or "__active__")
+        from .file_lock import cross_process_lock
+        from .fleet import fleets_dir, load_fleet, save_fleet
+
+        target_tenant = tenant or "__active__"
+        with cross_process_lock(fleets_dir(tenant=target_tenant) / f"{fleet.name}.json"):
+            fleet, _added = merge_department_fleet(
+                fleet, load_fleet(fleet.name, tenant=target_tenant), known_members=dept.members,
+            )
+            save_fleet(fleet, tenant=target_tenant)
     return fleet

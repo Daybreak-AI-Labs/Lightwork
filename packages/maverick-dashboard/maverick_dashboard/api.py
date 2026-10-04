@@ -14134,7 +14134,10 @@ def _require_jd_hiring() -> None:
 
 def _scoped_jd_matches(request: Request, jd_text: str, k: int) -> dict:
     from maverick.domain import available_domains, suites_for_domain
+    from maverick.domain_edit import workflow_readiness
     from maverick.jd_hiring import match_jd
+
+    from .plain_labels import pack_display_name
 
     # Job-function scoping, mirroring /agents: a department-scoped caller only
     # ranks their departments' specialists plus generic (suite-less) packs.
@@ -14149,7 +14152,21 @@ def _scoped_jd_matches(request: Request, jd_text: str, k: int) -> dict:
             if suites_for_domain(name, profile) <= allowed
         }
     matches = match_jd(jd_text, k=k, domains=domains)
-    return {"matches": [m.to_dict() for m in matches]}
+    rows = []
+    for match in matches:
+        profile = domains.get(match.name)
+        if profile is None:
+            continue
+        try:
+            readiness = workflow_readiness(profile)
+        except Exception:
+            readiness = {"state": "unknown", "label": "Setup check unavailable", "fix_url": "/settings"}
+        rows.append({
+            **match.to_dict(),
+            "display_name": pack_display_name(match.name, profile.persona, profile.description),
+            "readiness": readiness,
+        })
+    return {"matches": rows}
 
 
 @router.post("/agents/jd/match")
@@ -14230,7 +14247,7 @@ async def draft_agent_from_jd(request: Request, payload: JDDraftIn) -> dict:
             llm = None
             budget = None
     try:
-        profile = await run_in_threadpool(
+        profile, draft_source = await run_in_threadpool(
             lambda: draft_from_jd(
                 payload.role_title,
                 payload.jd_text,
@@ -14238,6 +14255,7 @@ async def draft_agent_from_jd(request: Request, payload: JDDraftIn) -> dict:
                 llm=llm,
                 model=llm_model,
                 budget=budget,
+                return_source=True,
             )
         )
     except ValueError as exc:
@@ -14261,7 +14279,9 @@ async def draft_agent_from_jd(request: Request, payload: JDDraftIn) -> dict:
                 for s in profile.workflow
             ],
         },
-        "generated_with_llm": llm is not None,
+        "generated_with_llm": draft_source == "ai",
+        "ai_attempted": llm is not None,
+        "draft_source": draft_source,
     }
 
 
@@ -16906,10 +16926,16 @@ async def list_departments_api(request: Request) -> list[dict]:
     Suite-scoped (job function): a caller with a department grant sees only
     their departments; unscoped callers (auth off / admin / no grant) see all.
     """
-    from maverick.departments import list_departments
+    from maverick.departments import fleet_name_for, list_departments
     from maverick.domain_edit import list_agents
+    from maverick.fleet import list_fleets
 
     allowed = caller_suites(request)
+    owner = caller_principal(request) or ""
+    try:
+        deployed = {fleet.name for fleet in list_fleets() if fleet.owner == owner}
+    except Exception:
+        deployed = set()
     agents_by_name = {agent["name"]: agent for agent in list_agents()}
     out = []
     for d in list_departments():
@@ -16917,6 +16943,7 @@ async def list_departments_api(request: Request) -> list[dict]:
             continue
         row = d.to_dict()
         row["entitled"] = _department_entitled_for_request(d.key)
+        row["deployed"] = fleet_name_for(d.key, owner) in deployed
         row.update(_department_action_status(d.members, agents_by_name))
         out.append(row)
     return out
@@ -16947,7 +16974,7 @@ async def get_department_api(request: Request, key: str) -> dict:
 
 
 @router.post("/departments/{key}/deploy", status_code=201)
-async def deploy_department_api(request: Request, key: str) -> dict:
+async def deploy_department_api(request: Request, response: Response, key: str) -> dict:
     """Deploy a department as a fleet of its specialists — a PAID ADD-ON.
 
     Gated four ways: ``operate`` RBAC (a viewer is 403'd), the caller's
@@ -16963,8 +16990,10 @@ async def deploy_department_api(request: Request, key: str) -> dict:
         deploy_department,
         fleet_name_for,
         get_department,
+        merge_department_fleet,
     )
-    from maverick.fleet import load_fleet, save_fleet
+    from maverick.file_lock import cross_process_lock
+    from maverick.fleet import fleets_dir, load_fleet, save_fleet
     from maverick.suite_grants import DepartmentAccessError
 
     dept = get_department(key)
@@ -16979,8 +17008,6 @@ async def deploy_department_api(request: Request, key: str) -> dict:
     if (
         existing is not None
         and existing.owner != owner
-        and principal is not None
-        and not is_dashboard_admin(principal)
     ):
         raise HTTPException(status_code=404, detail="no such fleet")
 
@@ -16997,7 +17024,7 @@ async def deploy_department_api(request: Request, key: str) -> dict:
 
     by_name = {agent["name"]: agent for agent in list_agents()}
     action_status = _department_action_status(dept.members, by_name)
-    if action_status["ready_specialists"] == 0:
+    if action_status["ready_specialists"] == 0 and existing is None:
         raise HTTPException(
             status_code=409,
             detail="This team has no specialists whose required actions passed setup checks. "
@@ -17026,7 +17053,7 @@ async def deploy_department_api(request: Request, key: str) -> dict:
     from dataclasses import replace
 
     fleet = replace(fleet, agents=tuple(a for a in fleet.agents if a.name in ready_names))
-    if not fleet.agents:
+    if not fleet.agents and existing is None:
         raise HTTPException(
             status_code=409,
             detail="No ready specialist remains in this team. Open View team to check its setup.",
@@ -17042,8 +17069,20 @@ async def deploy_department_api(request: Request, key: str) -> dict:
         }
         for name in dept.members if name not in deployed_names
     ]
-    save_fleet(fleet, tenant=tenant or "__active__")
+    target_tenant = tenant or "__active__"
+    with cross_process_lock(fleets_dir(tenant=target_tenant) / f"{fleet_name}.json"):
+        current = load_fleet(fleet_name, tenant=target_tenant)
+        if current is not None and current.owner != owner:
+            raise HTTPException(status_code=404, detail="no such fleet")
+        if not fleet.agents and current is None:
+            raise HTTPException(status_code=409, detail="No ready specialist remains in this team.")
+        baseline_created = current is not None and not current.department_members_added
+        fleet, added_count = merge_department_fleet(fleet, current, known_members=dept.members)
+        save_fleet(fleet, tenant=target_tenant)
+    response.status_code = 201 if current is None else 200
     return {"fleet": fleet.to_dict(), "deployed_count": len(fleet.agents),
+            "created": current is None, "added_count": added_count,
+            "baseline_created": baseline_created,
             "skipped_count": len(skipped), "skipped_specialists": skipped}
 
 

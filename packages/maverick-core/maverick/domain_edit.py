@@ -378,6 +378,7 @@ def _resolved_view(name: str, directory: str | Path | None = None) -> dict | Non
     if prof is None:
         return None
     raw = read_override(name, directory)
+    base = _base_profile(name, raw)
     errors, warnings = lint_profile(prof)
     readiness = workflow_readiness(prof)
     from .agent_autonomy import default_profile_for, effective_profile, levels_enabled, resolve
@@ -395,8 +396,10 @@ def _resolved_view(name: str, directory: str | Path | None = None) -> dict | Non
         "description": prof.description,
         "persona": prof.persona,
         "allow_tools": list(prof.allow_tools),
+        "base_allow_tools": list(base.allow_tools) if base else None,
         "deny_tools": list(prof.deny_tools),
         "max_risk": prof.max_risk,
+        "base_max_risk": base.max_risk if base else None,
         "knowledge_sources": list(prof.knowledge_sources),
         "models": dict(prof.models),
         "workflow": [_step_dict(s) for s in prof.workflow],

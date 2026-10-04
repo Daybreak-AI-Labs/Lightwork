@@ -1,14 +1,47 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from maverick_dashboard import copilot_context
 
 CANONICAL_CONTEXTS = {
     "/chat": "Chat",
+    "/today": "Today",
+    "/workflow-readiness": "Workflow readiness",
+    "/code": "Code",
+    "/me": "My work",
+    "/research": "Research lab",
+    "/action-center": "Action Center",
+    "/goals": "Tasks",
+    "/deliverables": "Results",
+    "/automations": "Automations",
+    "/overview": "Overview",
+    "/ekko": "Ekko",
+    "/oversight": "Oversight",
+    "/run-tree": "Branches",
+    "/spend": "Spend",
+    "/savings": "Savings",
+    "/shoring": "Autonomous Shoring",
+    "/knowledge-access": "Knowledge",
+    "/learning": "Learning",
+    "/permissions": "Permissions",
+    "/connections": "Connections",
+    "/workspace/recovery": "Workspace Recovery",
+    "/settings": "Settings",
+    "/users": "Users",
+    "/spending-limits": "Spending limits",
+    "/tenants": "Workspaces",
+    "/help": "Help and Diagnostics",
+    "/account": "Account",
+    "/start": "Get started",
+    "/providers": "AI services",
+    "/billing": "Billing",
     "/commitment-reviews": "Promise reviews",
     "/workflows": "Flows",
     "/agents": "Specialists",
     "/workforce": "Workforce",
+    "/fleets": "Teams",
     "/approvals": "Approvals",
     "/facts": "Shared business facts",
     "/content-access": "Employee content access",
@@ -95,6 +128,45 @@ def test_registry_paths_are_unique_and_match_expected_pages() -> None:
     assert len(registered) == len(set(registered))
     assert set(registered) == set(CANONICAL_CONTEXTS)
     assert set(copilot_context._PANEL_TIPS) == set(CANONICAL_CONTEXTS)
+
+
+def test_every_everyday_navigation_page_has_authored_help() -> None:
+    from maverick_dashboard.ui_visibility import PAGES
+
+    missing = [page["path"] for page in PAGES
+               if page.get("in_nav", True) and page.get("group") in {"Operate", "Observe", "Admin"}
+               and page["path"] not in copilot_context._CONTEXT_BY_PATH]
+    assert missing == []
+    assert copilot_context.context_for_page("/help").path == "/help"
+
+
+@pytest.mark.parametrize(("path", "template", "control"), [
+    ("/today", "today.html", "In-flight work"),
+    ("/action-center", "action_center.html", "Refresh list"),
+    ("/goals", "goals.html", "Result"),
+    ("/deliverables", "deliverables.html", "Finished work"),
+    ("/automations", "automations.html", "Schedules"),
+    ("/overview", "index.html", "Recent goals"),
+    ("/spend", "spend.html", "Cost of each task"),
+    ("/savings", "savings.html", "Save and recalculate"),
+    ("/shoring", "shoring.html", "Book of Work"),
+    ("/knowledge-access", "knowledge_access.html", "Source detail"),
+    ("/learning", "learning.html", "Preview what would change"),
+    ("/connections", "connections.html", "Saved connections"),
+    ("/settings", "settings.html", "Models"),
+    ("/users", "users.html", "Workspace members"),
+    ("/fleets", "fleets.html", "Start task"),
+    ("/spending-limits", "spending_limits.html", "Whole workspace"),
+    ("/workspace/recovery", "workspace_recovery.html", "Recovery Key"),
+    ("/help", "support.html", "Prepare support report"),
+    ("/account", "account.html", "Your preferences"),
+    ("/providers", "providers.html", "Test connection"),
+    ("/billing", "billing.html", "Monthly statements"),
+])
+def test_core_guide_first_step_names_a_real_page_control(path: str, template: str, control: str) -> None:
+    source = (Path(__file__).resolve().parents[1] / "maverick_dashboard" / "templates" / template).read_text(encoding="utf-8")
+    assert control in source
+    assert control in copilot_context.context_for_page(path).next_steps[0]
 
 
 def test_panel_tips_are_page_specific_and_do_not_repeat_internal_boundaries() -> None:

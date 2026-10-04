@@ -9749,6 +9749,7 @@ def _turn_text(title: str, description: str) -> str:
 def _chat_threads(request: Request, w, *, active_root: int | None = None) -> list[dict]:
     """The caller's recent chats (root goals) for the sidebar, newest first."""
     from maverick.chat_threads import ChatThreads
+    from maverick.stop_reasons import stop_payload
 
     try:
         goals = w.conversation_summaries(owner=goal_owner_filter(request), limit=_THREAD_LIST_LIMIT)
@@ -9767,6 +9768,13 @@ def _chat_threads(request: Request, w, *, active_root: int | None = None) -> lis
         if target is None:
             continue
         assert_goal_access(request, target)
+        stop_kind = ""
+        if target.status == "blocked":
+            try:
+                stopped = w.goal_stream_state(target_id, include_result=True)
+                stop_kind = (stop_payload(stopped.status, stopped.result) or {}).get("kind", "")
+            except Exception:
+                pass  # A sidebar label must not make a task page unavailable.
         try:
             metadata = organization(request, w, g.id)
         except Exception:
@@ -9775,6 +9783,7 @@ def _chat_threads(request: Request, w, *, active_root: int | None = None) -> lis
             continue
         threads.append({
             "id": g.id, "target_id": target_id, "title": metadata["title"] or g.title, "status": target.status,
+            "stop_kind": stop_kind,
             "pinned": metadata["pinned"], "archived": metadata["archived"],
             "active": g.id == active_root, "updated_at": g.updated_at,
         })

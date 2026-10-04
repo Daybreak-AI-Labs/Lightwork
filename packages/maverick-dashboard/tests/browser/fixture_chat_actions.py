@@ -58,6 +58,16 @@ def install(app, world, tenant, principal):
             world.set_goal_status(chat_goal_id, "blocked", result="provider connection refused")
         return {"synthetic": True, "provider_calls": 0}
 
+    @app.post("/__browser_fixture/chat/{chat_goal_id}/specialist-setup-fail", include_in_schema=False)
+    async def fixture_chat_specialist_setup_fail(chat_goal_id: int):
+        with tenant_scope(tenant=tenant):
+            world.set_goal_domain(chat_goal_id, "legal_research")
+            world.set_goal_status(chat_goal_id, "blocked", result=(
+                "domain 'legal_research' agent build failed: Domain 'legal_research' "
+                "cannot deploy: required workflow tools unavailable: web_search. "
+                "No model work has started."))
+        return {"synthetic": True, "provider_calls": 0}
+
     @app.post("/__browser_fixture/long-chat", include_in_schema=False)
     async def fixture_long_chat():
         with tenant_scope(tenant=tenant):

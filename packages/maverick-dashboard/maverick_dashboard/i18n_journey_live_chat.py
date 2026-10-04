@@ -15,6 +15,8 @@ ROWS = [
 ('Working','En cours','In Bearbeitung','作業中','正在处理'),
 ('Done','Terminé','Erledigt','完了','已完成'),
 ('Paused','En pause','Pausiert','一時停止中','已暂停'),
+('Work is paused. Your message is still here; you can start it after work resumes.','Le travail est en pause. Votre message est toujours ici ; vous pourrez le démarrer lorsque le travail reprendra.','Die Arbeit ist pausiert. Ihre Nachricht ist noch hier; Sie können sie nach der Fortsetzung starten.','作業は一時停止中です。メッセージはここに残っています。作業の再開後に開始できます。','工作已暂停。您的消息仍保留在这里；工作恢复后即可开始。'),
+('Ask Copilot about this task','Interroger Copilot sur cette tâche','Copilot zu dieser Aufgabe fragen','このタスクについてCopilotに質問','向Copilot询问此任务'),
 ('Failed','Échec','Fehlgeschlagen','失敗','失败'),
 ('Stopped','Arrêté','Gestoppt','停止済み','已停止'),
 ('Complete','Terminé','Abgeschlossen','完了','已完成'),

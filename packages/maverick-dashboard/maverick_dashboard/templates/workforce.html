@@ -98,9 +98,9 @@
           <button type="button" class="btn btn--ghost" data-key="{{ d.key }}" data-act="team" aria-label="View {{ d.title }} team">View team</button>
           <button type="button" class="btn btn--ghost" data-key="{{ d.key }}" data-act="review" aria-label="Review {{ d.title }} performance">Performance review</button>
           {% if entitlements.get(d.key) %}
-          <button type="button" class="btn btn--primary" data-key="{{ d.key }}" data-act="deploy" aria-label="Deploy {{ d.title }} team">Deploy team</button>
+          <button type="button" class="btn btn--primary" data-key="{{ d.key }}" data-act="deploy" aria-label="Set up {{ d.title }} team">Set up team</button>
           {% else %}
-          <button type="button" class="btn btn--primary" data-key="{{ d.key }}" data-act="deploy" aria-label="Deploy {{ d.title }} team" aria-describedby="addon-note-{{ d.key }}">Deploy team</button>
+          <button type="button" class="btn btn--primary" data-key="{{ d.key }}" data-act="deploy" aria-label="Set up {{ d.title }} team" aria-describedby="addon-note-{{ d.key }}">Set up team</button>
           <span id="addon-note-{{ d.key }}" class="muted">paid add-on</span>
           {% endif %}
         </p>
@@ -281,13 +281,18 @@
           });
           if (!card) return;
           var badge = card.querySelector('.dept-readiness');
+          var deploy = card.querySelector('button[data-act="deploy"]');
+          if (deploy && d.deployed) {
+            deploy.dataset.deployed = 'true';
+            deploy.textContent = 'Update team';
+            deploy.setAttribute('aria-label', 'Update ' + d.title + ' team');
+          }
           var ready = Number(d.ready_specialists || 0);
           var unknown = Number(d.unknown_specialists || 0);
           badge.textContent = unknown
             ? ready + ' of ' + d.headcount + ' can start; ' + unknown + ' need a setup check'
             : ready + ' of ' + d.headcount + ' can start';
-          if (ready === 0) {
-            var deploy = card.querySelector('button[data-act="deploy"]');
+          if (ready === 0 && !d.deployed) {
             if (deploy) {
               deploy.disabled = true;
               deploy.title = unknown
@@ -326,9 +331,11 @@
         if (act === "deploy") {
           if (btn.dataset.inFlight === "true") return;
           btn.dataset.inFlight = "true";
-          if (!(await mvConfirm(
-            "Deploy the " + deptTitle + " team? This creates an operational fleet and its specialists.",
-            { okText: "Deploy team" }
+          var updating = btn.dataset.deployed === 'true';
+          if (!(await mvConfirm(updating
+            ? "Check the " + deptTitle + " team for new ready specialists? Your specialists and changes will stay."
+            : "Set up the " + deptTitle + " team? If it already exists, your changes will stay while Lightwork checks for new ready specialists.",
+            { okText: updating ? "Update team" : "Set up team" }
           ))) { delete btn.dataset.inFlight; return; }
           var box = card.querySelector(".dept-detail");
           box.hidden = false;
@@ -344,12 +351,23 @@
             var res = { ok: response.ok, status: response.status, body: body };
             if (res.ok) {
               var f = res.body.fleet || {};
-              var deployed = (f.agents || []).length;
+              var deployed = Number(res.body.deployed_count || (f.agents || []).length);
+              var added = Number(res.body.added_count || 0);
               var skipped = Number(res.body.skipped_count || 0);
-              box.innerHTML = "<p>Deployed <strong>" + esc(human(f.name)) + "</strong> — " +
-                esc(deployed) + " specialist" + (deployed === 1 ? '' : 's') + " ready for tasks. " +
-                (skipped ? esc(skipped) + " still need setup and were not deployed. Use View team to see what they need. " : "") +
-                "Give the ready specialists tasks from <a href=\"/fleets\">Fleets</a>.</p>";
+              var result = res.body.created
+                ? "Team set up with " + deployed + " specialist" + (deployed === 1 ? '' : 's') + ". "
+                : res.body.baseline_created
+                  ? "Team kept as it is. Future new catalog specialists can be added on an update; your existing changes were kept. "
+                : added ? "Added " + added + " new specialist" + (added === 1 ? '' : 's') + ". Your existing team changes were kept. "
+                  : "Team unchanged. Your existing specialists and changes were kept; no new ready specialists were added. ";
+              box.innerHTML = "<p><strong>" + esc(human(f.name)) + "</strong> — " + esc(result) +
+                (skipped ? esc(skipped) + " catalog specialists still need setup. Use View team to see what they need. " : "") +
+                (deployed ? "Give the team tasks from " : "Add specialists in ") +
+                "<a href=\"/fleets#team-" + esc(encodeURIComponent(f.name || '')) + "\">Teams</a>" +
+                (deployed ? "." : " before giving it work.") + "</p>";
+              btn.dataset.deployed = 'true';
+              btn.textContent = 'Update team';
+              btn.setAttribute('aria-label', 'Update ' + deptTitle + ' team');
             } else if (res.status === 402) {
               box.innerHTML = "<p class=\"muted\">This department is a paid add-on. " +
                 "Ask your administrator to add it to your plan.</p>";

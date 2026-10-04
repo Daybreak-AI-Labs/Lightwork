@@ -59,6 +59,7 @@ def test_fleets_page_lists_a_saved_fleet(monkeypatch, tmp_path):
     assert "dana" in text                       # owner shown as a name
     assert "Researcher" in text                 # roles shown as job titles
     assert "Coder" in text
+    assert 'id="team-acme"' in text  # deployment links target the exact team
     from test_support.plain_language import developer_terms
     assert developer_terms(text) == []
 
@@ -74,13 +75,12 @@ def test_fleets_empty_state_shows_create_hint(monkeypatch, tmp_path):
 
 
 def test_fleets_page_reachable(monkeypatch, tmp_path):
-    # Fleets is folded out of the sidebar in the moderate declutter (reached
-    # from Workforce in-page), but the page still renders at its URL.
+    # The Teams destination keeps its existing /fleets URL for saved links.
     _isolate(monkeypatch, tmp_path)
     r = _client().get("/fleets")
     assert r.status_code == 200
     # Shared hero h1 (page-title + hero-title classes) carries the page name.
-    assert ">Fleets</h1>" in r.text
+    assert ">Teams</h1>" in r.text
 
 
 def test_recent_oversight_panel_shows_governance_holds(monkeypatch, tmp_path):

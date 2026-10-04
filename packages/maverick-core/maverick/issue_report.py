@@ -30,12 +30,14 @@ def build_issue_url(
 
 def build_report_fields(
     goal, error_events, *, repo: str = DEFAULT_REPO, version: str | None = None,
+    failure_cause: str | None = None,
 ) -> dict[str, str]:
     """Build the exact, bounded local draft before any external navigation.
 
     ``goal`` exposes ``.id`` / ``.title`` / ``.status``; ``error_events`` is a
-    list of objects with ``.agent`` / ``.content``. All free text is scrubbed
-    of secrets (API keys, tokens) before it ever reaches the URL.
+    list of objects with ``.agent`` / ``.content``. ``failure_cause`` is
+    explicit so the CLI URL does not silently gain the task's result. All
+    free text is scrubbed of secrets before it leaves this builder.
     """
     from .secrets import scrub
 
@@ -48,8 +50,19 @@ def build_report_fields(
         f"- Status: {getattr(goal, 'status', '?')}",
     ]
     if version:
-        lines.append(f"- Version: {version}")
+        lines.append(f"- Version: {scrub(str(version)).strip()[:80]}")
     lines += ["", "### Errors", ""]
+    reason = ""
+    if failure_cause:
+        from .safety.secret_detector import redact
+
+        try:
+            reason, _ = redact(scrub(str(failure_cause)[:4000]))
+            reason = " ".join(reason.split())[:800]
+        except Exception:
+            reason = "(The failure details could not be safely prepared.)"
+        if reason:
+            lines.append(f"- Recorded failure: {reason}")
     if error_events:
         for e in error_events:
             agent = scrub(str(getattr(e, "agent", "?") or "?"))
@@ -57,7 +70,7 @@ def build_report_fields(
             lines.append(
                 f"<details><summary>{agent}</summary>\n\n```\n{content}\n```\n</details>"
             )
-    else:
+    elif not reason:
         lines.append("_(no error events recorded)_")
     lines += ["", "### What I expected", "", "<!-- describe the expected behaviour -->"]
     body = "\n".join(lines)

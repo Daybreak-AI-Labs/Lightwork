@@ -3,6 +3,7 @@
   'use strict';
   const form=document.getElementById('halt-resume-form');if(!form)return;
   const button=document.getElementById('halt-resume'),budget=document.getElementById('halt-resume-budget'),message=document.getElementById('halt-resume-msg');
+  const setupButton=document.getElementById('halt-check-setup'),setupMessage=document.getElementById('halt-setup-message');
   const root='/api/v1/goals/'+form.dataset.goal,context=form.dataset.context,key='lightwork:restart:'+context+':'+form.dataset.goal;
   let prepared=null,busy=false,uncertain=false,received=false;
   const copy=(node,text,values)=>{if(window.LightworkI18n)window.LightworkI18n.set(node,text,values);else node.textContent=String(text||'').replace(/\{(\w+)\}/g,(whole,key)=>values&&Object.prototype.hasOwnProperty.call(values,key)?String(values[key]):whole);};
@@ -14,6 +15,12 @@
   function remember(id){try{sessionStorage.setItem(key,id);}catch(_){copy(message,'Keep this page open until its restart receipt is confirmed.');}}
   function forget(){try{sessionStorage.removeItem(key);}catch(_){}check.hidden=true;}
   async function request(path,body){const abort=new AbortController(),timer=setTimeout(()=>abort.abort(),30000);try{const response=await fetch(root+path,{method:body?'POST':'GET',credentials:'same-origin',cache:'no-store',signal:abort.signal,headers:{'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined});const value=await response.json().catch(()=>null);if(response.redirected||!value)throw new Error('Restart outcome is not confirmed. Keep the receipt reference and check current progress.');if(!response.ok){const error=new Error(value.detail&&value.detail.message||typeof value.detail==='string'&&value.detail||'Restart could not be accepted. Review current task progress.');error.known=response.status<500;throw error;}if(value.context&&value.context!==context){prepared=null;forget();const error=new Error('Your account or workspace changed. Reopen this task before restarting.');error.known=true;throw error;}return value;}finally{clearTimeout(timer);}}
+  if(setupButton&&setupMessage)setupButton.addEventListener('click',async()=>{
+    if(busy)return;busy=true;setupButton.disabled=true;
+    try{const review=await request('/resume-review');if(review.blocked){form.hidden=true;copy(setupMessage,review.blocked);}else{form.hidden=false;copy(setupMessage,'Required actions are available. Review a restart to continue; live connections are checked when work starts.');}}
+    catch(error){copy(setupMessage,error.message);}
+    finally{busy=false;setupButton.disabled=false;}
+  });
   function confirmed(value){if(!value.received)throw new Error('No restart receipt is confirmed yet. The original request may still be finishing.');received=true;uncertain=false;forget();button.disabled=true;budget.disabled=false;copy(message,'Restart admission is recorded. Check task progress to confirm execution. No second attempt was dispatched.');}
   async function checkReceipt(){if(busy)return;const id=prepared&&prepared.operation_id||pointer();if(!id)return;busy=true;try{confirmed(await request('/resume-receipt/'+id));}catch(error){copy(message,error.message);}finally{busy=false;}}
   check.onclick=checkReceipt;
@@ -35,5 +42,5 @@
     }catch(error){copy(message,error.message);if(error.known&&!uncertain){prepared=null;forget();budget.disabled=false;copy(button,'Review restart');}else if(prepared&&pointer()){uncertain=true;copy(button,'Retry same restart');copy(message,'Check its receipt or retry this exact request; no automatic retry will occur. {reason}',{reason:translated(error.message)});}}
     finally{busy=false;if(!received)button.disabled=false;}
   });
-  if(pointer()){check.hidden=false;copy(message,'Checking the earlier restart receipt. No task will be started by this check.');checkReceipt();}
+  if(pointer()){form.hidden=false;check.hidden=false;copy(message,'Checking the earlier restart receipt. No task will be started by this check.');checkReceipt();}
 }());

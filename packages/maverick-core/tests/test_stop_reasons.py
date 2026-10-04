@@ -52,6 +52,21 @@ def test_unpriced_model_points_to_known_price_setup_without_exposing_the_id():
     assert stop.technical == raw
 
 
+def test_missing_specialist_action_explains_setup_without_exposing_internal_names():
+    raw = ("domain 'legal_research' agent build failed: Domain 'legal_research' "
+           "cannot deploy: required workflow tools unavailable: web_search. "
+           "Configure/enable the named adapter or MCP connection, or revise the workflow "
+           "to read an operator-approved workspace export with read_file. No model work has started.")
+    stop = explain_stop(raw)
+    assert stop.kind == "specialist_setup"
+    assert "Web search" in stop.message
+    assert "No work has started" in stop.message
+    assert stop.link == "/settings/all?id=capabilities.web_search"
+    assert "legal_research" not in stop.message + stop.action
+    assert "MCP" not in stop.message + stop.action
+    assert stop.technical == raw
+
+
 @pytest.mark.parametrize("raw", [
     "provider not ready: ANTHROPIC_API_KEY is not set",
     "httpx.ConnectError: [Errno 111] connection refused",

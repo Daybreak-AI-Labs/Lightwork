@@ -68,6 +68,30 @@ def test_people_see_only_their_own_stopped_tasks_and_get_a_local_draft(client, m
     assert client.post("/api/v1/support/issue-report", json={"task": 0}).status_code == 422
 
 
+def test_task_draft_includes_installed_version_and_redacted_result(client, monkeypatch):
+    from maverick_dashboard import __version__
+    from maverick_dashboard._shared import _world
+
+    task = _stopped_task("user:vic@example.com", "Provider test")
+    secret = "sk-ant-api03-" + "z" * 40
+    _world().set_goal_status(task, "blocked", result=f"provider HTTP 500; credential {secret}")
+    _as(monkeypatch, "viewer", "user:vic@example.com")
+    response = client.post("/api/v1/support/issue-report", json={"task": task})
+    assert response.status_code == 200
+    draft = response.json()
+    assert f"Version: {__version__}" in draft["body"]
+    assert "provider HTTP 500" in draft["body"]
+    assert secret not in str(draft)
+    assert "no error events recorded" not in draft["body"].lower()
+    assert "url" not in draft
+
+    completed = _world().create_goal("Private completed work", owner="user:vic@example.com")
+    _world().set_goal_status(completed, "done", result="private completed output")
+    refused = client.post("/api/v1/support/issue-report", json={"task": completed})
+    assert refused.status_code == 409
+    assert "private completed output" not in refused.text
+
+
 def test_support_search_finds_old_tasks_and_deep_link_rechecks_access(client, monkeypatch):
     oldest = _stopped_task("user:vic@example.com", "Oldest quarterly task")
     for index in range(59):

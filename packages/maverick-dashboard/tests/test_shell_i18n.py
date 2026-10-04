@@ -25,7 +25,8 @@ def render(name, language, **values):
     env = Environment(loader=FileSystemLoader(ROOT / "templates"), autoescape=select_autoescape())
     request = SimpleNamespace(query_params={}, headers={}, cookies={}, state=SimpleNamespace())
     context = i18n_journeys.context(request, language)
-    context.update(lang=language, page_lang="en", dir="rtl" if language == "ar" else "ltr",
+    page_lang = i18n.content_lang(language)
+    context.update(lang=language, page_lang=page_lang, dir=i18n.dir_for(page_lang),
                    asset=lambda name: "/static/" + name, t=lambda key: i18n.t(key, language),
                    threads=[], nav_groups=[], finder_pages=[], can_halt=False, can_create_goal=False,
                    custom_theme_names=[], path="/chat")
@@ -75,9 +76,16 @@ def test_shell_escape_original_titles_and_declare_fallback_language(name):
     else:
         assert i18n_journeys.text("Pinned:", "fr") in html
     fallback = render(name, "ar")
-    assert '<html lang="en" dir="rtl">' in fallback
+    assert '<html lang="en" dir="ltr">' in fallback
     assert 'lang="en" dir="ltr" data-product-copy>Find a page' in fallback
     assert frozenset({"en"}) == i18n.CONTENT_LANGS
+
+
+def test_owner_sign_in_shell_keeps_english_body_direction_with_arabic_selection():
+    html = render("local_owner.html", "ar", title="Sign in as the local owner",
+                  explanation="Use the owner email and passphrase.", message="", setup=False)
+    assert '<html lang="en" dir="ltr">' in html
+    assert "Use the owner email and passphrase." in html
 
 
 def test_stop_copy_has_two_distinct_scopes_and_keeps_review_qualification():

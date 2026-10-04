@@ -90,8 +90,12 @@ def test_changes_and_downloads_need_a_workspace_admin(client, monkeypatch):
 
 
 def test_inventory_summarises_every_specialist_in_plain_words(client, monkeypatch, audit_rows):
+    from maverick.departments import department_title
+
     inv = client.get(f"{API}/inventory").json()
     assert inv["specialists"] > 0 and inv["suites"]
+    assert all(row["label"] == department_title(row["value"]) for row in inv["suites"])
+    assert [row["label"] for row in inv["suites"]] == sorted(row["label"] for row in inv["suites"])
     assert inv["can_change_things_while_drafting"] == 0
     suite = inv["suites"][0]["value"]
     one = client.get(f"{API}/inventory", params={"suite": suite}).json()
