@@ -172,3 +172,40 @@ test("analysis pins come from the chosen document and criteria, and a changed fi
   assert.match(h.$("operation-status").textContent, /doesn't match the registered document/);
   assert.equal(h.calls.filter((c) => c.key === "POST /analyses").length, 1);
 });
+
+// ---- no loader keeps saying "Loading" ---------------------------------------
+function settledPage(t, status, moduleEnabled = "true") {
+  const dom = new JSDOM(`<main>${pageBody}</main>`, { url: "https://lightwork.test/ai-evidence-analysis", runScripts: "outside-only" });
+  t.after(() => dom.window.close());
+  const w = dom.window;
+  w.document.getElementById("evidence-shell").dataset.moduleEnabled = moduleEnabled;
+  w.mvErrorText = (failure, action) => "Could not " + action + ". Try again in a few minutes.";
+  const calls = [];
+  w.fetch = async (url) => { calls.push(url); return status(); };
+  w.eval(pageSource);
+  const settle = async () => { for (let i = 0; i < 40; i += 1) await new Promise((r) => setImmediate(r)); };
+  const loaders = () => ["artifact-select", "criteria-select", "analyses-rows"].map((id) => w.document.getElementById(id).textContent).join(" | ");
+  return { calls, settle, loaders, $: (id) => w.document.getElementById(id) };
+}
+
+test("a failed availability check settles the document, criteria and analysis loaders", async (t) => {
+  const h = settledPage(t, () => new Response(JSON.stringify({ detail: "unavailable" }), { status: 503 }));
+  await h.settle();
+  assert.equal(h.$("analyses-rows").textContent, "Could not load analyses. Try again in a few minutes.");
+  assert.equal(h.$("artifact-select").options[0].textContent, "Not available right now");
+  assert.equal(h.$("criteria-select").options[0].textContent, "Not available right now");
+  assert.doesNotMatch(h.loaders(), /Loading/);
+});
+
+test("unfinished setup says when analyses will appear instead of loading forever", async (t) => {
+  const h = settledPage(t, () => new Response(JSON.stringify({ enabled: true, ready: false }), { status: 200 }));
+  await h.settle();
+  assert.equal(h.$("analyses-rows").textContent, "Analyses appear here once an administrator finishes the setup.");
+  assert.doesNotMatch(h.loaders(), /Loading/);
+});
+
+test("a turned-off evidence module starts no checks or loads behind its gate", async (t) => {
+  const h = settledPage(t, () => { throw new Error("no request expected"); }, "false");
+  await h.settle();
+  assert.deepEqual(h.calls, []);
+});

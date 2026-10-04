@@ -369,6 +369,23 @@ async function history(record) {
 }
 
 // ---- status ------------------------------------------------------------
+// Nothing loads until analysis is available: say why in each loader instead
+// of leaving "Loading…" there.
+function settleLoaders(message) {
+  for (const id of ["artifact-select", "criteria-select"]) {
+    const select = document.getElementById(id);
+    select.textContent = "";
+    option(select, "", "Not available right now");
+  }
+  const tbody = document.getElementById("analyses-rows");
+  tbody.textContent = "";
+  const tr = document.createElement("tr");
+  const td = cell(message);
+  td.colSpan = 6;
+  tr.appendChild(td);
+  tbody.appendChild(tr);
+}
+
 async function refreshStatus() {
   setStatus(runtimeStatus, "Checking whether analysis is available…");
   operations.disabled = true;
@@ -390,11 +407,14 @@ async function refreshStatus() {
     }
     if (payload.enabled === true) {
       setStatus(runtimeStatus, "Evidence analysis is turned on, but setup isn't finished. Ask an administrator to complete it.", true);
+      settleLoaders("Analyses appear here once an administrator finishes the setup.");
     } else {
-      setStatus(runtimeStatus, "Evidence analysis is turned off for this workspace.", true);
+      setStatus(runtimeStatus, "Evidence analysis is turned off for this workspace. Ask an administrator to turn it on.", true);
+      settleLoaders("Analyses appear here once AI evidence analysis is turned on.");
     }
   } catch (error) {
     setStatus(runtimeStatus, error.message, true);
+    settleLoaders(plainError(error.status, "load analyses"));
   }
   return false;
 }
@@ -557,6 +577,8 @@ if (purgeButton) {
   });
 }
 
-if (shell && apiBase) {
+// A turned-off module shows its gate instead of this workbench's checks:
+// nothing is requested, and the page already says when analyses will appear.
+if (shell && apiBase && shell.dataset.moduleEnabled !== "false") {
   loadAll().catch(() => {});
 }
