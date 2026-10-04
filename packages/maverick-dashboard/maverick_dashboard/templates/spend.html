@@ -19,7 +19,7 @@
                      they are not verified provider invoices. Need the monthly statement?
                      Open <a href="/billing">Billing</a>.' | safe) %}
     {{ state('Current state',
-             '$' ~ '{:,.2f}'.format(total.dollars) ~ ' recorded across all time',
+             total.dollars | money ~ ' recorded across all time',
              badge=total.runs ~ ' finished task' ~ ('' if total.runs == 1 else 's'),
              badge_class='ok' if total.runs else 'idle',
              copy='The same records power <a href="/savings">Savings</a> and

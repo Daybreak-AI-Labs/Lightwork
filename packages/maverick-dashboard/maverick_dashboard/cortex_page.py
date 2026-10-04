@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import re
 import secrets
-import time
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
@@ -184,10 +183,9 @@ def _audit_tail(n: int) -> list[dict[str, Any]]:
 
 
 def _when(ts: Any) -> str:
-    try:
-        return time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime(float(ts)))
-    except (TypeError, ValueError, OverflowError, OSError):
-        return "—"
+    from .plain_labels import datetime_text
+
+    return datetime_text(ts) or "—"
 
 
 def _row(event: dict[str, Any]) -> dict[str, Any]:

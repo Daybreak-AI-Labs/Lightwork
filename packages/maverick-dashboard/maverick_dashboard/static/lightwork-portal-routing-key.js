@@ -7,7 +7,7 @@
   const api = '/api/v1/third-party/portal-routing-key';
   const el = (id) => document.getElementById('portal-key-' + id);
   let busy = false, state = null;
-  const when = (seconds) => new Date(seconds * 1000).toLocaleString();
+  const when = (seconds) => (window.mvTimeAbsolute ? window.mvTimeAbsolute(seconds) : new Date(seconds * 1000).toLocaleString());
   function render(data) {
     state = data;
     root.hidden = false;

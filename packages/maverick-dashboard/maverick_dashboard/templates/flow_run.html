@@ -265,7 +265,7 @@
       parent.appendChild(ul);
     }
     function money(budget) {
-      if (budget && typeof budget.maximum === 'number') return 'Up to $' + budget.maximum.toFixed(2);
+      if (budget && typeof budget.maximum === 'number') return 'Up to ' + (window.mvMoney ? window.mvMoney(budget.maximum) : '$' + budget.maximum.toFixed(2));
       if (budget && budget.state) return 'Checked again when it runs';
       return 'Within your workspace limits';
     }
@@ -431,14 +431,14 @@
       var allowWrap = document.createElement('div'); allowWrap.className = 'fr__allow';
       var allowField = document.createElement('div'); allowField.className = 'field';
       var allowLabel = document.createElement('label'); allowLabel.htmlFor = 'fr-allowance';
-      allowLabel.textContent = 'New spending limit for this run ($) — currently $' + current.toFixed(2);
+      allowLabel.textContent = 'New spending limit for this run ($) — currently ' + (window.mvMoney ? window.mvMoney(current) : '$' + current.toFixed(2));
       var allowance = document.createElement('input'); allowance.id = 'fr-allowance'; allowance.className = 'input';
       allowance.type = 'number'; allowance.min = String(current);
       allowance.step = '0.01'; allowance.value = (current + 5).toFixed(2);
       allowField.appendChild(allowLabel); allowField.appendChild(allowance); allowWrap.appendChild(allowField);
       [5, 20].forEach(function (extra) {
         var quick = document.createElement('button'); quick.type = 'button'; quick.className = 'btn btn--ghost';
-        quick.textContent = '+$' + extra; quick.setAttribute('aria-label', 'Set the limit to $' + (current + extra).toFixed(2));
+        quick.textContent = '+$' + extra; quick.setAttribute('aria-label', 'Set the limit to ' + (window.mvMoney ? window.mvMoney(current + extra) : '$' + (current + extra).toFixed(2)));
         quick.addEventListener('click', function () { allowance.value = (current + extra).toFixed(2); });
         allowWrap.appendChild(quick);
       });
@@ -545,7 +545,7 @@
           ? 'Started by ' + human(run.origin.split(':').slice(4).join(':'))
           : (ORIGIN[run.origin] || human(run.origin)));
       else bits.push('Started by hand');
-      if (run.cost_dollars) bits.push('cost $' + Number(run.cost_dollars).toFixed(2));
+      if (run.cost_dollars) bits.push('cost ' + (window.mvMoney ? window.mvMoney(run.cost_dollars) : '$' + Number(run.cost_dollars).toFixed(2)));
       meta.textContent = bits.join(' · ');
     }
     var err = document.getElementById('fr-error');

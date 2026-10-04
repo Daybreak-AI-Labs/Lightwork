@@ -1414,7 +1414,7 @@
     const seconds = Number(value);
     if (!Number.isFinite(seconds) || seconds <= 0) return "—";
     if (typeof window.mvWhen === "function") return window.mvWhen(seconds);
-    return new Date(seconds * 1000).toLocaleString();
+    return (window.mvTimeAbsolute ? window.mvTimeAbsolute(seconds) : new Date(seconds * 1000).toLocaleString());
   };
   // Fingerprints are computed here from a chosen file or typed text.
   const hex = buffer => Array.from(new Uint8Array(buffer), byte => byte.toString(16).padStart(2, "0")).join("");

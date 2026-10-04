@@ -185,8 +185,8 @@
         details.append(node("p", reconciliation.resolution.explanation, "muted"));
         article.append(details);
       }
-      if (item.due_at) article.append(node("p", `${item.overdue ? "Overdue" : "Due"}: ${new Date(item.due_at * 1000).toLocaleString()}`, item.overdue ? "badge warn" : "muted"));
-      if (item.snoozed) article.append(node("p", `Snoozed until ${new Date(item.snoozed_until * 1000).toLocaleString()}`, "muted"));
+      if (item.due_at) article.append(node("p", `${item.overdue ? "Overdue" : "Due"}: ${(window.mvTimeAbsolute ? window.mvTimeAbsolute(item.due_at) : new Date(item.due_at * 1000).toLocaleString())}`, item.overdue ? "badge warn" : "muted"));
+      if (item.snoozed) article.append(node("p", `Snoozed until ${(window.mvTimeAbsolute ? window.mvTimeAbsolute(item.snoozed_until) : new Date(item.snoozed_until * 1000).toLocaleString())}`, "muted"));
       const actions = node("div"); actions.style.cssText = "display:flex;flex-wrap:wrap;gap:var(--space-2);align-items:center;";
       if (item.assessment_id) {
         const review = node("button", "Review assessment", "btn btn--primary"); review.type="button";

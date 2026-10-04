@@ -2,7 +2,6 @@
   'use strict';
   var source = document.getElementById('today-preferences'); if (!source) return;
   var model = JSON.parse(source.textContent), busy = false, pending = null;
-  document.querySelectorAll('time[datetime]').forEach(function (item) { var value = new Date(item.dateTime); if (!isNaN(value)) item.textContent = value.toLocaleString(); });
   async function save(name, remove) {
     if (busy) return;
     var pins = model.pins.filter(function (value) { return value !== name; }); if (!remove) pins.push(name);

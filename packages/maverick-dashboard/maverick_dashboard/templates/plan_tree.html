@@ -72,7 +72,7 @@
     const statusEl = document.getElementById("plan-tree-status");
     const list = document.getElementById("plan-tree-list");
     function costLabel(node) {
-      return node.dollars ? "  $" + Number(node.dollars).toFixed(4) : "";
+      return node.dollars ? "  " + (window.mvMoney ? window.mvMoney(node.dollars) : "$" + Number(node.dollars).toFixed(2)) : "";
     }
     function renderList(root) {
       function item(node) {
@@ -175,7 +175,7 @@
             cy.layout({name: 'breadthfirst', directed: true, padding: 20}).run();
           } catch (_) { cy.destroy(); cy = null; container.hidden = true; }
         }
-        lastRefresh = new Date().toLocaleTimeString(); failures = 0;
+        lastRefresh = (window.mvTimeAbsolute ? window.mvTimeAbsolute(Date.now()) : new Date().toLocaleTimeString()); failures = 0;
         stopped = TERMINAL.includes(tree.status);
         statusEl.textContent = (stopped ? 'Task ' : 'Live — ') + String(tree.status || 'running').replace(/_/g, ' ') + '. Refreshed ' + lastRefresh + '.';
       } catch (e) {

@@ -7,7 +7,7 @@
   let prepared=null,busy=false,uncertain=false,received=false;
   const copy=(node,text,values)=>{if(window.LightworkI18n)window.LightworkI18n.set(node,text,values);else node.textContent=String(text||'').replace(/\{(\w+)\}/g,(whole,key)=>values&&Object.prototype.hasOwnProperty.call(values,key)?String(values[key]):whole);};
   const translated=text=>window.LightworkI18n?window.LightworkI18n.text(text):text;
-  const money=value=>window.LightworkI18n?window.LightworkI18n.number(value,{style:'currency',currency:'USD'}):'$'+value;
+  const money=value=>window.mvMoney?window.mvMoney(value):'$'+value;
   if(window.LightworkI18n&&budget.max&&Number.isFinite(Number(budget.max))){const amount=money(Number(budget.max));budget.placeholder=window.LightworkI18n.text('Up to {amount}',{amount});const inherited=document.getElementById('halt-inherited-limit');if(inherited)copy(inherited,'Leave it empty to use your workspace’s spending limit of {amount}.',{amount});}
   const check=document.createElement('button');check.type='button';check.className='btn btn--ghost';copy(check,'Check restart receipt');check.hidden=true;form.appendChild(check);
   function pointer(){try{const value=sessionStorage.getItem(key);return value&&/^[a-f0-9]{32}$/.test(value)?value:null;}catch(_){return null;}}

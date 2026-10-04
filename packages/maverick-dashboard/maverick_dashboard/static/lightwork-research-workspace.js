@@ -147,7 +147,7 @@
 
   function when(value) {
     const n = Number(value);
-    return Number.isFinite(n) && n > 0 ? new Date(n * 1000).toLocaleString() : '';
+    return Number.isFinite(n) && n > 0 ? (window.mvTimeAbsolute ? window.mvTimeAbsolute(n) : new Date(n * 1000).toLocaleString()) : '';
   }
 
   function technical(item, rows) {

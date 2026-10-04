@@ -75,9 +75,13 @@
         count.textContent = samples.length + ' of ' + need + ' samples';
         save.disabled = samples.length < need;
       }
+      // A failed request reads as a plain sentence, never raw server text.
+      function problem(r, d, action) {
+        return window.mvPlainDetail(d && d.detail) || window.mvErrorText({status: r.status, detail: d && d.detail}, action);
+      }
       function detail(r) {
-        return r.json().then(function (d) { return d.detail || d.message || ''; },
-                             function () { return ''; });
+        return r.json().then(function (d) { return problem(r, d, 'save your voice'); },
+                             function () { return problem(r, null, 'save your voice'); });
       }
       function record(button, done) {
         var canRecord = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia && window.MediaRecorder);
@@ -119,7 +123,8 @@
             saveMsg.textContent = r.ok ? 'Your voice is saved. The recordings were not kept.' : text;
             if (r.ok) setTimeout(function () { window.location.reload(); }, 1200);
           });
-        }).finally(function () { refresh(); });
+        }).catch(function (e) { saveMsg.textContent = window.mvErrorText(e, 'save your voice'); })
+          .finally(function () { refresh(); });
       });
       var check = document.getElementById('vu-check');
       if (check) check.addEventListener('click', function () {
@@ -131,9 +136,9 @@
           fd.append('file', wav, 'check.wav');
           fetch(API + '/check', { method: 'POST', body: fd }).then(function (r) {
             return r.json().then(function (d) {
-              msg.textContent = r.ok ? d.message : (d.detail || 'The check could not run.');
+              msg.textContent = r.ok ? d.message : problem(r, d, 'check your voice');
             });
-          });
+          }).catch(function (e) { msg.textContent = window.mvErrorText(e, 'check your voice'); });
         });
       });
       var del = document.getElementById('vu-delete');
@@ -142,7 +147,7 @@
           document.getElementById('vu-delete-msg').textContent =
             r.ok ? 'Your voice print was deleted.' : 'It could not be deleted. Try again.';
           if (r.ok) setTimeout(function () { window.location.reload(); }, 1200);
-        });
+        }).catch(function (e) { document.getElementById('vu-delete-msg').textContent = window.mvErrorText(e, 'delete your voice print'); });
       });
       refresh();
     })();

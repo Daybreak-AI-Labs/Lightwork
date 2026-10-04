@@ -14,7 +14,7 @@
              waiting ~ (' thing needs you' if waiting == 1 else ' things need you'),
              badge='Action needed' if waiting else 'All clear',
              badge_class='warn' if waiting else 'ok',
-             copy=d.date_label ~ ' · ' ~ preferences.time_zone) }}
+             copy=d.local_date | datetime('date') ~ ' · ' ~ preferences.time_zone) }}
   {% endcall %}
 
   {% if saved %}
@@ -94,7 +94,7 @@
 
   <div class="section-head"><h2>Spending this month</h2></div>
   <div class="panel">
-    <p><strong>${{ '%.2f' | format(d.spending.dollars) }}</strong> spent in {{ d.spending.month_label }} across {{ d.spending.runs }} run{{ '' if d.spending.runs == 1 else 's' }}{% if d.spending.limit_dollars %}, of your <strong>${{ '%.2f' | format(d.spending.limit_dollars) }}</strong> monthly limit{% endif %}.
+    <p><strong>{{ d.spending.dollars | money }}</strong> spent in {{ d.spending.month_label }} across {{ d.spending.runs }} run{{ '' if d.spending.runs == 1 else 's' }}{% if d.spending.limit_dollars %}, of your <strong>{{ d.spending.limit_dollars | money }}</strong> monthly limit{% endif %}.
       {% if d.spending.over_limit %}<span class="badge blocked">Over the limit</span>{% endif %}</p>
     {% if not d.spending.limit_dollars %}<p class="muted">No monthly limit is set. An administrator can set one in Settings.</p>{% endif %}
   </div>

@@ -95,7 +95,7 @@
   function when(seconds) {
     if (typeof root.mvWhen === 'function') return root.mvWhen(Number(seconds));
     if (!seconds || !Number.isFinite(Number(seconds))) return '';
-    return new Date(Number(seconds) * 1000).toLocaleString();
+    return (window.mvTimeAbsolute ? window.mvTimeAbsolute(Number(seconds)) : new Date(Number(seconds) * 1000).toLocaleString());
   }
   function human(value) {
     if (typeof root.mvHuman === 'function') return root.mvHuman(value);

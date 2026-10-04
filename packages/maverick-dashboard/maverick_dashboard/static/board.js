@@ -31,10 +31,14 @@ window.LWBoard = (function () {
     return n;
   }
   function fmt(n) { return (n == null ? 0 : n).toLocaleString(); }
+  // The shared formats from lightwork-ui.js; the fallbacks only cover a
+  // render that lands before the shell script has loaded.
   function money(n) {
-    return '$' + (n == null ? 0 : n).toLocaleString(undefined,
+    n = n == null ? 0 : n;
+    return window.mvMoney ? window.mvMoney(n) : '$' + n.toLocaleString(undefined,
       { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   }
+  function now() { return window.mvTimeAbsolute ? window.mvTimeAbsolute(Date.now()) : new Date().toLocaleString(); }
 
   // ---- shared tooltip ------------------------------------------------------
   var tip = null;
@@ -436,7 +440,7 @@ window.LWBoard = (function () {
         .then(function (D) {
           if (retired || request !== generation || selectedDays !== days) return;
           cfg.render(D);
-          updated = selectedDays + ' days, ' + new Date().toLocaleTimeString();
+          updated = selectedDays + ' days, checked ' + now();
           stamp('Showing ' + updated + ' · updates every minute');
         })
         .catch(function (e) {

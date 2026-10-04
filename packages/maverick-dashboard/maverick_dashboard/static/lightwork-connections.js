@@ -104,7 +104,7 @@
     var labels = {authenticated:'Authentication verified at check time',access_unverified:'Reachable; access not verified',sign_in_refused:'Sign-in refused',blocked_by_policy:'Blocked by connection policy',unreachable:'Service unreachable',address_missing:'Service address needed'};
     var checked = Number(t.tested_at) * 1000, stale = !Number.isFinite(checked) || Date.now() - checked > 86400000;
     return (stale ? 'Previous check (stale): ' : '') + (labels[t.outcome] || 'Access not verified') +
-      (Number.isFinite(checked) ? ' · ' + new Date(checked).toLocaleString() : '') + '. ' +
+      (Number.isFinite(checked) ? ' · ' + (window.mvTimeAbsolute ? window.mvTimeAbsolute(checked) : new Date(checked).toLocaleString()) : '') + '. ' +
       (t.capability || 'Service address only; task permissions still need checking.');
   }
   function editRecord(record) {
@@ -160,7 +160,7 @@
         li.append(change,test,remove,impactButton); list.appendChild(li); if(location.hash==='#'+encodeURIComponent(li.id)){li.tabIndex=-1;li.focus();}
       });
       inventoryReady = true;
-      inventoryStatus.textContent = 'Connections checked at ' + new Date().toLocaleTimeString() + '.';
+      inventoryStatus.textContent = 'Connections checked at ' + (window.mvTimeAbsolute ? window.mvTimeAbsolute(Date.now()) : new Date().toLocaleTimeString()) + '.';
       document.getElementById('cx-empty').hidden = data.connections.length > 0;
       if (conflict && editing && currentByName[editing.name]) document.getElementById('cx-conflict-current').textContent = 'Current saved record:\n' + publicSummary(currentByName[editing.name]);
     } catch (error) {

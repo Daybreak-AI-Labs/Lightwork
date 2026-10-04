@@ -148,6 +148,20 @@
   function show(value) {
     output.textContent = typeof value === "string" ? value : JSON.stringify(value, null, 2);
   }
+  // Failures read as plain sentences: never "HTTP 403", "Error:" or raw server text.
+  function requestProblem(status, detail) {
+    return window.mvPlainDetail(detail) || window.mvErrorText({status: status, detail: detail}, "complete the request");
+  }
+  function problemText(error) {
+    var kind = error && error.name;
+    if (kind === "SyntaxError") {
+      return "Record references and Action details must be valid JSON. Check the quotes, commas and brackets, then try again.";
+    }
+    if (kind === "TypeError" || kind === "AbortError") {
+      return window.mvErrorText(error, "complete the request");
+    }
+    return error && error.message ? error.message : window.mvErrorText(error, "complete the request");
+  }
   function selectedRoute() {
     return operation.options[operation.selectedIndex];
   }
@@ -158,7 +172,7 @@
   function buildPath(template, values) {
     return template.replace(/\{([A-Za-z0-9_]+)\}/g, function (_match, key) {
       if (typeof values[key] !== "string" || !values[key]) {
-        throw new Error("Missing string path value: " + key);
+        throw new Error("Add \"" + key + "\" to Record references, then try again.");
       }
       return encodeURIComponent(values[key]);
     });
@@ -176,16 +190,16 @@
       if (!responseText) { throw new Error("empty response"); }
       result = JSON.parse(responseText);
     } catch (_error) {
-      throw new Error("Request failed: the server returned an invalid JSON response.");
+      throw new Error("Lightwork's reply could not be read. Refresh the page and try again.");
     }
     if (!response.ok) {
-      throw new Error(result && typeof result.detail === "string" ? result.detail : ("HTTP " + response.status));
+      throw new Error(requestProblem(response.status, result && result.detail));
     }
     show({status: response.status, ok: response.ok, result: result});
   }
 
   document.getElementById("pro-load-status").addEventListener("click", function () {
-    run("GET", "/status", {}).catch(function (error) { show(String(error)); });
+    run("GET", "/status", {}).catch(function (error) { show(problemText(error)); });
   });
   operation.addEventListener("change", updateConfirmation);
   document.getElementById("pro-submit").addEventListener("click", async function () {
@@ -201,11 +215,11 @@
           Object.prototype.hasOwnProperty.call(payload, "tenant_id") ||
           Object.prototype.hasOwnProperty.call(payload, "actor") ||
           Object.prototype.hasOwnProperty.call(payload, "actor_ref")) {
-        throw new Error("Tenant and actor fields are never accepted.");
+        throw new Error("Tenant and actor fields are never accepted. Remove them from Action details, then try again.");
       }
       var path = buildPath(route.dataset.path, pathValues);
       await run(route.dataset.method, path, payload);
-    } catch (error) { show(String(error)); }
+    } catch (error) { show(problemText(error)); }
     finally { if (clearRawIntake) { body.value = "{}"; } }
   });
   updateConfirmation();

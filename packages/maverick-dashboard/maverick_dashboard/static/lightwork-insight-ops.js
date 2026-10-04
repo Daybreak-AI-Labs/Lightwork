@@ -66,7 +66,7 @@
   // ---- Spending: questions about your tasks (analytics) ---------------------
   var MONEY = {spend: true, spend_per_task: true};
   function shown(metric, value) {
-    if (MONEY[metric]) return Number(value || 0).toLocaleString(undefined, {style: 'currency', currency: 'USD'});
+    if (MONEY[metric]) return window.mvMoney ? window.mvMoney(Number(value || 0)) : Number(value || 0).toLocaleString(undefined, {style: 'currency', currency: 'USD'});
     return Math.round(Number(value || 0)).toLocaleString();
   }
   function groupLabel(group, value) {

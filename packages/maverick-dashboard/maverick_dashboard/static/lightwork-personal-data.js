@@ -48,12 +48,12 @@
     el('pd-links').replaceChildren(); el('pd-proofs').replaceChildren();
     state.identity.links.forEach(link => {
       const card = text(el('pd-links'), '', 'article');
-      text(card, link.channel + ' sender ' + (link.sender_id || link.user_id) + ' - verified ' + new Date(link.verified_at * 1000).toLocaleString());
+      text(card, link.channel + ' sender ' + (link.sender_id || link.user_id) + ' - verified ' + (window.mvTimeAbsolute ? window.mvTimeAbsolute(link.verified_at) : new Date(link.verified_at * 1000).toLocaleString()));
       button(card, 'Unlink and stop future sharing', () => action(() => call('/links/' + encodeURIComponent(link.id) + '/unlink', {expected_revision: state.identity.revision})));
     });
     state.identity.challenges.forEach(proof => {
       const card = text(el('pd-proofs'), '', 'article');
-      text(card, proof.channel + ': ' + proof.status.replaceAll('_', ' ') + (proof.sender_id ? '; sender ' + proof.sender_id : '') + '; expires ' + new Date(proof.expires_at * 1000).toLocaleString());
+      text(card, proof.channel + ': ' + proof.status.replaceAll('_', ' ') + (proof.sender_id ? '; sender ' + proof.sender_id : '') + '; expires ' + (window.mvTimeAbsolute ? window.mvTimeAbsolute(proof.expires_at) : new Date(proof.expires_at * 1000).toLocaleString()));
       if (proof.status === 'proof_received') button(card, 'Confirm this is my channel account', () => action(() => call('/links/' + encodeURIComponent(proof.id) + '/confirm', {expected_revision: state.identity.revision})));
     });
     el('pd-ceiling').textContent = state.policy.personal_recall ? 'Administrator policy permits personal preference recall. Your per-channel restrictions apply below.' : 'Administrator policy disables personal preference recall. Stored notes can still be inspected and restricted; turning on your preference does not override this ceiling.';
@@ -79,7 +79,7 @@
         const row = text(card, '', 'article');
         const label = text(row, 'Remembered preference', 'label');
         const input = document.createElement('textarea'); input.value = note.note; input.maxLength = 160; input.rows = 2; input.addEventListener('input', () => { dirty = true; }); label.appendChild(input);
-        text(row, note.source_state + (note.source_ts ? '; ' + new Date(note.source_ts * 1000).toLocaleString() : ''));
+        text(row, note.source_state + (note.source_ts ? '; ' + (window.mvTimeAbsolute ? window.mvTimeAbsolute(note.source_ts) : new Date(note.source_ts * 1000).toLocaleString()) : ''));
         if (note.conversation_id && note.turn_id) button(row, 'Read original source', () => action(async () => {
           const source = await call('/source/' + note.conversation_id + '/' + note.turn_id);
           el('pd-source-text').textContent = source.text + '\n\nSource revision: ' + source.revision;
@@ -174,7 +174,7 @@
       }
       if (store.inventory && store.inventory.tools) {
         store.inventory.tools.forEach(tool => text(row, 'Current owned generated tool: ' + tool.name + '; source ' + (tool.goal_id ? 'task ' + tool.goal_id : 'explicit owner publication') + '.'));
-        store.inventory.learning_records.forEach(item => text(row, 'Retained owned ' + item.kind + ' learning record; source ' + (item.goal_id ? 'task ' + item.goal_id : 'explicit owner publication') + '; ' + new Date(item.date * 1000).toLocaleString() + '.'));
+        store.inventory.learning_records.forEach(item => text(row, 'Retained owned ' + item.kind + ' learning record; source ' + (item.goal_id ? 'task ' + item.goal_id : 'explicit owner publication') + '; ' + (window.mvTimeAbsolute ? window.mvTimeAbsolute(item.date) : new Date(item.date * 1000).toLocaleString()) + '.'));
         if (store.inventory.learning_records_truncated) text(row, 'Showing 500 current authorized learning records; older rows remain outside this window.');
       }
       if (store.blocked) text(row, store.blocked + ' records require reconciliation before erasure.');
@@ -186,7 +186,7 @@
         const card = text(row, '', 'article'); text(card, item.name + ' - ' + item.state, 'h4');
         text(card, 'Owner: ' + item.owner_label + '. Recipient: ' + item.recipient + '.');
         ['use', 'source', 'source_state', 'expiry', 'dependencies', 'action'].forEach(key => { if (item[key]) text(card, item[key]); });
-        if (item.access_expires_at) text(card, (item.expiry_label || 'Recipient access expiry') + ': ' + new Date(item.access_expires_at * 1000).toLocaleString());
+        if (item.access_expires_at) text(card, (item.expiry_label || 'Recipient access expiry') + ': ' + (window.mvTimeAbsolute ? window.mvTimeAbsolute(item.access_expires_at) : new Date(item.access_expires_at * 1000).toLocaleString()));
         [['href', 'Review this saved record'], ['source_href', 'Open your original task'], ['dependency_href', 'Review the selected bundle']].forEach(([key, label]) => {
           if (item[key]) { const link = text(card, label, 'a'); link.href = item[key]; }
         });

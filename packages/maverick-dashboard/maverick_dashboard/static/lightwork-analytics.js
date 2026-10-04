@@ -133,7 +133,7 @@
       };
       const spending = this._fetch("/api/v1/spend", controller.signal).then((data) => {
         const total = data.total || {};
-        put("spend", "$" + Number(total.dollars || 0).toFixed(4) +
+        put("spend", (window.mvMoney ? window.mvMoney(Number(total.dollars || 0)) : "$" + Number(total.dollars || 0).toFixed(2)) +
           ' <span class="muted">(' + (Number(total.runs) || 0) + " tasks)</span>");
         const costs = (data.episodes || [])
           .map((e) => Number(e.cost_dollars || 0))
@@ -160,7 +160,7 @@
         clearTimeout(timeout);
         if (generation !== this._generation || !this.isConnected) return;
         refresh.disabled = false;
-        root.getElementById('freshness').textContent = (failed ? 'Snapshot incomplete. Attempted ' : 'Snapshot loaded ') + new Date().toLocaleString() + '. Refresh to check current state.';
+        root.getElementById('freshness').textContent = (failed ? 'Snapshot incomplete. Attempted ' : 'Snapshot loaded ') + (window.mvTimeAbsolute ? window.mvTimeAbsolute(Date.now()) : new Date().toLocaleString()) + '. Refresh to check current state.';
       });
     }
   }

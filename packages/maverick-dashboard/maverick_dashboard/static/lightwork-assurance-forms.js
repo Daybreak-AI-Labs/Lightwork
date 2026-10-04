@@ -105,7 +105,7 @@
       return row.current === true || row.freshness === "current";
     }
     static label(row) {
-      const when = Number(row.observed_at) > 0 ? new Date(Number(row.observed_at) * 1000).toLocaleDateString() : "";
+      const when = Number(row.observed_at) > 0 ? (window.mvDateAbsolute ? window.mvDateAbsolute(Number(row.observed_at)) : new Date(Number(row.observed_at) * 1000).toLocaleDateString()) : "";
       const what = human(row.evidence_kind || "evidence");
       const about = String(row.summary || "").trim().slice(0, 120);
       return [what, about, when].filter(Boolean).join(" · ");
@@ -983,7 +983,7 @@
         : deployment ? "No release used with this deployment yet" : "No release used yet";
       select.replaceChildren(new Option(first, ""));
       rows.forEach(row => {
-        const when = row.added ? "added just now" : row.when > 0 ? `last used ${new Date(row.when * 1000).toLocaleDateString()}` : "";
+        const when = row.added ? "added just now" : row.when > 0 ? `last used ${(window.mvDateAbsolute ? window.mvDateAbsolute(row.when) : new Date(row.when * 1000).toLocaleDateString())}` : "";
         select.appendChild(new Option(when ? `${row.name} (${when})` : row.name, row.name));
       });
       select.appendChild(new Option("Add a new release…", NEW_RELEASE));

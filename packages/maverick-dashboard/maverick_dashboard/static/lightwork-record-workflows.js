@@ -17,12 +17,12 @@
   function when(ts) {
     if (!ts || !isFinite(ts)) return '';
     if (global.mvWhen) return global.mvWhen(ts);
-    try { return new Date(ts * 1000).toLocaleString(); } catch (e) { return ''; }
+    try { return (window.mvTimeAbsolute ? window.mvTimeAbsolute(ts) : new Date(ts * 1000).toLocaleString()); } catch (e) { return ''; }
   }
 
   function day(ts) {
     if (!ts || !isFinite(ts)) return '';
-    try { return new Date(ts * 1000).toLocaleDateString(); } catch (e) { return ''; }
+    try { return (window.mvDateAbsolute ? window.mvDateAbsolute(ts) : new Date(ts * 1000).toLocaleDateString()); } catch (e) { return ''; }
   }
 
   function errorText(failure, action) {

@@ -28,7 +28,7 @@
       if (!Array.isArray(fresh.items) || !Array.isArray(fresh.coverage)) throw new Error('unreadable');
       model = fresh; failures = 0; coverage.replaceChildren();
       fresh.coverage.forEach(function (source) { coverage.append(node('li', source.source + ': ' + source.state + (source.state === 'partial' ? ' — open the source to see earlier work.' : ''))); });
-      render(); status.textContent = 'Last checked ' + new Date(fresh.generated_at * 1000).toLocaleTimeString() + '. Status is a recorded observation; external delivery needs its own verification.';
+      render(); status.textContent = 'Last checked ' + window.mvTimeAbsolute(fresh.generated_at) + '. Status is a recorded observation; external delivery needs its own verification.';
     } catch (_) {
       failures++;
       if (denied) { model = null; rows.replaceChildren(); coverage.replaceChildren(); status.textContent = 'Your account or access changed. Reload to review work for the current workspace.'; }

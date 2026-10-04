@@ -40,7 +40,7 @@
       if (!matches(item)) lines.push('Your current selection remains visible although it does not match this filter.');
       if (item.fetched_at) {
         const when = new Date(item.fetched_at);
-        lines.push('Capabilities: ' + (item.capability_source || 'Unknown') + ', checked ' + (Number.isNaN(when.getTime()) ? 'at an unknown time' : when.toLocaleString()) + (item.capability_stale ? ' (stale).' : '.'));
+        lines.push('Capabilities: ' + (item.capability_source || 'Unknown') + ', checked ' + (Number.isNaN(when.getTime()) ? 'at an unknown time' : window.mvTimeAbsolute ? window.mvTimeAbsolute(when.getTime()) : when.toLocaleString()) + (item.capability_stale ? ' (stale).' : '.'));
       }
       const price = item.price;
       if (price) {

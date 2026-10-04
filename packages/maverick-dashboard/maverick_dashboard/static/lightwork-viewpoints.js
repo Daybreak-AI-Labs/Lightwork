@@ -48,8 +48,7 @@
       typeof data.key_point === 'string' && typeof data.cost === 'number' && Number.isFinite(data.cost);
   }
   function money(value) {
-    return value < 0.01 ? translated('less than one cent') : window.LightworkI18n
-      ? window.LightworkI18n.number(value, {style:'currency', currency:'USD'}) : '$' + value.toFixed(2);
+    return window.mvMoney ? window.mvMoney(value) : value < 0.01 ? translated('less than one cent') : '$' + value.toFixed(2);
   }
   function show(data) {
     result.replaceChildren();

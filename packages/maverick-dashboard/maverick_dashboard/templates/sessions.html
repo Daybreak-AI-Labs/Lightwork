@@ -49,8 +49,8 @@
           <td>{{ (row.principal | identity).name }}{% if row.principal == you %} <span class="muted">(you)</span>{% endif %}</td>
           <td>{{ row.method }}</td>
           <td>{% if row.mfa %}Yes{% else %}No{% endif %}</td>
-          <td>{{ row.issued_text }}</td>
-          <td>{{ row.last_seen_text }}{% if row.current %} <span class="muted">(this device)</span>{% endif %}</td>
+          <td>{{ row.issued_at | datetime('absolute') }}</td>
+          <td>{{ row.last_seen | datetime }}{% if row.current %} <span class="muted">(this device)</span>{% endif %}</td>
           <td>{{ row.ip or '—' }}</td>
           <td>{{ row.user_agent }}</td>
           <td>

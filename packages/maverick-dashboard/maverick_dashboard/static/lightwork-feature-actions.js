@@ -46,7 +46,7 @@
   function badge(ok, yes, no) { return el('span', 'badge ' + (ok ? 'ok' : 'warn'), ok ? yes : no); }
   function money(value) {
     var n = Number(value) || 0;
-    return n.toLocaleString(undefined, {style: 'currency', currency: 'USD'});
+    return window.mvMoney ? window.mvMoney(n) : n.toLocaleString(undefined, {style: 'currency', currency: 'USD'});
   }
   function percent(value) { return Math.round((Number(value) || 0) * 100) + '%'; }
   function plural(n, one, many) { return n + ' ' + (n === 1 ? one : (many || one + 's')); }

@@ -8,6 +8,7 @@ from maverick.governed_operations import digest
 from pydantic import Field
 from starlette.background import BackgroundTask
 
+from .plain_labels import money
 from .product_operations import Adapter, Outcome, Preview, Snapshot, StrictInput
 
 
@@ -40,7 +41,7 @@ def rebuild_prepare(request, selection, arguments):
     review = _reindex_call(preview, arguments["collection"])
     return Preview("Build a shadow index, then publish the complete replacement after current permission and source checks. Paid AI requests require verified cost admission.",
                    changes=[{"label": "Passages", "before": review["count"], "after": review["count"]},
-                            {"label": "Provider admission ceiling", "before": "No rebuild", "after": f"${review['cost_ceiling']:.6f}. {review['price_basis']}"},
+                            {"label": "Provider admission ceiling", "before": "No rebuild", "after": f"{money(review['cost_ceiling'])}. {review['price_basis']}"},
                             {"label": "Embedding model", "before": "No rebuild", "after": review["model"]},
                             {"label": "Elapsed time limit", "before": "No rebuild", "after": str(review["limits"]["max_wall_seconds"]) + " seconds, checked between batches"}],
                    native={"context": context, "collection": arguments["collection"], "review": review["review"]})

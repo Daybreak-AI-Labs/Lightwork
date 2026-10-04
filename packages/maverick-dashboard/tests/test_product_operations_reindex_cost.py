@@ -17,6 +17,7 @@ def test_copilot_preserves_nonzero_ceiling_rate_basis_model_and_native_review(mo
     result = operations.rebuild_prepare(object(), {}, {"collection": "policies"})
     assert result.native == {"context": "a" * 64, "collection": "policies", "review": "c" * 64}
     changes = {row["label"]: row["after"] for row in result.changes}
-    assert changes["Provider admission ceiling"] == "$0.000125. " + review["price_basis"]
+    # A non-zero ceiling never reads as free.
+    assert changes["Provider admission ceiling"] == "under $0.01. " + review["price_basis"]
     assert changes["Embedding model"] == review["model"]
     assert "local computation only" not in str(changes)

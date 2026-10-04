@@ -10,7 +10,7 @@
   function setBusy(value) { busy = value; test.disabled = value || !enabled; refresh.disabled = value; }
   function render(state) {
     enabled = state.enabled && ['ntfy', 'pushover', 'slack', 'discord'].includes(state.backend);
-    const last = state.last_success_at ? new Date(state.last_success_at * 1000).toLocaleString() : 'No confirmed delivery in recent history';
+    const last = state.last_success_at ? (window.mvTimeAbsolute ? window.mvTimeAbsolute(state.last_success_at) : new Date(state.last_success_at * 1000).toLocaleString()) : 'No confirmed delivery in recent history';
     summary.textContent = state.enabled ? 'Current channel: ' + state.backend + '. Last accepted delivery: ' + last + '. Seen by a person: unknown.' : 'Delivery history is turned off. Enable it in All settings before sending a test.';
     list.replaceChildren();
     if (!state.receipts.length) list.textContent = 'No delivery receipts yet. A saved configuration does not confirm delivery.';
@@ -20,7 +20,7 @@
       const labels = {queued:'Queued', sending:'Sending', delivered:'Accepted by service', failed:'Failed', unknown:'Unknown result'};
       title.textContent = row.backend + ' - ' + (labels[row.state] || 'Unknown result');
       const description = document.createElement('p'); description.textContent = row.message;
-      const time = document.createElement('p'); time.className = 'muted'; time.textContent = new Date(row.updated_at * 1000).toLocaleString() + ' · Attempt ' + row.attempts + ' · ' + (row.kind === 'test' ? 'Delivery test' : 'Organization alert');
+      const time = document.createElement('p'); time.className = 'muted'; time.textContent = (window.mvTimeAbsolute ? window.mvTimeAbsolute(row.updated_at) : new Date(row.updated_at * 1000).toLocaleString()) + ' · Attempt ' + row.attempts + ' · ' + (row.kind === 'test' ? 'Delivery test' : 'Organization alert');
       article.append(title, description, time);
       if (row.kind === 'test' && row.state === 'failed' && row.safe_to_retry && row.attempts < 3) {
         const retry = document.createElement('button'); retry.className = 'btn btn--ghost'; retry.textContent = 'Retry this refused test';

@@ -69,8 +69,7 @@
       reviews.append(items);
       out.append(reviews);
     }
-    const cost = data.cost < 0.01 ? translated('less than one cent') : window.LightworkI18n
-      ? window.LightworkI18n.number(data.cost, {style:'currency', currency:'USD'}) : '$' + data.cost.toFixed(2);
+    const cost = window.mvMoney ? window.mvMoney(data.cost) : data.cost < 0.01 ? translated('less than one cent') : '$' + data.cost.toFixed(2);
     const summary = make('p', 'muted');
     product(summary, '{status} This cost {cost}. Nothing about the task was changed.', {status:translated(STATUS[data.status] || 'Finished.'), cost:cost});
     out.append(summary);

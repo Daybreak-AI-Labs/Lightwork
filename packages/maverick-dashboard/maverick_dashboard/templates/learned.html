@@ -176,7 +176,7 @@
             body: JSON.stringify(body || {}) });
           if (!r.ok) {
             var j = await r.json().catch(function () { return {}; });
-            say(r.status === 404 && typeof j.detail === 'string' ? j.detail : window.mvErrorText(r, action));
+            say(r.status === 404 && window.mvPlainDetail(j.detail) || window.mvErrorText(r, action));
             return null;
           }
           return await r.json().catch(function () { return {}; });

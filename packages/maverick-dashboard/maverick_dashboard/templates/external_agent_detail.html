@@ -39,11 +39,11 @@
       <thead><tr><th scope="col">Period</th><th scope="col">Amount</th></tr></thead>
       <tbody>
         <tr><td>{{ 'This month' if a.period == 'monthly' else 'All time' }}</td>
-            <td>${{ '%.2f' | format(a.period_spent) }}{% if a.max_dollars is not none %} of ${{ '%.2f' | format(a.max_dollars) }}{% endif %}
+            <td>{{ a.period_spent | money }}{% if a.max_dollars is not none %} of {{ a.max_dollars | money }}{% endif %}
                 {% if a.over_budget %}<span class="badge failure">Over budget</span>{% endif %}</td></tr>
-        <tr><td>Reported by the agent, all time</td><td>${{ '%.2f' | format(a.spent_dollars) }}</td></tr>
+        <tr><td>Reported by the agent, all time</td><td>{{ a.spent_dollars | money }}</td></tr>
         <tr><td>Recorded by Lightwork</td>
-            <td>{{ a.record.get('runs', 0) }} run{{ '' if a.record.get('runs', 0) == 1 else 's' }} · ${{ '%.2f' | format(a.record.get('dollars', 0)) }}</td></tr>
+            <td>{{ a.record.get('runs', 0) }} run{{ '' if a.record.get('runs', 0) == 1 else 's' }} · {{ a.record.get('dollars', 0) | money }}</td></tr>
         <tr><td>Runs that took longer than allowed</td><td>{{ a.wall_violations }}</td></tr>
       </tbody>
     </table>
@@ -88,7 +88,7 @@
           <td>{% if e.outcome == 'success' %}<span class="badge active">Succeeded</span>
               {% elif e.outcome %}<span class="badge failure">{{ e.outcome | humanize }}</span>
               {% else %}<span class="badge">Running</span>{% endif %}</td>
-          <td>${{ '%.2f' | format(e.cost_dollars or 0) }}</td>
+          <td>{{ e.cost_dollars | money }}</td>
           <td>{{ e.ended_at | datetime if e.ended_at else '—' }}</td>
         </tr>
         {% endfor %}

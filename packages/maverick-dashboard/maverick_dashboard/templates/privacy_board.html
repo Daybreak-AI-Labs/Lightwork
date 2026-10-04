@@ -1056,7 +1056,7 @@
       risk.appendChild(pair);
       tr.appendChild(risk);
       tr.appendChild(el('td', 'muted-sm', s.created_at
-        ? new Date(s.created_at * 1000).toLocaleDateString() : '—'));
+        ? (window.mvDateAbsolute ? window.mvDateAbsolute(s.created_at) : new Date(s.created_at * 1000).toLocaleDateString()) : '—'));
       var flags = [];
       if (s.review_due) flags.push(s.review_due_reason ? 'Review due: ' + s.review_due_reason : 'Review due');
       if (s.risk_accepted) flags.push('Risk accepted');
@@ -1236,7 +1236,7 @@
   }
   function stamp() {
     $('pb-stamp').textContent = 'Updated ' +
-      new Date().toLocaleTimeString() + ' · updates every minute';
+      (window.mvTimeAbsolute ? window.mvTimeAbsolute(Date.now()) : new Date().toLocaleTimeString()) + ' · updates every minute';
   }
   function load() {
     fetch(API).then(function (r) {

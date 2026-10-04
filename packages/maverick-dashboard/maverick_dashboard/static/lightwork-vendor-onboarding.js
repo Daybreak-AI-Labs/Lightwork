@@ -48,7 +48,7 @@
     byId("message").setAttribute("role", error ? "alert" : "status");
     show("message", text);
   };
-  const date = value => value ? new Date(value * 1000).toLocaleString() : "Not recorded";
+  const date = value => value ? (window.mvTimeAbsolute ? window.mvTimeAbsolute(value) : new Date(value * 1000).toLocaleString()) : "Not recorded";
   const dateInput = value => value ? new Date(value * 1000).toISOString().slice(0, 10) : "";
   function dueTimestamp(value) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(value || "")) throw new Error("Choose a requested completion date.");

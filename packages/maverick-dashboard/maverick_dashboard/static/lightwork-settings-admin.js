@@ -104,7 +104,7 @@
       fact('Status', data.status_label);
       fact('Plan', data.plan);
       fact('Licensed to', data.customer);
-      fact('Renews or ends', data.expires ? new Date(data.expires + 'T00:00:00').toLocaleDateString() : '');
+      fact('Renews or ends', data.expires ? (window.mvDateAbsolute ? window.mvDateAbsolute(data.expires) : new Date(data.expires + 'T00:00:00').toLocaleDateString()) : '');
       fact('Add-ons', data.add_ons.join(', '));
       box.appendChild(dl);
       var list = el('ul', 'maintenance-list');

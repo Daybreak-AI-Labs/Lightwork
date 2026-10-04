@@ -3,7 +3,7 @@
   // Plain sentences only: a failed request becomes a readable message, never
   // the server's own detail text or a browser exception name.
   function errText(failure, action) {
-    return window.mvErrorText ? window.mvErrorText(failure, action) : 'Could not ' + action + '. Please try again.';
+    return window.mvErrorText ? window.mvErrorText(failure, action) : 'Could not ' + action + '. Try again.';
   }
   function plainError(text) { var error = new Error(text); error.plain = true; return error; }
   var form = document.getElementById('setup-initialize');
@@ -41,7 +41,7 @@
         var result = null;
         try { result = await response.json(); } catch (ignored) { result = null; }
         if (response.status === 409 && result && result.detail && result.detail.ready === false) {
-          message.textContent = result.detail.detail + ' ';
+          message.textContent = (window.mvPlainDetail(result.detail.detail) || 'No AI service is ready yet, so the sample task cannot run.') + ' ';
           var link = document.createElement('a'); link.href = result.detail.href; link.textContent = 'Connect an AI service'; message.appendChild(link);
           return;
         }

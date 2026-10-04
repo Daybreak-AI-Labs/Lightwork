@@ -164,7 +164,7 @@
           var out0 = {};
           for (var i = 0; i < fields.length; i++) {
             var s = fields[i];
-            var promptLabel = (s.label || s.key) + (s.required ? ' *' : '');
+            var promptLabel = (s.label || s.key) + (s.required ? ' (required)' : '');
             var boolField = s.type === 'bool' || s.type === 'checkbox';
             var choices = (s.options || []).map(function (o) {
               return String(o && o.value != null ? o.value : o);
@@ -220,7 +220,7 @@
             wrap.appendChild(ctl); wrap.appendChild(l1);
           } else {
             var lab = document.createElement('label'); lab.setAttribute('for', id);
-            lab.textContent = (f.label || f.key) + (f.required ? ' *' : ''); lab.lang = 'und'; lab.dir = 'auto';
+            lab.textContent = f.label || f.key; lab.lang = 'und'; lab.dir = 'auto';
             wrap.appendChild(lab);
             if (f.type === 'select') {
               ctl = document.createElement('select');
@@ -361,19 +361,20 @@
       // Plain-language error text for a failed request. Pass the fetch
       // Response (or a thrown error) and, optionally, what the person was
       // trying to do ("save the policy"). Never shows HTTP codes, exception
-      // class names or server internals.
-      window.mvErrorText = function (failure, action) {
+      // class names or server internals. One definition: the English sentence
+      // comes from plainErrorText and a translated interface localizes it.
+      function plainErrorText(failure, action) {
         var business = window.mvBusinessError(failure);
         if (business) return business.message;
         var what = action ? ('Could not ' + action + '. ') : '';
         var status = failure && typeof failure.status === 'number' ? failure.status : 0;
         if (!status) {
           var name = failure && failure.name;
-          if (name === 'AbortError') return what + 'It took too long. Please try again.';
+          if (name === 'AbortError') return what + 'It took too long. Try again.';
           if (name === 'TypeError' || (failure && /fetch|network/i.test(String(failure.message || failure)))) {
             return what + 'Lightwork could not be reached. Check your connection and try again.';
           }
-          return what + 'Something went wrong. Please try again.';
+          return what + 'Something went wrong. Try again.';
         }
         if (status === 400 || status === 422) return what + 'Some of the details need fixing. Check what you entered and try again.';
         if (status === 401) return what + 'Your sign-in has expired. Sign in again to continue.';
@@ -395,18 +396,17 @@
             /\b(turned off|is disabled|not enabled)\b/i.test(typeof failure.detail === 'string' ? failure.detail : '');
           return what + (off
             ? 'This feature is turned off. An administrator can turn it on in Settings.'
-            : 'This is temporarily unavailable. Please try again in a few minutes.');
+            : 'This is temporarily unavailable. Try again in a few minutes.');
         }
-        if (status >= 500) return what + 'Something went wrong on our side. Please try again in a minute.';
-        return what + 'Something went wrong. Please try again.';
-      };
-      var originalErrorText = window.mvErrorText;
-      window.mvErrorText = function(failure, action) {
-        var value=originalErrorText(failure,action), locale=window.LightworkI18n;
-        if(!locale || locale.language==='en')return value;
-        var prefix=action ? 'Could not '+action+'. ' : '';
-        var reason=prefix && value.startsWith(prefix) ? value.slice(prefix.length) : value;
-        if(prefix && locale.has(reason))return locale.text('This action could not be completed. {reason}',{reason:locale.text(reason)});
+        if (status >= 500) return what + 'Something went wrong on our side. Try again in a minute.';
+        return what + 'Something went wrong. Try again.';
+      }
+      window.mvErrorText = function (failure, action) {
+        var value = plainErrorText(failure, action), locale = window.LightworkI18n;
+        if (!locale || locale.language === 'en') return value;
+        var prefix = action ? 'Could not ' + action + '. ' : '';
+        var reason = prefix && value.startsWith(prefix) ? value.slice(prefix.length) : value;
+        if (prefix && locale.has(reason)) return locale.text('This action could not be completed. {reason}', {reason: locale.text(reason)});
         return locale.text(value);
       };
       // A server message is shown only when it is already a plain sentence
@@ -452,43 +452,90 @@
         // Unix epoch: (ts || 0) would turn 0/null/undefined/NaN into 1/1/1970,
         // which then leaks into visible text and aria-labels.
         if (!ts || !isFinite(ts)) return '';
-        try { return window.LightworkI18n ? window.LightworkI18n.formatDate(ts) : new Date(ts * 1000).toLocaleString(); } catch (e) { return ''; }
+        return window.mvTimeAbsolute(ts);
       };
       // One shared time formatter for every timestamp people read. Servers
       // send an epoch (seconds) or an ISO string; the viewer sees it in their
       // own time zone. Convention (any page, any markup owner):
       //   <time data-mv-time="1790790000">fallback</time>
       //   data-mv-time-mode="relative" (default: "2 minutes ago", absolute on
-      //   hover) | "absolute" ("30 Sep 2026, 17:15 BST") | "both".
+      //   hover) | "absolute" ("30 Sep 2026, 17:15 BST") | "both" | "date"
+      //   ("30 Sep 2026"; a "2026-09-30" value is a calendar date, not UTC midnight).
       // Elements added later are formatted by calling window.mvFormatTimes(root).
+      // English pages read the same in every browser ("4 Oct 2026, 14:01 BST",
+      // a 24-hour clock); a translated interface uses its own locale's order.
+      function mvFormatLocale() {
+        var i18n = window.LightworkI18n;
+        return i18n && i18n.language && i18n.language !== 'en' ? (i18n.locale || i18n.language) : 'en-GB';
+      }
       function mvParseTime(raw) {
         if (raw === null || raw === undefined || raw === '') return null;
         var n = Number(raw);
         var d = isFinite(n) ? new Date((n > 1e12 ? n : n * 1000)) : new Date(String(raw));
         return isNaN(d.getTime()) || d.getTime() <= 0 ? null : d;
       }
-      window.mvTimeAbsolute = function (raw) {
+      // An optional IANA zone shows the time in that zone instead (a schedule's own
+      // zone); the zone name is part of the text either way.
+      window.mvTimeAbsolute = function (raw, zone) {
         var d = mvParseTime(raw);
         if (!d) return '';
+        var options = { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', timeZoneName: 'short' };
+        if (zone) options.timeZone = zone;
+        try { return new Intl.DateTimeFormat(mvFormatLocale(), options).format(d); }
+        catch (e) { return zone ? window.mvTimeAbsolute(raw) : d.toUTCString(); }
+      };
+      // A calendar day ("2026-10-04" or a moment) reads "4 Oct 2026"; an
+      // accounting month ("2026-09") reads "September 2026".
+      window.mvDateAbsolute = function (raw) {
+        var parts = typeof raw === 'string' && /^(\d{4})-(\d{2})(?:-(\d{2}))?$/.exec(raw.trim());
+        var d = parts ? new Date(Number(parts[1]), Number(parts[2]) - 1, Number(parts[3] || 1)) : mvParseTime(raw);
+        if (!d || isNaN(d.getTime())) return '';
         try {
-          return d.toLocaleString(undefined, { day: 'numeric', month: 'short', year: 'numeric',
-            hour: '2-digit', minute: '2-digit', timeZoneName: 'short' });
-        } catch (e) { return d.toLocaleString(); }
+          return new Intl.DateTimeFormat(mvFormatLocale(), parts && !parts[3] ? { month: 'long', year: 'numeric' }
+            : { day: 'numeric', month: 'short', year: 'numeric' }).format(d);
+        } catch (e) { return d.toDateString(); }
+      };
+      // Money reads "$1,234.56" everywhere (the |money filter matches it):
+      // two decimals with thousands separators, and a non-zero amount under a
+      // cent reads "under $0.01". { decimals: 4 } is only for a labelled
+      // per-unit price ("$0.0030 per 1K tokens"); { currency: 'EUR' } shows the
+      // code ("EUR 75.00"). A missing or unreadable amount returns '' so the
+      // caller can say why it is unknown instead of showing $0.00.
+      window.mvMoney = function (value, options) {
+        if (value === null || value === undefined || value === '' || typeof value === 'boolean') return '';
+        var amount = Number(value);
+        if (!isFinite(amount)) return '';
+        var decimals = options && typeof options.decimals === 'number' ? options.decimals : 2;
+        var currency = String((options && options.currency) || 'USD').toUpperCase();
+        var i18n = window.LightworkI18n;
+        var locale = i18n && i18n.language && i18n.language !== 'en' ? (i18n.locale || i18n.language) : 'en-US';
+        function format(n) {
+          try {
+            return new Intl.NumberFormat(locale, { style: 'currency', currency: currency,
+              currencyDisplay: currency === 'USD' ? 'symbol' : 'code',
+              minimumFractionDigits: decimals, maximumFractionDigits: decimals }).format(n);
+          } catch (e) { return (n < 0 ? '-' : '') + (currency === 'USD' ? '$' : currency + ' ') + Math.abs(n).toFixed(decimals); }
+        }
+        var smallest = Math.pow(10, -decimals);
+        if (amount !== 0 && Math.abs(amount) < smallest / 2) return 'under ' + format(smallest);
+        return format(amount || 0);
       };
       window.mvTimeRelative = function (raw) {
         var d = mvParseTime(raw);
         if (!d) return '';
         var diff = (d.getTime() - Date.now()) / 1000;
-        var abs = Math.abs(diff), past = diff < 0;
-        var units = [[60, 'second'], [3600, 'minute'], [86400, 'hour'], [604800, 'day'], [2629800, 'week'], [31557600, 'month']];
+        var abs = Math.abs(diff), past = diff <= 0;
+        // [seconds in one unit, unit, size of the next unit]. Each value is
+        // counted in its own unit; one that rounds up to the next unit
+        // ("60 minutes") is shown in that unit instead ("1 hour").
+        var units = [[1, 'second', 60], [60, 'minute', 3600], [3600, 'hour', 86400], [86400, 'day', 604800],
+          [604800, 'week', 2629800], [2629800, 'month', 31557600], [31557600, 'year', Infinity]];
         if (abs < 45) return past ? 'just now' : 'in a moment';
-        var value, unit = 'year', size = 31557600;
-        for (var i = 1; i < units.length; i++) {
-          if (abs < units[i][0]) { unit = units[i - 1][1]; size = units[i - 1][0]; break; }
-        }
-        value = Math.round(abs / size);
+        var i = 0;
+        while (Math.round(abs / units[i][0]) * units[i][0] >= units[i][2]) i++;
+        var size = units[i][0], unit = units[i][1], value = Math.round(abs / size);
         if (typeof Intl !== 'undefined' && Intl.RelativeTimeFormat) {
-          try { return new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' }).format(past ? -value : value, unit); } catch (e) {}
+          try { return new Intl.RelativeTimeFormat(mvFormatLocale(), { numeric: 'auto' }).format(past ? -value : value, unit); } catch (e) {}
         }
         var word = value + ' ' + unit + (value === 1 ? '' : 's');
         return past ? word + ' ago' : 'in ' + word;
@@ -503,7 +550,8 @@
           var absolute = window.mvTimeAbsolute(raw);
           var relative = window.mvTimeRelative(raw);
           if (el.tagName === 'TIME' && !el.getAttribute('datetime')) el.setAttribute('dateTime', d.toISOString());
-          if (mode === 'absolute') { el.textContent = absolute; el.title = relative; }
+          if (mode === 'date') el.textContent = window.mvDateAbsolute(raw);
+          else if (mode === 'absolute') { el.textContent = absolute; el.title = relative; }
           else if (mode === 'both') { el.textContent = absolute + ' (' + relative + ')'; }
           else { el.textContent = relative; el.title = absolute; }
           el.setAttribute('data-mv-time-done', mode);
@@ -527,7 +575,7 @@
       Array.prototype.forEach.call(realDocument ? document.querySelectorAll('[data-mv-utc-midnight]') : [], function (el) {
         try {
           var next = new Date(); next.setUTCHours(24, 0, 0, 0);
-          var local = next.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+          var local = next.toLocaleTimeString(mvFormatLocale(), { hour: '2-digit', minute: '2-digit' });
           var zone = (Intl.DateTimeFormat().resolvedOptions().timeZone || '').replace(/_/g, ' ');
           if (next.getTimezoneOffset() !== 0) el.textContent = ', which is ' + local + ' in your time zone' + (zone ? ' (' + zone + ')' : '');
         } catch (e) {}
@@ -904,6 +952,80 @@
           if (btn) { btn.disabled = false; btn.removeAttribute('aria-busy'); }
         }
       });
+    })();
+
+    // Required fields say so beside their label: one small "Required" for
+    // every [required] control, on load and for forms added later (dialogs,
+    // rows built from data). The required attribute already tells assistive
+    // technology, so the marker is aria-hidden. A label that already says it
+    // (an asterisk or the word "required") is left as written.
+    (function () {
+      if (typeof document.querySelectorAll !== 'function' || !document.body) return;
+      var CONTROLS = 'input[required], select[required], textarea[required]';
+      function labelFor(control) {
+        if (control.type === 'hidden') return null;
+        if (control.type === 'radio') {
+          var group = control.closest('fieldset');
+          return group && group.querySelector('legend');
+        }
+        return control.labels && control.labels.length ? control.labels[0] : null;
+      }
+      // The label's own words, without the text of a field it wraps.
+      function ownText(node) {
+        var text = '';
+        Array.prototype.forEach.call(node.childNodes, function (child) {
+          if (child.nodeType === 3) text += child.nodeValue;
+          else if (child.nodeType === 1 && !child.matches('input, select, textarea, button, datalist')) text += ownText(child);
+        });
+        return text;
+      }
+      function mark(control) {
+        var label = labelFor(control);
+        if (!label || label.querySelector('.mv-required') || /(?:^|\s)\*(?:\s|$)|\brequired\b/i.test(ownText(label))) return;
+        var marker = document.createElement('span');
+        marker.className = 'mv-required'; marker.setAttribute('aria-hidden', 'true');
+        marker.setAttribute('data-mv-required', ''); marker.lang = 'en'; marker.textContent = 'Required';
+        // Beside the words: inside the element holding them (<span>Person</span>),
+        // else just before a field the label wraps, else after a checkbox's words.
+        var field = label.contains(control) && !/^(checkbox|radio)$/.test(control.type) ? control : null;
+        while (field && field.parentNode !== label) field = field.parentNode;
+        var words = field && field.previousSibling;
+        while (words && words.nodeType === 3 && !words.nodeValue.trim()) words = words.previousSibling;
+        if (words && words.nodeType === 1 && words.textContent.trim() && !words.matches('input, select, textarea, button') &&
+            !words.querySelector('input, select, textarea, button')) words.appendChild(marker);
+        else if (field) label.insertBefore(marker, field);
+        else label.appendChild(marker);
+      }
+      function unmark(control) {
+        var label = labelFor(control);
+        var marker = label && label.querySelector('[data-mv-required]');
+        if (!marker) return;
+        if (control.type === 'radio' && label.parentNode.querySelector('input[type="radio"][required]')) return;
+        marker.remove();
+      }
+      function markWithin(root) {
+        if (root.matches && root.matches(CONTROLS)) mark(root);
+        if (root.querySelectorAll) Array.prototype.forEach.call(root.querySelectorAll(CONTROLS), mark);
+      }
+      // A label whose words were rewritten (a translation, a renamed field) gets its marker back.
+      function relabel(node) {
+        var label = node.nodeType === 1 && node.closest('label, legend');
+        if (!label) return;
+        var control = label.tagName === 'LEGEND' ? label.parentNode.querySelector('input[type="radio"][required]') : label.control;
+        if (control && control.required) mark(control);
+      }
+      markWithin(document);
+      if (typeof MutationObserver !== 'function') return;
+      new MutationObserver(function (changes) {
+        changes.forEach(function (change) {
+          if (change.type === 'attributes') {
+            if (change.target.required) mark(change.target); else unmark(change.target);
+            return;
+          }
+          Array.prototype.forEach.call(change.addedNodes, function (node) { if (node.nodeType === 1) markWithin(node); });
+          relabel(change.target);
+        });
+      }).observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['required'] });
     })();
 
     // Reveal invalid fields before native form validation attempts to focus

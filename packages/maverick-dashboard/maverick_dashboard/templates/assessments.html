@@ -222,7 +222,7 @@
   function responseDetail(result, fallback) {
     var reason = typeof window.mvErrorText === 'function'
       ? window.mvErrorText({ status: (result && result.status) || 0 })
-      : 'Something went wrong. Please try again.';
+      : 'Something went wrong. Try again.';
     return (fallback ? fallback + ' ' : '') + reason;
   }
   function pageMessage(text, error) {

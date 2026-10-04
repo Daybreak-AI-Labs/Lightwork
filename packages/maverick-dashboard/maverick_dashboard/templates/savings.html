@@ -16,7 +16,7 @@
 
   {% set saved = report.saved %}
   {% set cur = 'USD' %}
-  {% macro amount(v) %}{% if v is none %}Unavailable{% else %}${{ '{:,.2f}'.format(v) }}{% endif %}{% endmacro %}
+  {% macro amount(v) %}{% if v is none %}Unavailable{% else %}{{ v | money }}{% endif %}{% endmacro %}
   {% set field_words = {'hourly_rate': 'hourly rate', 'hours_per_task': 'hours per task', 'currency': 'currency', 'departments': 'department numbers'} %}
   {% from "_hero.html" import hero, state %}
   {% call hero('Value & spend', 'Savings',
@@ -69,10 +69,9 @@
     {% if value_resolution.effective_source == 'tenant_override' %}
       <p class="sv-note" id="sv-precedence" role="status">
         <strong>This workspace uses its own numbers:</strong>
-        {{ cfg.currency }} {{ cfg.hourly_rate }} an hour and
+        {{ cfg.hourly_rate | money(currency=cfg.currency) }} an hour and
         {{ cfg.hours_per_task }} hours per task. The company-wide numbers are
-        {{ value_resolution.global_assumptions.currency }}
-        {{ value_resolution.global_assumptions.hourly_rate }} an hour and
+        {{ value_resolution.global_assumptions.hourly_rate | money(currency=value_resolution.global_assumptions.currency) }} an hour and
         {{ value_resolution.global_assumptions.hours_per_task }} hours per task.
         This workspace keeps its own
         {% for f in value_resolution.tenant_override_fields %}{{ field_words.get(f, f | humanize | lower) }}{{ ', ' if not loop.last }}{% endfor %}
@@ -80,7 +79,7 @@
       </p>
     {% else %}
       <p class="sv-note" id="sv-precedence">
-        Using the company-wide numbers: {{ cfg.currency }} {{ cfg.hourly_rate }} an hour and
+        Using the company-wide numbers: {{ cfg.hourly_rate | money(currency=cfg.currency) }} an hour and
         {{ cfg.hours_per_task }} hours per task.
       </p>
     {% endif %}

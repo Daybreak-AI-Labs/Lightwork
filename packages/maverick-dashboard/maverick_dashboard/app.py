@@ -222,13 +222,16 @@ templates.env.bytecode_cache = _template_bytecode_cache()
 
 
 def _format_datetime(ts, mode: str = "relative"):
-    """Jinja filter: epoch seconds -> a ``<time>`` the viewer reads in their zone.
+    """Jinja filter: epoch seconds or ISO 8601 text -> a ``<time>`` the viewer
+    reads in their zone.
 
-    The server text is the full date, time and zone (UTC), so a page without
-    JavaScript still says when; ``lightwork-ui.js`` (``mvFormatTimes``) then
-    rewrites it in the viewer's time zone -- relative with the absolute time on
-    hover (default), or absolute with ``mode="absolute"``. Never a bare
-    ``HH:MM:SS`` and never a raw epoch.
+    The server text is the full date, time and zone ("4 Oct 2026, 14:01 UTC"),
+    so a page without JavaScript still says when; ``lightwork-ui.js``
+    (``mvFormatTimes``) then rewrites it in the viewer's time zone -- relative
+    with the absolute time on hover (default), absolute with
+    ``mode="absolute"``, or the calendar date alone with ``mode="date"`` (a
+    ``YYYY-MM-DD`` value stays that calendar day). Never a bare ``HH:MM:SS``,
+    an ISO string or a raw epoch.
     """
     import datetime as _dt
 
@@ -236,12 +239,24 @@ def _format_datetime(ts, mode: str = "relative"):
 
     if ts is None or ts == "":
         return "-"
+    if mode == "date" and isinstance(ts, str) and re.fullmatch(r"\d{4}-\d{2}-\d{2}", ts.strip()):
+        try:
+            day = _dt.date.fromisoformat(ts.strip())
+        except ValueError:
+            return str(ts)
+        return Markup(f'<time datetime="{day.isoformat()}" data-mv-time="{day.isoformat()}"'
+                      f' data-mv-time-mode="date">{_plain_labels.day_text(day)}</time>')
     try:
-        stamp = float(ts)
-        when = _dt.datetime.fromtimestamp(stamp, tz=_dt.timezone.utc)
+        if isinstance(ts, str) and not re.fullmatch(r"\s*-?\d+(?:\.\d+)?\s*", ts):
+            when = _dt.datetime.fromisoformat(ts.strip().replace("Z", "+00:00"))
+            when = (when if when.tzinfo else when.replace(tzinfo=_dt.timezone.utc)).astimezone(_dt.timezone.utc)
+            stamp = when.timestamp()
+        else:
+            stamp = float(ts)
+            when = _dt.datetime.fromtimestamp(stamp, tz=_dt.timezone.utc)
     except (TypeError, ValueError, OverflowError, OSError):
         return str(ts)
-    text = when.strftime("%d %b %Y, %H:%M UTC")
+    text = _plain_labels.datetime_text(stamp, date_only=mode == "date")
     return Markup(
         f'<time datetime="{when.isoformat()}" data-mv-time="{stamp:.3f}"'
         f' data-mv-time-mode="{escape(mode)}">{text}</time>'
@@ -4334,7 +4349,6 @@ async def privacy_page(request: Request) -> HTMLResponse:
 def _privacy_page_data() -> tuple[dict, dict]:
     """The Privacy workspace's data plane: privacy-ops records plus the
     estate registers (vendors, consent, data map), each its own opt-in."""
-    import time as _time
 
     from maverick import privacy_ops
 
@@ -4365,9 +4379,7 @@ def _privacy_page_data() -> tuple[dict, dict]:
         ):
             for r in rows:
                 created = float(r.get("created_at") or 0)
-                r["created"] = (
-                    _time.strftime("%Y-%m-%d", _time.localtime(created)) if created else "—"
-                )
+                r["created"] = _plain_labels.datetime_text(created, date_only=True) if created else "—"
         records["dsar_open"] = sum(
             1 for r in records["dsar"] if r.get("status") in ("open", "awaiting_erasure")
         )
@@ -4419,13 +4431,11 @@ def _privacy_page_data() -> tuple[dict, dict]:
 
 
 def _date(stamp) -> str:
-    import time as _time
-
     try:
         value = float(stamp or 0)
     except (TypeError, ValueError):
         return "—"
-    return _time.strftime("%Y-%m-%d", _time.localtime(value)) if value else "—"
+    return _plain_labels.datetime_text(value, date_only=True) if value else "—"
 
 
 @app.get("/privacy/vendors/{vendor_id}", response_class=HTMLResponse)
@@ -4978,14 +4988,13 @@ async def privacy_report_page(request: Request) -> HTMLResponse:
     """The privacy program report: a print-friendly board pack over every
     register. Same operate floor as the workspace it summarizes."""
     require_permission(request, "operate")
-    import time as _time
 
     from maverick import privacy_ops
 
     if not privacy_ops.enabled():
         raise HTTPException(status_code=404, detail="privacy ops are disabled")
     report = privacy_ops.program_report()
-    report["generated"] = _time.strftime("%Y-%m-%d %H:%M", _time.localtime(report["generated_at"]))
+    report["generated"] = _plain_labels.datetime_text(report["generated_at"])
     return templates.TemplateResponse(request, "privacy_report.html", {"r": report})
 
 
@@ -5182,7 +5191,7 @@ async def security_report_page(request: Request) -> HTMLResponse:
     report = security_ops.program_report()
     generated_at = report.get("generated_at")
     if isinstance(generated_at, (int, float)):
-        report["generated"] = time.strftime("%Y-%m-%d %H:%M %Z", time.localtime(generated_at))
+        report["generated"] = _plain_labels.datetime_text(generated_at)
     else:
         report["generated"] = "unknown"
     # The click-through must carry substance: each control with what it does,
@@ -6593,14 +6602,13 @@ async def audit_binder_page(request: Request, days: int = 90) -> HTMLResponse:
     and the acceptance-learning KPIs. Audit-gated like /audit; the product
     generates its own workpapers."""
     require_permission(request, "audit")
-    import time as _time
 
     from starlette.concurrency import run_in_threadpool as _rit
 
     from .api import _binder_payload
 
     b = await _rit(_binder_payload, max(1, min(days, 730)))
-    generated = _time.strftime("%Y-%m-%d %H:%M UTC", _time.gmtime(b["generated_at"]))
+    generated = _plain_labels.datetime_text(b["generated_at"])
     from .audit_actions_api import kind_label
 
     return templates.TemplateResponse(
@@ -11846,7 +11854,7 @@ def _render_tree_html(node: dict) -> str:
         return _html.escape(str(s), quote=True) if s is not None else ""
 
     def _render(n: dict) -> str:
-        dollars_html = f' <span class="cost">${n["dollars"]:.4f}</span>' if n.get("dollars") else ""
+        dollars_html = f' <span class="cost">{_plain_labels.money(n["dollars"])}</span>' if n.get("dollars") else ""
         node_html = (
             f'<a class="node" href="/chat/goal/{_esc(n["id"])}">'
             f'<span class="badge {_esc(n["status"])}">{_esc(_idfmt.humanize(n["status"]))}</span> '

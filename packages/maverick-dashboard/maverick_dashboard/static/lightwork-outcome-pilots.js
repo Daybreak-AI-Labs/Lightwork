@@ -190,7 +190,7 @@
       if (!c.source) { details.append(node('p', 'Source unavailable. Its observations are hidden until access is restored.')); report.append(details); return; }
       const link = node('a', 'Review current source'); link.href = c.source.href; details.append(link);
       details.append(node('p', (c.source.sample ? 'Sample source. ' : '') + (c.source.accepted ? 'Current source has a recorded acceptance.' : 'Current source has no qualifying acceptance.') +
-        ' Recorded runtime price: ' + (c.source.runtime_cost_usd === null ? 'unmeasured' : 'USD ' + c.source.runtime_cost_usd) + '; provider invoice unverified.'));
+        ' Recorded runtime price: ' + (c.source.runtime_cost_usd === null ? 'unmeasured' : window.mvMoney ? window.mvMoney(c.source.runtime_cost_usd) : 'USD ' + c.source.runtime_cost_usd) + '; provider invoice unverified.'));
       details.append(node('p', 'Leave unknown values blank. Enter non-overlapping effort: preparation, review, and rework are separate. Reported total cost includes all attempts.'));
       if (c.learning_exclusion) details.append(node('p', c.learning_exclusion.enforced ? 'Local learning exclusion receipt: ' + c.learning_exclusion.policy_id : 'Local learning exclusion receipt is unavailable or no longer matches these task inputs.'));
       details.append(node('p', 'Human and rework cost details are operator reports. They are already part of your reported total; provider allocations are shown separately and are not added automatically.'));
@@ -338,7 +338,7 @@
       picker.replaceChildren(new Option(items.length ? 'Choose a pilot' : 'No pilots are waiting for review', ''));
       const decisions = {accepted_local_scope: 'accepted', needs_more_evidence: 'more evidence requested'};
       items.forEach(item => {
-        const when = Number.isFinite(item.frozen_at) ? new Date(item.frozen_at * 1000).toLocaleDateString() : '';
+        const when = Number.isFinite(item.frozen_at) ? (window.mvDateAbsolute ? window.mvDateAbsolute(item.frozen_at) : new Date(item.frozen_at * 1000).toLocaleDateString()) : '';
         const done = item.decision ? ' · already reviewed (' + (decisions[item.decision] || 'reviewed') + ')' : '';
         picker.append(new Option(String(item.title || 'Untitled pilot') + (when ? ' · planned ' + when : '') + done, item.id));
       });

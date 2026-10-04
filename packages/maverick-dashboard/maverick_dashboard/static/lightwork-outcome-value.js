@@ -501,7 +501,7 @@
   };
   const titleCase = value => value.replaceAll('_', ' ').replace(/\b\w/g, character => character.toUpperCase());
   const displayTimestamp = value => value === null
-    ? 'not recorded' : new Date(value * 1000).toISOString();
+    ? 'not recorded' : window.mvTimeAbsolute ? window.mvTimeAbsolute(value) : new Date(value * 1000).toISOString();
   const friendlyWorkItem = value => {
     const separator = value.indexOf(':');
     const visible = separator === -1 ? value : value.slice(separator + 1);
@@ -661,7 +661,7 @@
       });
       if (!response.ok) fail('The cohort value report is unavailable.');
       let payload;
-      try { payload = await response.json(); } catch (_) { fail('The cohort value report could not be read.'); }
+      try { payload = await response.json(); } catch (_) { fail('The cohort value report could not be read. Refresh the page to try again.'); }
       const validated = validateCohort(payload, 'lightwork.outcome-value-cohort.v1');
       if (request !== generation) return;
       cohort = validated;

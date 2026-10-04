@@ -1268,7 +1268,7 @@
     }
     function stat(n,l){ return '<div class="jc-stat"><div class="n">'+n+
       '</div><div class="l">'+l+'</div></div>'; }
-    function money(v){ return v==null?'—':'$'+Number(v).toLocaleString(undefined,{maximumFractionDigits:0}); }
+    function money(v){ return v==null?'—':window.mvMoney?window.mvMoney(v):'$'+Number(v).toLocaleString(undefined,{maximumFractionDigits:0}); }
     function render(d){
       var jd=d.job_description||{}, sc=d.scorecard||{}, ct=d.cost_tier||{};
       el('jc-name').textContent=jd.name||NAME;
@@ -1291,7 +1291,7 @@
       var band=ct.band||'medium';
       var b=el('jc-band'); b.className='jc-band '+band; b.textContent=(ct.label||band)+' cost';
       el('jc-model').textContent=(ct.overridden?'Set by hand':'Chosen automatically')+
-        (ct.blended_rate!=null?(' · about $'+ct.blended_rate.toFixed(1)+' per million words'):'');
+        (ct.blended_rate!=null?(' · about '+money(ct.blended_rate)+' per million words'):'');
       el('jc-band-set').value=ct.overridden?band:'';
       el('jc-band-set').dataset.model=ct.model||'';
     }
@@ -1315,7 +1315,7 @@
         .then(function(ct){
           var b=el('jc-band'); b.className='jc-band '+ct.band; b.textContent=(ct.label||ct.band)+' cost';
           el('jc-model').textContent=(ct.overridden?'Set by hand':'Chosen automatically')+
-            (ct.blended_rate!=null?(' · about $'+ct.blended_rate.toFixed(1)+' per million words'):'');
+            (ct.blended_rate!=null?(' · about '+money(ct.blended_rate)+' per million words'):'');
         })
         .catch(function(e){ window.mvFail ? mvFail(e, 'change the cost level') : null; });
     });

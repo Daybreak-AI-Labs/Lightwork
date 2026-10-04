@@ -26,7 +26,7 @@
   }
   function say(id, text) { var node = $(id); if (node) node.textContent = text || ''; }
   function money(value) {
-    return (Number(value) || 0).toLocaleString(undefined, {style: 'currency', currency: 'USD'});
+    return window.mvMoney ? window.mvMoney(Number(value) || 0) : (Number(value) || 0).toLocaleString(undefined, {style: 'currency', currency: 'USD'});
   }
   function stateName(code) { return STATE_NAMES[code] || code; }
   async function failText(failure, action) {

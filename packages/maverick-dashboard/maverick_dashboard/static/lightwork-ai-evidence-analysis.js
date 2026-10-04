@@ -65,7 +65,7 @@ function human(value) {
 
 function when(ts) {
   if (typeof window !== "undefined" && typeof window.mvWhen === "function") return window.mvWhen(ts);
-  return ts ? new Date(ts * 1000).toLocaleString() : "";
+  return ts ? (window.mvTimeAbsolute ? window.mvTimeAbsolute(ts) : new Date(ts * 1000).toLocaleString()) : "";
 }
 
 function plainError(status, action) {

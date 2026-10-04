@@ -21,6 +21,7 @@
     var text = String(value || "").replace(/[_.-]+/g, " ").trim();
     return text ? text.charAt(0).toUpperCase() + text.slice(1) : "";
   }
+  function money(value) { return window.mvMoney ? window.mvMoney(Number(value || 0)) : "$" + Number(value || 0).toFixed(2); }
   function plain(status, action) {
     if (typeof window.mvErrorText === "function") return window.mvErrorText({ status: status }, action);
     return "Could not " + action + ". Please try again.";
@@ -39,7 +40,7 @@
     var payload = {};
     try { payload = await response.json(); } catch (_error) { payload = null; }
     if (!response.ok || !payload || typeof payload !== "object") {
-      throw new Error(response.ok ? "Could not " + action + ". Lightwork returned something unexpected." : (payload && typeof payload.detail === "string" ? payload.detail : plain(response.status, action)));
+      throw new Error(response.ok ? "Could not " + action + ". Lightwork returned something unexpected." : (payload && window.mvPlainDetail && window.mvPlainDetail(payload.detail) || plain(response.status, action)));
     }
     return payload;
   }
@@ -70,7 +71,7 @@
     payload.jobs.forEach(function(job) {
       var section = el("section"), progress = el("progress"); progress.max = Math.max(1,job.count); progress.value = job.done; progress.setAttribute("aria-label", "Rebuild progress");
       section.append(el("h4",human(job.collection)), el("p", human(job.state) + ": " + job.done + " of " + job.count + " passages. " + job.message),progress);
-      section.appendChild(el("p", "Observed provider usage at reviewed rates: $" + Number(job.observed_dollars || 0).toFixed(6) + ". Unresolved reservation: $" + Number(job.unresolved_dollars || 0).toFixed(6) + "."));
+      section.appendChild(el("p", "Observed provider usage at reviewed rates: " + money(job.observed_dollars) + ". Unresolved reservation: " + money(job.unresolved_dollars) + "."));
       if (["queued","running","publishing"].indexOf(job.state) >= 0) {
         ["cancel","resume"].forEach(function(action) {
           section.appendChild(button(action === "cancel" ? "Cancel at next safe boundary" : "Continue after an interruption", async function() {
@@ -92,7 +93,7 @@
   async function reindex(name) {
     var result = await call("GET", "/collections/" + encodeURIComponent(name) + "/reindex-review", undefined, "review rebuild limits"), review = result.review;
     jobsContext = result.context;
-    var ok = await confirmed("Rebuild " + human(name) + "? " + review.count + " passages, using " + review.model + ". Provider admission ceiling: $" + review.cost_ceiling.toFixed(6) + ". " + review.price_basis + " Time limit: " + review.limits.max_wall_seconds + " seconds, checked between batches. A complete replacement is published only after validation. AI indexing can cost money with a paid provider; paid requests are blocked without verified cost admission.", "Start rebuild");
+    var ok = await confirmed("Rebuild " + human(name) + "? " + review.count + " passages, using " + review.model + ". Provider admission ceiling: " + money(review.cost_ceiling) + ". " + review.price_basis + " Time limit: " + review.limits.max_wall_seconds + " seconds, checked between batches. A complete replacement is published only after validation. AI indexing can cost money with a paid provider; paid requests are blocked without verified cost admission.", "Start rebuild");
     if (!ok) return;
     pendingRebuild = {name:name,body:{context:result.context,job_id:crypto.randomUUID().replace(/-/g,""),review:review.review,confirmed:true}};
     statusEl.textContent = "Starting the rebuild. You may leave this page and return to its recorded status.";

@@ -207,7 +207,7 @@
     <table><thead><tr><th scope="col">Model</th><th scope="col">Ceiling per million tokens</th><th scope="col">Source and review</th><th scope="col">Action</th></tr></thead>
       <tbody>{% for rate in operator_rates %}<tr>
         <td>{{ rate.spec|model_label }}<br><span class="muted">Exact model: {{ rate.spec }}</span><br><span class="badge {{ 'active' if rate.active else 'blocked' }}">{{ 'Active' if rate.active else 'Expired — requests stop' }}</span></td>
-        <td>Input ${{ rate.input_per_mtok }} · Output ${{ rate.output_per_mtok }}</td>
+        <td>Input {{ rate.input_per_mtok | money(decimals=4) }} · Output {{ rate.output_per_mtok | money(decimals=4) }}</td>
         <td>{{ rate.source }}<br><span class="muted">Applies {{ rate.as_of }} · review by {{ rate.valid_until }}</span></td>
         <td><form method="post" action="/settings/models/rate/remove" data-settings-local="true"><input type="hidden" name="model" value="{{ rate.spec }}"><button class="btn btn--ghost" type="submit">Remove rate</button></form></td>
       </tr>{% endfor %}</tbody>
@@ -408,7 +408,7 @@
     </form>
     <p class="muted settings-foot" role="note">Right now:
       {% if limit_mode == 'off' %}tasks have no spending limit of their own.
-      {% elif limit_mode == 'amount' %}each task stops after spending ${{ '%.2f'|format(budget) }}.
+      {% elif limit_mode == 'amount' %}each task stops after spending {{ budget | money }}.
       {% else %}each task follows your installation's standard limits.{% endif %}</p>
   </div>
 

@@ -22,7 +22,7 @@
   function say(id, text) { var box = $(id); if (box) box.textContent = String(text || ''); }
   function money(n) {
     var v = Number(n) || 0;
-    return '$' + (v < 1 && v > 0 ? v.toFixed(4) : v.toFixed(2));
+    return window.mvMoney ? window.mvMoney(v) : '$' + v.toFixed(2);
   }
   function plural(n, one, many) { return n + ' ' + (n === 1 ? one : many); }
   function errorText(failure, action) {

@@ -484,7 +484,7 @@
     var facts = [['Risk of this change', r.risk], ['Needs a person to approve it', r.needs_approval ? 'Yes' : 'No']];
     if (r.read_current_values) {
       facts.push(['Could be undone', r.can_undo ? 'Yes' : 'No']);
-      if (r.money_at_stake) facts.push(['Money at stake', Number(r.money_at_stake).toLocaleString(undefined, {style: 'currency', currency: 'USD'})]);
+      if (r.money_at_stake) facts.push(['Money at stake', window.mvMoney ? window.mvMoney(r.money_at_stake) : Number(r.money_at_stake).toLocaleString(undefined, {style: 'currency', currency: 'USD'})]);
     }
     out.appendChild(table(['Question', 'Answer'], facts, 'What this change would do'));
     if (r.undo_note) out.appendChild(el('p', 'muted', r.undo_note));

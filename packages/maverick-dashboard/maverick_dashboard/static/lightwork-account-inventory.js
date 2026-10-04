@@ -24,7 +24,7 @@
       data.accounts.forEach(account=>{
         const item=node('li',''); item.className='mv-row';
         item.append(node('strong',account.name),node('p',account.domain+' · '+account.owner+' · '+account.sharing),node('p',account.identity));
-        if(account.expires_at)item.append(node('p',(account.expired?'Expired at ':'Expires at ')+new Date(account.expires_at*1000).toLocaleString()+(account.renews?' · renewal configured':'')));
+        if(account.expires_at)item.append(node('p',(account.expired?'Expired at ':'Expires at ')+(window.mvTimeAbsolute ? window.mvTimeAbsolute(account.expires_at) : new Date(account.expires_at*1000).toLocaleString())+(account.renews?' · renewal configured':'')));
         if(account.workspace&&account.workspace.name)item.append(node('p','Workspace: '+account.workspace.name));
         if(account.site_url)item.append(node('p','Connected site: '+account.site_url));
         if(account.renewal_state)item.append(node('p','Renewal: '+account.renewal_state.replace(/_/g,' ')));

@@ -303,7 +303,7 @@
         return value;
       }
       function evidenceText(source) {
-        const date = source.source_date ? new Date(source.source_date * 1000).toLocaleDateString() : 'Date unknown';
+        const date = source.source_date ? (typeof mvDateAbsolute === 'function' ? mvDateAbsolute(source.source_date) : new Date(source.source_date * 1000).toLocaleDateString()) : 'Date unknown';
         return source.subject + ' / saved ' + date + ' / revision ' + source.source_revision +
           ' / questionnaire version ' + (source.policy_version == null ? 'unknown' : source.policy_version) +
           ' / approval owner: ' + (source.approval_owner ? person(source.approval_owner) : 'Not recorded') +

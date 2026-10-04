@@ -594,7 +594,7 @@
       : 'The record does not have a complete, authenticated single-currency total.';
   }
   function displayTime(value) {
-    return new Date(value * 1000).toISOString();
+    return window.mvTimeAbsolute ? window.mvTimeAbsolute(value) : new Date(value * 1000).toISOString();
   }
 
   function renderAssurance(validated) {
@@ -934,9 +934,9 @@
         headers: {'X-Lightwork-Pilot-Context': context},
       });
     } catch (_) {
-      fail('Outcome accounting is unavailable.');
+      fail('Outcome accounting is unavailable. Refresh the page to try again.');
     }
-    if (!response.ok) fail('Outcome accounting is unavailable.');
+    if (!response.ok) fail('Outcome accounting is unavailable. Refresh the page to try again.');
     let data;
     try { data = await response.json(); } catch (_) { fail('Outcome accounting could not be read.'); }
     if (requestNumber !== pageRequest) return false;

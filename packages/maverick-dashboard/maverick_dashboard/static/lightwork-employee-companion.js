@@ -42,7 +42,7 @@
   function dateLabel(value) {
     if (value === null || value === undefined || value === "") { return "Time unavailable"; }
     var date = new Date(typeof value === "number" ? value * 1000 : value);
-    return Number.isNaN(date.getTime()) ? "Time unavailable" : date.toLocaleString();
+    return Number.isNaN(date.getTime()) ? "Time unavailable" : window.mvTimeAbsolute ? window.mvTimeAbsolute(date.getTime()) : date.toLocaleString();
   }
   function taskState(value) {
     var labels = {

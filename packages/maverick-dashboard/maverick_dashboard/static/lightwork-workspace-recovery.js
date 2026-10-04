@@ -404,7 +404,7 @@
       return;
     }
     heading.textContent = descriptor.title + " · " + descriptor.source_label + " · " + (index + 1);
-    explanation.textContent = descriptor.source_label + " · Restored " + new Date(descriptor.restored_at).toLocaleString();
+    explanation.textContent = descriptor.source_label + " · Restored " + (window.LightworkI18n ? window.LightworkI18n.formatDate(descriptor.restored_at) : new Date(descriptor.restored_at).toLocaleString());
     if (descriptor.status === "recorded" && item.state === "resolved") {
       var done = document.createElement("p"); done.textContent = "Review recorded. No old action was repeated."; entry.append(done); return;
     }
@@ -508,7 +508,7 @@
             var prompt = document.createElement("option"); prompt.value = ""; prompt.textContent = "Select a dated checkpoint after reviewing its evidence"; choices.append(prompt);
             result.candidates.forEach(function (candidate, candidateIndex) {
               if (!/^[0-9]{1,40}$/.test(candidate.position) || !Number.isFinite(Date.parse(candidate.source_at)) || !/^[a-f0-9]{64}$/.test(candidate.evidence_digest || "") || typeof candidate.evidence_reference !== "string") throw new Error("The source evidence is incomplete. Keep this review unresolved.");
-              var option = document.createElement("option"); option.value = String(candidateIndex); option.textContent = (candidate.empty_source ? "Source confirmed empty at " : "Collect only after ") + new Date(candidate.source_at).toLocaleString() + " (evidence " + candidate.evidence_digest.slice(0, 12) + ")"; choices.append(option);
+              var option = document.createElement("option"); option.value = String(candidateIndex); option.textContent = (candidate.empty_source ? "Source confirmed empty at " : "Collect only after ") + (window.LightworkI18n ? window.LightworkI18n.formatDate(candidate.source_at) : new Date(candidate.source_at).toLocaleString()) + " (evidence " + candidate.evidence_digest.slice(0, 12) + ")"; choices.append(option);
             });
             choices.hidden = !result.candidates.length; olderButton.hidden = !result.next_before;
             lookupStatus.textContent = result.candidates.length ? result.notice : "No selectable current checkpoint was returned. Keep this item unresolved or review the original service; no checkpoint was guessed.";
@@ -738,13 +738,13 @@
     list("coverage", result.coverage); list("excluded", result.excluded); list("blockers", result.restore_blockers);
     get("snapshot").replaceChildren();
     var empty = document.createElement("option"); empty.value = ""; empty.textContent = "Choose a snapshot"; get("snapshot").appendChild(empty);
-    result.snapshots.forEach(function (row, index) { var option = document.createElement("option"); option.value = row.id; var when = row.created_at ? new Date(row.created_at * 1000).toLocaleString() : "Snapshot " + (index + 1); option.textContent = when + " · " + (row.bytes / 1048576).toFixed(2) + " MB · " + row.id.slice(0, 8); get("snapshot").appendChild(option); });
+    result.snapshots.forEach(function (row, index) { var option = document.createElement("option"); option.value = row.id; var when = row.created_at ? (window.LightworkI18n ? window.LightworkI18n.formatDate(row.created_at) : new Date(row.created_at * 1000).toLocaleString()) : "Snapshot " + (index + 1); option.textContent = when + " · " + (row.bytes / 1048576).toFixed(2) + " MB · " + row.id.slice(0, 8); get("snapshot").appendChild(option); });
     if (selected) get("snapshot").value = selected;
     try {
       var installation = await request("installation");
       nativeReview = installation.native_review || null;
       if (!currentNativeReview()) nativeReview = null;
-      get("installation-native-review").textContent = nativeReview ? "Native release: " + nativeReview.release.version + ". Review expires " + new Date(nativeReview.expires_at * 1000).toLocaleString() + "." : "For a protected update, first select Check for updates in the native app, then refresh this page.";
+      get("installation-native-review").textContent = nativeReview ? "Native release: " + nativeReview.release.version + ". Review expires " + (window.LightworkI18n ? window.LightworkI18n.formatDate(nativeReview.expires_at) : new Date(nativeReview.expires_at * 1000).toLocaleString()) + "." : "For a protected update, first select Check for updates in the native app, then refresh this page.";
       get("installation-point").replaceChildren();
       var choose = document.createElement("option"); choose.value = ""; choose.textContent = "Choose a completed upgrade"; get("installation-point").appendChild(choose);
       (installation.recovery_points || []).filter(function (item) { return item.status === "upgraded"; }).forEach(function (item) {
@@ -759,7 +759,7 @@
         return label + (item.retirement_blocker ? ": " + item.retirement_blocker : item.cleanup_pending ? ": Continue the already reviewed retirement cleanup." : ": Eligible for reviewed retirement.");
       }));
       get("installation-retention-status").textContent = installationPoints.length + " of " + (installation.point_limit || 20) + " local installation slots used. " + (installationPoints.length ? "Retirement frees a slot after file cleanup succeeds." : "No installation recovery points are saved.");
-      list("installation-retirement-history", (installation.retirement_history || []).map(function (item) { return item.id.slice(0, 8) + " · retired " + new Date(item.retired_at * 1000).toLocaleString(); }));
+      list("installation-retirement-history", (installation.retirement_history || []).map(function (item) { return item.id.slice(0, 8) + " · retired " + (window.LightworkI18n ? window.LightworkI18n.formatDate(item.retired_at) : new Date(item.retired_at * 1000).toLocaleString()); }));
     } catch (error) { clearConfirmations(); clearEvidence(); if (accessDenied) throw error; get("installation-result").textContent = error.message; }
     if (result.bootstrap) {
       try { renderReconciliation(await request("reconciliation")); }
@@ -810,7 +810,7 @@
   }
   function renderComparison() {
     var row = comparison;
-    get("comparison-summary").textContent = "Captured " + new Date(row.compared_at * 1000).toLocaleString() + ": " + row.total_changes
+    get("comparison-summary").textContent = "Captured " + (window.LightworkI18n ? window.LightworkI18n.formatDate(row.compared_at) : new Date(row.compared_at * 1000).toLocaleString()) + ": " + row.total_changes
       + (row.total_changes === 1 ? " file difference, including " : " file differences, including ") + row.protected_changes
       + (row.protected_changes === 1 ? " protected difference requiring administrator review." : " protected differences requiring administrator review.");
     get("comparison-status").textContent = row.total_changes ? "Showing differences " + (row.offset + 1) + "–" + (row.offset + row.items.length)
@@ -897,8 +897,8 @@
     }
     verifyDrillReport(row, selected);
     drillEvidence = row; drillContext = context;
-    get("drill-report-summary").textContent = "Test completed " + new Date(row.completed_at * 1000).toLocaleString() + ": " + row.file_count + " files restored and checked in " + row.elapsed_seconds
-      + " seconds. Snapshot created " + new Date(row.snapshot_created_at * 1000).toLocaleString() + " (" + snapshotAge(row.completed_at - row.snapshot_created_at) + " old when tested).";
+    get("drill-report-summary").textContent = "Test completed " + (window.LightworkI18n ? window.LightworkI18n.formatDate(row.completed_at) : new Date(row.completed_at * 1000).toLocaleString()) + ": " + row.file_count + " files restored and checked in " + row.elapsed_seconds
+      + " seconds. Snapshot created " + (window.LightworkI18n ? window.LightworkI18n.formatDate(row.snapshot_created_at) : new Date(row.snapshot_created_at * 1000).toLocaleString()) + " (" + snapshotAge(row.completed_at - row.snapshot_created_at) + " old when tested).";
     get("drill-report-build").textContent = row.current_build_matches ? "The tested application build matches this app. This historical test does not prove the current workspace is ready for recovery."
       : "This test used a different application build (Lightwork " + row.application_version + "). Keep it as historical evidence; it does not prove readiness for this app.";
     get("drill-report-identity").textContent = "Snapshot: " + row.snapshot + ". Archive fingerprint: " + row.archive_sha256 + ". Test report: " + row.report_id + ". Tested application build: " + row.application_identity + ".";
@@ -952,8 +952,8 @@
     var outcomes = { verified_supported_formats: "Recognized supported formats verified", incomplete: "Test incomplete", failed: "Verification failed", no_encrypted_records: "No encrypted records tested" };
     get("custody-status").textContent = outcomes[row.outcome] + ". Review the exact coverage below; no live restore has been authorized.";
     var duration = row.elapsed_seconds < 0.1 ? "less than 0.1" : row.elapsed_seconds.toLocaleString(undefined, { maximumFractionDigits: 1 });
-    get("custody-summary").textContent = "Completed " + new Date(row.completed_at * 1000).toLocaleString() + " in " + duration + " seconds using your uploaded key copy in a fresh temporary process. Snapshot created "
-      + new Date(row.snapshot_created_at * 1000).toLocaleString() + " (" + snapshotAge(row.completed_at - row.snapshot_created_at) + " old when tested).";
+    get("custody-summary").textContent = "Completed " + (window.LightworkI18n ? window.LightworkI18n.formatDate(row.completed_at) : new Date(row.completed_at * 1000).toLocaleString()) + " in " + duration + " seconds using your uploaded key copy in a fresh temporary process. Snapshot created "
+      + (window.LightworkI18n ? window.LightworkI18n.formatDate(row.snapshot_created_at) : new Date(row.snapshot_created_at * 1000).toLocaleString()) + " (" + snapshotAge(row.completed_at - row.snapshot_created_at) + " old when tested).";
     get("custody-build").textContent = row.current_build_matches ? "The tested application build matches this app. This saved result does not prove current recovery readiness."
       : "This historical test used a different application build (Lightwork " + row.application_version + "). It does not prove readiness for this app.";
     var formats = { "raw-v1": "Encrypted files (v1)", "raw-v2": "Encrypted files (rotated-key v2)", "raw-tenant-local": "Encrypted files (local tenant key)",
@@ -1055,7 +1055,7 @@
   on("key-import", async function () { var key = get("key-input").value.trim(); if (!key) throw new Error("Enter your existing recovery key."); await request("key", { confirm: true, key: key }, "Lightwork-recovery-key.txt"); get("key-input").value = ""; await load(); say("Recovery key imported."); });
   on("create", async function () { clearReview(); say("Creating and verifying a snapshot…"); var row = await request("snapshots", { confirm: true }); await load(row.id); say("Snapshot created and verified. Export a copy outside this computer."); });
   on("import", async function () { clearReview(); var file = get("file").files[0]; if (!file) throw new Error("Select a snapshot archive."); if (file.size > state.max_archive_bytes) throw new Error("This archive exceeds the in-app size limit."); say("Importing and verifying the archive…"); var row = await request("import", file); get("file").value = ""; await load(row.id); say("Snapshot imported and verified."); });
-  on("inspect", async function () { say("Checking the signature and every archived file…"); var row = await request(path("inspect"), {}); get("result").textContent = "Signature and all " + row.file_count + " files verified" + (row.created_at ? " · Made " + new Date(row.created_at * 1000).toLocaleString() : "") + " · Lightwork " + row.application_version + " · " + row.compatibility; say("Snapshot verification finished."); });
+  on("inspect", async function () { say("Checking the signature and every archived file…"); var row = await request(path("inspect"), {}); get("result").textContent = "Signature and all " + row.file_count + " files verified" + (row.created_at ? " · Made " + (window.LightworkI18n ? window.LightworkI18n.formatDate(row.created_at) : new Date(row.created_at * 1000).toLocaleString()) : "") + " · Lightwork " + row.application_version + " · " + row.compatibility; say("Snapshot verification finished."); });
   on("download", async function () { await request(path("download"), {}, "Lightwork-snapshot-" + get("snapshot").value + ".tgz"); say("Verified snapshot download started. Store it securely."); });
   on("drill", async function () { clearDrillReport(); say("Restoring into a temporary workspace and checking the result…"); var row = await request(path("drill"), { confirm: true }); get("result").textContent = row.file_count + " files restored and checked in " + row.elapsed_seconds + " seconds. Your live workspace was not changed. External stores were not tested."; say("Local restore test passed. View the last restore test to review and download its saved evidence."); });
   on("retire", async function () { if (!get("retire-confirm").checked) return; var row = await request(path("inspect"), {}); await request(path("retire"), { confirm: true, sha256: row.sha256 }); get("retire-confirm").checked = false; clearReview(); await load(); say("The selected local snapshot was retired."); });
@@ -1080,7 +1080,7 @@
     }
     var result = await request("installation/authorize", body);
     if (result.native_handoff === true) {
-      get("installation-result").textContent = "Protected approval ready until " + new Date(result.expires_at * 1000).toLocaleString() + ". In Install & updates, select Load protected approval, review its administrator, action and scope, then confirm. Nothing has been installed.";
+      get("installation-result").textContent = "Protected approval ready until " + (window.LightworkI18n ? window.LightworkI18n.formatDate(result.expires_at) : new Date(result.expires_at * 1000).toLocaleString()) + ". In Install & updates, select Load protected approval, review its administrator, action and scope, then confirm. Nothing has been installed.";
     } else {
     if (typeof result.authorization !== "string" || !/^[0-9a-f]{32}:[0-9a-f]{64}$/.test(result.authorization)) throw new Error("The maintenance authorization was incomplete. Review again.");
     get("installation-code").value = result.authorization;
@@ -1099,7 +1099,7 @@
     identityTransition = { envelope: envelope, sha256: result.sha256, context: binding };
     get("installation-transition-details").textContent = "Verified signatures for " + result.from_version + " → " + result.to_version +
       "\nPublisher: " + result.from_publisher + " → " + result.to_publisher + "\nUpdate key fingerprints: " + result.from_key_sha256 + " → " + result.to_key_sha256 +
-      "\nNew admissions end: " + new Date(result.expires_at * 1000).toISOString() + ". Rollback is limited to the exact retained pair and compatible unchanged protected state. Windows verifies each installer's publisher trust before execution.";
+      "\nNew admissions end: " + (window.LightworkI18n ? window.LightworkI18n.formatDate(result.expires_at) : new Date(result.expires_at * 1000).toISOString()) + ". Rollback is limited to the exact retained pair and compatible unchanged protected state. Windows verifies each installer's publisher trust before execution.";
   });
   get("installation-transition-file").addEventListener("change", function () { clearIdentityTransition(); clearApprovalCode(); controls(); });
   get("installation-transition-confirm").addEventListener("change", controls);

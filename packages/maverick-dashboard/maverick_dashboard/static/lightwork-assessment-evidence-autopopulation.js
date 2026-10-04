@@ -197,7 +197,7 @@
   }
   function when(ts) {
     if (typeof window.mvWhen === "function") return window.mvWhen(ts);
-    return ts ? new Date(ts * 1000).toLocaleString() : "";
+    return ts ? (window.mvTimeAbsolute ? window.mvTimeAbsolute(ts) : new Date(ts * 1000).toLocaleString()) : "";
   }
   function documentName(artifactId) {
     var match = /^(.+)\.[0-9a-f]{8}$/.exec(String(artifactId || ""));

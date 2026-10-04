@@ -20,7 +20,7 @@
       {% else %}<span class="badge">Connection closed</span>{% endif %}
       <span class="badge">{{ status.enrolled }} connected</span>
       <span class="badge">{{ status.runs }} runs reported</span>
-      <span class="badge">${{ '%.2f' | format(status.reported_dollars) }} reported spend</span>
+      <span class="badge">{{ status.reported_dollars | money }} reported spend</span>
       {% if status.memory_contributions %}<span class="badge">{{ status.memory_contributions }} lessons shared</span>{% endif %}
       {% if status.over_budget %}<span class="badge failure">{{ status.over_budget }} over budget</span>{% endif %}
       {% if status.contained %}<span class="badge failure">{{ status.contained }} blocked</span>{% endif %}
@@ -57,7 +57,7 @@
           <td>{{ (a.department | humanize) if a.department else '—' }}</td>
           <td>{{ (a.max_risk | humanize) if a.max_risk else 'No limit' }}</td>
           <td>
-            ${{ '%.2f' | format(a.period_spent) }}{% if a.max_dollars is not none %} of ${{ '%.2f' | format(a.max_dollars) }}{% endif %}
+            {{ a.period_spent | money }}{% if a.max_dollars is not none %} of {{ a.max_dollars | money }}{% endif %}
             <span class="muted" style="font-size: var(--text-sm)">{{ 'this month' if a.period == 'monthly' else 'all time' }}</span>
             {% if a.over_budget %}<span class="badge failure">Over budget</span>{% endif %}
           </td>

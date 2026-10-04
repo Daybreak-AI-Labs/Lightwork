@@ -14,7 +14,7 @@
     return node;
   }
   function plural(n, one, many) { return n + ' ' + (n === 1 ? one : (many || one + 's')); }
-  function money(v) { return '$' + (Number(v) || 0).toFixed(2); }
+  function money(v) { return window.mvMoney ? window.mvMoney(Number(v) || 0) : '$' + (Number(v) || 0).toFixed(2); }
   function when(ts) { return (typeof window.mvWhen === 'function' ? window.mvWhen(ts) : '') || ''; }
 
   // A failed request as one sentence. Our routes write their refusals for

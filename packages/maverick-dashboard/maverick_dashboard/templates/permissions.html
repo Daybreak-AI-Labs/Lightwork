@@ -329,7 +329,7 @@
         <tr><td>Where work runs</td><td>{{ where[0] | upper }}{{ where[1:] }}</td></tr>
         <tr><td>Internet access</td><td>{{ network[0] | upper }}{{ network[1:] }}</td></tr>
         <tr><td>Limit for each task</td><td>
-          {%- if perm.budget.max_dollars is defined and perm.budget.max_dollars %}${{ '%.2f' | format(perm.budget.max_dollars | float) }}{% else %}No spending limit{% endif %}
+          {%- if perm.budget.max_dollars is defined and perm.budget.max_dollars %}{{ perm.budget.max_dollars | float | money }}{% else %}No spending limit{% endif %}
           {%- if perm.budget.max_wall_seconds is defined and perm.budget.max_wall_seconds %} and {{ ((perm.budget.max_wall_seconds | float) / 60) | round(0) | int }} minutes{% endif %}</td></tr>
       </tbody>
     </table>
