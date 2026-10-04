@@ -126,6 +126,8 @@ SAMPLES: dict[str, object] = {
     "consent_preferences.storage.backend": "postgres",
     "consent_preferences.storage.dsn": "postgresql://consent@db.example.com:5432/consent",  # pragma: allowlist secret
     "consent_preferences.storage.dsn_secret_ref": "$ACME_CONSENT_DSN",  # pragma: allowlist secret
+    # Letting the person who asked approve their own risky request loosens it.
+    "approval.separate_approver": "never",
 }
 
 # Other settings a switch needs before the module's reader accepts it.
