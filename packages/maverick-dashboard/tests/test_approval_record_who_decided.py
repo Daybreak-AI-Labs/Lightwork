@@ -73,7 +73,9 @@ def _csv_rows(client):
     return list(csv.reader(io.StringIO(response.text)))
 
 
-def test_activity_log_and_download_name_the_person_who_decided(env, monkeypatch):
+def test_activity_log_and_download_say_a_person_decided_without_naming_them(env, monkeypatch):
+    # The metadata view keeps the decider's identity private (the owner's rule,
+    # test_ux_basics), but never credits Lightwork with a person's decision.
     client, world = env
     approval_id, headers = _approval(world)
     _as(monkeypatch, APPROVER)
@@ -82,12 +84,12 @@ def test_activity_log_and_download_name_the_person_who_decided(env, monkeypatch)
     rows = _csv_rows(client)
     decided = [row for row in rows if row[1] == "Approval decided"]
     assert decided, rows
-    assert decided[-1][2] == "dana.admin@northwind.example"
-    assert "Lightwork" not in {row[2] for row in decided}
+    assert decided[-1][2] == "A person (name not shown)"
+    assert not {"Lightwork", "dana.admin@northwind.example"} & {row[2] for row in decided}
 
     html = client.get("/audit").text
     page = _visible(html)
-    assert re.search(r"Approval decided\s+dana\.admin@northwind\.example", page), page[:2000]
+    assert re.search(r"Approval decided\s+A person \(name not shown\)", page), page[:2000]
     # A decision row names no task, so it shows a dash, not a link to nowhere.
     assert 'href="/chat/goal/"' not in html
 
@@ -158,4 +160,5 @@ def test_approval_steps_read_plainly_in_the_log():
     details = {label: text for _key, label, text in event_details(in_slack)}
     assert details["Chat app"] == "Slack"
     assert details["Approved own request"] == "Yes"
-    assert event_who(in_slack) == "dana.admin@northwind.example"
+    assert event_who(in_slack) == "A person (name not shown)"
+    assert APPROVER not in str(in_slack)

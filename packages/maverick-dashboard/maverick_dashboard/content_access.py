@@ -140,9 +140,10 @@ def require_employee_content(request, owner: str, *, resource_kind: str, resourc
         raise HTTPException(403, "Employee content is private. Request a scoped, independently reviewed read in Content access.")
 
 
-# Approval decisions are governance evidence: who decided, on which request,
-# through which channel, and whether the requester approved their own request.
-# These are identities and fixed words, never the request's content.
+# Approval decisions are governance evidence: that a person decided, on which
+# request, through which channel, and whether the requester approved their own
+# request. Only fixed words and flags: the decider's identity stays out of this
+# metadata view, like the request's content (the owner's privacy rule).
 APPROVAL_AUDIT_KINDS = frozenset({"approval_decision", "consent_result", "channel_approval_decision"})
 APPROVAL_AUDIT_ACTIONS = frozenset({
     "approval_decision_undone", "approval_confirmation", "approval_rejection_reason",
@@ -154,10 +155,9 @@ _APPROVAL_CHANNELS = frozenset({"slack", "teams", "email"})
 
 def _approval_fields(event: dict) -> dict:
     safe = {}
-    for name in ("decided_by", "previously_decided_by"):
-        value = event.get(name)
-        if isinstance(value, str) and 0 < len(value) <= 256 and value.isprintable():
-            safe[name] = value
+    if any(isinstance(event.get(name), str) and event.get(name)
+           for name in ("decided_by", "previously_decided_by")):
+        safe["decided_by_person"] = True
     if isinstance(event.get("self_approval"), bool):
         safe["self_approval"] = event["self_approval"]
     approval_id = event.get("approval_id")

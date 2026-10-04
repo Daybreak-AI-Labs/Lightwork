@@ -80,7 +80,8 @@ FIELD_LABELS: dict[str, str] = {
     "decided_by": "Decided by", "previously_decided_by": "Earlier decision by",
     "self_approval": "Approved own request",
 }
-_HIDDEN = {"v", "ts", "kind", "agent", "goal_id", "hash", "prev_hash", "sig", "key_id", "projection"}
+_HIDDEN = {"v", "ts", "kind", "agent", "goal_id", "hash", "prev_hash", "sig", "key_id", "projection",
+           "decided_by_person"}
 # Machine identifiers (event ids, fingerprints, 64-hex tokens) are kept for
 # support staff under "Technical details" instead of in the readable row.
 _TECHNICAL_KEYS = {"approval_event_id", "event_id", "request_id", "idempotency_key",
@@ -182,6 +183,10 @@ def event_who(event: dict) -> str:
     person = event_person(event)
     if person:
         return humanize_principal(person).name
+    payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
+    if event.get("decided_by_person") is True or payload.get("decided_by_person") is True:
+        # A person decided; the metadata view keeps their identity private.
+        return "A person (name not shown)"
     agent = event.get("agent")
     return humanize(agent) if agent else "Lightwork"
 

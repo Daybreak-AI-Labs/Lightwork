@@ -192,11 +192,11 @@ def test_activity_log_hides_machine_ids_and_never_shows_raw_epochs(monkeypatch, 
     page = _client().get("/audit").text
     assert "e+09" not in page
     assert "Approval decided" in page and "Approved" in page
-    # The projected metadata view omits machine identifiers and the request's
-    # content, but names the person who decided (governance evidence, like any
-    # other event's actor); its event time is still rendered as a readable time.
-    assert "approval-v1-" not in page
-    assert re.search(r'Decided by</span>\s*<span class="aud-v">owner@example\.com</span>', page)
+    # The projected metadata view omits private decision identity and machine
+    # identifiers; it still says a person (not Lightwork) decided, and its event
+    # time is rendered as a readable time.
+    assert "approval-v1-" not in page and "owner@example.com" not in page
+    assert "A person (name not shown)" in page
     assert re.search(r'data-mv-time="[0-9.]+" data-mv-time-mode="absolute"', page)
 
 
