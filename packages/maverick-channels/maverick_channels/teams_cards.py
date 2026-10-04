@@ -141,6 +141,9 @@ def approval_card(approval: dict, card: dict | None, *, source_label: str | None
         ]))
         body.append(_block("What it will do", weight="bolder", spacing="medium"))
         body.append(_block(_bullets((card.get("parameters") or {}).get("summary"))))
+        if card.get("display"):
+            # The exact command stays on the access-checked Approvals page.
+            body.append(_block("The exact command is shown on the Approvals page."))
         preview = card.get("preview") or {}
         body.append(_facts([("Before", preview.get("before")), ("After", preview.get("after"))]))
         consequences = card.get("consequences") or {}

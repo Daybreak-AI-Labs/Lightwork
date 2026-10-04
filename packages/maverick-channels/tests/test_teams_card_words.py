@@ -36,3 +36,4 @@ def test_the_command_stays_off_the_shared_room_card():
     rendered = str(approval_card({"id": 7, "action": "shell", "risk": "high", "scope": "sandbox:/work"}, card))
     assert command not in rendered
     assert "5ac93412" not in rendered
+    assert "The exact command is shown on the Approvals page." in rendered

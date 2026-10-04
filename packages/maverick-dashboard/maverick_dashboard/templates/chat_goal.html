@@ -1055,10 +1055,10 @@
           const explain = running && !inboxReady && canOperate && stoppable;
           runNote.hidden = !explain;
           if (explain) cgCopy(runNote, approvalWait
-            ? 'This task is waiting for approval before it continues. Send works again when it finishes. To end the task now, press Stop.'
+            ? 'Waiting for approval. Send works again when this task finishes; to end it now, press Stop.'
             : inbox && inbox.disabledByPolicy
-              ? 'Lightwork is working on this task. Sending messages during a task is turned off for this workspace, so Send works again when it finishes. To end the task now, press Stop.'
-              : 'Lightwork is working on this task. Send works again when it finishes. To end the task now, press Stop.');
+              ? 'Sending during a task is turned off for this workspace. Send works again when this task finishes; to end it now, press Stop.'
+              : 'Send works again when this task finishes. To end it now, press Stop.');
           else runNote.textContent = '';
         }
         answerInput.disabled = !canOperate || submitting;
