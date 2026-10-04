@@ -729,8 +729,11 @@ def test_compliance_profiles_follow_the_saved_list(audit_rows):
 
 def test_dashboard_approval_wait_reads_the_setting_and_env_wins(monkeypatch, audit_rows):
     from maverick.safety.consent import _dashboard_timeout
+    from maverick_dashboard import settings_catalog as catalog
 
-    assert _dashboard_timeout() == 300.0
+    # Risky steps wait 30 minutes by default (it was 5).
+    assert _dashboard_timeout() == 1800.0
+    assert catalog.BY_ID["approval.dashboard_wait_seconds"].default == 1800
     assert _save({"approval.dashboard_wait_seconds": 2}).status_code == 200
     assert _dashboard_timeout() == 120.0
     monkeypatch.setenv("MAVERICK_CONSENT_DASHBOARD_TIMEOUT", "45")

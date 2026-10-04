@@ -8572,20 +8572,25 @@ def _approval_source(provenance: str | None) -> str | None:
 def _approval_viewer_context(request: Request | None, approvals: list) -> dict:
     """Who is looking at the queue, so a card can say "your own request", and
     -- when the enforced rules keep that person from approving it (someone
-    else must, or under two-person approval their vote doesn't count) -- why."""
+    else must, or under two-person approval their vote doesn't count) -- why.
+    Also which waiting requests have had their one reminder sent."""
     if request is None:
-        return {"approval_viewer": "", "own_request_notes": {}}
+        return {"approval_viewer": "", "own_request_notes": {}, "approval_reminders": set()}
     from .api import _supervisor
     from .approval_decisions import own_request_note
+    from .approval_reminders import reminder_sent
 
     viewer = _supervisor(request)
     world = _world()
     notes = {}
+    reminders = set()
     for approval in approvals:
         note = own_request_note(world, approval, viewer)
         if note:
             notes[approval.id] = note
-    return {"approval_viewer": viewer, "own_request_notes": notes}
+        if reminder_sent(world, approval):
+            reminders.add(approval.id)
+    return {"approval_viewer": viewer, "own_request_notes": notes, "approval_reminders": reminders}
 
 
 def _approval_queue_context(approvals: list, request: Request | None = None) -> dict:

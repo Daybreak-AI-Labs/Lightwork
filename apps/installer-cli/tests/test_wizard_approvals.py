@@ -42,6 +42,19 @@ def test_every_separate_approver_choice_is_a_mode_the_kernel_knows(monkeypatch):
     assert tuple(choice.split()[0] for choice in offered) == SEPARATE_APPROVER_MODES
 
 
+def test_the_step_says_how_long_a_risky_step_waits(monkeypatch):
+    from maverick_installer import wizard
+
+    printed = []
+    monkeypatch.setattr(wizard.console, "print", lambda *a, **_k: printed.append(" ".join(map(str, a))))
+    monkeypatch.setattr(wizard, "_q_text", lambda *_a, **kw: kw["default"])
+    monkeypatch.setattr(wizard, "_q_confirm", lambda *_a, **kw: kw["default"])
+    monkeypatch.setattr(wizard, "_q_select", lambda *_a, **kw: kw["default"])
+    wizard.pick_approvals()
+    text = " ".join(printed)
+    assert "30 minutes" in text and "10 minutes" in text
+
+
 def test_step_and_config_section():
     from maverick_installer import wizard
 

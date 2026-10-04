@@ -1284,7 +1284,9 @@ def pick_approvals() -> dict[str, Any]:
     """
     console.print()
     console.print(
-        "[dim]Risky actions wait on the Approvals page for a person. A decision "
+        "[dim]Risky actions wait on the Approvals page for a person for up to 30 "
+        "minutes; after 10 minutes the people who can decide get one in-app "
+        "reminder, and with no decision in time the action is refused. A decision "
         "can be undone for a short while; the agent only acts once that window "
         "has passed.[/dim]"
     )

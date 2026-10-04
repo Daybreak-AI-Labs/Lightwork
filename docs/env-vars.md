@@ -293,9 +293,10 @@ Config equivalents live under `[effort]` (`enabled`, `default`, `<role>`) and
 | Env var | Default | Description |
 | --- | --- | --- |
 | `MAVERICK_CONSENT_MODE` | `auto-approve` | Gating for destructive actions: `auto-approve`, `auto-deny`, `ask`, or `dashboard`. |
-| `MAVERICK_CONSENT_DASHBOARD_TIMEOUT` | `300` | Seconds to wait for a dashboard approval before treating as denied. |
+| `MAVERICK_CONSENT_DASHBOARD_TIMEOUT` | `1800` | Seconds to wait for a dashboard approval before treating as denied (overrides `[approval] dashboard_wait_seconds`). |
 | `MAVERICK_APPROVAL_UNDO_GRACE_SECONDS` | `30` | Seconds a decision on the Approvals page can be undone. The agent waits this long before acting on an approval; `0` acts at once and removes Undo. Also `[approval] undo_grace_seconds` (Settings > All settings; this variable wins). |
 | `MAVERICK_APPROVAL_REQUIRE_ACKNOWLEDGEMENT` | `1` | Approving a high or critical risk request needs an explicit confirmation (a ticked box; typing APPROVE for critical). `0` makes those approvals one click. Also `[approval] require_acknowledgement`. |
+| `MAVERICK_SEPARATE_APPROVER` | `when_available` | Who approves a high or critical risk action someone asked for: `when_available` (someone else whenever another approver could decide it, else the requester, recorded as a self-approval), `always` (always someone else) or `never` (the requester may approve it). Also `[approval] separate_approver` (Settings > All settings; this variable wins). |
 | `MAVERICK_MCP_ELICITATION` | `decline` | How the MCP client answers an external server's `elicitation/create`: `decline` (continue without the value), `cancel` (abort the server's op), or `prompt` (collect typed input from an interactive operator, gated through consent). The prompt is shield-scanned either way. |
 | `MAVERICK_MCP_ELICITATION_TIMEOUT` | `300` | Seconds the MCP *server* waits for an elicitation response from a stdio client before giving up and leaving the question parked for the async `maverick_answer` flow. Also `[mcp] elicitation_timeout` (Settings > All settings; this variable wins). |
 | `MAVERICK_MCP_MAX_ELICIT_ROUNDS` | `8` | Max elicit→answer→resume rounds the MCP server runs per `maverick_start`/`maverick_resume` call before returning (bounds runaway question loops). Also `[mcp] max_elicit_rounds` (Settings > All settings; this variable wins). |

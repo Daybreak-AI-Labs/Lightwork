@@ -37,6 +37,7 @@
       <div class="approval-item__head">
         <h2 class="approval-item__title" id="approval-title-{{ a.id }}">{{ action_label }}</h2>
         <span class="badge {{ 'blocked' if a.risk in ('high', 'critical') else 'pending' }} approval-risk">{{ a.risk | humanize }} risk</span>
+        {% if approval_reminders and a.id in approval_reminders %}<span class="badge pending approval-reminder">Reminder sent</span>{% endif %}
         <span class="badge approval-outcome" hidden></span>
       </div>
       <dl class="approval-item__meta">

@@ -1033,8 +1033,9 @@ def _other_rows(S) -> tuple:
                   "before high-risk actions, may stop applying."),
         S("approval", "dashboard_wait_seconds", "Wait for a dashboard approval up to",
           "How long an agent waits for someone to approve a risky action on the Approvals "
-          "page. With no answer in time, the action is refused.", "number", "Safety",
-          5 * _MINUTE, "maverick.safety.consent", subgroup="Approvals", minimum=1, maximum=60,
+          "page. After 10 minutes the people who can decide get one in-app reminder. With "
+          "no answer in time, the action is refused.", "number", "Safety",
+          30 * _MINUTE, "maverick.safety.consent", subgroup="Approvals", minimum=1, maximum=60,
           integer=True, scale=_MINUTE, unit="minutes",
           env=("MAVERICK_CONSENT_DASHBOARD_TIMEOUT",)),
         S("approval", "undo_grace_seconds", "Allow undo after a decision for",
