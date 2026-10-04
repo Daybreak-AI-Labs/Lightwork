@@ -49,6 +49,19 @@
   .af-grid{ display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
     gap: var(--space-5); align-items: start; }
   .af-grid > *, .af-card, .af-picker, .fld { min-width: 0; }
+  /* The specialist search (lightwork-agent-picker.js): an opaque list under
+     the field, so the field itself never moves while results change. */
+  .af-combo{ position: relative; flex: 1; min-width: 0; }
+  .af-combo .input{ width: 100%; }
+  .af-combo__list{ position: absolute; z-index: 30; inset-inline: 0; top: calc(100% + 4px); margin: 0;
+    padding: var(--space-1) 0; list-style: none; max-height: 18rem; overflow-y: auto;
+    background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius-md); box-shadow: var(--shadow-lg); }
+  .af-combo__option{ display: flex; flex-direction: column; gap: 2px; min-height: 24px;
+    padding: var(--space-2) var(--space-3); cursor: pointer; }
+  .af-combo__option:hover{ background: var(--row-hover); }
+  .af-combo__option[aria-selected="true"]{ background: var(--brand-subtle); outline: 2px solid var(--brand); outline-offset: -2px; }
+  .af-combo__note{ color: var(--muted); font-size: var(--text-xs); }
+  .af-combo__status{ min-height: 1.4em; margin: var(--space-1) 0 0; }
   @media (max-width: 900px){ .af-grid{ grid-template-columns: minmax(0, 1fr); } }
   .af-card{ border: 1px solid var(--glass-border); border-radius: var(--radius-lg);
     background: var(--glass-soft); box-shadow: var(--shadow-sm), var(--glass-edge);
@@ -297,27 +310,28 @@
         {% if agents %}
         <label for="agent-picker">Start from a specialist <span class="sub">— search {{ agents|length }} prebuilt specialists</span></label>
         <div style="display:flex; gap:var(--space-2); align-items:center;">
-          {# A searchable picker, not a 2,000-option dropdown: type to filter,
-             pick to open. Navigation happens only on an exact match. #}
-          <input id="agent-picker" list="agent-picker-list" type="text" autocomplete="off"
-                 spellcheck="false" style="flex:1;" class="input"
-                 aria-label="Choose a specialist to tailor"
-                 placeholder="Type to search, for example “forecasting” or “onboarding”"
-                 value="{{ ((selected.description or (selected.name | humanize)) if selected else '') }}">
-          <datalist id="agent-picker-list">
-            {% for a in agents %}
-            <option value="{{ (a.description or (a.name | humanize)) }}{% if a.is_override %} (custom){% endif %}" data-name="{{ a.name }}" data-ready="{{ '1' if a.readiness.state == 'action_ready' else '0' }}" label="{{ a.readiness.label }}"{% if a.readiness.state != 'action_ready' %} disabled{% endif %}></option>
-            {% endfor %}
-          </datalist>
+          {# Search as you type: each search asks /agents/picker for the best
+             matches (the page no longer ships all 2,000+ specialists).
+             Navigation happens on a chosen match or an exact name. #}
+          <div class="af-combo">
+            <input id="agent-picker" type="text" autocomplete="off" spellcheck="false" class="input"
+                   role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="agent-picker-list"
+                   aria-label="Choose a specialist to tailor" data-picker-src="/agents/picker"
+                   placeholder="Type to search, for example “forecasting” or “onboarding”"
+                   value="{{ ((selected.description or (selected.name | humanize)) if selected else '') }}">
+            <ul id="agent-picker-list" class="af-combo__list" role="listbox" aria-label="Matching specialists" hidden></ul>
+          </div>
           <button type="button" class="btn" id="agent-picker-open">Open</button>
           {% if editable %}
           <span class="sub">or</span>
           <a class="btn" href="/agents?new=1#agent-form" id="btn-new-agent">＋ New custom agent</a>
           {% endif %}
         </div>
+        <p class="sub af-combo__status" id="agent-picker-status" role="status" aria-live="polite"></p>
         <label class="sub" style="display:inline-flex;align-items:center;gap:var(--space-2);margin-top:var(--space-2);">
           <input id="agent-show-needs-setup" type="checkbox"> Show specialists that need setup
         </label>
+        <script src="{{ static_url('lightwork-agent-picker.js') if static_url is defined else '/static/lightwork-agent-picker.js' }}" defer></script>
         <p class="sub" style="margin:var(--space-1) 0 0;">The list starts with specialists whose required actions are available. Live connections, permissions and the AI service are checked when work starts.</p>
         {% elif editable %}
         <a class="btn" href="/agents?new=1#agent-form" id="btn-new-agent">＋ New custom agent</a>
@@ -550,32 +564,7 @@
     }
     function mountToolPicks() { document.querySelectorAll('.af-toolpick').forEach(mountToolPick); }
 
-    // Open the chosen prebuilt specialist from the search box.
-    (function () {
-      var picker = document.getElementById('agent-picker');
-      if (!picker) return;
-      var showAll = document.getElementById('agent-show-needs-setup');
-      if (showAll) showAll.addEventListener('change', function () {
-        document.querySelectorAll('#agent-picker-list option').forEach(function (option) {
-          option.disabled = !showAll.checked && option.dataset.ready !== '1';
-        });
-      });
-      function go() {
-        var v = picker.value.trim(); if (!v) return;
-        var match = Array.prototype.find.call(document.querySelectorAll('#agent-picker-list option'), function (o) {
-          return !o.disabled && (o.value.toLowerCase() === v.toLowerCase() || o.dataset.name === v);
-        });
-        if (match) location.href = '/agents?name=' + encodeURIComponent(match.dataset.name);
-      }
-      picker.addEventListener('change', go);
-      var open = document.getElementById('agent-picker-open');
-      if (open) open.addEventListener('click', function () {
-        go();
-        if (!Array.prototype.some.call(document.querySelectorAll('#agent-picker-list option'), function (o) { return !o.disabled && o.value.toLowerCase() === picker.value.trim().toLowerCase(); })) {
-          mvToast('Choose a specialist from the list, or show those needing setup.', { error: true });
-        }
-      });
-    })();
+    // The prebuilt-specialist search is static/lightwork-agent-picker.js.
 
     // ---- JD hiring: match the roster / draft a new specialist from a JD ----
     // Runs BEFORE the chips/risk initializers below so a drafted pack stashed in

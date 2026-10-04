@@ -7081,6 +7081,60 @@ async def agents_page(request: Request) -> HTMLResponse:
     )
 
 
+def _picker_rank(query: str, label: str, name: str) -> int | None:
+    """Where a specialist sorts for a picker search, or None when it does not
+    match: the label or pack name starting with the words first, then a word
+    in the label starting with them, then a match anywhere."""
+    if not query:
+        return 0
+    text, key = label.casefold(), name.casefold()
+    if text.startswith(query) or key.startswith(query):
+        return 0
+    if re.search(r"(?:^|\W)" + re.escape(query), text):
+        return 1
+    if query in text or query in key:
+        return 2
+    return None
+
+
+@app.get("/agents/picker")
+async def agents_picker(request: Request, q: str = "", setup: bool = False, limit: int = 20) -> dict:
+    """Search-as-you-type for the Agent Factory picker.
+
+    The page used to ship all 2,000+ specialists as one picker list. This
+    answers with the best matches only: ready-to-run specialists unless
+    ``setup`` asks for those that need setup too, at most ``limit`` (20 by
+    default, 50 at most). It sits under /agents, so the page's role visibility
+    applies, and it is department-scoped exactly like the page's roster.
+    """
+    from maverick.domain_edit import list_agents
+
+    from .auth import caller_suites
+
+    query = " ".join(q.split())[:100].casefold()
+    limit = max(1, min(limit, 50))
+    allowed = caller_suites(request)
+    try:
+        roster = list_agents()
+    except Exception as exc:  # noqa: BLE001 - the page says the list is unavailable
+        raise HTTPException(status_code=503, detail="The specialist list is unavailable. Try again.") from exc
+    ranked = []
+    for position, agent in enumerate(roster):
+        if allowed is not None and not set(agent["suites"]) <= allowed:
+            continue
+        readiness = agent.get("readiness") or {}
+        ready = readiness.get("state") == "action_ready"
+        if not ready and not setup:
+            continue
+        label = (agent.get("description") or _idfmt.humanize(agent["name"])) + (" (custom)" if agent.get("is_override") else "")
+        rank = _picker_rank(query, label, agent["name"])
+        if rank is not None:
+            ranked.append((rank, position, {"name": agent["name"], "label": label, "ready": ready,
+                                            "readiness": readiness.get("label", "")}))
+    ranked.sort(key=lambda row: row[:2])
+    return {"items": [row[2] for row in ranked[:limit]], "total": len(ranked), "limit": limit}
+
+
 @app.get("/assessments", response_class=HTMLResponse)
 def assessments_page(request: Request) -> HTMLResponse:
     """Govern → Assessments: the privacy / security / AI-risk register. Every
@@ -12387,6 +12441,7 @@ async def shell_copilot_js() -> FileResponse:
     )
 
 
+@app.get("/static/lightwork-agent-picker.js")
 @app.get("/static/lightwork-answer-panel.js")
 @app.get("/static/lightwork-approval-history.js")
 @app.get("/static/lightwork-chat-drafts.js")
