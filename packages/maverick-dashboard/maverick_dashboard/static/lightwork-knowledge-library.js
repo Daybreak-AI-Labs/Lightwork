@@ -39,7 +39,7 @@
     var payload = {};
     try { payload = await response.json(); } catch (_error) { payload = null; }
     if (!response.ok || !payload || typeof payload !== "object") {
-      throw new Error(response.ok ? "Could not " + action + ". Lightwork returned something unexpected." : (payload && typeof payload.detail === "string" ? payload.detail : plain(response.status, action)));
+      throw new Error(response.ok ? "Could not " + action + ". Lightwork returned something unexpected." : (payload && window.mvPlainDetail && window.mvPlainDetail(payload.detail) || plain(response.status, action)));
     }
     return payload;
   }

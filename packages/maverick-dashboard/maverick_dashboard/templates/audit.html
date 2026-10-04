@@ -340,7 +340,7 @@
       if (!(await window.mvConfirm('Build and download a signed proof bundle of what Lightwork did?', { okText: 'Download' }))) return;
       try {
         var r = await fetch('/api/v1/audit/proof-bundle', { method: 'POST', credentials: 'same-origin' });
-        if (!r.ok) { var j = await r.json().catch(function () { return {}; }); show([r.status === 409 && j.detail ? j.detail : window.mvErrorText(r, 'build the proof bundle')]); return; }
+        if (!r.ok) { var j = await r.json().catch(function () { return {}; }); show([window.mvErrorText({status: r.status, detail: j.detail}, 'build the proof bundle')]); return; }
         var blob = await r.blob();
         var a = document.createElement('a');
         a.href = URL.createObjectURL(blob); a.download = 'lightwork-proof.json';

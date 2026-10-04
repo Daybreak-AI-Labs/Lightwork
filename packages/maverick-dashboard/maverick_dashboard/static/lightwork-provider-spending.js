@@ -109,7 +109,7 @@
     state = await response.json();
     providerOptions(el('spend-provider'), provider, true);
     const health = state.ledger_health || {};
-    el('spend-health').textContent = (health.message || 'Spending record health could not be checked.')
+    el('spend-health').textContent = (health.message || 'Spending record health could not be checked. Refresh the page to check again.')
       + (Number.isInteger(health.receipt_count) ? ` ${health.receipt_count.toLocaleString()} provider requests recorded.` : '')
       + (Number.isInteger(health.unresolved_count) && health.unresolved_count
         ? ` ${health.unresolved_count.toLocaleString()} request${health.unresolved_count === 1 ? '' : 's'} still need a final cost.` : '')

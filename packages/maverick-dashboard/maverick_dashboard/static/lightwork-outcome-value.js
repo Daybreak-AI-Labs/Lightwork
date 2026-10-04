@@ -661,7 +661,7 @@
       });
       if (!response.ok) fail('The cohort value report is unavailable.');
       let payload;
-      try { payload = await response.json(); } catch (_) { fail('The cohort value report could not be read.'); }
+      try { payload = await response.json(); } catch (_) { fail('The cohort value report could not be read. Refresh the page to try again.'); }
       const validated = validateCohort(payload, 'lightwork.outcome-value-cohort.v1');
       if (request !== generation) return;
       cohort = validated;

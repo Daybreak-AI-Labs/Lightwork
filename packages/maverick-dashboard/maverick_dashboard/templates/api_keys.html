@@ -103,18 +103,22 @@
         init.headers['Content-Type'] = 'application/json';
         init.body = JSON.stringify(options.json);
       }
-      var response = await window.fetch(url, init);
+      var response;
+      try { response = await window.fetch(url, init); }
+      catch (e) { throw new Error(window.mvErrorText(e)); }
       var data = null;
       try { data = await response.json(); } catch (e) { data = null; }
       if (!response.ok) {
-        var detail = (data && data.detail) ? data.detail : ('Something went wrong (' + response.status + ').');
-        throw new Error(typeof detail === 'string' ? detail : JSON.stringify(detail));
+        // Plain sentences only: a validation reply that is already one, else the shared wording.
+        var detail = data && data.detail;
+        throw new Error((response.status === 400 || response.status === 422) && window.mvPlainDetail(detail) ||
+          window.mvErrorText({status: response.status, detail: detail}));
       }
       return data;
     }
     function when(ts) {
       if (!ts) return 'never';
-      return new Date(ts * 1000).toLocaleString();
+      return window.mvTimeAbsolute ? window.mvTimeAbsolute(ts) : new Date(ts * 1000).toLocaleString();
     }
     function statusText(k) {
       return {active: 'Working', expiring: 'Expires soon', rotating: 'Being replaced',

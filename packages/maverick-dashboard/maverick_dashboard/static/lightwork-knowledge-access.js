@@ -172,7 +172,7 @@
         (typeof value.released_by !== "string" || !value.released_by.startsWith("user:") ||
          !SHA.test(value.release_evidence_sha256) ||
          finiteTime(value.released_at, "retention release time", false) < placedAt)) {
-      throw failure("The rights response contained a malformed hold release.");
+      throw failure("The rights response could not be verified. Refresh the page and try again.");
     }
     return {
       schema: value.schema,
@@ -385,7 +385,7 @@
     var payload;
     try { payload = body ? JSON.parse(body) : {}; }
     catch (_error) {
-      var unreadable = failure("The knowledge response could not be verified.");
+      var unreadable = failure("The knowledge response could not be verified. Refresh the page and try again.");
       unreadable.accessKind = meaning.kind;
       throw unreadable;
     }
@@ -1265,7 +1265,7 @@
       clean.forEach(function (entry, index) {
         if (!sameReference(entry.reference, expected[index]) ||
             entry.eligibility.requested_action !== "export") {
-          throw failure("The knowledge export did not match the selected source versions.");
+          throw failure("The knowledge export did not match the selected source versions. Choose the sources again, then export.");
         }
       });
       var evidence = payload.authority_evidence;

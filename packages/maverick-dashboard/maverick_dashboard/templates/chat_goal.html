@@ -621,7 +621,7 @@
     function cgDate(value) { return window.LightworkI18n ? window.LightworkI18n.formatDate(value) : new Date(value*1000).toLocaleString(); }
     // Plain-language failure text for this page (no status codes or server text).
     function cgErr(failure, what) {
-      return window.mvErrorText ? window.mvErrorText(failure, what) : 'Could not ' + what + '. Please try again.';
+      return window.mvErrorText ? window.mvErrorText(failure, what) : 'Could not ' + what + '. Try again.';
     }
   </script>
   <script>
@@ -1502,7 +1502,8 @@
             failed.className = 'muted';
             cgCopy(failed,'Attachments could not be loaded. You can still add a file or retry by reloading.');
             list.appendChild(failed);
-            cgCopy(msg,String(error.message || error));
+            // A dropped connection, timeout or unreadable reply gets the shared wording, not the browser's.
+            cgCopy(msg,error && /^(TypeError|AbortError|SyntaxError)$/.test(error.name) ? cgErr(error,'load the attached files') : String(error.message || error));
         } finally {
           loading = false;
           if (refreshAgain) { refreshAgain = false; refresh(); }
