@@ -120,6 +120,24 @@ template-owned while every value inside stays escaped. `compact=true` is the
 shorter header for working pages, with the actions beside the title. The
 macro comment documents the arguments.
 
+## Tabs and filter toggles: `.mv-tabs` / `.mv-tab`
+
+One look for tab strips and list filters. The selected item shows a selected
+state — `aria-selected="true"` (tabs, `role="tab"` in a `role="tablist"`),
+`aria-pressed="true"` (filter toggles in a `role="group"`) or
+`aria-current="page"` (links) — never `btn--primary`, which is kept for the
+view's main action.
+
+```html
+<div class="mv-tabs" role="tablist" aria-label="Record types">
+  <button class="mv-tab" role="tab" aria-selected="true" aria-controls="tab-a" id="tabbtn-a" type="button">Agreements</button>
+  <button class="mv-tab" role="tab" aria-selected="false" aria-controls="tab-b" id="tabbtn-b" tabindex="-1" type="button">AI systems</button>
+</div>
+```
+
+Tabs move with the arrow keys (see the Security and Privacy pages); script
+only toggles the ARIA state, the stylesheet does the rest.
+
 ## `.card` / `.card-grid`
 
 The shared card surface (border + token padding + hover) and a responsive
