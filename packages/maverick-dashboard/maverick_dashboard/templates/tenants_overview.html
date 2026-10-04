@@ -13,8 +13,8 @@
              badge=(suspended_count ~ ' paused') if suspended_count
                    else ('All active' if rows else 'Single workspace'),
              badge_class='warn' if suspended_count else ('ok' if rows else 'idle'),
-             copy='Spent today across all workspaces: $'
-                  ~ ('%.2f' % (rows | sum(attribute='spend_today'))) ~ '.
+             copy='Spent today across all workspaces: '
+                  ~ (rows | sum(attribute='spend_today') | money) ~ '.
                   Each workspace has its own budget.') }}
   {% endcall %}
 
@@ -58,9 +58,9 @@
                   <span class="muted">No tasks yet</span>
                 {% endif %}
               </td>
-              <td>${{ '%.2f' % r.spend_today }}</td>
+              <td>{{ r.spend_today | money }}</td>
               <td class="muted">
-                {% if r.max_daily_dollars %}${{ '%g' % r.max_daily_dollars }}/day{% else %}No limit{% endif %}
+                {% if r.max_daily_dollars %}{{ r.max_daily_dollars | money }}/day{% else %}No limit{% endif %}
               </td>
               <td><a class="btn btn--ghost" href="/tenants" aria-label="Change {{ action_name }}">Change</a>
                 <a class="btn btn--ghost" href="/tenants/{{ r.id | urlencode }}/features" aria-label="Features for {{ action_name }}">Features</a></td>

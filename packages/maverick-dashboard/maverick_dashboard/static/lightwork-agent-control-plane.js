@@ -825,7 +825,7 @@
     parts.push(row.max_risk ? "Highest risk: " + human(row.max_risk) : "No risk limit");
     parts.push(row.max_dollars === null || row.max_dollars === undefined
       ? "No spending limit"
-      : "Spending limit: $" + row.max_dollars);
+      : "Spending limit: " + (window.mvMoney ? window.mvMoney(row.max_dollars) : "$" + row.max_dollars));
     if (row.deny_tools && row.deny_tools.length) {
       parts.push("Blocked tools: " + row.deny_tools.map(human).join(", "));
     }

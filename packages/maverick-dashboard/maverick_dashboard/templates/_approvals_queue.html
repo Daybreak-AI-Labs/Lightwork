@@ -12,7 +12,7 @@
 {%- endmacro %}
 {% macro _budget_text(budget) -%}
   {%- if budget.get('maximum') is not none and budget.get('maximum') is number -%}
-    Up to {{ '$' if (budget.get('currency') or 'USD') == 'USD' else (budget.get('currency') ~ ' ') }}{{ '%.2f' | format(budget.get('maximum')) }}
+    Up to {{ budget.get('maximum') | money(currency=budget.get('currency') or 'USD') }}
     {%- if budget.get('minutes') %} · {{ budget.get('minutes') }} minutes{% endif %}
   {%- elif budget.get('state') -%}Checked again when it runs
   {%- else -%}{% for key, value in budget.items() %}{{ key | humanize }}: {{ _plain_value(value) }}{% if not loop.last %} · {% endif %}{% endfor %}

@@ -292,8 +292,8 @@
         head.appendChild(close);
         panel.appendChild(head);
         var counts = Object.keys(d.summary || {}).map(function (k) { return stepLabel(k) + ': ' + d.summary[k]; }).join(' · ');
-        panel.appendChild(el('p', 'muted', 'Status: ' + human(d.status) + ' · Cost so far: $' +
-          Number(d.cost_dollars || 0).toFixed(2) + (counts ? ' · ' + counts : '')));
+        panel.appendChild(el('p', 'muted', 'Status: ' + human(d.status) + ' · Cost so far: ' +
+          (window.mvMoney ? window.mvMoney(Number(d.cost_dollars || 0)) : '$' + Number(d.cost_dollars || 0).toFixed(2)) + (counts ? ' · ' + counts : '')));
         var evs = d.events || [];
         if (!evs.length) {
           panel.appendChild(el('p', 'muted', 'No steps recorded yet.'));

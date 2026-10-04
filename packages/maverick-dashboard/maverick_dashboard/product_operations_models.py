@@ -7,6 +7,7 @@ from pydantic import Field
 
 from . import model_tests_api as native
 from .draft_api import context_for
+from .plain_labels import money
 from .product_operations import Adapter, EmptyInput, Outcome, Preview, Snapshot, StrictInput
 
 
@@ -50,7 +51,7 @@ def test_snapshot(request, selection):
 def prepare_test(request, selection, arguments):
     row = native.call(model_tests.prepare, context_for(request), arguments["model"], arguments["kind"], native.guard_for(request, context_for(request)))
     caps = row["limits"]
-    return Preview(f"Run one potentially paid synthetic sample on {row['model']}; at most USD {caps['max_dollars']}, {caps['max_output_tokens']} output tokens and {caps['max_wall_seconds']} seconds of local waiting. Cancellation cannot retract an already sent request.",
+    return Preview(f"Run one potentially paid synthetic sample on {row['model']}; at most {money(caps['max_dollars'])}, {caps['max_output_tokens']} output tokens and {caps['max_wall_seconds']} seconds of local waiting. Cancellation cannot retract an already sent request.",
         changes=[{"field": "Model test", "before": "Not dispatched", "after": model_tests.KINDS[row["kind"]]}], native={"check_id": row["id"]})
 
 

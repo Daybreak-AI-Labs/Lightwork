@@ -109,7 +109,7 @@
                          value="{{ '%g' % t.max_daily_dollars if t.max_daily_dollars else '' }}"
                          aria-label="Daily limit for {{ action_name }} in US dollars"{% if not t.max_daily_dollars %} disabled{% endif %}>
                   <button type="submit" class="btn" aria-label="Save daily limit for {{ action_name }}">Save</button>
-                  <span class="muted">{% if t.max_daily_dollars %}${{ '%g' % t.max_daily_dollars }}/day{% else %}No limit{% endif %}</span>
+                  <span class="muted">{% if t.max_daily_dollars %}{{ t.max_daily_dollars | money }}/day{% else %}No limit{% endif %}</span>
                 </form>
               </td>
               <td class="tenants-actions">

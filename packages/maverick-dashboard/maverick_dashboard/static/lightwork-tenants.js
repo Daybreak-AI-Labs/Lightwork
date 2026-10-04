@@ -91,7 +91,7 @@
       rowMsg.textContent = 'Saving…';
       try {
         await send(base(id) + '/quota', 'POST', {max_daily_dollars: limit});
-        rowMsg.textContent = 'Daily limit for ' + nameOf(id) + ' is now ' + (limit ? '$' + limit + ' a day' : 'no limit') + '.';
+        rowMsg.textContent = 'Daily limit for ' + nameOf(id) + ' is now ' + (limit ? (window.mvMoney ? window.mvMoney(limit) : '$' + limit) + ' a day' : 'no limit') + '.';
         if (window.mvToastAfterReload) window.mvToastAfterReload(rowMsg.textContent);
         reloadSoon();
       } catch (failure) { rowMsg.textContent = errorText(failure, 'save the daily limit'); }

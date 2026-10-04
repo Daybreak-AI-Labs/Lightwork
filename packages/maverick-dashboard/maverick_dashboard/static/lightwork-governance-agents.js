@@ -68,7 +68,7 @@
   }
   function when(ts) {
     if (typeof window.mvWhen === "function") return window.mvWhen(ts);
-    return ts ? new Date(ts * 1000).toLocaleString() : "";
+    return ts ? (window.mvTimeAbsolute ? window.mvTimeAbsolute(ts) : new Date(ts * 1000).toLocaleString()) : "";
   }
   function reference(prefix) {
     if (window.crypto && typeof window.crypto.randomUUID === "function") return prefix + "-" + window.crypto.randomUUID();

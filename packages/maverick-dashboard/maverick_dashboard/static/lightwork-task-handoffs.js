@@ -24,9 +24,10 @@
   function review(parent, p) {
     parent.replaceChildren(); paragraph(parent, 'Recipient: ' + p.recipient + '. Source task: #' + p.source_id + '.');
     paragraph(parent, 'Next work: ' + p.instruction); paragraph(parent, 'Sender-declared pending commitments: ' + p.commitments);
-    paragraph(parent, 'New task ceiling: $' + p.max_dollars.toFixed(2) + '. Source recorded spend: $' + p.source_cost_dollars.toFixed(2) + '. Unanswered source questions: ' + p.open_questions + '.');
+    var money = function (value) { return window.mvMoney ? window.mvMoney(value) : '$' + value.toFixed(2); };
+    paragraph(parent, 'New task ceiling: ' + money(p.max_dollars) + '. Source recorded spend: ' + money(p.source_cost_dollars) + '. Unanswered source questions: ' + p.open_questions + '.');
     paragraph(parent,p.source_cost_scope || 'Source task recorded spend only.');
-    paragraph(parent, 'Conversation/task IDs closed on acceptance: ' + p.closed_task_ids.join(', ') + '. Offer expires ' + new Date(p.expires_at * 1000).toLocaleString() + '.');
+    paragraph(parent, 'Conversation/task IDs closed on acceptance: ' + p.closed_task_ids.join(', ') + '. Offer expires ' + (window.mvTimeAbsolute ? window.mvTimeAbsolute(p.expires_at) : new Date(p.expires_at * 1000).toLocaleString()) + '.');
     const list = document.createElement('ul'); (p.items || []).forEach(item => { const li = document.createElement('li'); li.textContent = item.title + ' — ' + item.bytes + ' bytes — SHA-256 ' + item.sha256; list.appendChild(li); }); parent.appendChild(list);
     (p.consequences || []).forEach(text => paragraph(parent,text));
     link(parent, 'Review the exact selected bundle', '/deliverable-bundles?open=' + encodeURIComponent(p.bundle_id));

@@ -40,7 +40,7 @@
   async function refresh() {
     var body = await request(''); list.replaceChildren();
     body.links.forEach(function (link) {
-      var row = text('li', link.label + ' — ' + (link.scope === 'conversation' ? 'full conversation' : 'saved answer') + ' — ' + link.state + (link.expires_at ? '; expires ' + new Date(link.expires_at * 1000).toLocaleString() : '; legacy link without expiry') + ' ');
+      var row = text('li', link.label + ' — ' + (link.scope === 'conversation' ? 'full conversation' : 'saved answer') + ' — ' + link.state + (link.expires_at ? '; expires ' + (window.mvTimeAbsolute ? window.mvTimeAbsolute(link.expires_at) : new Date(link.expires_at * 1000).toLocaleString()) : '; legacy link without expiry') + ' ');
       if (!link.revoked) {
         var revoke = text('button', 'Revoke'); revoke.type = 'button'; revoke.className = 'btn btn--ghost share-revoke'; revoke.dataset.id = link.id;
         row.append(revoke);
@@ -83,7 +83,7 @@
           output.value = body.url; output.dataset.shareId = body.id; output.dataset.localOnly = body.local_only ? '1' : '0';
           output.style.display = ''; copy.hidden = false; output.focus(); output.select();
           status.textContent = (body.local_only ? 'This address is limited to this computer or its private network. Recipients need an address they can reach. ' : '') +
-            'Copy this link now; it is shown once. Expires ' + new Date(body.expires_at * 1000).toLocaleString() + '.';
+            'Copy this link now; it is shown once. Expires ' + (window.mvTimeAbsolute ? window.mvTimeAbsolute(body.expires_at) : new Date(body.expires_at * 1000).toLocaleString()) + '.';
           preview = null; review.hidden = true; review.replaceChildren(); if (scope) scope.disabled = false; await refresh();
         } catch (error) {
           preview = null; review.hidden = true; review.replaceChildren(); if (scope) scope.disabled = false;

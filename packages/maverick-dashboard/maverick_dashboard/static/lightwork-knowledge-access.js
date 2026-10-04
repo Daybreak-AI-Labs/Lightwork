@@ -422,7 +422,7 @@
 
   function date(value) {
     if (value === null) { return "Not required"; }
-    try { return new Date(value * 1000).toLocaleString(); }
+    try { return (window.mvTimeAbsolute ? window.mvTimeAbsolute(value) : new Date(value * 1000).toLocaleString()); }
     catch (_error) { return "Unavailable"; }
   }
 

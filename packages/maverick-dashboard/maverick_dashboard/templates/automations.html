@@ -1468,7 +1468,7 @@
           run.origin.indexOf('event:v2:') === 0
             ? 'Started by ' + mvHuman(run.origin.split(':').slice(4).join(':'))
             : (ORIGIN_WORDS[run.origin] || mvHuman(run.origin)));
-        if (run.cost_dollars) bits.push('$' + Number(run.cost_dollars).toFixed(2));
+        if (run.cost_dollars) bits.push(window.mvMoney ? window.mvMoney(run.cost_dollars) : '$' + Number(run.cost_dollars).toFixed(2));
         if (bits.length) main.appendChild(el('div', 'mv-row__sub', bits.join(' · ')));
         if (run.status === 'paused_approval') {
           var card = run.human && run.human.approval_card;

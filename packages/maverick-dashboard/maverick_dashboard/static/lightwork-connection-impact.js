@@ -24,7 +24,7 @@
     if(!value.items.length)panel.append(node('p','No declared affected work was found in the inspected sources. Review the coverage limits below.'));
     const coverage=node('ul');for(const item of value.coverage)coverage.append(node('li',item.kind+': '+item.state));panel.append(coverage);
     const receipts=node('details');receipts.append(node('summary','Earlier service checks (up to the retained 100 checks)'));
-    for(const receipt of value.receipts)receipts.append(node('p',new Date(receipt.tested_at*1000).toLocaleString()+' — '+(receipt.outcome||'earlier check')+' — '+(receipt.capability||'service check')));panel.append(receipts);
+    for(const receipt of value.receipts)receipts.append(node('p',(window.mvTimeAbsolute ? window.mvTimeAbsolute(receipt.tested_at) : new Date(receipt.tested_at*1000).toLocaleString())+' — '+(receipt.outcome||'earlier check')+' — '+(receipt.capability||'service check')));panel.append(receipts);
     const label=node('label','Choose a reviewed replacement connection'),select=node('select');select.className='input';
     const self=node('option','Current saved credential (repair its exact source binding)');self.value=value.name;select.append(self);
     for(const record of value.replacements){const option=node('option',record.name+' — '+record.connector);option.value=record.name;select.append(option);}label.append(select);panel.append(label);
@@ -57,12 +57,12 @@
         try{
           if(!await mvConfirm('Read only the metadata for this exact resource? No business record is created or changed, and no blocked task is resumed.',{okText:'Check this read'}))return;
           const result=await request(value.name,'/capability-check',{context:value.context,expected_revision:value.revision,capability:capability.id,resource:resource.value.trim(),confirm:true});
-          status.textContent=result.verified?'This exact resource read was verified at '+new Date(result.tested_at*1000).toLocaleTimeString()+'. Write access and future access remain unverified. No task was resumed.':'The exact resource read was not verified: '+result.outcome.replace(/_/g,' ')+'. Other connections remain available.';
+          status.textContent=result.verified?'This exact resource read was verified at '+(window.mvTimeAbsolute ? window.mvTimeAbsolute(result.tested_at) : new Date(result.tested_at*1000).toLocaleTimeString())+'. Write access and future access remain unverified. No task was resumed.':'The exact resource read was not verified: '+result.outcome.replace(/_/g,' ')+'. Other connections remain available.';
         }catch(error){status.textContent=error.message;}
         finally{busy=false;check.disabled=false;}
       });row.append(check);capabilities.append(row);
     }
-    for(const receipt of value.capability_receipts||[])capabilities.append(node('p',receipt.label+' — '+(receipt.revision!==value.revision?'older credential':Date.now()-receipt.tested_at*1000>86400000?'stale check':receipt.verified?'verified exact resource read':'not verified')+' — '+new Date(receipt.tested_at*1000).toLocaleString()+'. Write access was not checked.'));
+    for(const receipt of value.capability_receipts||[])capabilities.append(node('p',receipt.label+' — '+(receipt.revision!==value.revision?'older credential':Date.now()-receipt.tested_at*1000>86400000?'stale check':receipt.verified?'verified exact resource read':'not verified')+' — '+(window.mvTimeAbsolute ? window.mvTimeAbsolute(receipt.tested_at) : new Date(receipt.tested_at*1000).toLocaleString())+'. Write access was not checked.'));
     panel.append(capabilities);
     panel.append(node('p','Local removal does not revoke upstream authorization. Review the provider’s connected-app controls separately, without revoking another application’s access.'));
     for(const [provider,url] of Object.entries(value.provider_revocation||{})){const link=node('a','Review '+provider+' connected apps');link.href=url;link.target='_blank';link.rel='noopener noreferrer';panel.append(link,node('br'));}

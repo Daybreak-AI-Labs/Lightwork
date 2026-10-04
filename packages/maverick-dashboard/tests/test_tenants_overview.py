@@ -56,7 +56,7 @@ def test_overview_page_rollup(monkeypatch, tmp_path):
     assert "acme" in text and "Acme Inc" in text and "Enterprise" in text
     assert "Done 1" in text and "Pending 1" in text
     assert "$1.25" in text
-    assert "$100/day" in text
+    assert "$100.00/day" in text
     # beta: suspended flag + no runs yet.
     assert "Paused" in text and "No tasks yet" in text
 

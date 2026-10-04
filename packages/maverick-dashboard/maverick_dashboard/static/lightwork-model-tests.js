@@ -25,7 +25,7 @@
     rows.slice(0, visible).forEach(row => {
       const card = document.createElement('article'); card.className = 'settings-callout';
       const heading = document.createElement('h4'); heading.textContent = row.model + ' — ' + (words[row.state] || 'Status unavailable'); card.appendChild(heading);
-      const text = document.createElement('p'); text.textContent = new Date(row.created_at * 1000).toLocaleString() + '. ' + (row.message || row.notice); card.appendChild(text);
+      const text = document.createElement('p'); text.textContent = (window.mvTimeAbsolute ? window.mvTimeAbsolute(row.created_at) : new Date(row.created_at * 1000).toLocaleString()) + '. ' + (row.message || row.notice); card.appendChild(text);
       const scope = document.createElement('p'); scope.className = 'muted'; scope.textContent = row.scope; card.appendChild(scope);
       if (typeof row.latency_seconds === 'number') { const facts = document.createElement('p'); facts.textContent = 'Observed response time: ' + row.latency_seconds + ' seconds. Recorded usage: USD ' + row.recorded_dollars + '; this is not a final provider invoice.'; card.appendChild(facts); }
       if (row.may_still_be_running || ['prepared', 'queued', 'executing'].includes(row.state)) {
@@ -52,7 +52,7 @@
       const model = el('model').value === '__custom__' ? el('custom-value').value.trim() : el('model').value;
       const value = await request('/review', {context, model, kind: el('kind').value}); review = value.check;
       const caps = review.limits;
-      el('review-text').textContent = 'Send one synthetic ' + (review.kind === 'vision' ? 'image' : 'text') + ' sample to ' + review.model + '. Limits: USD ' + caps.max_dollars + ', ' + caps.max_output_tokens + ' output tokens, ' + caps.max_wall_seconds + ' seconds local waiting. The provider may bill an interrupted request. No automatic retries or model failover. Only this test is affected.';
+      el('review-text').textContent = 'Send one synthetic ' + (review.kind === 'vision' ? 'image' : 'text') + ' sample to ' + review.model + '. Limits: ' + (window.mvMoney ? window.mvMoney(caps.max_dollars) : 'USD ' + caps.max_dollars) + ', ' + caps.max_output_tokens + ' output tokens, ' + caps.max_wall_seconds + ' seconds local waiting. The provider may bill an interrupted request. No automatic retries or model failover. Only this test is affected.';
       el('review-card').hidden = false; el('review-card').focus(); el('status').textContent = 'Review the model, sample and limits before confirming.';
     } catch (error) { el('status').textContent = error.message; }
     finally { busy = false; controls(); }

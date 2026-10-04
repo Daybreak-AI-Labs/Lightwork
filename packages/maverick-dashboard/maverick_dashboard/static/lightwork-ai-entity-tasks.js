@@ -345,7 +345,7 @@
   function formattedDate(value) {
     if (typeof value !== "number" || !Number.isFinite(value)) return "—";
     var date = new Date(value * 1000);
-    return Number.isNaN(date.getTime()) ? "—" : date.toLocaleDateString();
+    return Number.isNaN(date.getTime()) ? "—" : window.mvDateAbsolute ? window.mvDateAbsolute(value) : date.toLocaleDateString();
   }
   function dateInputValue(value) {
     if (typeof value !== "number" || !Number.isFinite(value)) return "";

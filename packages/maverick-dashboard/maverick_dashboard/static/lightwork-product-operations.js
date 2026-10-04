@@ -185,7 +185,7 @@
         return true;
       }
       selected = item; clear(formHost); node('h3', item.label, formHost); node('p', item.summary, formHost);
-      node('p', 'Source: ' + item.source + '. Checked ' + new Date(fresh.checked_at * 1000).toLocaleString() + '.', formHost);
+      node('p', 'Source: ' + item.source + '. Checked ' + (window.mvTimeAbsolute ? window.mvTimeAbsolute(fresh.checked_at) : new Date(fresh.checked_at * 1000).toLocaleString()) + '.', formHost);
       nativeLink(item, formHost);
       var form = node('form', undefined, formHost), controls = {}, dependents = [];
       (item.fields || []).forEach(function (spec) { var setup = createField(spec, form, controls); if (setup) dependents.push(setup); });
@@ -200,7 +200,7 @@
           var review = await request('/prepare', requested);
           if (!active(started)) return;
           clear(formHost); node('h3', item.label, formHost); node('p', review.summary, formHost);
-          node('p', 'Source: ' + review.source + '. Checked ' + new Date(review.checked_at * 1000).toLocaleString() + '.', formHost);
+          node('p', 'Source: ' + review.source + '. Checked ' + (window.mvTimeAbsolute ? window.mvTimeAbsolute(review.checked_at) : new Date(review.checked_at * 1000).toLocaleString()) + '.', formHost);
           if (review.changes && review.changes.length) renderData(formHost, review.changes);
           if (review.read_only) { renderData(formHost, review.details); status.textContent = 'Current information checked. Nothing was changed.'; }
           else renderConfirmation(item, review, started);

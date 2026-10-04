@@ -155,7 +155,7 @@
     {{ ui('No spending or time limit is set for each task.') }}
   {% else %}
     {{ ui('Task limits:') }}
-    {% if goal_max_dollars is not none %}{{ ui('up to {amount}', amount='$' ~ ('%.2f'|format(goal_max_dollars))) }}{% else %}{{ ui('no spending limit') }}{% endif %},
+    {% if goal_max_dollars is not none %}{{ ui('up to {amount}', amount=goal_max_dollars | money) }}{% else %}{{ ui('no spending limit') }}{% endif %},
     {% if goal_max_wall_seconds is none %}{{ ui('no time limit') }}{% elif goal_max_wall_seconds > 0 and goal_max_wall_seconds % 60 == 0 %}{{ ui('up to {minutes} minutes', minutes='%g'|format(goal_max_wall_seconds / 60)) }}{% else %}{{ ui('up to {seconds} seconds', seconds='%g'|format(goal_max_wall_seconds)) }}{% endif %}.
   {% endif %}
   {% if show_settings_link %}<a href="/settings">{{ ui('Review task limits') }}</a>{% endif %}

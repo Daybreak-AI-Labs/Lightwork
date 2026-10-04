@@ -65,6 +65,9 @@ test("absolute times read one way in the viewer's zone, whatever the browser loc
   assert.equal(w.mvTimeAbsolute(String(seconds)), "4 Oct 2026, 14:01 BST");
   assert.equal(w.mvTimeAbsolute("2026-10-04T13:01:12Z"), "4 Oct 2026, 14:01 BST");
   assert.equal(w.mvWhen(seconds), "4 Oct 2026, 14:01 BST");
+  // A schedule's own zone, named in the text; an unknown zone falls back to the viewer's.
+  assert.equal(w.mvTimeAbsolute(seconds, "America/New_York"), "4 Oct 2026, 09:01 GMT-4");
+  assert.equal(w.mvTimeAbsolute(seconds, "Not/AZone"), "4 Oct 2026, 14:01 BST");
   for (const missing of [null, undefined, "", "soon", 0, NaN]) {
     assert.equal(w.mvTimeAbsolute(missing), "", String(missing));
     assert.equal(w.mvWhen(missing), "", String(missing));

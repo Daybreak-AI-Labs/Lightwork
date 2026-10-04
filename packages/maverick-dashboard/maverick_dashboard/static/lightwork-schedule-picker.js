@@ -21,7 +21,7 @@
   function human(value) { return typeof window.mvHuman === 'function' ? window.mvHuman(value) : String(value).replace(/[-_]+/g, ' '); }
   function when(epoch) {
     if (typeof window.mvWhen === 'function') return window.mvWhen(epoch);
-    return new Date(epoch * 1000).toLocaleString();
+    return (window.mvTimeAbsolute ? window.mvTimeAbsolute(epoch) : new Date(epoch * 1000).toLocaleString());
   }
   function what() { const pick = form.querySelector('input[name="what"]:checked'); return pick ? pick.value : 'workflow'; }
   function timetable() {

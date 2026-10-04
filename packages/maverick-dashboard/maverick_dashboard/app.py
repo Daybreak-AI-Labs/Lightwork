@@ -11861,7 +11861,7 @@ def _render_tree_html(node: dict) -> str:
         return _html.escape(str(s), quote=True) if s is not None else ""
 
     def _render(n: dict) -> str:
-        dollars_html = f' <span class="cost">${n["dollars"]:.4f}</span>' if n.get("dollars") else ""
+        dollars_html = f' <span class="cost">{_plain_labels.money(n["dollars"])}</span>' if n.get("dollars") else ""
         node_html = (
             f'<a class="node" href="/chat/goal/{_esc(n["id"])}">'
             f'<span class="badge {_esc(n["status"])}">{_esc(_idfmt.humanize(n["status"]))}</span> '

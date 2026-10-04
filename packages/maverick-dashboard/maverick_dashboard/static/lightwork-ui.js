@@ -474,13 +474,15 @@
         var d = isFinite(n) ? new Date((n > 1e12 ? n : n * 1000)) : new Date(String(raw));
         return isNaN(d.getTime()) || d.getTime() <= 0 ? null : d;
       }
-      window.mvTimeAbsolute = function (raw) {
+      // An optional IANA zone shows the time in that zone instead (a schedule's own
+      // zone); the zone name is part of the text either way.
+      window.mvTimeAbsolute = function (raw, zone) {
         var d = mvParseTime(raw);
         if (!d) return '';
-        try {
-          return new Intl.DateTimeFormat(mvFormatLocale(), { day: 'numeric', month: 'short', year: 'numeric',
-            hour: '2-digit', minute: '2-digit', timeZoneName: 'short' }).format(d);
-        } catch (e) { return d.toUTCString(); }
+        var options = { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', timeZoneName: 'short' };
+        if (zone) options.timeZone = zone;
+        try { return new Intl.DateTimeFormat(mvFormatLocale(), options).format(d); }
+        catch (e) { return zone ? window.mvTimeAbsolute(raw) : d.toUTCString(); }
       };
       window.mvDateAbsolute = function (raw) {
         var parts = typeof raw === 'string' && /^(\d{4})-(\d{2})-(\d{2})$/.exec(raw.trim());

@@ -63,7 +63,7 @@
       <tbody>
         <tr><td>Tasks finished</td><td>{{ firm.goals_completed }} / {{ firm.goals_total }}</td></tr>
         <tr><td>Human approvals</td><td>{{ firm.human_decisions }} / {{ firm.approvals }}</td></tr>
-        <tr><td>Spend</td><td>${{ '%.2f'|format(firm.spend_dollars) }}</td></tr>
+        <tr><td>Spend</td><td>{{ firm.spend_dollars | money }}</td></tr>
       </tbody>
     </table>
 

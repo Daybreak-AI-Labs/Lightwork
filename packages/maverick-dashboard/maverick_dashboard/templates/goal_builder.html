@@ -208,7 +208,7 @@
       preview.appendChild(ol);
     }
     const meta = [];
-    if (d.budget_dollars !== undefined && !isNaN(d.budget_dollars)) meta.push("Spending limit: $" + d.budget_dollars.toFixed(2) + " (enforced while it runs)");
+    if (d.budget_dollars !== undefined && !isNaN(d.budget_dollars)) meta.push("Spending limit: " + (window.mvMoney ? window.mvMoney(d.budget_dollars) : "$" + d.budget_dollars.toFixed(2)) + " (enforced while it runs)");
     if (d.channel) meta.push("Post updates in: " + d.channel);
     if (d.priority) meta.push("Priority: " + d.priority.charAt(0).toUpperCase() + d.priority.slice(1));
     meta.forEach(function (m) { const p = document.createElement("p"); p.style.margin = "0.25rem 0 0"; p.textContent = m; preview.appendChild(p); });

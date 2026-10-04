@@ -34,7 +34,7 @@
     context = value.context; list.replaceChildren();
     value.devices.forEach(function (device) {
       var row = document.createElement('div'), description = document.createElement('p');
-      description.textContent = device.label + ' · ' + (device.revoked ? 'Removed' : 'Expires ' + new Date(device.expires_at * 1000).toLocaleString()) + ' · ' + (device.actions ? 'Reviewed own-task actions enabled' : 'Read only');
+      description.textContent = device.label + ' · ' + (device.revoked ? 'Removed' : 'Expires ' + (window.mvTimeAbsolute ? window.mvTimeAbsolute(device.expires_at) : new Date(device.expires_at * 1000).toLocaleString())) + ' · ' + (device.actions ? 'Reviewed own-task actions enabled' : 'Read only');
       row.appendChild(description);
       if (!device.revoked) {
         var remove = document.createElement('button'); remove.type = 'button'; remove.className = 'btn btn--ghost'; remove.textContent = 'Remove ' + device.label;

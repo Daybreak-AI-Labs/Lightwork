@@ -72,7 +72,7 @@
     const statusEl = document.getElementById("plan-tree-status");
     const list = document.getElementById("plan-tree-list");
     function costLabel(node) {
-      return node.dollars ? "  $" + Number(node.dollars).toFixed(4) : "";
+      return node.dollars ? "  " + (window.mvMoney ? window.mvMoney(node.dollars) : "$" + Number(node.dollars).toFixed(2)) : "";
     }
     function renderList(root) {
       function item(node) {

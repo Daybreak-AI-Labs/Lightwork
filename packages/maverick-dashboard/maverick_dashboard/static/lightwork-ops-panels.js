@@ -22,7 +22,7 @@
   function when(stamp) {
     if (typeof stamp === 'number') return window.mvWhen ? window.mvWhen(stamp) : new Date(stamp * 1000).toLocaleString();
     var d = new Date(stamp);
-    return isNaN(d.getTime()) ? '' : d.toLocaleString();
+    return isNaN(d.getTime()) ? '' : window.mvTimeAbsolute ? window.mvTimeAbsolute(stamp) : d.toLocaleString();
   }
   function errorText(failure, action) {
     return window.mvErrorText ? window.mvErrorText(failure, action) : 'Could not ' + action + '. Please try again.';

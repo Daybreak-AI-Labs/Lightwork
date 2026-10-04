@@ -24,7 +24,7 @@
     Object.entries(mutes).forEach(function ([id, until]) {
       const row = document.createElement('p');
       const task = (snapshot.tasks || []).find(function (item) { return String(item.id) === id; });
-      const label = document.createElement('span'); label.textContent = (task ? task.title : 'Unavailable task') + ': muted until ' + new Date(until * 1000).toLocaleString() + ' ';
+      const label = document.createElement('span'); label.textContent = (task ? task.title : 'Unavailable task') + ': muted until ' + (window.mvTimeAbsolute ? window.mvTimeAbsolute(until) : new Date(until * 1000).toLocaleString()) + ' ';
       const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'btn btn--ghost'; remove.textContent = 'Remove mute';
       remove.addEventListener('click', function () { delete mutes[id]; dirty = true; renderMutes(); });
       row.append(label, remove); container.append(row);
@@ -50,15 +50,15 @@
       label.append(input, document.createTextNode(' ' + channel.channel + ' — ' + channel.sender_id + (channel.reason ? ': ' + channel.reason : '')));
       destinations.append(label);
       (channel.receipts || []).forEach(function (receipt) {
-        const row = document.createElement('p'); row.textContent = channel.channel + ': ' + receipt.message + ' (' + new Date(receipt.at * 1000).toLocaleString() + ')'; receipts.append(row);
+        const row = document.createElement('p'); row.textContent = channel.channel + ': ' + receipt.message + ' (' + (window.mvTimeAbsolute ? window.mvTimeAbsolute(receipt.at) : new Date(receipt.at * 1000).toLocaleString()) + ')'; receipts.append(row);
       });
     });
     if (!delivery.channels.length) { const note = document.createElement('p'); note.textContent = 'No verified private channel is available. You can keep using this inbox.'; destinations.append(note); }
     const observed = state.background && state.background.last_observed_at;
     document.getElementById('personal-background-status').textContent = state.background_enabled
-      ? 'Background observation is enabled while the dashboard runs. ' + (observed ? 'Last completed observation: ' + new Date(observed * 1000).toLocaleString() + '.' : 'No completed background observation yet.')
+      ? 'Background observation is enabled while the dashboard runs. ' + (observed ? 'Last completed observation: ' + (window.mvTimeAbsolute ? window.mvTimeAbsolute(observed) : new Date(observed * 1000).toLocaleString()) + '.' : 'No completed background observation yet.')
       : 'Background observation is disabled. This inbox observes changes while its page is open and catches up when you return.';
-    status.textContent = state.delivery_note + (state.partial ? ' Some assigned decisions could not be checked. Refresh your inbox.' : '') + ' Last checked ' + new Date(state.checked_at * 1000).toLocaleTimeString();
+    status.textContent = state.delivery_note + (state.partial ? ' Some assigned decisions could not be checked. Refresh your inbox.' : '') + ' Last checked ' + (window.mvTimeAbsolute ? window.mvTimeAbsolute(state.checked_at) : new Date(state.checked_at * 1000).toLocaleTimeString());
     const active = document.activeElement;
     const restoreId = active && active.dataset ? active.dataset.alertId : null;
     items.replaceChildren();
