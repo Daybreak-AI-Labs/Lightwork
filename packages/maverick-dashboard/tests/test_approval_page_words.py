@@ -21,7 +21,7 @@ SAM = "user:sam.lee@northwind.example"
 DANA = "user:dana.admin@northwind.example"
 SHELL_BUDGET = {
     "runtime": {"currency": "USD", "external_effect_cost": "unmeasured",
-                "authority_sha256": "5ac93412c16f5f3723303a3784b956b2cd9fe81eafd414a6adbc660b6595a5c0"},
+                "authority_sha256": "5ac93412c16f5f3723303a3784b956b2cd9fe81eafd414a6adbc660b6595a5c0"},  # pragma: allowlist secret
     "operation": {"timeout_seconds": None},
 }
 
