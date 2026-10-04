@@ -85,9 +85,9 @@
         {% endif %}
       </div>
       <p class="approval-item__decided muted" hidden></p>
-      {% if own_note %}<p class="muted approval-own-note">{{ own_note }}</p>{% endif %}
+      {% if own_note %}<p class="muted approval-own-note" id="approval-own-note-{{ a.id }}">{{ own_note }}</p>{% endif %}
       <div class="approval-actions">
-        <button type="button" class="btn approval-btn" data-id="{{ a.id }}" data-action="approve"{% if card %} data-binding="{{ card.binding_sha256 }}"{% endif %}{% if card_status in ('expired', 'invalid', 'legacy') %} disabled title="A new request is needed before this can be approved"{% elif own_note %} disabled title="{{ own_note }}"{% endif %}>Approve</button>
+        <button type="button" class="btn approval-btn" data-id="{{ a.id }}" data-action="approve"{% if card %} data-binding="{{ card.binding_sha256 }}"{% endif %}{% if card_status in ('expired', 'invalid', 'legacy') %} disabled title="A new request is needed before this can be approved"{% elif own_note %} disabled title="{{ own_note }}" aria-describedby="approval-own-note-{{ a.id }}"{% endif %}>Approve</button>
         <button type="button" class="btn btn--ghost approval-btn" data-id="{{ a.id }}" data-action="deny">Reject</button>
         <button type="button" class="btn btn--ghost approval-btn" data-id="{{ a.id }}" data-action="revise">Send back for changes</button>
       </div>
@@ -592,7 +592,9 @@
       var words = [required <= 1 ? 'One approval is needed.'
         : state.approved_count + ' of ' + required + ' required approvals received.'];
       if (state.your_approval_recorded) words.push('Your approval is recorded.');
-      else if (state.requested_by_you) words.push(!state.self_approval_counts
+      else if (state.requested_by_you && !(state.own_request_note && row.querySelector('.approval-own-note')))
+        // (The card already shows why when someone else must approve it.)
+        words.push(!state.self_approval_counts
         ? (state.own_request_note || 'You asked for this, so other people must approve it.')
         : required <= 1 ? 'You asked for this, so approving it approves your own request.'
           : 'You asked for this; your approval counts as one of them.');

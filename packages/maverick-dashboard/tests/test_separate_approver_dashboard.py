@@ -232,7 +232,9 @@ def test_the_requester_cannot_approve_when_another_approver_is_available(env, mo
     card = _card_markup(client.get("/approvals").text, approval_id)
     button = _approve_button(card)
     assert "disabled" in button and f'title="{ANOTHER}"' in button
-    assert ANOTHER in html.unescape(card)
+    # Screen readers hear the reason with the disabled button.
+    assert f'aria-describedby="approval-own-note-{approval_id}"' in button
+    assert f'id="approval-own-note-{approval_id}">{ANOTHER}' in html.unescape(card)
 
     response = client.post(f"/api/v1/approvals/{approval_id}/approve",
                            json={"acknowledged": True}, headers=headers)
