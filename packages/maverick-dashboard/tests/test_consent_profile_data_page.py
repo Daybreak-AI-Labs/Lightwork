@@ -37,7 +37,7 @@ def test_page_exposes_complete_governed_operator_contract(page_client: TestClien
     response = page_client.get("/consent/profile-data")
     assert response.status_code == 200
     page = response.text
-    assert "Preference Questions" in page
+    assert "Preference questions" in page
     assert "cannot approve it" in page
     assert "About this page’s safeguards" in page
     assert "/api/v1/consent/profile-data" in page

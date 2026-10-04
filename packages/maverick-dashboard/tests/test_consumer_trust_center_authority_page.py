@@ -37,7 +37,7 @@ def test_page_exposes_full_four_eyes_authority_workbench(page_client) -> None:
     response = page_client.get("/consent/trust-center-authority")
     assert response.status_code == 200
     page = response.text
-    assert "Trust Center Access" in page
+    assert "Trust center access" in page
     assert "two approvals from people other than the one who asked" in page
     assert "/api/v1/consent/trust-center-authority" in page
     # Records are lists with row buttons; the four-eyes steps are buttons.

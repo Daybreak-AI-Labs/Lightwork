@@ -44,7 +44,7 @@ def test_provider_free_copilot_returns_bounded_page_guide(
     payload = response.json()
     assert payload["mode"] == "built_in"
     assert payload["page_context"]["path"] == "/privacy/drop"
-    assert payload["page_context"]["title"] == "California DROP Requests"
+    assert payload["page_context"]["title"] == "California DROP requests"
     assert payload["provider_setup"]["href"] == "/settings#settings-integrations"
     assert "Settings" in payload["provider_setup"]["label"]
     assert "when role and server composition permit" in payload["reply"].lower()

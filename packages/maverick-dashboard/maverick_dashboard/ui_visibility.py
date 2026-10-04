@@ -51,9 +51,9 @@ from . import rbac
 PAGES: tuple[dict, ...] = (
     {"path": "/my-data", "label": "My data", "group": "Operate",
      "icon": "settings", "floor": "view", "default": "view", "in_nav": False},
-    {"path": "/account", "label": "Account", "group": "Operate",
+    {"path": "/account", "label": "Your account", "group": "Operate",
      "icon": "settings", "floor": "view", "default": "view", "in_nav": False},
-    {"path": "/content-access", "label": "Reviewed content access", "group": "Observe",
+    {"path": "/content-access", "label": "Content access", "aliases": "Reviewed content access", "group": "Observe",
      "icon": "check", "floor": "view", "default": "view", "in_nav": False},
     {"path": "/preferences", "label": "Your preferences", "group": "Operate", "icon": "settings", "floor": "view", "default": "view", "in_nav": False},
     {"path": "/today", "label": "Today", "group": "Operate", "icon": "check", "floor": "view", "default": "view", "in_nav": True},
@@ -78,7 +78,7 @@ PAGES: tuple[dict, ...] = (
      "icon": "check", "floor": "view", "default": "view", "in_nav": False},
     {"path": "/deliverable-bundles", "label": "Selected deliverable bundles", "group": "Operate",
      "icon": "check", "floor": "view", "default": "view", "in_nav": False},
-    {"path": "/task-handoffs", "label": "Accepted task handoffs", "group": "Operate",
+    {"path": "/task-handoffs", "label": "Task handoffs", "aliases": "Accepted task handoffs", "group": "Operate",
      "icon": "check", "floor": "view", "default": "view", "in_nav": False},
     {
         "path": "/action-center", "label": "Action Center", "group": "Operate",
@@ -125,7 +125,8 @@ PAGES: tuple[dict, ...] = (
     # Alternate goal composers, linked from the Goals page toolbar.
     {
         "path": "/goal-builder",
-        "label": "Quick Goal",
+        "label": "Task builder",
+        "aliases": "Quick Goal",
         "group": "Operate",
         "icon": "builder",
         "floor": "view",
@@ -134,7 +135,8 @@ PAGES: tuple[dict, ...] = (
     },
     {
         "path": "/graph-editor",
-        "label": "Goal Map",
+        "label": "Task map",
+        "aliases": "Goal Map",
         "group": "Operate",
         "icon": "graph",
         "floor": "view",
@@ -185,7 +187,7 @@ PAGES: tuple[dict, ...] = (
     # The sidebar opens saved work first; the designer stays one click away.
     {
         "path": "/workflows",
-        "label": "Flows",
+        "label": "Workflows",
         "group": "Operate",
         "icon": "workflow",
         "floor": "view",
@@ -202,7 +204,7 @@ PAGES: tuple[dict, ...] = (
     },
     {
         "path": "/workflow-builder",
-        "label": "Workflow Builder",
+        "label": "Workflow builder",
         "group": "Operate",
         "icon": "workflow",
         "floor": "view",
@@ -261,7 +263,8 @@ PAGES: tuple[dict, ...] = (
     # Counterfactual review: forked runs and their branches under one root.
     {
         "path": "/run-tree",
-        "label": "Run Tree",
+        "label": "Branches",
+        "aliases": "Run Tree",
         "group": "Observe",
         "icon": "eye",
         "floor": "view",
@@ -289,6 +292,7 @@ PAGES: tuple[dict, ...] = (
     {
         "path": "/shoring",
         "label": "Autonomous Shoring",
+        "aliases": "Hand a team's work to Lightwork",
         "group": "Observe",
         "icon": "fleets",
         "floor": "view",
@@ -331,7 +335,8 @@ PAGES: tuple[dict, ...] = (
     },
     {
         "path": "/flows/analytics",
-        "label": "Flow Analytics",
+        "label": "Flow results",
+        "aliases": "Flow Analytics",
         "group": "Observe",
         "icon": "bench",
         "floor": "view",
@@ -353,7 +358,7 @@ PAGES: tuple[dict, ...] = (
     {
         "path": "/knowledge-access",
         "label": "Knowledge",
-        "aliases": "cortex company source freshness corrections exclusion deletion lineage rights",
+        "aliases": "cortex company source freshness corrections exclusion deletion lineage rights Find knowledge you can use now",
         "group": "Observe",
         "icon": "learned",
         "floor": "operate",
@@ -381,7 +386,7 @@ PAGES: tuple[dict, ...] = (
     # Per-user goal recordings (owner-scoped) -- an operator review surface.
     {
         "path": "/walkthroughs",
-        "label": "Walkthroughs",
+        "label": "Video walkthroughs",
         "group": "Observe",
         "icon": "walkthroughs",
         "floor": "view",
@@ -397,7 +402,7 @@ PAGES: tuple[dict, ...] = (
     },
     {
         "path": "/plan-tree-3d",
-        "label": "3D Plan View",
+        "label": "3D plan view",
         "group": "Observe",
         "icon": "cube",
         "floor": "view",
@@ -431,7 +436,8 @@ PAGES: tuple[dict, ...] = (
     # governs the mixed-authority surface.
     {
         "path": "/agent-control-plane",
-        "label": "Agent Control Plane",
+        "label": "Agent controls",
+        "aliases": "Agent Control Plane",
         "group": "Govern",
         "icon": "agents",
         "floor": "view",
@@ -450,7 +456,8 @@ PAGES: tuple[dict, ...] = (
     },
     {
         "path": "/privacy/data-discovery",
-        "label": "Privacy Data Discovery",
+        "label": "Find personal data",
+        "aliases": "Privacy Data Discovery",
         "group": "Privacy",
         "icon": "eye",
         "floor": "view",
@@ -459,7 +466,8 @@ PAGES: tuple[dict, ...] = (
     },
     {
         "path": "/privacy/regulatory-intelligence",
-        "label": "Privacy Regulatory Intelligence",
+        "label": "Privacy law research",
+        "aliases": "Privacy Regulatory Intelligence",
         "group": "Privacy",
         "icon": "facts",
         "floor": "operate",
@@ -468,7 +476,8 @@ PAGES: tuple[dict, ...] = (
     },
     {
         "path": "/privacy/rights-orchestration",
-        "label": "Privacy Rights Orchestration",
+        "label": "Privacy requests",
+        "aliases": "Privacy Rights Orchestration",
         "group": "Privacy",
         "icon": "shield",
         "floor": "operate",
@@ -477,7 +486,8 @@ PAGES: tuple[dict, ...] = (
     },
     {
         "path": "/privacy/rights-consumer-delivery",
-        "label": "Privacy Rights Consumer Delivery",
+        "label": "Send people their data",
+        "aliases": "Privacy Rights Consumer Delivery",
         "group": "Privacy",
         "icon": "key",
         "floor": "operate",
@@ -486,7 +496,8 @@ PAGES: tuple[dict, ...] = (
     },
     {
         "path": "/privacy/notice-governance",
-        "label": "Privacy Notice Governance",
+        "label": "Privacy notices",
+        "aliases": "Privacy Notice Governance",
         "group": "Privacy",
         "icon": "check",
         "floor": "operate",
@@ -506,7 +517,8 @@ PAGES: tuple[dict, ...] = (
     },
     {
         "path": "/consent/publishing",
-        "label": "Consent Publishing",
+        "label": "Banner and preference center",
+        "aliases": "Consent Publishing",
         "group": "Consent",
         "icon": "check",
         "floor": "operate",
@@ -515,7 +527,8 @@ PAGES: tuple[dict, ...] = (
     },
     {
         "path": "/consent/experiments",
-        "label": "Consent Experiments",
+        "label": "Banner experiments",
+        "aliases": "Consent Experiments",
         "group": "Consent",
         "icon": "bench",
         "floor": "operate",
@@ -524,7 +537,8 @@ PAGES: tuple[dict, ...] = (
     },
     {
         "path": "/consent/delivery",
-        "label": "Consent Delivery",
+        "label": "Send choices to other systems",
+        "aliases": "Consent Delivery",
         "group": "Consent",
         "icon": "check",
         "floor": "operate",
@@ -533,7 +547,8 @@ PAGES: tuple[dict, ...] = (
     },
     {
         "path": "/consent/public-clients",
-        "label": "Public Consent Clients",
+        "label": "Website and app keys",
+        "aliases": "Public Consent Clients",
         "group": "Consent",
         "icon": "key",
         "floor": "operate",
@@ -542,7 +557,8 @@ PAGES: tuple[dict, ...] = (
     },
     {
         "path": "/consent/native",
-        "label": "Consent in Your Apps",
+        "label": "Mobile app consent",
+        "aliases": "Consent in Your Apps",
         "group": "Consent",
         "icon": "key",
         "floor": "view",
@@ -551,7 +567,8 @@ PAGES: tuple[dict, ...] = (
     },
     {
         "path": "/consent/profile-data",
-        "label": "Consent Profile Data",
+        "label": "Preference questions",
+        "aliases": "Consent Profile Data",
         "group": "Consent",
         "icon": "check",
         "floor": "operate",
@@ -560,7 +577,8 @@ PAGES: tuple[dict, ...] = (
     },
     {
         "path": "/consent/custom-indexes",
-        "label": "Custom Consent Indexes",
+        "label": "Find people by preference",
+        "aliases": "Custom Consent Indexes",
         "group": "Consent",
         "icon": "search",
         "floor": "view",
@@ -569,7 +587,8 @@ PAGES: tuple[dict, ...] = (
     },
     {
         "path": "/consent/bulk-jobs",
-        "label": "Consent Bulk Jobs",
+        "label": "Bulk consent changes",
+        "aliases": "Consent Bulk Jobs",
         "group": "Consent",
         "icon": "clock",
         "floor": "view",
@@ -578,7 +597,8 @@ PAGES: tuple[dict, ...] = (
     },
     {
         "path": "/consent/publish-settings",
-        "label": "Consent Publish Settings",
+        "label": "Website banner settings",
+        "aliases": "Consent Publish Settings",
         "group": "Consent",
         "icon": "settings",
         "floor": "view",
@@ -587,7 +607,8 @@ PAGES: tuple[dict, ...] = (
     },
     {
         "path": "/consent/global-opt-out",
-        "label": "Global Opt-Out",
+        "label": "Opt out everywhere",
+        "aliases": "Global Opt-Out",
         "group": "Consent",
         "icon": "check",
         "floor": "view",
@@ -596,7 +617,8 @@ PAGES: tuple[dict, ...] = (
     },
     {
         "path": "/consent/application-scans",
-        "label": "Application Consent Scans",
+        "label": "App tracking checks",
+        "aliases": "Application Consent Scans",
         "group": "Consent",
         "icon": "search",
         "floor": "view",
@@ -605,7 +627,8 @@ PAGES: tuple[dict, ...] = (
     },
     {
         "path": "/consent/scan-inventory",
-        "label": "Consent Scan Inventory",
+        "label": "Tracker scans",
+        "aliases": "Consent Scan Inventory",
         "group": "Consent",
         "icon": "eye",
         "floor": "operate",
@@ -614,7 +637,8 @@ PAGES: tuple[dict, ...] = (
     },
     {
         "path": "/consent/scan-notice-proposals",
-        "label": "Scan Disclosure Proposals",
+        "label": "Disclosure suggestions",
+        "aliases": "Scan Disclosure Proposals",
         "group": "Consent",
         "icon": "check",
         "floor": "operate",
@@ -623,7 +647,8 @@ PAGES: tuple[dict, ...] = (
     },
     {
         "path": "/consent/trust-center-authority",
-        "label": "Trust Center Authority",
+        "label": "Trust center access",
+        "aliases": "Trust Center Authority",
         "group": "Consent",
         "icon": "key",
         "floor": "operate",
@@ -632,7 +657,8 @@ PAGES: tuple[dict, ...] = (
     },
     {
         "path": "/data-use",
-        "label": "Data Use Governance",
+        "label": "Data use rules",
+        "aliases": "Data Use Governance",
         "group": "Privacy",
         "icon": "shield",
         "floor": "operate",
@@ -640,7 +666,8 @@ PAGES: tuple[dict, ...] = (
     },
     {
         "path": "/data-use/providers",
-        "label": "Native Data Controls",
+        "label": "Snowflake and Databricks",
+        "aliases": "Native Data Controls",
         "group": "Privacy",
         "icon": "shield",
         "floor": "operate",
@@ -649,7 +676,8 @@ PAGES: tuple[dict, ...] = (
     },
     {
         "path": "/governance-agents",
-        "label": "Governance Agents",
+        "label": "Governance assistants",
+        "aliases": "Governance Agents",
         "group": "AI oversight",
         "icon": "agents",
         "floor": "view",
@@ -667,7 +695,7 @@ PAGES: tuple[dict, ...] = (
     },
     {
         "path": "/ai-evidence-analysis",
-        "label": "AI Evidence Analysis",
+        "label": "AI evidence analysis",
         "group": "AI oversight",
         "icon": "check",
         "floor": "view",
@@ -676,7 +704,8 @@ PAGES: tuple[dict, ...] = (
     },
     {
         "path": "/assess/evidence-autopopulation",
-        "label": "Assessment Evidence",
+        "label": "Suggested assessment answers",
+        "aliases": "Assessment Evidence",
         "group": "AI oversight",
         "icon": "check",
         "floor": "view",
@@ -685,7 +714,8 @@ PAGES: tuple[dict, ...] = (
     },
     {
         "path": "/ai-entity-tasks",
-        "label": "AI Entity Tasks",
+        "label": "AI system tasks",
+        "aliases": "AI Entity Tasks",
         "group": "AI oversight",
         "icon": "check",
         "floor": "view",
@@ -694,7 +724,8 @@ PAGES: tuple[dict, ...] = (
     },
     {
         "path": "/assurance/cloud-agents",
-        "label": "Cloud Agent Governance",
+        "label": "Cloud AI agents",
+        "aliases": "Cloud Agent Governance",
         "group": "AI oversight",
         "icon": "shield",
         "floor": "operate",
@@ -703,7 +734,7 @@ PAGES: tuple[dict, ...] = (
     },
     {
         "path": "/privacy/drop",
-        "label": "DROP Requests",
+        "label": "California DROP requests",
         "group": "Privacy",
         "icon": "shield",
         "floor": "view",
@@ -723,7 +754,7 @@ PAGES: tuple[dict, ...] = (
     },
     {
         "path": "/third-party/vendor-onboarding",
-        "label": "AI Vendor Onboarding",
+        "label": "AI vendor onboarding",
         "group": "Third parties",
         "icon": "shield",
         "floor": "operate",
@@ -732,7 +763,8 @@ PAGES: tuple[dict, ...] = (
     },
     {
         "path": "/third-party/contracts",
-        "label": "Contracts & Engagements",
+        "label": "Contracts and engagements",
+        "aliases": "Contracts & Engagements",
         "group": "Third parties",
         "icon": "shield",
         "floor": "view",
@@ -750,7 +782,7 @@ PAGES: tuple[dict, ...] = (
     },
     {
         "path": "/third-party/intelligence",
-        "label": "Third-Party Intelligence",
+        "label": "Third-party intelligence",
         "group": "Third parties",
         "icon": "shield",
         "floor": "operate",
@@ -777,7 +809,8 @@ PAGES: tuple[dict, ...] = (
     },
     {
         "path": "/security/threats",
-        "label": "Platform Threat Hunter",
+        "label": "Lightwork threat check",
+        "aliases": "Platform Threat Hunter",
         "group": "Govern",
         "icon": "shield",
         "floor": "operate",
@@ -786,7 +819,8 @@ PAGES: tuple[dict, ...] = (
     },
     {
         "path": "/security/soc",
-        "label": "Environment Threat Hunter",
+        "label": "Threat monitoring",
+        "aliases": "Environment Threat Hunter",
         "group": "Govern",
         "icon": "shield",
         "floor": "operate",
@@ -797,8 +831,8 @@ PAGES: tuple[dict, ...] = (
     # the visibility matrix and the page finder both know them.
     {
         "path": "/security/report",
-        "label": "Security Readiness Report",
-        "aliases": "board pack readiness print",
+        "label": "Security readiness report",
+        "aliases": "board pack readiness print Security & GRC readiness",
         "group": "Govern",
         "icon": "shield",
         "floor": "operate",
@@ -807,8 +841,8 @@ PAGES: tuple[dict, ...] = (
     },
     {
         "path": "/security/assurance",
-        "label": "Model Risk & AI Assurance",
-        "aliases": "assurance cockpit evidence gateway model risk",
+        "label": "AI assurance",
+        "aliases": "assurance cockpit evidence gateway model risk Model Risk & AI Assurance",
         "group": "Govern",
         "icon": "shield",
         "floor": "operate",
@@ -820,7 +854,8 @@ PAGES: tuple[dict, ...] = (
     # sidebar entry -- those personas never open the technical cockpit.
     {
         "path": "/security/governance",
-        "label": "AI Governance",
+        "label": "AI governance",
+        "aliases": "Governance workspace",
         "group": "Govern",
         "icon": "shield",
         "floor": "operate",
@@ -832,7 +867,8 @@ PAGES: tuple[dict, ...] = (
     # ITGC / credit-risk control record, not day-to-day finance operations.
     {
         "path": "/finance",
-        "label": "Financial Risk",
+        "label": "Financial risk",
+        "aliases": "Finance",
         "group": "Govern",
         "icon": "spend",
         "floor": "operate",
@@ -860,7 +896,8 @@ PAGES: tuple[dict, ...] = (
     },
     {
         "path": "/simulate",
-        "label": "Simulate",
+        "label": "Test a safety rule",
+        "aliases": "Simulate",
         "group": "Govern",
         "icon": "graph",
         "floor": "view",
@@ -870,7 +907,7 @@ PAGES: tuple[dict, ...] = (
     # goal/trajectory surfaces rather than the sidebar.
     {
         "path": "/redact",
-        "label": "Redaction",
+        "label": "Redaction check",
         "group": "Govern",
         "icon": "shield",
         "floor": "view",
@@ -906,7 +943,7 @@ PAGES: tuple[dict, ...] = (
     },
     {
         "path": "/compliance/grc-studio",
-        "label": "No-code GRC Studio",
+        "label": "No-code GRC studio",
         "aliases": "workflow builder governance risk compliance studio",
         "group": "Govern",
         "icon": "compliance",
@@ -916,7 +953,8 @@ PAGES: tuple[dict, ...] = (
     },
     {
         "path": "/compliance/policy-links",
-        "label": "Policy Publication Links",
+        "label": "Policy links",
+        "aliases": "Policy Publication Links",
         "group": "Govern",
         "icon": "compliance",
         "floor": "operate",
@@ -925,7 +963,8 @@ PAGES: tuple[dict, ...] = (
     },
     {
         "path": "/compliance/scoping",
-        "label": "Compliance Scoping",
+        "label": "Find which controls apply",
+        "aliases": "Compliance Scoping",
         "group": "Govern",
         "icon": "compliance",
         "floor": "operate",
@@ -934,7 +973,8 @@ PAGES: tuple[dict, ...] = (
     },
     {
         "path": "/compliance/scope-actions",
-        "label": "Compliance Scope Actions",
+        "label": "Turn scope into tasks",
+        "aliases": "Compliance Scope Actions",
         "group": "Govern",
         "icon": "compliance",
         "floor": "operate",
@@ -943,7 +983,7 @@ PAGES: tuple[dict, ...] = (
     },
     {
         "path": "/compliance/continuous-evidence",
-        "label": "Continuous Evidence",
+        "label": "Continuous evidence",
         "group": "Govern",
         "icon": "compliance",
         "floor": "operate",
@@ -955,7 +995,8 @@ PAGES: tuple[dict, ...] = (
     # Read-only (enforcement is chosen in config), so the view floor is right.
     {
         "path": "/compliance/obligations",
-        "label": "Regulatory Obligations",
+        "label": "Regulations and rules",
+        "aliases": "Regulatory Obligations",
         "group": "Govern",
         "icon": "compliance",
         "floor": "view",
@@ -972,7 +1013,8 @@ PAGES: tuple[dict, ...] = (
     },
     {
         "path": "/audit",
-        "label": "Audit",
+        "label": "Activity log",
+        "aliases": "Audit",
         "group": "Govern",
         "icon": "audit",
         "floor": "audit",
@@ -993,7 +1035,8 @@ PAGES: tuple[dict, ...] = (
     # twin replays and information-flow events. Counts and labels only.
     {
         "path": "/immune",
-        "label": "Immune layer",
+        "label": "Safety monitoring",
+        "aliases": "Immune layer",
         "group": "Govern",
         "icon": "shield",
         "floor": "audit",
@@ -1004,7 +1047,8 @@ PAGES: tuple[dict, ...] = (
     # It is audit-gated like the source evidence, and has no product mutation.
     {
         "path": "/audit/evolution-ledger",
-        "label": "Evolution Ledger",
+        "label": "Learning history",
+        "aliases": "Evolution Ledger",
         "group": "Govern",
         "icon": "learned",
         "floor": "audit",
@@ -1013,7 +1057,7 @@ PAGES: tuple[dict, ...] = (
     },
     {
         "path": "/replay",
-        "label": "Replay",
+        "label": "Task replay",
         "group": "Govern",
         "icon": "audit",
         "floor": "view",
@@ -1032,7 +1076,8 @@ PAGES: tuple[dict, ...] = (
     # mutation (enroll / mint / revoke) is admin-gated at the API.
     {
         "path": "/external-agents",
-        "label": "External Agents",
+        "label": "Outside agents",
+        "aliases": "External Agents",
         "group": "AI oversight",
         "icon": "agents",
         "floor": "view",
@@ -1049,7 +1094,7 @@ PAGES: tuple[dict, ...] = (
     },
     {
         "path": "/store",
-        "label": "Store",
+        "label": "Skill store",
         "group": "Extend",
         "icon": "store",
         "floor": "view",
@@ -1095,7 +1140,8 @@ PAGES: tuple[dict, ...] = (
     # the other operator-facing extension surfaces, not admin plumbing.
     {
         "path": "/styles",
-        "label": "Response Styles",
+        "label": "Response styles",
+        "aliases": "Output styles",
         "group": "Extend",
         "icon": "roles",
         "floor": "view",
@@ -1103,7 +1149,7 @@ PAGES: tuple[dict, ...] = (
     },
     {
         "path": "/mcp",
-        "label": "Tool Servers",
+        "label": "Tool servers",
         "group": "Advanced tools",
         "icon": "mcp",
         "floor": "admin",
@@ -1120,7 +1166,7 @@ PAGES: tuple[dict, ...] = (
     # -- Admin ----------------------------------------------------------------
     {
         "path": "/administration/document-vault",
-        "label": "Document Vault",
+        "label": "Document vault",
         "group": "Admin",
         "icon": "shield",
         "floor": "view",
@@ -1157,6 +1203,7 @@ PAGES: tuple[dict, ...] = (
     {
         "path": "/users",
         "label": "Users",
+        "aliases": "Users & roles",
         "group": "Admin",
         "icon": "users",
         "floor": "admin",
@@ -1214,7 +1261,8 @@ PAGES: tuple[dict, ...] = (
     },
     {
         "path": "/embed-demo",
-        "label": "Embed Analytics",
+        "label": "Embedded analytics",
+        "aliases": "Embed Analytics",
         "group": "Advanced tools",
         "icon": "embed",
         "floor": "view",

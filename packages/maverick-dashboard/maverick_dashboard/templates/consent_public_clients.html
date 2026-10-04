@@ -1,14 +1,14 @@
 {% extends "base.html" %}
 {% from "_hero.html" import hero %}
 {% from "_module_gate.html" import module_gate %}
-{% block title %}Website and App Keys · Lightwork{% endblock %}
+{% block title %}Website and app keys · Lightwork{% endblock %}
 {% block head_extra %}<link rel="stylesheet" href="/static/lightwork-consent-workbench.css">{% endblock %}
 {% block content %}
 {% set pc_on = consent_public_clients_enabled %}
 {% set pc_admin = consent_can_admin if consent_can_admin is defined else true %}
 {% set pc_audit = consent_can_audit if consent_can_audit is defined else true %}
 <div class="governance-workbench">
-  {{ hero('Consent integration', 'Website and App Keys',
+  {{ hero('Consent integration', 'Website and app keys',
           lede='Create a key that lets your website or app show your Lightwork consent banner and save people’s choices.') }}
   {% include "_consent_nav.html" %}
   {% if not pc_on %}

@@ -35,7 +35,7 @@
     allowed to do. A new person who signs in starts as
     <strong>{{ default_role | role_label }}</strong> until you change it here.
   {% endset %}
-  {% call hero('Administration', 'Users & roles',
+  {% call hero('Administration', 'Users',
                subtitle='Who can use Lightwork',
                lede=users_lede) %}
     {{ state('Current state',

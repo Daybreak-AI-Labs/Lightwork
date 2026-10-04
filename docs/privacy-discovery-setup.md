@@ -11,7 +11,7 @@ external provider still controls credential issuance and permission grants.
    readers use bearer tokens. Credential inputs are excluded from draft recovery
    and are cleared after an acknowledged save. Existing saved credentials are
    retained when an edit leaves credential fields empty.
-2. Open **Privacy Data Discovery** and select **Refresh connections and keys**.
+2. Open **Find personal data** and select **Refresh connections and keys**.
    Create a named evidence key in **Evidence keys**. Lightwork generates 32
    cryptographically random bytes and seals them with the existing tenant KMS;
    the browser receives only the key's name, owner, version, and reference.

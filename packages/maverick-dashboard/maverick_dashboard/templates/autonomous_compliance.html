@@ -40,12 +40,13 @@
     </div>
     <div class="acm-grid">
       {% for module in suite.modules %}
+      {% set _name = page_names.get(module.path, module.label) %}
       <a class="card acm-card" href="{{ module.path }}">
         <span class="acm-card__row">
-          <span class="acm-card__name">{{ module.label }}</span>
+          <span class="acm-card__name">{{ _name }}</span>
           <span class="badge {{ status_badge_class[module.status] }}">{{ status_labels[module.status] }}</span>
         </span>
-        <span class="acm-card__path">{{ module_summaries.get(module.path, "Open " ~ module.label ~ ".") }}</span>
+        <span class="acm-card__path">{{ module_summaries.get(module.path, "Open " ~ _name ~ ".") }}</span>
       </a>
       {% endfor %}
     </div>

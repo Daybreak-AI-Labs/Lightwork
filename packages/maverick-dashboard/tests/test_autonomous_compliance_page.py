@@ -96,6 +96,37 @@ def test_every_offered_module_card_carries_the_catalog_badge(client: TestClient)
     assert offered and len(parser.by_href) == offered
 
 
+def test_module_cards_use_each_page_s_one_name(client: TestClient) -> None:
+    """A card names its page exactly as the sidebar, heading and title do."""
+
+    class Names(HTMLParser):
+        def __init__(self) -> None:
+            super().__init__()
+            self.by_href: dict[str, str] = {}
+            self._href: str | None = None
+            self._capture = False
+
+        def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+            d = dict(attrs)
+            if tag == "a" and "card" in (d.get("class") or ""):
+                self._href = d.get("href")
+            self._capture = tag == "span" and "acm-card__name" in (d.get("class") or "")
+
+        def handle_data(self, data: str) -> None:
+            if self._capture and self._href:
+                self.by_href[self._href] = self.by_href.get(self._href, "") + data
+
+        def handle_endtag(self, tag: str) -> None:
+            self._capture = False
+
+    names = Names()
+    names.feed(client.get(page.PAGE_PATH).text)
+    labels = {p["path"]: p["label"] for p in ui_visibility.PAGES}
+    registered = {href: name.strip() for href, name in names.by_href.items() if href in labels}
+    assert registered and all(name == labels[href] for href, name in registered.items()), registered
+    assert names.by_href["/consent/global-opt-out"].strip() == "Opt out everywhere"
+
+
 def test_visible_suites_drops_held_modules_and_empty_suites() -> None:
     suites = catalog.suites()
     held = frozenset(m.path for m in suites[0].modules) | {suites[1].modules[0].path}

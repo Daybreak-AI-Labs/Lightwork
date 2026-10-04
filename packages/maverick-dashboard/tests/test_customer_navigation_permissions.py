@@ -88,7 +88,7 @@ def test_read_only_chat_projects_workspace_authority(monkeypatch, tmp_path, glob
 
 
 @pytest.mark.parametrize("path,title", [
-    ("/goals", "Tasks"), ("/cortex", "Knowledge"), ("/deliverables", "Results"),
+    ("/goals", "Tasks"), ("/cortex", "Cortex memory diagnostics"), ("/deliverables", "Results"),
 ])
 def test_customer_read_destinations_remain_available(monkeypatch, tmp_path, path, title):
     from maverick_dashboard import rbac

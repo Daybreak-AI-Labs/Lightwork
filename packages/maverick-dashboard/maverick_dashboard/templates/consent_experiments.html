@@ -1,14 +1,14 @@
 {% extends "base.html" %}
 {% from "_hero.html" import hero %}
 {% from "_module_gate.html" import module_gate %}
-{% block title %}Banner Experiments · Lightwork{% endblock %}
+{% block title %}Banner experiments · Lightwork{% endblock %}
 {% block head_extra %}<link rel="stylesheet" href="/static/lightwork-consent-workbench.css">{% endblock %}
 {% block content %}
 {% set ce_on = consent_experiments_enabled %}
 {% set ce_admin = consent_can_admin if consent_can_admin is defined else true %}
 {% set ce_audit = consent_can_audit if consent_can_audit is defined else true %}
 <div class="governance-workbench">
-  {{ hero('Consent experiments', 'Banner Experiments',
+  {{ hero('Consent experiments', 'Banner experiments',
           lede='Test different layouts of your consent banner to see which one helps more people make a choice. A second person must approve every experiment, and you can stop it at any time.') }}
   {% include "_consent_nav.html" %}
   {% if not ce_on %}

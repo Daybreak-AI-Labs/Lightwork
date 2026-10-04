@@ -7,7 +7,7 @@ test('a saved answer exposes the product and its print, copy, download and share
   await page.goto(`/chat/goal/${fixture.review_goal}`);
 
   const product = page.getByRole('navigation', {name: 'Lightwork product'});
-  await expect(product.getByRole('link', {name: 'Flows'})).toBeVisible();
+  await expect(product.getByRole('link', {name: 'Workflows', exact: true})).toBeVisible();
   await expect(product.getByRole('link', {name: 'Tasks'})).toBeVisible();
   const answer = page.locator('#result');
   await expect(answer).toContainText('Synthetic captured deliverable');
@@ -55,7 +55,7 @@ test('a saved answer exposes the product and its print, copy, download and share
   await page.setViewportSize({width: 390, height: 844});
   await expect(page.getByRole('button', {name: 'Menu', exact: true})).toBeVisible();
   await page.getByRole('button', {name: 'Menu', exact: true}).click();
-  await expect(product.getByRole('link', {name: 'Flows'})).toBeVisible();
+  await expect(product.getByRole('link', {name: 'Workflows', exact: true})).toBeVisible();
   await expect(page.getByRole('button', {name: 'Close menu'})).toBeVisible();
   await expect(page.locator('main')).toHaveAttribute('inert', '');
   const firstNavigation = page.locator('#cs-side .cs-brand');

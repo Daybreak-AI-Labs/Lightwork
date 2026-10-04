@@ -68,7 +68,7 @@ def test_workbench_is_store_free_closed_and_liquid_glass(client: TestClient) -> 
         "style-src 'self'",
     ):
         assert directive in csp
-    assert "Opt Out Everywhere" in response.text
+    assert "Opt out everywhere" in response.text
     assert "as an opt-out request" in response.text
     assert "keeps only a fingerprint of each request" in response.text
     assert 'id="goo-operations" disabled' in response.text

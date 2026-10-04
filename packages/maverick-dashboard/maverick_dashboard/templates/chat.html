@@ -22,7 +22,8 @@
   <div class="cs-mark" aria-hidden="true">
     <svg viewBox="0 0 48 48"><path d="M14 30c-4 0-7-3-7-7s3-7 7-7c1-5 5-8 10-8s9 3 10 8c4 0 7 3 7 7s-3 7-7 7z"/><path d="M19 22l4 4 6-8"/></svg>
   </div>
-  <h1 class="cs-greet">{{ ui('What should Lightwork take on?') }}</h1>
+  <h1 class="sr-only">{{ ui('Chat') }}</h1>
+  <p class="cs-greet">{{ ui('What should Lightwork take on?') }}</p>
   {% if not model_route_ready %}
   <section class="panel" id="model-route-setup" role="status">
     <h2 style="margin-top:0">{{ ui('Connect an AI service to start') }}</h2>

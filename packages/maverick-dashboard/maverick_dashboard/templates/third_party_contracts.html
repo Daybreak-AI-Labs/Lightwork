@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% from "_hero.html" import hero %}
-{% block title %}Contracts and Engagements - Lightwork{% endblock %}
+{% block title %}Contracts and engagements · Lightwork{% endblock %}
 {% block head_extra %}
 <style nonce="{{ csp_style_nonce }}">
   .tpc-grid { display:grid; gap:var(--space-3); grid-template-columns:repeat(auto-fit,minmax(min(100%,14rem),1fr)); }
@@ -25,7 +25,7 @@
      data-can-operate="{{ 'true' if contracts_can_operate else 'false' }}"
      data-can-audit="{{ 'true' if contracts_can_audit else 'false' }}"
      data-can-admin="{{ 'true' if contracts_can_admin else 'false' }}">
-  {% call hero('Third-party management', 'Contracts and Engagements',
+  {% call hero('Third-party management', 'Contracts and engagements',
                lede='Keep track of vendor agreements and the work each vendor does for you, with a clear history of every change.', title_id='tpc-title') %}
     <div class="hero-statebox" aria-live="polite">
       <div class="hero-statebox__label">Availability</div>

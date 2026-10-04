@@ -40,7 +40,7 @@ def test_default_off_page_exposes_authority_workflows_and_limits() -> None:
     response = client.get("/data-use")
     assert response.status_code == 200
     page = response.text
-    assert "Data Use Rules" in page
+    assert "Data use rules" in page
     assert 'data-module-gate="data_use_governance"' in page
     assert "[data_use_governance] enable = true" not in page
     for form in ("dug-catalog", "dug-context", "dug-policy", "dug-request", "dug-label",

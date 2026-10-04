@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% from "_hero.html" import hero %}
 {% from "_module_gate.html" import module_gate %}
-{% block title %}Send Choices to Other Systems · Lightwork{% endblock %}
+{% block title %}Send choices to other systems · Lightwork{% endblock %}
 {% block head_extra %}<link rel="stylesheet" href="/static/lightwork-consent-workbench.css">{% endblock %}
 {% block content %}
 {% set cd_on = consent_delivery_enabled %}
@@ -9,7 +9,7 @@
 {% set cd_audit = consent_can_audit if consent_can_audit is defined else true %}
 {% set cd_operate = consent_can_operate if consent_can_operate is defined else true %}
 <div class="governance-workbench">
-  {{ hero('Consent delivery', 'Send Choices to Other Systems',
+  {{ hero('Consent delivery', 'Send choices to other systems',
           lede='Send people’s consent choices to your other systems, such as your CRM, email platform or data warehouse, so every system respects them.') }}
   {% include "_consent_nav.html" %}
   {% if not cd_on %}

@@ -12,7 +12,7 @@ shipped.
 | --- | --- | --- | --- | --- |
 | Session kernel | `governed_repl.py` | `[repl]` | **off** | `repl_exec` agent tool; `maverick repl`; `repl_executed` audit rows |
 | Self-refinement | `harness_refine.py` | `[harness_refine]` | **off** | Approval queue (`/approvals`); `maverick refine`; the standing brief; signed learning audit |
-| Run forking | `session_tree.py` | `[session_tree]` | **on** | **Run Tree** page (`/run-tree`); `maverick run-tree` |
+| Run forking | `session_tree.py` | `[session_tree]` | **on** | **Branches** page (`/run-tree`); `maverick run-tree` |
 
 All three are asked in the installer wizard's advanced flow (**Governed
 session kernel?**, **Governed self-refinement?**, **Run forking?**), and
@@ -357,7 +357,7 @@ take a review page down.
 
 ### Reading it
 
-The **Run Tree** page (`/run-tree`, Observe group) lists every forked run and
+The **Branches** page (`/run-tree`, Insights group) lists every forked run and
 renders the branches under one root as a plain nested list — it reads in
 source order for a screen reader and prints straight into an audit pack. It is
 read-only and owner-scoped like the goal listings, and it renders the empty
@@ -426,7 +426,7 @@ Every refusal below is deliberate and leaves the system in a defined state.
 | `could not snapshot the harness` | The pre-apply snapshot failed | Check the data dir's permissions and free space; nothing was applied |
 | `snapshot '…' is no longer retained` | Older than the last 50 snapshots | Restore by hand; the proposal stays marked applied |
 | `killswitch.Halted` on apply | `~/.maverick/HALT` is set | Clear the killswitch; recovery paths (`revert`) stay outside the halt boundary |
-| `session forking is off` | `[session_tree] enable = false` | Re-enable it; the Run Tree page shows the same state as a badge |
+| `session forking is off` | `[session_tree] enable = false` | Re-enable it; the Branches page shows the same state as a badge |
 | `goal #N does not exist` | Unknown parent | Fork a run that is on the record |
 | `event #N is not on goal #M's trail` | Fork point is not one of the parent's event ids | Read the ids from the run's trajectory — `at_event` is a `goal_events` id, not an offset |
 | `would reach depth D, past the [session_tree] max_depth` | Chain of forks too deep | Raise `max_depth`, or fork closer to the root |

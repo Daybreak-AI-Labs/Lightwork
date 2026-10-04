@@ -37,7 +37,7 @@ def test_page_is_a_set_of_record_lists_in_plain_words(
     response = page_client.get("/third-party/intelligence")
     assert response.status_code == 200
     page = response.text
-    assert "Third-party Intelligence" in page
+    assert "Third-party intelligence" in page
     assert "/api/v1/third-party/intelligence" in page
     assert "/static/lightwork-third-party-intelligence.js" in page
     assert "Enhanced due diligence" in page

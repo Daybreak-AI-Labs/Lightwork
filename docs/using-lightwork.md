@@ -64,7 +64,7 @@ state is not proof that every approval is clear.
 
 ## Reuse a good process
 
-Open **Flows** (`/workflows`) to see three different kinds of saved work:
+Open **Workflows** (`/workflows`) to see three different kinds of saved work:
 
 | If you need | Use | What to expect |
 | --- | --- | --- |
@@ -72,7 +72,7 @@ Open **Flows** (`/workflows`) to see three different kinds of saved work:
 | Connected steps with decisions or repetition | **New flow** | Use the visual designer, review each step and its required inputs, then inspect the run. A flow approval step pauses for a person. |
 | Instructions for a specialist | An **agent playbook** | It guides the specialist; a sentence telling it to seek review does **not** create a flow approval gate. |
 
-The **Flows** list shows saved flows, templates, and playbooks. **Edit** opens
+The **Workflows** list shows saved flows, templates, and playbooks. **Edit** opens
 the relevant builder; **Use** starts a template in Chat. A flow can be turned
 off or deleted from **More** after review. If flows are turned off, the page
 shows who can enable them. Ask Copilot to explain the steps while you are in

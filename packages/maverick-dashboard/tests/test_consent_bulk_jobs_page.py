@@ -70,7 +70,7 @@ def test_workbench_is_store_free_closed_and_copilot_enabled(client: TestClient) 
         assert directive in csp
     from test_support.plain_language import developer_terms
 
-    assert "Bulk Consent Changes" in response.text
+    assert "Bulk consent changes" in response.text
     assert 'id="cbj-operations" disabled' in response.text
     assert "Checking whether bulk changes are available" in response.text
     assert "Checking status never adds to the allowance" in response.text

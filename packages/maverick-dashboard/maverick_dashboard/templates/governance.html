@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% from "_hero.html" import hero %}
 {% from "_module_gate.html" import module_gate %}
-{% block title %}Governance workspace · Lightwork{% endblock %}
+{% block title %}AI governance · Lightwork{% endblock %}
 {% block content %}
 <style>
   .gov-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,22rem),1fr)); gap:var(--space-4); }
@@ -42,7 +42,7 @@
 {% set DUTY = {'technical_documentation': 'Technical documentation of the model', 'downstream_information': 'Information for companies building on the model', 'copyright_policy': 'Copyright policy', 'training_content_summary': 'Public summary of training content', 'model_evaluation': 'Model evaluation and adversarial testing', 'systemic_risk_mitigation': 'Assessing and reducing systemic risks', 'incident_reporting': 'Tracking and reporting serious incidents', 'cybersecurity_protection': 'Cybersecurity protection', 'use_per_instructions': "Used as the provider's instructions say", 'operation_monitoring': 'Operation is monitored', 'log_retention': 'Logs are kept long enough', 'affected_person_information': 'People affected are told', 'authority_cooperation': 'Cooperation with authorities', 'input_data_control': 'Input data is relevant and representative', 'worker_information': 'Workers are informed', 'registration_check': 'Registration was checked', 'dpia_information': 'Information for the data protection impact assessment'} %}
 {% macro duty_list(keys) %}{% for key in keys %}{{ DUTY.get(key, key|humanize) }}{% if not loop.last %}; {% endif %}{% else %}—{% endfor %}{% endmacro %}
 
-{{ hero('Legal, privacy and compliance', 'Governance workspace', lede='Keep the records the EU AI Act asks for: impact assessments, technical documentation, approval routes, registrations, staff AI training and serious-incident reports. Every entry is saved under your name. Lightwork records filings you make with authorities; it does not send them for you.') }}
+{{ hero('Legal, privacy and compliance', 'AI governance', lede='Keep the records the EU AI Act asks for: impact assessments, technical documentation, approval routes, registrations, staff AI training and serious-incident reports. Every entry is saved under your name. Lightwork records filings you make with authorities; it does not send them for you.') }}
 
 <p id="gov-flash" role="status" aria-live="polite" class="muted"></p>
 
