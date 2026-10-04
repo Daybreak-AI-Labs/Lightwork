@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}My background work · Lightwork{% endblock %}
 {% block content %}
-<main id="my-work" data-context="{{ work_context }}" style="max-width:72rem">
+<section id="my-work" data-context="{{ work_context }}" style="max-width:72rem">
   {% from "_hero.html" import hero %}
   {{ hero('Your work', 'My background work',
           lede='Your tasks, schedules, workflow runs and connections. Open a row for its current controls and evidence.',
@@ -13,7 +13,7 @@
   <p id="my-work-status" role="status" aria-live="polite"></p>
   <section aria-labelledby="my-work-coverage-title"><h2 id="my-work-coverage-title">What was checked</h2><ul id="my-work-coverage"></ul></section>
   <section aria-label="Your background work" id="my-work-rows"></section>
-</main>
+</section>
 <style>#my-work .input{max-width:24rem}#my-work article{padding-block:1rem;border-bottom:1px solid var(--border)}#my-work h2,#my-work p{overflow-wrap:anywhere}</style>
 <script src="/static/lightwork-my-work.js" defer></script>
 {% endblock %}
