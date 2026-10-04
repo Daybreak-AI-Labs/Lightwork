@@ -8581,6 +8581,50 @@ def _approval_viewer_context(request: Request | None) -> dict:
     return {"approval_viewer": _supervisor(request), "self_approval_allowed": allow_self_approval()}
 
 
+def _approval_progress(approvals: list, request: Request) -> dict:
+    """Each pending card's approval progress, in the words the card shows.
+
+    The same facts ``GET /api/v1/approvals/{id}/state`` returns, rendered with
+    the page instead of fetched once per card after load. Callers pass only
+    the approvals the viewer may open (the page routes filter with
+    ``can_read_approval``, the state API's content check); the state API's
+    operate floor applies here too.
+    """
+    if not has_permission(request, "operate"):
+        return {}
+    from maverick.safety.dual_control import allow_self_approval
+
+    from .api import _supervisor
+
+    who = _supervisor(request)
+    world = _world()
+    progress = {}
+    for approval in approvals:
+        try:
+            state = world.approval_state(approval.id)
+        except Exception:  # noqa: BLE001 - the card keeps its server-side checks
+            continue
+        if not state or state.get("status") != "pending":
+            continue
+        required = int(state.get("approvals_required") or 1)
+        words = ["One approval is needed." if required <= 1
+                 else f"{state.get('approved_count', 0)} of {required} required approvals received."]
+        recorded = who in (state.get("approvers") or [])
+        if recorded:
+            words.append("Your approval is recorded.")
+        elif state.get("requested_by") and state.get("requested_by") == who:
+            # The words follow what is enforced: one approver may be the person
+            # who asked; under two-person approval their vote may not count.
+            if required > 1 and not allow_self_approval():
+                words.append("You asked for this, so other people must approve it.")
+            elif required <= 1:
+                words.append("You asked for this, so approving it approves your own request.")
+            else:
+                words.append("You asked for this; your approval counts as one of them.")
+        progress[approval.id] = {"text": " ".join(words), "recorded": recorded}
+    return progress
+
+
 def _approval_queue_context(approvals: list, request: Request | None = None) -> dict:
     """Build the exact-operation review context shared by approval surfaces."""
 
@@ -8645,6 +8689,7 @@ def _approval_queue_context(approvals: list, request: Request | None = None) -> 
         "approval_actions": approval_actions,
         "approval_scopes": approval_scopes,
         "assessment_ids": assessment_ids,
+        "approval_progress": _approval_progress(approvals, request) if request is not None else {},
         **_approval_viewer_context(request),
     }
 
