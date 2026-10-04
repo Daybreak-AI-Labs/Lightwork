@@ -20,11 +20,11 @@ def _app():
 
 
 def _identity(request):
-    from maverick import config
+    from maverick.personal_notifications import personal_alerts_enabled
 
     from .preferences_api import _principal
     principal = _principal(request)
-    if config.config_source_errors(include_tenant=True) or (config.load_config().get("notifications") or {}).get("personal_alerts", False) is not True:
+    if not personal_alerts_enabled():
         raise HTTPException(403, "Personal alerts are turned off. An administrator can enable them in All settings.")
     return principal
 
@@ -159,6 +159,7 @@ def _state_locked(request, *, seen_id=None):
 @router.get("/notifications")
 def page(request: Request):
     from maverick import config, experience_preferences
+    from maverick.personal_notifications import personal_alerts_on
 
     auth.require_permission(request, "view")
     if not auth.caller_principal(request):
@@ -167,7 +168,7 @@ def page(request: Request):
         unavailable = "Notification settings could not be read. Ask an administrator to check All settings."
     elif not experience_preferences.enabled():
         unavailable = "Personal preferences are turned off. An administrator can enable them in All settings."
-    elif (config.load_config().get("notifications") or {}).get("personal_alerts") is not True:
+    elif not personal_alerts_on(config.load_config().get("notifications")):
         unavailable = "Personal task alerts are turned off. An administrator can enable them in All settings."
     else:
         unavailable = ""

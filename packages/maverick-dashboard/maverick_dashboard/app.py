@@ -552,12 +552,13 @@ def _nav_context(request: Request) -> dict:
     try:
         from maverick import config as core_config
         from maverick import experience_preferences
+        from maverick.personal_notifications import personal_alerts_on
 
         show_personal_notifications = bool(caller_principal(request)) and has_permission(request, "view")
         personal_notifications_enabled = (
             show_personal_notifications and experience_preferences.enabled()
             and not core_config.config_source_errors(include_tenant=True)
-            and (core_config.load_config().get("notifications") or {}).get("personal_alerts") is True
+            and personal_alerts_on(core_config.load_config().get("notifications"))
         )
     except Exception:  # pragma: no cover -- shell rendering stays fail-closed
         show_personal_notifications = personal_notifications_enabled = False

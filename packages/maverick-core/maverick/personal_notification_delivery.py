@@ -38,8 +38,11 @@ def _settings() -> dict:
     from .config import config_source_errors, load_config
     if config_source_errors(include_tenant=True):
         raise ValueError("Notification policy is unavailable.")
+    from .personal_notifications import personal_alerts_on
+
     value = load_config().get("notifications") or {}
-    if not all(value.get(key) is True for key in ("personal_alerts", "personal_background", "personal_external")):
+    if not (personal_alerts_on(value)
+            and all(value.get(key) is True for key in ("personal_background", "personal_external"))):
         raise ValueError("Personal private-channel delivery is disabled.")
     return value
 

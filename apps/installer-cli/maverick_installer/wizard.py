@@ -6666,7 +6666,7 @@ def pick_persona() -> dict[str, str]:
 def pick_notifications() -> tuple[dict[str, Any], list[str]]:
     """Private task alerts and shared organization delivery setup."""
     personal_alerts = _q_confirm(
-        "Show signed-in people private alerts when their tasks finish or need attention? They can choose quiet hours and daily digests in Your notifications. Requires personal preferences.",
+        "Show signed-in people in-app alerts (the bell) when their tasks finish, need an answer, or wait for their approval? On by default; email, Slack and Teams stay off until you set them up. They can choose quiet hours and daily digests in Your notifications. Requires personal preferences.",
         default=True,
     )
     personal_critical_bypass = personal_alerts and _q_confirm(
