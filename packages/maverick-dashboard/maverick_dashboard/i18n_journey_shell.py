@@ -236,4 +236,5 @@ ROWS = [
     ("Library", "Bibliothèque", "Bibliothek", "ライブラリ", "资料库"),
     ("Most used", "Les plus utilisés", "Häufig genutzt", "よく使う項目", "常用"),
     ("Help", "Aide", "Hilfe", "ヘルプ", "帮助"),
+    ("{page}, {count} waiting", "{page}, {count} en attente", "{page}, {count} offen", "{page}、{count}件が保留中", "{page}，{count} 项待处理"),
 ]

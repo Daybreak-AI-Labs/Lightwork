@@ -3,6 +3,11 @@
     nav_groups comes from the _nav_context context processor: the page
     registry (maverick_dashboard.ui_visibility.PAGES) filtered to what the
     caller's RBAC role may see. Auth off -> the full nav, as before. -#}
+{# One sidebar link. Approvals carries an empty count badge that the sidebar
+   script fills after the page has loaded (hidden while nothing waits). #}
+{% macro _nav_link(link, active, current) -%}
+<a href="{{ link.href }}"{% if active %} class="active"{% if current %} aria-current="page"{% endif %}{% endif %}{% if link.href == '/approvals' %} data-approvals-badge{% endif %}><svg class="nav-ic" aria-hidden="true"><use href="#i-{{ link.icon or 'dot' }}"></use></svg><span class="nav-label">{{ ui(link.label) }}</span>{% if link.href == '/approvals' %}<span class="nav-count" hidden></span>{% endif %}</a>
+{%- endmacro %}
 {# The five most-used pages sit above the groups so a first visit never
    lands on closed headers alone. Only pages the caller may see appear. #}
 {% set _quick_hrefs = ['/chat', '/goals', '/approvals', '/deliverables', '/settings'] %}
@@ -29,7 +34,7 @@
 <ul class="navquick-list" aria-label="{{ ut('Most used') }}" lang="{{ ul('Most used') }}">
   {% for _link in _quick.links %}
     {% set _active = (_active_nav.href == _link.href) %}
-    <li><a href="{{ _link.href }}"{% if _active %} class="active" aria-current="page"{% endif %}><svg class="nav-ic" aria-hidden="true"><use href="#i-{{ _link.icon or 'dot' }}"></use></svg><span class="nav-label">{{ ui(_link.label) }}</span></a></li>
+    <li>{{ _nav_link(_link, _active, true) }}</li>
   {% endfor %}
 </ul>
 {% endif %}
@@ -44,7 +49,7 @@
       {% for _link in _group.links %}
         {% set _active = (_active_nav.href == _link.href) %}
         {# A page that also sits in the Most used list carries its aria-current there. #}
-        <li><a href="{{ _link.href }}"{% if _active %} class="active"{% if _link.href not in _quick_hrefs %} aria-current="page"{% endif %}{% endif %}><svg class="nav-ic" aria-hidden="true"><use href="#i-{{ _link.icon or 'dot' }}"></use></svg><span class="nav-label">{{ ui(_link.label) }}</span></a></li>
+        <li>{{ _nav_link(_link, _active, _link.href not in _quick_hrefs) }}</li>
       {% endfor %}
     </ul>
   </div>

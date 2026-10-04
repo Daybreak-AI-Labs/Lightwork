@@ -944,6 +944,37 @@
       });
     })();
 
+    // Approvals badge: how many decisions wait for this person. The sidebar
+    // renders the link only for people who can decide; the count is fetched
+    // after the page has rendered, so it never slows a page, and stays hidden
+    // at zero or when it cannot be read.
+    (function() {
+      const links = Array.from(document.querySelectorAll('a[data-approvals-badge]'));
+      if (!links.length || typeof fetch !== 'function') return;
+      function show(count) {
+        links.forEach(function(link) {
+          const badge = link.querySelector('.nav-count');
+          const label = link.querySelector('.nav-label');
+          if (!badge || !label) return;
+          badge.hidden = !(count > 0);
+          badge.textContent = count > 99 ? '99+' : String(count);
+          badge.setAttribute('aria-hidden', 'true');
+          if (count > 0) {
+            const i18n = window.LightworkI18n, values = {page: label.textContent.trim(), count: count};
+            link.setAttribute('aria-label', i18n ? i18n.text('{page}, {count} waiting', values)
+              : values.page + ', ' + count + ' waiting');
+          } else {
+            link.removeAttribute('aria-label');
+          }
+        });
+      }
+      fetch('/api/v1/approvals/waiting-count', {credentials: 'same-origin', cache: 'no-store',
+        headers: {Accept: 'application/json'}})
+        .then(function(response) { return response.ok ? response.json() : null; })
+        .then(function(data) { if (data && Number.isSafeInteger(data.waiting) && data.waiting >= 0) show(data.waiting); })
+        .catch(function() {});
+    })();
+
     // Feature-gated workbenches must not advertise executable controls while
     // their server capability is disabled. Templates expose only the final
     // boolean; no client value can enable a server-side feature.
