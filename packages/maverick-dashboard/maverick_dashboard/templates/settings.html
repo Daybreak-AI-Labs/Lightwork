@@ -31,6 +31,11 @@
     <a href="/audit?kind=setting_changed">Activity log</a>. This metadata view does not display the values before and after a change. A prepared entry alone does not confirm a save.
     If a save reports that its completion record is unavailable, refresh Settings and Activity before retrying.</p>
 
+  {# The group shown first is decided here, not by the page script, so the
+     page never paints all six groups and then hides five of them. #}
+  {% set settings_tabs = [('general', 'General'), ('models', 'Models'), ('integrations', 'Connections'),
+                          ('controls', 'Features'), ('access', 'Access'), ('maintenance', 'Maintenance')] %}
+  {% set settings_group = saved_section if saved_section in settings_tabs | map('first') | list else 'general' %}
   <section class="settings-index" aria-labelledby="settings-index-title"
            data-initial-group="{{ saved_section or 'general' }}">
     <div>
@@ -42,12 +47,9 @@
              placeholder="Provider, budget, visibility…" aria-controls="settings-sections">
     </label>
     <div class="mv-tabs settings-tabs" role="tablist" aria-label="Settings sections">
-      <button class="mv-tab" type="button" role="tab" data-settings-tab="general">General</button>
-      <button class="mv-tab" type="button" role="tab" data-settings-tab="models">Models</button>
-      <button class="mv-tab" type="button" role="tab" data-settings-tab="integrations">Connections</button>
-      <button class="mv-tab" type="button" role="tab" data-settings-tab="controls">Features</button>
-      <button class="mv-tab" type="button" role="tab" data-settings-tab="access">Access</button>
-      <button class="mv-tab" type="button" role="tab" data-settings-tab="maintenance">Maintenance</button>
+      {% for key, label in settings_tabs %}
+      <button class="mv-tab" type="button" role="tab" data-settings-tab="{{ key }}" aria-selected="{{ 'true' if key == settings_group else 'false' }}" tabindex="{{ '0' if key == settings_group else '-1' }}">{{ label }}</button>
+      {% endfor %}
     </div>
     <p class="muted" id="settings-filter-status" role="status" aria-live="polite"></p>
     <p class="settings-all-link">
@@ -56,7 +58,36 @@
     </p>
   </section>
 
-  <div id="settings-sections">
+  <style>
+    /* Before the page script takes over the tabs, the sections element names
+       the one group that shows; every other group's headings and panels stay
+       hidden from the first paint. */
+    {% for key, _label in settings_tabs %}#settings-sections[data-settings-active="{{ key }}"] [data-settings-group]:not([data-settings-group="{{ key }}"]){{ ',' if not loop.last }}
+    {% endfor %}{ display: none; }
+  </style>
+  <div id="settings-sections" data-settings-active="{{ settings_group }}">
+  <script>
+  // A link to /settings#settings-<group> (or an older section name) shows that
+  // group, and selects its tab, from the first paint: the server cannot see
+  // the address fragment. The page script below then takes over the tabs.
+  window.mvSettingsGroupFor = function (hash) {
+    var aliases = {appearance: 'general', budget: 'general', providers: 'integrations', webhooks: 'integrations', capabilities: 'controls', features: 'controls', visibility: 'access', voice: 'models', discovery: 'models', connections: 'integrations', system: 'maintenance'};
+    var name = String(hash || '').replace(/^#settings-?/, '').replace(/^#/, '');
+    if (Object.prototype.hasOwnProperty.call(aliases, name)) name = aliases[name];
+    return ['general', 'models', 'integrations', 'controls', 'access', 'maintenance'].indexOf(name) === -1 ? '' : name;
+  };
+  (function () {
+    var wanted = window.mvSettingsGroupFor(window.location.hash);
+    var sections = document.getElementById('settings-sections');
+    if (!wanted || !sections || sections.dataset.settingsActive === wanted) return;
+    sections.dataset.settingsActive = wanted;
+    Array.prototype.forEach.call(document.querySelectorAll('[data-settings-tab]'), function (tab) {
+      var selected = tab.dataset.settingsTab === wanted;
+      tab.setAttribute('aria-selected', selected ? 'true' : 'false');
+      tab.tabIndex = selected ? 0 : -1;
+    });
+  })();
+  </script>
   <div class="section-head" data-settings-group="general" id="settings-general"><h2>Appearance</h2></div>
   <div class="panel" data-settings-group="general">
     <p class="muted settings-lead">Theme, density and font follow your signed-in account. Use Display preferences for an explicit device-only override. Applies without leaving your draft.</p>
@@ -859,11 +890,12 @@
     var search = document.getElementById('settings-search');
     var filterStatus = document.getElementById('settings-filter-status');
     var groups = ['general', 'models', 'integrations', 'controls', 'access', 'maintenance'];
-    var aliases = {appearance: 'general', budget: 'general', providers: 'integrations', webhooks: 'integrations', capabilities: 'controls', features: 'controls', visibility: 'access', voice: 'models', discovery: 'models', connections: 'integrations', system: 'maintenance'};
+    var sectionsRoot = document.getElementById('settings-sections');
+    // The address-to-group rule is defined once, before the sections.
+    var groupFor = window.mvSettingsGroupFor || function () { return ''; };
     var active = (index && index.dataset.initialGroup) || 'general';
-    var hash = String(window.location.hash || '').replace(/^#settings-?/, '').replace(/^#/, '');
-    if (aliases[hash]) hash = aliases[hash];
-    if (groups.indexOf(hash) !== -1) active = hash;
+    var hashed = groupFor(window.location.hash);
+    if (hashed) active = hashed;
 
     function sections() {
       return grouped.filter(function (node) { return node.classList.contains('section-head'); }).map(function (head) {
@@ -924,6 +956,9 @@
       var aiRow = document.querySelector('[data-ai-provider-focus]');
       requestedFocus = aiRow ? aiRow.id : 'settings-integrations';
     }
+    // Hand what the server (and the address) painted over to the tabs: the
+    // hidden attributes selectGroup sets show exactly the same group.
+    if (sectionsRoot) sectionsRoot.removeAttribute('data-settings-active');
     selectGroup(active, false);
     if (requestedFocus) {
       var focusTarget = document.getElementById(requestedFocus);
@@ -945,9 +980,8 @@
     // A link to /settings#settings-<group> from another page, or from this
     // page while it is already open, lands on that section.
     window.addEventListener('hashchange', function () {
-      var next = String(window.location.hash || '').replace(/^#settings-?/, '').replace(/^#/, '');
-      if (aliases[next]) next = aliases[next];
-      if (groups.indexOf(next) !== -1 && next !== active) selectGroup(next, true);
+      var next = groupFor(window.location.hash);
+      if (next && next !== active) selectGroup(next, true);
     });
 
     var forms = Array.prototype.slice.call(document.querySelectorAll('form[action^="/settings"]'));
