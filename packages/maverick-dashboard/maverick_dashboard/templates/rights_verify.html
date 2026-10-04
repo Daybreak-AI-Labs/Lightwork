@@ -1,5 +1,7 @@
 {% extends "public_base.html" %}
 {% block title %}{{ rf.verify_title }}{% endblock %}
+{% block public_label %}{{ rf.page_title }}{% endblock %}
+{% block public_footer %}{{ rf.page_title }}{% endblock %}
 {% block content %}
 <section class="panel" style="max-width: 40rem; margin: 0 auto;">
   <h1>{{ rf.verify_title }}</h1>

@@ -1,5 +1,7 @@
 {% extends "public_base.html" %}
 {% block title %}{{ rf.page_title }} · {{ form.property.organisation }}{% endblock %}
+{% block public_label %}{{ rf.page_title }}{% endblock %}
+{% block public_footer %}{{ rf.page_title }}{% endblock %}
 {% block content %}
 <style{% if csp_style_nonce is defined %} nonce="{{ csp_style_nonce }}"{% endif %}>
   .rf-wrap { max-width: 44rem; margin: 0 auto; }

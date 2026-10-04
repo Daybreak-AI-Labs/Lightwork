@@ -72,6 +72,7 @@ from .api import router as api_router
 from .api_schemas import GOAL_DESCRIPTION_MAX_LENGTH, GOAL_TITLE_MAX_LENGTH
 from .auth import (
     BOARD_SCOPE_DETAIL,
+    PUBLIC_STATIC_PATHS,
     SELF_AUTH_WEBHOOK_PATHS,
     AutomationAuthorizationError,
     assert_goal_access,
@@ -1969,21 +1970,11 @@ _AUTH_EXEMPT = {
     "/auth/error",
     "/auth/local-owner",
     "/auth/local-login",
-    # The brand logo is a public, non-sensitive image; the public share view
-    # (itself auth-exempt) references it, so an unauthenticated recipient must
-    # be able to load it.
-    "/static/daybreak-logo.jpg",
-    # The brand mark and the self-hosted fonts are public, non-sensitive
-    # assets the login and share pages need before any session exists.
-    "/static/daybreak-mark.png",
-    "/static/fonts/manrope-200.woff2", "/static/fonts/manrope-300.woff2",
-    "/static/fonts/manrope-400.woff2", "/static/fonts/manrope-500.woff2",
-    "/static/fonts/manrope-600.woff2", "/static/fonts/manrope-700.woff2",
-    "/static/fonts/jbm-400.woff2", "/static/fonts/jbm-500.woff2",
-    # The public share page formats its answer with this renderer, and its
-    # recipient has no dashboard sign-in. The file is a public, dependency-free
-    # script that builds DOM from text and carries no data.
-    "/static/lightwork-markdown.js",
+    # The stylesheet, brand images, fonts and share-page renderer the
+    # signed-out pages (sign-in, invitation, public rights form, shared
+    # result) load before any session exists. One reviewed set of exact files,
+    # shared with the global dependency (auth.PUBLIC_STATIC_PATHS).
+    *PUBLIC_STATIC_PATHS,
     # The LLM gateway authenticates every call with its OWN bearer inside
     # maverick.llm_gateway (same rationale as /a2a/v1): callers are foreign
     # agents that hold the gateway credential, never the dashboard bearer.
@@ -2725,6 +2716,14 @@ def _wants_html(request: Request) -> bool:
 @app.exception_handler(StarletteHTTPException)
 async def http_exception_handler(request: Request, exc: StarletteHTTPException):
     """Branded, actionable HTML for browser failures; JSON for API callers."""
+    if (exc.status_code == 404 and _wants_html(request)
+            and request.url.path.startswith("/share/")):
+        # A shared-result recipient has no account: an unknown, expired or
+        # revoked link gets a plain public page (no detail), never the app shell.
+        return templates.TemplateResponse(
+            request, "share_unavailable.html", {}, status_code=404,
+            headers={"Cache-Control": "no-store", "X-Robots-Tag": "noindex"},
+        )
     if exc.status_code == 404 and _wants_html(request):
         return templates.TemplateResponse(
             request,
