@@ -1,0 +1,26 @@
+{#- Draft recovery around a chat composer (Chat and a task's reply box).
+    The wrapper, a placeholder for the recovery panel and the note are part of
+    the page, so starting recovery never moves the docked composer or takes
+    focus from it: lightwork-chat-drafts.js swaps the placeholder for the live
+    panel, which starts in exactly this state, and only toggles which note is
+    shown. Both notes are rendered so the longer one keeps its space. Called
+    with `enabled` only where recovery copies can be saved (the page then has
+    the lightwork-draft-context meta and loads the recovery scripts). -#}
+{% macro composer_recovery(enabled) -%}
+{%- if enabled -%}
+<div class="draft-host" data-draft-host>
+  <section class="draft-recovery" data-draft-panel inert>
+    <p>Checking for a recovery copy…</p>
+    <div class="draft-recovery__actions"></div>
+    <details><summary>Manage recovery storage</summary></details>
+  </section>
+  {{ caller() }}
+  <p class="muted draft-note" data-draft-note>
+    <span data-draft-note-for="kept">{{ ui('Recovery copies keep unsent text. Attachments must be selected again after reload; files are not kept in a recovery copy.') }}</span>
+    <span data-draft-note-for="restored" aria-hidden="true">{{ ui('Text restored for review. Select any attachments again before sending.') }}</span>
+  </p>
+</div>
+{%- else -%}
+{{ caller() }}
+{%- endif -%}
+{%- endmacro %}
