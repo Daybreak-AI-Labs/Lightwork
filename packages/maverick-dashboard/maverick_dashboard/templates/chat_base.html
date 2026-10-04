@@ -194,6 +194,7 @@
   </style>
   {% block head_extra %}{% endblock %}
   <link rel="icon" href="{{ asset('daybreak-logo.jpg') }}" />
+<link rel="preload" as="script" href="{{ asset('lightwork-ui.js') }}">
 {% include "_journey_i18n.html" %}
 </head>
 <body class="chat-shell theme-{{ theme or 'dark' }} font-{{ font or 'default' }} density-{{ density or 'comfortable' }}" data-global-admin="{{ '1' if viewer_global_admin else '0' }}">
@@ -455,6 +456,7 @@
       });
     })();
   </script>
+  {% include "_journey_i18n_scripts.html" %}
   <link rel="stylesheet" href="{{ asset('lightwork-draft-recovery.css') }}">
   <script src="{{ asset('lightwork-draft-recovery.js') }}" defer></script>
   <script src="{{ asset('lightwork-chat-drafts.js') }}" defer></script>

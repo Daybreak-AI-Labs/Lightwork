@@ -368,8 +368,10 @@ def build(
     })
     done_count = sum(step["done"] for step in steps)
     next_step = next((step for step in steps if not step["done"]), None)
-    runtime_preflight = _preflight_state("run")
-    assurance_preflight = _preflight_state("cockpit")
+    # Both reports describe this request's provider inventory. Reuse its
+    # snapshot instead of resolving every provider and model route twice more.
+    runtime_preflight = _preflight_state("run", readiness=readiness)
+    assurance_preflight = _preflight_state("cockpit", readiness=readiness)
     from maverick.config import config_path
 
     return {

@@ -1,6 +1,8 @@
 """A signed-in owner sees finished work through the same alert source as the inbox."""
 from __future__ import annotations
 
+import re
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -36,6 +38,25 @@ def client_and_actor(monkeypatch, tmp_path):
         dashboard.app.dependency_overrides.clear()
         dashboard._world_cache.clear()
         config.reset_config_cache()
+
+
+@pytest.mark.parametrize("path", ["/goals", "/chat"])
+def test_both_shells_serve_the_advertised_notification_badge(client_and_actor, path):
+    client, _actor, _world, _home = client_and_actor
+    page = client.get(path)
+    assert page.status_code == 200
+    scripts = re.findall(
+        r'src="(/static/lightwork-notification-badge\.js(?:\?[^"]*)?)"', page.text,
+    )
+    assert len(scripts) == 1
+    assert "?v=" in scripts[0]
+
+    response = client.get(scripts[0])
+    assert response.status_code == 200
+    assert response.headers["content-type"].split(";", 1)[0] == "application/javascript"
+    source = (Path(__file__).resolve().parents[1]
+              / "maverick_dashboard/static/lightwork-notification-badge.js")
+    assert response.content == source.read_bytes()
 
 
 def test_finished_task_bell_to_owner_inbox_and_seen_state(client_and_actor):

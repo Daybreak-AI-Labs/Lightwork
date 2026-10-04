@@ -77,7 +77,9 @@ test('Chrome reuses the public catalog across shells and conditional reads retur
     await page.goto('/preferences');
     await expect(page.locator('[data-pref="interface_language"]')).toBeVisible();
     const timing=await page.evaluate(asset=>{
-      const item=performance.getEntriesByName(new URL(asset,location.origin).href).find(entry=>entry.initiatorType==='script');
+      // A preload starts the same script request early; it is reported as a
+      // link initiator rather than a script initiator in Resource Timing.
+      const item=performance.getEntriesByName(new URL(asset,location.origin).href).find(entry=>['script','link'].includes(entry.initiatorType));
       return item&&{transferSize:item.transferSize,encodedBodySize:item.encodedBodySize,decodedBodySize:item.decodedBodySize};
     },path);
     expect(timing).toBeTruthy();expect(timing.decodedBodySize).toBeGreaterThan(0);expect(timing.transferSize).toBe(0);
@@ -107,4 +109,76 @@ test('an unavailable catalog keeps dynamic product fallback marked as English',a
   await expect(page.locator('.composer details > summary [data-product-copy]')).toHaveText(labels.fr);
   await expect(page.locator('[data-budget-summary] a')).toHaveAttribute('lang','en');
   expect(await page.evaluate(()=>window.LightworkI18n.text('Add details'))).toBe(labels.en);
+});
+
+for (const destination of ['/chat', '/preferences']) {
+  for (const asset of ['catalog', 'runtime']) {
+    for (const width of [1280, 390]) {
+    test(`slow ${asset} does not hide ${destination} navigation and server-rendered content at ${width}px`, async ({page, context, baseURL}, info) => {
+      await localOnly(context, baseURL); await syntheticBudget(page);
+      await context.setExtraHTTPHeaders({Origin: baseURL, 'Accept-Language': 'fr'});
+      await chooseInterface(page, 'fr');
+      await page.setViewportSize({width, height: 950});
+      const errors = []; page.on('pageerror', error => errors.push(error.message));
+      let release, requested;
+      const held = new Promise(resolve => {release = resolve;});
+      const arrived = new Promise(resolve => {requested = resolve;});
+      const pattern = asset === 'catalog' ? '**/static/lightwork-i18n-catalog/**' : '**/static/lightwork-i18n.js*';
+      await page.route(pattern, async route => {requested(); await held; await route.continue();});
+      try {
+        await page.goto(destination, {waitUntil: 'commit'});
+        await arrived;
+        const started = Date.now();
+        // The response is deliberately held, not merely failed or served from
+        // cache. Primary content and native navigation must remain available.
+        await expect(page.locator('main')).toBeVisible({timeout: 1500});
+        const sidebar = page.locator(destination === '/chat' ? '#cs-side' : '#sidebar');
+        if (width < 860) {
+          // Drawer initialization marks its hidden contents inaccessible. Wait
+          // for that actual readiness state, while localization stays held.
+          await expect(sidebar).toHaveAttribute('aria-hidden', 'true');
+          await page.locator(destination === '/chat' ? '#cs-menu' : '#nav-toggle').click();
+        }
+        await expect(sidebar).toBeVisible({timeout: 1500});
+        await expect(page.locator(destination === '/chat'
+          ? '#cs-filter-scope a[href="/goals"]' : '#sidebar .navquick-list a[href="/goals"]')).toBeVisible();
+        await info.attach('visible-while-localization-pending', {
+          body: JSON.stringify({destination, asset, width, milliseconds: Date.now() - started}), contentType: 'application/json',
+        });
+        if (destination === '/preferences') {
+          // Emergency controls still verify their live state while the language
+          // download is stalled; temporary English copy declares its language.
+          await expect(page.locator('#halt-pill')).toHaveAttribute('aria-disabled', 'false');
+          await expect(page.locator('#halt-label')).toHaveAttribute('lang', 'en');
+        }
+      } finally { release(); }
+      await page.waitForLoadState('domcontentloaded');
+      if (width < 860) await page.keyboard.press('Escape');
+      expect(await page.evaluate(() => window.LightworkI18n.text('Add details'))).toBe(labels.fr);
+      if (destination === '/chat') {
+        await page.locator('[data-budget-launch] > summary').click();
+        await expect(page.locator('[data-budget-summary] a')).toHaveAttribute('lang', 'fr');
+      } else {
+        await expect(page.locator('[data-pref="interface_language"]')).toBeVisible();
+        await expect(page.locator('#halt-label')).toHaveAttribute('lang', 'fr');
+      }
+      expect(errors).toEqual([]);
+    });
+    }
+  }
+}
+
+test('workflow initialization still translates interactive examples after footer localization', async ({page, context, baseURL}) => {
+  await localOnly(context, baseURL); await syntheticBudget(page);
+  await context.setExtraHTTPHeaders({Origin: baseURL, 'Accept-Language': 'fr'});
+  await chooseInterface(page, 'fr');
+  const errors = []; page.on('pageerror', error => errors.push(error.message));
+  await page.goto('/workflow-builder');
+  const example = page.locator('#wf-examples button').first();
+  await expect(example).toBeVisible();
+  await expect(example.locator('.chip__lead')).toHaveAttribute('lang', 'fr');
+  const value = await example.locator('span').last().textContent();
+  await example.click();
+  await expect(page.locator('#wf-brief')).toHaveValue(value);
+  expect(errors).toEqual([]);
 });

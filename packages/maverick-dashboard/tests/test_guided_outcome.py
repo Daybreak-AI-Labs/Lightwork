@@ -83,7 +83,7 @@ def test_scheduling_without_a_started_task_does_not_complete_the_run_step(monkey
     monkeypatch.setattr(onboarding_state, "_has_user_template", lambda: True)
     monkeypatch.setattr(onboarding_state, "_has_user_agent", lambda: False)
     monkeypatch.setattr(onboarding_state, "_has_automation", lambda: True)
-    monkeypatch.setattr(onboarding_state, "_preflight_state", lambda profile: {"ready":True})
+    monkeypatch.setattr(onboarding_state, "_preflight_state", lambda profile, **kwargs: {"ready":True})
     world = World()
     world.list_goals = lambda **kwargs: []
     result = onboarding_state.build(world)

@@ -535,19 +535,26 @@
       // A server-rendered "Saved." notice after a redirect also announces as a
       // toast, so feedback lands where the person is looking, not above the
       // fold. <div data-mv-toast="Workspace limit saved." ...>.
-      Array.prototype.forEach.call(realDocument ? document.querySelectorAll('[data-mv-toast]') : [], function (el) {
-        var text = el.getAttribute('data-mv-toast');
-        if (text) window.mvToast(text, { error: el.getAttribute('data-mv-toast-error') === 'true' });
-      });
       // A page that reloads right after a change hands its toast to the next load.
       var FLASH = 'lightwork.flash-toast';
       window.mvToastAfterReload = function (message) {
         try { sessionStorage.setItem(FLASH, String(message)); } catch (e) { window.mvToast(message); }
       };
-      try {
-        var flashed = sessionStorage.getItem(FLASH);
-        if (flashed) { sessionStorage.removeItem(FLASH); window.mvToast(flashed); }
-      } catch (e) {}
+      function showInitialToasts() {
+        Array.prototype.forEach.call(realDocument ? document.querySelectorAll('[data-mv-toast]') : [], function (el) {
+          var text = el.getAttribute('data-mv-toast');
+          if (text) window.mvToast(text, { error: el.getAttribute('data-mv-toast-error') === 'true' });
+        });
+        try {
+          var flashed = sessionStorage.getItem(FLASH);
+          if (flashed) { sessionStorage.removeItem(FLASH); window.mvToast(flashed); }
+        } catch (e) {}
+      }
+      // Navigation and submit protection initialize before localization downloads;
+      // initial announcements wait for their language helpers or honest fallback.
+      if (document.readyState === 'loading' && !window.LightworkI18n) {
+        document.addEventListener('DOMContentLoaded', showInitialToasts, {once: true});
+      } else showInitialToasts();
     })();
 
     // Halt indicator + arm/clear via /api/v1/halt.
@@ -622,8 +629,11 @@
           : state === 'clear'
             ? 'Emergency stop'
             : 'Stop status unavailable');
+        // A late catalog translates the current verified state, never an older
+        // pending label. Authority checks and status reads stay immediate.
+        label.dataset.i18n = copy;
         if (window.LightworkI18n) window.LightworkI18n.set(label, copy);
-        else label.textContent = copy;
+        else { label.textContent = copy; label.lang = 'en'; label.dir = 'ltr'; }
         renderBanner(armed && !pending);
         if (canHalt) {
           pill.setAttribute('aria-pressed', known ? (armed ? 'true' : 'false') : 'mixed');

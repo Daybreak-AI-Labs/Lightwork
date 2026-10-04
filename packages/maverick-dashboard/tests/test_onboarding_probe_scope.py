@@ -72,7 +72,7 @@ def test_existing_owned_task_completes_built_step_without_catalog(monkeypatch):
 
     monkeypatch.setattr(onboarding_state, "selected_model_route_state", lambda: {
         "configured": False, "status": "incomplete", "detail": "No model configured"})
-    monkeypatch.setattr(onboarding_state, "_preflight_state", lambda profile: {"ready": False})
+    monkeypatch.setattr(onboarding_state, "_preflight_state", lambda profile, **kwargs: {"ready": False})
     monkeypatch.setattr(onboarding_state, "_has_user_template", _unexpected_catalog)
     monkeypatch.setattr(onboarding_state, "_has_user_agent", _unexpected_catalog)
     world = SimpleNamespace(list_goals=owned_goals)
@@ -90,3 +90,58 @@ def test_existing_owned_task_completes_built_step_without_catalog(monkeypatch):
     assert other["steps"][1]["done"] is False
     assert other["steps"][2]["done"] is False
     assert owners == ["user:alice", "user:bob"]
+
+
+def test_build_reuses_provider_inventory_and_rechecks_next_request(tmp_path, monkeypatch):
+    from maverick import config, operator_preflight
+
+    verdicts = iter(("ready", "not_ready"))
+    inventories = []
+    profiles = []
+
+    def current_readiness():
+        verdict = next(verdicts)
+        inventories.append(verdict)
+        return {
+            "verdict": verdict,
+            "reason": "Connected" if verdict == "ready" else "The connection changed",
+            "next_action": None if verdict == "ready" else {
+                "label": "Open providers", "href": "/providers",
+            },
+        }
+
+    def preflight(profile):
+        profiles.append(profile)
+        return SimpleNamespace(to_dict=lambda: {
+            "ready": True,
+            "checks": [{"id": "provider", "status": "ready"}],
+        })
+
+    monkeypatch.setattr(config, "config_path", lambda: tmp_path / "config.toml")
+    monkeypatch.setattr(operator_preflight, "collect", preflight)
+    monkeypatch.setattr(onboarding_state, "workspace_readiness", current_readiness)
+    monkeypatch.setattr(onboarding_state, "selected_model_route_state", lambda: {"configured": True})
+    monkeypatch.setattr(onboarding_state, "_has_user_template", lambda: False)
+    monkeypatch.setattr(onboarding_state, "_has_user_agent", lambda: False)
+    # Keep this regression focused on inventory reuse and the real provider
+    # verdict overlay, without importing the dashboard just for check labels.
+    monkeypatch.setattr(onboarding_state, "_with_plain_checks", lambda payload: payload)
+    world = SimpleNamespace(list_goals=lambda **kwargs: [])
+    reviewed = {"complete": False, "detail": "No approval", "status": "incomplete"}
+
+    first = onboarding_state.build(world, reviewed_outcome=reviewed)
+    assert inventories == ["ready"]
+    assert first["runtime_ready"] is True
+    assert first["assurance_ready"] is True
+    assert first["steps"][0]["done"] is True
+
+    # A second request must not inherit the previous request's ready badge.
+    second = onboarding_state.build(world, reviewed_outcome=reviewed)
+    assert inventories == ["ready", "not_ready"]
+    assert profiles == ["run", "cockpit", "run", "cockpit"]
+    assert second["runtime_ready"] is False
+    assert second["assurance_ready"] is False
+    assert second["steps"][0]["done"] is False
+    for key in ("runtime_preflight", "assurance_preflight"):
+        assert second[key]["checks"][0]["status"] == "blocked"
+        assert second[key]["checks"][0]["detail"] == "The connection changed"

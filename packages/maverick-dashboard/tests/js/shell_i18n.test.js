@@ -28,7 +28,7 @@ const copy = {
   'No recent titles match. Open task search for older chats or a match in task contents.': 'Aucun titre récent ne correspond. Ouvrez la recherche de tâches pour rechercher d’anciennes discussions ou du contenu de tâche.',
 };
 const tick = () => new Promise(resolve => setImmediate(resolve));
-function page(html='', {language='fr', workspace=false, fetch=async()=>({ok:true,json:async()=>({})})}={}) {
+function page(html='', {language='fr', workspace=false, pendingRuntime=false, flash=null, fetch=async()=>({ok:true,json:async()=>({})})}={}) {
   const dom = new JSDOM(`<!doctype html><html lang="en"><head>${workspace ? '<meta name="lightwork-workspace-tenant" content="owned">' : ''}</head><body>${html}<div id="mv-toasts"></div><div id="mv-toasts-alert"></div><dialog id="mv-confirm"><p id="mv-confirm-msg"></p><button id="mv-confirm-cancel"></button><button id="mv-confirm-ok"></button></dialog></body></html>`, {url:'https://local.test/chat/goal/1',runScripts:'outside-only'});
   const w=dom.window, doc=w.document;
   w.matchMedia=()=>({matches:false,addEventListener(){},removeEventListener(){}});
@@ -37,9 +37,87 @@ function page(html='', {language='fr', workspace=false, fetch=async()=>({ok:true
   w.HTMLDialogElement.prototype.close=function(){this.open=false;};
   const config=doc.createElement('script');config.id='lightwork-i18n-data';config.type='application/json';
   config.textContent=JSON.stringify({language,locale:language==='fr'?'fr-CA':'ar-EG',catalog:language==='fr'?Object.fromEntries(Object.entries(copy).map(([s,text])=>[s,{text,lang:'fr'}])):{}});
-  doc.head.appendChild(config);w.eval(source('lightwork-i18n.js'));w.eval(source('lightwork-ui.js'));
+  doc.head.appendChild(config);
+  if (flash !== null) w.sessionStorage.setItem('lightwork.flash-toast', flash);
+  if (!pendingRuntime) w.eval(source('lightwork-i18n.js'));
+  w.eval(source('lightwork-ui.js'));
   return dom;
 }
+
+test('pending localization verifies halt immediately and later translates only its current state', async()=>{
+  const calls=[];
+  let completeRead;
+  const pendingRead=new Promise(resolve=>{completeRead=resolve;});
+  const dom=page('<a id="halt-pill" data-can-halt="true"><span id="halt-label">Checking from server</span></a>'+
+    '<p data-mv-toast="Saved receipt."></p><form method="post" action="/api/v1/save"><textarea name="draft">Keep this draft</textarea></form>',
+  {workspace:true,pendingRuntime:true,flash:'Retained receipt.',fetch:async(url,options)=>{
+    calls.push({url,options});return pendingRead;
+  }});
+  const w=dom.window,doc=w.document;
+  try {
+    assert.equal(w.LightworkI18n,undefined);
+    assert.equal(calls.length,1);
+    const label=doc.getElementById('halt-label'),pill=doc.getElementById('halt-pill');
+    assert.equal(label.textContent,'Checking stop status\u2026');
+    assert.equal(label.dataset.i18n,'Checking stop status\u2026');
+    assert.equal(label.lang,'en');assert.equal(label.dir,'ltr');
+    assert.equal(pill.getAttribute('aria-disabled'),'true');
+    assert.equal(doc.querySelectorAll('.mv-toast').length,0);
+    assert.equal(w.sessionStorage.getItem('lightwork.flash-toast'),'Retained receipt.');
+    const form=doc.querySelector('form');
+    form.addEventListener('submit',event=>event.preventDefault());
+    form.dispatchEvent(new w.Event('submit',{bubbles:true,cancelable:true}));
+    assert.equal(form.querySelector('[name="_expected_tenant"]').value,'owned');
+    assert.equal(form.querySelector('textarea').value,'Keep this draft');
+    completeRead({ok:true,json:async()=>({active:false,scope:'local'})});
+    await tick();
+    assert.equal(calls.length,1);
+    assert.equal(calls[0].url,'/api/v1/halt');
+    assert.equal(calls[0].options.method,undefined);
+    assert.equal(label.textContent,'Emergency stop');
+    assert.equal(label.dataset.i18n,'Emergency stop');
+    assert.equal(label.lang,'en');assert.equal(label.dir,'ltr');
+    assert.equal(pill.getAttribute('aria-disabled'),'false');
+    w.eval(source('lightwork-i18n.js'));
+    doc.dispatchEvent(new w.Event('DOMContentLoaded'));
+    assert.equal(label.textContent,copy['Emergency stop']);
+    assert.equal(label.lang,'fr');
+    assert.equal(pill.getAttribute('aria-disabled'),'false');
+    assert.deepEqual(Array.from(doc.querySelectorAll('.mv-toast'),node=>node.textContent),['Saved receipt.','Retained receipt.']);
+    assert.equal(w.sessionStorage.getItem('lightwork.flash-toast'),null);
+    doc.dispatchEvent(new w.Event('DOMContentLoaded'));
+    await tick();
+    assert.equal(calls.length,1);
+    assert.equal(doc.querySelectorAll('.mv-toast').length,2);
+  } finally {w.close();}
+});
+
+test('failed localization download never postpones halt verification and keeps fallback English',async()=>{
+  let calls=0;
+  const dom=page('<a id="halt-pill" data-can-halt="true"><span id="halt-label"></span></a>',
+    {pendingRuntime:true,flash:'Retained receipt.',fetch:async()=>{calls++;return {ok:true,json:async()=>({active:false,scope:'local'})};}});
+  const w=dom.window,doc=w.document;
+  try {
+    assert.equal(calls,1);
+    const label=doc.getElementById('halt-label'),pill=doc.getElementById('halt-pill');
+    assert.equal(label.textContent,'Checking stop status\u2026');
+    assert.equal(label.lang,'en');assert.equal(label.dir,'ltr');
+    assert.equal(pill.getAttribute('aria-disabled'),'true');
+    await tick();
+    assert.equal(w.LightworkI18n,undefined);
+    assert.equal(calls,1);
+    assert.equal(label.textContent,'Emergency stop');
+    assert.equal(label.dataset.i18n,'Emergency stop');
+    assert.equal(label.lang,'en');assert.equal(label.dir,'ltr');
+    assert.equal(pill.getAttribute('aria-disabled'),'false');
+    assert.equal(doc.querySelector('.mv-toast').textContent,'Retained receipt.');
+    assert.equal(w.sessionStorage.getItem('lightwork.flash-toast'),null);
+    doc.dispatchEvent(new w.Event('DOMContentLoaded'));
+    await tick();
+    assert.equal(calls,1);
+    assert.equal(doc.querySelectorAll('.mv-toast').length,1);
+  } finally {w.close();}
+});
 
 test('localized workspace warning still blocks mutations and retains the untouched draft', async()=>{
   let calls=0;
