@@ -8,7 +8,11 @@ call ``require_consent(action, risk_level)`` which:
   2. Checks ``MAVERICK_CONSENT_MODE`` env var:
         - "auto-approve" (default) -> grant + log (no friction out of the box)
         - "auto-deny"              -> deny + log
-        - "ask"                    -> ask the user; in non-tty contexts, deny
+        - "ask"                    -> ask a person: prompt at a terminal; for a
+                                      task someone started in Lightwork's chat,
+                                      park it on the Approvals page and deny if
+                                      nobody decides in time; otherwise (a
+                                      headless run) deny at once
         - "dashboard"              -> park in the approvals queue + poll
   3. Logs an audit event for prompt + result.
 
@@ -192,8 +196,9 @@ def _configured_mode() -> str:
 
 
 # Consent modes from the strictest to the loosest. "ask" outranks "dashboard":
-# outside a terminal (every server-run task) it refuses, while "dashboard" can
-# still be approved on the Approvals page.
+# outside a terminal it refuses every headless run at once and withdraws an
+# unanswered request, while "dashboard" parks any run's request on the
+# Approvals page.
 _STRICTNESS = ("auto-deny", "ask", "dashboard", "auto-approve")
 
 # A per-task consent mode (director mode's autonomy level for one task). It is
@@ -253,7 +258,7 @@ def _installation_mode(risk: str | None = None) -> str:
     if configured:
         return configured
     # Enterprise mode flips the default to 'ask' so destructive actions are gated
-    # (and denied in non-interactive contexts) when handling sensitive data.
+    # (a person decides; headless runs are denied) when handling sensitive data.
     try:
         from ..enterprise import enterprise_enabled
         if enterprise_enabled():
@@ -262,8 +267,9 @@ def _installation_mode(risk: str | None = None) -> str:
         pass
     # Secure-by-default: gate HIGH/CRITICAL-risk actions (an autonomous run can't
     # take a destructive action without an explicit decision -> 'ask', which
-    # denies in a non-interactive context). Low/medium stay frictionless so
-    # normal goals are unaffected. An explicit MAVERICK_CONSENT_MODE opts out.
+    # asks the person behind a chat task on the Approvals page and denies a
+    # headless run). Low/medium stay frictionless so normal goals are
+    # unaffected. An explicit MAVERICK_CONSENT_MODE opts out.
     if str(risk or "").strip().lower() in ("high", "critical"):
         try:
             from ..security_defaults import secure_by_default
