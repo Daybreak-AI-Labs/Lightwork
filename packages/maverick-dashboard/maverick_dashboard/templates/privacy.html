@@ -76,7 +76,8 @@
       <span class="bd-stamp" id="bd-stamp" role="status" aria-live="off">loading…</span></span>
   </div>
 
-  <div class="bd-kpis" id="bd-kpis"></div>
+  {% from "_board_kpis.html" import kpi_row %}
+  {{ kpi_row(['On the record', 'Open', 'Approved', 'Due for re-review']) }}
 
   <div class="viz-grid">
     <div class="panel viz-card viz-card--wide">

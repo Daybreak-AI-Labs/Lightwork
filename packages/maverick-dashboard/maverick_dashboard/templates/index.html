@@ -65,7 +65,8 @@
       </div>
     </div>
 
-    <div class="bd-kpis" id="bd-kpis"></div>
+    {% from "_board_kpis.html" import kpi_row %}
+    {{ kpi_row(['Total goals', 'Active now', 'Delivered', 'Blocked']) }}
 
     <div class="viz-grid">
       <div class="panel viz-card viz-card--wide">
