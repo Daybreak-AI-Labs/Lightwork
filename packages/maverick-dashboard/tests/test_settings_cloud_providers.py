@@ -142,7 +142,7 @@ def test_live_cloud_probe_records_only_status(monkeypatch):
 
     FakeAzure._sync.chat = FakeAzure._sync
     route = type("Route", (), {
-        "api_key": "secret", "base_url": "https://sample.openai.azure.com",
+        "api_key": "secret", "base_url": "https://sample.openai.azure.com",  # pragma: allowlist secret
         "headers_dict": lambda self: None, "environment_dict": lambda self: {},
     })()
     monkeypatch.setattr(LLM, "_provider_client_config", lambda self, name: route)

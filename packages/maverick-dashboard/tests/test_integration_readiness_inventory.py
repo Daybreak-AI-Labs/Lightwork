@@ -146,7 +146,7 @@ def test_provider_probe_truth_for_loopback_runtime_and_unsupported(monkeypatch):
     assert integration_readiness.probe_provider("ollama", {})["verified"] is True
     with pytest.raises(_ssrf.BlockedHost):
         _ssrf.resolve_pinned_ip("127.0.0.1")
-    for invalid in ("file:///tmp/model", "http://user:pass@127.0.0.1/v1", "http://[invalid"):
+    for invalid in ("file:///tmp/model", "http://user:pass@127.0.0.1/v1", "http://[invalid"):  # pragma: allowlist secret
         rejected = integration_readiness.probe_provider("vllm", {"base_url": invalid})
         assert rejected["verified"] is False
         assert "address must be an HTTP or HTTPS URL" in rejected["detail"]
@@ -154,12 +154,12 @@ def test_provider_probe_truth_for_loopback_runtime_and_unsupported(monkeypatch):
 
     # Hosted providers still use the pinned public-only fetch policy.
     hosted = integration_readiness.probe_provider(
-        "openai", {"api_key": "test-key", "base_url": "http://10.0.0.7/v1"}
+        "openai", {"api_key": "test-key", "base_url": "http://10.0.0.7/v1"}  # pragma: allowlist secret
     )
     assert hosted["verified"] is False
     assert hosted["evidence"]["blocked_by_egress_policy"] is True
     assert len(requests) == 5
-    settings_store.set_provider("openai", api_key="test-key", base_url="http://10.0.0.7/v1")
+    settings_store.set_provider("openai", api_key="test-key", base_url="http://10.0.0.7/v1")  # pragma: allowlist secret
     monkeypatch.setattr(providers, "missing_sdks", lambda _specs: [])
     integration_readiness.record(
         "provider", "openai", config.get_provider_config("openai"),

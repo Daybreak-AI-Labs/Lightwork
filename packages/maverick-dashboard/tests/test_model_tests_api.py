@@ -111,7 +111,7 @@ def test_copilot_provider_status_uses_settings_truth_without_exposing_credential
         "summary": "One AI service needs a test",
         "providers": [{"name": "openai", "label": "OpenAI", "status_label": "Key saved, not tested yet",
                        "routed": True, "configured": True, "reason": "Test the connection.",
-                       "api_key": "must-never-leak"}],
+                       "api_key": "must-never-leak"}],  # pragma: allowlist secret
     })
     adapter = next(item for item in copilot.entries() if item.id == "models.provider_status")
     assert "/providers" in adapter.pages

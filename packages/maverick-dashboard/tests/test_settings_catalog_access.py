@@ -460,7 +460,7 @@ def test_browser_sign_in_check_rejects_missing_or_wrong_return_address(monkeypat
     values = {
         "auth.oidc.issuer": "https://login.example.com/realm",
         "auth.oidc.client_id": "lightwork",
-        "auth.oidc.client_secret": "client-secret",
+        "auth.oidc.client_secret": "client-secret",  # pragma: allowlist secret
         "auth.oidc.audience": "lightwork",
         "auth.oidc.session_secret": _SECRET,
         "auth.oidc.redirect_uri": "https://lightwork.example.com/auth/callback",
@@ -687,7 +687,7 @@ def test_disabled_company_sign_in_details_keep_the_owner_passphrase_available(mo
 
 
 def test_partial_saml_save_cannot_strand_local_owner_after_sign_out(audit_rows):
-    password = "a long local owner fixture phrase"
+    password = "a long local owner fixture phrase"  # pragma: allowlist secret
     with TestClient(app, base_url="http://127.0.0.1:8765", client=("127.0.0.1", 53210),
                     headers={"Origin": "http://127.0.0.1:8765"},
                     follow_redirects=False) as owner:

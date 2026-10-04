@@ -68,7 +68,7 @@ def _provider_changed_fields(old: dict, new: dict, name: str) -> list[str]:
 
     before, after = provider(old), provider(new)
     labels = {
-        "api_key": "access key", "base_url": "service address",
+        "api_key": "access key", "base_url": "service address",  # pragma: allowlist secret
         "auth_mode": "sign-in method", "deployment": "deployment",
         "api_version": "service version", "endpoint": "endpoint",
         "region": "region", "model_id": "model",

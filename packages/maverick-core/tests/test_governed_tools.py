@@ -809,15 +809,15 @@ class TestEnterpriseBoundary:
                 "role": "viewer",
                 "credentials": {
                     "username": "hidden-user",
-                    "nested": [{"apiKey": "hidden-api-key", "token": "hidden-token"}],
+                    "nested": [{"apiKey": "hidden-api-key", "token": "hidden-token"}],  # pragma: allowlist secret
                 },
                 "access_key": "hidden-access-key",
-                "private_key": "hidden-private-key",
-                "client_secret": "hidden-client-secret",
-                "client_key": "hidden-client-key",
+                "private_key": "hidden-private-key",  # pragma: allowlist secret
+                "client_secret": "hidden-client-secret",  # pragma: allowlist secret
+                "client_key": "hidden-client-key",  # pragma: allowlist secret
                 "connectionString": "hidden-connection-string",
                 "dsn": "hidden-dsn",
-                "password": "hidden-password",
+                "password": "hidden-password",  # pragma: allowlist secret
                 "certificate": "hidden-certificate",
             },
             "headers": {

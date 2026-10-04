@@ -382,7 +382,7 @@ class TestBuildEmbedderFailLoud:
         monkeypatch.setenv("VOYAGE_API_KEY", "voyage-credential")
         e = build_embedder({"embedder": "hosted", "dim": 8})
         assert isinstance(e, HostedEmbedder)
-        assert e.api_key == "voyage-credential"
+        assert e.api_key == "voyage-credential"  # pragma: allowlist secret
 
     def test_unknown_provider_raises(self, monkeypatch):
         from maverick_knowledge.embed import build_embedder

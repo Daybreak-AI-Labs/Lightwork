@@ -33,7 +33,7 @@ def test_embedding_key_never_reaches_qdrant(monkeypatch, store_key):
     monkeypatch.setattr(config, "load_config", lambda: {
         "knowledge": {
             "enable": True, "store": "qdrant", "url": "https://vectors.example.test",
-            "api_key": "embedding-credential", "store_api_key": store_key,
+            "api_key": "embedding-credential", "store_api_key": store_key,  # pragma: allowlist secret
         },
     })
     calls = []
@@ -42,5 +42,5 @@ def test_embedding_key_never_reaches_qdrant(monkeypatch, store_key):
     selected = config.get_knowledge()
     store.build_store(selected)
 
-    assert selected["api_key"] == "embedding-credential"
+    assert selected["api_key"] == "embedding-credential"  # pragma: allowlist secret
     assert calls[0]["api_key"] == (store_key or None)
