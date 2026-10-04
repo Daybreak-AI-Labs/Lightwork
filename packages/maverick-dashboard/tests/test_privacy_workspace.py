@@ -107,6 +107,50 @@ def test_collected_access_export_is_not_presented_as_delivered():
     assert "It does not confirm delivery or deletion" in report.text
 
 
+def test_collected_export_download_is_verified_audited_and_unavailable_after_close(monkeypatch):
+    from maverick import audit, privacy_ops
+
+    request = privacy_ops.open_dsar("person@example.test", "access", channel="email")
+    privacy_ops.fulfill_dsar(request["id"])
+    events = []
+    monkeypatch.setattr(audit, "audit_event", lambda kind, **fields: events.append((kind, fields)) or True)
+    detail = client.get(f"/privacy/dsar/{request['id']}")
+    assert 'id="dsar-download"' in detail.text
+
+    url = f"/api/v1/privacy/dsar/{request['id']}/export"
+    downloaded = client.post(url)
+    assert downloaded.status_code == 200
+    assert downloaded.headers["cache-control"] == "private, no-store"
+    assert downloaded.headers["content-disposition"].endswith(f'{request["id"]}-data.json"')
+    assert downloaded.json()["subject"]["user_id"] == "person@example.test"
+    assert "_lightwork_export" not in downloaded.json()
+    assert len(events) == 1 and events[0][1]["action"] == "export_access_authorized"
+    assert events[0][1]["record_id"] == request["id"]
+    assert "person@example.test" not in str(events)
+
+    monkeypatch.setattr(audit, "audit_event", lambda *_args, **_kwargs: False)
+    refused = client.post(url)
+    assert refused.status_code == 503 and "person@example.test" not in refused.text
+    privacy_ops.close_dsar(request["id"])
+    assert client.post(url).status_code == 404
+    assert 'id="dsar-download"' not in client.get(f"/privacy/dsar/{request['id']}").text
+
+
+def test_collected_export_download_rejects_a_recorded_path_change():
+    from maverick import privacy_ops
+
+    request = privacy_ops.open_dsar("person@example.test", "access", channel="email")
+    privacy_ops.fulfill_dsar(request["id"])
+    def change_path(row):
+        row["fulfillment"] = {**row["fulfillment"], "export_path": "C:/other-person-export.json"}
+
+    privacy_ops._DSAR.update(request["id"], change_path)
+    response = client.post(f"/api/v1/privacy/dsar/{request['id']}/export")
+    assert response.status_code == 409
+    assert "could not be verified" in response.text
+    assert "other-person-export.json" not in response.text
+
+
 def test_templates_catalog_api():
     resp = client.get("/api/v1/assess/templates")
     assert resp.status_code == 200

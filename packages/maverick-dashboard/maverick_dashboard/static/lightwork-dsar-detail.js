@@ -188,6 +188,28 @@
     });
   });
 
+  on('dsar-download', function () {
+    var button = $('dsar-download');
+    ask('Download the collected personal data for review? Keep the file secure. Lightwork records that you were authorized to access it; this does not send anything to the requester.',
+      'Download for review').then(async function (ok) {
+      if (!ok) return;
+      button.disabled = true;
+      try {
+        var response = await fetch(base + encodeURIComponent(requestId) + '/export', {
+          method: 'POST', credentials: 'same-origin', cache: 'no-store'
+        });
+        if (!response.ok) throw response;
+        var url = URL.createObjectURL(await response.blob());
+        var link = doc.createElement('a');
+        link.href = url; link.download = requestId + '-data.json';
+        doc.body.appendChild(link); link.click(); link.remove();
+        setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+        say('The package was prepared for download. Check your browser downloads; it has not been sent to the requester.');
+      } catch (failure) { fail(failure, 'download the collected data'); }
+      finally { button.disabled = false; }
+    });
+  });
+
   on('dsar-close', function () {
     var retry = page.getAttribute('data-status') === 'closed';
     ask(retry ? 'Try removing this request’s saved export again?' :

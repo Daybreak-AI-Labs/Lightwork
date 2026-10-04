@@ -73,8 +73,8 @@ def test_workbench_is_store_free_no_store_and_csp_closed(client: TestClient) -> 
     assert "The text read from them is not stored either" in response.text
     assert "a different, authorized person" in response.text
     assert "/api/v1/ai-evidence-analysis" in response.text
-    assert "may be sent to that provider" in response.text
-    assert "Do not type in document contents, passwords," in response.text
+    assert "recent questions may be" in response.text
+    assert "Do not include document text, passwords," in response.text
     assert 'aria-describedby="mv-copilot-egress"' in response.text
 
 
@@ -269,7 +269,8 @@ def test_client_uses_raw_file_body_without_persistent_or_html_injection_channels
     assert ".status-card > .governance-details" in css
     assert "Grounded in the current page" not in copilot_source
     assert "AI answers can be wrong" in copilot_source
-    assert "history.push({role: 'user', content: question})" in copilot_source
+    assert "conversation_token: conversationToken" in copilot_source
+    assert "history: history.slice(-6)" not in copilot_source
     assert '{role: "assistant", content: payload.reply}' not in copilot_source
 
 

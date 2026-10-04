@@ -1751,7 +1751,7 @@ class FeatureSwitchIn(BaseModel):
 
 
 class CopilotHistoryItem(BaseModel):
-    """One bounded prior turn accepted by the read-only platform Copilot."""
+    """Legacy browser history; the server never treats it as assistant context."""
 
     model_config = ConfigDict(extra="forbid", strict=True)
 
@@ -1768,6 +1768,7 @@ class CopilotIn(BaseModel):
     page: str = Field(default="", max_length=200)
     selected_goal_id: int | None = Field(default=None, ge=1, le=2**63 - 1)
     history: list[CopilotHistoryItem] = Field(default_factory=list, max_length=6)
+    conversation_token: str | None = Field(default=None, min_length=10, max_length=24_000)
 
 
 class BreachPlanIn(BaseModel):

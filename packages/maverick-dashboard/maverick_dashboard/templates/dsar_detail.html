@@ -100,6 +100,9 @@
           {% if dsar.kind in ('access', 'portability') %}Collect their data{% else %}Mark ready for deletion{% endif %}
         </button>
       {% endif %}
+      {% if dsar.status == 'fulfilled' and dsar.kind in ('access', 'portability') %}
+        <button type="button" class="btn btn--primary" id="dsar-download">Review collected data</button>
+      {% endif %}
       {% if dsar.kind == 'erasure' and dsar.status in ('open', 'awaiting_erasure') and can_admin %}
         <button type="button" class="btn btn--danger" id="dsar-erase">Erase their data now</button>
       {% endif %}
@@ -122,7 +125,7 @@
       <p class="notice notice--warning">This request is closed, but its saved data export still needs cleanup. Use Retry export cleanup or ask an administrator for help.</p>
     {% endif %}
     {% if dsar.status == 'fulfilled' and dsar.kind in ('access', 'portability') %}
-      <p class="notice notice--warning">The data was collected, but this status does not confirm that the requester received it. Check the response below. The saved export is removed when you close this request; check the cleanup result after closing.</p>
+      <p class="notice notice--warning">The data was collected, but this status does not confirm that the requester received it. Download and review the package before sharing it through an approved secure channel. The saved export is removed when you close this request; check the cleanup result after closing.</p>
     {% endif %}
     <div class="dsar-actions" aria-label="Send a notice to the requester">
       <span class="muted">Send:</span>

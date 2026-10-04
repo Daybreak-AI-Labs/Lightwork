@@ -82,7 +82,7 @@ def test_every_canonical_page_has_closed_server_context(path: str, title: str) -
         "title": title,
         "summary": context.summary,
         "capabilities": list(context.capabilities),
-        "boundaries": list(context.boundaries),
+        "boundaries": [copilot_context._panel_tip(context)],
         "next_steps": list(context.next_steps),
         "suggested_questions": list(context.suggested_questions),
     }
@@ -93,6 +93,24 @@ def test_registry_paths_are_unique_and_match_expected_pages() -> None:
 
     assert len(registered) == len(set(registered))
     assert set(registered) == set(CANONICAL_CONTEXTS)
+    assert set(copilot_context._PANEL_TIPS) == set(CANONICAL_CONTEXTS)
+
+
+def test_panel_tips_are_page_specific_and_do_not_repeat_internal_boundaries() -> None:
+    for path in CANONICAL_CONTEXTS:
+        context = copilot_context.context_for_page(path)
+        tips = copilot_context.public_context(context)["boundaries"]
+        assert len(tips) == 1
+        assert tips[0] != copilot_context._READ_ONLY_BOUNDARY
+        assert tips[0] != copilot_context._ROLE_AND_READINESS_BOUNDARY
+        assert not copilot_context._INTERNAL_COPY.search(tips[0]), path
+
+    assert "supplier stock" in copilot_context.public_context(
+        copilot_context.context_for_page("/commitment-reviews")
+    )["boundaries"][0]
+    assert "every source" in copilot_context.public_context(
+        copilot_context.context_for_page("/compliance/continuous-evidence")
+    )["boundaries"][0]
 
 
 def test_every_registered_dashboard_page_gets_page_specific_copilot_help() -> None:
@@ -289,9 +307,9 @@ def test_consent_delivery_context_covers_named_adapters_and_reconciliation() -> 
 @pytest.mark.parametrize(
     ("message", "prefix"),
     [
-        ("What is the authority boundary?", "Key boundary: "),
+        ("What is the authority boundary?", "Keep in mind: "),
         ("How do I get started?", "Start here: "),
-        ("What can this feature do?", "When role and server composition permit, "),
+        ("What can this feature do?", "Model Risk and AI Assurance can help you: "),
         ("Explain this workspace", "Model Risk and AI Assurance: "),
     ],
 )
@@ -309,9 +327,9 @@ def test_built_in_reply_is_deterministic_read_only_and_bounded(
     assert len(first.split()) <= copilot_context._MAX_BUILT_IN_REPLY_WORDS
     assert len(first) <= copilot_context._MAX_BUILT_IN_REPLY_CHARS
     assert "\n" not in first
-    if prefix == "Key boundary: ":
+    if prefix == "Keep in mind: ":
         assert "read-only" in first
-        assert "executes an action" in first
+        assert "cannot make changes" in first
 
 
 @pytest.mark.parametrize(
@@ -330,10 +348,10 @@ def test_built_in_guide_does_not_claim_to_perform_requested_actions(
     context = copilot_context.context_for_page(page)
     reply = copilot_context.built_in_reply(context, message)
 
-    assert reply.startswith("This guide can't do that for you.")
+    assert reply.startswith("I can explain the steps, but I haven't changed anything.")
     assert f"Open {context.title}" in reply
     assert "if the action is available" in reply
-    assert "current status and your access" in reply
+    assert "status and your access" in reply
     assert "can:" not in reply
     assert len(reply.split()) <= copilot_context._MAX_BUILT_IN_REPLY_WORDS
 
@@ -347,7 +365,7 @@ def test_how_to_question_gets_flow_steps_without_claiming_execution() -> None:
     assert reply.startswith("Start here: ")
     assert "Choose New flow" in reply
     assert "save the flow" in reply
-    assert "can't do that for you" not in reply
+    assert "haven't changed anything" not in reply
     assert copilot_context.is_action_request("Create a flow for me") is True
 
 
@@ -357,7 +375,7 @@ def test_personal_capability_question_is_not_an_execution_request(question: str)
 
     assert copilot_context.is_action_request(question) is False
     reply = copilot_context.built_in_reply(context, question)
-    assert reply.startswith("When role and server composition permit, ")
+    assert reply.startswith("Flows can help you: ")
     assert "operator access" in reply
     assert copilot_context.is_action_request("Can you create a flow for me?") is True
 
@@ -377,7 +395,18 @@ def test_capability_question_does_not_become_an_action_request() -> None:
 
     reply = copilot_context.built_in_reply(context, "Can this page create goals?")
 
-    assert reply.startswith("When role and server composition permit, ")
+    assert reply.startswith("Tasks can help you: ")
+
+
+def test_plain_built_in_replies_do_not_repeat_access_notice_or_internal_terms() -> None:
+    context = copilot_context.context_for_page("/ai-entity-tasks")
+    permissions = frozenset({"view"})
+    for question in ("What should I do next?", "What are the limits?", "Explain this page"):
+        reply = copilot_context.built_in_reply(context, question, permissions)
+        assert "server composition" not in reply
+        assert "endpoint authorization" not in reply
+        assert "Your current role" not in reply
+    assert "cannot change" in copilot_context._authority_notice(permissions)
 
 
 @pytest.mark.parametrize("path", CANONICAL_CONTEXTS)

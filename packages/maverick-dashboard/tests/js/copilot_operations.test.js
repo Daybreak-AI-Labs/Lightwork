@@ -28,7 +28,8 @@ async function harness() {
     if(url.endsWith("/prepare")) return response({...envelope(),operation_id:operationId,token:"sealed-review",expires_at:Date.now()/1000+600});
     if(url.endsWith("/execute")) {state.record=record({revision:4,status:"withdrawn",withdrawal_available:false});return response({...envelope(),operation_id:operationId,outcome:"confirmed"});}
     if(url.endsWith("/propose")) return response({...envelope(),proposal:{operation_id:state.proposal,source:"built_in"}});
-    if(url==="/api/v1/copilot") return response({reply:"Helpful guidance",mode:"built_in"});
+    if(url==="/api/v1/copilot") return response({reply:"Helpful guidance",mode:"built_in",
+      conversation_token:"server-sealed-guide-token"});
     throw Error("Unexpected request "+url);
   };
   w.eval(read("static/lightwork-copilot.js"));w.eval(read("static/lightwork-learning-example.js"));await tick();
@@ -175,7 +176,7 @@ test("an unavailable catalog clears prior questions before legacy guidance",asyn
   h.get('mv-copilot-close').click();
   h.override(c=>c.url.includes('/copilot/operations?'),()=>response({detail:{code:'operation_denied'}},403));
   await h.open();assert.equal(h.get('mv-copilot-log').textContent,'');await h.ask('Account B question');
-  const last=h.calls.filter(c=>c.url==='/api/v1/copilot').at(-1);assert.deepEqual(last.body.history,[]);h.close();
+  const last=h.calls.filter(c=>c.url==='/api/v1/copilot').at(-1);assert.equal(last.body.conversation_token,null);h.close();
 });
 test("turning off optional actions does not erase the page guide's recent chat",async()=>{
   const h=await harness();h.state.proposal=null;await h.open();await h.ask('Earlier question');
@@ -184,7 +185,7 @@ test("turning off optional actions does not erase the page guide's recent chat",
   await h.open();assert.match(h.get('mv-copilot-log').textContent,/Earlier question/);
   await h.ask('Follow-up question');
   const last=h.calls.filter(c=>c.url==='/api/v1/copilot').at(-1);
-  assert.deepEqual(last.body.history,[{role:'user',content:'Earlier question'}]);h.close();
+  assert.equal(last.body.conversation_token,'server-sealed-guide-token');h.close();
 });
 test("feature-disabled Copilot does not erase a direct-page draft",async()=>{
   const h=await harness();h.get('le-withdraw').click();h.get('le-reason').value='Direct review';

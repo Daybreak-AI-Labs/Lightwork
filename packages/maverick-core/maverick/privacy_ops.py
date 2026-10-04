@@ -2736,6 +2736,40 @@ def _remove_closed_dsar_export(record: dict) -> bool:
     return True
 
 
+def read_dsar_export(request_id: str) -> tuple[dict, str] | None:
+    """Read one collected export through its recorded intent and digest.
+
+    The record's path is never used as the read target. A closed request has
+    no downloadable export, even if its cleanup needs another attempt.
+    """
+    from .paths import data_dir
+
+    record = get_dsar(request_id)
+    if record is None or record.get("status") != "fulfilled" or record.get("kind") not in (
+        "access", "portability",
+    ):
+        return None
+    fulfillment = record.get("fulfillment")
+    if not isinstance(fulfillment, dict):
+        raise PrivacyStateError("saved data export could not be verified")
+    path = Path(os.path.abspath(os.fspath(
+        data_dir("dsar_requests") / "exports" / f"{record['id']}-export.json"
+    )))
+    try:
+        path_matches = (isinstance(fulfillment.get("export_path"), str)
+                        and Path(os.path.abspath(fulfillment["export_path"])) == path)
+    except (OSError, ValueError):
+        path_matches = False
+    digest = fulfillment.get("artifact_sha256")
+    if (not path_matches or fulfillment.get("export_schema") != _DSAR_EXPORT_SCHEMA
+            or not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None):
+        raise PrivacyStateError("saved data export could not be verified")
+    recovered = _load_dsar_export_artifact(path, intent=_dsar_export_intent(record))
+    if recovered is None or not hmac.compare_digest(recovered[1], digest):
+        raise PrivacyStateError("saved data export could not be verified")
+    return recovered
+
+
 def dsar_clock(record: dict, *, now: float | None = None) -> dict:
     """The live clock fields for one request, computed from the stored
     deadlines so the list, the detail page and the alerting (work package

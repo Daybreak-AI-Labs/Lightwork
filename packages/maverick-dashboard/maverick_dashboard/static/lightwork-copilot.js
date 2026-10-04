@@ -19,8 +19,8 @@
   if (!fab || !panel || !closeButton || !tips || !prompts || !log ||
       !form || !input || !note || !sendButton || !clearButton || !providerSetup) return;
 
-  var history = [];
   var recent = [];
+  var conversationToken = null;
   var recentLoaded = false;
   var recentAt = 0;
   var recentKey = 'lightwork:copilot:recent:v1';
@@ -55,7 +55,7 @@
 
   function forgetRecent() {
     if (recentTimer !== null) { clearTimeout(recentTimer); recentTimer = null; }
-    recent = []; history = []; recentLoaded = false; recentAt = 0;
+    recent = []; conversationToken = null; recentLoaded = false; recentAt = 0;
     try { sessionStorage.removeItem(recentKey); } catch (_) { /* This tab cannot retain chat. */ }
   }
 
@@ -70,12 +70,17 @@
       Math.max(1, recentAge - (Date.now() - recentAt) + 1));
   }
 
-  function rememberRecent(question, reply) {
+  function rememberRecent(question, reply, token) {
     if (!clientScope) return;
+    // Only the server's sealed guide token can supply earlier assistant text
+    // to a later model call. Local control and live-record replies have none.
+    conversationToken = typeof token === 'string' && token.length <= 24000 ? token : null;
     recent.push({role: 'user', text: question}, {role: 'bot', text: reply});
     recent = recent.slice(-8);
     recentAt = Date.now();
-    try { sessionStorage.setItem(recentKey, JSON.stringify({scope: clientScope, at: recentAt, turns: recent})); }
+    try { sessionStorage.setItem(recentKey, JSON.stringify({
+      scope: clientScope, at: recentAt, turns: recent, token: conversationToken
+    })); }
     catch (_) { /* The visible conversation still works in this page. */ }
     armRecentExpiry();
   }
@@ -114,10 +119,10 @@
       forgetRecent(); recentLoaded = true; return;
     }
     recent = saved.turns;
+    conversationToken = typeof saved.token === 'string' && saved.token.length <= 24000
+      ? saved.token : null;
     recentAt = saved.at;
     armRecentExpiry();
-    history = recent.filter(function (turn) { return turn.role === 'user'; })
-      .slice(-6).map(function (turn) { return {role: 'user', content: turn.text}; });
     var pending = Array.from(log.children);
     clear(log);
     recent.forEach(function (turn) { addMessage(turn.role, turn.text); });
@@ -142,14 +147,10 @@
     return message;
   }
 
-  function completeReply(question, reply, actionLink) {
+  function completeReply(question, reply, actionLink, token) {
     input.value = '';
     addMessage('bot', reply, actionLink);
-    rememberRecent(question, reply);
-    // Earlier assistant text is display-only; only user questions become
-    // untrusted context on a later model request.
-    history.push({role: 'user', content: question});
-    history = history.slice(-6);
+    rememberRecent(question, reply, token);
   }
 
   function renderContext(context) {
@@ -477,19 +478,27 @@
         body: JSON.stringify(Object.assign({
           message: message,
           page: window.location.pathname,
-          history: history.slice(-6)
+          conversation_token: conversationToken
         }, selectedGoalId ? {selected_goal_id: selectedGoalId} : {}))
       });
       var payload;
       try { payload = await response.json(); }
       catch (_error) { payload = {detail: "The server returned an unreadable response."}; }
       if (started !== generation || panel.hidden) return;
+      if (response.status === 409) {
+        forgetRecent(); recentLoaded = true; clear(log); failedMessage = null;
+        input.value = message;
+        note.textContent = 'The earlier chat expired or your access changed. It was cleared. Your question is still here; press Send to ask it again.';
+        return;
+      }
       if (!response.ok || !payload.reply) throw new Error('unavailable');
       if (!(await verifyScope(started))) return;
-      completeReply(message, payload.reply, payload.action_link);
+      completeReply(message, payload.reply, payload.action_link, payload.conversation_token);
       if (payload.page_context) renderContext(payload.page_context);
       renderProviderSetup(payload);
-      if (payload.mode === "built_in_fallback") {
+      if (payload.conversation_context_status === 'unavailable') {
+        note.textContent = 'Copilot answered, but earlier guide answers could not be kept. Check the current page before a follow-up.';
+      } else if (payload.mode === "built_in_fallback") {
         note.textContent = payload.warning || "The AI provider is not available — using the built-in page guide.";
       } else if (payload.mode === "built_in") {
         note.textContent = payload.warning || "Built-in page guide — no AI provider needed.";

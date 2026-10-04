@@ -9,7 +9,8 @@ const base = path.resolve(__dirname, "../../maverick_dashboard");
 const read = name => fs.readFileSync(path.join(base, name), "utf8");
 const key = "lightwork:copilot:recent:v1";
 const tick = async () => { await new Promise(resolve => setImmediate(resolve)); await new Promise(resolve => setImmediate(resolve)); };
-const response = body => ({ok: true, status: 200, redirected: false, json: async () => body});
+const response = (body, status = 200) => ({ok: status >= 200 && status < 300,
+  status, redirected: false, json: async () => body});
 
 function harness(saved) {
   const dom = new JSDOM(read("templates/_copilot.html"), {
@@ -20,7 +21,8 @@ function harness(saved) {
   w.fetch = async (url, options = {}) => {
     calls.push({url, body: options.body ? JSON.parse(options.body) : null});
     if (url.includes("/copilot/context")) return response({client_context: state.scope, boundaries: [], suggested_questions: []});
-    if (url === "/api/v1/copilot") return response({reply: "Answer to " + JSON.parse(options.body).message, mode: "built_in"});
+    if (url === "/api/v1/copilot") return response({reply: "Answer to " + JSON.parse(options.body).message,
+      mode: "built_in", conversation_token: "server-sealed-" + JSON.parse(options.body).message});
     throw Error("Unexpected request " + url);
   };
   w.eval(read("static/lightwork-copilot.js"));
@@ -56,14 +58,16 @@ test("recent Copilot chat returns on another page in the same scoped tab", async
   await first.open(); await first.ask("What is next?");
   const saved = first.w.sessionStorage.getItem(key);
   assert.equal(JSON.parse(saved).turns.length, 2);
+  assert.equal(JSON.parse(saved).token, "server-sealed-What is next?");
   first.close();
 
   const next = harness(saved);
   await next.open();
   assert.match(next.get("mv-copilot-log").textContent, /What is next\?Answer to What is next\?/);
   await next.ask("And after that?");
-  assert.deepEqual(next.calls.filter(call => call.url === "/api/v1/copilot").at(-1).body.history,
-    [{role: "user", content: "What is next?"}]);
+  const followup = next.calls.filter(call => call.url === "/api/v1/copilot").at(-1).body;
+  assert.equal(followup.conversation_token, "server-sealed-What is next?");
+  assert.equal(Object.hasOwn(followup, "history"), false);
   next.close();
 });
 
@@ -75,7 +79,7 @@ test("a changed account scope never restores the prior chat", async () => {
   assert.equal(next.get("mv-copilot-log").textContent, "");
   assert.equal(next.w.sessionStorage.getItem(key), null);
   await next.ask("New account");
-  assert.deepEqual(next.calls.filter(call => call.url === "/api/v1/copilot").at(-1).body.history, []);
+  assert.equal(next.calls.filter(call => call.url === "/api/v1/copilot").at(-1).body.conversation_token, null);
   next.close();
 });
 
@@ -85,7 +89,37 @@ test("Clear recent chat removes this tab's transcript and prompt context", async
   assert.equal(h.get("mv-copilot-log").textContent, "");
   assert.equal(h.w.sessionStorage.getItem(key), null);
   await h.ask("Second question");
-  assert.deepEqual(h.calls.filter(call => call.url === "/api/v1/copilot").at(-1).body.history, []);
+  assert.equal(h.calls.filter(call => call.url === "/api/v1/copilot").at(-1).body.conversation_token, null);
+  h.close();
+});
+
+test("a refused conversation token clears old context and keeps the unsent question", async () => {
+  const h = harness(); await h.open(); await h.ask("Earlier guide question");
+  const original = h.w.fetch;
+  h.w.fetch = (url, options) => url === "/api/v1/copilot"
+    ? response({detail: "Earlier chat expired"}, 409) : original(url, options);
+  await h.ask("Do that next");
+  assert.equal(h.get("mv-copilot-input").value, "Do that next");
+  assert.equal(h.get("mv-copilot-log").textContent, "");
+  assert.equal(h.w.sessionStorage.getItem(key), null);
+  assert.match(h.get("mv-copilot-note").textContent, /earlier chat expired/);
+  h.close();
+});
+
+test("a live private answer is displayed but clears guide model history", async () => {
+  const h = harness(); await h.open(); await h.ask("Where are settings?");
+  const original = h.w.fetch;
+  h.w.fetch = (url, options) => url === "/api/v1/copilot"
+    ? response({reply: "Your private task is paused", mode: "live", source: "Tasks"})
+    : original(url, options);
+  await h.ask("What needs my approval?");
+  assert.match(h.get("mv-copilot-log").textContent, /Your private task is paused/);
+  const saved = JSON.parse(h.w.sessionStorage.getItem(key));
+  assert.equal(saved.token, null);
+  h.w.fetch = original;
+  await h.ask("What can I do next?");
+  const sent = h.calls.filter(call => call.url === "/api/v1/copilot").at(-1);
+  assert.equal(sent.body.conversation_token, null);
   h.close();
 });
 
@@ -110,7 +144,7 @@ test("an idle open panel drops old context before the next question", async () =
   const h = harness(); await h.open(); await h.ask("Old question");
   h.w.Date.now = () => Date.now() + 3600001;
   await h.ask("Fresh question");
-  assert.deepEqual(h.calls.filter(call => call.url === "/api/v1/copilot").at(-1).body.history, []);
+  assert.equal(h.calls.filter(call => call.url === "/api/v1/copilot").at(-1).body.conversation_token, null);
   assert.doesNotMatch(h.get("mv-copilot-log").textContent, /Old question/);
   h.close();
 });
@@ -144,7 +178,7 @@ test("changing selected work discards an in-flight reply and its draft", async (
   h.close();
 });
 
-test("a typed control proposal remains in recent chat without replaying assistant text", async () => {
+test("a typed control proposal remains visible without becoming model history", async () => {
   const h = harness();
   h.w.LightworkProductOperations = {open() {}, isBusy: () => false, propose: async () => true};
   await h.open(); await h.ask("Review the selected order");
@@ -155,7 +189,7 @@ test("a typed control proposal remains in recent chat without replaying assistan
   h.w.LightworkProductOperations = null;
   await h.ask("What else should I check?");
   const followup = h.calls.filter(call => call.url === "/api/v1/copilot").at(-1).body;
-  assert.deepEqual(followup.history, [{role: "user", content: "Review the selected order"}]);
+  assert.equal(followup.conversation_token, null);
   h.close();
 });
 

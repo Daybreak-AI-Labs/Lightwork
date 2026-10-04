@@ -14,11 +14,10 @@ from re import IGNORECASE, Pattern
 from re import compile as compile_regex
 
 _READ_ONLY_BOUNDARY = (
-    "Copilot guidance is read-only and never grants authority or executes an action."
+    "This page guide is read-only. It explains controls but cannot make changes for you."
 )
 _ROLE_AND_READINESS_BOUNDARY = (
-    "Listed capabilities describe the workspace, not the caller's authority; every action "
-    "still requires the caller's current role and verified server composition."
+    "Your current access and the page's setup decide which controls you can use."
 )
 _MAX_BUILT_IN_REPLY_WORDS = 120
 _MAX_BUILT_IN_REPLY_CHARS = 1_000
@@ -1735,35 +1734,35 @@ def _registered_page_context(path: str) -> CopilotPageContext | None:
     group = str(page.get("group") or "workspace")
     floor = str(page.get("floor") or "view")
     authority = {
-        "view": "This page is viewable with read access; its mutation endpoints may require more authority.",
-        "operate": "Using this page's operations requires current operator authority.",
-        "audit": "This page is limited to authorized audit review.",
-        "admin": "This page is a deployment administration surface and requires global administrator authority.",
-    }.get(floor, "The server rechecks current authority for every operation.")
+        "view": "You can read this page with viewing access. Changing records may require more access.",
+        "operate": "You need permission to run work to use this page's controls.",
+        "audit": "You need permission to review activity records to use this page.",
+        "admin": "You need installation administrator access to use this page.",
+    }.get(floor, "Lightwork checks your access before changing anything.")
     return _ensure_read_only(
         CopilotPageContext(
             path=path,
             title=title,
             summary=(
-                f"{title} is part of Lightwork's {group} workspace. It presents "
-                "the records, status, and bounded controls for this module."
+                f"{title} is part of Lightwork's {group} workspace. It shows "
+                "the records, current status and controls available here."
             ),
             capabilities=(
-                f"Inspect the {title} records and status available to your current role.",
-                "Use the page's labeled controls when the server confirms both authority and readiness.",
+                f"Review the {title} records and status available to you.",
+                "Use the page's labeled controls when your access and setup allow it.",
             ),
             boundaries=(
                 authority,
-                "A rendered control or local status does not prove an external action, complete coverage, or customer acceptance.",
+                "A visible control or ready status does not confirm that an outside service acted or accepted a result.",
             ),
             next_steps=(
-                "Read the page status and evidence boundary before selecting an operation.",
-                "After any permitted operation, verify the returned result and retained evidence before relying on it.",
+                "Read the page status before choosing a control.",
+                "After a change, check the result and saved record before relying on it.",
             ),
             suggested_questions=(
                 f"What can I inspect on {title}?",
-                "What authority and readiness does this page require?",
-                "What should I verify after an operation?",
+                "What access and setup does this page need?",
+                "What should I check after a change?",
             ),
         )
     )
@@ -1787,6 +1786,79 @@ def context_for_page(page: object) -> CopilotPageContext:
     return _CONTEXT_BY_PATH.get(canonical) or _registered_page_context(canonical) or _GENERIC
 
 
+# Short, page-specific tips for the panel. The full boundaries above remain in
+# the server's model context; implementation details do not need to fill the
+# three visible tip slots on every page.
+_PANEL_TIPS = {
+    "/commitment-reviews": "These estimates use your team's inputs. They do not check supplier stock or reserve capacity.",
+    "/workflows": "The guide can explain a flow. Use the designer to create or change one.",
+    "/agents": "A Can start label checks required actions. Connections, access and the AI service are checked when work starts.",
+    "/workforce": "Department counts show required actions. Connections, access and the AI service are checked when work starts.",
+    "/approvals": "An approval lets a paused step continue to other checks; it does not confirm success.",
+    "/facts": "Shared facts are visible to workspace viewers. Personal and task notes stay private.",
+    "/content-access": "Another administrator or the content owner must approve a read, and that access ends within an hour.",
+    "/users/departures": "Deactivating local access does not end access granted by outside services.",
+    "/companion/admin": "You need workspace administrator access and current employee membership to change companion policy.",
+    "/companion": "A workspace administrator must enroll you before you can use a companion.",
+    "/assurance/cloud-agents": "This installation cannot list or change agents in cloud accounts.",
+    "/ai-evidence-analysis": "Results help review evidence. They do not certify compliance or provide legal advice.",
+    "/assess/evidence-autopopulation": "A proposed answer does not change an assessment or its score until applied.",
+    "/administration/document-vault": "Local encrypted storage does not confirm that outside backup or recovery has been tested.",
+    "/ai-entity-tasks": "Current access and setup are checked when you start a task. A ready label does not prove the result.",
+    "/governance-agents": "Governance agents help people decide; they cannot approve or act on their own.",
+    "/agent-control-plane": "If the agent list cannot be read completely, Lightwork reports the gap instead of showing an empty list.",
+    "/audit/evolution-ledger": "You can review learning history here. This page cannot approve, change or repair learned work.",
+    "/governance/inventory": "The inventory shows sources Lightwork captured. Missing sources remain unknown.",
+    "/consent": "A person's choice applies to the policy and notice version shown when it was made.",
+    "/consent/publishing": "Publishing uses reviewed versions. Returning to an older version does not erase history.",
+    "/consent/experiments": "A different person must approve an experiment before it can run.",
+    "/consent/delivery": "A ready or completed local delivery does not confirm that a connected service applied the change.",
+    "/consent/public-clients": "A client secret is shown once. Save it securely when it is issued.",
+    "/consent/native": "Registration needs a valid check from the device platform; local success does not prove live app acceptance.",
+    "/consent/profile-data": "Authors cannot approve their own versions, and protected traits are never inferred.",
+    "/consent/custom-indexes": "Search matches exact saved values. It does not search across workspaces or guess from similar data.",
+    "/consent/bulk-jobs": "A completed local job does not confirm that an outside service acted or received the result.",
+    "/consent/publish-settings": "Lightwork keeps publishing keys and protected storage under administrator control.",
+    "/consent/global-opt-out": "A local opt-out request does not confirm that every device or service honored it.",
+    "/consent/application-scans": "The scan reviews submitted app information. It does not inspect a live device or network activity.",
+    "/consent/scan-inventory": "Scan findings need a person's review before they become part of a consent notice.",
+    "/consent/scan-notice-proposals": "Accepting a proposal does not publish a notice or change an app.",
+    "/consent/trust-center-authority": "Access grants need a requester and two different approvers.",
+    "/data-use": "Policy authors cannot approve their own changes, and requesters cannot authorize their own use.",
+    "/data-use/providers": "Before writing to a connected service, Lightwork checks the approved decision again.",
+    "/compliance": "Completed local work does not establish whether a law applies or whether you comply.",
+    "/compliance/grc-studio": "The guide cannot create or approve studio work. Use the reviewed controls on this page.",
+    "/compliance/policy-links": "Only a reviewed policy version can be published. Share private links carefully.",
+    "/compliance/scoping": "A questionnaire creator cannot publish it or approve their own scope result.",
+    "/compliance/scope-actions": "A plan needs a final scope and a separately approved mapping before use.",
+    "/compliance/continuous-evidence": "A ready connection does not prove that every source was collected or that a control works.",
+    "/privacy": "Draft analysis helps with review; it is not legal advice or final approval.",
+    "/privacy/data-discovery": "No findings in a report do not prove that no private data exists.",
+    "/privacy/regulatory-intelligence": "Sources must be cleared for their intended use before they are added.",
+    "/privacy/rights-orchestration": "Lightwork records identity-check evidence from another source; it does not verify identity itself.",
+    "/privacy/rights-consumer-delivery": "A case or package does not prove someone's identity. Access needs a separate check.",
+    "/privacy/notice-governance": "A finished local release does not confirm browser behavior or legal sufficiency.",
+    "/privacy/drop": "A finished local record does not confirm that California's DROP service accepted it.",
+    "/third-party/contracts": "Contracts and templates need review before use. This page does not accept executable content.",
+    "/third-party/executive-reports": "Missing source data stays marked unavailable. Reports do not fill the gap with guesses.",
+    "/third-party/intelligence": "Possible sanctions and watchlist matches need a person's review.",
+    "/third-party/lifecycle": "Changing a vendor's status needs an explicit decision. Saved templates keep their versions.",
+    "/third-party/collaboration": "A supplier's answer is their statement, not independently checked evidence.",
+    "/security/governance": "These records support a review. They do not provide legal advice or certify a result.",
+    "/security/assurance": "Local AI risk records support decisions. They are not legal conclusions or certification.",
+    "/assessments": "Comments help reviewers; they are not an approval or compliance conclusion.",
+}
+
+
+def _panel_tip(context: CopilotPageContext) -> str:
+    if context.path == "/":
+        return "Ask about a page or open it to see its current status. The guide cannot make a change for you."
+    return _PANEL_TIPS.get(
+        context.path,
+        "Check the page's current status and your access before using one of its controls.",
+    )
+
+
 def public_context(
     context: CopilotPageContext,
     permissions: frozenset[str] | None = None,
@@ -1798,7 +1870,7 @@ def public_context(
         "title": context.title,
         "summary": context.summary,
         "capabilities": list(context.capabilities),
-        "boundaries": list(context.boundaries),
+        "boundaries": [_panel_tip(context)],
         "next_steps": list(context.next_steps),
         "suggested_questions": list(context.suggested_questions),
     }
@@ -1807,6 +1879,21 @@ def public_context(
         result["caller_permissions"] = [item for item in order if item in permissions]
         result["authority_notice"] = _authority_notice(permissions)
     return result
+
+
+_INTERNAL_COPY = compile_regex(
+    r"\b(?:tenant|principal|actor|digest|cas|csp|hmac|nonce|callback|"
+    r"server|composition|endpoint|schema|manifest|signer|sdk|idempotent|"
+    r"attestation|revision|revisions|runtime|adapter|preflight|"
+    r"authority|credential reference|key custody)\b",
+    IGNORECASE,
+)
+
+
+def _plain_lines(lines: tuple[str, ...], fallback: str) -> str:
+    """Keep useful page copy while avoiding implementation terms in replies."""
+    selected = [line for line in lines if not _INTERNAL_COPY.search(line)]
+    return " ".join(selected[:2]) if selected else fallback
 
 
 def built_in_reply(
@@ -1819,26 +1906,36 @@ def built_in_reply(
     words = tuple(_WORDS.findall(message.casefold()))
     terms = frozenset(words)
     if _is_action_request(words):
-        lead = "This guide can't do that for you. "
+        lead = "I can explain the steps, but I haven't changed anything. "
         body = (
             f"Open {context.title} and use its controls if the action is available. "
-            "If you don't see the control, check the item's current status and your access."
+            "If you don't see the control, check the item's status and your access."
         )
     elif terms & {"limit", "limits", "boundary", "boundaries", "prove", "proof", "safe", "safety", "authority"}:
-        lead = "Key boundary: "
-        body = " ".join(context.boundaries[:2])
+        lead = "Keep in mind: "
+        tip = _panel_tip(context)
+        body = tip if "guide" in tip.casefold() else f"{tip} {_READ_ONLY_BOUNDARY}"
     elif terms & {"start", "started", "next", "how", "ready", "readiness", "status"}:
         lead = "Start here: "
-        body = " ".join(context.next_steps)
+        body = _plain_lines(
+            context.next_steps,
+            f"Open {context.title}, check its current status and follow any setup message before using a control.",
+        )
     elif terms & {"can", "could", "capability", "capabilities", "do", "feature", "features"}:
-        lead = f"When role and server composition permit, {context.title} can: "
-        body = " ".join(context.capabilities)
+        lead = f"{context.title} can help you: "
+        body = _plain_lines(
+            context.capabilities,
+            f"Review what is available on this page. {_panel_tip(context)}",
+        )
+        if "access" not in body.casefold() and "permission" not in body.casefold():
+            body += f" {_authority_notice(permissions)}" if permissions is not None else (
+                " Available controls depend on your access and current setup."
+            )
     else:
         lead = f"{context.title}: "
         questions = " Or ask: ".join(context.suggested_questions[:2])
         body = f"{context.summary} You can ask: {questions}"
-    authority = f" {_authority_notice(permissions)}" if permissions is not None else ""
-    return _bounded_reply(f"{lead}{body}{authority}")
+    return _bounded_reply(f"{lead}{body}")
 
 
 def _is_action_request(words: tuple[str, ...]) -> bool:
@@ -1898,16 +1995,14 @@ def _authority_notice(permissions: frozenset[str]) -> str:
     """Describe caller authority without exposing identity or implying readiness."""
 
     if "admin" in permissions:
-        access = "Your current role includes global administrator controls"
+        access = "You can manage installation settings"
     elif "operate" in permissions:
-        access = (
-            "Your current role includes tenant operations but not global administrator controls"
-        )
+        access = "You can start or change work in this workspace; installation settings need an administrator"
     elif "audit" in permissions:
-        access = "Your current role includes read and global audit controls only"
+        access = "You can review activity records but cannot change work"
     else:
-        access = "Your current role is read-only"
-    return f"{access}; server readiness and endpoint authorization are still enforced."
+        access = "You can view available records but cannot change them"
+    return f"{access}. Each control checks your current access and setup when you use it."
 
 
 def sanitize_model_reply(reply: object) -> str:
