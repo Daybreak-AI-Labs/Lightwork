@@ -9,7 +9,8 @@ const template = fs.readFileSync(path.resolve(__dirname, '../../maverick_dashboa
 const settle = async () => { for (let i = 0; i < 15; i++) await new Promise(resolve => setImmediate(resolve)); };
 
 function page() {
-  const html = template.replace(/\{%[\s\S]*?%\}/g, '').replace(/\{\{ project_id or '' \}\}/g, '1').replace(/\{\{ project_context \}\}/g, 'current-context').replace(/\{\{[\s\S]*?\}\}/g, '');
+  // The title comes from the shared page header macro; stand in its <h1>.
+  const html = template.replace(/\{\{ hero\([\s\S]*?\) \}\}/, '<h1 id="pw-title">Project workspaces</h1>').replace(/\{%[\s\S]*?%\}/g, '').replace(/\{\{ project_id or '' \}\}/g, '1').replace(/\{\{ project_context \}\}/g, 'current-context').replace(/\{\{[\s\S]*?\}\}/g, '');
   const dom = new JSDOM(html, {url:'https://lightwork.invalid/project-workspaces/1', runScripts:'outside-only'});
   const state = {context:'current-context', workspace:{project_id:1, name:'Current project', revision:1, owner:'user:owner', can_edit:true,
     outcome:'Saved outcome', criteria:['Checked'], labels:[], default_view:'list', members:[], milestones:[], context:[], latest_accepted:null,

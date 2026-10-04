@@ -30,7 +30,7 @@ def _view(html: str) -> str:
     """The page's own content, without scripts, styles or closed dialogs (separate views)."""
     main = html[html.index('<main id="content"'):html.index("</main>")]
     for pattern in (r"<script\b.*?</script>", r"<style\b.*?</style>", r"<dialog\b.*?</dialog>"):
-        main = re.sub(pattern, "", main, flags=re.S)
+        main = re.sub(pattern, "", main, flags=re.DOTALL)
     return main
 
 
@@ -42,7 +42,7 @@ def test_top_routes_keep_one_primary_and_it_lives_in_the_header(client, path):
     primaries = re.findall(r'class="btn btn--primary"', view)
     assert len(primaries) <= 1, (path, len(primaries))
     if primaries:
-        actions = re.search(r'<div class="hero-actions">(.*?)</div>', view, re.S)
+        actions = re.search(r'<div class="hero-actions">(.*?)</div>', view, re.DOTALL)
         assert actions and "btn--primary" in actions.group(1), path
 
 
@@ -98,5 +98,5 @@ def test_page_opens_with_the_shared_header(name, title):
 def test_rendered_error_page_uses_the_header_and_its_main_action(client):
     page = client.get("/this/does/not/exist", headers={"Accept": "text/html"}).text
     assert '<h1 class="page-title hero-title" id="page-hero-title">Page not found</h1>' in page
-    actions = re.search(r'<div class="hero-actions">(.*?)</div>', page, re.S).group(1)
+    actions = re.search(r'<div class="hero-actions">(.*?)</div>', page, re.DOTALL).group(1)
     assert 'class="btn btn--primary" href="/">Go to the overview</a>' in actions
