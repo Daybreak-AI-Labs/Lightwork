@@ -455,9 +455,11 @@
       letter-spacing: -0.012em; line-height: 1.14; color: var(--text); margin: 0 0 var(--space-2);
     }
     .page-subtitle { color: var(--muted); margin: 0 0 var(--space-5); }
-    /* Section label (the established uppercase "eyebrow" used across pages). */
+    /* Section title. A bare <h2> is a panel's title, the same job as the
+       h2 in .section-head, so both use one size (it used to be a 12px
+       eyebrow here and 18px there). Small labels use their own classes. */
     h2 {
-      margin: 0 0 var(--space-3); font-size: var(--text-xs); color: var(--muted);
+      margin: 0 0 var(--space-3); font-size: var(--text-lg); color: var(--muted);
       text-transform: uppercase; letter-spacing: 0.08em; font-weight: var(--font-semibold);
     }
 
