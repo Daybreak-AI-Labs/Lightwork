@@ -90,9 +90,7 @@ PUBLIC_STATIC_PATHS = frozenset(
         "/static/daybreak-logo.jpg",
         "/static/daybreak-mark.png",
         # The self-hosted fonts lightwork.css references.
-        "/static/fonts/manrope-200.woff2", "/static/fonts/manrope-300.woff2",
-        "/static/fonts/manrope-400.woff2", "/static/fonts/manrope-500.woff2",
-        "/static/fonts/manrope-600.woff2", "/static/fonts/manrope-700.woff2",
+        "/static/fonts/manrope-var.woff2",
         "/static/fonts/jbm-400.woff2", "/static/fonts/jbm-500.woff2",
         # The public share page formats its answer with this dependency-free
         # renderer, which builds DOM from text and carries no data.

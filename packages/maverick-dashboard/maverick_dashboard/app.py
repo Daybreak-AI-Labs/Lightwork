@@ -12814,8 +12814,7 @@ async def brand_mark() -> FileResponse:
 #: The self-hosted faces the design system declares. An allowlist, not a
 #: directory mount: nothing else under static/fonts/ is ever served.
 _FONT_FILES = frozenset({
-    "manrope-200.woff2", "manrope-300.woff2", "manrope-400.woff2",
-    "manrope-500.woff2", "manrope-600.woff2", "manrope-700.woff2",
+    "manrope-var.woff2",
     "jbm-400.woff2", "jbm-500.woff2",
 })
 

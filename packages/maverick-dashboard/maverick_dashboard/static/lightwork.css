@@ -1489,12 +1489,10 @@ body[data-global-admin="1"] .mg-banner .mg-nonadmin-note { display: none; }
    up the type and component treatment. Offline-first: no third-party font
    or asset request is made.
    ===================================================================== */
-@font-face { font-family: "Manrope"; font-weight: 200; font-display: swap; src: url(/static/fonts/manrope-200.woff2) format("woff2"); }
-@font-face { font-family: "Manrope"; font-weight: 300; font-display: swap; src: url(/static/fonts/manrope-300.woff2) format("woff2"); }
-@font-face { font-family: "Manrope"; font-weight: 400; font-display: swap; src: url(/static/fonts/manrope-400.woff2) format("woff2"); }
-@font-face { font-family: "Manrope"; font-weight: 500; font-display: swap; src: url(/static/fonts/manrope-500.woff2) format("woff2"); }
-@font-face { font-family: "Manrope"; font-weight: 600; font-display: swap; src: url(/static/fonts/manrope-600.woff2) format("woff2"); }
-@font-face { font-family: "Manrope"; font-weight: 700; font-display: swap; src: url(/static/fonts/manrope-700.woff2) format("woff2"); }
+/* Manrope is a variable font: one file and one face cover every weight from
+   200 to 700, so a page downloads it once (it was six faces naming six copies
+   of the same file). The shells preload it; JetBrains Mono's two files differ. */
+@font-face { font-family: "Manrope"; font-weight: 200 700; font-display: swap; src: url(/static/fonts/manrope-var.woff2) format("woff2"); }
 @font-face { font-family: "JetBrains Mono"; font-weight: 400; font-display: swap; src: url(/static/fonts/jbm-400.woff2) format("woff2"); }
 @font-face { font-family: "JetBrains Mono"; font-weight: 500; font-display: swap; src: url(/static/fonts/jbm-500.woff2) format("woff2"); }
 
