@@ -202,8 +202,8 @@ def test_page_is_a_hidden_read_only_compatibility_console() -> None:
     assert entry["group"] == "Advanced tools"
     assert entry["floor"] == "view" and entry["default"] == "view"
     assert entry["in_nav"] is False
-    base = (Path(page.__file__).parent / "templates" / "base.html").read_text(encoding="utf-8")
-    assert f'id="i-{entry["icon"]}"' in base
+    sprite = (Path(page.__file__).parent / "templates" / "_icon_sprite.html").read_text(encoding="utf-8")
+    assert f'id="i-{entry["icon"]}"' in sprite
     # Compatibility is reachable directly but does not duplicate the primary
     # Knowledge destination in the sidebar.
     for role in (None, "viewer", "auditor", "operator", "admin"):

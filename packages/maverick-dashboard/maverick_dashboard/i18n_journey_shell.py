@@ -23,7 +23,6 @@ ROWS = [
     ("proprietary software", "logiciel propriétaire", "proprietäre Software", "プロプライエタリソフトウェア", "专有软件"),
     ("OK", "OK", "OK", "OK", "确定"),
     ("Chats", "Discussions", "Chats", "チャット", "对话"),
-    ("Open the Lightwork dashboard", "Ouvrir le tableau de bord Lightwork", "Lightwork-Übersicht öffnen", "Lightwork ダッシュボードを開く", "打开 Lightwork 仪表板"),
     ("Close menu", "Fermer le menu", "Menü schließen", "メニューを閉じる", "关闭菜单"),
     ("New chat", "Nouvelle discussion", "Neuer Chat", "新しいチャット", "新建对话"),
     ("Filter recent chats", "Filtrer les discussions récentes", "Letzte Chats filtern", "最近のチャットを絞り込む", "筛选最近的对话"),
@@ -235,4 +234,6 @@ ROWS = [
     ("Governance", "Gouvernance", "Governance", "ガバナンス", "治理"),
     ("Administration", "Administration", "Verwaltung", "管理", "管理"),
     ("Library", "Bibliothèque", "Bibliothek", "ライブラリ", "资料库"),
+    ("Most used", "Les plus utilisés", "Häufig genutzt", "よく使う項目", "常用"),
+    ("Help", "Aide", "Hilfe", "ヘルプ", "帮助"),
 ]

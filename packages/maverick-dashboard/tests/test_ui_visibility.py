@@ -37,15 +37,17 @@ def test_registry_is_well_formed():
         assert path in seen_paths and role == "admin"
 
 
-def test_registry_icons_exist_in_base_template():
+def test_registry_icons_exist_in_the_shared_icon_sprite():
     from pathlib import Path
 
     from maverick_dashboard import ui_visibility
-    base = (
-        Path(ui_visibility.__file__).parent / "templates" / "base.html"
-    ).read_text(encoding="utf-8")
+    templates = Path(ui_visibility.__file__).parent / "templates"
+    sprite = (templates / "_icon_sprite.html").read_text(encoding="utf-8")
     for page in ui_visibility.PAGES:
-        assert f'id="i-{page["icon"]}"' in base, page["path"]
+        assert f'id="i-{page["icon"]}"' in sprite, page["path"]
+    # Both shells render the sidebar's icons from the same sprite.
+    for shell in ("base.html", "chat_base.html"):
+        assert '{% include "_icon_sprite.html" %}' in (templates / shell).read_text(encoding="utf-8")
 
 
 def test_agent_control_plane_read_surface_is_discoverable_to_auditors():
@@ -415,7 +417,7 @@ def test_rendered_sidebar_group_titles_are_unique_with_companions_on(monkeypatch
             if self.capture:
                 self.titles[-1] += data.strip()
 
-    for path in ("/goals",):
+    for path in ("/goals", "/chat"):
         parser = Groups()
         parser.feed(c.get(path).text)
         assert len(parser.titles) == len(set(parser.titles)), (path, parser.titles)

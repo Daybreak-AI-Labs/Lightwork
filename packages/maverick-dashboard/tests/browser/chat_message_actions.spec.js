@@ -6,9 +6,10 @@ test('a saved answer exposes the product and its print, copy, download and share
   await page.addInitScript(() => { window.print = () => { window.__printed = true; }; });
   await page.goto(`/chat/goal/${fixture.review_goal}`);
 
-  const product = page.getByRole('navigation', {name: 'Lightwork product'});
+  const product = page.getByRole('navigation', {name: 'Primary'});
   await expect(product.getByRole('link', {name: 'Workflows', exact: true})).toBeVisible();
-  await expect(product.getByRole('link', {name: 'Tasks'})).toBeVisible();
+  // Tasks is a one-click Most used shortcut as well as a Work entry.
+  await expect(product.getByRole('list', {name: 'Most used'}).getByRole('link', {name: 'Tasks', exact: true})).toBeVisible();
   const answer = page.locator('#result');
   await expect(answer).toContainText('Synthetic captured deliverable');
 
