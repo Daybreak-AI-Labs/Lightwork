@@ -268,3 +268,30 @@ test("a refused stop change reads as a plain sentence, never a code or server te
   assert.match(message, /Emergency stop change failed|Could not change the emergency stop/);
   assert.doesNotMatch(message, /\b403\b|error \d|principal|admin scope/);
 });
+
+test("the label is announced only after the first read, and only when its words change", async () => {
+  const first = deferred();
+  const reads = [first.promise, response({ active: false, scope: "local" }), response({ active: true, scope: "local" })];
+  const ui = fixture(async () => reads.shift());
+  // Loading the page: "Checking…" then "Emergency stop" are not announced.
+  assert.equal(ui.label.getAttribute("aria-live"), undefined);
+  first.resolve(response({ active: false, scope: "local" }));
+  await turn();
+  await turn();
+  assert.equal(ui.label.textContent, "Emergency stop");
+  assert.equal(ui.label.getAttribute("aria-live"), "polite");
+
+  let writes = 0;
+  let text = ui.label.textContent;
+  Object.defineProperty(ui.label, "textContent", {
+    get() { return text; },
+    set(value) { writes += 1; text = value; },
+  });
+  // The same state on the next poll leaves the live label untouched.
+  await ui.poll();
+  assert.equal(writes, 0);
+  // A real change is written, and so announced.
+  await ui.poll();
+  assert.equal(ui.label.textContent, "STOPPED — click to resume");
+  assert.equal(writes, 1);
+});
