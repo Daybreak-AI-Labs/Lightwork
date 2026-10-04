@@ -5947,6 +5947,15 @@ def pick_advanced() -> dict[str, Any]:
         "of Lightwork already compresses.",
         default=True,
     )
+    # Glass effects ([dashboard] glass) are off by default: solid panels keep
+    # pages fast to respond. People can still turn them on for themselves in
+    # Display preferences; this only changes the starting look for everyone.
+    advanced["dashboard_glass"] = _q_confirm(
+        "Turn on glass effects (see-through, blurred panels) for everyone? "
+        "Pages respond more slowly with them, especially on older computers. "
+        "People can still choose for themselves in Display preferences.",
+        default=False,
+    )
     # Settings > Models lists the models each saved key can reach by asking the
     # provider's own model-list endpoint ([models] discovery, default on).
     advanced["mobile_offline"] = {"enabled": _q_confirm(
@@ -9346,6 +9355,7 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
                 _emit_kv(lines, key, val)
     dept = advanced.get("department_access") or {}
     compress_off = advanced.get("dashboard_compress") is False
+    glass_on = advanced.get("dashboard_glass") is True
     api_keys = advanced.get("api_keys") if isinstance(advanced.get("api_keys"), dict) else {}
     # Only a deliberate change is written: the app's defaults (on, 90 / 365
     # days, 24 hours) apply when the table says nothing.
@@ -9356,7 +9366,7 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
         api_key_lines = {"api_keys": False}
     if isinstance(dept, dict) and (
         "default_suites" in dept or "default_role" in dept or dept.get("group_roles") or dept.get("group_suites")
-        or "local_owner_setup" in advanced or compress_off or api_key_lines
+        or "local_owner_setup" in advanced or compress_off or glass_on or api_key_lines
         or "employee_activation_jobs" in advanced or "extension_form_values" in advanced
         or "extension_page_structure" in advanced
     ):
@@ -9376,6 +9386,10 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
             # Default-on in the app; only a deliberate "no" is written.
             lines.append("# Response compression off: a proxy in front already compresses.")
             _emit_kv(lines, "compress", False)
+        if glass_on:
+            # Default-off in the app; only a deliberate "yes" is written.
+            lines.append("# Glass effects for everyone until people choose their own.")
+            _emit_kv(lines, "glass", "on")
         if api_key_lines:
             lines.append("# API keys for scripts and integrations (maverick.config.api_key_settings).")
             for key in ("api_keys", "api_key_default_days", "api_key_max_days",

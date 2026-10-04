@@ -198,6 +198,14 @@ token = "${MAVERICK_DASHBOARD_TOKEN}"
 # upgrade restyles on the next page load without a hard refresh.
 # compress = true
 
+# Glass effects for everyone: "off" (the default) keeps panels, rows, controls
+# and dialogs solid, so clicks and typing repaint quickly; "on" brings back the
+# see-through, blurred look until people choose their own in Display
+# preferences (on this device or on their account). The top bar and sidebar
+# stay translucent either way. Settings > All settings and the setup wizard's
+# advanced step set it too.
+# glass = "off"
+
 # Department (suite) access for authenticated users with NO explicit grant on
 # the Users page (job-function scoping: a finance analyst sees and runs only
 # Finance specialists). Unset = unrestricted — scoping is opt-in per user.

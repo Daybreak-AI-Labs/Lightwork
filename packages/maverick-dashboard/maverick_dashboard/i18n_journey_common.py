@@ -58,6 +58,8 @@ ROWS = [('Your account', 'Votre compte', 'Ihr Konto', 'アカウント', '您的
  ('Standard', 'Standard', 'Standard', '標準', '标准'),
  ('Large', 'Grand', 'Groß', '大', '大'),
  ('Larger', 'Plus grand', 'Größer', '特大', '更大'),
+ ('Glass effects', 'Effets de verre', 'Glaseffekte', 'ガラス効果', '玻璃效果'),
+ ('On', 'Activé', 'An', '有効', '开启'),
  ('Light', 'Clair', 'Hell', 'ライト', '浅色'),
  ('Dark', 'Sombre', 'Dunkel', 'ダーク', '深色'),
  ('High contrast', 'Contraste élevé', 'Hoher Kontrast', '高コントラスト', '高对比度'),

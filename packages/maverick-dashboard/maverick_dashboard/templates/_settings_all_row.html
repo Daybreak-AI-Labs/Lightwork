@@ -25,7 +25,7 @@
     {% if s.warning %}<p class="muted settings-all-warning">{{ s.warning_lead }} {{ s.warning }}</p>{% endif %}
   </div>
   <div class="settings-all-control">
-    {% if s.id in ['persona.name','persona.style','persona.addendum','dashboard.theme','dashboard.density','budget.max_wall_seconds','budget.max_tool_calls','budget.max_output_tokens','models.vision','speculative.draft_model','verification.cross_family_model'] %}<label><input type="checkbox" data-profile-select> Export preference</label>{% endif %}
+    {% if s.id in ['persona.name','persona.style','persona.addendum','dashboard.theme','dashboard.density','dashboard.glass','budget.max_wall_seconds','budget.max_tool_calls','budget.max_output_tokens','models.vision','speculative.draft_model','verification.cross_family_model'] %}<label><input type="checkbox" data-profile-select> Export preference</label>{% endif %}
     {% if s.locked %}
       <p class="muted">Set by your server's deployment settings, so it can't be changed here.</p>
     {% elif s.control == 'toggle' %}

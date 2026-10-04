@@ -293,6 +293,7 @@ templates.env.globals.setdefault("font", "default")
 templates.env.globals.setdefault("lang", "en")
 templates.env.globals.setdefault("page_lang", "en")
 templates.env.globals.setdefault("density", "comfortable")
+templates.env.globals.setdefault("glass", "off")
 templates.env.globals.setdefault("custom_theme_css", "")
 templates.env.globals.setdefault("custom_theme_names", [])
 templates.env.globals.setdefault("dir", "ltr")
@@ -382,6 +383,7 @@ templates.env.globals.setdefault("ul", lambda source: "en")
 _VALID_THEMES = {"dark", "light", "solarized", "hicontrast"}
 _VALID_FONTS = {"default", "dyslexic"}
 _VALID_DENSITIES = {"comfortable", "compact"}
+_VALID_GLASS = {"off", "on"}
 
 
 def _valid_theme_names() -> set[str]:
@@ -448,6 +450,20 @@ def resolve_density(request: Request) -> str:
     )
 
 
+def resolve_glass(request: Request) -> str:
+    """Glass effects: ``?glass=`` → ``mvk_glass`` cookie (or the account's
+    saved choice) → ``[dashboard] glass`` config → off. Default-off: solid
+    panes repaint fast; ``on`` brings back the translucent, blurred look."""
+    return _resolve_pref(
+        request,
+        param="glass",
+        cookie="mvk_glass",
+        valid=_VALID_GLASS,
+        config_key="glass",
+        default="off",
+    )
+
+
 def _resolve_font(request: Request) -> str:
     """Font preference: ``?font=`` → cookie → default. Independent axis from
     the theme so high-contrast + dyslexia-friendly compose."""
@@ -474,6 +490,7 @@ def _theme_context(request: Request) -> dict:
         "theme": _resolve_theme(request),
         "font": _resolve_font(request),
         "density": resolve_density(request),
+        "glass": resolve_glass(request),
         "custom_theme_css": theme_css(custom),
         "custom_theme_names": sorted(custom),
         # ``lang`` is the selected UI language (drives ``t()``); ``page_lang``
@@ -1913,7 +1930,7 @@ def _persist_pref_cookie(request, response, *, param, cookie, valid, max_age) ->
 
 @app.middleware("http")
 async def persist_theme(request: Request, call_next):
-    """If ?theme= / ?font= / ?density= / ?lang= is in the URL, set a cookie so it sticks."""
+    """If ?theme= / ?font= / ?density= / ?glass= / ?lang= is in the URL, set a cookie so it sticks."""
     response = await call_next(request)
     q = request.query_params.get("theme")
     if q and q.lower() in _valid_theme_names():
@@ -1934,6 +1951,14 @@ async def persist_theme(request: Request, call_next):
         param="density",
         cookie="mvk_density",
         valid=_VALID_DENSITIES,
+        max_age=30 * 24 * 3600,
+    )
+    _persist_pref_cookie(
+        request,
+        response,
+        param="glass",
+        cookie="mvk_glass",
+        valid=_VALID_GLASS,
         max_age=30 * 24 * 3600,
     )
     _persist_pref_cookie(

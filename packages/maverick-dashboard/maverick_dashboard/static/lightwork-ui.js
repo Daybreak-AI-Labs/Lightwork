@@ -1234,7 +1234,7 @@
           document.documentElement.style.fontSize = value === 'larger' ? '125%' : value === 'large' ? '112.5%' : '';
           return;
         }
-        if (['theme', 'font', 'density'].indexOf(key) === -1) return;
+        if (['theme', 'font', 'density', 'glass'].indexOf(key) === -1) return;
         if (key === 'theme') { document.body.dataset.themePreference = value; if (value === 'system') value = system.matches ? 'dark' : 'light'; }
         Array.from(document.body.classList).forEach(function (name) { if (name.startsWith(key + '-')) document.body.classList.remove(name); });
         document.body.classList.add(key + '-' + value);

@@ -241,7 +241,7 @@ def _adapter(request, page, selection, identifier):
 def _response(value, *, background=None, delete_cookies=()):
     response = JSONResponse(value, headers={"Cache-Control": "private, no-store"}, background=background)
     for name in delete_cookies:
-        if name in {"mvk_theme", "mvk_font", "mvk_density", "mvk_text_size", "mvk_lang"}:
+        if name in {"mvk_theme", "mvk_font", "mvk_density", "mvk_text_size", "mvk_glass", "mvk_lang"}:
             response.delete_cookie(name, path="/")
     return response
 

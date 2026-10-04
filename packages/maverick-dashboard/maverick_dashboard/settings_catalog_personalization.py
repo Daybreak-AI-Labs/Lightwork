@@ -26,6 +26,7 @@ def entries(S, C, Column):
         "font": (("default", "Default"), ("dyslexic", "Dyslexia-friendly")),
         "density": (("comfortable", "Comfortable"), ("compact", "Compact")),
         "text_size": (("standard", "Standard"), ("large", "Large"), ("larger", "Larger")),
+        "glass": (("off", "Off"), ("on", "On")),
     }
     for key, _label in choices:
         extra = {"choices_from": "preference_themes"} if key == "theme" else {"choices": options[key]} if key in options else {"max_length": 2000 if key == "custom_style" else 80}

@@ -13,7 +13,7 @@ from . import preferences_api as native
 from .product_operations import Adapter, EmptyInput, Outcome, Preview, Snapshot, StrictInput
 
 KEYS = ("preferred_name", "tone", "language", "verbosity", "output_style", "custom_style_name",
-        "custom_style", "theme", "font", "density", "text_size", "conversation_mode", "conversation_detail")
+        "custom_style", "theme", "font", "density", "text_size", "glass", "conversation_mode", "conversation_detail")
 STYLE_KEYS = {"tone", "language", "verbosity", "output_style", "custom_style_name", "custom_style"}
 
 
@@ -59,6 +59,7 @@ def _choices():
         "font": (("default", "Default"), ("dyslexic", "Dyslexia-friendly")),
         "density": (("comfortable", "Comfortable"), ("compact", "Compact")),
         "text_size": (("standard", "Standard"), ("large", "Large"), ("larger", "Larger")),
+        "glass": (("off", "Off"), ("on", "On")),
         "conversation_mode": (("queue", "Queue next message"), ("guidance", "Review task guidance"), ("independent", "Start separately")),
         "conversation_detail": (("brief", "Brief"), ("balanced", "Balanced"), ("detailed", "Detailed")),
     }
@@ -97,7 +98,7 @@ def _plan(request, selection, args):
     try:
         if value is not None:
             value = native.preferences._validate(key, value)
-            if key in {"theme", "font", "density", "language", "text_size"}:
+            if key in {"theme", "font", "density", "language", "text_size", "glass"}:
                 native._check_display(key, value)
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
@@ -130,7 +131,7 @@ def execute(request, selection, args, prepared, operation_id):
                    {"values": {key: state["values"][key] for key in prepared["changes"]},
                     "sources": {key: state["sources"][key] for key in prepared["changes"]}, "revision": state["revision"]},
                    delete_cookies=tuple("mvk_lang" if key == "language" else "mvk_" + key
-                                        for key in prepared["changes"] if key in {"theme", "font", "density", "text_size", "language"})
+                                        for key in prepared["changes"] if key in {"theme", "font", "density", "text_size", "glass", "language"})
                                   if prepared["scope"] == "personal" and not prepared["thread"] else ())
 
 
