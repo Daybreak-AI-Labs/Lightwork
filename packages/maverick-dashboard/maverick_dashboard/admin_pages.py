@@ -189,7 +189,11 @@ def _settings_response(request: Request, saved: str = "", *, notice: str = "",
         )
     # The one truth about whether an AI service is connected: the header,
     # each provider row and every other page read the same verdict.
-    from maverick_dashboard.provider_readiness import apply_to_rows, workspace_readiness
+    from maverick_dashboard.provider_readiness import (
+        apply_to_rows,
+        attention_provider,
+        workspace_readiness,
+    )
 
     workspace = workspace_readiness()
     apply_to_rows(cfg_state["providers"], workspace)
@@ -269,6 +273,8 @@ def _settings_response(request: Request, saved: str = "", *, notice: str = "",
         **pickers,
         "providers": cfg_state["providers"],
         "workspace": workspace,
+        # The row "Open AI provider keys" (?focus=ai-provider) lands on.
+        "ai_focus_provider": attention_provider(workspace),
         "capabilities": cfg_state["capabilities"],
         "features": cfg_state["features"],
         "budget": budget_override(),

@@ -1,5 +1,7 @@
 {% extends "public_base.html" %}
 {% block title %}{{ rf.status_title }}{% endblock %}
+{% block public_label %}{{ rf.page_title }}{% endblock %}
+{% block public_footer %}{{ rf.page_title }}{% endblock %}
 {% block content %}
 {% from "_hero.html" import hero %}
 <div style="width: 100%; max-width: 40rem; margin: 0 auto;">

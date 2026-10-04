@@ -1,15 +1,24 @@
-<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Restart sign-in · Lightwork</title>
-<style>
-:root { color-scheme: light dark; font-family: system-ui, sans-serif; }
-body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: Canvas; color: CanvasText; }
-main { margin: 1rem; padding: clamp(1rem, 4vw, 3rem); max-width: 34rem; border: 1px solid GrayText; border-radius: 1.5rem; }
-h1 { font-size: clamp(1.5rem, 5vw, 2rem); } p { line-height: 1.6; }
-a { color: LinkText; display: inline-block; padding: .75rem; } a:focus-visible { outline: 3px solid Highlight; outline-offset: 3px; }
-</style></head><body><main aria-labelledby="title"><p>Lightwork</p>
-<h1 id="title" tabindex="-1">Sign-in could not finish</h1>
-<p>Your sign-in may have expired, been cancelled, or been interrupted. Restart to open a new secure sign-in request. Your previous sign-in code will not be reused.</p>
-<p><a href="{{ restart_url }}">Restart sign-in</a> <a href="/">Return to Lightwork</a></p>
-<p>If this continues, contact your organization's sign-in administrator and tell them when it happened. Never send them passwords or sign-in codes.</p>
-</main></body></html>
+{% extends "public_base.html" %}
+{#- Company sign-in failed: the person has no session, so this is the public
+    shell. Generic by default; the two documented reasons pass their own
+    title, message and next step. -#}
+{% block title %}{{ title or 'Restart sign-in' }} · Lightwork{% endblock %}
+{% block public_label %}Sign in{% endblock %}
+{% block public_footer %}Sign in to this workspace{% endblock %}
+{% block content %}
+<section class="panel" style="max-width: 36rem; margin: 0 auto;" aria-labelledby="title">
+  <h1 id="title" class="page-title" tabindex="-1">{{ title or 'Sign-in could not finish' }}</h1>
+  {% if message %}
+  <p>{{ message }}</p>
+  <p style="display: flex; gap: var(--space-3); flex-wrap: wrap; align-items: center;">
+    <a class="btn btn--primary" href="{{ action_href }}">{{ action_label }}</a>
+    <a href="/">Return to Lightwork</a></p>
+  {% else %}
+  <p>Your sign-in may have expired, been cancelled, or been interrupted. Restart to open a new secure sign-in request. Your previous sign-in code will not be reused.</p>
+  <p style="display: flex; gap: var(--space-3); flex-wrap: wrap; align-items: center;">
+    <a class="btn btn--primary" href="{{ restart_url }}">Restart sign-in</a>
+    <a href="/">Return to Lightwork</a></p>
+  <p class="muted">If this continues, contact your organization's sign-in administrator and tell them when it happened. Never send them passwords or sign-in codes.</p>
+  {% endif %}
+</section>
+{% endblock %}

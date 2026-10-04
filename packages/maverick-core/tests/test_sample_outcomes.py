@@ -68,7 +68,7 @@ def test_finance_seeds_the_three_exceptions_and_expected_shape_names_them():
     assert duplicates == [("INV-1043", "INV-1041")]
     assert mismatches == ["INV-1044"] and unknown == ["INV-1045"]
     expected = so.expected_result("finance")
-    for token in ("INV-1043", "INV-1041", "INV-1044", "INV-1045", "Approvals"):
+    for token in ("INV-1043", "INV-1041", "INV-1044", "INV-1045", so.get("finance").lands_in):
         assert token in expected
 
 
@@ -149,3 +149,49 @@ def test_config_knob_round_trips(tmp_path, monkeypatch):
         assert config.get_first_outcome() == {"department": None, "sample_workspace_created": False}
     finally:
         config.reset_config_cache()
+
+
+@pytest.fixture
+def fresh_install(tmp_path, monkeypatch):
+    """A fresh install: default configuration, no tool servers, no plugins."""
+    import os
+
+    from maverick import config, tools
+    from maverick.blackboard import Blackboard
+    from maverick.budget import Budget
+    from maverick.sandbox.local import LocalBackend
+    from maverick.swarm import SwarmContext
+    from maverick.world_model import WorldModel
+
+    for name in tuple(os.environ):
+        if name.startswith(("MAVERICK_", "LIGHTWORK_")):
+            monkeypatch.delenv(name, raising=False)
+    cfg = tmp_path / "config.toml"
+    cfg.write_text("[client]\nid = 'fresh-install'\n", encoding="utf-8")
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
+    monkeypatch.setenv("MAVERICK_CONFIG", str(cfg))
+    for name in ("_apply_python_plugins", "_apply_ts_plugins", "_apply_grpc_plugins"):
+        monkeypatch.setattr(tools, name, lambda registry: None)
+    config.reset_config_cache()
+    world = WorldModel(tmp_path / "world.db")
+    ctx = SwarmContext(llm=None, world=world, budget=Budget(max_dollars=1), blackboard=Blackboard(),
+                       sandbox=LocalBackend(workdir=tmp_path), goal_id=world.create_goal("sample check"),
+                       use_skills=False)
+    yield ctx
+    world.close()
+    config.reset_config_cache()
+
+
+@pytest.mark.parametrize("department", DEPARTMENTS)
+def test_every_offered_sample_specialist_can_start_on_a_fresh_install(fresh_install, department):
+    """LW-146: the kernel refuses to start a specialist whose workflow needs a
+    tool the install lacks (an AP connector, web search). Every sample runs
+    its pack exactly as the orchestrator builds it, on a default install."""
+    from maverick.domain import agent_from_profile, enabled_domains
+
+    outcome = so.get(department)
+    profile = enabled_domains()[outcome.pack]
+    agent = agent_from_profile(profile, fresh_install, so.goal_description(department), depth=0)
+    # The sample files are workspace files: the specialist reads them itself.
+    assert agent.capability.permits("read_file")
+    assert "read_file" in {tool.name for tool in agent.tools.all()}

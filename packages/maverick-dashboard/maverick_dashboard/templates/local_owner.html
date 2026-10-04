@@ -1,27 +1,9 @@
 {% extends "public_base.html" %}
+{% from "_passphrase_fields.html" import styles, passphrase, script %}
 {% block title %}{{ title }} · Lightwork{% endblock %}
 {% block public_label %}{{ 'First-time setup' if setup else 'Sign in' }}{% endblock %}
-{% block public_footer %}Owner sign-in on this computer{% endblock %}
-{% block head_extra %}
-<style>
-  .own { max-width: 34rem; margin-inline: auto; }
-  .own h1 { margin: 0 0 var(--space-2); }
-  .own__lede { color: var(--muted); margin: 0 0 var(--space-4); }
-  .own__field { display: flex; flex-direction: column; gap: var(--space-1); margin: 0 0 var(--space-3); }
-  .own__field > span { font-weight: var(--font-semibold); font-size: var(--text-sm); }
-  .own__row { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
-  .own__row .input { flex: 1 1 14rem; }
-  .own__check { display: flex; gap: var(--space-2); align-items: flex-start; margin: var(--space-3) 0; }
-  .own__check input { margin-top: 0.3em; }
-  .own__meter { height: 6px; border-radius: var(--radius-pill); background: var(--surface-2); overflow: hidden; }
-  .own__meter > i { display: block; height: 100%; width: 0; background: var(--danger); transition: width .2s ease, background .2s ease; }
-  .own__meter--fair > i { background: var(--warn); }
-  .own__meter--strong > i { background: var(--success); }
-  .own__hint { font-size: var(--text-sm); color: var(--muted); margin: var(--space-1) 0 0; }
-  .own__actions { display: flex; gap: var(--space-3); align-items: center; flex-wrap: wrap; margin-top: var(--space-4); }
-  .own__alert { border: 1px solid var(--danger); border-radius: var(--radius-md); padding: var(--space-2) var(--space-3); margin: 0 0 var(--space-3); }
-</style>
-{% endblock %}
+{% block public_footer %}{{ 'Owner setup on this computer' if setup else 'Sign in to this workspace' }}{% endblock %}
+{% block head_extra %}{{ styles() }}{% endblock %}
 {% block content %}
 <div class="panel own">
   <h1 class="page-title">{{ title }}</h1>
@@ -32,22 +14,8 @@
       <input class="input" type="email" name="email" maxlength="320" required autocomplete="username" placeholder="you@company.com">
       {% if setup %}<span class="own__hint">A label for this account on this computer. Lightwork does not send anything to it.</span>{% endif %}
     </label>
-    <label class="own__field"><span>Passphrase{% if setup %} (at least 14 characters){% endif %}</span>
-      <span class="own__row">
-        <input class="input" type="password" name="password" id="owner-password" minlength="14" maxlength="1024" required
-               autocomplete="{{ 'new-password' if setup else 'current-password' }}"{% if setup %} aria-describedby="owner-strength"{% endif %}>
-        <button type="button" class="btn btn--ghost" id="owner-show" aria-pressed="false" aria-controls="owner-password">Show</button>
-      </span>
-      {% if setup %}
-      <span class="own__meter" id="owner-meter" aria-hidden="true"><i></i></span>
-      <span class="own__hint" id="owner-strength" aria-live="polite">A few unrelated words make a passphrase that is long and easy to remember.</span>
-      {% endif %}
-    </label>
+    {{ passphrase(new=setup) }}
     {% if setup %}
-    <label class="own__field"><span>Confirm passphrase</span>
-      <input class="input" type="password" name="password2" id="owner-password2" minlength="14" maxlength="1024" required autocomplete="new-password" aria-describedby="owner-match">
-      <span class="own__hint" id="owner-match" aria-live="polite"></span>
-    </label>
     <label class="own__check"><input type="checkbox" name="confirm" value="yes" required>
       <span>I manage this computer and understand that saving turns off anonymous administrator access and turns on named sign-in.</span></label>
     {% endif %}
@@ -56,57 +24,13 @@
       {% if setup %}
       <a href="/auth/local-login">Already set up? Sign in</a>
       <a href="/start?owner=later" class="muted">Skip for now</a>
-      {% else %}
-      <span class="muted">For company sign-in, use your organization’s configured login method.</span>
       {% endif %}
     </div>
   </form>
+  {% if not setup %}
+  <p class="own__hint">No passphrase yet, or forgotten it? Ask your administrator for a new invite.
+    Accepting it lets you choose a new passphrase.</p>
+  {% endif %}
 </div>
 {% endblock %}
-{% block scripts_extra %}
-<script>
-(function () {
-  'use strict';
-  var pw = document.getElementById('owner-password');
-  var show = document.getElementById('owner-show');
-  var pw2 = document.getElementById('owner-password2');
-  var meter = document.getElementById('owner-meter');
-  var strength = document.getElementById('owner-strength');
-  var match = document.getElementById('owner-match');
-  var form = document.getElementById('owner-form');
-  show.addEventListener('click', function () {
-    var on = pw.type === 'password';
-    pw.type = on ? 'text' : 'password';
-    if (pw2) pw2.type = pw.type;
-    show.textContent = on ? 'Hide' : 'Show';
-    show.setAttribute('aria-pressed', on ? 'true' : 'false');
-  });
-  function score(value) {
-    var words = value.trim().split(/\s+/).filter(Boolean).length;
-    var classes = [/[a-z]/, /[A-Z]/, /[0-9]/, /[^A-Za-z0-9]/].filter(function (re) { return re.test(value); }).length;
-    if (value.length < 14) return {level: 0, text: 'Too short: use at least 14 characters (' + (14 - value.length) + ' more).'};
-    if (value.length >= 20 || words >= 4 || (value.length >= 16 && classes >= 3)) return {level: 2, text: 'Strong passphrase.'};
-    return {level: 1, text: 'Fair. Longer, or a few more unrelated words, makes it stronger.'};
-  }
-  function update() {
-    if (!meter) return;
-    var s = score(pw.value);
-    meter.className = 'own__meter' + (s.level === 2 ? ' own__meter--strong' : s.level === 1 ? ' own__meter--fair' : '');
-    meter.firstElementChild.style.width = pw.value ? (s.level === 2 ? '100%' : s.level === 1 ? '66%' : '33%') : '0';
-    strength.textContent = pw.value ? s.text : 'A few unrelated words make a passphrase that is long and easy to remember.';
-    if (pw2 && pw2.value) match.textContent = pw2.value === pw.value ? 'The passphrases match.' : 'The passphrases do not match yet.';
-    else if (match) match.textContent = '';
-  }
-  pw.addEventListener('input', update);
-  if (pw2) pw2.addEventListener('input', update);
-  form.addEventListener('submit', function (event) {
-    if (!form.checkValidity()) { event.preventDefault(); form.reportValidity(); return; }
-    if (pw2 && pw2.value !== pw.value) {
-      event.preventDefault();
-      match.textContent = 'The passphrases do not match. Type the same passphrase in both boxes.';
-      pw2.focus();
-    }
-  });
-})();
-</script>
-{% endblock %}
+{% block scripts_extra %}{{ script() }}{% endblock %}

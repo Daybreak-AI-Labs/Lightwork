@@ -77,17 +77,32 @@ SELF_AUTH_WEBHOOK_PATHS = frozenset(
     }
 )
 
-_SELF_AUTH_EXEMPT_PATHS = _OIDC_EXEMPT_PATHS | frozenset(
+# Files the signed-out pages (sign-in, owner setup, invitation, public rights
+# form, vendor questionnaire, shared result, sign-in error) load before any
+# session exists. Each is public product code or branding and carries no data.
+# Exact files only, never a folder: everything else under /static/ stays behind
+# sign-in. Both gates (app._AUTH_EXEMPT and this dependency) read this one set.
+PUBLIC_STATIC_PATHS = frozenset(
     {
-        "/a2a/v1",
+        # The shell stylesheet: without it every signed-out page renders
+        # unstyled (system serif font, full-size logo, sideways scrolling).
+        "/static/lightwork.css",
         "/static/daybreak-logo.jpg",
         "/static/daybreak-mark.png",
+        # The self-hosted fonts lightwork.css references.
         "/static/fonts/manrope-200.woff2", "/static/fonts/manrope-300.woff2",
         "/static/fonts/manrope-400.woff2", "/static/fonts/manrope-500.woff2",
         "/static/fonts/manrope-600.woff2", "/static/fonts/manrope-700.woff2",
         "/static/fonts/jbm-400.woff2", "/static/fonts/jbm-500.woff2",
-        # The public share page's markdown renderer (see app._AUTH_EXEMPT).
+        # The public share page formats its answer with this dependency-free
+        # renderer, which builds DOM from text and carries no data.
         "/static/lightwork-markdown.js",
+    }
+)
+
+_SELF_AUTH_EXEMPT_PATHS = _OIDC_EXEMPT_PATHS | PUBLIC_STATIC_PATHS | frozenset(
+    {
+        "/a2a/v1",
         # The LLM gateway authenticates every call with its own bearer inside
         # maverick.llm_gateway (same trust-domain rationale as /a2a/v1).
         "/gateway/v1/chat/completions",

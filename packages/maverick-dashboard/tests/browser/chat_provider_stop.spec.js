@@ -12,9 +12,9 @@ test('a provider failure stops the task and offers a connection route', async ({
   await expect(page.locator('#status')).toHaveText('Stopped');
   await expect(page.locator('#halt-card')).toBeVisible();
   await expect(page.locator('#halt-reason')).toContainText("couldn't reach the AI service");
-  await expect(page.locator('#halt-action-link')).toHaveAttribute('href', '/connections');
+  await expect(page.locator('#halt-action-link')).toHaveAttribute('href', '/settings?focus=ai-provider#settings-integrations');
 
   await page.reload();
   await expect(page.locator('#status')).toHaveText('stopped');
-  await expect(page.locator('#halt-action-link')).toHaveAttribute('href', '/connections');
+  await expect(page.locator('#halt-action-link')).toHaveAttribute('href', '/settings?focus=ai-provider#settings-integrations');
 });

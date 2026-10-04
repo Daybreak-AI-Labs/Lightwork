@@ -424,9 +424,9 @@
       blank to keep the key you already saved.
     </p>
     {% for p in providers %}
-    <div class="provider-row" data-settings-search-item id="provider-{{ p.name }}">
+    <div class="provider-row" data-settings-search-item id="provider-{{ p.name }}" role="group" aria-labelledby="provider-name-{{ p.name }}"{% if p.name == ai_focus_provider %} data-ai-provider-focus{% endif %}>
       <div class="provider-row__about">
-        <div class="provider-row__name">{{ p.label }}</div>
+        <div class="provider-row__name" id="provider-name-{{ p.name }}">{{ p.label }}</div>
         <div class="muted provider-row__meta">
           {% if p.configured %}Saved, {{ p.via|source_label }}{% if p.key_hint %} · {{ p.key_hint }}{% endif %}
           {% else %}No key yet. Paste one to use this provider.{% endif %}
@@ -467,7 +467,7 @@
           <button type="submit" class="btn"
                   {% if (not p.dashboard_can_set_api_key) and ((not p.base_url_field) or (not p.dashboard_can_set_base_url)) %}disabled aria-disabled="true"{% endif %}>Save</button>
         </form>
-        <div class="settings-row-form">
+        <div class="settings-row-form provider-row__buttons">
           {% if p.configured %}
           <form method="post" action="/settings/providers/test">
             <input type="hidden" name="provider" value="{{ p.name }}" />
@@ -487,6 +487,9 @@
           </form>
           {% endif %}
         </div>
+        {# Save, Test connection and Remove key report here; the row above is
+           re-rendered from the server's answer, so this line stays put. #}
+        <p class="muted provider-row__status" data-provider-status role="status" aria-live="polite"></p>
       </div>
     </div>
     {% endfor %}
@@ -903,6 +906,12 @@
     });
     if (search) search.addEventListener('input', applySearch);
     var requestedFocus = new URLSearchParams(window.location.search).get('focus');
+    // "Open AI provider keys" on a stopped task asks for the provider that
+    // needs attention; the server marks that one row.
+    if (requestedFocus === 'ai-provider') {
+      var aiRow = document.querySelector('[data-ai-provider-focus]');
+      requestedFocus = aiRow ? aiRow.id : 'settings-integrations';
+    }
     selectGroup(active, false);
     if (requestedFocus) {
       var focusTarget = document.getElementById(requestedFocus);
@@ -942,8 +951,32 @@
       return 'another section';
     }
     function markDirty(event) { dirty.add(event.currentTarget); }
+    function providerStatus(form) {
+      var row = form.closest('.provider-row');
+      return row ? row.querySelector('[data-provider-status]') : null;
+    }
+    // Save, Test connection and Remove key change one provider row and the
+    // page header. Re-render both from the page the server answered with, so
+    // the new status and its plain cause show at once, without a reload.
+    function refreshProviderRow(form, documentCopy) {
+      var row = form.closest('.provider-row');
+      if (!row) return '';
+      var header = document.querySelector('.hero-statebox'), freshHeader = documentCopy.querySelector('.hero-statebox');
+      if (header && freshHeader) header.replaceWith(document.importNode(freshHeader, true));
+      var fresh = documentCopy.getElementById(row.id);
+      if (!fresh) return '';
+      ['.provider-row__about', '.provider-row__buttons'].forEach(function (selector) {
+        var current = row.querySelector(selector), next = fresh.querySelector(selector);
+        if (!current || !next) return;
+        var copy = document.importNode(next, true);
+        current.replaceWith(copy);
+        copy.querySelectorAll('form[action^="/settings"]').forEach(bindForm);
+      });
+      var badge = row.querySelector('.provider-row__readiness .badge');
+      return badge ? badge.textContent.trim() : '';
+    }
 
-    forms.filter(function (form) { return form.dataset.settingsLocal !== 'true'; }).forEach(function (form) {
+    function bindForm(form) {
       form.addEventListener('input', markDirty);
       form.addEventListener('change', markDirty);
       form.addEventListener('submit', async function (event) {
@@ -951,7 +984,18 @@
         event.preventDefault();
         if (form.dataset.saving === 'true') return;
         form.dataset.saving = 'true';
-        var status = form.querySelector('[data-save-status]');
+        // Where the person was: saving disables the controls (which drops
+        // focus) and a provider row may be re-rendered, so focus returns here.
+        var focusedControl = form.contains(document.activeElement) ? document.activeElement : (event.submitter || null);
+        var providerRow = form.closest('.provider-row');
+        // A form that asks first (Remove key, reset visibility) confirms
+        // before anything is sent; declining sends nothing.
+        if (form.dataset.confirm) {
+          var confirmText = {okText: form.dataset.confirmOk || 'Confirm'};
+          var agreed = window.mvConfirm ? await window.mvConfirm(form.dataset.confirm, confirmText) : window.confirm(form.dataset.confirm);
+          if (!agreed) { delete form.dataset.saving; return; }
+        }
+        var status = form.querySelector('[data-save-status]') || providerStatus(form);
         if (!status) { status = document.createElement('p'); status.dataset.saveStatus = '1'; status.setAttribute('role', 'status'); form.append(status); }
         status.textContent = 'Saving this section.';
         var body = new FormData(form);
@@ -986,6 +1030,11 @@
           status.textContent = receipt.textContent.trim();
           if (response.status !== 202 && receipt.id !== "settings-notice") {
             dirty.delete(form);
+            var providerState = refreshProviderRow(form, documentCopy);
+            if (providerState) {
+              status.textContent = (form.getAttribute('action') === '/settings/providers/test'
+                ? 'Connection test finished.' : receipt.textContent.trim()) + ' Status now: ' + providerState;
+            }
             if (form.matches('form[action="/settings/models"], form[action="/settings/models/roles"]')) {
               var currentRates = document.querySelector('[data-model-rate-status]');
               var updatedRates = documentCopy.querySelector('[data-model-rate-status]');
@@ -1008,9 +1057,17 @@
         } finally {
           controls.forEach(function (item) { item[0].disabled = item[1]; });
           delete form.dataset.saving;
+          if (focusedControl && (!document.activeElement || document.activeElement === document.body)) {
+            var back = focusedControl.isConnected ? focusedControl : providerRow && providerRow.isConnected
+              ? providerRow.querySelector('form[action="' + form.getAttribute('action') + '"] button[type="submit"]') ||
+                providerRow.querySelector('input[type="password"]:not([disabled])')
+              : null;
+            if (back) back.focus();
+          }
         }
       });
-    });
+    }
+    forms.filter(function (form) { return form.dataset.settingsLocal !== 'true'; }).forEach(bindForm);
 
     document.querySelectorAll('[data-model-picker]').forEach(function (select) {
       var custom = document.getElementById(select.dataset.modelPicker);
