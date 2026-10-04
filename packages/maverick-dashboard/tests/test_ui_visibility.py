@@ -164,10 +164,11 @@ def test_nav_groups_per_role(monkeypatch, tmp_path):
     assert v.isdisjoint({"/chat", "/ekko", "/automations", "/settings", "/users", "/mcp", "/audit", "/learning", "/benchmarks"})
     # The governance surfaces are split into focused sections (the flat
     # 30-link Govern block read as unorganized); the role still sees no
-    # Extend/Admin group.
+    # Extend/Admin group. My companion lives in Operate (shown as "Work"),
+    # never in a second group that is also titled "Work".
     assert {g["label"] for g in ui_visibility.nav_groups("viewer")} == {
         "Operate", "Observe", "Govern", "Privacy", "Consent",
-        "AI oversight", "Third parties", "Work"}
+        "AI oversight", "Third parties"}
     # auditor: the audit read surfaces, nothing operational. (/replay is folded
     # out of the sidebar in the moderate declutter; reached from Audit in-page.)
     a = hrefs("auditor")
@@ -369,6 +370,57 @@ def test_nav_and_matrix_groups_are_unique():
         assert len(labels) == len(set(labels)), f"duplicate nav groups for {role}: {labels}"
     mlabels = [g["label"] for g in ui_visibility.matrix()]
     assert len(mlabels) == len(set(mlabels)), f"duplicate matrix groups: {mlabels}"
+
+
+def test_displayed_group_titles_are_unique_for_every_role():
+    """Two raw groups must never render under one title (the companion page once
+    sat in a raw "Work" group while "Operate" is also shown as "Work")."""
+    from maverick_dashboard import rbac, ui_visibility
+    for role in [None, *rbac.ROLES]:
+        for groups in (ui_visibility.nav_groups(role), ui_visibility.finder_pages(role)):
+            titles = [g["title"] for g in groups]
+            assert len(titles) == len(set(titles)), f"duplicate group titles for {role}: {titles}"
+    titles = [g["title"] for g in ui_visibility.matrix()]
+    assert len(titles) == len(set(titles)), f"duplicate matrix group titles: {titles}"
+    work = next(g for g in ui_visibility.nav_groups(None) if g["title"] == "Work")
+    assert {"/companion", "/goals", "/chat"} <= {link["href"] for link in work["links"]}
+
+
+def test_rendered_sidebar_group_titles_are_unique_with_companions_on(monkeypatch, tmp_path):
+    from html.parser import HTMLParser
+
+    from maverick_dashboard import employee_companion_api
+
+    monkeypatch.setattr(employee_companion_api, "navigation_available", lambda request, admin=False: True)
+    c = _client(monkeypatch, tmp_path)
+
+    class Groups(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.titles, self.capture, self.group_hrefs = [], False, {}
+
+        def handle_starttag(self, tag, attrs):
+            values = dict(attrs)
+            if tag == "span" and values.get("class") == "navgrp__label":
+                self.capture = True
+                self.titles.append("")
+            if tag == "a" and self.titles and values.get("href"):
+                self.group_hrefs.setdefault(self.titles[-1], set()).add(values["href"])
+
+        def handle_endtag(self, tag):
+            if tag == "span":
+                self.capture = False
+
+        def handle_data(self, data):
+            if self.capture:
+                self.titles[-1] += data.strip()
+
+    for path in ("/goals",):
+        parser = Groups()
+        parser.feed(c.get(path).text)
+        assert len(parser.titles) == len(set(parser.titles)), (path, parser.titles)
+        assert parser.titles.count("Work") == 1, (path, parser.titles)
+        assert "/companion" in parser.group_hrefs["Work"], path
 
 
 def test_approved_self_connect_keeps_page_overrides_and_native_admin_floor(monkeypatch, tmp_path):

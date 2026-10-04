@@ -108,7 +108,7 @@ PAGES: tuple[dict, ...] = (
         "path": "/companion",
         "label": "My companion",
         "aliases": "personal employee companion task status",
-        "group": "Work",
+        "group": "Operate",
         "icon": "chat",
         "floor": "view",
         "default": "view",
@@ -1263,6 +1263,21 @@ for _pg in PAGES:
 
 _PAGES_BY_PATH = {p["path"]: p for p in PAGES}
 
+# What people see for each registry group. The short keys stay stable because
+# they also key each browser's remembered open/closed sidebar sections.
+GROUP_TITLES: dict[str, str] = {
+    "Operate": "Work",
+    "Observe": "Insights",
+    "Govern": "Governance",
+    "Admin": "Administration",
+    "Extend": "Library",
+}
+
+
+def group_title(group: str) -> str:
+    """The sidebar, finder and Settings title for a registry group."""
+    return GROUP_TITLES.get(group, group)
+
 # Lockout guard: the pages an admin needs to *undo* a bad matrix save. Always
 # visible + reachable for the admin role, no matter what the store says.
 LOCKED = frozenset({("/settings", "admin"), ("/users", "admin")})
@@ -1505,7 +1520,7 @@ def _grouped_links(
             if g["label"] == page["group"]:
                 break
         else:
-            g = {"label": page["group"], "links": []}
+            g = {"label": page["group"], "title": group_title(page["group"]), "links": []}
             groups.append(g)
         g["links"].append(
             {
@@ -1549,7 +1564,7 @@ def matrix() -> list[dict]:
             if g["label"] == page["group"]:
                 break
         else:
-            g = {"label": page["group"], "pages": []}
+            g = {"label": page["group"], "title": group_title(page["group"]), "pages": []}
             groups.append(g)
         g["pages"].append(
             {
@@ -1565,6 +1580,7 @@ def matrix() -> list[dict]:
 
 __all__ = [
     "PAGES",
+    "GROUP_TITLES",
     "LOCKED",
     "store_path",
     "overrides",
@@ -1575,6 +1591,7 @@ __all__ = [
     "set_visibility",
     "apply_selection",
     "page_for",
+    "group_title",
     "nav_groups",
     "finder_pages",
     "matrix",

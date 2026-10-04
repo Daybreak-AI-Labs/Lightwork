@@ -224,14 +224,13 @@
       {{ ui("Find a page") }}
       <kbd aria-hidden="true" id="cs-find-kbd">Ctrl K</kbd>
     </button>
-    {% set _group_labels = {'Operate': 'Work', 'Observe': 'Insights', 'Govern': 'Governance', 'Admin': 'Administration', 'Extend': 'Library'} %}
     {% set _chat_path = request.url.path if request else '/chat' %}
     {% set _chat_groups = (nav_groups | selectattr('label', 'equalto', 'Operate') | list) + (nav_groups | rejectattr('label', 'equalto', 'Operate') | list) %}
     <nav class="cs-product" aria-label="Lightwork product">
       <div class="cs-product__heading"><strong>Explore Lightwork</strong></div>
       {% for _group in _chat_groups %}
       <details class="cs-product__group"{% if _group.label == 'Operate' %} open{% endif %}>
-        <summary>{{ _group_labels.get(_group.label, _group.label) }}</summary>
+        <summary>{{ _group.title or _group.label }}</summary>
         <ul>
           {% for _link in _group.links %}
           {% set _active = _chat_path == _link.href or _chat_path.startswith(_link.href ~ '/') %}
