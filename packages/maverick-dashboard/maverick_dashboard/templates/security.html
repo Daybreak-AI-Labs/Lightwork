@@ -580,8 +580,13 @@
     });
     if (focus) button.focus();
   }
+  // Each tab has its own address (#sec-incidents and so on), so a link or a
+  // refresh opens the same tab. replaceState keeps Back for leaving the page.
+  function remember(button) {
+    history.replaceState(history.state, '', '#sec-' + button.dataset.secTab);
+  }
   buttons.forEach(function (button) {
-    button.addEventListener('click', function () { activateTab(button, false); });
+    button.addEventListener('click', function () { activateTab(button, false); remember(button); });
     button.addEventListener('keydown', function (event) {
       var list = Array.prototype.slice.call(buttons);
       var index = list.indexOf(button);
@@ -590,12 +595,19 @@
       if (event.key === 'ArrowLeft') next = list[(index - 1 + list.length) % list.length];
       if (event.key === 'Home') next = list[0];
       if (event.key === 'End') next = list[list.length - 1];
-      if (next) { event.preventDefault(); activateTab(next, true); }
+      if (next) { event.preventDefault(); activateTab(next, true); remember(next); }
     });
   });
-  if (location.hash === '#sec-controls' && document.getElementById('sec-tab-controls')) {
-    activateTab(document.getElementById('sec-tab-controls'), false);
+  function openFromAddress() {
+    var match = /^#sec-([a-z]+)$/.exec(location.hash);
+    var button = match && document.querySelector('[data-sec-tab="' + match[1] + '"]');
+    if (!button) return;
+    activateTab(button, false);
+    var tabs = button.closest('[role="tablist"]');
+    if (tabs && typeof tabs.scrollIntoView === 'function') tabs.scrollIntoView({block: 'start'});
   }
+  openFromAddress();
+  window.addEventListener('hashchange', openFromAddress);
 
   // "Someone else…" / "Another framework…" reveal a text field.
   document.querySelectorAll('select[data-owner-select], select[data-other-select]').forEach(function (sel) {

@@ -217,12 +217,23 @@
         active = b.getAttribute('data-g-filter') || '';
         filterBtns.forEach(function (x) { x.classList.toggle('btn--primary', x === b); x.setAttribute('aria-pressed', x === b ? 'true' : 'false'); });
         applyFilter();
+        writeAddress();
       });
     });
     var savedStatuses = {'':'', running:'running active pending', waiting:'blocked awaiting_approval', failed:'failed', done:'done'};
     window.LightworkTaskFilters = {current:function () {
       return {q:input.value.trim(), status:Object.keys(savedStatuses).find(function (key) { return savedStatuses[key] === active; }) || ''};
     }};
+    // The address follows the chosen filter and search, so a copied link or a
+    // refresh shows the same tasks. replaceState keeps Back for leaving the page.
+    var addressTimer = null;
+    function writeAddress() {
+      var params = new URLSearchParams(window.location.search), current = window.LightworkTaskFilters.current();
+      ['status', 'q'].forEach(function (key) { if (current[key]) params.set(key, current[key]); else params.delete(key); });
+      var query = params.toString();
+      window.history.replaceState(window.history.state, '', window.location.pathname + (query ? '?' + query : '') + window.location.hash);
+    }
+    input.addEventListener('input', function () { clearTimeout(addressTimer); addressTimer = setTimeout(writeAddress, 400); });
     function selection() {
       document.dispatchEvent(new CustomEvent('lightwork:copilot-selection', {detail:{selection:{kind:'task_filter', filters:window.LightworkTaskFilters.current()}}}));
     }
