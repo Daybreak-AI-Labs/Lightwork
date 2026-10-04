@@ -66,18 +66,11 @@ def humanize(value: object) -> str:
 
 
 def budget_text(budget: object) -> str:
-    """The dashboard's spending line, in the same words."""
-    if not isinstance(budget, dict) or not budget:
-        return "Not stated"
-    maximum = budget.get("maximum")
-    if isinstance(maximum, (int, float)) and not isinstance(maximum, bool):
-        currency = str(budget.get("currency") or "USD")
-        amount = f"${maximum:.2f}" if currency == "USD" else f"{currency} {maximum:.2f}"
-        minutes = budget.get("minutes")
-        return f"Up to {amount}" + (f" · {minutes} minutes" if minutes else "")
-    if budget.get("state"):
-        return "Checked again when it runs"
-    return " · ".join(f"{humanize(k)}: {v}" for k, v in budget.items())
+    """The dashboard's spending line, in the same words (one shared sentence;
+    fingerprints and raw field names never appear on a card)."""
+    from maverick.channel_approvals import spending_text
+
+    return spending_text(budget if isinstance(budget, dict) else None)
 
 
 def decide_by(expires_at: object) -> str:

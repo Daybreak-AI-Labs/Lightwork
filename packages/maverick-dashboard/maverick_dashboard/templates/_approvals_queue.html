@@ -10,14 +10,9 @@
   {%- elif value is string -%}{{ value | humanize if ('_' in value and ' ' not in value) else value }}
   {%- else -%}{{ value }}{%- endif -%}
 {%- endmacro %}
-{% macro _budget_text(budget) -%}
-  {%- if budget.get('maximum') is not none and budget.get('maximum') is number -%}
-    Up to {{ '$' if (budget.get('currency') or 'USD') == 'USD' else (budget.get('currency') ~ ' ') }}{{ '%.2f' | format(budget.get('maximum')) }}
-    {%- if budget.get('minutes') %} · {{ budget.get('minutes') }} minutes{% endif %}
-  {%- elif budget.get('state') -%}Checked again when it runs
-  {%- else -%}{% for key, value in budget.items() %}{{ key | humanize }}: {{ _plain_value(value) }}{% if not loop.last %} · {% endif %}{% endfor %}
-  {%- endif -%}
-{%- endmacro %}
+{# The spending line every approval surface shares (maverick.channel_approvals):
+   a sentence, never a mapping; the raw record is under Technical details. #}
+{% macro _budget_text(budget) -%}{{ budget | approval_spending }}{%- endmacro %}
 <div id="approval-queue" class="approval-list" aria-label="Requests waiting for your decision">
 {% if approvals %}
   {% for a in approvals %}
@@ -61,6 +56,8 @@
             <div><dt>Spending</dt><dd>{{ _budget_text(card.budget) }}</dd></div>
           </dl>
           {% if card.parameters.summary %}<div class="approval-parameters"><strong>What it will do</strong><ul>{% for item in card.parameters.summary %}<li>{{ item }}</li>{% endfor %}</ul></div>{% endif %}
+          {% if card.display and card.display.command %}<div class="approval-command"><strong id="approval-command-label-{{ a.id }}">Command it will run</strong>
+            <pre aria-labelledby="approval-command-label-{{ a.id }}"><code>{{ card.display.command }}</code></pre></div>{% endif %}
           <div class="approval-preview"><div><strong>Before</strong><p>{{ card.preview.before }}</p></div><div><strong>After</strong><p>{{ card.preview.after }}</p></div></div>
           <div class="approval-consequences">
             <div><strong>What happens next{% if card.consequences.irreversible %} <span class="badge blocked">Can't be undone</span>{% endif %}</strong><ul>{% for item in card.consequences.known_effects %}<li>{{ item }}</li>{% endfor %}</ul></div>
@@ -73,6 +70,7 @@
               <div><dt>Item fingerprint</dt><dd><code>{{ card.target.sha256 }}</code></dd></div>
               <div><dt>Input fingerprint</dt><dd><code>{{ card.parameters.sha256 }}</code></dd></div>
               {% for key, value in card.credentials.items() %}<div><dt>{{ key | humanize }}</dt><dd><code>{{ _plain_value(value) }}</code></dd></div>{% endfor %}
+              {% if card.budget %}<div><dt>Spending record</dt><dd><code>{{ _plain_value(card.budget) }}</code></dd></div>{% endif %}
             </dl>
           </details>
         </section>
@@ -118,6 +116,7 @@
     <p id="approval-confirm-own" class="approval-confirm__own" hidden><strong>You're approving your own request.</strong></p>
     <dl class="approval-confirm__facts">
       <div><dt>What it will do</dt><dd><ul id="approval-confirm-does"></ul></dd></div>
+      <div id="approval-confirm-command-row" hidden><dt>Command it will run</dt><dd><pre><code id="approval-confirm-command"></code></pre></dd></div>
       <div><dt>Systems and data affected</dt><dd id="approval-confirm-affects"></dd></div>
       <div><dt>Spending</dt><dd id="approval-confirm-spending"></dd></div>
       <div><dt>Can it be undone?</dt><dd id="approval-confirm-undo"></dd></div>
@@ -171,6 +170,8 @@
   .approval-card dt { font-weight: var(--font-semibold); }
   .approval-card dd { margin: var(--space-1) 0 0; overflow-wrap: anywhere; }
   .approval-card code { white-space: normal; overflow-wrap: anywhere; }
+  .approval-command pre, .approval-confirm__facts pre { margin: var(--space-1) 0 var(--space-2); padding: var(--space-2); max-height: 16rem; overflow: auto; background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius-md); }
+  .approval-command pre code, .approval-confirm__facts pre code { white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--font-mono, monospace); }
   .approval-card ul { margin: var(--space-1) 0 var(--space-2); padding-left: 1.25rem; }
   .approval-card p { overflow-wrap: anywhere; }
   .approval-preview, .approval-consequences { margin-top: var(--space-3); }
@@ -299,6 +300,10 @@
         n.textContent = (detail && detail.textContent.trim()) || (item.dataset.label || 'The action described on the card.');
         does.appendChild(n);
       }
+      // The exact command, when the card carries one, is restated too.
+      const command = item.querySelector('.approval-command code');
+      document.getElementById('approval-confirm-command').textContent = command ? command.textContent : '';
+      document.getElementById('approval-confirm-command-row').hidden = !command;
       const affects = [item.dataset.target, item.dataset.scope].filter(function (v, i, arr) {
         return v && arr.indexOf(v) === i;
       });

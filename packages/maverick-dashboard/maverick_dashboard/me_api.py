@@ -97,16 +97,46 @@ def _require_bridge_identity(request: Request) -> tuple[str, str, str]:
     return identity
 
 
+def _waiting_on(request: Request, world, principal: str, row: dict, *, can_decide: bool) -> str:
+    """Who the request is really waiting on, by the rules that are enforced.
+
+    "you" / "you_own": this person can open and decide it (with one approver,
+    the person who asked may approve their own request); "others": they asked,
+    but under two-person approval other people must decide; "requester": it
+    belongs to a colleague's private task this person can't open.
+    """
+    from maverick.safety.dual_control import allow_self_approval
+
+    from .content_access import can_read_approval
+
+    approval = world.get_approval(int(row["id"]))
+    if approval is None:
+        return "others"
+    own = bool(principal) and approval.requested_by == principal
+    if not can_decide or not can_read_approval(request, approval, world):
+        return "others" if own else "requester"
+    if not own:
+        return "you"
+    required = max(1, int(getattr(approval, "approvals_required", 1) or 1))
+    return "you_own" if required <= 1 or allow_self_approval() else "others"
+
+
 def _my_work(request: Request, principal: str) -> dict:
     from maverick import channel_identities, daily_digest, user_preferences
 
     prefs = user_preferences.get_preferences(principal)
     can_decide = auth.has_permission(request, "operate")
     everything = auth.goal_owner_filter(request) is None
+    world = _world()
     digest = daily_digest.compose_digest(
-        _world(), principal, can_decide=can_decide, sees_everything=everything,
+        world, principal, can_decide=can_decide, sees_everything=everything,
         time_zone=prefs["time_zone"],
     )
+    for row in digest["approvals"]:
+        row["waiting_on"] = _waiting_on(request, world, principal, row, can_decide=can_decide)
+    # "Things that need you" counts only the requests this person can decide.
+    digest["counts"]["approvals"] = sum(
+        1 for row in digest["approvals"] if row["waiting_on"] in ("you", "you_own"))
     try:
         links = channel_identities.links_for(principal)
     except channel_identities.ChannelIdentityError:

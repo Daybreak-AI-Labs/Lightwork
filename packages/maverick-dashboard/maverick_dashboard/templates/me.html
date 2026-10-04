@@ -35,12 +35,13 @@
           <td><span class="badge {{ 'blocked' if a.risk in ('high', 'critical') else 'pending' }}">{{ a.risk_label }}</span></td>
           <td>{{ a.spending }}</td>
           <td>{% if a.decide_by %}{{ a.decide_by | datetime }}{% else %}No deadline{% endif %}{% if a.status == 'expired' %} <span class="badge blocked">Expired</span>{% endif %}</td>
-          <td>{{ 'You' if a.waiting_on == 'you' else 'Someone else' }}</td>
+          <td>{{ {'you': 'You', 'you_own': 'You (your own request)', 'requester': 'The person who asked'}.get(a.waiting_on, 'Other people') }}</td>
         </tr>
       {% endfor %}
       </tbody>
     </table>
     {% if can_decide %}<p class="muted">Decide on the <a href="/approvals">Approvals page</a>, or from Slack with the buttons on the card.</p>{% endif %}
+    {% if d.approvals | selectattr('waiting_on', 'equalto', 'requester') | list %}<p class="muted">“The person who asked” means the request comes from a colleague's private task, so you can't open it here; they can decide their own request.</p>{% endif %}
     {% else %}
     <p class="muted">Nothing is waiting for your decision.</p>
     {% endif %}

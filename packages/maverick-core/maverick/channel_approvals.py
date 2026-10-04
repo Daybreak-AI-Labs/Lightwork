@@ -170,18 +170,47 @@ def _plain_action(action: str | None) -> str:
     return (text[:1].upper() + text[1:]) if text else "Reviewed action"
 
 
-def _spending_text(budget: dict[str, Any] | None) -> str:
-    if not isinstance(budget, dict) or not budget:
-        return "Not stated"
+def _amount_text(budget: Any) -> str:
+    if not isinstance(budget, dict):
+        return ""
     maximum = budget.get("maximum")
     if isinstance(maximum, (int, float)) and not isinstance(maximum, bool):
         currency = str(budget.get("currency") or "USD")
         amount = f"${maximum:.2f}" if currency == "USD" else f"{currency} {maximum:.2f}"
         minutes = budget.get("minutes")
         return f"Up to {amount}" + (f" · {minutes} minutes" if minutes else "")
+    return ""
+
+
+def spending_text(budget: dict[str, Any] | None) -> str:
+    """The spending line people read on every approval surface.
+
+    A card's budget is a plain cap (``maximum``), a promise to check again
+    when it runs (``state``), or an exact-operation card's pair of commitments
+    (``runtime`` and ``operation``). Fingerprints and raw field names never
+    show here; they belong under technical details.
+    """
+    if not isinstance(budget, dict) or not budget:
+        return "Not stated"
+    amount = _amount_text(budget)
+    if amount:
+        return amount
     if budget.get("state"):
         return "Checked again when it runs"
-    return "; ".join(f"{k}: {v}" for k, v in budget.items())[:200]
+    operation, runtime = budget.get("operation"), budget.get("runtime")
+    for part in (operation, runtime):
+        amount = _amount_text(part)
+        if amount:
+            return amount
+    if isinstance(operation, dict) and operation.get("state") not in (None, "", "not_applicable"):
+        return "Checked again when it runs"
+    if isinstance(runtime, dict) and runtime.get("external_effect_cost") == "unmeasured":
+        return ("No separate amount for this step. The task's spending limit still applies, "
+                "and costs outside Lightwork aren't measured.")
+    return "No separate amount for this step."
+
+
+_spending_text = spending_text
 
 
 def card_content(approval: Any, *, now: float | None = None) -> dict[str, Any]:
@@ -225,10 +254,15 @@ def card_content(approval: Any, *, now: float | None = None) -> dict[str, Any]:
         return content
     if card is None:
         return content
+    what_it_will_do = list(card["parameters"]["summary"])
+    if card.get("display"):
+        # The exact command stays on the access-checked Approvals page; shared
+        # chat rooms and summaries say where to read it.
+        what_it_will_do.append("The exact command is shown on the Approvals page.")
     content.update({
         "summary": card["summary"],
         "scope": card["target"]["label"],
-        "what_it_will_do": list(card["parameters"]["summary"]),
+        "what_it_will_do": what_it_will_do,
         "spending": _spending_text(card.get("budget")),
         "irreversible": bool(card["consequences"]["irreversible"]),
         "decide_by": float(card["expires_at"]),
@@ -770,6 +804,7 @@ __all__ = [
     "require_current_card",
     "safe_action_label",
     "slack_announcements_configured",
+    "spending_text",
     "undo_decision",
     "undo_seconds_left",
 ]

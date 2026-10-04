@@ -258,7 +258,12 @@ templates.env.filters["role_label"] = _idfmt.role_label
 templates.env.filters["permission_label"] = _idfmt.permission_label
 templates.env.filters["humanize"] = _idfmt.humanize
 # One run-status vocabulary for the chat badge, composer and recents.
+from maverick.channel_approvals import spending_text as _approval_spending  # noqa: E402
+
 from .run_status import status_label as _run_status_label  # noqa: E402
+
+# The spending line every approval surface shares: a sentence, never a mapping.
+templates.env.filters["approval_spending"] = _approval_spending
 
 templates.env.globals["run_status_label"] = _run_status_label
 # Plain labels for model ids, setting sources and sizes (administration pages).
@@ -8536,6 +8541,7 @@ def approvals_page(request: Request) -> HTMLResponse:
     so a view-only caller must not read it via the HTML page either.
     """
     require_permission(request, "operate")
+    from . import content_access
     from .content_access import can_read_approval
     from .flow_approval_inbox import pending_for_request
 
@@ -8551,6 +8557,8 @@ def approvals_page(request: Request) -> HTMLResponse:
             "flow_approvals": flow_approvals["items"],
             "flow_approval_coverage": flow_approvals["coverage"],
             "private_count": len(pending) - len(approvals),
+            # Link to Content access only when asking for a card read is on.
+            "content_access_on": content_access.enabled(),
             **_approval_queue_context(approvals, request),
         },
         headers={"Cache-Control": "private, no-store"},

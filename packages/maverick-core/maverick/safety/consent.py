@@ -1068,11 +1068,13 @@ def require_operation_consent(
     consult_ledger: bool = False,
     require_fresh_person: bool = False,
     ttl_seconds: float = 300.0,
+    display_command: str | None = None,
 ) -> ConsentPermit:
     """Obtain a one-use exact-operation permit for a mutating boundary.
 
     ``require_fresh_person`` sends the committed card to an explicit reviewer
-    regardless of silent consent or standing grants.
+    regardless of silent consent or standing grants. ``display_command`` is
+    the exact command shown to whoever may read the card.
     """
 
     from ..approval_cards import ApprovalCardError, build_approval_card, digest
@@ -1135,6 +1137,7 @@ def require_operation_consent(
             before=before,
             after=after,
             irreversible=irreversible,
+            display_command=display_command,
         )
         if require_fresh_person:
             decision = require_person(

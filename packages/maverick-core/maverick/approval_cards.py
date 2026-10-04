@@ -20,6 +20,10 @@ APPROVAL_DETAIL_PREFIX = "lightwork-approval-card:v1:"
 _MAX_ENVELOPE_CHARS = 24_000
 _MAX_LABEL_CHARS = 500
 _MAX_LIST_ITEMS = 24
+# The exact text a reviewer checks (today: a command). It keeps its lines and
+# is bounded so the whole envelope stays within the storage limit.
+_MAX_DISPLAY_CHARS = 4000
+_DISPLAY_FIELDS = frozenset({"command"})
 _HEX_DIGITS = frozenset("0123456789abcdef")
 
 
@@ -67,6 +71,34 @@ def _label(value: Any, name: str, *, allow_empty: bool = False) -> str:
     if len(text) > _MAX_LABEL_CHARS:
         raise ApprovalCardError(f"{name} exceeds {_MAX_LABEL_CHARS} characters")
     return text
+
+
+def _display_text(value: Any, name: str) -> str:
+    """Exact text a person reads before deciding, with secrets masked.
+
+    Unlike a label it keeps its lines and spacing (a command must read as it
+    will run); other control characters are dropped.
+    """
+    if not isinstance(value, str):
+        raise ApprovalCardError(f"{name} must be a string")
+    text = "".join(char for char in value if char in "\n\t" or char.isprintable())
+    try:
+        from .safety.secret_detector import redact
+
+        text, _matches = redact(text)
+    except Exception as exc:
+        raise ApprovalCardError("approval display redaction is unavailable") from exc
+    if not text.strip():
+        raise ApprovalCardError(f"{name} is required")
+    if len(text) > _MAX_DISPLAY_CHARS:
+        raise ApprovalCardError(f"{name} exceeds {_MAX_DISPLAY_CHARS} characters")
+    return text
+
+
+def _display(value: Any) -> dict[str, str]:
+    if not isinstance(value, Mapping) or not value or set(value) - _DISPLAY_FIELDS:
+        raise ApprovalCardError("approval display fields are invalid")
+    return {key: _display_text(value[key], f"display {key}") for key in sorted(value)}
 
 
 def _safe_mapping(value: Mapping[str, Any], name: str) -> dict[str, Any]:
@@ -123,12 +155,15 @@ def build_approval_card(
     before: str,
     after: str,
     irreversible: bool,
+    display_command: str | None = None,
 ) -> dict[str, Any]:
     """Build an integrity-bound card without retaining raw parameters.
 
     ``target`` and ``parameters`` may contain sensitive values.  Only their
     SHA-256 commitments are stored; callers supply separate safe labels for the
-    person reviewing the action.
+    person reviewing the action. ``display_command`` is the exact command the
+    person is asked to approve (secrets masked); it is bound into the card like
+    every other field, and is shown only where the card itself may be read.
     """
     if type(irreversible) is not bool:
         raise ApprovalCardError("irreversible must be a boolean")
@@ -184,6 +219,8 @@ def build_approval_card(
             "after": _label(after, "after"),
         },
     }
+    if display_command is not None:
+        material["display"] = _display({"command": display_command})
     material["binding_sha256"] = digest(material)
     return material
 
@@ -207,8 +244,11 @@ def validate_approval_card(card: Mapping[str, Any]) -> dict[str, Any]:
         "authority", "inputs", "credentials", "budget", "expires_at",
         "consequences", "preview",
     }
-    if set(value) != expected:
+    # ``display`` (the exact command shown to the reviewer) is optional.
+    if set(value) - {"display"} != expected:
         raise ApprovalCardError("approval card fields are invalid")
+    if "display" in value and _display(value["display"]) != value["display"]:
+        raise ApprovalCardError("approval display contains unsafe material")
     authorization = value.get("authorization")
     if authorization != {
         "state": "recommendation_only",
