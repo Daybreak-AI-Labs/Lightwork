@@ -196,3 +196,16 @@ test('actions confirm in the page dialog and failures read as plain sentences', 
   assert.doesNotMatch(shown, /expected_revision|mismatch/);
   ui.dom.window.close();
 });
+
+test('a refused first load clears the list\'s Loading and says what happened above it', async () => {
+  const dom = new JSDOM(html(), {url:'https://lightwork.test/research', runScripts:'outside-only'});
+  const document = dom.window.document;
+  document.getElementById('research-promotions-list').innerHTML = '<li>Loading…</li>';
+  dom.window.mvErrorText = (failure, action) => `Could not ${action}. Try again later. (${failure.status})`;
+  dom.window.fetch = async () => ({ok:false, status:503, json:async () => ({detail:'unavailable'})});
+  dom.window.eval(source);
+  await settle();
+  assert.equal(document.getElementById('research-promotions-list').textContent, '');
+  assert.equal(document.getElementById('research-promotions-status').textContent, 'Could not load candidate promotions. Try again later. (503)');
+  dom.window.close();
+});

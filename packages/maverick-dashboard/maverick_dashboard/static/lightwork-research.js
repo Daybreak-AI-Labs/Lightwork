@@ -492,5 +492,18 @@
     message('Research submission cancelled.');
     await refresh();
   }));
-  act(refresh);
+  // A failed first load leaves nothing to show: say so where the page said
+  // "Checking…" and "Loading…" (the reason is also shown in the status line).
+  async function firstLoad() {
+    try {
+      await refresh();
+    } catch (error) {
+      const why = action => (typeof window.mvErrorText === 'function' ? window.mvErrorText(error, action)
+        : `Could not ${action}. Refresh the page to try again.`);
+      byId('research-readiness').textContent = why('check whether experiments can run');
+      byId('research-jobs').replaceChildren(element('li', why('load your experiments')));
+      throw error;
+    }
+  }
+  act(firstLoad);
 })();

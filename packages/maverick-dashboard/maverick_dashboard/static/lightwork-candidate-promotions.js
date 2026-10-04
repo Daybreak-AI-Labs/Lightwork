@@ -282,11 +282,17 @@
     render(value);
   }
 
+  let shown = false;
   async function runRefresh() {
     if (busy) return;
     setBusy(true);
-    try { await refresh(); }
-    catch (error) { message(error.message || 'Candidate promotions could not be loaded.', true); }
+    try { await refresh(); shown = true; }
+    catch (error) {
+      message(error.message || 'Candidate promotions could not be loaded.', true);
+      // Nothing was ever shown: clear the list's "Loading…"; the status line
+      // above it says what happened and what to do.
+      if (!shown) list.replaceChildren();
+    }
     finally { setBusy(false); }
   }
 
