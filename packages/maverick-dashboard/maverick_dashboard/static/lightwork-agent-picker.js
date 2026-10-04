@@ -73,8 +73,6 @@
         note.textContent = item.readiness;
         option.appendChild(note);
       }
-      // Keep focus in the field while a match is clicked.
-      option.addEventListener('mousedown', function (event) { event.preventDefault(); });
       option.addEventListener('click', function () { choose(item); });
       list.appendChild(option);
     });
@@ -154,6 +152,8 @@
       setOpen(false);
     }
   });
+  // Pressing on the list (a match or its scroll bar) keeps focus in the field.
+  list.addEventListener('mousedown', function (event) { event.preventDefault(); });
   input.addEventListener('blur', function () { setOpen(false); });
   if (open) open.addEventListener('click', openNamed);
   if (showAll) showAll.addEventListener('change', function () {
