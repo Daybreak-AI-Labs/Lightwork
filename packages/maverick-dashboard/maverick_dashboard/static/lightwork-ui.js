@@ -79,7 +79,7 @@
 
     // Reusable feedback primitives, on every page that extends base.html.
     // Prefer these over the browser's native dialogs. Contract: docs/ui-primitives.md.
-    //   window.mvToast(message, {error}) -> transient status/alert toast
+    //   window.mvToast(message, {error, quiet}) -> transient status/alert toast
     //   window.mvConfirm(message, {okText}) -> Promise<bool> (native <dialog>;
     //     focus-returning, not re-entrant; falls back to window.confirm)
     //   window.mvCopy(text) -> copy to clipboard with a toast (+ fallback)
@@ -96,6 +96,10 @@
         var t = document.createElement('div');
         t.className = 'mv-toast' + (opts.error ? ' mv-toast--error' : '');
         t.textContent = (opts.error ? '⚠ ' : '') + String(message);
+        // quiet: the page already says these words where the person is (its
+        // own status line or a focus move), so the toast is shown, not read
+        // a second time.
+        if (opts.quiet) t.setAttribute('aria-hidden', 'true');
         if(window.LightworkI18n){t.lang=window.LightworkI18n.languageFor(String(message));t.dir='auto';}
         target.appendChild(t);
         setTimeout(function () {

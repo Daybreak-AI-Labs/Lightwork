@@ -280,6 +280,37 @@
       const risk = (item.dataset.risk || '').toLowerCase();
       return risk === 'high' || risk === 'critical';
     }
+    // Keyboard focus never falls back to the page after a decision; it goes
+    // to what the person needs next. A card or line that takes focus gets
+    // tabindex -1, so it is focusable from script without adding a Tab stop.
+    // A mouse or touch click keeps the page where it is.
+    function focusOn(target, pointer) {
+      if (!target || !target.isConnected) return;
+      if (!target.matches('button, a[href], input, select, textarea')) target.setAttribute('tabindex', '-1');
+      target.focus({ preventScroll: !!pointer });
+    }
+    // Move focus only while it is still with the request: on the card, on a
+    // control that was disabled for the request, or in a closed dialog.
+    function focusStillHere(item) {
+      const active = document.activeElement;
+      return !active || active === document.body || (item && item.contains(active)) || !!active.closest('dialog');
+    }
+    function nextCard(item) {
+      let next = item.nextElementSibling;
+      while (next && !next.matches('article.approval-item')) next = next.nextElementSibling;
+      if (next) return next;
+      let previous = item.previousElementSibling;
+      while (previous && !previous.matches('article.approval-item')) previous = previous.previousElementSibling;
+      return previous;
+    }
+    // After a decision: Undo while it is offered; otherwise the next waiting
+    // card (the card, not its Approve button, so a repeated key press cannot
+    // decide it too); otherwise the decided card itself.
+    function focusAfterDecision(item, next, pointer) {
+      const undo = item.querySelector('.approval-undo');
+      if (undo && !undo.hidden) focusOn(undo, pointer);
+      else focusOn(next && queue.contains(next) ? next : item, pointer);
+    }
 
     // In-page confirmation for high and critical risk approvals: restates
     // what the action does, what it touches, what it spends and whether it
@@ -333,22 +364,42 @@
       const err = document.getElementById('approval-confirm-err');
       const form = document.getElementById('approval-confirm-form');
       const cancel = document.getElementById('approval-confirm-cancel');
+      // An error names the field it is about (aria-invalid and
+      // aria-describedby) and focus stays on that field.
+      function clearInvalid(field) {
+        field.removeAttribute('aria-invalid');
+        field.removeAttribute('aria-describedby');
+      }
+      function invalid(field, message) {
+        err.textContent = message;
+        field.setAttribute('aria-invalid', 'true');
+        field.setAttribute('aria-describedby', err.id);
+        field.focus();
+      }
+      function onFix(e) {
+        if (e.target.getAttribute('aria-invalid') !== 'true') return;
+        clearInvalid(e.target);
+        err.textContent = '';
+      }
       ack.checked = false; typed.value = ''; err.textContent = '';
+      clearInvalid(ack); clearInvalid(typed);
       typedWrap.hidden = !critical;
       return new Promise(function (resolve) {
         function done(val) {
           form.removeEventListener('submit', onSubmit);
           cancel.removeEventListener('click', onCancel);
           dlg.removeEventListener('cancel', onCancel);
+          ack.removeEventListener('change', onFix);
+          typed.removeEventListener('input', onFix);
           if (dlg.open) dlg.close();
           if (opener && opener.isConnected && typeof opener.focus === 'function') opener.focus();
           resolve(val);
         }
         function onSubmit(e) {
           e.preventDefault();
-          if (!ack.checked) { err.textContent = 'Tick the box to confirm you have read what this action will do.'; ack.focus(); return; }
+          if (!ack.checked) { invalid(ack, 'Tick the box to confirm you have read what this action will do.'); return; }
           if (critical && typed.value.trim().toUpperCase() !== 'APPROVE') {
-            err.textContent = 'Type APPROVE to confirm this critical action.'; typed.focus(); return;
+            invalid(typed, 'Type APPROVE to confirm this critical action.'); return;
           }
           done({ acknowledged: true, confirmation: critical ? 'approve' : '' });
         }
@@ -356,6 +407,8 @@
         form.addEventListener('submit', onSubmit);
         cancel.addEventListener('click', onCancel);
         dlg.addEventListener('cancel', onCancel);
+        ack.addEventListener('change', onFix);
+        typed.addEventListener('input', onFix);
         dlg.showModal();
         ack.focus();
       });
@@ -381,17 +434,24 @@
       const canUndo = outcome !== 'revised' && undoSeconds > 0;
       undo.hidden = !canUndo;
       if (canUndo) {
-        undo.textContent = 'Undo (' + undoSeconds + 's)';
+        // The countdown is shown, not spoken: Undo keeps one name while it
+        // has focus, and the status line already said how long it lasts.
+        const shown = document.createElement('span');
+        shown.setAttribute('aria-hidden', 'true');
+        undo.replaceChildren(document.createTextNode('Undo'), shown);
         let left = undoSeconds;
+        shown.textContent = ' (' + left + 's)';
         const timer = setInterval(function () {
           left -= 1;
           if (!undo.isConnected || undo.hidden) { clearInterval(timer); return; }
           if (left <= 0) {
             clearInterval(timer);
+            const hadFocus = document.activeElement === undo;
             undo.hidden = true;
             line.textContent += ' The undo window has ended.';
+            if (hadFocus) focusOn(line);
           } else {
-            undo.textContent = 'Undo (' + left + 's)';
+            shown.textContent = ' (' + left + 's)';
           }
         }, 1000);
         undo.dataset.timer = String(timer);
@@ -475,6 +535,7 @@
         });
         if (r.status === 202) {
           restoreDisabledStates();
+          if (focusStillHere(item0)) focusOn(btn, opts.pointer);
           say('Your decision on ' + label + ' is saved but not in effect yet ' +
             'while Lightwork finishes the record. It is safe to try again.', 'var(--warn)');
           toast('Decision saved, not in effect yet. It is safe to try again.', { error: true });
@@ -498,40 +559,54 @@
               progress.textContent = 'Your approval is recorded. ' + count + ' of ' + required +
                 ' required approvals received. The action is not authorized yet.';
             }
+            if (focusStillHere(item0)) focusOn(item0, opts.pointer);
             say('Your approval of ' + label + ' is recorded. More approvers are needed before it goes ahead.', 'var(--accent)');
-            toast('Your approval is recorded. More approvers are needed.');
+            toast('Your approval is recorded. More approvers are needed.', { quiet: true });
             return;
           }
           const decidedBy = r.headers.get('X-Lightwork-Decided-By') || '';
           const undoSeconds = parseInt(r.headers.get('X-Lightwork-Undo-Seconds') || '0', 10) || 0;
           const outcome = action === 'approve' ? 'approved' : 'denied';
           const decisionText = label + (action === 'approve'
-            ? ' authorized. Execution is a separate step; this decision does not confirm it happened.' : ' rejected.');
+            ? ' authorized. Execution is a separate step; this decision does not confirm it happened.' : ' rejected.') +
+            (undoSeconds > 0 ? ' You can undo for ' + undoSeconds + ' seconds.' : '');
+          // Spoken once, by the status line; the toast shows the same words.
           say(decisionText, 'var(--accent)');
-          toast(decisionText +
-            (undoSeconds > 0 ? ' You can undo for ' + undoSeconds + ' seconds.' : ''));
+          toast(decisionText, { quiet: true });
           const item = itemFor(id);
-          if (item) { restoreDisabledStates(); markDecided(item, outcome, decidedBy, undoSeconds); }
+          if (item) {
+            restoreDisabledStates();
+            const moveFocus = focusStillHere(item), next = nextCard(item);
+            markDecided(item, outcome, decidedBy, undoSeconds);
+            if (moveFocus) focusAfterDecision(item, next, opts.pointer);
+          }
         } else if (r.status === 200 && action === 'revise') {
           await r.json().catch(function() { return {}; });
           say(label + ' was sent back. The requester will prepare a new request.', 'var(--accent)');
-          toast(label + ' was sent back for changes.');
+          toast(label + ' was sent back for changes.', { quiet: true });
           const item = itemFor(id);
-          if (item) { restoreDisabledStates(); markDecided(item, 'revised', '', 0); }
+          if (item) {
+            restoreDisabledStates();
+            const moveFocus = focusStillHere(item), next = nextCard(item);
+            markDecided(item, 'revised', '', 0);
+            if (moveFocus) focusAfterDecision(item, next, opts.pointer);
+          }
         } else {
           restoreDisabledStates();
+          if (focusStillHere(item0)) focusOn(btn, opts.pointer);
           say(plainError(r, 'record your decision'), 'var(--danger)');
           toast(plainError(r, 'record your decision'), { error: true });
         }
       } catch (e) {
         restoreDisabledStates();
+        if (focusStillHere(item0)) focusOn(btn, opts.pointer);
         say(plainError(e, 'record your decision'), 'var(--danger)');
         toast(plainError(e, 'record your decision'), { error: true });
       }
     }
     window.mvDecideApproval = decide;
 
-    async function undo(btn) {
+    async function undo(btn, pointer) {
       const id = btn.dataset.id;
       const item = itemFor(id);
       const label = (item && item.dataset.label) || 'this request';
@@ -539,18 +614,26 @@
       try {
         const r = await fetch('/api/v1/approvals/' + encodeURIComponent(id) + '/undo', { method: 'POST' });
         if (r.ok) {
+          const moveFocus = focusStillHere(item);
           if (item) restoreToQueue(item);
+          // Back on the restored card, ready to decide again.
+          if (item && moveFocus) focusOn(item, pointer);
           say('Your decision on ' + label + ' was undone. It is waiting for a decision again.', 'var(--accent)');
-          toast('Decision on ' + label + ' undone.');
+          toast('Decision on ' + label + ' undone.', { quiet: true });
         } else {
           btn.disabled = false;
           const text = plainError(r, 'undo your decision');
           say(text, 'var(--danger)');
           toast(text, { error: true });
-          if (r.status === 409) { btn.hidden = true; }
+          if (r.status === 409) {
+            const moveFocus = focusStillHere(item);
+            btn.hidden = true;
+            if (item && moveFocus) focusOn(item.querySelector('.approval-item__decided'), pointer);
+          } else if (focusStillHere(item)) focusOn(btn, pointer);
         }
       } catch (e) {
         btn.disabled = false;
+        if (focusStillHere(item)) focusOn(btn, pointer);
         say(plainError(e, 'undo your decision'), 'var(--danger)');
         toast(plainError(e, 'undo your decision'), { error: true });
       }
@@ -559,15 +642,20 @@
     document.addEventListener('click', function (ev) {
       const target = ev.target instanceof Element ? ev.target : null;
       if (!target) return;
+      // detail is 0 for a click made with the keyboard (Enter or Space).
+      const pointer = ev.detail > 0;
       const decideBtn = target.closest('button.approval-btn');
-      if (decideBtn) { decide(decideBtn); return; }
+      if (decideBtn) { decide(decideBtn, { pointer: pointer }); return; }
       const undoBtn = target.closest('button.approval-undo');
-      if (undoBtn) { undo(undoBtn); return; }
+      if (undoBtn) { undo(undoBtn, pointer); return; }
       const dismiss = target.closest('button.approval-dismiss');
       if (dismiss) {
         const item = itemFor(dismiss.dataset.id);
+        const next = item && (nextCard(item) || queue.querySelector('article.approval-item'));
         if (item) item.remove();
         if (!decidedList.querySelector('article.approval-item')) decidedSection.hidden = true;
+        // The next decided card, else the first waiting one, else the page.
+        focusOn(next || document.getElementById('content'), pointer);
       }
     });
   })();

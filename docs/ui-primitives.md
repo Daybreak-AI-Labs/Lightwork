@@ -7,12 +7,14 @@ native `confirm()` / `alert()` or hand-rolled toasts** — they are accessible
 (assertive vs. polite live regions; a focus-trapping, focus-returning modal),
 themed (no hard-coded colors), and consistent across the dashboard.
 
-## `window.mvToast(message, { error })`
+## `window.mvToast(message, { error, quiet })`
 
 Transient notification.
 
 - `error: true` → an assertive (`role="alert"`) live region, prefixed `⚠ `.
 - otherwise → a polite (`role="status"`) live region.
+- `quiet: true` → shown but not read out (`aria-hidden`), for when the page
+  already announces the same words, in its own status line or by moving focus.
 - Auto-dismisses (errors linger longer). The two live regions are baked into the
   DOM at load, so announcements are reliable (a `role` injected into an existing
   polite region is not).

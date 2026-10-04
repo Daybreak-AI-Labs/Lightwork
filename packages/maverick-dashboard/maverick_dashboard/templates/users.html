@@ -53,6 +53,31 @@
   {% if saved %}
   <div class="panel users-saved" role="status" data-mv-toast="Saved. {{ saved }}"><strong>Saved.</strong> {{ saved }}</div>
   {% endif %}
+  {% if invite_link %}
+  {# The one-time invite link is the result of the action just taken: shown
+     first and given focus (script below), instead of beside the form far down
+     the page while focus stayed at the top. #}
+  <section class="panel users-saved" id="invite-result" tabindex="-1" aria-labelledby="invite-result-title">
+    {% if invite_sent %}
+    <strong id="invite-result-title">Invitation emailed to {{ invite_email }}.</strong>
+    <p class="muted users-help">The same link is below if you also want to send it yourself. It works once and expires in 7 days.</p>
+    {% elif invite_send_note and 'disabled' not in invite_send_note and 'no sending account' not in invite_send_note %}
+    <strong id="invite-result-title">Invitation for {{ invite_email }} created.</strong>
+    <p class="muted users-help">We couldn't email the invite. Copy the link below and send it yourself. It works once and expires in 7 days.</p>
+    {% else %}
+    <strong id="invite-result-title">Invitation for {{ invite_email }} created.</strong>
+    <p class="muted users-help">Copy this link and send it to them. It is shown only once, works once and
+      expires in 7 days. Anyone who opens it can accept, so send it only to the person you invited.</p>
+    {% endif %}
+    <div class="users-row-form">
+      <label class="users-field users-grow"><span>Invite link</span>
+        <input class="input" id="invite-link" type="text" readonly value="{{ invite_link }}" />
+      </label>
+      <button type="button" class="btn" data-copy-target="invite-link">Copy link</button>
+    </div>
+  </section>
+  {% endif %}
+
 
   {% if not auth_on %}
   <div class="panel users-note">
@@ -212,32 +237,11 @@
   {% if invites_on %}
   <div class="section-head"><h2 id="invite-email">Invite someone by email</h2></div>
   <div class="panel">
-    {% if invite_link %}
-    <div class="panel users-saved" role="status" data-mv-toast="Invitation for {{ invite_email }} created. Copy the link below.">
-      {% if invite_sent %}
-      <strong>Invitation emailed to {{ invite_email }}.</strong>
-      <p class="muted users-help">The same link is below if you also want to send it yourself. It works once and expires in 7 days.</p>
-      {% elif invite_send_note and 'disabled' not in invite_send_note and 'no sending account' not in invite_send_note %}
-      <strong>Invitation for {{ invite_email }} created.</strong>
-      <p class="muted users-help">We couldn't email the invite. Copy the link below and send it yourself. It works once and expires in 7 days.</p>
-      {% else %}
-      <strong>Invitation for {{ invite_email }} created.</strong>
-      <p class="muted users-help">Copy this link and send it to them. It is shown only once, works once and
-        expires in 7 days. Anyone who opens it can accept, so send it only to the person you invited.</p>
-      {% endif %}
-      <div class="users-row-form">
-        <label class="users-field users-grow"><span>Invite link</span>
-          <input class="input" id="invite-link" type="text" readonly value="{{ invite_link }}" />
-        </label>
-        <button type="button" class="btn" data-copy-target="invite-link">Copy link</button>
-      </div>
-    </div>
-    {% endif %}
     <form method="post" action="/users/invite" class="users-row-form">
       {{ workspace_binding() }}
       <label class="users-field users-grow">
         <span>Email address</span>
-        <input class="input" type="email" name="email" placeholder="colleague@company.com" autocomplete="off" required />
+        <input class="input" id="invite-email-input" type="email" name="email" placeholder="colleague@company.com" autocomplete="off" required />
       </label>
       <label class="users-field">
         <span>Role</span>
@@ -246,6 +250,7 @@
         </select>
       </label>
       <button type="submit" class="btn">Create invite link</button>
+      <p class="mv-form__err users-field-error" id="invite-email-error" role="alert" hidden></p>
     </form>
     <p class="muted users-help" id="invite-role-help">The invite starts as <strong>{{ 'viewer' | role_label }}</strong> (can look at dashboards and results but change nothing), the safest choice for someone new. Pick <strong>{{ 'operator' | role_label }}</strong> for people who will run work and approve actions, or <strong>{{ 'admin' | role_label }}</strong> for someone who will manage people and settings. You can change it later on this page.</p>
     <p class="muted users-help">
@@ -463,6 +468,7 @@
     .users-row-form { display: flex; flex-wrap: wrap; gap: var(--space-3); align-items: flex-end; margin: var(--space-2) 0; }
     .users-field { display: flex; flex-direction: column; gap: var(--space-1); min-width: min(100%, 14rem); }
     .users-grow { flex: 1 1 16rem; }
+    .users-field-error { flex-basis: 100%; margin: 0; }
     .users-inline { display: inline; }
     .users-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
     .users-help { font-size: var(--text-sm); }
@@ -534,6 +540,32 @@
         if (field) window.mvCopy(field.value);
       });
     });
+    // A wrong invite address gets a written error tied to the field, in
+    // place of the browser's bubble, and focus stays on the field.
+    var inviteEmail = document.getElementById('invite-email-input');
+    var inviteError = document.getElementById('invite-email-error');
+    if (inviteEmail && inviteError) {
+      inviteEmail.addEventListener('invalid', function (event) {
+        event.preventDefault();
+        inviteError.textContent = inviteEmail.validity.valueMissing
+          ? 'Enter the email address of the person you are inviting.'
+          : 'Enter a full email address. For example: name@company.com.';
+        inviteError.hidden = false;
+        inviteEmail.setAttribute('aria-invalid', 'true');
+        inviteEmail.setAttribute('aria-describedby', inviteError.id);
+        inviteEmail.focus();
+      });
+      inviteEmail.addEventListener('input', function () {
+        if (inviteError.hidden) return;
+        inviteError.hidden = true;
+        inviteError.textContent = '';
+        inviteEmail.removeAttribute('aria-invalid');
+        inviteEmail.removeAttribute('aria-describedby');
+      });
+    }
+    // Land on the one-time link just created (rendered first on the page).
+    var inviteResult = document.getElementById('invite-result');
+    if (inviteResult) inviteResult.focus();
   })();
   </script>
 {% endblock %}

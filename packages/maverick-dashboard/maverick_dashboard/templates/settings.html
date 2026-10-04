@@ -399,10 +399,11 @@
         <label><input type="radio" name="mode" value="configured"{% if limit_mode == 'amount' %} checked{% endif %} /> Stop a task when it has spent</label>
         <label class="settings-field settings-amount">
           <span>Amount per task (US dollars)</span>
-          <input class="input" id="settings-task-budget" type="number" name="max_dollars" min="0.01" step="0.5" inputmode="decimal"
+          <input class="input" id="settings-task-budget" type="number" name="max_dollars" min="0.01" step="0.01" inputmode="decimal"
                  value="{% if budget is not none %}{{ '%.2f'|format(budget) }}{% endif %}"
                  aria-describedby="task-limit-help" />
         </label>
+        <p class="mv-form__err" id="settings-task-budget-error" role="alert" hidden></p>
       </fieldset>
       <p class="muted" id="task-limit-help">
         Turning the limit off keeps your saved amount for later. Workspace spending limits,
@@ -410,6 +411,36 @@
       </p>
       <p class="settings-foot"><button type="submit" class="btn">Save task limit</button></p>
     </form>
+    <script>
+    (function () {
+      // A written error beside the amount, tied to the field, in place of the
+      // browser's bubble: it says what is wrong and how to fix it.
+      var field = document.getElementById('settings-task-budget');
+      var error = document.getElementById('settings-task-budget-error');
+      if (!field || !error) return;
+      var help = field.getAttribute('aria-describedby') || '';
+      field.addEventListener('invalid', function (event) {
+        event.preventDefault();
+        var validity = field.validity;
+        error.textContent = validity.rangeUnderflow
+          ? 'Enter an amount of at least $0.01, or choose No limit for each task.'
+          : validity.stepMismatch
+            ? 'Use dollars and cents, with at most two decimal places. For example: 7.50.'
+            : 'Enter the amount in US dollars as a number. For example: 7.50.';
+        error.hidden = false;
+        field.setAttribute('aria-invalid', 'true');
+        field.setAttribute('aria-describedby', (error.id + ' ' + help).trim());
+        field.focus();
+      });
+      field.addEventListener('input', function () {
+        if (error.hidden) return;
+        error.hidden = true;
+        error.textContent = '';
+        field.removeAttribute('aria-invalid');
+        field.setAttribute('aria-describedby', help);
+      });
+    })();
+    </script>
     <p class="muted settings-foot" role="note">Right now:
       {% if limit_mode == 'off' %}tasks have no spending limit of their own.
       {% elif limit_mode == 'amount' %}each task stops after spending {{ budget | money }}.
