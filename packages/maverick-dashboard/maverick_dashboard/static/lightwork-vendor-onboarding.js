@@ -1147,7 +1147,14 @@
         throw new Error("The saved return to this request expired. Select the request again from this workspace.");
     }
     await loadPeople();
-    await refresh();
+    try { await refresh(); }
+    catch (error) {
+      // No list arrived: replace the queue's "Loading…" lines; the message at
+      // the top of the page says what went wrong.
+      show("attention-summary", "");
+      if (byId("page-status")) show("page-status", "Requests could not be loaded. See the message above, then choose Refresh requests.");
+      throw error;
+    }
     if (requested) {
       if (!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/.test(requested)) throw new Error("The request link is invalid. Select a request from this workspace.");
       render(await api("/cases/" + encodeURIComponent(requested)));
