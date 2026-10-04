@@ -220,7 +220,9 @@
     </section>
     <section aria-labelledby="drift-title">
       <h3 id="drift-title">Drift monitoring</h3>
-      {% if not drift_monitoring_enabled %}<p class="assurance-muted">Drift monitoring is turned off for this workspace. Ask an administrator to turn it on in the setup wizard.</p>{% elif drift_monitoring_error %}<p class="assurance-alert">{{ drift_monitoring_error }}</p>{% else %}
+      {% if not drift_monitoring_enabled %}
+      {{ module_gate('drift_monitoring', 'Drift monitoring', detail='Compare new data with a saved normal pattern for an AI system.', can_activate=gateway_admin) }}
+      {% elif drift_monitoring_error %}<p class="assurance-alert">{{ drift_monitoring_error }}</p>{% else %}
       <p class="assurance-muted">Upload a spreadsheet (CSV) with one column per measure and one row per record. The first row must hold the column names. Only summaries are kept.</p>
       <form id="drift-baseline-create" class="assurance-form">
         <label>AI system<select class="select" name="asset_id" required>
@@ -274,7 +276,8 @@
 {% if not gateway_enabled %}
   <section class="panel" aria-labelledby="gateway-off-title">
     <h2 id="gateway-off-title">Evidence recording is off</h2>
-    <p>When it is on, Lightwork keeps a tamper-evident record of each AI answer your apps send through it — without storing the prompts or answers themselves. Ask an administrator to turn on the AI evidence gateway in the setup wizard; existing model-risk records remain available below.</p>
+    <p>When it is on, Lightwork keeps a tamper-evident record of each AI answer your apps send through it — without storing the prompts or answers themselves. Existing model-risk records remain available below.</p>
+    {{ module_gate('evidence_gateway', 'AI evidence recording', detail='Keep a verifiable record of AI answers your apps send through Lightwork.', can_activate=gateway_admin) }}
   </section>
 {% else %}
   {% if gateway_error %}
@@ -641,7 +644,7 @@
   <p class="assurance-muted">Ready-made sets of controls, each with its legal source, that you can check your evidence against. They help human review; they are not a
     compliance certification, a legal classification or a substitute for legal advice.</p>
   {% if not policy_packs_enabled %}
-    <p class="assurance-muted">Policy packs are turned off for this workspace. Ask an administrator to turn them on in the setup wizard. Nothing is used until an administrator prepares and turns on a pack.</p>
+    {{ module_gate('policy_packs', 'Policy packs', detail='Nothing is used until an administrator prepares and turns on a pack.', can_activate=gateway_admin) }}
   {% else %}
     {% if policy_pack_error %}
     <div class="assurance-alert" role="status">{{ policy_pack_error }}
@@ -771,7 +774,7 @@
     <h2>Overall AI risk</h2>
     <p class="assurance-muted">Adds up current findings across your AI systems and their parts. Accepting a risk can lower the score for non-critical findings; critical findings always count.</p>
     {% if not portfolio_enabled %}
-      <p class="assurance-muted">Overall risk scoring is turned off for this workspace. Ask an administrator to turn it on in the setup wizard.</p>
+      {{ module_gate('portfolio_risk', 'Overall AI risk scoring', detail='Add up current findings across your AI systems and their parts.', can_activate=gateway_admin) }}
     {% elif portfolio_error %}
       <div class="assurance-alert" role="status">{{ portfolio_error }}</div>
     {% else %}
@@ -806,7 +809,9 @@
     <h2>Attack testing (red team)</h2>
     <p class="assurance-muted">A registered testing agent sends made-up attack prompts to an AI system. Answers are scored and then thrown away; only the scores are kept.</p>
     {% if not red_team_enabled %}
-      <p class="assurance-muted">Attack testing is turned off for this workspace. It also needs external agents and model risk tracking. Ask an administrator to turn it on in the setup wizard.</p>
+      <p class="assurance-muted">Attack testing is turned off. It also needs external agents and model risk tracking.</p>
+      {% if gateway_admin %}<p><a class="btn btn--ghost" href="/settings/all?id=red_team_assurance.enable">Open attack-testing settings</a></p>
+      {% else %}<p class="assurance-muted">Ask an administrator to turn on attack testing in All settings.</p>{% endif %}
     {% elif red_team_error %}
       <div class="assurance-alert" role="status">{{ red_team_error }}</div>
     {% else %}

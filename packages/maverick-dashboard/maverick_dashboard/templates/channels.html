@@ -51,10 +51,23 @@
       <li><strong>Choose a chat app below</strong> and tick <strong>Turn on</strong>.</li>
       <li><strong>Paste the details that app gives you.</strong> Each field says where to find it.
         They're stored securely and never shown again. Leaving a field blank keeps what's saved.</li>
-      <li><strong>Press Save, then Test connection.</strong> Changes take effect the next time Lightwork starts.</li>
+      <li><strong>Press Save, then Test connection.</strong> Check message delivery below and apply changed details before sending a test.</li>
       <li><strong>Message Lightwork from that app.</strong> Requests are handled the same way as tasks started here,
         and replies come back in the same conversation.</li>
     </ol>
+  </div>
+
+  <div class="section-head"><h2 id="channel-delivery">Message delivery</h2></div>
+  <div class="panel" aria-labelledby="channel-delivery">
+    {% if channel_runtime %}
+    <p role="status">Chat service started from this app: <strong>{{ 'Process running here' if channel_runtime.running else 'Not running here' }}</strong>.</p>
+    {% else %}
+    <p role="status">Lightwork could not check the chat service just now.</p>
+    {% endif %}
+    <p class="muted">A running process does not prove replies reach people. Send a test message after changing a connection. If your IT team runs this service separately, ask them to apply the change there.</p>
+    <a class="btn btn--primary" href="/settings?focus=ops-services-title">Manage the chat service</a>
+    <p class="muted" role="status" aria-live="polite" data-ch-intake-capacity>Checking message history…</p>
+    <a href="/settings/all?id=channels.max_intake_records">Set the saved-message limit</a>
   </div>
 
   {% for c in managed %}
@@ -269,6 +282,23 @@
   <script>
   (function () {
     'use strict';
+    var capacity = document.querySelector('[data-ch-intake-capacity]');
+    if (capacity) {
+      fetch('/api/v1/channels/intake-capacity', {credentials: 'same-origin'})
+        .then(function (response) {
+          if (!response.ok) throw new Error('Message history could not be checked. Refresh this page.');
+          return response.json();
+        })
+        .then(function (state) {
+          if (!Number.isSafeInteger(state.used) || !Number.isSafeInteger(state.limit) ||
+              typeof state.count_exact !== 'boolean') throw new Error('Message history could not be checked. Refresh this page.');
+          var count = (state.count_exact ? '' : 'at least ') + String(state.used);
+          capacity.textContent = count + ' of ' + state.limit + ' saved-message places in use.' +
+            (state.full ? ' New messages may be held. ' + state.remedy :
+              (state.warning ? ' Space is getting low. ' + state.remedy : ''));
+        })
+        .catch(function (error) { capacity.textContent = error.message; });
+    }
     document.querySelectorAll('form[data-channels-confirm]').forEach(function (form) {
       form.addEventListener('submit', function (event) {
         if (form.dataset.confirmed === 'true') { form.dataset.confirmed = 'done'; return; }

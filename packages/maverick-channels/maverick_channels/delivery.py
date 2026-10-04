@@ -12,8 +12,10 @@ import json
 import logging
 import os
 import re
+import threading
 import time
 import uuid
+from collections import OrderedDict
 from contextlib import asynccontextmanager
 from dataclasses import asdict
 from itertools import islice
@@ -21,7 +23,12 @@ from pathlib import Path
 
 from .base import IncomingMessage, Reply, as_reply
 
-MAX_RECORDS = 10_000
+MAX_RECORDS = 20_000
+MAX_CONFIGURED_RECORDS = 100_000
+MAINTENANCE_INTERVAL_SECONDS = 60
+CAPACITY_RECOVERY_BATCHES = 10
+_maintenance_last: OrderedDict[str, float] = OrderedDict()
+_maintenance_lock = threading.Lock()
 # One recovery pass inspects at most this many receipts, for at most this long.
 RECOVERY_SCAN_LIMIT = 1000
 RECOVERY_SCAN_SECONDS = 1.0
@@ -40,6 +47,7 @@ TOMBSTONE_SECONDS = 90 * 24 * 3600
 STALE_CLAIM_SECONDS = 24 * 3600
 _INTERNAL_ERROR_REPLY = "⚠ An internal error occurred."
 _ACTIVE = contextvars.ContextVar("channel_delivery", default=None)
+log = logging.getLogger(__name__)
 
 
 class DeliveryNotSent(RuntimeError):
@@ -52,6 +60,23 @@ class DeliveryUnknown(RuntimeError):
 
 class _DeliveryOwnedElsewhere(RuntimeError):
     """A concurrent worker owns this send; the observer must not mutate it."""
+
+
+def intake_record_limit():
+    """Use the current bounded customer setting for all intake authorities."""
+    from maverick.config import load_config
+
+    channels = load_config().get("channels", {})
+    if channels is None:
+        channels = {}
+    if not isinstance(channels, dict):
+        raise ValueError("Chat app intake settings are invalid")
+    value = channels.get("max_intake_records")
+    if value is None:
+        return MAX_RECORDS
+    if type(value) is not int or not 1000 <= value <= MAX_CONFIGURED_RECORDS:
+        raise ValueError("Chat app intake capacity must be a number from 1000 to 100000")
+    return value
 
 
 def _digest(value):
@@ -161,6 +186,55 @@ class DeliveryJournal:
     def get(self, record_id):
         return self.store.get(record_id)
 
+    def capacity_status(self):
+        """Count receipt identities in bounded pages, without reading bodies."""
+        limit = intake_record_limit()
+        first, cursor, used = None, "", 0
+        while used <= limit:
+            page_size = min(10_000, limit + 1 - used)
+            page = list(self.store.iter_record_ids(start_after=cursor, limit=page_size))
+            if not page:
+                break
+            for position, _ in page:
+                if position == first:
+                    return self._capacity_result(used, limit, exact=True)
+                if first is None:
+                    first = position
+                cursor = position
+                used += 1
+                if used > limit:
+                    return self._capacity_result(used, limit, exact=False)
+        return self._capacity_result(used, limit, exact=True)
+
+    @staticmethod
+    def _capacity_result(used, limit, *, exact):
+        return {"used": used, "limit": limit, "count_exact": exact,
+                "warning": used * 5 >= limit * 4, "full": used >= limit,
+                "remedy": "Open Settings > All settings > Chat channels to increase message capacity. "
+                          "Only delivered messages past retention can be cleared automatically; "
+                          "messages needing review remain saved."}
+
+    def _maintenance_tick(self):
+        """Advance one retention window per active workspace, at most once/minute."""
+        from maverick.paths import current_tenant_id_strict
+
+        key = (current_tenant_id_strict() or "") + "\0" + os.environ.get("MAVERICK_HOME", "")
+        now = _monotonic()
+        with _maintenance_lock:
+            last = _maintenance_last.get(key)
+            if last is not None and now - last < MAINTENANCE_INTERVAL_SECONDS:
+                return
+            _maintenance_last[key] = now
+            _maintenance_last.move_to_end(key)
+            if len(_maintenance_last) > 1024:
+                _maintenance_last.popitem(last=False)
+            if last is None:
+                return  # The first accepted message starts this process's cadence.
+        try:
+            self.compact_delivered(limit=25)
+        except Exception:  # noqa: BLE001 -- maintenance cannot block a free intake slot
+            log.warning("Channel receipt maintenance needs review", exc_info=True)
+
     def recovery_window(self, *, channel, account, limit=16, scan_limit=RECOVERY_SCAN_LIMIT,
                         scan_seconds=RECOVERY_SCAN_SECONDS):
         """Fair bounded recovery; one window never proves an empty queue.
@@ -232,6 +306,7 @@ class DeliveryJournal:
     def admit(self, msg, *, external_id, account, route=None):
         from maverick.attachments import _encode_for_disk, _publish_attachment
         from maverick.file_lock import ensure_private_directory
+        from maverick.governed_records import GovernedRecordCapacityError
         from maverick.privacy_ops import RecordConflict
 
         _assert_work_allowed()
@@ -243,6 +318,7 @@ class DeliveryJournal:
         fingerprint = _digest([payload, route])
         row = self.get(record_id)
         if row is None:
+            self._maintenance_tick()
             # Confirm the existing execution-claim authority is readable before
             # accepting intake. No execution claim is taken at this boundary.
             from maverick.world_model import close_world_if_owned, open_world
@@ -252,14 +328,40 @@ class DeliveryJournal:
                 world.is_processed_message(msg.channel, external_id)
             finally:
                 close_world_if_owned(world)
+            record = {"id": record_id, "channel": msg.channel, "account_sha256": _digest(account),
+                      "external_id": external_id, "fingerprint": fingerprint, "message": payload,
+                      "route": route, "execution": "staging", "delivery": "not_ready", "chunks": {},
+                      "execution_id": str(uuid.uuid4())}
             try:
-                row = self.store.create({"id": record_id, "channel": msg.channel, "account_sha256": _digest(account),
-                                         "external_id": external_id, "fingerprint": fingerprint, "message": payload,
-                                         "route": route, "execution": "staging", "delivery": "not_ready", "chunks": {},
-                                         "execution_id": str(uuid.uuid4())},
-                                        action="intake_admitted", actor="system:channel", max_records=MAX_RECORDS)
+                row = self.store.create(record, action="intake_admitted", actor="system:channel",
+                                        max_records=intake_record_limit())
             except RecordConflict:
                 row = self.get(record_id)
+            except GovernedRecordCapacityError as exc:
+                # A long-idle workspace may have expired tombstones beyond the
+                # next cursor window. Scan a bounded portion before refusing.
+                deadline = _monotonic() + 1.0
+                for attempt in range(CAPACITY_RECOVERY_BATCHES):
+                    if attempt and _monotonic() >= deadline:
+                        break
+                    try:
+                        released = self.compact_delivered(limit=100, release_only=True)
+                    except Exception:  # noqa: BLE001 -- preserve capacity diagnosis
+                        log.warning("Channel receipt cleanup could not free capacity", exc_info=True)
+                        break
+                    if released:
+                        break
+                try:
+                    row = self.store.create(record, action="intake_admitted", actor="system:channel",
+                                            max_records=intake_record_limit())
+                except GovernedRecordCapacityError:
+                    raise GovernedRecordCapacityError(
+                        "Chat app message capacity is full. Open Settings > All settings > Chat channels "
+                        "to increase it; delivered messages past retention clear automatically. "
+                        "Messages that need review remain saved."
+                    ) from exc
+                except RecordConflict:
+                    row = self.get(record_id)
         if not row or row["fingerprint"] != fingerprint:
             raise ValueError("Channel message identity already belongs to different content or routing")
         if row.get("restore_hold"):
@@ -307,7 +409,7 @@ class DeliveryJournal:
         finally:
             close_world_if_owned(world)
 
-    def compact_delivered(self, *, limit=100):
+    def compact_delivered(self, *, limit=100, release_only=False):
         """Clear expired payloads only; retain dedup tombstones and unknowns.
 
         Capacity is a hard admission bound, not permission to evict unresolved
@@ -329,17 +431,21 @@ class DeliveryJournal:
                                         action="retention_cursor_created", actor="system:channel", max_records=1000)
             except RecordConflict:
                 cursor = cursors.get(cursor_id)
-        now, compacted = time.time(), 0
+        now, compacted, released = time.time(), 0, 0
         next_cursor = cursor["cursor"]
         try:
             for position, record_id in self.store.iter_record_ids(start_after=cursor["cursor"], limit=limit):
                 next_cursor = position
-                compacted += self._compact_receipt(self.get(record_id), now)
+                outcome = self._compact_receipt(self.get(record_id), now)
+                compacted += bool(outcome)
+                released += outcome == "deleted"
+                if release_only and released:
+                    break
         finally:
             # Surface cleanup failures, but do not let one locked or malformed
             # receipt starve every later record. The rotating scan retries it.
             self.finish_recovery_window((cursors, cursor, next_cursor))
-        return compacted
+        return released if release_only else compacted
 
     def _compact_receipt(self, row, now):
         from maverick.privacy_ops import RecordConflict
@@ -351,7 +457,7 @@ class DeliveryJournal:
             if row["updated_at"] > now - TOMBSTONE_SECONDS:
                 return False
             try:
-                return bool(self.store.delete(row["id"], expected_revision=row["revision"]))
+                return "deleted" if self.store.delete(row["id"], expected_revision=row["revision"]) else False
             except RecordConflict:
                 return False
         if ("cleanup_pending" not in row and not row.get("compacted")
@@ -372,7 +478,7 @@ class DeliveryJournal:
             self.change(row, cleanup_pending=[], compacted=True)
         except RecordConflict:
             return False  # Another worker owns/completed the transition.
-        return True
+        return "compacted"
 
 
 async def admit_message(msg, *, external_id, account, authorize, route=None, journal=None):

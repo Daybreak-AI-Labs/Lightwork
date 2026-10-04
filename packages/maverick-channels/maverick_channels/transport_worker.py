@@ -8,7 +8,7 @@ import time
 from collections import deque
 
 from .base import IncomingMessage
-from .delivery import MAX_RECORDS, DeliveryJournal, _digest
+from .delivery import MAX_CONFIGURED_RECORDS, DeliveryJournal, _digest
 
 MAX_PENDING = 32
 RETRY_DELAY = 30.0
@@ -75,19 +75,34 @@ class TransportWorker:
         selected = []
         count = 0
         now = time.monotonic()
-        for _, record_id in self.journal.store.iter_record_ids(limit=MAX_RECORDS):
-            if self._stop_scan.is_set():
-                return [], False
-            row = self.journal.get(record_id)
-            if (not row or row["channel"] != self.channel.name or row["account_sha256"] != _digest(self.account)
-                    or not (row["execution"] == "received" or row["delivery"] in {"ready", "retryable"})
-                    or self._retry_after.get(record_id, 0) > now):
-                continue
-            count += 1
-            selected.append((row["created_at"], row["id"]))
-            selected.sort()
-            del selected[MAX_PENDING:]
-        return [record_id for _, record_id in selected], count > MAX_PENDING
+        first, cursor, scanned = None, "", 0
+        while scanned <= MAX_CONFIGURED_RECORDS:
+            # Shared storage returns at most 10,000 ids per scan. Keep walking
+            # so raising the intake cap cannot hide older pending messages.
+            page = list(self.journal.store.iter_record_ids(start_after=cursor, limit=10_000))
+            if not page:
+                break
+            for position, record_id in page:
+                if position == first:
+                    return [record_id for _, record_id in selected], count > MAX_PENDING
+                if first is None:
+                    first = position
+                cursor = position
+                scanned += 1
+                if self._stop_scan.is_set():
+                    return [], False
+                row = self.journal.get(record_id)
+                if (not row or row["channel"] != self.channel.name or row["account_sha256"] != _digest(self.account)
+                        or not (row["execution"] == "received" or row["delivery"] in {"ready", "retryable"})
+                        or self._retry_after.get(record_id, 0) > now):
+                    continue
+                count += 1
+                selected.append((row["created_at"], row["id"]))
+                selected.sort()
+                del selected[MAX_PENDING:]
+        if scanned > MAX_CONFIGURED_RECORDS:
+            log.warning("Channel receipt scan exceeds configured safety ceiling")
+        return [record_id for _, record_id in selected], count > MAX_PENDING or scanned > MAX_CONFIGURED_RECORDS
 
     async def _run(self):
         while True:

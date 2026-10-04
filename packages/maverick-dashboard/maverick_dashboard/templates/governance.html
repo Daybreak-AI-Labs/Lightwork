@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% from "_hero.html" import hero %}
+{% from "_module_gate.html" import module_gate %}
 {% block title %}Governance workspace · Lightwork{% endblock %}
 {% block content %}
 <style>
@@ -32,9 +33,6 @@
     {% if help %}<span class="muted">{{ help }}</span>{% endif %}
     {% if not governed_assets %}<a class="btn btn--ghost" href="/security/assurance">Register an AI system</a>{% endif %}
   </label>
-{% endmacro %}
-{% macro turned_off(what) %}
-  <p class="muted">{{ what }} is turned off for this workspace. Ask an administrator to turn it on in the setup wizard.</p>
 {% endmacro %}
 {% set STATUS = {'draft': 'In progress', 'completed': 'Complete', 'outdated': 'Reopened — needs updating', 'recorded': 'Recorded', 'reassessment_required': 'Needs a new assessment', 'declared': 'Declared — nothing filed yet', 'initial_reported': 'First report filed', 'complete_reported': 'Full report filed', 'withdrawn': 'Withdrawn', 'pending': 'Waiting to send', 'dispatching': 'Sending', 'dispatch_unconfirmed': 'Sent — not confirmed', 'delivered_unconfirmed': 'Delivered — not confirmed', 'delivered': 'Delivered', 'failed': 'Failed', 'current': 'Up to date', 'expired': 'Expired', 'missing': 'Not done'} %}
 {% set ROUTE = {'internal_control_annex_vi': 'Internal check by your organisation (no outside body)', 'notified_body_annex_vii': 'Assessment by an independent body', 'sectoral_annex_i': 'Covered by product-specific EU law'} %}
@@ -93,7 +91,7 @@
 <section class="panel" aria-labelledby="fria-title">
   <h2 id="fria-title">Impact on people's rights <span class="gov-cite">Fundamental rights impact assessment, EU AI Act Art. 27</span></h2>
   {% if not eu_conformity_enabled %}
-  {{ turned_off('EU AI Act workflows') }}
+  {{ module_gate('eu_conformity', 'EU AI Act workflows', detail='Record how an AI system may affect people’s rights.') }}
   {% else %}
   {% if fria_error %}<p class="muted">{{ fria_error }}</p>{% endif %}
   {% if fria_records %}
@@ -139,7 +137,7 @@
 <section class="panel" aria-labelledby="annex-title">
   <h2 id="annex-title">Technical documentation <span class="gov-cite">Annex IV checklist</span></h2>
   {% if not eu_conformity_enabled %}
-  {{ turned_off('EU AI Act workflows') }}
+  {{ module_gate('eu_conformity', 'EU AI Act workflows', detail='Keep links to each AI system’s technical documentation.') }}
   {% else %}
   <form id="annex-open" class="gov-form">
     {{ asset_select('Which AI system?', help='Opens its nine-item documentation checklist.') }}
@@ -163,7 +161,7 @@
 <section class="panel" aria-labelledby="route-title">
   <h2 id="route-title">Approval route before launch <span class="gov-cite">Conformity assessment, Art. 43</span></h2>
   {% if not eu_conformity_enabled %}
-  {{ turned_off('EU AI Act workflows') }}
+  {{ module_gate('eu_conformity', 'EU AI Act workflows', detail='Record the approval route chosen before launch.') }}
   {% else %}
   {% if art43_routes %}
   <div class="gov-table"><table>
@@ -208,7 +206,7 @@
 <section class="panel" aria-labelledby="market-title">
   <h2 id="market-title">After launch <span class="gov-cite">Monitoring plan Art. 72, registration Art. 49, instructions for use Art. 13</span></h2>
   {% if not eu_conformity_enabled %}
-  {{ turned_off('EU AI Act workflows') }}
+  {{ module_gate('eu_conformity', 'EU AI Act workflows', detail='Keep monitoring plans and registration records here.') }}
   {% else %}
   <h3>Monitoring plan</h3>
   {% if pmm_plans %}
@@ -285,7 +283,7 @@
 <section class="panel" aria-labelledby="gpai-title">
   <h2 id="gpai-title">General-purpose AI models you provide <span class="gov-cite">Art. 53 and Art. 55</span></h2>
   {% if not eu_conformity_enabled %}
-  {{ turned_off('EU AI Act workflows') }}
+  {{ module_gate('eu_conformity', 'EU AI Act workflows', detail='Track the duties that apply to models you provide.') }}
   {% else %}
   {% if gpai_registers %}
   <div class="gov-table"><table>
@@ -333,7 +331,7 @@
 <section class="panel" aria-labelledby="deployer-title">
   <h2 id="deployer-title">High-risk AI systems you use <span class="gov-cite">Deployer duties, Art. 26</span></h2>
   {% if not eu_conformity_enabled %}
-  {{ turned_off('EU AI Act workflows') }}
+  {{ module_gate('eu_conformity', 'EU AI Act workflows', detail='Track duties for high-risk AI systems your organisation uses.') }}
   {% else %}
   {% if deployer_registers %}
   <div class="gov-table"><table>
@@ -402,7 +400,7 @@
 <section class="panel" aria-labelledby="literacy-title">
   <h2 id="literacy-title">Staff AI training <span class="gov-cite">AI literacy, Art. 4</span></h2>
   {% if not ai_literacy_enabled %}
-  {{ turned_off('Staff AI training tracking') }}
+  {{ module_gate('ai_literacy', 'Staff AI training tracking', detail='Record the training each role needs and the evidence that staff completed it.') }}
   {% else %}
   {% if literacy_error %}<p class="muted">{{ literacy_error }}</p>{% endif %}
   {% if literacy_plane_status.reconciliation_required %}
@@ -493,7 +491,7 @@
 <section class="panel" id="serious-incidents" aria-labelledby="incident-title">
   <h2 id="incident-title">Serious incidents <span class="gov-cite">Reporting deadlines, Art. 73</span></h2>
   {% if not ai_incident_enabled %}
-  {{ turned_off('Serious-incident reporting') }}
+  {{ module_gate('ai_incident_reporting', 'Serious-incident reporting', detail='Track deadlines and record reports your team makes to authorities.') }}
   {% else %}
   {% if ai_incident_error %}<p class="muted">{{ ai_incident_error }}</p>{% endif %}
   {% if ai_incident_declarations %}

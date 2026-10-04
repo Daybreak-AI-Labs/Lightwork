@@ -18,5 +18,5 @@ def compact(limit):
     count = DeliveryJournal().compact_delivered(limit=limit)
     click.echo(f"Compacted {count} delivered receipts; visited up to {limit} identities.")
     click.echo("The next call continues the persisted scan. Zero compacted does not prove a complete scan.")
-    click.echo("Deduplication identities remain; compaction does not reset the 10,000-receipt admission limit.")
-    click.echo("At capacity, preserve the old workspace authority and provision a new account/workspace under your retention policy.")
+    click.echo("Deduplication identities remain until their retention window ends; tidying may not free a slot yet.")
+    click.echo("At capacity, review Settings > All settings > Chat channels to raise the saved-message limit.")

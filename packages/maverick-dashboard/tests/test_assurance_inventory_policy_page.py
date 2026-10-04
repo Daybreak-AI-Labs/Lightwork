@@ -31,6 +31,41 @@ def _isolated_assurance_page(tmp_path, monkeypatch):
     config.reset_config_cache()
 
 
+def test_assurance_off_states_offer_working_controls():
+    page = client.get("/security/assurance")
+    assert page.status_code == 200, page.text
+    for section in (
+        "drift_monitoring", "evidence_gateway", "policy_packs",
+        "portfolio_risk",
+    ):
+        assert f'data-module-gate="{section}"' in page.text
+    assert 'href="/settings/all?id=red_team_assurance.enable"' in page.text
+    assert "setup wizard" not in page.text.lower()
+
+    setting = client.get("/settings/all?id=red_team_assurance.enable")
+    assert setting.status_code == 200, setting.text
+    assert 'data-setting-id="red_team_assurance.enable"' in setting.text
+
+
+def test_assurance_turn_on_controls_open_their_sections():
+    sections = (
+        "drift_monitoring", "evidence_gateway", "policy_packs",
+        "portfolio_risk",
+    )
+    for section in sections:
+        enabled = client.post("/api/v1/features/modules", json={
+            "section": section, "enabled": True,
+        })
+        assert enabled.status_code == 200, (section, enabled.text)
+    page = client.get("/security/assurance")
+    assert page.status_code == 200, page.text
+    for section in sections:
+        assert f'data-module-gate="{section}"' not in page.text
+    assert 'id="drift-baseline-create"' in page.text
+    assert 'id="policy-packs-panel"' in page.text
+    assert 'aria-label="AI portfolio risk totals"' in page.text
+
+
 def _policy_catalog_row(
     entry_id: str,
     pack_id: str,

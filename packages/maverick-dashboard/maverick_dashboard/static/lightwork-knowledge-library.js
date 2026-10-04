@@ -123,7 +123,13 @@
     tbody.textContent = "";
     starters.textContent = "";
     if (!body.enabled) {
-      statusEl.textContent = "The knowledge library is turned off. An administrator can turn it on in the setup wizard.";
+      if (canAdmin) {
+        var settings = el("a", "Turn it on in Settings");
+        settings.href = "/settings/all?id=knowledge_access.enable";
+        statusEl.replaceChildren(document.createTextNode("The knowledge library is turned off. "), settings);
+      } else {
+        statusEl.textContent = "The knowledge library is turned off. Ask an administrator to turn it on in Settings.";
+      }
       return;
     }
     var collections = Array.isArray(body.collections) ? body.collections : [];

@@ -8719,8 +8719,8 @@ def _render_channels_page(request: Request, *, saved: str = "",
                           issued_code: str = "") -> HTMLResponse:
     """Channels: manage the common ones (enable + credentials) from the form
     sections, plus a read-only, secret-redacted view of everything configured.
-    Saved to the dashboard overlay, never config.toml; effective on the next
-    `maverick serve`."""
+    Saved to the dashboard overlay; a running chat service must restart to
+    pick up changed connection details."""
     require_global_permission(request, "admin")
     sensitive_markers = (
         "token",
@@ -8788,7 +8788,7 @@ def _render_channels_page(request: Request, *, saved: str = "",
             detail="channel inventory is unavailable",
         ) from exc
     saved_msg = {
-        "save": "Chat app saved.",
+        "save": "Chat app saved. Check the chat service below, then send a test message to confirm delivery.",
         "clear": "Saved settings removed.",
         "tested": "Connection test passed.",
         "test_failed": "The connection test failed. Check the details and try again.",
@@ -8803,6 +8803,12 @@ def _render_channels_page(request: Request, *, saved: str = "",
                         "(Settings > All settings > Integrations > Email alerts).",
     }.get(saved, "")
     from . import plain_labels, teams_links_api
+    try:
+        from .service_supervisor import status as service_status
+
+        channel_runtime = service_status(["channels"])[0]
+    except Exception:
+        channel_runtime = None
     for channel in managed:
         for field in channel["fields"]:
             label, help_text, advanced = plain_labels.CHANNEL_FIELDS.get(
@@ -8820,6 +8826,7 @@ def _render_channels_page(request: Request, *, saved: str = "",
             "saved": saved_msg,
             "saved_failed": saved in {"test_failed", "send_failed", "email_failed"},
             "sendable": ["email", "sms", "slack"],
+            "channel_runtime": channel_runtime,
             **teams_links_api.page_context(issued_code),
             "mail_configured": _mail_configured(),
         },

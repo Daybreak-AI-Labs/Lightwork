@@ -104,7 +104,7 @@ _FAKE_SYS_ID = "abc123def456"  # pragma: allowlist secret
 # Fail-closed wiring and the disabled-state page
 # ---------------------------------------------------------------------------
 
-def test_disabled_modules_fail_closed_and_page_explains_the_knobs():
+def test_disabled_modules_fail_closed_and_page_offers_controls():
     for path in (
         f"{_PREFIX}/fria",
         f"{_PREFIX}/literacy/gaps",
@@ -122,9 +122,29 @@ def test_disabled_modules_fail_closed_and_page_explains_the_knobs():
     assert "EU AI Act workflows is turned off" in page.text
     assert "Staff AI training tracking is turned off" in page.text
     assert "Serious-incident reporting is turned off" in page.text
+    assert page.text.count('data-module-gate="eu_conformity"') == 6
+    assert page.text.count('data-module-gate="ai_literacy"') == 1
+    assert page.text.count('data-module-gate="ai_incident_reporting"') == 1
+    assert page.text.count('class="btn btn--primary mg-on"') >= 8
+    assert "setup wizard" not in page.text.lower()
     assert "is not set up" in page.text
     # Config section names are never shown to people.
     assert "[eu_conformity]" not in page.text and "[ai_literacy]" not in page.text
+
+
+def test_governance_turn_on_controls_open_their_sections():
+    for section in ("eu_conformity", "ai_literacy", "ai_incident_reporting"):
+        enabled = client.post("/api/v1/features/modules", json={
+            "section": section, "enabled": True,
+        })
+        assert enabled.status_code == 200, (section, enabled.text)
+    page = client.get("/security/governance")
+    assert page.status_code == 200, page.text
+    for section in ("eu_conformity", "ai_literacy", "ai_incident_reporting"):
+        assert f'data-module-gate="{section}"' not in page.text
+    assert 'id="fria-open"' in page.text
+    assert 'id="literacy-require"' in page.text
+    assert 'id="incident-declare"' in page.text
 
 
 def test_governance_page_is_registered_for_the_sidebar():

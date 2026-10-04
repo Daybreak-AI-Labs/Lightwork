@@ -1060,6 +1060,12 @@ no images without alt, axe violations limited to nine distinct rules).
 
 #### UX-058 · P1 · Reliability · Production database in the AWS Terraform stack has no deletion protection and skips the final snapshot
 
+- **Current branch (2026-10-03):** The AWS RDS plan now enables deletion
+  protection and a stable final-snapshot name, and Terraform refuses accidental
+  destroy or replacement. Formatting and provider-only validation passed; no
+  AWS plan against customer state, apply, snapshot, or restore was run. The
+  deployment remains single-AZ with seven-day automated backups.
+
 - **Who / where:** IT/security · `deploy/aws/terraform/rds.tf`
 - **User impact:** A terraform destroy, an accidental replacement or a mistaken apply deletes the world-model database (all goals, audit-linked records) immediately with no final snapshot; the operator believes state is protected because EFS is.
 - **Evidence (code-verified):**
@@ -1069,6 +1075,14 @@ no images without alt, axe violations limited to nine distinct rules).
 - Source: C5c-124
 
 #### UX-059 · P1 · Reliability · Channel intake stops accepting messages after ~10,000 per workspace until old receipts are manually compacted
+
+- **Current branch (2026-10-03):** Channel intake now has a bounded,
+  configurable receipt capacity, an administrator capacity display with an
+  80% warning, and automatic small-batch compaction of eligible delivered
+  receipts during active intake. Recovery scans page through the configured
+  capacity instead of stopping at the old first-page limit. Focused channel
+  checks passed. Unresolved receipts can still fill the cap, and this has not
+  been exercised against a sustained live provider feed.
 
 - **Who / where:** end user, workspace admin, compliance · `All channel adapters (webhooks return 503, pollers skip)`
 - **User impact:** A moderately busy Slack/Teams deployment (~80+ messages/day sustained) hits the cap and the assistant simply stops answering channel messages; the only fix is an admin knowing to run a maintenance command.
@@ -1091,6 +1105,13 @@ no images without alt, axe violations limited to nine distinct rules).
 
 #### UX-060 · P1 · Reliability · After a crash and quick restart, a running chat stays 'Working…' forever: orphan recovery only runs at startup and skips goals updated in the last 60 s
 
+- **Current branch (code review, 2026-10-03):** The dashboard now starts a
+  periodic orphan sweeper after startup recovery. Active runs heartbeat while
+  working, and the sweeper revisits stale active runs after the restart window;
+  the shutdown supervisor stops it. This addresses the one-shot recovery gap
+  described below, though an actual crash/restart browser journey is still
+  needed on a customer installation.
+
 - **Who / where:** end user, workspace admin, evaluator · `/chat/goal/{id}; dashboard startup`
 - **User impact:** After an OOM kill, container restart or power loss, the user's chat shows a live spinner indefinitely; follow-up messages are refused ('still working on the previous message') until they think to press Stop, and nothing tells them the run died.
 - **Evidence (reproduced):**
@@ -1110,6 +1131,13 @@ no images without alt, axe violations limited to nine distinct rules).
 
 #### UX-061 · P1 · Reliability · Re-running `lightwork init` (the wizard's own advice for changing anything) silently replaces an advanced configuration and wipes unrelated keys from .env, keeping only one backup generation
 
+- **Current branch (code review, 2026-10-03):** Every wizard entry point now
+  detects existing setup files before asking questions and directs the person
+  to in-app Settings. The publish boundary rechecks under its file lock and
+  refuses to replace an existing config or key file. Focused tests cover all
+  entry points and the desktop bridge. This prevents the silent wipe described
+  below; the separate in-app editing journey still needs customer acceptance.
+
 - **Who / where:** workspace admin, evaluator, end user · `lightwork init (re-run, consumer)`
 - **User impact:** An admin who re-runs the quick setup to add a key or change the governance level loses channels, SSO, security-suite and connector settings and their credentials without being told.
 - **Evidence (reproduced):**
@@ -1126,6 +1154,13 @@ no images without alt, axe violations limited to nine distinct rules).
 
 #### UX-062 · P1 · Reliability · After 2,048 knowledge rights requests, every knowledge read and search in that workspace is permanently denied
 
+- **Current branch (code review, 2026-10-03):** Normal request submission stops
+  at the 2,048 active-record limit; the knowledge page exposes capacity and an
+  administrator archive action for finished requests. The read guard only
+  refuses when it detects more records than it can scan, so the permanent
+  read outage is not reachable through normal submission. Legacy or externally
+  overfilled stores still need a bounded recovery path and installed acceptance.
+
 - **Who / where:** end user, compliance, workspace admin · `Knowledge search, read, export, jobs (knowledge_search tool and dashboard library)`
 - **User impact:** Once a workspace accumulates 2,048 correction/deletion requests over its lifetime, the AI can no longer read any knowledge source and users get an unintelligible 'request boundary' error; there is no admin action to recover.
 - **Evidence (code-verified):**
@@ -1140,6 +1175,14 @@ no images without alt, axe violations limited to nine distinct rules).
 - Source: C5c-123, C4-015 · prior audit: map/14b D11
 
 #### UX-063 · P1 · Reliability · Automated deletion requests can never close: the stock adapter's 'verify delete' step always fails, even when the record is gone
+
+- **Current branch (2026-10-03):** A validated zero-result provider lookup can
+  complete the verification step with a digest of the provider response and
+  request identity; records still present keep retrying. The privacy page
+  shows failed steps and an authorized, version-bound Try again action. This
+  proves absence from the active lookup, not hard purge; the separate delete
+  reconciliation keeps its stronger exact-target gate. Focused adapter and UI
+  checks passed, while a live provider erasure remains unverified.
 
 - **Who / where:** compliance · `/privacy/rights-orchestration source worker`
 - **User impact:** Every erasure request routed through a connected system ends in a dead-lettered task; the officer cannot close it inside the statutory deadline except via a manual evidence path that accepts self-asserted proof (map/10b D2).
@@ -1157,6 +1200,14 @@ no images without alt, axe violations limited to nine distinct rules).
 
 #### UX-064 · P1 · Ux · AI Governance workspace (EU AI Act) says 'turn it on in the setup wizard' in 8 sections although in-app switches exist
 
+- **Current branch (2026-10-03):** The governance and assurance sections now
+  use working in-app activation controls. Serious-incident reporting uses its
+  actual `ai_incident_reporting` switch; attack testing links to its real All
+  settings control. The knowledge library's remaining wizard instruction now
+  links to its in-app setting. Rendered-page activation checks passed for the
+  governance and assurance sections; the library link still needs a browser
+  check.
+
 - **Who / where:** compliance, workspace admin · `/security/governance`
 - **User impact:** The page that holds the EU AI Act records (FRIA, Annex IV, Art. 73 incidents, AI literacy) is entirely inert for a compliance officer. 'Setup wizard' is the installer CLI (apps/installer-cli), which a non-programmer cannot run after installation, contrary to docs/customer-experience-contract.md.
 - **Evidence (reproduced):**
@@ -1168,6 +1219,14 @@ no images without alt, axe violations limited to nine distinct rules).
 - Source: U6-003
 
 #### UX-065 · P1 · Ux · Chat channels only run inside a separate `lightwork serve` process that the dashboard/desktop never starts; the page says changes apply 'the next time Lightwork starts' and serve's error tells admins to edit config.toml
+
+- **Current branch (2026-10-03):** The dashboard already has an administrator
+  service supervisor with Start/Stop/Restart controls for the chat service in
+  Settings > Maintenance. The Channels page now shows whether this app owns a
+  running chat service and links directly to those controls; it no longer says
+  saving a connection alone starts delivery. This does not observe a service
+  managed outside the dashboard, and installed chat delivery needs an end-to-end
+  check after installation.
 
 - **Who / where:** workspace admin, evaluator · `/channels; lightwork serve`
 - **User impact:** On a desktop or docker install, an admin can configure Slack or email perfectly in the UI and it will never receive a message, because nothing runs the channel server; there is no start/stop/status control for it anywhere in the product.

@@ -514,6 +514,14 @@ def entries(S, C, Column) -> tuple:  # noqa: ARG001 -- Column is C
           "toggle", "Chat channels", False, "maverick_channels.rich_render",
           subgroup="Every chat app", restart=True, env=("MAVERICK_CHANNELS_RICH_RENDER",),
           aliases="math mermaid render"),
+        S("channels", "max_intake_records", "Saved chat message capacity",
+          "The number of saved message receipts each workspace can hold across all chat apps. "
+          "Lightwork clears delivered messages after their retention window; messages needing "
+          "review stay saved. Raise this before capacity is full.",
+          "number", "Chat channels", 20000, "maverick_channels.delivery",
+          subgroup="Every chat app", minimum=1000, maximum=100000, integer=True,
+          unit="messages", restart=True, weaker="higher",
+          warning="A higher limit retains more message receipts on this server."),
 
         # ---------------------------------------------------- vendor onboarding
         S("vendor_onboarding", "safe_read_attempts", "Tries for each vendor document read",

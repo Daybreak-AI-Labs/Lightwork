@@ -13773,6 +13773,15 @@ async def channel_delivery_receipts(request: Request, cursor: str = "", limit: i
     return await run_in_threadpool(read)
 
 
+@router.get("/channels/intake-capacity")
+async def channel_intake_capacity(request: Request) -> dict:
+    """Current tenant's receipt capacity, without message bodies or identities."""
+    require_global_permission(request, "admin")
+    from maverick_channels.delivery import DeliveryJournal
+
+    return await run_in_threadpool(lambda: DeliveryJournal().capacity_status())
+
+
 @router.get("/channels/poll-checkpoints")
 async def channel_poll_checkpoints(request: Request, cursor: str = "", limit: int = 50) -> dict:
     """Bounded tenant status; provider tokens and opaque cursors stay private."""

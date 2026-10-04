@@ -7,6 +7,7 @@
   if (!R || !app) return;
   var API = '/api/v1/privacy/rights-orchestration';
   var canAdmin = app.getAttribute('data-can-admin') === 'true';
+  var canAudit = app.getAttribute('data-can-audit') === 'true';
   var statusEl = document.getElementById('pro-status');
   var cases = [];
   var sources = [];
@@ -131,7 +132,14 @@
     renderSteps(c);
     panel.hidden = false;
     R.call('GET', API + '/cases/' + encodeURIComponent(c.case_id) + '/work').then(function (work) {
-      renderWork(c, work);
+      if (!canAdmin || !canAudit) { renderWork(c, work, []); return; }
+      return R.call('GET', API + '/callbacks?state=dead_letter&limit=1000').then(function (failed) {
+        renderWork(c, work, failed.items || []);
+        if (failed.count === 1000) say('This view shows the first 1,000 failed steps. Resolve some and refresh to see the rest.');
+      }).catch(function (f) {
+        renderWork(c, work, []);
+        fail(f, 'check failed system work');
+      });
     }).catch(function (f) { fail(f, 'load the work for this request'); });
   }
 
@@ -155,20 +163,35 @@
     step(box, 'Download the record', 'ghost', function () { exportCase(c); });
   }
 
-  function renderWork(c, work) {
+  function renderWork(c, work, failedCallbacks) {
+    var failedByTask = {};
+    failedCallbacks.forEach(function (callback) {
+      if (callback.case_id === c.case_id && callback.state === 'dead_letter') failedByTask[callback.task_id] = callback;
+    });
     R.table(document.getElementById('pro-case-tasks'), [
       { label: 'System', value: function (t) { return sourceName(t.source_id); } },
       { label: 'Step', value: function (t) { return PHASE[t.phase] || R.human(t.phase); } },
-      { label: 'Status', value: function (t) { return badge(TASK_STATE, t.state); } },
+      { label: 'Status', value: function (t) { return failedByTask[t.task_id] ? R.badge('Needs attention', 'blocked') : badge(TASK_STATE, t.state); } },
     ], work.tasks, [
       { label: 'Approve deletion', kind: 'danger', when: function (t) { return canAdmin && t.destructive && !t.approved_by && c.status !== 'closed'; }, run: function (t) { approveDestructive(t); } },
-      { label: 'Record result', when: function (t) { return t.state === 'planned' && !(t.destructive && !t.approved_by) && c.status !== 'closed'; }, run: function (t) { recordResult(c, t); } },
+      { label: 'Try again', when: function (t) { return canAdmin && !!failedByTask[t.task_id] && c.status !== 'closed'; }, run: function (t) { retryFailedWork(c, t, failedByTask[t.task_id]); } },
+      { label: 'Record result', when: function (t) { return t.phase === 'redact' && t.state === 'planned' && c.status !== 'closed'; }, run: function (t) { recordResult(c, t); } },
     ], { text: 'No systems searched yet. Use “Search a system”.' });
     R.table(document.getElementById('pro-case-manifests'), [
       { label: 'Checked', value: function (m) { return R.when(m.created_at); } },
       { label: 'Systems covered', value: function (m) { return (m.covered_source_ids || []).map(sourceName).join(', ') || 'None'; } },
       { label: 'Not covered', value: function (m) { return (m.uncovered_sources || []).map(function (u) { return sourceName(u.source_id) + (u.reason ? ' (' + R.human(u.reason) + ')' : ''); }).join(', ') || 'None'; } },
     ], work.manifests, null, { text: 'Not checked yet. Use “Check completeness” once each system is done.' });
+  }
+
+  function retryFailedWork(c, t, callback) {
+    R.confirm('Check the connection to ' + sourceName(t.source_id) + ' before trying “' + (PHASE[t.phase] || R.human(t.phase)) + '” again. This work may run automatically once retried.', 'Try again').then(function (ok) {
+      if (!ok) return;
+      return R.call('POST', API + '/callbacks/' + encodeURIComponent(callback.callback_id) + '/requeue', {
+        expected_revision: callback.revision, idempotency_key: R.newKey(),
+      }).then(function () { return load().then(function () { say('Retry requested. The connected system may be checked again automatically.'); }); })
+        .catch(function (f) { fail(f, 'retry the system work'); });
+    });
   }
 
   function proof(prefix) {

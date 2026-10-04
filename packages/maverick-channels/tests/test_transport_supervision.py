@@ -77,6 +77,29 @@ class Adapter(Channel):
         pass
 
 
+def test_recovery_scan_keeps_oldest_order_across_short_store_pages():
+    class ShortPages:
+        ids = ("a", "b", "c")
+
+        def iter_record_ids(self, *, start_after="", limit=100):
+            pivot = next((i for i, key in enumerate(self.ids) if key > start_after), len(self.ids))
+            for key in (self.ids[pivot:] + self.ids[:pivot])[:2]:
+                yield key, key
+
+    class Journal:
+        store = ShortPages()
+
+        def get(self, record_id):
+            return {"id": record_id, "channel": Adapter.name,
+                    "account_sha256": transport_worker._digest("account"),
+                    "execution": "received", "delivery": "not_ready",
+                    "created_at": {"a": 3, "b": 1, "c": 2}[record_id]}
+
+    worker = TransportWorker(Adapter(AsyncMock()), account="account",
+                             authorize=lambda msg: True, send=AsyncMock(), journal=Journal())
+    assert worker._oldest_window() == (["b", "c", "a"], False)
+
+
 def test_bounded_queue_overflow_is_durable_serial_and_in_intake_order(monkeypatch):
     monkeypatch.setattr(transport_worker, "MAX_PENDING", 2)
     async def run():
