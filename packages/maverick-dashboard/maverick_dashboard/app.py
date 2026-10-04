@@ -9886,18 +9886,19 @@ async def chat_send(
         refs = validate_connections(caller_principal(request) or "", json.loads(connection_references or "[]"))
     except ValueError as exc:
         raise HTTPException(409, str(exc)) from exc
-    title = (title or "").strip()
+    message = title or ""
+    title = message.strip()
     if not title:
         raise HTTPException(status_code=400, detail="goal text is required")
     if composer_mode == "message":
         # Chat accepts the full message as the task brief. The first line is
         # only the short navigation title; it must not truncate the work.
-        brief = title + ("\n\n" + description if description.strip() else "")
+        brief = message + ("\n\n" + description if description.strip() else "")
         if len(brief) > GOAL_DESCRIPTION_MAX_LENGTH:
             raise HTTPException(status_code=422, detail=(
                 f"Shorten your message and details to {GOAL_DESCRIPTION_MAX_LENGTH:,} characters or fewer."
             ))
-        title = title.splitlines()[0].strip()[:GOAL_TITLE_MAX_LENGTH]
+        title = next(line.strip() for line in message.splitlines() if line.strip())[:GOAL_TITLE_MAX_LENGTH]
         description = chat_text = brief
     else:
         if len(title) > GOAL_TITLE_MAX_LENGTH:

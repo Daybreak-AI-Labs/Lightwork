@@ -863,6 +863,16 @@
           }
           return;
         }
+        if ((form.querySelector('[name="composer_mode"]') || {}).value === 'message') {
+          const message = (form.querySelector('[name="title"]') || {}).value || '';
+          const details = (form.querySelector('[name="description"]') || {}).value || '';
+          const brief = message + (details.trim() ? '\n\n' + details : '');
+          if (Array.from(brief).length > 16000) {
+            errBox.textContent = 'Shorten your message and details to 16,000 characters or fewer. Your text is still here.';
+            errBox.style.display = 'block';
+            return;
+          }
+        }
         if (btn) { btn.disabled = true; btn.setAttribute('aria-busy', 'true'); }
         const submittedForm = new FormData(form);
         const submittedControls = Array.from(form.querySelectorAll('input,textarea,select')).map(function (control) {

@@ -3,6 +3,7 @@ so an OpenAI-compatible (or TGI) server configured on the computer running
 Lightwork is shown as set up instead of "0 providers connected / No key"."""
 from __future__ import annotations
 
+import os
 import re
 from pathlib import Path
 
@@ -105,9 +106,9 @@ def test_settings_page_no_longer_says_nothing_is_connected(monkeypatch):
     assert 'id="provider-openai_compatible"' in page
     assert "OpenAI-compatible server" in page
     assert "Add a provider key" not in page
-    # Models tab: one provider has what it needs, not "0 providers with a key".
+    # Models tab: one provider is set up, not "0 providers".
     assert re.search(
-        r'<span class="num">1</span><span class="muted">provider with a key</span>', page
+        r'<span class="num">1</span><span class="muted">provider set up</span>', page
     )
     # The address in use is named, and the credential is described without
     # naming a variable or revealing it.
@@ -137,3 +138,78 @@ def test_a_key_saved_here_replaces_the_environment_key_and_clearing_returns(monk
     assert row["dashboard_set"] is False
     assert row["configured"] is True  # the server's own key is back in use
     assert row["api_key_source"].startswith("environment:")
+
+
+def test_all_settings_shows_effective_server_fallback_and_safe_replacement(monkeypatch):
+    _env_openai_compatible(monkeypatch)
+    from maverick import config
+
+    client = TestClient(
+        __import__("maverick_dashboard.app", fromlist=["app"]).app,
+        headers={"Origin": "http://testserver"},
+    )
+
+    def current_rows():
+        result = client.get("/api/v1/settings/catalog?group=integrations")
+        assert result.status_code == 200
+        return result.json(), {row["id"]: row for group in result.json()["groups"]
+                               for row in group["settings"]}
+
+    snapshot, rows = current_rows()
+    address = rows["providers.openai_compatible.base_url"]
+    key = rows["providers.openai_compatible.api_key"]
+    assert address["value"] == _ENV_URL
+    assert address["source"] == "deployment" and address["locked"] is False
+    assert "save here to replace" in address["source_text"]
+    assert key["is_set"] is True and key["value"] is None
+    assert _ENV_KEY not in repr(snapshot)
+
+    updated = client.post("/api/v1/settings/catalog", json={
+        "expected_revision": snapshot["revision"],
+        "changes": [{"id": "providers.openai_compatible.base_url",
+                     "value": "https://new.example.test/v1"}],
+        "confirm": True,
+    })
+    assert updated.status_code == 200
+    assert config.get_provider_config("openai_compatible")["base_url"] == "https://new.example.test/v1"
+    saved, rows = current_rows()
+    assert rows["providers.openai_compatible.base_url"]["source"] == "here"
+    assert rows["providers.openai_compatible.base_url"]["value"] == "https://new.example.test/v1"
+    assert _ENV_KEY not in repr(rows)
+
+    cleared = client.post("/api/v1/settings/catalog", json={
+        "expected_revision": saved["revision"],
+        "changes": [{"id": "providers.openai_compatible.base_url", "reset": True}],
+        "confirm": True,
+    })
+    assert cleared.status_code == 200
+    _, rows = current_rows()
+    assert rows["providers.openai_compatible.base_url"]["value"] == _ENV_URL
+    assert rows["providers.openai_compatible.base_url"]["source"] == "deployment"
+    assert config.provider_configuration_state("openai_compatible")["base_url"] == _ENV_URL
+
+
+def test_reset_installer_address_reveals_server_fallback(monkeypatch):
+    _env_openai_compatible(monkeypatch)
+    from maverick import config
+
+    path = Path(os.environ["MAVERICK_CONFIG"])
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text('[providers.openai_compatible]\nbase_url = "https://installer.example.test/v1"\n', encoding="utf-8")
+    config.reset_config_cache()
+    client = TestClient(
+        __import__("maverick_dashboard.app", fromlist=["app"]).app,
+        headers={"Origin": "http://testserver"},
+    )
+    initial = client.get("/api/v1/settings/catalog?group=integrations").json()
+    response = client.post("/api/v1/settings/catalog", json={
+        "expected_revision": initial["revision"],
+        "changes": [{"id": "providers.openai_compatible.base_url", "reset": True}],
+        "confirm": True,
+    })
+    assert response.status_code == 200
+    assert config.provider_configuration_state("openai_compatible")["base_url"] == _ENV_URL
+    after = client.get("/api/v1/settings/catalog?group=integrations").json()
+    row = next(row for group in after["groups"] for row in group["settings"]
+               if row["id"] == "providers.openai_compatible.base_url")
+    assert row["value"] == _ENV_URL and row["source"] == "deployment"

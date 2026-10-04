@@ -48,12 +48,12 @@ SERVICE_ACCOUNT_SUBJECT_PREFIX = "svc:"
 # ``view`` (every role grants it; a caller who cannot view has no working
 # API). ``admin`` grants every atom, like the admin role.
 SCOPES: dict[str, tuple[str, str]] = {
-    "tasks:read": ("view", "Read tasks, results and this workspace's records"),
-    "tasks:write": ("operate", "Start, answer and cancel tasks"),
-    "approvals:decide": ("operate", "Approve or reject waiting actions"),
-    "audit:read": ("audit", "Read the activity record"),
-    "settings:write": ("admin", "Change settings and manage people"),
-    "admin": ("admin", "Everything an administrator can do"),
+    "tasks:read": ("view", "Read information available to your viewer role"),
+    "tasks:write": ("operate", "Perform any operator action, including approval decisions"),
+    "approvals:decide": ("operate", "Perform any operator action, including task changes"),
+    "audit:read": ("audit", "Read viewer information and audit-gated records"),
+    "settings:write": ("admin", "Use administrator-gated controls, but not operator or audit controls"),
+    "admin": ("admin", "Use all viewer, operator, audit and administrator controls"),
 }
 
 _LABEL_MAX = 80

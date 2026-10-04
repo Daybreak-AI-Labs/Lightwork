@@ -83,6 +83,30 @@ def test_closed_request_exposes_export_cleanup_failure_and_retry(monkeypatch):
     assert "Saved export needs cleanup" not in client.get("/privacy").text
 
 
+def test_collected_access_export_is_not_presented_as_delivered():
+    from maverick import privacy_ops
+
+    request = privacy_ops.open_dsar("person@example.test", "access", channel="email")
+    initial = client.get(f"/privacy/dsar/{request['id']}")
+    assert "Collect their data" in initial.text
+    assert "Collect their data and mark answered" not in initial.text
+
+    collected = privacy_ops.fulfill_dsar(request["id"])
+    assert collected is not None and collected["status"] == "fulfilled"
+    detail = client.get(f"/privacy/dsar/{request['id']}")
+    worklist = client.get("/privacy")
+    report = client.get("/privacy/report")
+    assert all(response.status_code == 200 for response in (detail, worklist, report))
+    assert "Data collected</span>" in detail.text
+    assert "does not confirm that the requester received it" in detail.text
+    assert "The saved export is removed when you close this request" in detail.text
+    assert collected["fulfillment"]["export_path"] not in detail.text
+    assert "Data collected</span>" in worklist.text
+    assert "Completed</span>" not in worklist.text
+    assert "Marked handled or closed by deadline" in report.text
+    assert "It does not confirm delivery or deletion" in report.text
+
+
 def test_templates_catalog_api():
     resp = client.get("/api/v1/assess/templates")
     assert resp.status_code == 200

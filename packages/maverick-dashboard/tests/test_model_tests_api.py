@@ -102,3 +102,23 @@ def test_disabled_policy_keeps_receipts_readable_but_refuses_new_work(ui, monkey
     assert snapshot["enabled"] is False and len(snapshot["checks"]) == 1
     assert ui.client.post("/api/v1/models/tests/review", json={"context": CONTEXT, "model": "openai:synthetic", "kind": "generation"}).status_code == 403
     assert not ui.calls
+
+
+def test_copilot_provider_status_uses_settings_truth_without_exposing_credentials(ui, monkeypatch):
+    monkeypatch.setattr(copilot.provider_readiness, "workspace_readiness", lambda: {
+        "verdict_label": "Key saved, not tested yet",
+        "reason": "Test the connection.",
+        "summary": "One AI service needs a test",
+        "providers": [{"name": "openai", "label": "OpenAI", "status_label": "Key saved, not tested yet",
+                       "routed": True, "configured": True, "reason": "Test the connection.",
+                       "api_key": "must-never-leak"}],
+    })
+    adapter = next(item for item in copilot.entries() if item.id == "models.provider_status")
+    assert "/providers" in adapter.pages
+    status = copilot.providers_snapshot(object(), None)
+    assert status.details["services"][0]["status"] == "Key saved, not tested yet"
+    assert "must-never-leak" not in json.dumps(status.details)
+    ui.state["admin"] = False
+    with pytest.raises(HTTPException) as denied:
+        copilot.providers_snapshot(object(), None)
+    assert denied.value.status_code == 403

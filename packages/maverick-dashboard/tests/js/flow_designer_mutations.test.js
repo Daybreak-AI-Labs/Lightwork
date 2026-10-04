@@ -32,7 +32,7 @@ function fixture(fetchImpl) {
       nodes: [{ id: "step", kind: "action", tool: "lookup", label: "Lookup" }] },
     idInput: { value: "flow" },
     flowInputs: [], saveInFlight: false, publishInFlight: false, runInFlight: false,
-    applyInFlight: false, draftGeneration: 0, pendingDraft: null,
+    applyInFlight: false, retireInFlight: false, draftGeneration: 0, pendingDraft: null,
     snapshot: "unsaved draft", cleanDraft: null, description: { value: "First draft" },
     sample: { value: "", focus() { this.focused = true; } }, testData: { open: false },
     proposals: { step: { to_kind: "agent" } },
@@ -96,7 +96,7 @@ test('actual API load and save retain recipe evidence and typed step zero', () =
     "../../maverick_dashboard/templates/flow_designer.js"), "utf8");
   const core = require("../../maverick_dashboard/templates/flow_designer_core.js");
   const context = { document: { getElementById() { return null; } },
-    renderCrumbs() {}, syncScheduleControls() {}, autoLayout() {}, render() {}, renderProps() {}, markClean() {},
+    renderCrumbs() {}, syncScheduleControls() {}, syncSaveButtons() {}, autoLayout() {}, render() {}, renderProps() {}, markClean() {},
     nameInput: {}, idInput: {}, normalizeNode: core.normalizeNode, serializeFlow: core.serializeFlow };
   const loadStart = source.indexOf('  function fromApiFlow(');
   const loadEnd = source.indexOf('  function autoLayout(', loadStart);
@@ -121,7 +121,7 @@ test('actual API load and save retain choice guard, both branches and admission 
     "../../maverick_dashboard/templates/flow_designer.js"), "utf8");
   const core = require("../../maverick_dashboard/templates/flow_designer_core.js");
   const context = { document: { getElementById() { return null; } },
-    renderCrumbs() {}, syncScheduleControls() {}, autoLayout() {}, render() {}, renderProps() {}, markClean() {},
+    renderCrumbs() {}, syncScheduleControls() {}, syncSaveButtons() {}, autoLayout() {}, render() {}, renderProps() {}, markClean() {},
     nameInput: {}, idInput: {}, normalizeNode: core.normalizeNode, serializeFlow: core.serializeFlow };
   const loadStart = source.indexOf('  function fromApiFlow(');
   const loadEnd = source.indexOf('  function autoLayout(', loadStart);
@@ -254,8 +254,7 @@ function deferred() {
   return { promise, resolve, reject };
 }
 
-// The API offers applicable action→agent proposals. Agent→action suggestions
-// require reviewed parameter bindings and are intentionally not applicable yet.
+// Softening remains a direct action; hardening now opens a separate review.
 const proposal = { to_kind: "agent" };
 function applied(overrides = {}) {
   return { id: "flow", version: 3, node_id: "step", from_kind: "action", to_kind: "agent", ...overrides };
@@ -319,12 +318,24 @@ for (const receipt of [null, {}, applied({ id: "other" }), applied({ node_id: "o
   });
 }
 
-test("a proposal requiring reviewed parameter bindings sends no save or apply request", async () => {
-  const ui = fixture(async () => response(saved()));
-  await ui.context.applyProposal({ id: "step", kind: "agent" }, {
-    to_kind: "action", inferred_tool: "lookup", applicable: false,
-  });
-  assert.equal(ui.calls.length, 0);
+test("a hardening suggestion applies only after reviewed parameter bindings", async () => {
+  const ui = fixture(async (url) => response(url.endsWith("/apply")
+    ? applied({from_kind: "agent", to_kind: "action"}) : saved()));
+  const node = ui.context.rootFlow.nodes[0];
+  node.kind = "agent"; node.brief = "Look up the customer";
+  const suggestion = {node_id: "step", to_kind: "action", inferred_tool: "lookup", applicable: false};
+  ui.context.proposals.step = suggestion;
+  let reviewed = false;
+  ui.context.LightworkFlowRewrite = {prepare: async () => {
+    reviewed = true;
+    return {node_id: "step", to_kind: "action", tool: "lookup",
+      params: {query: "{{customer}}"}, version: 2, revision: "draft-2"};
+  }};
+  await ui.context.applyProposal(node, suggestion);
+  assert.equal(reviewed, true);
+  assert.equal(ui.calls.length, 2);
+  assert.deepEqual(JSON.parse(ui.calls[1][1].body).params, {query: "{{customer}}"});
+  assert.equal(ui.loaded[0][0], "flow");
 });
 
 test("a failed apply restores its control and shows the server's conflict message", async () => {

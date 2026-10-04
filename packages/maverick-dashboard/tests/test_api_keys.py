@@ -281,7 +281,7 @@ def test_revoke_stops_the_key_at_once_and_others_cannot_touch_it(monkeypatch):
     assert r.status_code == 401 and r.json()["detail"] == "This API key was revoked."
 
 
-def test_a_key_cannot_manage_keys_beyond_its_scopes_but_can_list_its_owner_s(monkeypatch):
+def test_a_key_can_list_its_owner_s_keys(monkeypatch):
     _sign_in_map(monkeypatch)
     from maverick_dashboard import rbac
     rbac.set_role("user:alice", "operator")
@@ -289,6 +289,43 @@ def test_a_key_cannot_manage_keys_beyond_its_scopes_but_can_list_its_owner_s(mon
     secret = _create(c, "alice").json()["secret"]
     # The key acts as Alice on the keys API too (view scope).
     assert c.get("/api/v1/api-keys", headers=_key(secret)).status_code == 200
+
+
+def test_api_key_cannot_mint_rotate_or_revoke_credentials(monkeypatch):
+    _sign_in_map(monkeypatch)
+    from maverick_dashboard import rbac
+
+    monkeypatch.setenv("MAVERICK_DASHBOARD_ADMINS", "user:alice")
+    rbac.set_role("user:alice", "admin")
+    c = _client()
+    read_key = _create(c, "alice", scopes=["tasks:read"]).json()
+    admin_key = _create(c, "alice", scopes=["admin"]).json()
+    account = c.post("/api/v1/service-accounts",
+                     json={"name": "existing-sync", "role": "viewer"},
+                     headers=_as("alice"))
+    assert account.status_code == 201
+
+    for bearer in (read_key["secret"], admin_key["secret"]):
+        headers = _key(bearer)
+        assert c.get("/api/v1/api-keys", headers=headers).status_code == 200
+        assert c.get("/account/api-keys", headers=headers).status_code == 403
+        assert c.post("/api/v1/api-keys",
+                      json={"label": "elevated", "scopes": ["admin"]},
+                      headers=headers).status_code == 403
+        assert c.post(f"/api/v1/api-keys/{admin_key['key']['id']}/rotate",
+                      headers=headers).status_code == 403
+        assert c.post(f"/api/v1/api-keys/{admin_key['key']['id']}/revoke",
+                      headers=headers).status_code == 403
+        assert c.post("/api/v1/service-accounts", json={"name": "new-sync", "role": "viewer"},
+                      headers=headers).status_code == 403
+        assert c.post("/api/v1/service-accounts/existing-sync/disable",
+                      headers=headers).status_code == 403
+
+    # The signed-in owner still manages and rotates keys in the product.
+    assert len(c.get("/api/v1/api-keys", headers=_as("alice")).json()["keys"]) == 2
+    assert rbac.get_stored_role("user:svc:existing-sync") == "viewer"
+    assert c.post(f"/api/v1/api-keys/{admin_key['key']['id']}/rotate",
+                  headers=_as("alice")).status_code == 200
 
 
 # ---- service accounts -------------------------------------------------------
@@ -352,6 +389,8 @@ def test_static_token_still_works_and_is_audited_as_break_glass(monkeypatch):
     tok = {"Authorization": "Bearer static-break-glass-token-for-tests"}
     assert c.get("/api/v1/account/me", headers=tok).status_code == 200
     assert c.get("/api/v1/account/me", headers=tok).status_code == 200
+    assert c.post("/api/v1/api-keys", json={"label": "recovery", "scopes": ["tasks:read"]},
+                  headers=tok).status_code == 201
     kinds = [getattr(k, "value", k) for k, _p in rows]
     assert kinds.count("break_glass_token_used") == 1  # rate-limited
     payload = next(p for k, p in rows if getattr(k, "value", k) == "break_glass_token_used")

@@ -227,19 +227,31 @@ def read_status(legacy: Path, period: str, provider: str, cap):
             "SELECT dollars FROM totals WHERE period=? AND provider=?",
             (period, provider),
         ).fetchone()
-        stats = connection.execute(
-            "SELECT COUNT(*), COALESCE(SUM(CASE WHEN state!='settled' THEN projected ELSE 0 END),0), "
-            "COALESCE(MAX(CASE WHEN state='unknown' OR (state='held' AND projected=0) THEN 1 ELSE 0 END),0) "
-            "FROM receipts WHERE period=? AND provider=?", (period, provider),
-        ).fetchone()
-        if row is None and stats[0]:
+        if row is None and connection.execute(
+            "SELECT 1 FROM receipts WHERE period=? AND provider=? LIMIT 1",
+            (period, provider),
+        ).fetchone() is not None:
             raise cap.ProviderAccountingUnavailable
         total = cap._amount(float(row[0])) if row else 0.0
-        held = cap._amount(float(stats[1]))
+        # The state index can seek straight to live holds. Scanning every
+        # settled receipt here made each admission slower as history grew.
+        held_row = connection.execute(
+            "SELECT COALESCE(SUM(projected), 0) FROM receipts "
+            "WHERE period=? AND provider=? AND state IN ('held', 'unknown')",
+            (period, provider),
+        ).fetchone()
+        held = cap._amount(float(held_row[0]))
         if held > total + 1e-8:
             raise cap.ProviderAccountingUnavailable
+        unresolved = connection.execute(
+            "SELECT 1 FROM receipts WHERE period=? AND provider=? "
+            "AND state='unknown' LIMIT 1", (period, provider),
+        ).fetchone() is not None or connection.execute(
+            "SELECT 1 FROM receipts WHERE period=? AND provider=? "
+            "AND state='held' AND projected=0 LIMIT 1", (period, provider),
+        ).fetchone() is not None
         connection.commit()
-        return total, held, bool(stats[2])
+        return total, held, unresolved
     finally:
         connection.close()
 

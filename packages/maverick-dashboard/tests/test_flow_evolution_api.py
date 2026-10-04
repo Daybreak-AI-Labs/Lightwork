@@ -217,6 +217,51 @@ def test_apply_hardens_agent_to_action_and_bumps_version(monkeypatch, tmp_path):
     assert node_a["kind"] == "action" and node_a["tool"] == "web_search"
 
 
+def test_hardening_review_uses_live_action_contract_and_current_flow_inputs(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    from maverick.flow import evolve, store
+    from maverick.flow.ir import Flow, FlowNode
+    from maverick_dashboard import api
+
+    saved = store.save_flow(Flow(
+        id="review", name="Customer lookup", start="agent",
+        inputs=[{"key": "customer", "label": "Customer name", "type": "text"}],
+        nodes={"agent": FlowNode(id="agent", kind="agent", brief="Look up a customer",
+                                 label="Look up customer")},
+    ))
+    monkeypatch.setattr(evolve, "maybe_propose", lambda _flow: [evolve.NodeProposal(
+        "agent", "agent", "action", "Past successful runs used one action", 12, 1.0,
+        inferred_tool="web_search", applicable=False,
+        blocking_reason="parameters need review",
+    )])
+    monkeypatch.setattr(api, "_TOOL_INDEX_CACHE", [
+        {"name": "web_search", "description": "Search public pages", "params": ["query"]},
+    ])
+    monkeypatch.setattr(api, "_TOOL_SCHEMA_CACHE", {
+        "web_search": {"type": "object", "properties": {
+            "query": {"type": "string", "description": "What to search for"},
+        }, "required": ["query"]},
+    })
+    client = _client()
+    response = client.get("/api/v1/flows/review/apply-review?node_id=agent")
+    assert response.status_code == 200, response.text
+    review = response.json()
+    assert (review["version"], review["revision"]) == (saved.version, saved.revision)
+    assert review["tool"] == "web_search"
+    assert review["fields"] == [{"name": "query", "label": "Query", "type": "string",
+                                 "required": True, "description": "What to search for"}]
+    assert review["sources"] == [{"key": "customer", "label": "Customer name", "origin": "input"}]
+    assert store.load_flow("review").version == saved.version
+    monkeypatch.setattr(api, "_TOOL_INDEX_CACHE", [])
+    unavailable = client.get("/api/v1/flows/review/apply-review?node_id=agent")
+    assert unavailable.status_code == 200 and unavailable.json()["tool"] == ""
+    unavailable_choice = client.get(
+        "/api/v1/flows/review/apply-review?node_id=agent&tool=web_search",
+    )
+    assert unavailable_choice.status_code == 409
+    assert store.load_flow("review").nodes["agent"].kind == "agent"
+
+
 def test_apply_softens_action_to_agent_without_a_brief(monkeypatch, tmp_path):
     # The one-click "Apply this improvement" path for a soften: no brief supplied,
     # so the node's own label/brief becomes the agent brief (no human input needed).

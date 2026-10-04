@@ -182,7 +182,8 @@ customer acceptance result.
 9. **The learning story overclaims.** Skills distilled from successful runs are never recalled
    (UX-049); the causal "placebo refutation" cannot fail (UX-099); snapshots and
    rollback cover six stores, not the guardrails and habits the flywheel writes (UX-247,
-   UX-246); flow "hardening" can never apply (UX-090).
+   UX-246); flow hardening now has a reviewed draft path, while autonomous
+   application and live effect proof remain open (UX-090).
 10. **The public story overclaims and the help is missing.** The older "hard dollar/wall-clock caps"
     claim did not match every entry path (UX-092); the docs home advertised session providers that
     did not exist (UX-091). The private-repository contact and task-report links (UX-055, UX-046)
@@ -213,8 +214,8 @@ no images without alt, axe violations limited to nine distinct rules).
    pre-dispatch price checks and a plain-language unpriced-model path; the Docker-less consumer default;
    rehearsal holds that create an approval instead of refusing; a readiness badge per specialist; a
    real Results inbox; provider-failure messages with a cause and remedy; orphan recovery that runs
-   continuously; a pruned, append-only provider spend ledger (it slows every model call today and
-   eventually blocks them, UX-088).
+   continuously; scalable provider spend accounting (the indexed local ledger removes the JSON
+   size ceiling, but whole-database seal verification still grows with history, UX-088).
 3. **Finish the half-built surfaces (2–4 weeks).** Channels hosted by the dashboard with a sender
    allow-list field and question round-trips; Teams; Microsoft 365 OAuth; the Automations hub script
    order; flow delete/unpublish; approvals in the inbox; Copilot bound to the shared operation catalog
@@ -488,12 +489,13 @@ no images without alt, axe violations limited to nine distinct rules).
 #### UX-020 · P1 · Trust · DSAR export files are kept forever in plaintext after the request is closed
 
 - **Current branch:** New closes commit `closed` with a pending cleanup marker before touching the export, then remove only the current tenant/request's regular, single-link artifact whose embedded intent and digest match the request. The response and stored request expose `export_cleanup.status` (`removed` or `failed`) and a safe message; calling close again retries a failed or interrupted cleanup without repeating fulfillment. An orphan written just before an interrupted fulfillment is also removed when the request closes. Focused DSAR tests pass, including tampered-path/content refusal. Already-closed legacy requests still need a repeat close or a separate migration/sweep; there is no time-based retention purge yet.
+- **October 4 scope update (partial):** For access and portability requests, the Privacy list and detail page now call a fulfilled request **Data collected**; the collection button and confirmation say collection saves an export and does not send a response. The report labels its deadline count as marked handled or closed and says it cannot confirm delivery or deletion. The stored `fulfilled` status is unchanged. An officer still lacks an in-product review/download of the collected package and proof that the requester received it; closing removes the saved export as described above. Local page tests cover the wording, not a delivered response.
 - **Who / where:** compliance, IT/security · `DSAR fulfil / close in the Privacy workspace`
 - **User impact:** Every access request leaves a complete copy of the person's data on disk indefinitely, outside at-rest encryption and outside retention — the opposite of data minimisation, and FEATURES.md's 'no second copy' claim does not cover this path.
 - **Evidence (code-verified):**
   - packages/maverick-core/maverick/privacy_ops.py:2946-2976 — fulfill_dsar writes the subject's full export to data_dir('dsar_requests')/exports/<id>-export.json via atomic_write_text (plaintext)
   - packages/maverick-core/maverick/privacy_ops.py:3002-3021 — close_dsar does not delete it; no other core/dashboard code references that path (grep)
-- **Recommendation (effort S):** Delete (or seal with at-rest encryption and a retention date) the export on close/after a configurable window ([privacy_ops] dsar_export_retention_days, Settings > Privacy), and include it in the retention purge.
+- **Remaining work:** Give an authorized officer a reviewed way to inspect and deliver the collected package with a delivery record; reconcile already-closed exports and define a time-based retention purge for requests that are never closed.
 - Source: C5c-032
 
 #### UX-021 · P1 · Trust · REST goals have no spend or time cap by default, while docs/api.md promises '$2, 30min' defaults and a [0,100] clamp
@@ -1664,6 +1666,7 @@ no images without alt, axe violations limited to nine distinct rules).
 
 #### UX-087 · P1 · Feature · Only one all-powerful shared bearer token for the whole REST API: no per-user/per-app API keys, scopes, expiry or overlap rotation
 
+- **October 4 current branch (partial):** Named, expiring, owner-bound API keys already provide rotation and revocation, with service accounts available alongside the static break-glass token. This change refuses API-key bearers at create, rotate, revoke and service-account create/disable routes, even when the bearer has an administrator scope; interactive sign-in and the legacy break-glass token remain credential-management paths. Key bearers may still list keys their role permits. The current scope-to-RBAC mapping is coarse: `tasks:write` and `approvals:decide` both grant every operator action, while `settings:write` grants administrator-gated actions. Split route-level action scopes before presenting these as least-privilege task-only or approval-only keys. Local API tests cover the credential-mutation denial; installed integration acceptance remains open.
 - **Who / where:** developer, IT/security, workspace admin · `Settings > All settings > Server access token ([dashboard] token / MAVERICK_DASHBOARD_TOKEN)`
 - **User impact:** Every integration (CI job, Zapier, mobile app, script) must share an admin-equivalent secret; you cannot tell which program made a call, cannot limit a script to read-only or one workspace, and rotating the token breaks every integration at once.
 - **Evidence (code-verified):**
@@ -1671,7 +1674,7 @@ no images without alt, axe violations limited to nine distinct rules).
   - packages/maverick-dashboard/maverick_dashboard/settings_catalog_access.py:232-241 — 'Server access token' … warning: 'Programs using the old token will be refused, and anyone holding the new one can do everything an administrator can.'
   - packages/maverick-dashboard/maverick_dashboard/app.py:2271-2276 — bearer compared with hmac against that single value
   - grep -rli 'personal access token' packages/maverick-dashboard → only copy strings, no token-issuing store/route (per-agent tokens exist only for /api/v1/external via external-agents mint)
-- **Recommendation (effort L):** Add named API keys (Settings > Access > API keys): per-key owner principal, role/permission scope, workspace/suite scope, expiry, last-used, revoke; allow two active keys during rotation; audit which key acted. Document in docs/api.md.
+- **Remaining work:** Enforce the advertised task, approval and settings scopes at each action route; qualify key attribution, overlap rotation, revocation and owner/role changes in an installed integration. Retain the explicit break-glass boundary.
 - Source: C3-003
 
 #### UX-088 · P1 · Perf · Provider spend ledger grows by one never-pruned row per model call and is rewritten whole twice per call: accounting cost grows linearly, then all AI calls are blocked at 16 MB
@@ -1685,9 +1688,9 @@ no images without alt, axe violations limited to nine distinct rules).
   - provider_cost_cap.py:605-617 — _save json.dumps the whole ledger and raises ProviderAccountingUnavailable when > _MAX_LEDGER_BYTES (16 MB, :250)
   - provider_cost_cap.py:1808-1823 — prune() keeps _RECEIPTS and _ATTEMPT_INDEX forever; only caller is tests/test_outcome_accounting.py:1541
   - provider_cost_cap.py:137-141 — error shown: 'Provider accounting is unavailable or has unresolved charges. New calls are blocked; reconcile the retained accounting before retrying.'
-- **Recommendation (effort M):** Move receipts/attempt index into an indexed SQLite table in world.db (append/update one row per call) or segment the file by period and prune settled attempt-index rows after the period closes; run prune on a schedule. Add a regression test that per-call cost stays flat from 100 to 10,000 prior calls. Surface ledger size/health in Settings > Maintenance.
+- **Remaining work:** Avoid whole-database seal hashing on every admission without weakening integrity, define retention or archival of settled records, and measure end-to-end per-call cost as the database grows well beyond the local 20,000-receipt sample. Qualify recovery from a damaged active ledger on an installed workspace.
 - Source: C4-002
-- **Current branch status (partial):** Healthy JSON ledgers migrate at 512 KiB to an indexed, local SQLite accounting authority. The original JSON remains as a retained migration source; the active marker is published only after the staged database and integrity seal are complete. Failed migration leaves JSON authoritative, while a missing or damaged active database blocks new charges until a reviewed repair or complete Workspace restore. Reserve, settle, and attempt claims update SQLite transactionally, and Settings > Provider Spending reports accounting health, counts, and the appropriate recovery route. At 20,000 prior receipts on a Windows development host (4.29 MB database), check/reserve/settle took about 8/28/26 ms. Every active operation still hashes the entire database to verify the seal, so cost grows with database bytes; this remains a scale limit at larger histories and is not a claim of unlimited or constant-time accounting.
+- **Current branch status (partial):** Healthy JSON ledgers migrate at 512 KiB to an indexed, local SQLite accounting authority. The original JSON remains as a retained migration source; the active marker is published only after the staged database and integrity seal are complete. Failed migration leaves JSON authoritative, while a missing or damaged active database blocks new charges until a reviewed repair or complete Workspace restore. Reserve, settle, and attempt claims update SQLite transactionally, and Settings > Provider Spending reports accounting health, counts, and the appropriate recovery route. The hot status query now uses the state index to sum live `held`/`unknown` receipts and find unresolved rows without scanning the settled history; a local 5,000-settled-row test bounds its SQLite work. At 20,000 prior receipts on a Windows development host (4.29 MB database), check/reserve/settle took about 8/28/26 ms before this query change; that historical measurement does not measure the new path. Every active operation still hashes the entire database to verify the seal, so cost grows with database bytes; this remains a scale limit at larger histories and is not a claim of unlimited or constant-time accounting.
 
 #### UX-089 · P1 · Docs · There is no user guide for the product UI: the public docs never explain chat, approvals, flows, workspaces, users, settings or the governance workbenches
 
@@ -1702,12 +1705,9 @@ no images without alt, axe violations limited to nine distinct rules).
 - **Recommendation (effort L):** Add persona-based guides to the public nav: 'Using Lightwork' (chat, tasks, answers, approvals, results), 'Administering a workspace' (users, roles, invitations, providers, task limits, recovery), 'Compliance workbenches' (one page per workbench), each driven from the dashboard with screenshots; keep CLI as a separate Developer section.
 - Source: C7-018
 
-#### UX-090 · P1 · Docs · Flows' advertised differentiator ('hardens a reliable agent step into a deterministic action, inferring the very tool it kept calling… better than Power Automate') can never apply: harden proposals are hard-coded not applicable
+#### UX-090 · P1 · Docs · Flows' advertised differentiator overclaims automatic hardening from tool-name history
 
-- **Current branch (2026-10-03):** README and feature documentation now say
-  hardening is a review-only suggestion until parameters and effects can be
-  verified. They no longer claim autonomous application or superiority to
-  Power Automate. The underlying hardening capability remains unbuilt.
+- **October 4 current branch (partial):** README and feature documentation describe hardening as a review-only suggestion. The designer can now open an inferred candidate, let a person choose a currently available action, bind its supported scalar inputs to declared flow inputs, earlier step outputs or fixed values, and confirm a new versioned draft. The guarded Copilot `learning.workflow_harden` action prepares and confirms a similar exact-flow review through the native apply endpoint. History still supplies only a candidate tool name, not replayable parameters; proposals remain marked `applicable=False` for autonomous use. The review form refuses complex object/array inputs and directs the operator to the designer; it does not prove the new action's real-world effect. Published runs keep their old version until the draft is separately published. Local route, UI and Copilot tests cover the reviewed path, but an authenticated installed flow-to-action run, measured effect and autonomous hardening are unverified.
 
 - **Who / where:** evaluator, workspace admin, end user · `README.md:28, docs/FEATURES.md:2244-2250`
 - **User impact:** An evaluator comparing against Power Automate expects flows to cheapen themselves automatically; they only ever see a non-applicable suggestion, flows are off until an admin enables them, and 'import from Power Automate' requires a manual export. The comparative headline is not supportable.
@@ -1717,7 +1717,7 @@ no images without alt, axe violations limited to nine distinct rules).
   - packages/maverick-core/maverick/flow/evolve.py:93-106 — harden NodeProposal built with applicable=False, blocking_reason='tool-name telemetry does not prove the parameters needed to replay this behavior'
   - packages/maverick-dashboard/maverick_dashboard/automation_queue.py:1908-1918 — autonomous pass (docstring 'one apply per flow per pass')
   - packages/maverick-core/maverick/automation_import/power_automate.py:151-163 — can_fetch_definitions=True but fetch() always raises ImporterError ('export the flow definition and import with --from-file')
-- **Recommendation (effort S):** Rewrite the bullet to what ships: 'suggests hardening a reliable agent step (tool named from history; parameters need your review); softening and revert are automatic under [flows] auto_evolve'. Drop 'better than Power Automate' unless backed by a published comparison, and state the file-export import path. Fix FEATURES.md:2246-2249 accordingly.
+- **Remaining work:** Qualify the reviewed draft, publication and resulting action in an authenticated installed flow, including stale state and recovery. Support complex inputs through deliberate designer controls. Do not claim autonomous application or measured savings until exact parameters, effects and comparison evidence support them.
 - Source: C7-008
 
 #### UX-091 · P1 · Docs · Public docs homepage advertises 'use your existing ChatGPT Plus / Claude Pro / Kimi / X Premium / Gemini Advanced subscriptions via captured browser sessions' — no such providers exist
@@ -2345,6 +2345,7 @@ no images without alt, axe violations limited to nine distinct rules).
 
 #### UX-270 · P2 · Ux · The main composer is a single-line 200-character field: multi-line pastes are flattened and longer requests are rejected after sending
 
+- **October 4 current branch (partial):** The main `/chat` composer already uses a multi-line textarea and message mode, preserving the full brief up to 16,000 characters while deriving a short navigation title. The Overview first-task empty state now uses the same message mode and a growing textarea with Enter to submit and Shift+Enter for a line break. Message mode preserves outer whitespace in the saved brief and picks the first non-empty line for the navigation title. The old 200-character error remains for legacy callers using separate short-title mode. Local route and handler checks cover the bounded behavior; installed keyboard, paste and accessibility acceptance remain open.
 - **Who / where:** end user, evaluator · `/ and /chat composer`
 - **User impact:** Pasting an email, a list of requirements or a paragraph — the normal way people brief an assistant — either loses its line breaks or fails with an error telling them to move text by hand into a hidden 'Add details' box. The follow-up composer on the goal page, by contrast, is a multi-line textarea, so the two composers behave differently.
 - **Evidence (reproduced):**
@@ -3449,16 +3450,18 @@ no images without alt, axe violations limited to nine distinct rules).
 
 #### UX-217 · P2 · Bug · All settings shows 'Compatible AI service address/key: Not set · Default' while OPENAI_COMPATIBLE_BASE_URL/API_KEY are set and in use (catalog rows declare no environment source)
 
+- **October 4 current branch (partial):** All settings now resolves provider address/key rows against installer, dashboard, deployment/tenant and environment sources in runtime precedence. An environment fallback shows the effective address and a set credential without revealing the secret, and says a local save will replace it. Resetting a dashboard or installer provider value can reveal the server fallback; provider configuration status applies the same reset marker before reporting the effective source. Local catalog and configuration tests cover OpenAI-compatible fallback and reset. A live installed-provider switch and recovery journey has not been qualified.
 - **Who / where:** workspace admin, IT/security · `/settings/all → Integrations → AI service addresses`
 - **User impact:** The admin believes no AI service address is configured, and saving one silently re-routes all task text to a new address (config beats env) without the page ever having shown the old one.
 - **Evidence (reproduced):**
   - GET /api/v1/settings/catalog: providers.openai_compatible.base_url 'Not set | Default'; providers.openai_compatible.api_key 'Not set | Default' — with OPENAI_COMPATIBLE_BASE_URL and OPENAI_COMPATIBLE_API_KEY exported and every task using them
   - packages/maverick-dashboard/maverick_dashboard/settings_catalog_runtime.py:251-300 — openai_compatible/azure/bedrock rows have no env=(...) although config.PROVIDER_KEY_ENV_MAP/PROVIDER_BASE_URL_ENV_MAP (maverick-core/maverick/config.py:685-731) define them
-- **Recommendation (effort S):** Declare the provider env variables on these rows (or resolve via config.provider_configuration_state) so the page shows 'Set by server start-up setting: http://…' and the confirm dialog shows old → new.
+- **Remaining work:** Qualify provider replacement, reset to the actual fallback, failed save and recovery with an installed provider. Keep credential values concealed while showing effective source and address.
 - Source: U5-033
 
 #### UX-226 · P2 · Bug · Workspace-level administrators see 'Workspace members' controls on Users but the members API requires installation-wide admin, so they cannot list or change their own workspace's members
 
+- **October 4 current branch (partial):** A current workspace administrator can list, change and clear **existing direct members** in their active workspace through Users and the tenant-role API. The API rechecks the path workspace and current role at the change boundary, prevents grants beyond the administrator's own permissions, prevents clearing access into a broader global fallback, and blocks self-demotion/removal or loss of the final direct workspace administrator. The page offers only eligible existing members and roles. Inviting a new identity or assigning a first direct role still requires an installation administrator; this is delegated maintenance, not workspace-owned onboarding. Local API and UI tests cover the bounded path; authenticated installed-app use remains unverified.
 - **Who / where:** workspace admin · `/users → Workspace members; /api/v1/admin/tenants/{id}/roles`
 - **User impact:** Delegated workspace owners (the whole point of per-workspace roles) get a permission error when adding a colleague, so every membership change escalates to the installation admin.
 - **Evidence (code-verified):**
@@ -3468,7 +3471,7 @@ no images without alt, axe violations limited to nine distinct rules).
   - [C5c-069] packages/maverick-dashboard/maverick_dashboard/admin_pages.py:612-640 — _workspace_options offers non-global admins the workspaces they belong to
   - [C5c-069] packages/maverick-dashboard/maverick_dashboard/static/lightwork-workspace-members.js:12 — calls /api/v1/admin/tenants/{id}/roles
   - [C5c-069] packages/maverick-dashboard/maverick_dashboard/api.py:1210-1256 — GET/PUT/DELETE roles require require_global_permission('admin')
-- **Recommendation (effort S):** Authorize tenant-role list/assign/remove with tenant-aware admin on that tenant (require_permission with the path tenant), while preventing a workspace admin from granting installation-wide roles.
+- **Remaining work:** Provide a governed path for onboarding a new identity or assigning its first direct workspace role if that responsibility is delegated; keep installation-wide identity/role changes under installation authority. Qualify the existing-member controls with authenticated installed workspace administrators.
 - Source: U5-040, C5c-069 · prior audit: map/12 D5
 
 #### UX-228 · P2 · Bug · Workspaces: two workspaces can have the same name ('Acme Finance' twice); the page's 'name already exists' message is dead code
@@ -3789,7 +3792,7 @@ no images without alt, axe violations limited to nine distinct rules).
 
 #### UX-324 · P2 · Ux · Access request is marked 'Answered' after collection although nothing was delivered, and the collected copy cannot be downloaded from the request
 
-- **Current-source scope correction:** UX-020 now removes an authentic saved export on close and exposes cleanup failure/retry in the product. The misleading "Answered" state before delivery and missing officer review/download of the collected package remain open here. The old indefinite-retention evidence below is historical after that close-path fix; existing closed records require a retry or migration sweep.
+- **Current-source scope correction:** UX-020 now removes an authentic saved export on close and exposes cleanup failure/retry in the product. The access/portability list and detail now say **Data collected** instead of implying the response was delivered, and the report no longer labels the deadline count "Answered on time." The stored state is still `fulfilled`; officer review/download of the collected package and delivery proof remain open. The old screenshot, "Answered" wording and indefinite-retention evidence below are historical after these fixes; existing closed records require a retry or migration sweep.
 - **Who / where:** compliance · `/privacy/dsar/{id} > 'Collect their data and mark answered'`
 - **User impact:** The request list shows the person as answered before they have received anything, so SLA reporting overstates compliance; the officer cannot review or hand over the collected copy, and a second copy of personal data lingers on the server indefinitely.
 - **Evidence (reproduced):**

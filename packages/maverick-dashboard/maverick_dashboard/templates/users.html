@@ -31,20 +31,29 @@
     </div>
   {% endmacro %}
   {% set users_lede %}
+    {% if global_admin %}
     Who can use this workspace and what each person is
     allowed to do. A new person who signs in starts as
     <strong>{{ default_role | role_label }}</strong> until you change it here.
+    {% else %}
+    Review and change the roles of people already in the workspaces you administer.
+    An installation administrator can invite a new colleague.
+    {% endif %}
   {% endset %}
   {% call hero('Administration', 'Users & roles',
                subtitle='Who can use Lightwork',
                lede=users_lede) %}
     {{ state('Current state',
-             users | length ~ ' ' ~ ('person has' if users | length == 1 else 'people have') ~ ' a role',
+             (users | length ~ ' ' ~ ('person has' if users | length == 1 else 'people have') ~ ' a role')
+             if global_admin else
+             (workspace_member_count ~ ' ' ~ ('member has' if workspace_member_count == 1 else 'members have') ~ ' a role in this workspace'),
              badge='Company sign-in on' if auth_on else 'Sign-in off',
              badge_class='ok' if auth_on else 'warn',
              copy=(bootstrap_admins | length ~ ' administrator'
                   ~ ('' if bootstrap_admins | length == 1 else 's') ~ ' set up during installation.')
-                  if bootstrap_admins else 'Department access below limits which departments each person works with.') }}
+                  if bootstrap_admins else
+                  ('Membership changes here affect only this workspace.' if not global_admin else
+                   'Department access below limits which departments each person works with.')) }}
   {% endcall %}
 
   {% if saved %}
@@ -280,9 +289,12 @@
 
   {% endif %}
   <div class="section-head"><h2>Workspace members</h2></div>
-  {% if not global_admin %}<p class="muted">You manage membership only in the workspaces listed below. Ask an installation administrator to invite a new colleague or change installation-wide access.</p>{% endif %}
+  {% if not global_admin %}<p class="muted">You can change roles for current members in the workspaces listed below. Ask an installation administrator to invite a new colleague or change installation-wide access.</p>{% endif %}
   <section id="wm-root" class="panel" data-tenant="{{ wm_tenant }}" data-expected="{{ workspace_tenant_selection }}"
            data-labels='{{ people_labels | tojson }}' data-role-labels='{{ role_labels | tojson }}'
+           data-global-admin="{{ 'true' if global_admin else 'false' }}" data-you="{{ you or '' }}"
+           data-role-permissions='{{ role_permissions | tojson }}'
+           data-role-options='{{ workspace_role_options | tojson }}'
            data-autoload="true" aria-labelledby="wm-title">
     <h3 id="wm-title" class="users-subhead">Roles inside one workspace</h3>
     <p class="muted">A workspace role applies only inside the workspace you choose here. Project owners can invite these members to review results.</p>
@@ -300,12 +312,12 @@
         </select>
       </label>
       <label class="users-field" for="wm-role">Role in this workspace
-        <select id="wm-role" class="select" required><option value="" disabled selected>Choose a role</option>{% for r in roles %}<option value="{{ r }}">{{ r | role_label }}</option>{% endfor %}</select>
+        <select id="wm-role" class="select" required><option value="" disabled selected>Choose a role</option>{% for r in workspace_roles %}<option value="{{ r }}">{{ r | role_label }}</option>{% endfor %}</select>
       </label>
-      <button type="submit" class="btn btn--primary">Save workspace member</button>
+      <button type="submit" class="btn btn--primary">Save workspace role</button>
       <button id="wm-refresh" type="button" class="btn btn--ghost">Refresh</button>
     </form>
-    <p class="muted users-help">Removing someone here puts them back on their normal role. To limit them, give them the Viewer role instead.</p>
+    <p class="muted users-help">Clearing a workspace role removes direct membership. Installation administrators may still have access, and standard access still applies elsewhere. To keep someone here with limited access, give them the Viewer role. The last workspace administrator must keep an administrator role.</p>
     {% else %}
     <p class="muted">No workspace yet. <a class="btn btn--primary" href="/tenants">Create a workspace</a></p>
     {% endif %}

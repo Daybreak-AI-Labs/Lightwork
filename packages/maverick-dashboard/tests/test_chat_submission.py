@@ -90,6 +90,29 @@ def test_chat_composer_keeps_a_long_multiline_message_and_generates_only_a_short
     assert 'class="bubble__text"' in page and "Keep these three requirements:" in page
 
 
+def test_overview_first_goal_uses_the_full_message_contract(chat_env):
+    client, world, calls = chat_env
+    page = client.get("/overview")
+    assert page.status_code == 200
+    form = page.text.split('action="/chat/send"', 1)[1].split("</form>", 1)[0]
+    assert '<textarea name="title"' in form
+    assert 'name="composer_mode" value="message"' in form
+
+    message = "\n  \n" + "Review this customer request. " * 10 + "\n1. Keep this line.\n2. Keep this one too.\n"
+    response = client.post("/chat/send", data={"title": message, "composer_mode": "message"},
+                           follow_redirects=False)
+    assert response.status_code == 303, response.text
+    goal = world.list_goals()[0]
+    assert goal.title == next(line.strip() for line in message.splitlines() if line.strip())[:200]
+    assert goal.description == message
+    assert calls[0][:2] == (goal.title, message)
+
+    too_long = client.post("/chat/send", data={"title": "A" * 16_001, "composer_mode": "message"},
+                           follow_redirects=False)
+    assert too_long.status_code == 422
+    assert len(world.list_goals()) == 1
+
+
 def _finish(world, goal_id: int, answer: str) -> None:
     """Simulate the run: the assistant's answer lands on the goal and on the thread."""
     world.set_goal_status(goal_id, "done", result=answer)

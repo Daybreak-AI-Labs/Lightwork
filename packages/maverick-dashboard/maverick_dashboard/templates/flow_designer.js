@@ -173,8 +173,7 @@
     var del = document.getElementById('fd-delete-flow');
     if (del) del.disabled = busy;
     props.querySelectorAll('[data-apply-node]').forEach(function (button) {
-      button.disabled = busy ||
-        button.getAttribute('data-apply-blocked') === 'true' || !proposals[button.getAttribute('data-apply-node')];
+      button.disabled = busy || !proposals[button.getAttribute('data-apply-node')];
     });
   }
   function canonicalizeSavedFlow(id) {
@@ -691,7 +690,14 @@
     flow.nodes.push(copy); selectNode(copy.id); render();
     say('Duplicated ' + stepName(src) + '.');
   }
-  function selectNode(id) { selected = id; if (id) selectedEdge = null; renderProps(); render(); }
+  function selectNode(id) {
+    selected = id; if (id) selectedEdge = null; renderProps(); render();
+    if (flow === rootFlow && rootFlow.id) {
+      document.dispatchEvent(new CustomEvent('lightwork:copilot-selection', {detail: {
+        selection: id ? {kind: 'flow', id: rootFlow.id, node_id: id} : {kind: 'flow', id: rootFlow.id}
+      }}));
+    }
+  }
   var clipboard = null;    // serialized node (Ctrl+C), pasted with Ctrl+V
   function copyNode(id) {
     var n = nodeById(id); if (!n) return;
@@ -1186,15 +1192,10 @@
       pl.textContent = '💡 ' + prop.reason;
       var pb = document.createElement('button'); pb.className = 'btn btn--primary'; pb.type = 'button';
       pb.setAttribute('data-apply-node', n.id);
-      pb.setAttribute('data-apply-blocked', String(prop.applicable === false));
       pb.disabled = saveInFlight || publishInFlight || applyInFlight;
       pb.textContent = prop.to_kind === 'action'
-        ? 'Apply: always use ' + (prop.inferred_tool ? human(prop.inferred_tool) : 'a fixed action')
-        : 'Apply: let the AI handle this step';
-      if (prop.applicable === false) {
-        pb.disabled = true;
-        pb.title = prop.blocking_reason || 'Check this step’s settings before applying.';
-      }
+        ? 'Review action and inputs'
+        : 'Review: let the AI handle this step';
       pb.addEventListener('click', function () { applyProposal(n, prop, pb); });
       pbox.appendChild(pl); pbox.appendChild(pb); props.appendChild(pbox);
     }
@@ -2024,20 +2025,15 @@
     }).catch(function () {});
   }
   async function applyProposal(n, prop, button) {
-    // Persisted apply: save the current graph, then enact the swap server-side so
-    // it becomes a new version and its before/after impact is measured. Hardening
-    // needs a tool: the node's own, else the one the loop inferred it keeps calling.
-    if (applyInFlight || saveInFlight || publishInFlight || retireInFlight || prop.applicable === false) return;
+    // Persisted apply: save the current graph, review the current action and
+    // inputs, then enact the swap as a new measured draft version.
+    if (applyInFlight || saveInFlight || publishInFlight || retireInFlight) return;
     // Proposal IDs address root nodes only; nested bodies may reuse those IDs.
     if (flow !== rootFlow || rootFlow.nodes.indexOf(n) < 0) {
       say('Select the current step in the main flow before applying its suggestion.', true); return;
     }
-    var tool = n.tool || (prop.inferred_tool || '');
-    if (prop.to_kind === 'action' && !tool) {
-      say('Choose an action for this step first, then apply.', true); return;
-    }
     var applyingFlow = rootFlow, fromKind = n.kind, confirmed = false;
-    var body = { node_id: n.id, to_kind: prop.to_kind, tool: tool, brief: n.brief || n.label || '' };
+    var body = { node_id: n.id, to_kind: prop.to_kind, tool: n.tool || prop.inferred_tool || '', brief: n.brief || n.label || '' };
     applyInFlight = true;
     if (button) button.disabled = true;
     syncSaveButtons();
@@ -2050,6 +2046,18 @@
       var flowId = rootFlow.id, snapshot = draftSnapshot();
       body.version = rootFlow.version;
       body.revision = rootFlow.revision;
+      if (prop.to_kind === 'action') {
+        if (!window.LightworkFlowRewrite) {
+          say('The action review is unavailable. Refresh the designer and try again.', true); return;
+        }
+        var reviewed = await window.LightworkFlowRewrite.prepare(flowId, prop, body.tool);
+        if (!reviewed) { say('Review cancelled. The flow was not hardened.'); return; }
+        if (rootFlow !== applyingFlow || draftSnapshot() !== snapshot ||
+            reviewed.version !== body.version || reviewed.revision !== body.revision) {
+          say('The flow changed during review. Your edits were kept; review the suggestion again.', true); return;
+        }
+        body = reviewed;
+      }
       say('Applying suggestion…');
       var response = await apiFetch('/api/v1/flows/' + encodeURIComponent(flowId) + '/apply', {
         method: 'POST', body: JSON.stringify(body)
@@ -2071,7 +2079,7 @@
       say(e.message || unconfirmedMutation('Apply'), true);
     } finally {
       applyInFlight = false;
-      if (button) button.disabled = confirmed || prop.applicable === false;
+      if (button) button.disabled = confirmed;
       syncSaveButtons();
     }
   }
@@ -2519,6 +2527,9 @@
     if (outcome.status !== 'confirmed') return;
     if (outcome.operation === 'learning.workflow_delete') {
       markClean(); window.location.assign('/workflows');
+    } else if (outcome.operation === 'learning.workflow_harden') {
+      say('New draft version saved. Review and publish it when ready.');
+      if (!draftIsDirty()) load(rootFlow.id);
     } else if (outcome.operation === 'learning.workflow_turn_off') {
       rootFlow.published = false;
       rootFlow.published_version = 0;

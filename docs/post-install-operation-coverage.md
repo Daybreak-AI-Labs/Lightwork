@@ -1,6 +1,6 @@
 # Post-install operation coverage
 
-Source review: October 1, 2026; selected journeys updated October 2. This is a working gap register against the
+Source review: October 1, 2026; selected journeys updated October 4. This is a working gap register against the
 [customer experience contract](./customer-experience-contract.md), not a claim
 that the entire platform has been inventoried or accepted. A working backend,
 command or settings file does not complete a customer operation.
@@ -16,6 +16,22 @@ priority source still controls it. Keep backend checks shared across interfaces.
 Local service tests and synthetic browser fixtures provide distinct evidence;
 neither alone is an authenticated installed-application acceptance test. Track
 those gaps explicitly instead of calling a screen complete because it renders.
+
+## Selected partial journeys (October 4, 2026)
+
+The current branch adds focused local checks for the paths below. These
+are bounded source and test observations; authenticated installed-app use,
+real provider effects and customer acceptance remain to be qualified.
+
+| Customer job | Current in-product path | Remaining boundary |
+| --- | --- | --- |
+| Collect and close a personal-data request ([UX-020](../USER_EXPERIENCE_AUDIT.md#ux-020--p1--trust--dsar-export-files-are-kept-forever-in-plaintext-after-the-request-is-closed)) | For access and portability, Privacy now says **Data collected** after fulfillment and warns that collection is not delivery. The deadline report no longer calls this “answered on time.” Closing an authentic saved export reports removal or an explicit cleanup failure with retry. | The stored `fulfilled` state is not a delivery receipt. An officer still needs an in-product review/download and evidence of response; older closed exports need a sweep, and requests left open need retention handling. |
+| Manage API credentials ([UX-087](../USER_EXPERIENCE_AUDIT.md#ux-087--p1--feature--only-one-all-powerful-shared-bearer-token-for-the-whole-rest-api-no-per-userper-app-api-keys-scopes-expiry-or-overlap-rotation)) | Named API keys already have owner, expiry, rotation and revocation. An API-key bearer can list permitted keys but cannot create, rotate or revoke keys, create service accounts or disable them. | `tasks:write` and `approvals:decide` still map to the same broad operator permission; action-specific enforcement and installed integration qualification remain open. |
+| Check provider spending ([UX-088](../USER_EXPERIENCE_AUDIT.md#ux-088--p1--perf--provider-spend-ledger-grows-by-one-never-pruned-row-per-model-call-and-is-rewritten-whole-twice-per-call-accounting-cost-grows-linearly-then-all-ai-calls-are-blocked-at-16-mb)) | An indexed local SQLite ledger replaces healthy JSON accounting after migration. The hot status read now seeks live holds and unknown receipts instead of scanning settled history; Provider Spending exposes health and recovery guidance. | Each active call still hashes the full database to check its seal, so cost grows with history. Larger-scale, damaged-ledger and installed-workspace recovery acceptance remain open. |
+| Turn a flow suggestion into a fixed action ([UX-090](../USER_EXPERIENCE_AUDIT.md#ux-090--p1--docs--flows-advertised-differentiator-overclaims-automatic-hardening-from-tool-name-history)) | Designer and guarded Copilot can review the candidate action, bind supported scalar inputs to flow data or fixed values, then save a new draft under current version/revision checks. Publishing remains a separate step. | Tool-name history is only a suggestion. Complex object/array inputs require manual designer work; autonomous application, a live action result and measured benefit remain unproved. |
+| See the effective provider setting ([UX-217](../USER_EXPERIENCE_AUDIT.md#ux-217--p2--bug--all-settings-shows-compatible-ai-service-addresskey-not-set--default-while-openai_compatible_base_urlapi_key-are-set-and-in-use-catalog-rows-declare-no-environment-source)) | All settings resolves installer, dashboard, deployment and environment provider sources; it shows an environment address and set credential without revealing the secret. Reset can expose the effective server fallback. | Qualify a real installed provider switch, reset and failed-write recovery. A source label is not proof of a successful provider connection. |
+| Manage current workspace members ([UX-226](../USER_EXPERIENCE_AUDIT.md#ux-226--p2--bug--workspace-level-administrators-see-workspace-members-controls-on-users-but-the-members-api-requires-installation-wide-admin-so-they-cannot-list-or-change-their-own-workspaces-members)) | A workspace administrator can list, change and clear existing direct members in an active workspace. The API enforces current authority and protects self and the last direct administrator. | Inviting a new identity or assigning its first direct workspace role still needs an installation administrator. Qualify role changes and loss of authority in the authenticated installed UI. |
+| Start work with a full brief ([UX-270](../USER_EXPERIENCE_AUDIT.md#ux-270--p2--ux--the-main-composer-is-a-single-line-200-character-field-multi-line-pastes-are-flattened-and-longer-requests-are-rejected-after-sending)) | Chat and the Overview first-task empty state use a multi-line message composer. The full brief is retained up to 16,000 characters; the short title comes from its first nonempty line. | Qualify paste, keyboard submit/newline, accessibility and error recovery in an installed browser. The legacy separate-title submission path still has its 200-character title limit. |
 
 ## Everyday task controls (October 4, 2026)
 

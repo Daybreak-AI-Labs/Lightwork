@@ -270,3 +270,94 @@ def test_tenant_admin_cannot_manage_other_tenant_roles(monkeypatch):
 
     assert r.status_code == 403
     assert rbac.get_tenant_role("globex", "user:bob") is None
+
+
+def test_workspace_admin_manages_existing_members_only_in_their_workspace(monkeypatch):
+    from maverick_dashboard import auth, rbac
+
+    assert client.post("/api/v1/admin/tenants", json={"id": "acme"}).status_code == 201
+    assert client.post("/api/v1/admin/tenants", json={"id": "globex"}).status_code == 201
+    rbac.set_role("user:alice", "viewer")
+    rbac.set_tenant_role("acme", "user:alice", "admin")
+    rbac.set_tenant_role("acme", "user:bob", "operator")
+    rbac.set_tenant_role("globex", "user:carol", "viewer")
+    monkeypatch.setattr(auth, "caller_principal", lambda request: "user:alice")
+
+    assert client.get("/api/v1/admin/tenants/acme/roles").json() == {
+        "user:alice": "admin", "user:bob": "operator",
+    }
+    assert client.get("/api/v1/admin/tenants/globex/roles").status_code == 403
+    assert client.put("/api/v1/admin/tenants/globex/roles/user:carol",
+                      json={"role": "viewer"}).status_code == 403
+    assert client.delete("/api/v1/admin/tenants/globex/roles/user:carol").status_code == 403
+    assert client.put("/api/v1/admin/tenants/acme/roles/user:new",
+                      json={"role": "viewer"}).status_code == 409
+    assert client.put("/api/v1/admin/tenants/acme/roles/user:bob",
+                      json={"role": "viewer"}).status_code == 204
+    assert client.delete("/api/v1/admin/tenants/acme/roles/user:bob").status_code == 204
+    assert rbac.get_tenant_role("acme", "user:bob") is None
+    assert rbac.get_tenant_role("globex", "user:carol") == "viewer"
+
+    # Every call rechecks the requested workspace's current membership.
+    rbac.remove_tenant_role("acme", "user:alice")
+    assert client.get("/api/v1/admin/tenants/acme/roles").status_code == 403
+
+
+def test_workspace_admin_scope_requires_active_workspace_and_api_key_admin_scope(monkeypatch):
+    from maverick_dashboard import auth, rbac
+
+    assert client.post("/api/v1/admin/tenants", json={"id": "acme"}).status_code == 201
+    rbac.set_role("user:alice", "viewer")
+    rbac.set_tenant_role("acme", "user:alice", "admin")
+    monkeypatch.setattr(auth, "caller_principal", lambda request: "user:alice")
+    monkeypatch.setattr(auth, "api_key_permissions", lambda request: frozenset({"view"}))
+    assert client.get("/api/v1/admin/tenants/acme/roles").status_code == 403
+    monkeypatch.setattr(auth, "api_key_permissions", lambda request: None)
+    monkeypatch.setattr(auth, "caller_principal", lambda request: None)
+    assert client.post("/api/v1/admin/tenants/acme/suspend").status_code == 200
+    monkeypatch.setattr(auth, "caller_principal", lambda request: "user:alice")
+    assert client.get("/api/v1/admin/tenants/acme/roles").status_code == 403
+
+
+def test_workspace_admin_cannot_grant_above_own_role_or_clear_to_broader_fallback(monkeypatch):
+    from maverick_dashboard import auth, rbac
+
+    assert client.post("/api/v1/admin/tenants", json={"id": "acme"}).status_code == 201
+    rbac.set_custom_role("workspace-lead", ["admin", "view"])
+    rbac.set_role("user:alice", "viewer")
+    rbac.set_tenant_role("acme", "user:alice", "workspace-lead")
+    rbac.set_role("user:bob", "operator")
+    rbac.set_tenant_role("acme", "user:bob", "viewer")
+    monkeypatch.setattr(auth, "caller_principal", lambda request: "user:alice")
+
+    assert client.put("/api/v1/admin/tenants/acme/roles/user:bob",
+                      json={"role": "admin"}).status_code == 409
+    assert client.put("/api/v1/admin/tenants/acme/roles/user:bob",
+                      json={"role": "operator"}).status_code == 409
+    assert client.delete("/api/v1/admin/tenants/acme/roles/user:bob").status_code == 409
+    assert rbac.get_tenant_role("acme", "user:bob") == "viewer"
+    rbac.set_tenant_role("acme", "user:bob", "operator")
+    assert client.put("/api/v1/admin/tenants/acme/roles/user:bob",
+                      json={"role": "viewer"}).status_code == 409
+
+
+def test_workspace_admin_cannot_remove_self_or_last_admin(monkeypatch):
+    from maverick_dashboard import auth, rbac
+
+    assert client.post("/api/v1/admin/tenants", json={"id": "acme"}).status_code == 201
+    rbac.set_role("user:alice", "viewer")
+    rbac.set_tenant_role("acme", "user:alice", "admin")
+    monkeypatch.setattr(auth, "caller_principal", lambda request: "user:alice")
+
+    assert client.put("/api/v1/admin/tenants/acme/roles/user:alice",
+                      json={"role": "viewer"}).status_code == 409
+    assert client.delete("/api/v1/admin/tenants/acme/roles/user:alice").status_code == 409
+    assert rbac.get_tenant_role("acme", "user:alice") == "admin"
+
+    # Even an installation admin must designate a successor before clearing
+    # the final direct workspace administrator.
+    monkeypatch.setattr(auth, "caller_principal", lambda request: None)
+    assert client.delete("/api/v1/admin/tenants/acme/roles/user:alice").status_code == 409
+    assert client.put("/api/v1/admin/tenants/acme/roles/user:bob",
+                      json={"role": "admin"}).status_code == 204
+    assert client.delete("/api/v1/admin/tenants/acme/roles/user:alice").status_code == 204

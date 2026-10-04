@@ -330,6 +330,7 @@
 
 {% endblock %}
 {% block scripts_extra %}
+<script>{% include "flow_hardening_review.js" %}</script>
 <script>
 (function () {
   var fmtWhen = window.mvWhen, el = window.mvEl;   // shared primitives (base.html)
@@ -1552,14 +1553,11 @@
           main.appendChild(el('div', 'mv-row__sub', '💡 ' + (p.reason || (p.to_kind === 'action'
             ? 'A step could always use the same fixed action instead of asking the AI each time.'
             : 'A step could let the AI decide instead of always using the same action.'))));
-          if (p.applicable !== false) {
-            main.appendChild(mkBtn('Apply this improvement', function () { applyProposal(f.flow_id, p); }));
-          } else {
-            main.appendChild(el(
-              'div', 'mv-row__sub',
-              p.blocking_reason || 'Open the flow and check this step’s settings before applying.'
-            ));
-          }
+          var action = mkBtn(p.to_kind === 'action' ? 'Review action and inputs' : 'Review this improvement',
+            function () { applyProposal(f.flow_id, p, action); });
+          main.appendChild(action);
+          if (p.to_kind === 'action') main.appendChild(el('div', 'mv-row__sub',
+            'Past runs suggest an action; choose its inputs and review the effect before saving a new draft.'));
         });
         (f.changes || []).forEach(function (ch) {
           var imp = ch.impact || {}, d = imp.delta;
@@ -1572,39 +1570,21 @@
         insightsList.appendChild(li);
       });
     }
-    async function applyProposal(flowId, p) {
-      // Enact a self-rewrite the loop suggested. Softening (-> agent) needs no
-      // input; hardening (-> action) needs a tool name only a human can choose.
-      var body = { node_id: p.node_id, to_kind: p.to_kind };
-      if (p.to_kind === 'action') {
-        // The loop may already know the tool this node has been calling; only
-        // ask when it couldn't infer one confidently.
-        var tool = (p.inferred_tool || '').trim();
-        if (!tool) {
-          var options = [];
-          try {
-            var tr = await fetch('/api/v1/tools');
-            if (tr.ok) options = ((await tr.json()).tools || []).map(function (t) { return { value: t.name, label: mvHuman(t.name) }; });
-          } catch (e) { options = []; }
-          if (!options.length) { insightsHead.textContent = 'The list of actions could not be loaded. Try again in a moment.'; return; }
-          var vals = await window.mvForm('Make this step always use a fixed action',
-            [{ key: 'tool', label: 'Action to use', type: 'select', required: true, options: options,
-               help: 'The step will run this action directly instead of asking the AI each time.' }],
-            { okText: 'Apply' });
-          if (vals === null) { insightsHead.textContent = 'Cancelled.'; return; }
-          tool = (vals.tool || '').trim();
-        }
-        if (!tool) { insightsHead.textContent = 'Cancelled — choose an action to use.'; return; }
-        body.tool = tool;
-      }
-      insightsHead.textContent = 'Applying…';
+    async function applyProposal(flowId, p, button) {
+      button.disabled = true;
+      insightsHead.textContent = 'Reviewing the current flow…';
       try {
-        var r = await fetch('/api/v1/flows/' + encodeURIComponent(flowId) + '/apply', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
-        });
-        if (!r.ok) { insightsHead.textContent = plainError(r, 'apply this improvement'); return; }
-        loadFlows();          // re-render step counts + refresh insights (proposal now enacted)
-      } catch (e) { insightsHead.textContent = plainError(e, 'apply this improvement'); }
+        var result = await window.LightworkFlowRewrite.review(flowId, p);
+        if (result) {
+          insightsHead.textContent = 'New draft version saved. Open the flow to review and publish it.';
+          loadFlows();
+        } else insightsHead.textContent = 'Review cancelled. The flow was not changed.';
+      } catch (e) {
+        insightsHead.textContent = e.status === 409
+          ? 'The flow or action changed. Refresh its suggestions and review again.'
+          : (e.message || 'The result could not be confirmed. Open the flow to check its version history.');
+        loadFlowInsights();
+      } finally { button.disabled = false; }
     }
     loadFlows();
   }

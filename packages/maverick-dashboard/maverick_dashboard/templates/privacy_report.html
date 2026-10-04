@@ -76,8 +76,9 @@
       <div class="stat"><div class="num">{{ r.dsar.total }}</div><div class="label">Requests tracked</div></div>
       <div class="stat"><div class="num">{{ r.dsar.open }}</div><div class="label">Open</div></div>
       <div class="stat"><div class="num {{ 'pw-age-warn' if r.dsar.overdue }}">{{ r.dsar.overdue }}</div><div class="label">Past the 30-day deadline</div></div>
-      <div class="stat"><div class="num">{{ r.dsar.handled_on_time }} of {{ r.dsar.handled }}</div><div class="label">Answered on time</div></div>
+      <div class="stat"><div class="num">{{ r.dsar.handled_on_time }} of {{ r.dsar.handled }}</div><div class="label">Marked handled or closed by deadline</div></div>
     </div>
+    <p class="rpt-note">This count uses when a request was marked handled, prepared for deletion, or closed. It does not confirm delivery or deletion.</p>
     {% if r.dsar.by_kind %}
     <p class="rpt-note">By type:
       {% for k, v in r.dsar.by_kind.items() %}{{ kind_labels.get(k, k | humanize) }} {{ v }}{{ ' · ' if not loop.last }}{% endfor %}</p>

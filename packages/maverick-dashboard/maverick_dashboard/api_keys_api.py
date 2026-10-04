@@ -7,6 +7,8 @@ disable service accounts. The secret is returned exactly once, in the
 response that creates or rotates it. Every mutation is audited by the store
 (:mod:`maverick_dashboard.api_keys`). Mutating ``/api/v1`` requests are
 already same-origin-checked by the app middleware in cookie / no-token mode.
+An API key cannot manage credentials: allowing a read-only key to mint or
+rotate a stronger key would bypass its scopes and expiry.
 """
 from __future__ import annotations
 
@@ -42,6 +44,20 @@ def _is_admin(request: Request) -> bool:
 def _require_enabled() -> None:
     if not api_keys.enabled():
         raise HTTPException(status_code=404, detail="API keys are turned off on this installation.")
+
+
+def _require_non_key_caller(request: Request) -> None:
+    """Keep bearer keys from minting, renewing or disabling credentials.
+
+    Interactive sign-in and the legacy break-glass token retain key recovery.
+    This check runs after authentication, which records key use on the request.
+    """
+    if auth.api_key_permissions(request) is not None:
+        raise HTTPException(
+            status_code=403,
+            detail="An API key cannot manage access keys or service accounts. "
+                   "Sign in and use Account > Access keys.",
+        )
 
 
 async def _body(request: Request) -> dict:
@@ -124,6 +140,7 @@ async def create_api_key(request: Request) -> dict:
     """Create a key. The response is the only time the secret is shown."""
     _require_enabled()
     auth.require_permission(request, "view")
+    _require_non_key_caller(request)
     body = await _body(request)
     caller = _caller(request)
     owner = str(body.get("owner") or "").strip() or caller
@@ -154,6 +171,7 @@ async def rotate_api_key(request: Request, key_id: str) -> dict:
     """Mint a replacement; the old secret keeps working for the grace period."""
     _require_enabled()
     auth.require_permission(request, "view")
+    _require_non_key_caller(request)
     caller = _caller(request)
 
     def _rotate():
@@ -170,6 +188,7 @@ async def rotate_api_key(request: Request, key_id: str) -> dict:
 async def revoke_api_key(request: Request, key_id: str) -> dict:
     _require_enabled()
     auth.require_permission(request, "view")
+    _require_non_key_caller(request)
     caller = _caller(request)
 
     def _revoke():
@@ -198,6 +217,7 @@ async def create_service_account(request: Request) -> dict:
     """Register a service account with a role (administrators only)."""
     _require_enabled()
     auth.require_global_permission(request, "admin")
+    _require_non_key_caller(request)
     body = await _body(request)
     caller = _caller(request)
 
@@ -216,6 +236,7 @@ async def disable_service_account(request: Request, slug: str) -> dict:
     """Disable an account: all of its keys stop working at once."""
     _require_enabled()
     auth.require_global_permission(request, "admin")
+    _require_non_key_caller(request)
     caller = _caller(request)
     return await run_in_threadpool(
         lambda: _run(lambda: {"service_account": api_keys.disable_service_account(slug, actor=caller).to_public()})
@@ -226,6 +247,7 @@ async def disable_service_account(request: Request, slug: str) -> dict:
 def api_keys_page(request: Request) -> HTMLResponse:
     _require_enabled()
     auth.require_permission(request, "view")
+    _require_non_key_caller(request)
     from .app import templates
 
     return templates.TemplateResponse(request, "api_keys.html", {},

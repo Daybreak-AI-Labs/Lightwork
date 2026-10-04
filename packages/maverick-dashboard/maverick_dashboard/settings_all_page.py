@@ -15,6 +15,7 @@ enforces it independently of the page.
 from __future__ import annotations
 
 import contextvars
+import copy
 import dataclasses
 import hashlib
 import itertools
@@ -73,6 +74,7 @@ def _sources() -> dict[str, Any]:
     from . import settings_store
 
     config.reset_config_cache()
+    config._load_wizard_env()
     try:
         base = config._load_config_file(config.config_path())
     except Exception:  # an unreadable base file shows as "not set by installer"
@@ -84,20 +86,32 @@ def _sources() -> dict[str, Any]:
             operator = config._load_config_file(Path(overlay_env).expanduser())
         except Exception:
             operator = {}
+    tenant: dict = {}
+    tenant_path = config.tenant_config_path()
+    if tenant_path:
+        try:
+            tenant = config._load_config_file(tenant_path)
+        except Exception:
+            tenant = {}
     return {
         "base": base if isinstance(base, dict) else {},
         "here": settings_store.load_overlay(),
         "operator": operator if isinstance(operator, dict) else {},
+        "tenant": tenant if isinstance(tenant, dict) else {},
     }
 
 
 def _revision(layers: dict[str, Any] | None = None) -> str:
     """Opaque review binding, including deployment overrides and environment."""
+    from maverick import config
+
     from . import settings_store
 
     sources = _sources() if layers is None else layers
     names = {name for setting in catalog.SETTINGS for name in setting.env}
     names.update(name for provider in settings_store.PROVIDERS for name in provider.get("env", ()))
+    names.update(config.PROVIDER_KEY_ENV_VARS)
+    names.update(config.PROVIDER_BASE_URL_ENV_VARS)
     names.update(name for name in os.environ if name.startswith("MAVERICK_"))
     # Variable references may be chosen by the installer rather than named in
     # the catalog. Bind their values without ever sending those values out.
@@ -151,6 +165,9 @@ def _resolve_table(setting: catalog.Setting, layers: dict[str, Any]) -> dict[str
 
 def _resolve(setting: catalog.Setting, layers: dict[str, Any]) -> dict[str, Any]:
     """Effective value, where it comes from, and whether this page may change it."""
+    provider = _resolve_provider_field(setting, layers)
+    if provider is not None:
+        return provider
     if _env_locked(setting):
         return {"source": "deployment", "locked": True, "value": None, "known": False}
     if setting.control == "table":
@@ -169,6 +186,45 @@ def _resolve(setting: catalog.Setting, layers: dict[str, Any]) -> dict[str, Any]
         return {"source": "installer", "locked": False, "value": value, "known": True}
     return {"source": "default", "locked": False, "value": _default_in(setting, layers),
             "known": True}
+
+
+def _resolve_provider_field(setting: catalog.Setting, layers: dict[str, Any]) -> dict[str, Any] | None:
+    """Match provider runtime precedence; a server fallback can be replaced here."""
+    if (not setting.section.startswith("providers.")
+            or setting.key not in {"api_key", "base_url"}):
+        return None
+    from maverick import config
+    from maverick.config_resets import apply_to_base
+
+    name = setting.section.removeprefix("providers.")
+    env_map = (config.PROVIDER_KEY_ENV_MAP if setting.key == "api_key"
+               else config.PROVIDER_BASE_URL_ENV_MAP)
+    value: object = None
+    source = "default"
+    base = apply_to_base(layers["base"], layers["here"])
+    for layer, label in (("base", "installer"), ("here", "here"),
+                         ("operator", "deployment"), ("tenant", "deployment")):
+        present, candidate = catalog.lookup(base if layer == "base" else layers.get(layer, {}),
+                                            setting.path)
+        if present:
+            value, source = candidate, label
+    if not isinstance(value, str) or not value.strip():
+        value, source = None, "default"
+        for env_name in env_map.get(name, ()):
+            candidate = os.environ.get(env_name, "").strip()
+            if candidate:
+                value, source = candidate, "deployment"
+                break
+        if source == "deployment":
+            # Unlike most deployment settings, provider environment variables
+            # are a fallback: a dashboard value takes precedence at runtime.
+            return {"source": source, "locked": False,
+                    "source_text": "Set when Lightwork starts · save here to replace it",
+                    "value": bool(value) if setting.secret else value, "known": True}
+    if value is None:
+        return {"source": "default", "locked": False, "value": _default_of(setting), "known": True}
+    return {"source": source, "locked": source == "deployment",
+            "value": bool(value) if setting.secret else value, "known": True}
 
 
 def _has_partial_default(setting: catalog.Setting) -> bool:
@@ -566,7 +622,7 @@ def _row(setting: catalog.Setting, layers: dict[str, Any]) -> dict[str, Any]:
         "warning": setting.warning,
         "warning_lead": catalog.warning_lead(setting) if setting.warning else "",
         "source": state["source"],
-        "source_text": SOURCE_TEXT[state["source"]],
+        "source_text": state.get("source_text", SOURCE_TEXT[state["source"]]),
         "locked": state["locked"],
         "default_text": catalog.display_value(setting, _default_of(setting)),
         "max_length": setting.max_length,
@@ -1183,7 +1239,14 @@ def _plan(body: CatalogUpdate) -> tuple[dict, list[dict], list[dict], dict]:  # 
         if item.reset:
             default = _default_of(setting)
             base_present, base_value = catalog.lookup(layers["base"], setting.path)
-            if default is None and base_present:
+            if (setting.section.startswith("providers.") and setting.key in {"api_key", "base_url"}
+                    and base_present and base_value != default):
+                # Empty provider fields are omitted by the overlay writer. A
+                # reset marker is required to mask a nonempty installer value.
+                writes[marker] = reset_spec(setting)
+                writes[setting.path] = None
+                new = default
+            elif default is None and base_present:
                 writes[marker] = reset_spec(setting)
                 writes[setting.path] = None
                 new = None
@@ -1218,6 +1281,25 @@ def _plan(body: CatalogUpdate) -> tuple[dict, list[dict], list[dict], dict]:  # 
                 new = base_value if base_present else _default_of(setting)
             else:
                 writes[setting.path] = _sealed_rows(setting, new)
+        if (item.reset and setting.section.startswith("providers.")
+                and setting.key in {"api_key", "base_url"}):
+            # A cleared provider value can reveal a server fallback. Compare
+            # and review the value that will actually take effect after save.
+            planned_here = copy.deepcopy(layers["here"])
+            if marker in writes:
+                metadata = planned_here.setdefault(METADATA, {})
+                if writes[marker] is None:
+                    metadata.pop(setting.id, None)
+                else:
+                    metadata[setting.id] = writes[marker]
+            node = planned_here
+            for part in setting.path[:-1]:
+                node = node.setdefault(part, {})
+            if writes.get(setting.path) is None:
+                node.pop(setting.path[-1], None)
+            else:
+                node[setting.path[-1]] = writes[setting.path]
+            new = _resolve(setting, {**layers, "here": planned_here})["value"]
         unchanged = old == new and (not item.reset or state["source"] != "here")
         if unchanged and marker not in writes and (item.reset or not setting.secret):
             writes.pop(setting.path, None)

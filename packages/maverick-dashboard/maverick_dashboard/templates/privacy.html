@@ -703,7 +703,7 @@
             <td>{{ {'eu_gdpr': 'EU GDPR', 'uk_gdpr': 'UK GDPR', 'us_ca_ccpa': 'California', 'us_va': 'Virginia', 'us_co': 'Colorado', 'us_ct': 'Connecticut', 'us_ut': 'Utah', 'us_tx': 'Texas', 'us_or': 'Oregon', 'br_lgpd': 'Brazil', 'ca_pipeda': 'Canada', 'au_privacy': 'Australia', 'jp_appi': 'Japan'}.get(r.jurisdiction, '—') }}
               {% if r.due_basis == 'internal_target' %}<br><span class="muted" style="font-size:var(--text-xs);">No fixed legal deadline; internal target</span>{% endif %}</td>
             <td>
-              <span class="badge {{ 'done' if r.status == 'fulfilled' else 'warn' if r.status in ('awaiting_erasure', 'unverified') else 'info' if r.status == 'open' else '' }}">{{ {'open': 'Open', 'unverified': 'Not yet confirmed', 'awaiting_erasure': 'Waiting for deletion', 'fulfilled': 'Completed', 'closed': 'Closed'}.get(r.status, (r.status or '') | replace('_', ' ') | capitalize) }}</span>
+              <span class="badge {{ 'info' if r.status == 'fulfilled' and r.kind in ('access', 'portability') else 'done' if r.status == 'fulfilled' else 'warn' if r.status in ('awaiting_erasure', 'unverified') else 'info' if r.status == 'open' else '' }}">{{ 'Data collected' if r.status == 'fulfilled' and r.kind in ('access', 'portability') else {'open': 'Open', 'unverified': 'Not yet confirmed', 'awaiting_erasure': 'Waiting for deletion', 'fulfilled': 'Completed', 'closed': 'Closed'}.get(r.status, (r.status or '') | replace('_', ' ') | capitalize) }}</span>
               {% if r.status == 'awaiting_erasure' and r.fulfillment %}
                 <br><span class="muted pw-erase-note">Open the request to delete this person&rsquo;s data.</span>
               {% endif %}

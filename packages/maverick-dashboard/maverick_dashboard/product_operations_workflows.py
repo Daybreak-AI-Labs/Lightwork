@@ -1,21 +1,160 @@
 """Copilot entry to the native, release-pinned learned workflow run form."""
 from __future__ import annotations
 
+import math
 from urllib.parse import quote
 
 from fastapi import HTTPException, Response
 from maverick.governed_operations import digest
+from pydantic import BaseModel, ConfigDict
 
 from . import api as native
 from .product_operations import Adapter, EmptyInput, Outcome, Preview, Snapshot
 
 
 def _flow_id(selection):
-    if (not isinstance(selection, dict) or set(selection) != {"kind", "id"}
+    if (not isinstance(selection, dict) or not {"kind", "id"} <= set(selection)
+            or set(selection) - {"kind", "id", "node_id"}
             or selection["kind"] != "flow" or not isinstance(selection["id"], str)
-            or not 1 <= len(selection["id"]) <= 256):
+            or not 1 <= len(selection["id"]) <= 256
+            or ("node_id" in selection and (not isinstance(selection["node_id"], str)
+                or not 1 <= len(selection["node_id"]) <= 120))):
         raise HTTPException(422, "Open a saved workflow before asking Copilot to run it.")
     return selection["id"]
+
+
+class HardeningBindings(BaseModel):
+    """Names and values are checked against the current live action contract."""
+
+    model_config = ConfigDict(extra="allow", strict=True)
+
+
+def harden_snapshot(request, selection):
+    flow_id = _flow_id(selection)
+    node_id = selection.get("node_id")
+    if not node_id:
+        draft = native.get_flow_endpoint(request, flow_id)
+        return Snapshot(digest([flow_id, draft["version"], draft["revision"]]),
+                        "Current flow", "Select a suggested AI step to review its fixed action.",
+                        blocked="Select a step marked with a suggestion in the flow designer.")
+    try:
+        review = native.flow_apply_review_endpoint(request, flow_id, node_id)
+    except HTTPException as exc:
+        if exc.status_code != 409:
+            raise
+        draft = native.get_flow_endpoint(request, flow_id)
+        return Snapshot(digest([flow_id, draft["version"], draft["revision"], node_id]),
+                        "Current flow", "Review this step's current suggestions.",
+                        blocked="This step has no current fixed-action suggestion. Choose a marked step.")
+    revision = digest(review)
+    if review["to_kind"] != "action":
+        return Snapshot(revision, "Current flow", "This step has a different suggestion.",
+                        blocked="Select an AI step suggested for a fixed action.")
+    if not review["tool"]:
+        return Snapshot(revision, "Current flow", "The action needs to be chosen by a person.",
+                        blocked="Choose and review an action in the flow designer.")
+    sources = review["sources"]
+    fields = []
+    for field in review["fields"]:
+        name = field["name"]
+        if field["type"] == "string" and sources:
+            choices = [{"label": "Choose an input" if field["required"] else "Leave blank",
+                        "value": ""}]
+            choices.extend({"label": "Use " + source["label"] +
+                            (" from the start form" if source["origin"] == "input" else " from an earlier step"),
+                            "value": source["key"]}
+                           for source in sources)
+            fields.append({"name": name, "label": field["label"], "kind": "select",
+                           "required": field["required"], "choices": choices})
+        else:
+            fields.append({"name": name, "label": field["label"],
+                           "kind": "boolean" if field["type"] == "boolean" else
+                                   "text",
+                           "required": field["required"],
+                           "max_length": 80 if field["type"] in {"number", "integer"} else 2000})
+    summary = ("Replace “" + review["node_label"] + "” with the fixed action “" +
+               review["tool"].replace("_", " ") + "” in a new draft version. " +
+               "Review each input. Published runs will keep their current version until you publish the draft.")
+    if review.get("approval_added"):
+        summary += " This also adds an approval before the action runs."
+    return Snapshot(revision, "Current flow and live action", summary,
+                    {"flow": review["flow_name"], "step": review["node_label"],
+                     "action": review["tool"], "published": review["published"]},
+                    fields=fields)
+
+
+def harden_prepare(request, selection, arguments):
+    state = harden_snapshot(request, selection)
+    if state.blocked:
+        raise HTTPException(409, state.blocked)
+    flow_id, node_id = _flow_id(selection), selection["node_id"]
+    review = native.flow_apply_review_endpoint(request, flow_id, node_id)
+    if digest(review) != state.revision:
+        raise HTTPException(409, "This suggestion changed. Refresh and review it again.")
+    fields = review["fields"]
+    if set(arguments) != {field["name"] for field in fields}:
+        raise HTTPException(422, "Review every action input before saving the new version.")
+    sources = {source["key"]: source for source in review["sources"]}
+    params, changes = {}, []
+    for field in fields:
+        name, kind, value = field["name"], field["type"], arguments[field["name"]]
+        if value in (None, ""):
+            if field["required"]:
+                raise HTTPException(422, "Choose a value for " + field["label"] + ".")
+            continue
+        if kind == "string" and sources:
+            if not isinstance(value, str) or value not in sources:
+                raise HTTPException(422, "Choose a current flow input for " + field["label"] + ".")
+            params[name] = "{{" + value + "}}"
+            shown = "From " + sources[value]["label"]
+        elif kind == "string":
+            if not isinstance(value, str) or len(value) > 2000 or "{{" in value or "}}" in value:
+                raise HTTPException(422, "Enter a short fixed value for " + field["label"] + ".")
+            params[name] = value
+            shown = "Same value every run"
+        elif kind == "boolean":
+            if type(value) is not bool:
+                raise HTTPException(422, "Choose yes or no for " + field["label"] + ".")
+            params[name] = value
+            shown = "Yes" if value else "No"
+        else:
+            try:
+                number = float(value) if type(value) in (int, float, str) else math.nan
+            except (OverflowError, ValueError):
+                number = math.nan
+            if (not math.isfinite(number) or (kind == "integer" and not number.is_integer())):
+                raise HTTPException(422, "Enter a valid number for " + field["label"] + ".")
+            params[name] = int(number) if kind == "integer" else number
+            shown = str(params[name])
+        changes.append({"item": field["label"], "effect": shown})
+    from maverick.flow import Flow, evolve
+
+    draft = Flow.from_dict(native.get_flow_endpoint(request, flow_id))
+    revised = evolve.apply_proposal(draft, node_id, "action", tool=review["tool"], params=params)
+    errors = revised.validate()
+    if errors:
+        raise HTTPException(409, "The new flow needs review in the designer before it can be saved.")
+    changes.insert(0, {"item": review["node_label"], "effect": "Fixed action: " + review["tool"]})
+    return Preview(state.summary, changes, native={"id": flow_id, "node_id": node_id,
+                                             "tool": review["tool"], "params": params,
+                                             "version": review["version"],
+                                             "revision": review["revision"]})
+
+
+def harden_execute(request, selection, _arguments, native_review, _operation_id):
+    flow_id = _flow_id(selection)
+    if native_review.get("id") != flow_id or native_review.get("node_id") != selection.get("node_id"):
+        raise HTTPException(409, "The selected flow step changed. Review it again.")
+    result = native.apply_flow_proposal_endpoint(request, flow_id, native.FlowApplyIn(
+        node_id=native_review["node_id"], to_kind="action", tool=native_review["tool"],
+        params=native_review["params"], version=native_review["version"],
+        revision=native_review["revision"],
+    ))
+    if (result.get("id") != flow_id or result.get("node_id") != native_review["node_id"]
+            or result.get("to_kind") != "action" or result.get("version", 0) <= native_review["version"]):
+        return Outcome("unconfirmed", "The save result could not be confirmed. Open the flow version history.")
+    return Outcome("confirmed", "A new draft version was saved. Review and publish it when ready.",
+                   {"flow": flow_id, "version": result["version"], "published": False})
 
 
 def snapshot(request, selection):
@@ -177,6 +316,9 @@ def entries():
     return (Adapter("learning.workflow_run", "Run this published workflow", "learning", "/flows/designer",
                     ("/flows/designer/*",), EmptyInput, snapshot, prepare,
                     aliases=("run this workflow", "start this workflow", "run published workflow")),
+            Adapter("learning.workflow_harden", "Review fixed action for this step", "learning", "/workflows",
+                    ("/flows/designer/*",), HardeningBindings, harden_snapshot, harden_prepare, harden_execute,
+                    aliases=("harden this step", "make this step a fixed action", "apply flow improvement")),
             Adapter("learning.workflow_turn_off", "Turn off this flow", "learning", "/workflows",
                     ("/flows/designer/*",), EmptyInput, off_snapshot, off_prepare, off_execute,
                     aliases=("unpublish this flow", "stop this flow", "turn off this flow")),

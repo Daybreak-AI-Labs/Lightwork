@@ -169,3 +169,71 @@ def test_copilot_turn_off_and_delete_require_fresh_review_and_confirmation(monke
             "token": review("learning.workflow_delete")["token"], "confirmed": True})
         assert deleted.status_code == 200 and deleted.json()["status"] == "confirmed"
         assert state["deleted"] is True
+
+
+def test_copilot_hardening_binds_input_and_saves_only_after_fresh_confirmation(monkeypatch):
+    client, state = _harness(monkeypatch)
+    state["version"] = 2
+    state["revision"] = "draft-2"
+    monkeypatch.setattr(ops.crypto_at_rest, "seal_to_str", lambda value: "sealed:" + value)
+    monkeypatch.setattr(ops.crypto_at_rest, "is_sealed_str", lambda value: value.startswith("sealed:"))
+    monkeypatch.setattr(ops.crypto_at_rest, "unseal_from_str", lambda value: value[len("sealed:"):])
+
+    def draft(_request, flow_id):
+        if not state["allowed"] or flow_id != "owned":
+            raise HTTPException(404, "no such flow")
+        return {"id": flow_id, "name": "Customer lookup", "start": "step",
+                "version": state["version"], "revision": state["revision"],
+                "inputs": [{"key": "customer", "label": "Customer name", "type": "text"}],
+                "nodes": [{"id": "step", "kind": "agent", "brief": "Look up the customer"}]}
+
+    def review(_request, flow_id, node_id, tool=""):
+        draft(_request, flow_id)
+        if node_id != "step":
+            raise HTTPException(409, "suggestion changed")
+        return {"flow_id": flow_id, "flow_name": "Customer lookup",
+                "version": state["version"], "revision": state["revision"],
+                "node_id": node_id, "node_label": "Look up customer", "from_kind": "agent",
+                "to_kind": "action", "published": True, "inferred_tool": "web_search",
+                "tool": "web_search", "description": "Search public pages",
+                "fields": [{"name": "query", "label": "Query", "type": "string",
+                            "required": True, "description": "What to search for"}],
+                "sources": [{"key": "customer", "label": "Customer name", "origin": "input"}]}
+
+    def apply(_request, flow_id, payload):
+        state["calls"].append("apply")
+        assert flow_id == "owned" and payload.node_id == "step"
+        assert payload.tool == "web_search" and payload.params == {"query": "{{customer}}"}
+        assert payload.version == state["version"] and payload.revision == state["revision"]
+        state["version"] += 1
+        return {"id": flow_id, "node_id": "step", "to_kind": "action", "version": state["version"]}
+
+    monkeypatch.setattr(workflows.native, "get_flow_endpoint", draft)
+    monkeypatch.setattr(workflows.native, "flow_apply_review_endpoint", review)
+    monkeypatch.setattr(workflows.native, "apply_flow_proposal_endpoint", apply)
+    selection = {"kind": "flow", "id": "owned", "node_id": "step"}
+
+    def prepare():
+        catalog = client.post(BASE + "/catalog", json={"page": PAGE, "selection": selection}).json()
+        item = next(row for row in catalog["operations"] if row["id"] == "learning.workflow_harden")
+        assert item["available"] and item["fields"][0]["label"] == "Query"
+        assert item["fields"][0]["choices"][0]["value"] == ""
+        response = client.post(BASE + "/prepare", json={"page": PAGE, "selection": selection,
+            "operation": item["id"], "context": catalog["context"], "revision": item["revision"],
+            "arguments": {"query": "customer"}})
+        assert response.status_code == 200, response.text
+        return response.json()["token"]
+
+    with client:
+        token = prepare()
+        assert "apply" not in state["calls"]
+        state["version"] += 1
+        stale = client.post(BASE + "/execute", json={"token": token, "confirmed": True})
+        assert stale.status_code == 409 and "apply" not in state["calls"]
+        token = prepare()
+        denied = client.post(BASE + "/execute", json={"token": token, "confirmed": False})
+        assert denied.status_code == 400 and "apply" not in state["calls"]
+        done = client.post(BASE + "/execute", json={"token": token, "confirmed": True})
+        assert done.status_code == 200, done.text
+        assert done.json()["status"] == "confirmed" and state["version"] == 4
+        assert state["calls"].count("apply") == 1

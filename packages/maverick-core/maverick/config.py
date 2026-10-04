@@ -639,10 +639,18 @@ def provider_configuration_state(provider: str) -> dict[str, Any]:
     effective: dict[str, Any] = {}
     field_sources: dict[str, str] = {}
     dashboard_set = False
+    dashboard_path = dashboard_overrides_path()
+    dashboard_layer = _load_config_file(dashboard_path) if dashboard_path.exists() else {}
     for source, path in layers:
         if path is None or not path.exists():
             continue
-        loaded = _load_config_file(path)
+        loaded = dashboard_layer if source == "dashboard" else _load_config_file(path)
+        if source == "config.toml" and dashboard_layer:
+            # A dashboard reset masks the installer's value before the normal
+            # merge. Reflect that same effective source in Settings and health.
+            from .config_resets import apply_to_base
+
+            loaded = apply_to_base(loaded, dashboard_layer)
         providers = loaded.get("providers") if isinstance(loaded, dict) else None
         table = providers.get(name) if isinstance(providers, dict) else None
         if not isinstance(table, dict):

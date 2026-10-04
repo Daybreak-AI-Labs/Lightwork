@@ -51,7 +51,7 @@
   <p class="muted" style="margin-bottom: var(--space-2);"><a href="/privacy">← Back to Privacy</a></p>
   <h1 class="page-title">{{ kind_label }}: request from {{ dsar.subject_id }}</h1>
   <p class="page-subtitle">
-    <span class="badge {{ 'done' if dsar.status == 'fulfilled' else 'warn' if dsar.status in ('awaiting_erasure', 'unverified') else 'info' if dsar.status == 'open' else '' }}">{{ status_labels.get(dsar.status, dsar.status | humanize) }}</span>
+    <span class="badge {{ 'info' if dsar.status == 'fulfilled' and dsar.kind in ('access', 'portability') else 'done' if dsar.status == 'fulfilled' else 'warn' if dsar.status in ('awaiting_erasure', 'unverified') else 'info' if dsar.status == 'open' else '' }}">{{ 'Data collected' if dsar.status == 'fulfilled' and dsar.kind in ('access', 'portability') else status_labels.get(dsar.status, dsar.status | humanize) }}</span>
     {% if dsar.status in ('open', 'unverified', 'awaiting_erasure') %}
       · <span {% if dsar.overdue %}class="pw-due-warn"{% endif %}>{{ (dsar.days_left ~ ' days left') if not dsar.overdue else ((dsar.days_left | abs) ~ ' days overdue') }}</span>
     {% endif %}
@@ -97,7 +97,7 @@
       <button type="button" class="btn btn--ghost" id="dsar-worksheet">Where to search</button>
       {% if dsar.status == 'open' %}
         <button type="button" class="btn btn--primary" id="dsar-fulfill">
-          {% if dsar.kind in ('access', 'portability') %}Collect their data and mark answered{% else %}Mark ready for deletion{% endif %}
+          {% if dsar.kind in ('access', 'portability') %}Collect their data{% else %}Mark ready for deletion{% endif %}
         </button>
       {% endif %}
       {% if dsar.kind == 'erasure' and dsar.status in ('open', 'awaiting_erasure') and can_admin %}
@@ -120,6 +120,9 @@
     </div>
     {% if dsar.status == 'closed' and dsar.kind in ('access', 'portability') and (not dsar.export_cleanup or dsar.export_cleanup.status != 'removed') %}
       <p class="notice notice--warning">This request is closed, but its saved data export still needs cleanup. Use Retry export cleanup or ask an administrator for help.</p>
+    {% endif %}
+    {% if dsar.status == 'fulfilled' and dsar.kind in ('access', 'portability') %}
+      <p class="notice notice--warning">The data was collected, but this status does not confirm that the requester received it. Check the response below. The saved export is removed when you close this request; check the cleanup result after closing.</p>
     {% endif %}
     <div class="dsar-actions" aria-label="Send a notice to the requester">
       <span class="muted">Send:</span>

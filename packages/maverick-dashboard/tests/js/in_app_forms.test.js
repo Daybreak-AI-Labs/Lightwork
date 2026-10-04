@@ -119,6 +119,21 @@ test('authoring refuses oversized text visibly without losing or storing it',asy
   assert.equal(w.sessionStorage.length,0); w.close();
 });
 
+test('chat message length check leaves an oversized paste intact',async()=>{
+  let calls=0;
+  const {dom,submit}=authoringFixture(async()=>{calls++;return response({},422);});
+  const w=dom.window,form=w.document.querySelector('form');
+  form.querySelector('[name="authoring_kind"]').innerHTML='<option value="goal">Task</option>';
+  form.querySelector('[name="title"]').outerHTML='<textarea name="title"></textarea>';
+  form.insertAdjacentHTML('beforeend','<input type="hidden" name="composer_mode" value="message">');
+  const message='A'.repeat(16001),field=form.querySelector('textarea[name="title"]');
+  field.value=message;submit();await tick();
+  assert.equal(calls,0);
+  assert.equal(field.value,message);
+  assert.match(w.document.getElementById('goal-error').textContent,/16,000 characters or fewer.*text is still here/);
+  w.close();
+});
+
 test('authoring preserves Unicode and exact detail text with verified workspace context',async()=>{
   const pending=deferred(); let calls=0;
   const {dom,submit}=authoringFixture(async()=>{calls++;return pending.promise;},'Review');

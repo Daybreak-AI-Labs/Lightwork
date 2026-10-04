@@ -977,17 +977,35 @@ def _users_context(request: Request) -> dict:
     workspace_options, wm_tenant = _workspace_options(request)
     if not global_admin:
         # Do not even load the installation roster, invitations or department
-        # grants for a workspace administrator. Only current members belong in
-        # this picker; adding a new installation identity remains global work.
+        # grants for a workspace administrator. Only current members of the
+        # workspaces they administer belong in the picker; new identities are
+        # invited by an installation administrator.
         from .identity_format import role_label
-        members = rbac.list_tenant_roles(wm_tenant) if wm_tenant else {}
+        member_rosters = {
+            option["id"]: rbac.list_tenant_roles(option["id"])
+            for option in workspace_options
+        }
+        members = {principal: role for roster in member_rosters.values()
+                   for principal, role in roster.items()}
         people = _people(members, {}, [])
+        role_permissions = {r: sorted(rbac.permissions_for(r)) for r in rbac.known_roles()}
+        workspace_role_options = {}
+        for option in workspace_options:
+            actor_role = member_rosters[option["id"]].get(auth.caller_principal(request))
+            actor_permissions = rbac.permissions_for(actor_role)
+            workspace_role_options[option["id"]] = [
+                role for role in rbac.known_roles()
+                if rbac.permissions_for(role).issubset(actor_permissions)
+            ]
         return {
             "global_admin": False, "people": people,
             "people_labels": {p["principal"]: p["label"] for p in people},
             "role_labels": {r: role_label(r) for r in rbac.known_roles()},
             "roles": rbac.known_roles(), "users": [], "invite_labels": {},
-            "role_permissions": {r: sorted(rbac.permissions_for(r)) for r in rbac.known_roles()},
+            "role_permissions": role_permissions,
+            "workspace_role_options": workspace_role_options,
+            "workspace_roles": workspace_role_options.get(wm_tenant, []),
+            "workspace_member_count": len(member_rosters.get(wm_tenant, {})),
             "bootstrap_admins": [], "auth_on": True, "default_role": rbac.default_role(),
             "you": auth.caller_principal(request), "saved": "",
             "workspace_options": workspace_options, "wm_tenant": wm_tenant,
@@ -1064,6 +1082,9 @@ def _users_context(request: Request) -> dict:
         "users": sorted(role_map.items()),
         "standard_roles": {principal: standard_role(principal) for principal in role_map},
         "roles": rbac.known_roles(),
+        "workspace_roles": rbac.known_roles(),
+        "workspace_role_options": {},
+        "workspace_member_count": len(rbac.list_tenant_roles(wm_tenant)) if wm_tenant else 0,
         "builtin_roles": rbac.ROLES,
         "custom_roles": custom_roles,
         "permission_atoms": rbac.PERMISSION_ATOMS,

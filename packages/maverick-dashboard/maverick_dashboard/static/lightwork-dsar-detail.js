@@ -178,7 +178,7 @@
   on('dsar-fulfill', function () {
     var kind = page.getAttribute('data-kind');
     var msg = kind === 'access' || kind === 'portability'
-      ? 'Collect everything Lightwork holds about ' + subject + ' and mark this request answered?'
+      ? 'Collect everything Lightwork holds about ' + subject + '? This saves an export for the request; it does not send a response.'
       : 'Mark this request ready for deletion? Their data is erased in the next step.';
     ask(msg, 'Continue').then(function (ok) {
       if (!ok) return;

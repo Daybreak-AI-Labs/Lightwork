@@ -5,6 +5,7 @@ from maverick import model_tests
 from maverick.governed_operations import digest
 from pydantic import Field
 
+from . import auth, provider_readiness
 from . import model_tests_api as native
 from .draft_api import context_for
 from .product_operations import Adapter, EmptyInput, Outcome, Preview, Snapshot, StrictInput
@@ -13,6 +14,27 @@ from .product_operations import Adapter, EmptyInput, Outcome, Preview, Snapshot,
 class TestInput(StrictInput):
     model: str = Field(min_length=1, max_length=200)
     kind: str = Field(pattern=r"^(generation|vision)$")
+
+
+def providers_snapshot(request, selection):
+    """Answer provider-status questions from the same source as Settings."""
+    auth.require_global_permission(request, "admin")
+    if selection:
+        raise ValueError("Open Settings to check your AI services.")
+    current = provider_readiness.workspace_readiness()
+    rows = [{"name": row["name"], "label": row["label"],
+             "status": row["status_label"], "used_for_work": row["routed"],
+             "next_step": row["reason"]}
+            for row in current["providers"] if row["routed"] or row["configured"]]
+    details = {"overall": current["verdict_label"], "next_step": current["reason"],
+               "services": rows, "href": "/settings"}
+    return Snapshot(digest(details), "Current AI service and model routing status",
+                    current["summary"] + ". " + current["reason"], details=details)
+
+
+def providers_prepare(request, selection, _arguments):
+    state = providers_snapshot(request, selection)
+    return Preview(state.summary, native=state.details)
 
 
 def snapshot(request, selection):
@@ -101,7 +123,11 @@ def execute_cancel(request, selection, arguments, review, operation_id):
 
 def entries():
     pages = ("/settings", "/settings/all")
-    return [Adapter("models.guidance", "Compare model capabilities", "models", "/settings", pages, EmptyInput, snapshot,
+    return [Adapter("models.provider_status", "Check AI service status", "models", "/settings",
+                    (*pages, "/providers"),
+                    EmptyInput, providers_snapshot, providers_prepare,
+                    aliases=("which ai services are connected", "which ai provider is in use", "check model connection")),
+            Adapter("models.guidance", "Compare model capabilities", "models", "/settings", pages, EmptyInput, snapshot,
                     lambda request, selection, args: Preview("Current model evidence", native=snapshot(request, selection).details)),
             Adapter("models.test", "Run a bounded model test", "models", "/settings", pages, TestInput, test_snapshot, prepare_test, execute_test, recover_test),
             Adapter("models.test.history", "Check model test results", "models", "/settings", pages, EmptyInput, history_snapshot,

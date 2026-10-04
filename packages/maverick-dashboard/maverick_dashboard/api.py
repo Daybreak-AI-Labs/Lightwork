@@ -1368,7 +1368,8 @@ async def restore_tenant(request: Request, tenant_id: str) -> TenantOut:
 
 # Per-tenant RBAC: a principal can hold a different role in each tenant. These
 # memberships override the global role for that tenant only (bootstrap admins
-# stay globally admin). Managed admin-only.
+# stay globally admin). Installation admins can add members; workspace admins
+# manage existing members in workspaces where they currently hold admin.
 
 
 def _reject_tenant_role_assignment_under_per_user_tenancy() -> None:
@@ -1397,11 +1398,56 @@ def _reject_tenant_role_assignment_under_per_user_tenancy() -> None:
 
 @router.get("/admin/tenants/{tenant_id}/roles", response_model=dict[str, str])
 async def list_tenant_roles(request: Request, tenant_id: str) -> dict[str, str]:
-    require_global_permission(request, "admin")
-    from maverick_dashboard import rbac
+    from maverick.authority_effects import authority_effect_fence
 
-    _get_tenant_or_404(tenant_id)
-    return rbac.list_tenant_roles(tenant_id)
+    from . import rbac
+
+    with authority_effect_fence():
+        _require_tenant_roles_admin(request, tenant_id)
+        _get_tenant_or_404(tenant_id)
+        return rbac.list_tenant_roles(tenant_id)
+
+
+def _require_tenant_roles_admin(request: Request, tenant_id: str) -> bool:
+    """Return whether the caller is an installation admin, or refuse access.
+
+    The requested workspace is the authority boundary. A caller's currently
+    selected workspace may differ from the Members picker, so the ambient
+    ``require_permission`` result cannot authorize this route.
+    """
+    from . import auth, rbac
+
+    if auth.has_global_permission(request, "admin"):
+        return True
+    actor = auth.caller_principal(request)
+    key_permissions = auth.api_key_permissions(request)
+    if (not actor or (key_permissions is not None and "admin" not in key_permissions)
+            or "admin" not in rbac.permissions_for(rbac.get_tenant_role(tenant_id, actor))):
+        raise HTTPException(status_code=403, detail="You cannot manage members in this workspace.")
+    if not _get_tenant_or_404(tenant_id).active:
+        raise HTTPException(status_code=403, detail="This workspace is not active.")
+    return False
+
+
+def _protect_last_workspace_admin(tenant_id: str, principal: str, next_role: str | None) -> None:
+    """Keep at least one direct workspace administrator after a role change."""
+    from maverick.paths import tenant_by_user_enabled
+
+    from . import rbac
+
+    # Generated per-user tenants do not have a managed workspace roster. Their
+    # stale direct roles must remain revocable by an installation admin.
+    if tenant_by_user_enabled():
+        return
+    members = rbac.list_tenant_roles(tenant_id)
+    old = members.get(principal)
+    if (old is None or "admin" not in rbac.permissions_for(old)
+            or (next_role is not None and "admin" in rbac.permissions_for(next_role))):
+        return
+    if sum("admin" in rbac.permissions_for(role) for role in members.values()) <= 1:
+        raise HTTPException(status_code=409, detail=(
+            "Choose another workspace administrator before changing this person's role."
+        ))
 
 
 @router.put("/admin/tenants/{tenant_id}/roles/{principal}", status_code=204)
@@ -1411,20 +1457,41 @@ async def set_tenant_role(
     principal: str,
     body: TenantRoleIn,
 ) -> Response:
-    require_global_permission(request, "admin")
+    _require_tenant_roles_admin(request, tenant_id)
     step_up.require_recent_mfa(request, "change_role")
     _reject_tenant_role_assignment_under_per_user_tenancy()
-    from maverick_dashboard import rbac
+    from maverick.authority_effects import authority_effect_fence
 
-    _get_tenant_or_404(tenant_id)
-    try:
-        rbac.set_tenant_role(
-            tenant_id, principal, body.role, actor=caller_principal(request) or "local"
-        )
-    except ValueError as e:
-        # An unknown (e.g. since-deleted custom) role: the schema regex can't
-        # see the live role registry, so rbac's check answers here.
-        raise HTTPException(status_code=400, detail=str(e)) from e
+    from . import auth, rbac
+
+    with authority_effect_fence():
+        installation_admin = _require_tenant_roles_admin(request, tenant_id)
+        _get_tenant_or_404(tenant_id)
+        if not rbac.is_known_role(body.role):
+            raise HTTPException(status_code=400, detail="Choose an available role.")
+        actor = auth.caller_principal(request)
+        if not installation_admin:
+            actor_role = rbac.get_tenant_role(tenant_id, actor)
+            actor_permissions = rbac.permissions_for(actor_role)
+            current_role = rbac.get_tenant_role(tenant_id, principal)
+            if current_role is None:
+                raise HTTPException(status_code=409, detail=(
+                    "Ask an installation administrator to invite this colleague first."
+                ))
+            if (not rbac.permissions_for(body.role).issubset(actor_permissions)
+                    or not rbac.permissions_for(current_role).issubset(actor_permissions)):
+                raise HTTPException(status_code=409, detail=(
+                    "Your workspace role cannot change this colleague's level of access."
+                ))
+            if principal == actor and "admin" not in rbac.permissions_for(body.role):
+                raise HTTPException(status_code=409, detail=(
+                    "Choose another workspace administrator before changing your own administrator role."
+                ))
+        _protect_last_workspace_admin(tenant_id, principal, body.role)
+        try:
+            rbac.set_tenant_role(tenant_id, principal, body.role, actor=actor or "local")
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
     return Response(status_code=204)
 
 
@@ -1434,12 +1501,31 @@ async def remove_tenant_role(
     tenant_id: str,
     principal: str,
 ) -> Response:
-    require_global_permission(request, "admin")
+    _require_tenant_roles_admin(request, tenant_id)
     step_up.require_recent_mfa(request, "change_role")
-    from maverick_dashboard import rbac
+    from maverick.authority_effects import authority_effect_fence
 
-    _get_tenant_or_404(tenant_id)
-    rbac.remove_tenant_role(tenant_id, principal, actor=caller_principal(request) or "local")
+    from . import auth, rbac
+
+    with authority_effect_fence():
+        installation_admin = _require_tenant_roles_admin(request, tenant_id)
+        _get_tenant_or_404(tenant_id)
+        actor = auth.caller_principal(request)
+        if not installation_admin:
+            if principal == actor:
+                raise HTTPException(status_code=409, detail=(
+                    "Choose another workspace administrator before clearing your own administrator role."
+                ))
+            actor_permissions = rbac.permissions_for(rbac.get_tenant_role(tenant_id, actor))
+            current_role = rbac.get_tenant_role(tenant_id, principal)
+            fallback_permissions = rbac.permissions_for(auth.global_role_for_principal(principal))
+            if (current_role is None or not rbac.permissions_for(current_role).issubset(actor_permissions)
+                    or not fallback_permissions.issubset(actor_permissions)):
+                raise HTTPException(status_code=409, detail=(
+                    "Your workspace role cannot clear this colleague's access."
+                ))
+        _protect_last_workspace_admin(tenant_id, principal, None)
+        rbac.remove_tenant_role(tenant_id, principal, actor=actor or "local")
     return Response(status_code=204)
 
 
@@ -8154,6 +8240,118 @@ def flow_proposals_endpoint(request: Request, flow_id: str) -> dict:
         raise HTTPException(status_code=404, detail="no such flow")
     _assert_flow_access(request, f)
     return {"proposals": [p.to_dict() for p in evolve.maybe_propose(f)]}
+
+
+@router.get("/flows/{flow_id}/apply-review")
+def flow_apply_review_endpoint(
+    request: Request, flow_id: str, node_id: str, tool: str = "",
+) -> dict:
+    """Current, owner-scoped information for reviewing one suggested rewrite.
+
+    The tool name is only a candidate. Its live registry contract and the
+    available flow data are displayed for a person to bind before apply; this
+    endpoint never treats tool-name telemetry as parameter evidence.
+    """
+    require_permission(request, "operate")
+    _require_flows()
+    from maverick.flow import evolve, store
+
+    flow = store.load_flow(flow_id)
+    if flow is None:
+        raise HTTPException(status_code=404, detail="no such flow")
+    _assert_flow_access(request, flow)
+    proposal = next(
+        (p for p in evolve.maybe_propose(flow) if p.node_id == node_id), None,
+    )
+    if proposal is None:
+        raise HTTPException(status_code=409, detail="This suggestion changed. Refresh the flow.")
+    node = flow.nodes[node_id]
+    result = {
+        "flow_id": flow.id, "flow_name": flow.name,
+        "version": flow.version, "revision": flow.revision,
+        "node_id": node_id, "node_label": node.label or node_id,
+        "from_kind": node.kind, "to_kind": proposal.to_kind,
+        "published": bool(_flow_publication_fields(flow.id).get("published")),
+        "inferred_tool": proposal.inferred_tool,
+        "tool": "", "description": "", "fields": [], "sources": [],
+    }
+    if proposal.to_kind != "action":
+        result["brief"] = node.brief or node.label or ""
+        return result
+
+    chosen = (tool or proposal.inferred_tool or "").strip()
+    if not chosen:
+        return result
+    user_id = execution_user_id_from_request(request)
+    channel = "api" if user_id else None
+    catalog = _live_tool_index(channel=channel, user_id=user_id)
+    selected = next((entry for entry in catalog if entry["name"] == chosen), None)
+    if selected is None:
+        if not tool:
+            # The learned name is a suggestion, not a binding. Keep the
+            # review open so a person can choose a currently available action.
+            return result
+        raise HTTPException(409, detail="This action is no longer available. Choose a current action.")
+    schema = _live_tool_schemas(channel=channel, user_id=user_id).get(chosen) or {}
+    properties = schema.get("properties")
+    if schema.get("type") != "object" or not isinstance(properties, dict):
+        raise HTTPException(409, detail="This action's input contract is unavailable for review.")
+    names = list(properties)
+    if len(names) > 12:
+        raise HTTPException(409, detail="This action has too many settings for the review form.")
+    required_names = schema.get("required") or []
+    if not isinstance(required_names, list) or not all(isinstance(name, str) for name in required_names):
+        raise HTTPException(409, detail="This action's required settings could not be reviewed.")
+    required = set(required_names)
+    if required - set(names):
+        raise HTTPException(409, detail="This action's required settings could not be reviewed.")
+    fields = []
+    for name in names:
+        spec = properties.get(name) or {}
+        if not isinstance(spec, dict):
+            raise HTTPException(409, detail="This action's settings could not be reviewed.")
+        kind = spec.get("type", "string")
+        if kind not in {"string", "number", "integer", "boolean"}:
+            raise HTTPException(409, detail="This action has complex settings. Configure it in the flow designer.")
+        fields.append({
+            "name": name, "label": name.replace("_", " ").capitalize(),
+            "type": kind, "required": name in required,
+            "description": str(spec.get("description") or "")[:200],
+        })
+    # A value can come from a declared run input or an earlier step's output.
+    # Do not offer a downstream result, which cannot exist when this step runs.
+    sources = [
+        {"key": item["key"], "label": item.get("label") or item["key"], "origin": "input"}
+        for item in flow.inputs
+        if isinstance(item, dict) and isinstance(item.get("key"), str)
+        and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*", item["key"])
+    ]
+    for prior in flow.nodes.values():
+        if (prior.id == node_id or not prior.output
+                or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*", prior.output)):
+            continue
+        pending, seen = [prior.id], set()
+        while pending:
+            current_id = pending.pop()
+            if current_id == node_id:
+                sources.append({"key": prior.output, "label": prior.label or prior.output,
+                                "origin": "earlier_step"})
+                break
+            if current_id in seen or current_id not in flow.nodes:
+                continue
+            seen.add(current_id)
+            current = flow.nodes[current_id]
+            pending.extend(
+                target for target in (current.next, current.if_true, current.if_false, current.on_error)
+                if target
+            )
+    result.update({"tool": chosen, "description": selected.get("description") or "",
+                   "fields": fields, "sources": sources})
+    candidate = evolve.apply_proposal(flow, node_id, "action", tool=chosen, params={})
+    result["approval_added"] = sum(n.kind == "approval" for n in candidate.nodes.values()) > sum(
+        n.kind == "approval" for n in flow.nodes.values()
+    )
+    return result
 
 
 @router.get("/flows/{flow_id}/signals")

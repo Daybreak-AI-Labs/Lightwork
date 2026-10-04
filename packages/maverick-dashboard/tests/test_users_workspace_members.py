@@ -68,3 +68,35 @@ def test_people_who_accepted_an_invite_are_shown_by_email(monkeypatch, tmp_path)
     assert '<option value="user:google-oauth2|105693517179064336026">dab@example.com</option>' in text
     # Someone with no accepted invite renders exactly as before.
     assert "plain@example.com" in text
+
+
+def test_workspace_admin_page_lists_only_managed_workspaces_and_current_members(monkeypatch, tmp_path):
+    c = _client(monkeypatch, tmp_path)
+    from maverick.paths import reset_tenant, set_tenant
+    from maverick.tenant import registry as tr
+    from maverick_dashboard import auth, rbac
+
+    for tenant in ("acme", "beta", "outside"):
+        tr.create_tenant(tenant)
+    rbac.set_role("user:alice", "viewer")
+    rbac.set_role("user:global-only", "operator")
+    rbac.set_tenant_role("acme", "user:alice", "admin")
+    rbac.set_tenant_role("beta", "user:alice", "admin")
+    rbac.set_tenant_role("acme", "user:acme-member", "viewer")
+    rbac.set_tenant_role("beta", "user:beta-member", "operator")
+    rbac.set_tenant_role("outside", "user:outside-member", "viewer")
+    monkeypatch.setattr(auth, "caller_principal", lambda request: "user:alice")
+
+    token = set_tenant("acme")
+    try:
+        response = c.get("/users")
+    finally:
+        reset_tenant(token)
+    assert response.status_code == 200
+    text = response.text
+    assert 'value="acme"' in text and 'value="beta"' in text
+    assert 'value="outside"' not in text
+    assert 'user:acme-member' in text and 'user:beta-member' in text
+    assert 'user:outside-member' not in text and 'user:global-only' not in text
+    assert 'data-global-admin="false"' in text
+    assert 'data-role-options=' in text

@@ -179,3 +179,44 @@ def test_online_sqlite_backup_retains_logical_seal(tmp_path, monkeypatch):
     changed[32] ^= 1  # a nonvolatile SQLite header field remains sealed
     snapshot.write_bytes(changed)
     assert indexed._digest_file(source) != indexed._digest_file(snapshot)
+
+
+def test_hot_status_reads_only_live_holds_after_large_settled_history(tmp_path, monkeypatch):
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
+    monkeypatch.setenv("MAVERICK_CONFIG", str(tmp_path / "missing.toml"))
+    monkeypatch.setattr(cap, "_INDEXED_MIGRATION_BYTES", 1)
+    path = cap._ledger_path()
+    period = cap.period_key()
+    receipts = {
+        f"settled-{number}": {"projected": 0.01, "state": "settled", "actual": 0.01}
+        for number in range(5_000)
+    }
+    receipts["live-hold"] = {"projected": 1.25, "state": "held", "actual": None}
+    receipts["unknown-charge"] = {"projected": 0.5, "state": "unknown", "actual": None}
+    cap._save_json(path, {
+        period: {"openai": 51.75},
+        cap._RECEIPTS: {period: {"openai": receipts}},
+    })
+
+    steps = 0
+    original_connect = indexed._connect
+
+    def counted_connect(database):
+        connection = original_connect(database)
+
+        def progress():
+            nonlocal steps
+            steps += 1
+            return 0
+
+        connection.set_progress_handler(progress, 1_000)
+        return connection
+
+    monkeypatch.setattr(indexed, "_connect", counted_connect)
+    total, held, unresolved = indexed.read_status(path, period, "openai", cap)
+    assert total == pytest.approx(51.75)
+    assert held == pytest.approx(1.75)
+    assert unresolved is True
+    # SQLite calls this handler every 1,000 VM instructions. A scan of all
+    # settled receipts in the hot path needs far more than this bound.
+    assert steps < 10
