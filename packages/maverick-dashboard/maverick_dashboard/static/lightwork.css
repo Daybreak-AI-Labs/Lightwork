@@ -626,6 +626,16 @@
     .task-tabs__list a { display: inline-block; padding: var(--space-2) var(--space-3); color: var(--muted); border-bottom: 2px solid transparent; margin-bottom: -1px; }
     .task-tabs__list a:hover { color: var(--text); text-decoration: none; }
     .task-tabs__list a.task-tabs__on { color: var(--text); border-bottom-color: var(--brand); font-weight: var(--font-semibold); }
+    /* Tabs and filter toggles in the same look. The selected item shows a
+       selected state (aria-selected, aria-pressed or aria-current), never
+       btn--primary: the primary style is kept for the view's main action. */
+    .mv-tabs { display: flex; flex-wrap: wrap; gap: var(--space-1); margin: 0 0 var(--space-3); padding: 0; border-bottom: 1px solid var(--border); }
+    .mv-tab { appearance: none; background: none; border: 0; border-bottom: 2px solid transparent; border-radius: 0; margin-bottom: -1px; padding: var(--space-2) var(--space-3); color: var(--muted); font: inherit; cursor: pointer; }
+    .mv-tab:hover { color: var(--text); }
+    .mv-tab[aria-selected="true"], .mv-tab[aria-pressed="true"], .mv-tab[aria-current="page"] { color: var(--text); border-bottom-color: var(--brand); font-weight: var(--font-semibold); }
+    @media (forced-colors: active) {
+      .mv-tab[aria-selected="true"], .mv-tab[aria-pressed="true"], .mv-tab[aria-current="page"] { border-bottom-color: Highlight; }
+    }
     .navquick-list { list-style: none; margin: 0 0 var(--space-3); padding: 0 0 var(--space-3); border-bottom: 1px solid var(--border); }
     .halt-pill.armed .dot { background: currentColor; animation: pulse 1.2s ease-in-out infinite; }
     @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
