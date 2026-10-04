@@ -4,9 +4,11 @@
     registry (maverick_dashboard.ui_visibility.PAGES) filtered to what the
     caller's RBAC role may see. Auth off -> the full nav, as before. -#}
 {# One sidebar link. Approvals carries an empty count badge that the sidebar
-   script fills after the page has loaded (hidden while nothing waits). #}
+   script fills after the page has loaded (hidden while nothing waits). A page
+   whose module is switched off (only administrators still see it) says so in
+   text, not colour alone. #}
 {% macro _nav_link(link, active, current) -%}
-<a href="{{ link.href }}"{% if active %} class="active"{% if current %} aria-current="page"{% endif %}{% endif %}{% if link.href == '/approvals' %} data-approvals-badge{% endif %}><svg class="nav-ic" aria-hidden="true"><use href="#i-{{ link.icon or 'dot' }}"></use></svg><span class="nav-label">{{ ui(link.label) }}</span>{% if link.href == '/approvals' %}<span class="nav-count" hidden></span>{% endif %}</a>
+<a href="{{ link.href }}"{% if active %} class="active"{% if current %} aria-current="page"{% endif %}{% endif %}{% if link.off %} aria-label="{{ ut('{page} (turned off)', page=ut(link.label)) }}"{% endif %}{% if link.href == '/approvals' %} data-approvals-badge{% endif %}><svg class="nav-ic" aria-hidden="true"><use href="#i-{{ link.icon or 'dot' }}"></use></svg><span class="nav-label">{{ ui(link.label) }}</span>{% if link.off %}<span class="nav-off" aria-hidden="true">{{ ui('Off') }}</span>{% endif %}{% if link.href == '/approvals' %}<span class="nav-count" hidden></span>{% endif %}</a>
 {%- endmacro %}
 {# The five most-used pages sit above the groups so a first visit never
    lands on closed headers alone. Only pages the caller may see appear. #}

@@ -41,6 +41,10 @@ from . import rbac
 # primary page's own links, so the nav stays one entry per job.
 # ``scope: global`` uses the installation-wide role and permission in
 # request navigation and HTTP admission, never a tenant-local role grant.
+# ``module`` names the in-app module switch (``api._MODULE_SWITCHES``) whose
+# gate turns the page into a "...is turned off" dead end; a tuple means the page
+# is a dead end only while every listed switch is off. The sidebar uses it to
+# keep people away from dead ends (see ``mark_switched_off``).
 # ``ready: False`` marks a page that is not ready for customers -- an operator
 # workbench of record ids, verification fingerprints and raw status documents,
 # or a module that ships switched off with no in-app way to turn it on. Such a
@@ -62,7 +66,7 @@ PAGES: tuple[dict, ...] = (
     # Software development: vaulted repositories and swarm-built change
     # proposals awaiting approval. Read-only; merges run after approval.
     {"path": "/code", "label": "Code", "group": "Operate", "icon": "tools",
-     "floor": "operate", "default": "operate", "in_nav": True},
+     "floor": "operate", "default": "operate", "module": "codebase", "in_nav": True},
     # The personal "My work" page: my approvals, questions, results, spending,
     # chat accounts and daily summary. Every signed-in person, so view floor.
     {"path": "/me", "label": "My work", "group": "Operate", "icon": "users",
@@ -462,6 +466,7 @@ PAGES: tuple[dict, ...] = (
         "icon": "eye",
         "floor": "view",
         "default": "view",
+        "module": "privacy_automation.data_discovery",
         "in_nav": True,
     },
     {
@@ -472,6 +477,7 @@ PAGES: tuple[dict, ...] = (
         "icon": "facts",
         "floor": "operate",
         "default": "operate",
+        "module": "privacy_automation.regulatory_intelligence",
         "in_nav": False,
     },
     {
@@ -482,6 +488,7 @@ PAGES: tuple[dict, ...] = (
         "icon": "shield",
         "floor": "operate",
         "default": "operate",
+        "module": "privacy_automation.rights_orchestration",
         "in_nav": False,
     },
     {
@@ -492,6 +499,7 @@ PAGES: tuple[dict, ...] = (
         "icon": "key",
         "floor": "operate",
         "default": "operate",
+        "module": "privacy_automation.rights_consumer_delivery",
         "in_nav": False,
     },
     {
@@ -502,6 +510,7 @@ PAGES: tuple[dict, ...] = (
         "icon": "check",
         "floor": "operate",
         "default": "operate",
+        "module": "privacy_automation.notice_governance",
         "in_nav": False,
     },
     # Consumer consent is its own operating surface: unlike the agent-action
@@ -514,6 +523,7 @@ PAGES: tuple[dict, ...] = (
         "icon": "check",
         "floor": "operate",
         "default": "operate",
+        "module": "consent_preferences",
     },
     {
         "path": "/consent/publishing",
@@ -523,6 +533,7 @@ PAGES: tuple[dict, ...] = (
         "icon": "check",
         "floor": "operate",
         "default": "operate",
+        "module": "consent_preferences.publishing",
         "in_nav": False,
     },
     {
@@ -533,6 +544,7 @@ PAGES: tuple[dict, ...] = (
         "icon": "bench",
         "floor": "operate",
         "default": "operate",
+        "module": "consent_preferences.experiments",
         "in_nav": False,
     },
     {
@@ -543,6 +555,7 @@ PAGES: tuple[dict, ...] = (
         "icon": "check",
         "floor": "operate",
         "default": "operate",
+        "module": "consent_preferences.delivery",
         "in_nav": False,
     },
     {
@@ -553,6 +566,7 @@ PAGES: tuple[dict, ...] = (
         "icon": "key",
         "floor": "operate",
         "default": "operate",
+        "module": "consent_preferences.public_api",
         "in_nav": False,
     },
     {
@@ -563,6 +577,7 @@ PAGES: tuple[dict, ...] = (
         "icon": "key",
         "floor": "view",
         "default": "audit",
+        "module": "consent_preferences.native_sdk",
         "in_nav": True,
     },
     {
@@ -573,6 +588,7 @@ PAGES: tuple[dict, ...] = (
         "icon": "check",
         "floor": "operate",
         "default": "operate",
+        "module": "consent_preferences.profile_data",
         "in_nav": False,
     },
     {
@@ -583,6 +599,7 @@ PAGES: tuple[dict, ...] = (
         "icon": "search",
         "floor": "view",
         "default": "view",
+        "module": "consent_preferences.profile_data.custom_index",
         "in_nav": True,
     },
     {
@@ -593,6 +610,7 @@ PAGES: tuple[dict, ...] = (
         "icon": "clock",
         "floor": "view",
         "default": "audit",
+        "module": "consent_preferences.bulk_jobs",
         "in_nav": True,
     },
     {
@@ -603,6 +621,7 @@ PAGES: tuple[dict, ...] = (
         "icon": "settings",
         "floor": "view",
         "default": "audit",
+        "module": "consent_preferences.publishing.web_settings",
         "in_nav": True,
     },
     {
@@ -613,6 +632,7 @@ PAGES: tuple[dict, ...] = (
         "icon": "check",
         "floor": "view",
         "default": "audit",
+        "module": "consent_preferences.global_opt_out",
         "in_nav": True,
     },
     {
@@ -623,6 +643,7 @@ PAGES: tuple[dict, ...] = (
         "icon": "search",
         "floor": "view",
         "default": "audit",
+        "module": "consent_preferences.application_scanner",
         "in_nav": True,
     },
     {
@@ -633,6 +654,7 @@ PAGES: tuple[dict, ...] = (
         "icon": "eye",
         "floor": "operate",
         "default": "operate",
+        "module": "consent_preferences.scanner",
         "in_nav": False,
     },
     {
@@ -643,6 +665,7 @@ PAGES: tuple[dict, ...] = (
         "icon": "check",
         "floor": "operate",
         "default": "operate",
+        "module": "consent_preferences.scanner.notice_proposals",
         "in_nav": False,
     },
     {
@@ -653,6 +676,7 @@ PAGES: tuple[dict, ...] = (
         "icon": "key",
         "floor": "operate",
         "default": "operate",
+        "module": "consent_preferences.trust_center",
         "in_nav": False,
     },
     {
@@ -663,6 +687,7 @@ PAGES: tuple[dict, ...] = (
         "icon": "shield",
         "floor": "operate",
         "default": "operate",
+        "module": "data_use_governance",
     },
     {
         "path": "/data-use/providers",
@@ -672,6 +697,7 @@ PAGES: tuple[dict, ...] = (
         "icon": "shield",
         "floor": "operate",
         "default": "operate",
+        "module": ("data_use_governance.snowflake", "data_use_governance.databricks"),
         "in_nav": False,
     },
     {
@@ -682,6 +708,7 @@ PAGES: tuple[dict, ...] = (
         "icon": "agents",
         "floor": "view",
         "default": "view",
+        "module": "governance_agents",
         "in_nav": True,
     },
     {
@@ -700,6 +727,7 @@ PAGES: tuple[dict, ...] = (
         "icon": "check",
         "floor": "view",
         "default": "view",
+        "module": "ai_evidence_analysis",
         "in_nav": True,
     },
     {
@@ -710,6 +738,7 @@ PAGES: tuple[dict, ...] = (
         "icon": "check",
         "floor": "view",
         "default": "view",
+        "module": "assessment_evidence_autopopulation",
         "in_nav": True,
     },
     {
@@ -720,6 +749,7 @@ PAGES: tuple[dict, ...] = (
         "icon": "check",
         "floor": "view",
         "default": "view",
+        "module": "ai_entity_tasks",
         "in_nav": True,
     },
     {
@@ -769,6 +799,7 @@ PAGES: tuple[dict, ...] = (
         "icon": "shield",
         "floor": "view",
         "default": "view",
+        "module": "third_party_management.contracts",
         "in_nav": True,
     },
     {
@@ -778,6 +809,7 @@ PAGES: tuple[dict, ...] = (
         "icon": "shield",
         "floor": "view",
         "default": "view",
+        "module": "third_party_management.executive_reports",
         "in_nav": True,
     },
     {
@@ -787,6 +819,7 @@ PAGES: tuple[dict, ...] = (
         "icon": "shield",
         "floor": "operate",
         "default": "operate",
+        "module": "third_party_management.intelligence",
         "in_nav": False,
     },
     {
@@ -796,6 +829,7 @@ PAGES: tuple[dict, ...] = (
         "icon": "shield",
         "floor": "operate",
         "default": "operate",
+        "module": "third_party_management.lifecycle",
         "in_nav": False,
     },
     {
@@ -805,6 +839,7 @@ PAGES: tuple[dict, ...] = (
         "icon": "shield",
         "floor": "operate",
         "default": "operate",
+        "module": "third_party_management.lifecycle.portal",
         "in_nav": False,
     },
     {
@@ -860,6 +895,7 @@ PAGES: tuple[dict, ...] = (
         "icon": "shield",
         "floor": "operate",
         "default": "operate",
+        "module": ("eu_conformity", "ai_literacy", "ai_incident_reporting"),
     },
     # The Finance workspace: the same chassis over the finance assessment
     # types (SOX control / fraud risk / ITGC / credit risk / close readiness).
@@ -949,6 +985,7 @@ PAGES: tuple[dict, ...] = (
         "icon": "compliance",
         "floor": "view",
         "default": "operate",
+        "module": "tech_risk_compliance.grc_studio",
         "in_nav": True,
     },
     {
@@ -959,6 +996,7 @@ PAGES: tuple[dict, ...] = (
         "icon": "compliance",
         "floor": "operate",
         "default": "operate",
+        "module": "tech_risk_compliance.policy_publication_links",
         "in_nav": False,
     },
     {
@@ -969,6 +1007,7 @@ PAGES: tuple[dict, ...] = (
         "icon": "compliance",
         "floor": "operate",
         "default": "operate",
+        "module": "tech_risk_compliance.scoping",
         "in_nav": False,
     },
     {
@@ -979,6 +1018,7 @@ PAGES: tuple[dict, ...] = (
         "icon": "compliance",
         "floor": "operate",
         "default": "operate",
+        "module": "tech_risk_compliance.scope_actions",
         "in_nav": False,
     },
     {
@@ -988,6 +1028,7 @@ PAGES: tuple[dict, ...] = (
         "icon": "compliance",
         "floor": "operate",
         "default": "operate",
+        "module": "tech_risk_compliance.continuous_evidence",
         "in_nav": True,
     },
     # Compliance by construction: what the regulatory compiler turned into
@@ -1082,6 +1123,7 @@ PAGES: tuple[dict, ...] = (
         "icon": "agents",
         "floor": "view",
         "default": "view",
+        "module": "external_agents",
     },
     # -- Extend ---------------------------------------------------------------
     {
@@ -1127,6 +1169,7 @@ PAGES: tuple[dict, ...] = (
         "icon": "key",
         "floor": "admin",
         "default": "admin",
+        "module": "connections",
     },
     {
         "path": "/plugins",
@@ -1171,6 +1214,7 @@ PAGES: tuple[dict, ...] = (
         "icon": "shield",
         "floor": "view",
         "default": "admin",
+        "module": "governed_document_vault",
         "in_nav": True,
     },
     {
@@ -1517,6 +1561,52 @@ def not_ready_paths() -> frozenset[str]:
     return frozenset(p["path"] for p in PAGES if not customer_ready(p))
 
 
+def page_modules(page: dict) -> tuple[str, ...]:
+    """The in-app module switches (api._MODULE_SWITCHES keys) behind a page.
+
+    A page with a ``module`` is a "...is turned off" dead end while its switch is
+    off; a page built from several switches is one only while every switch is.
+    """
+    modules = page.get("module") or ()
+    return (modules,) if isinstance(modules, str) else tuple(modules)
+
+
+def switched_off_paths(enabled) -> frozenset[str]:
+    """Registry pages whose module switch is off, given ``enabled(section)``.
+
+    Runs on every page render, so each switch is asked about once.
+    """
+    known: dict[str, bool] = {}
+
+    def on(module: str) -> bool:
+        if module not in known:
+            known[module] = bool(enabled(module))
+        return known[module]
+
+    return frozenset(path for path, modules in _MODULE_PAGES if not any(on(m) for m in modules))
+
+
+_MODULE_PAGES: tuple[tuple[str, tuple[str, ...]], ...] = tuple(
+    (page["path"], page_modules(page)) for page in PAGES if page_modules(page)
+)
+
+
+def mark_switched_off(groups: list[dict], off: frozenset[str], *, can_turn_on: bool) -> None:
+    """Keep the sidebar free of dead ends, in place.
+
+    Someone who can turn modules on (a global administrator) keeps each link,
+    marked ``off`` so the page says what to do; everyone else, who could only
+    reach a "...is turned off" page, does not get the link at all.
+    """
+    for group in groups:
+        if can_turn_on:
+            for link in group["links"]:
+                link["off"] = link["href"] in off
+        else:
+            group["links"] = [link for link in group["links"] if link["href"] not in off]
+    groups[:] = [group for group in groups if group["links"]]
+
+
 def nav_groups(
     role: str | None, *, scope_roles: dict[str, str | None] | None = None,
 ) -> list[dict]:
@@ -1639,8 +1729,11 @@ __all__ = [
     "set_visibility",
     "apply_selection",
     "page_for",
+    "page_modules",
     "group_title",
+    "mark_switched_off",
     "nav_groups",
     "finder_pages",
     "matrix",
+    "switched_off_paths",
 ]

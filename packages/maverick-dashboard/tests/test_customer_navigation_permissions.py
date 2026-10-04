@@ -272,6 +272,17 @@ def test_tenant_admin_cannot_see_or_open_installation_controls(monkeypatch, tmp_
     _as(monkeypatch, "user:tenant-admin")
     token = set_tenant("acme")
     try:
+        # Connections ships switched off. A workspace administrator cannot turn
+        # modules on (that is installation-wide), so the sidebar leaves out the
+        # page that would only say it is turned off; the finder still lists it.
+        context = app._nav_context(Request({"type": "http", "headers": []}))
+        assert "/connections" not in {link["href"] for group in context["nav_groups"] for link in group["links"]}
+        assert "/connections" in {link["href"] for group in context["finder_pages"] for link in group["links"]}
+        from maverick import config
+        from maverick_dashboard import settings_store
+
+        settings_store.set_module_enables(["connections"], True)
+        config.reset_config_cache()
         context = app._nav_context(Request({"type": "http", "headers": []}))
         for key in ("nav_groups", "finder_pages"):
             links = {link["href"] for group in context[key] for link in group["links"]}

@@ -498,6 +498,29 @@ def _page_role(request: Request, *, global_scope: bool = False) -> str | None:
         return ""
 
 
+def _switched_off_pages() -> frozenset[str]:
+    """Registry pages whose in-app module switch is off right now: the same
+    effective gate chain as each page's banner (api._module_switch_enabled),
+    with every enable gate read once per render."""
+    from . import ui_visibility
+    from .api import _MODULE_SWITCHES, _load_module_config, _module_path_enabled
+
+    try:
+        loaded = _load_module_config()
+    except Exception:  # unreadable configuration: navigation stays as it is
+        return frozenset()
+    gates: dict[str, bool] = {}
+
+    def gate(path: str) -> bool:
+        if path not in gates:
+            gates[path] = _module_path_enabled(loaded, path)
+        return gates[path]
+
+    return ui_visibility.switched_off_paths(
+        lambda section: all(gate(path) for path in (*_MODULE_SWITCHES[section]["requires"], section))
+    )
+
+
 def _nav_context(request: Request) -> dict:
     from . import ui_visibility
     from .api import _shared_halt_backend
@@ -549,6 +572,10 @@ def _nav_context(request: Request) -> dict:
         viewer_global_admin = has_global_permission(request, "admin")
     except Exception:  # pragma: no cover -- shell rendering stays fail-closed
         viewer_global_admin = False
+    # A page whose module is switched off only says "...is turned off". Global
+    # administrators, who can turn it on, keep the link marked Off; nobody else
+    # gets a sidebar link into that dead end. Same switch state as the banner.
+    ui_visibility.mark_switched_off(groups, _switched_off_pages(), can_turn_on=viewer_global_admin)
     try:
         from maverick import config as core_config
         from maverick import experience_preferences

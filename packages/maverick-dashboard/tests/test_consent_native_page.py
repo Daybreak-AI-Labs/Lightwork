@@ -85,6 +85,7 @@ def test_page_has_nav_and_closed_copilot_context() -> None:
         "icon": "key",
         "floor": "view",
         "default": "audit",
+        "module": "consent_preferences.native_sdk",
         "in_nav": True,
     }
     context = copilot_context.context_for_page(page.PAGE_PATH)

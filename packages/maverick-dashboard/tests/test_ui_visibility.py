@@ -441,3 +441,76 @@ def test_approved_self_connect_keeps_page_overrides_and_native_admin_floor(monke
     assert not ui_visibility.is_visible(page, "operator")
     assert ui_visibility.is_visible(page, "admin")
     assert not ui_visibility.is_visible(ui_visibility.page_for("/settings"), "operator")
+
+
+# ---------- switched-off modules: no sidebar dead ends ----------
+
+def test_every_page_module_is_an_in_app_switch():
+    from maverick_dashboard import api, ui_visibility
+    modules = [m for page in ui_visibility.PAGES for m in ui_visibility.page_modules(page)]
+    assert modules
+    assert set(modules) <= set(api._MODULE_SWITCHES)
+
+
+def test_switched_off_pages_follow_the_module_switches():
+    from maverick_dashboard import ui_visibility
+    all_off = ui_visibility.switched_off_paths(lambda section: False)
+    assert {"/consent", "/consent/global-opt-out", "/code", "/connections",
+            "/security/governance", "/external-agents"} <= all_off
+    # Workspaces that still work with a section switched off are never dead ends.
+    assert all_off.isdisjoint({"/privacy", "/finance", "/goals", "/approvals"})
+    assert ui_visibility.switched_off_paths(lambda section: True) == frozenset()
+    # A page built from several switches is a dead end only while all are off.
+    one_on = ui_visibility.switched_off_paths(lambda section: section == "ai_literacy")
+    assert "/security/governance" not in one_on and "/consent" in one_on
+
+
+def test_mark_switched_off_marks_for_administrators_and_hides_for_others():
+    from maverick_dashboard import ui_visibility
+
+    def groups():
+        return [{"label": "Consent", "title": "Consent", "links": [{"href": "/consent"}, {"href": "/consent/native"}]},
+                {"label": "Operate", "title": "Work", "links": [{"href": "/goals"}, {"href": "/code"}]}]
+
+    off = frozenset({"/consent", "/consent/native", "/code"})
+    admin = groups()
+    ui_visibility.mark_switched_off(admin, off, can_turn_on=True)
+    assert [[link["off"] for link in g["links"]] for g in admin] == [[True, True], [False, True]]
+    others = groups()
+    ui_visibility.mark_switched_off(others, off, can_turn_on=False)
+    assert others == [{"label": "Operate", "title": "Work", "links": [{"href": "/goals"}]}]
+
+
+def _sidebar_link(body, href):
+    import re
+    match = re.search(r'<aside class="sidebar" id="sidebar">.*?</aside>', body, re.DOTALL)
+    return re.findall(r'<a href="' + re.escape(href) + r'"[^>]*>.*?</a>', match.group(0), re.DOTALL)
+
+
+def test_fresh_install_marks_switched_off_pages_for_administrators(monkeypatch, tmp_path):
+    c = _client(monkeypatch, tmp_path)  # the local owner can turn modules on
+    body = c.get("/goals").text
+    [consent] = _sidebar_link(body, "/consent")
+    assert 'aria-label="Consent &amp; Preferences (turned off)"' in consent
+    assert '<span class="nav-off" aria-hidden="true">' in consent and ">Off</span>" in consent
+    tasks = _sidebar_link(body, "/goals")  # Most used and Work: pages that work stay plain
+    assert len(tasks) == 2 and not any("aria-label" in link or "nav-off" in link for link in tasks)
+
+
+def test_people_who_cannot_turn_a_module_on_get_no_link_to_it(monkeypatch, tmp_path):
+    monkeypatch.setenv("MAVERICK_DASHBOARD_ADMINS", "")
+    c = _client(monkeypatch, tmp_path)
+    from maverick_dashboard import rbac
+    rbac.set_role("user:op", "operator")
+    _as(monkeypatch, "user:op")
+    body = c.get("/goals").text
+    assert _sidebar_link(body, "/consent") == [] and _sidebar_link(body, "/code") == []
+    assert _sidebar_link(body, "/goals") and "nav-off" not in body
+    # The page itself still answers; only the sidebar stops sending people there.
+    assert c.get("/consent").status_code == 200
+    # Once an administrator turns the module on, the plain link comes back.
+    _as(monkeypatch, None)
+    assert c.post("/api/v1/features/modules", json={"section": "consent_preferences", "enabled": True}).status_code == 200
+    _as(monkeypatch, "user:op")
+    [consent] = _sidebar_link(c.get("/goals").text, "/consent")
+    assert "nav-off" not in consent and "aria-label" not in consent
