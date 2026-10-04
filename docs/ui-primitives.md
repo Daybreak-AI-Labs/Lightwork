@@ -86,6 +86,40 @@ row.appendChild(mvEl('div', 'mv-row__title', name));
 row.appendChild(mvEl('div', 'mv-row__sub', 'last run ' + mvWhen(ts)));
 ```
 
+## Empty states: `empty_state(...)` / `window.mvEmpty(title, body, action, opts)`
+
+One component for every empty list, panel and page (`.mv-empty`). The wording
+says what will appear and how to add the first one — "[What will appear
+here]. [How to add the first one]." — plus at most one next step. Leave the
+button out when the viewer can't use the destination page. The button is a
+plain `.btn`, never a second primary: the page's main action is in the header.
+
+```html
+{% from "_empty_state.html" import empty_state %}
+{{ empty_state('No results yet',
+               'Finished tasks with a saved answer appear here. Start a task to get the first one.',
+               action_label='Start a task', action_href='/chat') }}
+```
+
+`id`/`hidden` serve empties a script toggles; `compact=true` is the smaller,
+left-aligned version for panels, tiles and charts. Script-rendered lists use
+the same markup:
+
+```js
+list.replaceChildren(mvEmpty('No schedules yet',
+  'Schedules you create appear here. Create one below to run a workflow on a timetable.',
+  { label: 'Create a schedule', onClick: focusForm }));          // or { label, href }
+```
+
+## Page header: `hero(..., actions=..., compact=...)`
+
+`templates/_hero.html` is the one page header. Its `actions` slot holds the
+page's main action (the view's only `btn--primary`) and any secondary buttons
+beside it; build it with `{% set hero_actions %}…{% endset %}` so the markup is
+template-owned while every value inside stays escaped. `compact=true` is the
+shorter header for working pages, with the actions beside the title. The
+macro comment documents the arguments.
+
 ## `.card` / `.card-grid`
 
 The shared card surface (border + token padding + hover) and a responsive

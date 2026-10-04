@@ -751,10 +751,18 @@
     .mv-row__sub { color: var(--muted); font-size: var(--text-sm); margin-top: 2px; word-break: break-word; }
     .mv-row__actions { display: flex; gap: var(--space-2); flex-wrap: wrap; flex: none; }
     .btn--icon { flex: none; padding: 0.3rem 0.55rem; font-size: var(--text-sm); line-height: 1; }
-    /* Shared empty / get-started state: centered title + body + a CTA. */
+    /* Shared empty / get-started state: centered title + body + one next
+       step. Markup: templates/_empty_state.html or window.mvEmpty(). */
     .mv-empty { text-align: center; padding: var(--space-6) var(--space-4); border: 1px dashed var(--border); border-radius: var(--radius-lg); background: var(--surface-1); color: var(--muted); }
     .mv-empty__title { color: var(--text); font-weight: var(--font-semibold); font-size: var(--text-md); margin: 0 0 var(--space-1); }
     .mv-empty__body { margin: 0 auto var(--space-3); max-width: 38rem; }
+    .mv-empty__body:last-child { margin-bottom: 0; }
+    .mv-empty__title + .mv-empty__action { margin-top: var(--space-2); }
+    /* Compact: inside panels, tiles and charts. */
+    .mv-empty--compact { text-align: start; padding: var(--space-3) var(--space-4); font-size: var(--text-sm); }
+    .mv-empty--compact .mv-empty__title { font-size: var(--text-sm); }
+    .mv-empty--compact .mv-empty__body { margin: 0 0 var(--space-2); max-width: none; }
+    .mv-empty--compact .mv-empty__body:last-child { margin-bottom: 0; }
     /* Shared card + responsive card grid. */
     .card { background: var(--surface-1); border: 1px solid var(--border); border-radius: var(--radius-md); padding: var(--space-4); display: flex; flex-direction: column; transition: border-color .12s ease, box-shadow .12s ease; animation: mv-rise 200ms ease-out both; }
     .card:hover { border-color: var(--border-strong); box-shadow: var(--shadow-sm); }

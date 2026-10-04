@@ -317,6 +317,23 @@
         if (text != null) e.textContent = text;
         return e;
       };
+      // The one empty state, same markup as templates/_empty_state.html:
+      // "[What will appear here]. [How to add the first one]." plus at most
+      // one next step — {label, href} for a link or {label, onClick} for a
+      // button; leave it out when the viewer can't use the destination.
+      // opts.compact: the smaller version for panels, tiles and charts.
+      window.mvEmpty = function (title, body, action, opts) {
+        var box = window.mvEl('div', 'mv-empty' + (opts && opts.compact ? ' mv-empty--compact' : ''));
+        box.appendChild(window.mvEl('p', 'mv-empty__title', title));
+        if (body) box.appendChild(window.mvEl('p', 'mv-empty__body', body));
+        if (action && action.label && (action.href || action.onClick)) {
+          var next = window.mvEl(action.href ? 'a' : 'button', 'btn mv-empty__action', action.label);
+          if (action.href) next.setAttribute('href', action.href);
+          else { next.type = 'button'; next.addEventListener('click', action.onClick); }
+          box.appendChild(next);
+        }
+        return box;
+      };
       // Only the business-error envelope carries trusted, authored display copy.
       // Legacy detail strings continue through the restrictive plain-copy filter.
       window.mvBusinessError = function (value) {
