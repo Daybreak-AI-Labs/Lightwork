@@ -15,9 +15,11 @@
   var states = {available:'Available', blocked:'Blocked', unavailable:'Unavailable', unidentified:'No named account', not_bound:'Not bound', requested:'Requested', assigned:'Assigned', evidence_needed:'Evidence needed', reviewing:'Under review', verified:'Verified', pending:'Pending', reserved:'Reserved', settled:'Recorded', released:'Released', unknown:'Unknown', estimated:'Estimated', observed:'Observed'};
   function state(value) { return Object.prototype.hasOwnProperty.call(states, value) ? text(states[value]) : value; }
   function dimension(value) { var labels = {task:'Task ceiling', person:'Personal allowance', workspace:'Workspace allowance'}; return Object.prototype.hasOwnProperty.call(labels, value) ? text(labels[value]) : value && value.indexOf('provider:') === 0 ? text('Provider: {provider}', {provider:value.slice(9)}) : value; }
-  function money(v) { return v === null || v === undefined ? text('Unavailable or uncapped (see basis)') : (i18n ? i18n.number(v, {style:'currency', currency:'USD', currencyDisplay:'code', minimumFractionDigits:4, maximumFractionDigits:4}) : 'USD ' + Number(v).toFixed(4)); }
+  function money(v) { return v === null || v === undefined ? text('Unavailable or uncapped (see basis)') : window.mvMoney(v); }
   function link(label, href, sourceContent) { var a = sourceContent ? content('a', label) : node('a', label); a.href = href; return a; }
-  function errorMessage(error) { return window.mvBusinessError ? window.mvBusinessError(error).message : (error.message || 'Budget details could not be refreshed.'); }
+  // Only the authored business message is shown; anything else (a dropped
+  // connection, a non-JSON reply) gets one plain sentence, never raw text.
+  function errorMessage(error) { var business = window.mvBusinessError && window.mvBusinessError(error); return business ? business.message : 'Budget details could not be refreshed. Try again in a moment.'; }
   async function call(url, options, signal) {
     var response = await fetch(url, Object.assign({credentials: 'same-origin', cache: 'no-store', signal: signal}, options || {}));
     var value = await response.json();

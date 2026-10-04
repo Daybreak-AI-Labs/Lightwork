@@ -109,3 +109,23 @@ test("a translated interface uses its own locale, and both shared formatters agr
   assert.equal(en.LightworkI18n.formatDate(seconds), en.mvTimeAbsolute(seconds));
   en.close();
 });
+
+test("money reads one way: dollars and cents, separators, never a run of decimals", () => {
+  const w = load();
+  assert.equal(w.mvMoney(1234.5), "$1,234.50");
+  assert.equal(w.mvMoney("0"), "$0.00");
+  assert.equal(w.mvMoney(-5), "-$5.00");
+  assert.equal(w.mvMoney(0.0004), "under $0.01");
+  assert.equal(w.mvMoney(0.003, { decimals: 4 }), "$0.0030");
+  assert.equal(w.mvMoney(75, { currency: "eur" }), "EUR 75.00");
+  for (const missing of [null, undefined, "", "n/a", NaN, Infinity, true]) assert.equal(w.mvMoney(missing), "", String(missing));
+  w.close();
+  const fr = load("", { language: "fr" });
+  assert.equal(fr.mvMoney(1234.5), new Intl.NumberFormat("fr-CA", { style: "currency", currency: "USD",
+    minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(1234.5));
+  fr.close();
+  // English pages keep "$" even when the browser prefers another English region.
+  const en = load("", { language: "en" });
+  assert.equal(en.mvMoney(1234.5), "$1,234.50");
+  en.close();
+});

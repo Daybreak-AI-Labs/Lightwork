@@ -190,7 +190,7 @@
     <h3>Control coverage</h3>
     <p class="muted">Controls in place out of all your controls. This shows readiness, not a certification.</p>
     <div class="stat sec-stat">
-      <div class="num">{{ insights.coverage_percent }}%</div>
+      <div class="num">{{ insights.coverage_percent | percent }}</div>
       <div class="label">In place</div>
     </div>
     <div class="sec-heat" aria-label="Controls by status">
@@ -208,7 +208,7 @@
       {% for framework in insights.framework_coverage %}
       <div class="sec-framework">
         <strong>{{ framework.label }}</strong>
-        <span>{{ framework.coverage_percent }}%</span><br>
+        <span>{{ framework.coverage_percent | percent }}</span><br>
         <span class="muted">{{ framework.controls_implemented }} in place, {{ framework.controls_partial }} partly, of
           {{ framework.controls_applicable }} that apply</span>
       </div>

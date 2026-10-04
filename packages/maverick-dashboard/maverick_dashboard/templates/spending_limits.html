@@ -2,9 +2,8 @@
 {% block title %}Spending limits · Lightwork{% endblock %}
 {% block content %}
   {% from "_hero.html" import hero, state %}
-  {% macro money(value) %}${{ '{:,.2f}'.format(value or 0) }}{% endmacro %}
   {% macro who(principal) %}{% set p = principal | identity %}<span title="{{ p.raw }}">{{ p.name }}{% if p.detail %} <span class="muted" style="font-weight: normal;">· {{ p.detail }}</span>{% endif %}</span>{% endmacro %}
-  {% macro describe(limit) %}{% if limit %}{{ money(limit.amount) }} {{ period_labels[limit.period] }}{% else %}No limit{% endif %}{% endmacro %}
+  {% macro describe(limit) %}{% if limit %}{{ limit.amount | money }} {{ period_labels[limit.period] }}{% else %}No limit{% endif %}{% endmacro %}
   {% macro limit_fields(prefix, limit, options) %}
     <fieldset style="border: 0; padding: 0; margin: 0; display: flex; flex-direction: column; gap: var(--space-2);">
       <legend class="muted" style="font-size: var(--text-sm); padding: 0 0 var(--space-1);">Choose one</legend>
@@ -36,10 +35,10 @@
                      When a limit is reached, new work pauses until the limit resets or you
                      raise it.') %}
     {{ state('This month',
-             money(view.workspace_month) ~ ' spent',
+             (view.workspace_month | money) ~ ' spent',
              badge=('Limited' if view.workspace else 'No limit'),
              badge_class=('warn' if view.workspace else 'ok'),
-             copy=money(view.workspace_today) ~ ' spent today across the workspace.') }}
+             copy=(view.workspace_today | money) ~ ' spent today across the workspace.') }}
   {% endcall %}
 
   {% if saved %}
@@ -59,10 +58,10 @@
   <div class="panel">
     <p class="muted" style="margin-top: 0;">
       The most everyone together may spend. Currently: <strong>{{ describe(view.workspace) }}</strong>.
-      {{ money(view.workspace_today) }} spent today, {{ money(view.workspace_month) }} this month.
+      {{ view.workspace_today | money }} spent today, {{ view.workspace_month | money }} this month.
     </p>
     {% if organization_cap %}
-    <p class="muted">This workspace also has a daily limit of <strong>{{ money(organization_cap) }}</strong>,
+    <p class="muted">This workspace also has a daily limit of <strong>{{ organization_cap | money }}</strong>,
       set on the <a href="/tenants">Workspaces</a> page. Whichever limit is reached first applies.</p>
     {% endif %}
     <form method="post" action="/spending-limits/workspace" data-limit-form="the workspace"
@@ -103,8 +102,8 @@
         <tr>
           <td>{{ who(row.principal) }}</td>
           <td>{% if row.limit %}{{ describe(row.limit) }}{% elif row.uses_default %}{{ describe(view.default) }} <span class="muted">(everyone's limit)</span>{% else %}<span class="muted">No limit</span>{% endif %}</td>
-          <td>{{ money(row.today) }}</td>
-          <td>{{ money(row.month) }}</td>
+          <td>{{ row.today | money }}</td>
+          <td>{{ row.month | money }}</td>
           <td>
             {% if row.limit %}
             <form method="post" action="/spending-limits/person" style="display: inline;"
@@ -165,7 +164,6 @@
   <script>
   (function () {
     'use strict';
-    function money(v) { return '$' + Number(v).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}); }
     function guard(form, question) {
       form.addEventListener('submit', function (event) {
         if (form.dataset.confirmed === 'true') { delete form.dataset.confirmed; return; }
@@ -191,7 +189,7 @@
         }
         var amount = parseFloat((form.querySelector('input[name="amount"]') || {}).value);
         if (isFinite(amount) && amount > current) {
-          return 'Raise the spending limit for ' + who + ' from ' + money(current) + ' to ' + money(amount) + '?';
+          return 'Raise the spending limit for ' + who + ' from ' + window.mvMoney(current) + ' to ' + window.mvMoney(amount) + '?';
         }
         return '';
       });

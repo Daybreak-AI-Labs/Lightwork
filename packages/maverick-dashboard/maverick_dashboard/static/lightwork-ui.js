@@ -490,6 +490,31 @@
           return new Intl.DateTimeFormat(mvFormatLocale(), { day: 'numeric', month: 'short', year: 'numeric' }).format(d);
         } catch (e) { return d.toDateString(); }
       };
+      // Money reads "$1,234.56" everywhere (the |money filter matches it):
+      // two decimals with thousands separators, and a non-zero amount under a
+      // cent reads "under $0.01". { decimals: 4 } is only for a labelled
+      // per-unit price ("$0.0030 per 1K tokens"); { currency: 'EUR' } shows the
+      // code ("EUR 75.00"). A missing or unreadable amount returns '' so the
+      // caller can say why it is unknown instead of showing $0.00.
+      window.mvMoney = function (value, options) {
+        if (value === null || value === undefined || value === '' || typeof value === 'boolean') return '';
+        var amount = Number(value);
+        if (!isFinite(amount)) return '';
+        var decimals = options && typeof options.decimals === 'number' ? options.decimals : 2;
+        var currency = String((options && options.currency) || 'USD').toUpperCase();
+        var i18n = window.LightworkI18n;
+        var locale = i18n && i18n.language && i18n.language !== 'en' ? (i18n.locale || i18n.language) : 'en-US';
+        function format(n) {
+          try {
+            return new Intl.NumberFormat(locale, { style: 'currency', currency: currency,
+              currencyDisplay: currency === 'USD' ? 'symbol' : 'code',
+              minimumFractionDigits: decimals, maximumFractionDigits: decimals }).format(n);
+          } catch (e) { return (n < 0 ? '-' : '') + (currency === 'USD' ? '$' : currency + ' ') + Math.abs(n).toFixed(decimals); }
+        }
+        var smallest = Math.pow(10, -decimals);
+        if (amount !== 0 && Math.abs(amount) < smallest / 2) return 'under ' + format(smallest);
+        return format(amount || 0);
+      };
       window.mvTimeRelative = function (raw) {
         var d = mvParseTime(raw);
         if (!d) return '';

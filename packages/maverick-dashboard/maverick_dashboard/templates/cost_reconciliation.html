@@ -9,7 +9,7 @@
   <p><a href="/spend">Spend</a> · <a href="/budget">Your budget</a></p>
   {% for ledger in report.ledgers %}
   <section class="panel"><h2>{{ ledger.name }}</h2><p>{{ ledger.state }}{% if ledger.period %} · {{ ledger.period }}{% endif %}</p>
-    <p>{% if ledger.amount is not none %}{{ ledger.currency }} {{ '%.6f'|format(ledger.amount) }}{% else %}Amount unavailable or separately accounted{% endif %}</p>
+    <p>{% if ledger.amount is not none %}<span title="{{ '%.6f'|format(ledger.amount) }} {{ ledger.currency }} exactly">{{ ledger.amount | money(currency=ledger.currency) }}</span>{% else %}Amount unavailable or separately accounted{% endif %}</p>
     <p>{{ ledger.scope }}</p><p>{{ ledger.basis or '' }}</p>
     {% if ledger.unknown_count %}<p>{{ ledger.unknown_count }} attempts have unknown costs; the subtotal is incomplete.</p>{% endif %}
     {% if ledger.href %}<a href="{{ ledger.href }}">Open source record</a>{% endif %}
@@ -18,14 +18,14 @@
   <p>{{ report.tasks_without_complete_receipt_evidence }} selected tasks lack a complete available linked receipt catalogue. Missing receipts are not free work.</p>
   {% for group in report.provider_groups %}
   <section class="panel"><h3>{{ group.provider }} · {{ group.period }} · {{ group.currency }}</h3>
-    <p>Recorded at verified rates: {{ group.recorded }}; estimated: {{ group.estimated }}; reconciled in the local ledger: {{ group.reconciled }}.</p>
-    <p>Pending reservation ceilings: {{ group.ceiling }}; unknown-outcome amounts still held: {{ group.unknown }}; reservations with unknown amount: {{ group.unknown_amounts }}.</p>
+    <p>Recorded at verified rates: {{ group.recorded | money(currency=group.currency) }}; estimated: {{ group.estimated | money(currency=group.currency) }}; reconciled in the local ledger: {{ group.reconciled | money(currency=group.currency) }}.</p>
+    <p>Pending reservation ceilings: {{ group.ceiling | money(currency=group.currency) }}; unknown-outcome amounts still held: {{ group.unknown | money(currency=group.currency) }}; reservations with unknown amount: {{ group.unknown_amounts }}.</p>
     <p>Do not add held ceilings to charges. Reconciled means a governed local accounting review changed the ledger; it does not certify a provider invoice or refund.</p>
   </section>{% endfor %}
   {% for row in report.receipts %}
   <details><summary>{{ row.reference }} — {{ row.basis }} · {{ row.state }}</summary>
     <p><a href="/chat/goal/{{ row.goal_id }}">Task {{ row.goal_id }}</a> · {{ row.provider }} · {{ row.period }} · {{ row.currency }}</p>
-    <p>Projected ceiling: {{ row.projected if row.projected is not none else 'unknown' }}; recorded settlement: {{ row.actual if row.actual is not none else 'unknown' }}.</p>
+    <p>Projected ceiling: {{ row.projected | money(currency=row.currency) if row.projected is not none else 'unknown' }}; recorded settlement: {{ row.actual | money(currency=row.currency) if row.actual is not none else 'unknown' }}.</p>
     <p>Rate-card version: {{ row.rate_card_version or 'not recorded' }}; evidence: {{ row.pricing_evidence_id or 'not recorded' }}; reconciliation review: {{ row.reconciliation_review or 'none' }}.</p>
     <p>{{ row.pricing_basis or 'Historical pricing evidence is unavailable; current configuration does not retroactively verify it.' }}</p>
   </details>{% endfor %}

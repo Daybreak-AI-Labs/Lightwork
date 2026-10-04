@@ -277,15 +277,33 @@ def unique_slug(name: object, taken, *, fallback: str = "item", max_len: int = 4
     return f"{base}-{n}"
 
 
-def money(value: object) -> str:
-    """Dollars to two places; tiny non-zero amounts read as "under $0.01"."""
+def money(value: object, decimals: int = 2, currency: str = "USD") -> str:
+    """Money the way every page shows it (``mvMoney`` in lightwork-ui.js too):
+    "$1,234.56" or "-$5.00", tiny non-zero amounts as "under $0.01".
+
+    ``decimals=4`` is only for a labelled per-unit price ("$0.0030 per 1K
+    tokens"). Another currency shows its code ("EUR 75.00").
+    """
     try:
         amount = float(value or 0)
     except (TypeError, ValueError):
-        return "$0.00"
-    if 0 < abs(amount) < 0.005:
-        return "under $0.01"
-    return f"${amount:,.2f}"
+        amount = 0.0
+    smallest = 10.0 ** -decimals
+    if 0 < abs(amount) < smallest / 2:
+        return "under " + money(smallest, decimals, currency)
+    number = f"{abs(amount):,.{decimals}f}"
+    sign = "-" if amount < 0 else ""
+    code = str(currency or "USD").upper()
+    return f"{sign}${number}" if code == "USD" else f"{sign}{code} {number}"
+
+
+def percent(value: object) -> str:
+    """A percentage with at most one decimal: 0 -> "0%", 37.46 -> "37.5%"."""
+    try:
+        amount = float(value or 0)
+    except (TypeError, ValueError):
+        amount = 0.0
+    return f"{amount:,.1f}".removesuffix(".0") + "%"
 
 
 def size(num_bytes: object) -> str:
@@ -326,6 +344,7 @@ def register(env) -> None:
     env.filters.setdefault("capability_label", capability_label)
     env.filters.setdefault("feature_label", feature_label)
     env.filters.setdefault("money", money)
+    env.filters.setdefault("percent", percent)
     env.filters.setdefault("agent_role", agent_role_title)
     env.filters.setdefault("agent_role_help", agent_role_help)
     env.filters.setdefault("effort_label", lambda v: EFFORT_LABELS.get(str(v or ""), str(v or "").capitalize()))

@@ -109,6 +109,19 @@ def test_datetime_filter_reads_one_format_from_epochs_iso_text_and_calendar_days
     assert _format_datetime("not a time") == "not a time"
 
 
+def test_money_and_percent_filters_use_one_format():
+    from maverick_dashboard.app import templates
+    money, percent = templates.env.filters["money"], templates.env.filters["percent"]
+    assert money(1234.5) == "$1,234.50"
+    assert money(0) == money(None) == money("n/a") == "$0.00"
+    assert money(-5) == "-$5.00"
+    assert money(0.0004) == "under $0.01"
+    assert money(0.003, decimals=4) == "$0.0030"  # labelled per-unit prices only
+    assert money(75, currency="eur") == "EUR 75.00"
+    assert percent(0) == "0%" and percent(37.46) == "37.5%" and percent(100.0) == "100%"
+    assert percent(12.04) == "12%" and percent(None) == "0%"
+
+
 # ---- activity log ----------------------------------------------------------
 
 def test_activity_log_records_invites_channels_and_workspace_pauses(monkeypatch, tmp_path):
