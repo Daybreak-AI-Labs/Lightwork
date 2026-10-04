@@ -111,7 +111,9 @@ def test_settings_page_no_longer_says_nothing_is_connected(monkeypatch):
     )
     # The address in use is named, and the credential is described without
     # naming a variable or revealing it.
-    row = page.split('id="provider-openai_compatible"', 1)[1].split('id="provider-', 1)[0]
+    # The row ends where the next provider row starts (rows carry their own
+    # id="provider-name-…" label inside).
+    row = page.split('id="provider-openai_compatible"', 1)[1].split('<div class="provider-row"', 1)[0]
     assert _ENV_URL in row
     assert _ENV_KEY not in page
     assert "OPENAI_COMPATIBLE" not in row

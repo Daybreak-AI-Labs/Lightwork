@@ -161,7 +161,9 @@ def test_nav_groups_per_role(monkeypatch, tmp_path):
     # viewer: read-only pages only -- no run/build/admin surfaces, and the
     # groups left empty (Extend, Admin) are dropped whole.
     v = hrefs("viewer")
-    assert {"/goals", "/overview", "/spend", "/safety"} <= v
+    assert {"/goals", "/overview", "/spend"} <= v
+    # Safety's route requires audit permission, so viewers are not offered it.
+    assert "/safety" not in v
     assert "/cortex" not in v and "/knowledge-access" not in v
     assert v.isdisjoint({"/chat", "/ekko", "/automations", "/settings", "/users", "/mcp", "/audit", "/learning", "/benchmarks"})
     # The governance surfaces are split into focused sections (the flat

@@ -75,7 +75,8 @@ def test_companion_navigation_has_separate_employee_and_workspace_admin_floors()
     employee = ui_visibility.page_for("/companion")
     admin = ui_visibility.page_for("/companion/admin")
     assert employee["label"] == "My companion"
-    assert employee["group"] == "Work"
+    # One "Work" group: the raw group is Operate, shown as "Work".
+    assert ui_visibility.group_title(employee["group"]) == "Work"
     assert employee["floor"] == "view"
     assert admin["label"] == "Employee companions"
     assert admin["floor"] == "admin"
