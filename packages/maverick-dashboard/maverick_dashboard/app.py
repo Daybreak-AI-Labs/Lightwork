@@ -257,6 +257,10 @@ templates.env.filters["identity"] = _idfmt.humanize_principal
 templates.env.filters["role_label"] = _idfmt.role_label
 templates.env.filters["permission_label"] = _idfmt.permission_label
 templates.env.filters["humanize"] = _idfmt.humanize
+# One run-status vocabulary for the chat badge, composer and recents.
+from .run_status import status_label as _run_status_label  # noqa: E402
+
+templates.env.globals["run_status_label"] = _run_status_label
 # Plain labels for model ids, setting sources and sizes (administration pages).
 from . import plain_labels as _plain_labels  # noqa: E402
 
@@ -9667,6 +9671,10 @@ def _chat_threads(request: Request, w, *, active_root: int | None = None) -> lis
         goals.extend(goal for goal in pinned_roots(request, w) if goal.id not in known)
     except Exception:
         pass  # Current authorized tasks remain readable if organization storage is unavailable.
+    from maverick.stop_reasons import stop_payload
+
+    from .run_status import status_label
+
     threads: list[dict] = []
     for g in goals:
         target_id = ChatThreads(w).latest(g.id)
@@ -9674,6 +9682,13 @@ def _chat_threads(request: Request, w, *, active_root: int | None = None) -> lis
         if target is None:
             continue
         assert_goal_access(request, target)
+        stop_kind = None
+        if target.status == "blocked":
+            # The same word the open chat shows: a run that stopped on a broken
+            # AI connection reads "Stopped", any other pause reads "Paused".
+            stopped = w.goal_stream_state(target_id, include_result=True)
+            stop = stop_payload(stopped.status, stopped.result) if stopped is not None else None
+            stop_kind = stop["kind"] if stop else None
         try:
             metadata = organization(request, w, g.id)
         except Exception:
@@ -9682,6 +9697,7 @@ def _chat_threads(request: Request, w, *, active_root: int | None = None) -> lis
             continue
         threads.append({
             "id": g.id, "target_id": target_id, "title": metadata["title"] or g.title, "status": target.status,
+            "state_label": status_label(target.status, stop_kind),
             "pinned": metadata["pinned"], "archived": metadata["archived"],
             "active": g.id == active_root, "updated_at": g.updated_at,
         })
