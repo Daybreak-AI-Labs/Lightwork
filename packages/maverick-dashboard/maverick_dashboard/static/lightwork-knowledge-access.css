@@ -27,7 +27,7 @@
   gap: var(--space-1);
   padding: var(--space-3);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-md);
   background: var(--surface-2);
 }
 
@@ -47,7 +47,7 @@
   gap: var(--space-2);
   padding: var(--space-3);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-md);
   background: var(--surface-2);
 }
 
@@ -138,7 +138,7 @@
   min-width: 0;
   padding: var(--space-3);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-md);
   background: var(--surface-2);
 }
 
@@ -191,7 +191,7 @@
   min-width: 0;
   padding: var(--space-3);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-md);
 }
 
 .ka-detail-grid h3 {
@@ -214,7 +214,7 @@
   margin-block: var(--space-3) 0;
   padding: var(--space-3);
   border: 1px solid var(--warn, #b7791f);
-  border-radius: var(--radius);
+  border-radius: var(--radius-md);
   background: var(--warn-subtle, rgba(183, 121, 31, .12));
 }
 

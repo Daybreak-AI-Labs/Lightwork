@@ -299,7 +299,7 @@
     </div>
 
     <div class="pw-tab" id="pw-tab-lineage" hidden>
-      <p class="muted" style="font-size:var(--text-sm);margin-bottom:var(--sp-3);">
+      <p class="muted" style="font-size:var(--text-sm);margin-bottom:var(--space-3);">
         Answer the questions a regulator asks about a vendor: its full history,
         why it was approved, and what else depends on a clause or document
         that turned out to be a problem. Every answer links to the record it
@@ -318,7 +318,7 @@
           <button class="btn" id="pw-lin-why" type="button">Why was it approved?</button>
           <span class="pw-form-err" id="pw-lin-err" role="alert"></span>
         </div>
-        <div class="pw-form-row" style="margin-top:var(--sp-2);">
+        <div class="pw-form-row" style="margin-top:var(--space-2);">
           <label><span>What depends on this? Name a clause, document or person that turned out to be a problem</span>
             <input class="input" id="pw-lin-blast-name" maxlength="200" list="pw-lineage-names"
                    placeholder="For example: the vendor's data agreement file name"></label>
@@ -354,7 +354,7 @@
     </div>
 
     <div class="pw-tab" id="pw-tab-paper" hidden>
-      <p class="muted" style="font-size:var(--text-sm);margin-bottom:var(--sp-3);">
+      <p class="muted" style="font-size:var(--text-sm);margin-bottom:var(--space-3);">
         When the vendor insists on <strong>their</strong> paper. Upload it and
         Lightwork works out whether it is a DPA or a privacy addendum, compares
         every clause against your playbook, and returns their document marked up
@@ -385,7 +385,7 @@
       <div id="pw-paper-result"></div>
 
       <div class="pw-form">
-        <p class="muted" style="font-size:var(--text-sm);margin-bottom:var(--sp-2);">
+        <p class="muted" style="font-size:var(--text-sm);margin-bottom:var(--space-2);">
           Vendor signing <strong>your</strong> paper instead? Download your
           template instrument as a Word document with the vendor-specific
           values filled <span style="color:#d33;">in red</span> for counsel to
@@ -397,7 +397,7 @@
 
       <details class="pw-form" id="pw-playbook">
         <summary style="cursor:pointer;">Your standard clauses: the wording Lightwork asks vendors to accept</summary>
-        <p class="muted" style="font-size:var(--text-sm);margin:var(--sp-2) 0;">
+        <p class="muted" style="font-size:var(--text-sm);margin:var(--space-2) 0;">
           When a vendor's contract falls short, Lightwork suggests changes towards <em>these</em> clauses. The
           shipped text is our standard language; edit any clause to your own and
           every future review asks for yours instead. Clauses you leave alone
@@ -827,7 +827,7 @@
 
     <div class="pe-tab" id="pe-tab-vendors">
       {% if estate.vendors_enabled %}
-      <p class="muted" style="font-size:var(--text-sm);margin-bottom:var(--sp-3);">
+      <p class="muted" style="font-size:var(--text-sm);margin-bottom:var(--space-3);">
         One governed row per vendor: criticality, lifecycle, questionnaires the
         vendor answers by link (no account needed), and monitoring notes.
         Import your OneTrust vendor export below; vendors already here are left unchanged.
@@ -921,7 +921,7 @@
       </div>
       {% if estate.vendors %}
       <div class="pw-form">
-        <p class="muted" style="font-size:var(--text-sm);margin-bottom:var(--sp-2);">
+        <p class="muted" style="font-size:var(--text-sm);margin-bottom:var(--space-2);">
           <strong>Contracts &amp; renewals.</strong> Record each vendor's
           current paper with its renewal date — the needs-attention digest
           then warns before anything lapses.
@@ -929,7 +929,7 @@
           {% if estate.renewals.due_soon %}<span class="badge warn">{{ estate.renewals.due_soon | length }} renewing within 30 days</span>{% endif %}
         </p>
         {% if estate.renewals.overdue or estate.renewals.due_soon %}
-        <ul class="muted" style="font-size:var(--text-sm);margin:0 0 var(--sp-2) 1.2em;">
+        <ul class="muted" style="font-size:var(--text-sm);margin:0 0 var(--space-2) 1.2em;">
           {% for entry in estate.renewals.overdue %}
           <li>Overdue: {{ entry.vendor }} ({{ entry.kind | upper }})</li>
           {% endfor %}
@@ -973,7 +973,7 @@
 
     <div class="pe-tab" id="pe-tab-consent" hidden>
       {% if estate.consent_enabled %}
-      <p class="muted" style="font-size:var(--text-sm);margin-bottom:var(--sp-3);">
+      <p class="muted" style="font-size:var(--text-sm);margin-bottom:var(--space-3);">
         A lasting record of what each person agreed to, kept behind your consent
         forms. Look a person up, record a choice, or import your OneTrust consent export.
       </p>
@@ -1051,7 +1051,7 @@
         </div>
       </div>
       <div class="pw-form">
-        <p class="muted" style="font-size:var(--text-sm);margin-bottom:var(--sp-2);">
+        <p class="muted" style="font-size:var(--text-sm);margin-bottom:var(--space-2);">
           <strong>Privacy notices.</strong> Publish each version of your privacy notice.
           Published versions cannot be changed, so every recorded choice points to the exact wording the person saw.
           {% if estate.notice_coverage and not estate.notice_coverage.covered %}
@@ -1061,7 +1061,7 @@
           {% endif %}
         </p>
         {% if estate.notices %}
-        <ul class="muted" style="font-size:var(--text-sm);margin:0 0 var(--sp-2) 1.2em;">
+        <ul class="muted" style="font-size:var(--text-sm);margin:0 0 var(--space-2) 1.2em;">
           {% for notice in estate.notices %}
           <li>{{ notice.version }}{% if notice.published_date and notice.published_date != '—' %} · published {{ notice.published_date }}{% endif %}</li>
           {% endfor %}
@@ -1081,7 +1081,7 @@
         </div>
       </div>
       <div class="pw-form">
-        <p class="muted" style="font-size:var(--text-sm);margin-bottom:var(--sp-2);">
+        <p class="muted" style="font-size:var(--text-sm);margin-bottom:var(--space-2);">
           <strong>Check a web page.</strong> Lightwork loads one page of your own site once and lists
           the cookies it sets, the other companies' sites it loads, and known trackers. It does not follow links.
         </p>
@@ -1103,7 +1103,7 @@
 
     <div class="pe-tab" id="pe-tab-datamap" hidden>
       {% if estate.data_map_enabled %}
-      <p class="muted" style="font-size:var(--text-sm);margin-bottom:var(--sp-3);">
+      <p class="muted" style="font-size:var(--text-sm);margin-bottom:var(--space-3);">
         Where personal data actually lives. Import your database&rsquo;s column list or list your
         SharePoint sites, and Lightwork flags columns and sites that probably hold personal data
         by their names. This is a starting point for your team, not a scan of the data itself.
@@ -1706,7 +1706,7 @@
             });
           };
           out.innerHTML =
-            '<div class="panel" style="margin-top:var(--sp-3);">' +
+            '<div class="panel" style="margin-top:var(--space-3);">' +
             '<p>That is a <strong>' + esc(rec.instrument_label) + '</strong> (' +
             esc((rec.classification || {}).confidence) + ' confidence), filed as ' +
             '<strong>version ' + rec.version + '</strong>.<br>' +
@@ -1785,12 +1785,12 @@
     }
     function render(data) {
       if (data.found === false) {
-        out.innerHTML = '<div class="panel" style="margin-top:var(--sp-3);">' +
+        out.innerHTML = '<div class="panel" style="margin-top:var(--space-3);">' +
           '<p class="muted">Nothing on record has that name. Check the spelling, ' +
           'or pick a name from the list as you type.</p></div>';
         return;
       }
-      var html = '<div class="panel" style="margin-top:var(--sp-3);">';
+      var html = '<div class="panel" style="margin-top:var(--space-3);">';
       if (data.chain) {                       // why()
         if (!data.decision) {
           html += '<p>' + esc(data.note) + '</p>';
@@ -1896,7 +1896,7 @@
             var custom = pb.customised.indexOf(key) !== -1;
             var wrap = document.createElement('label');
             wrap.style.display = 'block';
-            wrap.style.marginBottom = 'var(--sp-2)';
+            wrap.style.marginBottom = 'var(--space-2)';
             var span = document.createElement('span');
             span.textContent = pbHuman(key) + (custom ? ' (your wording)' : '');
             var ta = document.createElement('textarea');
