@@ -11,7 +11,7 @@ from maverick.paths import current_tenant_id_strict
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.concurrency import run_in_threadpool
 
-from .auth import _authorization_principal, require_permission
+from .auth import _authorization_principal, has_permission, require_permission
 from .draft_store import DraftConflict, DraftStore
 
 router = APIRouter(prefix="/api/v1/drafts", tags=["draft-recovery"])
@@ -42,6 +42,10 @@ def context_for(request: Request) -> str:
 
 def page_context(request: Request) -> dict:
     try:
+        # The drafts API needs the operate permission (see _store). Without it a
+        # page must not try to save a recovery copy only to be refused.
+        if not has_permission(request, "operate"):
+            return {"draft_recovery_context": ""}
         if config.config_source_errors(include_tenant=True) or config.get_features().get("draft_recovery") is not True:
             return {"draft_recovery_context": ""}
         return {"draft_recovery_context": context_for(request)}

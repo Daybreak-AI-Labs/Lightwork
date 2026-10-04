@@ -37,6 +37,8 @@
   </section>
   {% endif %}
   <p id="template-draft-notice" class="muted" role="status" hidden></p>
+  {% if can_create_goal %}
+  {# Both helpers come before starting work, so only people who can start it see them. #}
   <details class="panel" data-budget-launch>
     <summary>{{ ui('Check budget before starting') }}</summary>
     <p role="status" aria-live="polite"></p><div data-budget-summary></div>
@@ -69,6 +71,7 @@
     <p id="vp-status" role="status" aria-live="polite" tabindex="-1"></p>
     <div id="vp-result" hidden></div>
   </details>
+  {% endif %}
   {% endif %}
 </div>
 {% endblock %}
@@ -144,6 +147,8 @@
   {% else %}{{ ui('Ask the person who manages this installation to turn them on.') }}{% endif %}
 </p>
 {% endif %}
+{# Readiness and task limits only matter to someone who can start a task. #}
+{% if can_create_goal %}
 {% if not model_route_ready %}
 <p class="cs-dock__note" id="composer-readiness" role="status">{{ ui(workspace.reason) }}</p>
 {% elif workspace.verdict == 'needs_test' %}
@@ -161,11 +166,12 @@
   {% endif %}
   {% if show_settings_link %}<a href="/settings">{{ ui('Review task limits') }}</a>{% endif %}
 </p>
+{% endif %}
 {% endblock %}
 
 {% block scripts_extra %}
 <script src="/static/lightwork-file-selection.js" defer></script>
-{% if model_route_ready %}<script src="/static/lightwork-viewpoints.js" defer></script>{% endif %}
+{% if model_route_ready and can_create_goal %}<script src="/static/lightwork-viewpoints.js" defer></script>{% endif %}
 <script>
   function chatCopy(node, source, values) { if (window.LightworkI18n) window.LightworkI18n.set(node, source, values); else node.textContent = source.replace(/\{(\w+)\}/g, function (_, key) { return (values || {})[key] === undefined ? '{' + key + '}' : values[key]; }); }
   function chatText(source) { return window.LightworkI18n ? window.LightworkI18n.text(source) : source; }

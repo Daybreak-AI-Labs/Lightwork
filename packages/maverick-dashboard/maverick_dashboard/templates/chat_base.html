@@ -452,9 +452,11 @@
     })();
   </script>
   {% include "_journey_i18n_scripts.html" %}
+  {% if can_create_goal %}{# Someone who cannot write a message has no draft to keep. #}
   <link rel="stylesheet" href="{{ asset('lightwork-draft-recovery.css') }}">
   <script src="{{ asset('lightwork-draft-recovery.js') }}" defer></script>
   <script src="{{ asset('lightwork-chat-drafts.js') }}" defer></script>
+  {% endif %}
   <script src="{{ asset('lightwork-product-operations.js') }}"></script>
   <script src="{{ asset('lightwork-copilot.js') }}"></script>
   {% if show_personal_notifications %}<script src="{{ asset('lightwork-notification-badge.js') }}" defer></script>{% endif %}
