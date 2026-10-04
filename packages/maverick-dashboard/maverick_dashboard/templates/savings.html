@@ -27,11 +27,17 @@
                      Lightwork\'s costs are its own records, not verified provider invoices.' | safe) %}
     {{ state('Current state',
              amount(saved) ~ ' estimated difference',
-             badge='Unavailable' if not report.available else ('Saving money' if saved >= 0 else 'Costing more'),
-             badge_class='warn' if not report.available else ('ok' if saved >= 0 else 'warn'),
-             copy='This estimate changes with your numbers below. For measured
+             badge='Unavailable' if not report.available
+                   else ('Saving money' if saved >= 0 else 'Costing more') if assumptions_confirmed
+                   else 'Starting numbers',
+             badge_class='ok' if report.available and assumptions_confirmed and saved >= 0 else 'warn',
+             copy='A directional estimate: it changes with the numbers below. For measured
                    results, run a workflow pilot.') }}
   {% endcall %}
+  {# Whose tasks these numbers count, and on what assumptions (value_views). #}
+  <p class="muted" id="sv-scope">{% if value_view.scope == 'workspace' %}These numbers cover the whole
+    workspace, totals only. Task details stay with the people who ran them.{% else %}These numbers
+    cover the tasks you ran.{% endif %}</p>
   {% if not report.available %}<p role="alert">{{ report.unavailable_reason }}</p>{% endif %}
   {% if report.incomplete %}<p role="status">History coverage is incomplete. Do not treat these figures as a complete period total.</p>{% endif %}
   <p class="muted">Comparison basis: USD only, finished episode attempts in the selected period. Provider invoices, subscriptions, taxes and human rework are not included. Existing non-USD assumptions require your review; Lightwork does not relabel or convert them.</p>
@@ -50,6 +56,12 @@
   </div>
 
   <div class="bd-kpis" id="bd-kpis"></div>
+  <p class="sv-note" id="sv-basis">Estimated savings are directional, not measured: finished tasks ×
+    {{ cfg.hours_per_task }} hours per task × {{ cfg.currency }} {{ cfg.hourly_rate }} an hour, minus what
+    Lightwork spent.
+    {% if not assumptions_confirmed %}These are Lightwork&rsquo;s starting numbers, not yours yet.{% endif %}
+    <a href="#sv-assumptions">{{ 'Change these numbers' if can_manage_assumptions else 'See these numbers' }}</a>{% if not can_manage_assumptions %}
+    (only an administrator can change them){% endif %}.</p>
 
   <div class="viz-grid">
     <div class="panel viz-card viz-card--wide">
@@ -170,7 +182,7 @@
     {% else %}
       <p class="muted">No finished work in this period yet. Savings appear as soon as tasks
         finish; Lightwork never invents a number.</p>
-      <p><a class="btn btn--primary" href="/chat">Start a task</a></p>
+      {% if value_view.can_operate %}<p><a class="btn btn--primary" href="/chat">Start a task</a></p>{% endif %}
     {% endif %}
   </div>
 
@@ -255,16 +267,26 @@
     if (!rep.available) throw new Error(rep.unavailable_reason || 'Savings history is unavailable.');
     var k = document.getElementById('bd-kpis');
     k.textContent = '';
-    k.appendChild(B.kpi({ label: 'Estimated savings', value: rep.saved,
+    // Show the assumptions next to the estimate; never a bare cost multiple.
+    var A = rep.assumptions || {};
+    var uniform = (rep.by_department || []).every(function (d) {
+      return d.hourly_rate === A.hourly_rate && d.hours_per_task === A.hours_per_task;
+    });
+    var tasks = rep.deliverables + ' finished task' + (rep.deliverables === 1 ? '' : 's');
+    k.appendChild(B.kpi({ label: 'Estimated savings (directional)', value: rep.saved,
       format: B.money, sparkCls: 'ok',
       spark: D.daily_done.map(function (r) { return r.n; }),
-      sub: 'last ' + D.days + ' days, using your numbers' }));
+      sub: uniform
+        ? tasks + ' × ' + A.hours_per_task + ' h × ' + B.money(A.hourly_rate) + ' an hour, minus ' +
+          B.money(rep.agent_cost) + ' Lightwork cost, last ' + D.days + ' days'
+        : tasks + ' at each department\'s numbers (see By department), last ' + D.days + ' days' }));
     k.appendChild(B.kpi({ label: 'Cost for people (estimate)', value: rep.human_cost,
       format: B.money }));
     k.appendChild(B.kpi({ label: 'Lightwork cost', value: rep.agent_cost,
       format: B.money }));
     k.appendChild(B.kpi({ label: 'Hours of people\'s time (estimate)', value: rep.human_hours,
-      sub: rep.roi_multiple ? rep.roi_multiple.toFixed(1) + ' times what Lightwork cost' : 'no tasks yet' }));
+      sub: !rep.deliverables ? 'no tasks yet'
+        : uniform ? 'at ' + A.hours_per_task + ' hours per task' : 'at each department\'s hours per task' }));
 
     var doneTotal = 0;
     D.daily_done.forEach(function (r) { doneTotal += r.n; });

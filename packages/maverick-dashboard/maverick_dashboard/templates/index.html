@@ -2,6 +2,8 @@
 {% block title %}Overview · Lightwork{% endblock %}
 {% block content %}
   {% from "_hero.html" import hero, state %}
+  {# A read-only role counts the whole workspace, totals only (value_views). #}
+  {% set workspace_view = value_view is defined and value_view.scope == 'workspace' %}
   {% call hero('Your AI workforce', 'Overview',
                subtitle='The operating picture',
                lede='Everything your workforce is doing right now — goals in
@@ -9,14 +11,26 @@
                      Start new work from <a href="/chat">chat</a>, or manage
                      the teams on <a href="/workforce">Workforce</a>.' | safe) %}
     {{ state('Current state',
-             counts.total ~ ' goal' ~ ('' if counts.total == 1 else 's') ~ ' on record',
+             counts.total ~ ' goal' ~ ('' if counts.total == 1 else 's') ~ ' on record'
+               ~ (' in this workspace' if workspace_view else ''),
              badge=(counts.active ~ ' active') if counts.active else 'idle',
              badge_class='ok' if counts.active else 'idle',
-             copy=counts.done ~ ' delivered · ' ~ counts.blocked ~ ' blocked.
-                   Spending and time limits apply when an administrator sets them.') }}
+             copy=counts.done ~ ' delivered · ' ~ counts.blocked ~ ' blocked. '
+               ~ ('Totals for the whole workspace; goal details stay with the people who ran them.'
+                  if workspace_view else
+                  'Spending and time limits apply when an administrator sets them.')) }}
   {% endcall %}
 
-  {% if counts.total == 0 %}
+  {% if counts.total == 0 and value_view is defined and not value_view.can_operate %}
+    {# Never tell a role that cannot start goals to start one. #}
+    <div class="panel empty">
+      <h2 class="empty__title">No goals have run in this workspace yet</h2>
+      <p class="muted" style="max-width: 540px; margin: 0 auto;">
+        The totals appear here as soon as people start work. Your role can follow
+        the results but not start goals; ask an administrator if you need to.
+      </p>
+    </div>
+  {% elif counts.total == 0 %}
     <div class="panel empty">
       <h2 class="empty__title">Start your first goal</h2>
       <p class="muted" style="max-width: 540px; margin: 0 auto 1.75rem;">
@@ -126,9 +140,11 @@
           return !statusFilter || g.status === statusFilter;
         });
         if (!rows.length) {
-          B.empty(box, statusFilter
-            ? 'No recent goals with status "' + statusFilter + '".'
-            : 'No goals yet.');
+          B.empty(box, DATA.scope === 'workspace'
+            ? 'Goal titles stay with the people who ran them. The counts above cover the whole workspace.'
+            : statusFilter
+              ? 'No recent goals with status "' + statusFilter + '".'
+              : 'No goals yet.');
           return;
         }
         box.textContent = '';

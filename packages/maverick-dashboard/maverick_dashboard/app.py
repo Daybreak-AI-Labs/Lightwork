@@ -3526,10 +3526,14 @@ def public_demo(request: Request) -> HTMLResponse:
 @app.get("/overview", response_class=HTMLResponse)
 def overview(request: Request) -> HTMLResponse:
     require_unscoped_board(request)
+    from .value_views import value_scope
+
     w = _world()
-    # Use SQL aggregation instead of pulling every goal into Python. Owner-scope
-    # the rollup to the caller (auth-off/admin -> all; see goal_owner_filter).
-    owner = goal_owner_filter(request)
+    # Use SQL aggregation instead of pulling every goal into Python. Count the
+    # caller's own goals; a read-only role counts the whole workspace (totals
+    # only -- see value_views).
+    value_view = value_scope(request)
+    owner = value_view["owner"]
     if owner is None:
         rows = w.query("SELECT status, COUNT(*) FROM goals GROUP BY status")
     else:
@@ -3553,7 +3557,7 @@ def overview(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(
         request,
         "index.html",
-        {"counts": counts, "facts": facts, "skills": skills[:10]},
+        {"counts": counts, "facts": facts, "skills": skills[:10], "value_view": value_view},
     )
 
 
@@ -4187,7 +4191,12 @@ def spend_page(request: Request) -> HTMLResponse:
     # Scope both reads to the caller (matches /api/v1/spend and the on-page
     # charts) so a non-admin never sees the whole tenant's spend/episodes.
     # goal_owner_filter returns None for admins / auth-off, preserving that view.
+    from .value_views import value_scope
+
     owner = goal_owner_filter(request)
+    # The heading total follows the value view (a read-only role sees the
+    # workspace total); the task table always stays the caller's own rows.
+    value_view = value_scope(request)
     w = _world()
     episodes = w.list_episodes(limit=50, owner=owner)
     from maverick.cost_provenance import for_goal, runtime_basis
@@ -4211,8 +4220,9 @@ def spend_page(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(
         request,
         "spend.html",
-        {"episodes": episodes, "total": w.total_spend(owner=owner),
-         "goal_titles": goal_titles, "csv_months": months, "episode_provenance": episode_provenance},
+        {"episodes": episodes, "total": w.total_spend(owner=value_view["owner"]),
+         "goal_titles": goal_titles, "csv_months": months, "episode_provenance": episode_provenance,
+         "value_view": value_view},
     )
 
 
@@ -6201,11 +6211,13 @@ def savings_page(request: Request, days: int = 90) -> HTMLResponse:
     from maverick import savings as savings_mod
 
     from .api import _value_assumptions_resolution
+    from .value_views import assumptions_confirmed, value_scope
 
     days = max(1, min(days, 730))
     resolution = _value_assumptions_resolution()
     cfg = resolution["effective_assumptions"]
-    report = savings_mod.compute(_world(), window_days=days, cfg=cfg, owner=goal_owner_filter(request))
+    value_view = value_scope(request)
+    report = savings_mod.compute(_world(), window_days=days, cfg=cfg, owner=value_view["owner"])
     return templates.TemplateResponse(
         request,
         "savings.html",
@@ -6215,6 +6227,8 @@ def savings_page(request: Request, days: int = 90) -> HTMLResponse:
             "report": savings_mod.to_dict(report),
             "value_resolution": resolution,
             "can_manage_assumptions": has_global_permission(request, "operate"),
+            "value_view": value_view,
+            "assumptions_confirmed": assumptions_confirmed(),
         },
     )
 

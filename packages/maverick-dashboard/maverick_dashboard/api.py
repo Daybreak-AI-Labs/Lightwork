@@ -1069,6 +1069,13 @@ def dashboard_board(request: Request, board: str, days: int | None = None) -> di
             require_suite(request, "finance")
     w = _world()
     owner = goal_owner_filter(request)
+    scope = None
+    if board in ("overview", "spend", "savings"):
+        # A read-only role counts the whole workspace, totals only.
+        from .value_views import value_scope
+
+        view = value_scope(request)
+        owner, scope = view["owner"], view["scope"]
     d = _board_days(days)
     if board in ("privacy", "finance", "security"):
         payload = _board_workspace(board)
@@ -1083,6 +1090,12 @@ def dashboard_board(request: Request, board: str, days: int | None = None) -> di
         payload = build(w, owner, d, request=request) if board == "oversight" else build(w, owner, d)
     else:
         raise HTTPException(status_code=404, detail="unknown board")
+    if scope is not None:
+        from .value_views import WORKSPACE, without_task_content
+
+        if scope == WORKSPACE:
+            without_task_content(board, payload)
+        payload["scope"] = scope
     payload.update({"board": board, "days": d, "generated_at": time.time()})
     return payload
 
@@ -9080,12 +9093,16 @@ async def get_savings(request: Request, days: int = 90) -> dict:
     require_permission(request, "view")
     from maverick import savings as savings_mod
 
+    from .value_views import value_scope
+
     days = max(1, min(int(days), 730))
     resolution = _value_assumptions_resolution()
     cfg = resolution["effective_assumptions"]
-    report = await run_in_threadpool(savings_mod.compute, _world(), window_days=days, cfg=cfg, owner=goal_owner_filter(request))
+    view = value_scope(request)
+    report = await run_in_threadpool(savings_mod.compute, _world(), window_days=days, cfg=cfg, owner=view["owner"])
     return {
         "enabled": cfg["enable"],
+        "scope": view["scope"],
         "report": savings_mod.to_dict(report),
         # Keep ``assumptions`` as the backwards-compatible effective value.
         # The additional fields make precedence explicit when a tenant config
