@@ -18,6 +18,7 @@
   {%- else -%}{% for key, value in budget.items() %}{{ key | humanize }}: {{ _plain_value(value) }}{% if not loop.last %} · {% endif %}{% endfor %}
   {%- endif -%}
 {%- endmacro %}
+{% from "_empty_state.html" import empty_state %}
 <div id="approval-queue" class="approval-list" aria-label="Requests waiting for your decision">
 {% if approvals %}
   {% for a in approvals %}
@@ -80,21 +81,20 @@
       </div>
       <p class="approval-item__decided muted" hidden></p>
       <div class="approval-actions">
-        <button type="button" class="btn btn--primary approval-btn" data-id="{{ a.id }}" data-action="approve"{% if card %} data-binding="{{ card.binding_sha256 }}"{% endif %}{% if card_status in ('expired', 'invalid', 'legacy') %} disabled title="A new request is needed before this can be approved"{% endif %}>Approve</button>
+        <button type="button" class="btn approval-btn" data-id="{{ a.id }}" data-action="approve"{% if card %} data-binding="{{ card.binding_sha256 }}"{% endif %}{% if card_status in ('expired', 'invalid', 'legacy') %} disabled title="A new request is needed before this can be approved"{% endif %}>Approve</button>
         <button type="button" class="btn btn--ghost approval-btn" data-id="{{ a.id }}" data-action="deny">Reject</button>
         <button type="button" class="btn btn--ghost approval-btn" data-id="{{ a.id }}" data-action="revise">Send back for changes</button>
       </div>
       <div class="approval-actions approval-actions--decided" hidden>
-        <button type="button" class="btn btn--primary approval-undo" data-id="{{ a.id }}">Undo</button>
+        <button type="button" class="btn approval-undo" data-id="{{ a.id }}">Undo</button>
         <button type="button" class="btn btn--ghost approval-dismiss" data-id="{{ a.id }}">Dismiss</button>
       </div>
     </article>
   {% endfor %}
 {% else %}
-  <div class="approval-empty">
-    <p class="muted">Nothing needs your decision right now.</p>
-    <p><a class="btn btn--ghost" href="#request-decision-history">See decisions on your requests</a></p>
-  </div>
+  {{ empty_state('Nothing needs your decision right now',
+                 'Requests from agents that need a person to approve them appear here. Decisions on requests you made are listed further down.',
+                 action_label='See decisions on your requests', action_href='#request-decision-history') }}
 {% endif %}
 </div>
 
@@ -212,7 +212,7 @@
         summary.insertAdjacentElement('afterend', dts);
       }
       const cell = item.querySelector('.approval-actions');
-      const btn = el('button', 'btn btn--primary approval-review', 'Review assessment');
+      const btn = el('button', 'btn approval-review', 'Review assessment');
       btn.type = 'button';
       btn.addEventListener('click', function () { window.mvAssessmentReview.open(assessmentId); });
       cell.insertBefore(btn, cell.firstChild);
@@ -254,9 +254,11 @@
     }
     function showEmptyIfNeeded() {
       if (queue.querySelector('article.approval-item')) return;
-      const empty = document.createElement('p');
-      empty.className = 'muted';
-      empty.textContent = 'Nothing needs your decision right now.';
+      const title = 'Nothing needs your decision right now';
+      const body = 'Requests from agents that need a person to approve them appear here. Decisions on requests you made are listed further down.';
+      let empty;
+      if (window.mvEmpty) empty = window.mvEmpty(title, body, { label: 'See decisions on your requests', href: '#request-decision-history' });
+      else { empty = document.createElement('p'); empty.className = 'muted'; empty.textContent = title + '.'; }
       queue.replaceChildren(empty);
     }
     function isHighRisk(item) {
@@ -388,7 +390,7 @@
       line.hidden = true; line.textContent = '';
       item.querySelector('.approval-actions:not(.approval-actions--decided)').hidden = false;
       item.querySelector('.approval-actions--decided').hidden = true;
-      const empty = queue.querySelector(':scope > p.muted, :scope > .approval-empty');
+      const empty = queue.querySelector(':scope > p.muted, :scope > .mv-empty');
       if (empty) empty.remove();
       queue.appendChild(item);
       if (!decidedList.querySelector('article.approval-item')) decidedSection.hidden = true;

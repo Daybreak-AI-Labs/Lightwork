@@ -213,7 +213,7 @@ def test_oversight_approval_sources_use_trusted_provenance(monkeypatch, tmp_path
 def test_no_pending_holds_shows_empty_state(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     text = _client().get("/oversight").text
-    assert "Nothing needs your decision right now." in text
+    assert '<p class="mv-empty__title">Nothing needs your decision right now</p>' in text
 
 
 def _enable_oidc_principal_map(monkeypatch):

@@ -239,7 +239,7 @@ def test_page_renders_stacked_cards_with_confirmation_and_decided_area(tmp_path)
     assert "High risk" in text and "Decide by" in text and "Requested by" in text
     assert "What it will do" in text and "Can&#39;t be undone" in text or "Can't be undone" in text
     assert 'id="approval-confirm"' in text and "Type APPROVE to confirm" in text
-    assert "Decided just now" in text and 'class="btn btn--primary approval-undo"' in text
+    assert "Decided just now" in text and 'class="btn approval-undo"' in text
     source = TEMPLATE.read_text(encoding="utf-8")
     assert "window.confirm" not in source and "mvConfirm" not in source
     assert "mvToast" in text

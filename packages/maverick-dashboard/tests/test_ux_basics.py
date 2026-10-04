@@ -261,7 +261,8 @@ def test_workspaces_page_has_one_create_form_and_hides_plans_without_billing(mon
 
 def test_results_page_shows_a_real_empty_state_and_a_typeahead():
     body = _client().get("/deliverables").text
-    assert "No results yet — start a task" in body
+    assert '<p class="mv-empty__title">No results yet</p>' in body
+    assert '<a class="btn mv-empty__action" href="/chat">Start a task</a>' in body
     assert "deliverables in view" not in body and 'name="role"' not in body
     catalogue = _client().get("/deliverables?role=all").text
     assert "data-typeahead" in catalogue and "lightwork-typeahead.js" in catalogue
