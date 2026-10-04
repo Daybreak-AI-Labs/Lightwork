@@ -69,9 +69,9 @@ test("after approving by keyboard, focus is on that card's Undo and the decision
     // Undo is not re-announced every second.
     assert.equal(undo.firstChild.nodeValue, "Undo");
     const countdown = undo.querySelector('[aria-hidden="true"]');
-    assert.equal(countdown.textContent, " (30s)");
+    assert.equal(countdown.textContent, "(30s)");
     f.timers[0]();
-    assert.equal(countdown.textContent, " (29s)");
+    assert.equal(countdown.textContent, "(29s)");
     assert.equal(undo.firstChild.nodeValue, "Undo");
   } finally { f.dom.window.close(); }
 });

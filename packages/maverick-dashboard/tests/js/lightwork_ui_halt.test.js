@@ -56,21 +56,24 @@ function haltSource() {
   return source.slice(start, end);
 }
 
-function fixture(fetchImpl, { canHalt = true, haltTimeoutMs = 1000 } = {}) {
+function fixture(fetchImpl, { canHalt = true, haltTimeoutMs = 1000, loaded = true } = {}) {
   const pill = new Element(canHalt);
   pill.dataset.haltTimeoutMs = String(haltTimeoutMs);
   const label = new Element(canHalt);
   const toasts = [];
   const confirms = [];
   const intervals = [];
+  let onLoad;
   const context = {
     document: {
+      readyState: loaded ? "complete" : "interactive",
       getElementById(id) {
         if (id === "halt-pill") return pill;
         if (id === "halt-label") return label;
         return null;
       },
     },
+    addEventListener(type, callback) { if (type === "load") onLoad = callback; },
     fetch: fetchImpl,
     mvToast(message, options) { toasts.push({ message, options }); },
     async mvConfirm(message, options) {
@@ -90,6 +93,7 @@ function fixture(fetchImpl, { canHalt = true, haltTimeoutMs = 1000 } = {}) {
     toasts,
     confirms,
     poll() { return intervals[0](); },
+    load() { onLoad(); },
   };
 }
 
@@ -294,4 +298,17 @@ test("the label is announced only after the first read, and only when its words 
   await ui.poll();
   assert.equal(ui.label.textContent, "STOPPED — click to resume");
   assert.equal(writes, 1);
+});
+
+test("a page still loading keeps the label quiet until it has loaded", async () => {
+  const ui = fixture(async () => response({ active: false, scope: "local" }), { loaded: false });
+  await turn();
+  await turn();
+  // The first read is done, but the localization pass may still rewrite the
+  // label when the document finishes loading.
+  assert.equal(ui.label.textContent, "Emergency stop");
+  assert.equal(ui.label.getAttribute("aria-live"), undefined);
+  ui.load();
+  await turn();
+  assert.equal(ui.label.getAttribute("aria-live"), "polite");
 });

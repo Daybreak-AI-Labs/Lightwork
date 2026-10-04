@@ -403,7 +403,7 @@
                  value="{% if budget is not none %}{{ '%.2f'|format(budget) }}{% endif %}"
                  aria-describedby="task-limit-help" />
         </label>
-        <p class="mv-form__err" id="settings-task-budget-error" role="alert" hidden></p>
+        <p class="mv-form__err settings-amount-error" id="settings-task-budget-error" role="alert" hidden></p>
       </fieldset>
       <p class="muted" id="task-limit-help">
         Turning the limit off keeps your saved amount for later. Workspace spending limits,
@@ -829,6 +829,7 @@
     .settings-choice legend { font-weight: var(--font-medium); margin-bottom: var(--space-2); }
     .settings-choice > label:not(.settings-field) { display: flex; gap: var(--space-2); align-items: center; }
     .settings-amount { max-width: 16rem; margin-left: var(--space-6, 1.5rem); }
+    .settings-amount-error { margin: 0 0 0 var(--space-6, 1.5rem); }
     .settings-callout { border: 1px solid var(--hairline); border-radius: var(--radius-md, 8px); padding: var(--space-3); margin: var(--space-3) 0; }
     .settings-callout p { margin: 0 0 var(--space-2); }
     .settings-details { margin-top: var(--space-3); }

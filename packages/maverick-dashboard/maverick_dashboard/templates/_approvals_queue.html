@@ -435,12 +435,13 @@
       undo.hidden = !canUndo;
       if (canUndo) {
         // The countdown is shown, not spoken: Undo keeps one name while it
-        // has focus, and the status line already said how long it lasts.
+        // has focus, and the status line already said how long it lasts. The
+        // button's flex gap spaces the two parts.
         const shown = document.createElement('span');
         shown.setAttribute('aria-hidden', 'true');
         undo.replaceChildren(document.createTextNode('Undo'), shown);
         let left = undoSeconds;
-        shown.textContent = ' (' + left + 's)';
+        shown.textContent = '(' + left + 's)';
         const timer = setInterval(function () {
           left -= 1;
           if (!undo.isConnected || undo.hidden) { clearInterval(timer); return; }
@@ -451,7 +452,7 @@
             line.textContent += ' The undo window has ended.';
             if (hadFocus) focusOn(line);
           } else {
-            shown.textContent = ' (' + left + 's)';
+            shown.textContent = '(' + left + 's)';
           }
         }, 1000);
         undo.dataset.timer = String(timer);

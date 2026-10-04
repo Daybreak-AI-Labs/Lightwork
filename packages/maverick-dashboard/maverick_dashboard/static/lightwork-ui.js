@@ -866,9 +866,13 @@
         }
       });
       // The label turns into a polite live region only once the first read
-      // has settled: loading a page must not announce "Emergency stop", while
-      // a later stop, resume or lost status is still announced.
-      refresh().then(function () { label.setAttribute('aria-live', 'polite'); });
+      // has settled and the page has finished loading (the localization pass
+      // rewrites the label at DOMContentLoaded): loading a page must not
+      // announce "Emergency stop", while a later stop, resume or lost status
+      // is still announced.
+      const loaded = document.readyState === 'complete' ? Promise.resolve()
+        : new Promise(function (resolve) { window.addEventListener('load', resolve, {once: true}); });
+      Promise.all([refresh(), loaded]).then(function () { label.setAttribute('aria-live', 'polite'); });
       setInterval(refresh, 15000);
     })();
 
