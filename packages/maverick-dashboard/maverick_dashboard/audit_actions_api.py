@@ -92,6 +92,9 @@ _TECHNICAL_VALUE = re.compile(r"^(?:[a-z0-9_-]+-)?[0-9a-f]{32,}$", re.IGNORECASE
 _TIME_KEYS = {"occurred_at", "created_at", "decided_at", "expires_at", "started_at",
               "ended_at", "finished_at", "updated_at", "requested_at", "at"}
 _PERSON_KEYS = ("principal", "actor", "user", "requested_by", "decided_by", "owner")
+# Shown as a person's name too, but never the row's "Who" (an undo row's Who is
+# the person who undid it).
+_NAMED_KEYS = frozenset(_PERSON_KEYS) | {"previously_decided_by"}
 _SLUG_KEYS = {"name", "tool", "action", "stage", "provider", "rule", "outcome", "status",
               "decision", "risk", "source", "phase", "labels", "agent", "channel"}
 _SLUG = re.compile(r"[a-z][a-z0-9]*(?:[_.:-][a-z0-9]+)*")
@@ -129,7 +132,7 @@ def value_text(key: str, value: Any) -> str:
         return "—"
     if isinstance(value, bool):
         return "Yes" if value else "No"
-    if key in _PERSON_KEYS and isinstance(value, str):
+    if key in _NAMED_KEYS and isinstance(value, str):
         return humanize_principal(value).name
     if key == "scope" and value == "deployment":
         return "Deployment-wide record (all workspaces)"
@@ -185,7 +188,7 @@ def event_who(event: dict) -> str:
         return humanize_principal(person).name
     payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
     if event.get("decided_by_person") is True or payload.get("decided_by_person") is True:
-        # A person decided; the metadata view keeps their identity private.
+        # A person decided, but the recorded name can't be shown as text.
         return "A person (name not shown)"
     agent = event.get("agent")
     return humanize(agent) if agent else "Lightwork"
