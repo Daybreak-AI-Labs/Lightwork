@@ -258,3 +258,89 @@ def test_ordinary_task_metadata_does_not_scan_unrelated_domain_packs(monkeypatch
     monkeypatch.setattr(sources, "require_permission", lambda *args: None)
     monkeypatch.setattr(sources, "goal_owner_filter", lambda request: "user:alice")
     assert sources._tasks(object()).items[0]["kind"] == "task"
+
+
+def test_switched_off_or_closed_sources_do_not_mark_the_search_partial():
+    def off():
+        raise search.SourceOff("no workspace selected")
+
+    def closed():
+        raise HTTPException(403, "disabled")
+
+    def broken():
+        raise OSError("store unreadable")
+
+    calm = search.search({"tasks": lambda: search.Source([record("1")]), "vault": off, "reviews": closed}, query="acme")
+    assert calm["complete"] is True and calm["total"] == 1
+    assert [row["state"] for row in calm["coverage"]] == ["current", "not available", "not available"]
+    assert all(row["indexed"] is None for row in calm["coverage"][1:])
+    # A source that actually failed still says the results may be incomplete.
+    failed = search.search({"tasks": lambda: search.Source([record("1")]), "vault": broken}, query="acme")
+    assert failed["complete"] is False and failed["coverage"][1]["state"] == "unavailable"
+    assert "unreadable" not in json.dumps(failed)
+
+
+def test_turned_off_sources_report_off_before_opening_a_store(monkeypatch):
+    from maverick import vendor_management
+    from maverick_dashboard import governed_document_vault_api as vault_api
+
+    monkeypatch.setattr(sources, "require_permission", lambda *args: None)
+    monkeypatch.setattr(sources, "require_suite", lambda *args: None)
+    model = search.search({"vendors": lambda: sources._vendors(object()),
+                           "onboarding": lambda: sources._onboarding(object())}, query="")
+    assert [row["state"] for row in model["coverage"]] == ["not available", "not available"]
+    assert model["complete"] is True
+    monkeypatch.setattr(vendor_management, "list_vendors", lambda: (_ for _ in ()).throw(OSError("disk")))
+    monkeypatch.setattr(vault_api, "_tenant_id", lambda: (_ for _ in ()).throw(HTTPException(409, "select a workspace")))
+    model = search.search({"vendors": lambda: sources._vendors(object()),
+                           "vault": lambda: sources._vault(object())}, query="")
+    assert [row["state"] for row in model["coverage"]] == ["unavailable", "not available"]
+
+
+def test_best_matching_titles_come_first():
+    rows = [record("1", "Quarterly report for Acme"), record("2", "Acme quarterly"),
+            record("3", "Report"), record("4", "Annual report"), record("5", "Reporting acme")]
+    rows[0]["state"] = "report pending"
+    model = search.search({"vendors": lambda: search.Source(rows)}, query="report")
+    assert [row["id"] for row in model["items"]] == ["3", "5", "4", "1"]
+    by_reference = search.search({"vendors": lambda: search.Source(rows)}, query="2")
+    assert by_reference["items"][0]["id"] == "2"
+
+
+def test_task_templates_show_readable_blanks_in_results(tmp_path, monkeypatch):
+    from maverick import flow, templates
+    from maverick_dashboard import record_history as history
+    monkeypatch.setattr(history, "require_permission", lambda *args: None)
+    monkeypatch.setattr(history, "caller_principal", lambda request: "user:alice")
+    monkeypatch.setattr(flow, "enabled", lambda: False)
+    body = tmp_path / "weekly.md"
+    body.write_text("metadata", encoding="utf-8")
+    weekly = templates.Template("weekly-update", "Weekly update for {{ team }}", "Body", owner="user:alice", path=body)
+    monkeypatch.setattr(templates, "list_templates", lambda: ["weekly-update"])
+    monkeypatch.setattr(templates, "load_template", lambda name: weekly)
+    rows = history._workflows(object())
+    assert [row["title"] for row in rows] == ["Weekly update for [Team]"]
+    assert "{{" not in json.dumps(rows)
+
+
+def test_switched_off_workspace_modules_are_not_available_not_failed(monkeypatch):
+    from maverick.third_party_executive_reports import ThirdPartyExecutiveReportConfigError
+    from maverick_dashboard import third_party_executive_reports_api as reports_api
+    from maverick_dashboard import vendor_onboarding_composition as onboarding
+
+    monkeypatch.setattr(reports_api, "_require_report_permission", lambda request, permission: None)
+    monkeypatch.setattr(reports_api, "_tenant_id", lambda: "workspace-a")
+    monkeypatch.setattr(onboarding, "settings", lambda: SimpleNamespace(enable=False))
+
+    def reports_request(code):
+        def factory(**kwargs):
+            raise ThirdPartyExecutiveReportConfigError(code)
+        return SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(third_party_executive_reports_runtime_factory=factory)))
+
+    with tenant_scope(tenant="workspace-a"):
+        model = search.search({"reports": lambda: sources._reports(reports_request("executive_report_disabled")),
+                               "onboarding": lambda: sources._onboarding(object())}, query="")
+    assert [row["state"] for row in model["coverage"]] == ["not available", "not available"]
+    assert model["complete"] is True
+    broken = search.search({"reports": lambda: sources._reports(reports_request("executive_report_configuration_unavailable"))}, query="")
+    assert broken["coverage"][0]["state"] == "unavailable" and broken["complete"] is False

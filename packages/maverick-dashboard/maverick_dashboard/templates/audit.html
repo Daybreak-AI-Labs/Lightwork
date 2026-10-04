@@ -35,6 +35,7 @@
                    else 'Entries are kept but not sealed. Turn on tamper-evident records on the Compliance page.')) }}
     <div class="aud-links">
       <a class="btn btn--ghost" href="/audit/binder">Open the audit binder</a>
+      {% if can_open_page('/replay') %}<a class="btn btn--ghost" href="/replay">Replay a task</a>{% endif %}
       {% if not audit_signing_enabled %}<a class="btn btn--ghost" href="/compliance">Turn on tamper-evident records</a>{% endif %}
     </div>
   {% endcall %}

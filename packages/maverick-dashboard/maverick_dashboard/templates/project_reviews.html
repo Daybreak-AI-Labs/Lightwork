@@ -1,8 +1,9 @@
 {% extends "base.html" %}
 {% block title %}{{ ut("Project team reviews") }} · Lightwork{% endblock %}
 {% block content %}
+{% from "_back_link.html" import back_link with context %}
 <div id="pr-root" data-context="{{ review_context }}">
-  <p><a href="/projects">{{ ui("← Projects") }}</a></p>
+  <p>{{ back_link('/projects', 'Projects') }}</p>
   {% from "_hero.html" import hero %}
   {{ hero('', ui("Project team reviews"),
           lede=ui("Share a fixed task result with a named workspace reviewer. Their decision applies to that captured result. The owner remains responsible for any changes, final sign-off, or further work on the task."),

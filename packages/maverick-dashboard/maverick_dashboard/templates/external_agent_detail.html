@@ -2,10 +2,11 @@
 {% set _name = a.description or (a.id | humanize) %}
 {% block title %}{{ _name }} · Outside agents · Lightwork{% endblock %}
 {% block content %}
+{% from "_back_link.html" import back_link with context %}
   {% set _LIFECYCLE = {'active': 'Active', 'suspended': 'Paused', 'revoked': 'Access blocked', 'contained': 'Blocked for rule breaks', 'expired': 'Access expired'} %}
   {% set _MEMORY = {'lesson': 'lessons', 'semantic': 'facts', 'procedural': 'how-to notes', 'episodic': 'run summaries'} %}
   <h1 class="page-title">{{ _name }}</h1>
-  <p class="page-subtitle">{{ a.platform_label }}{% if a.description %} · {{ a.id }}{% endif %} · <a href="/external-agents">← All outside agents</a></p>
+  <p class="page-subtitle">{{ a.platform_label }}{% if a.description %} · {{ a.id }}{% endif %} · {{ back_link('/external-agents', 'Outside agents') }}</p>
 
   <div class="panel">
     <p style="margin: 0 0 var(--space-3);">

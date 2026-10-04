@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Task map · Lightwork{% endblock %}
 {% block content %}
+{% from "_back_link.html" import back_link with context %}
 <style>
   .ge-wrap { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 1rem; }
   @media (max-width: 900px) { .ge-wrap { grid-template-columns: 1fr; } }
@@ -26,7 +27,7 @@
   .tree ul { list-style: none; padding-inline-start: 1.5rem; border-inline-start: 1px solid var(--border); margin: 0; }
   .tree > ul { padding-inline-start: 0; border-inline-start: 0; }
 </style>
-<p class="muted"><a href="/goals">← All tasks</a> · <a href="/plan-tree-3d">3D view</a></p>
+<p class="muted">{{ back_link('/goals', 'Tasks') }} · <a href="/plan-tree-3d">3D view</a></p>
 <h1 class="page-title">Task map</h1>
 <p class="page-subtitle">See how your tasks fit together. Select a task to rename it, move it, or add a smaller task beneath it.</p>
 <div class="panel">

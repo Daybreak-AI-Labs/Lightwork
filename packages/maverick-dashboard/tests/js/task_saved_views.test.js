@@ -72,3 +72,20 @@ test('task page restores typed URL filters and binds real filter selection to Co
   w.document.getElementById('run-search-q').dispatchEvent(new w.Event('input'));
   assert.equal(w.document.querySelector('[data-status="done"]').hidden,true);dom.window.close();
 });
+
+test('choosing a filter or typing a search updates the address without adding history',async()=>{
+  const template=fs.readFileSync(path.join(base,'templates/goals.html'),'utf8');
+  const script=template.slice(template.indexOf('<script>')+8,template.indexOf('</script>'));
+  const dom=new JSDOM('<input id="run-search-q"><div id="run-list"><div class="g-row" data-status="done"></div><div class="g-row" data-status="failed"></div></div><p id="run-search-status"></p><button id="run-search-retry"></button><button data-g-filter=""></button><button data-g-filter="failed"></button><button data-g-filter="done"></button>',
+    {url:'https://local.test/goals?status=done&view=mine#top',runScripts:'outside-only'});
+  const w=dom.window,d=w.document;w.fetch=async()=>({ok:true,status:200,json:async()=>[]});w.eval(script);
+  const before=w.history.length;
+  d.querySelector('[data-g-filter="failed"]').click();
+  assert.equal(w.location.search,'?status=failed&view=mine');assert.equal(w.location.hash,'#top');
+  d.querySelector('[data-g-filter=""]').click();
+  assert.equal(w.location.search,'?view=mine');
+  d.getElementById('run-search-q').value='quarterly report';d.getElementById('run-search-q').dispatchEvent(new w.Event('input'));
+  await new Promise(resolve=>setTimeout(resolve,450));
+  assert.equal(new URL(w.location.href).searchParams.get('q'),'quarterly report');
+  assert.equal(w.history.length,before);dom.window.close();
+});

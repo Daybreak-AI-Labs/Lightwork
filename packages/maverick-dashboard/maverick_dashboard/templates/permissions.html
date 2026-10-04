@@ -26,6 +26,7 @@
              copy='Work runs ' ~ where ~ '. Network access is ' ~ network ~
                   '. Allowed tools still need their connections and setup checked.') }}
   {% endcall %}
+  {% if can_open_page('/discovery') %}<p><a href="/discovery">See everything Lightwork can use here</a>: actions, tool servers, AI providers, chat channels and outside agents.</p>{% endif %}
 
   {% if perm.error %}
     <div class="panel" role="alert"><p>Some permission details could not be loaded. Reload the page to try again.</p>

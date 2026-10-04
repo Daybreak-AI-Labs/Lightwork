@@ -76,7 +76,7 @@ def test_shell_escape_original_titles_and_declare_fallback_language(name):
         assert i18n_journeys.text("Pinned:", "fr") in html
     fallback = render(name, "ar")
     assert '<html lang="en" dir="rtl">' in fallback
-    assert 'lang="en" dir="ltr" data-product-copy>Find a page' in fallback
+    assert 'lang="en" dir="ltr" data-product-copy>Search' in fallback
     assert frozenset({"en"}) == i18n.CONTENT_LANGS
 
 

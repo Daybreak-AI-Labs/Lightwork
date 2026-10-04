@@ -1,8 +1,9 @@
 {% extends "base.html" %}
 {% block title %}{{ ut("Task files") }} · Lightwork{% endblock %}
 {% block content %}
+{% from "_back_link.html" import back_link with context %}
 <section id="task-files" data-goal="{{ goal.id }}" class="tf-wrap">
-  <p><a class="btn btn--ghost" href="/chat/goal/{{ goal.id }}">{{ ui("Back to task") }}</a></p>
+  <p>{{ back_link('/chat/goal/' ~ goal.id, 'task') }}</p>
   <h1 class="page-title">{{ ui("Review and restore task files") }}</h1>
   <p class="page-subtitle" lang="und" dir="auto" data-user-content>{{ goal.title }}</p>
   <div class="panel">

@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Flow designer · Lightwork{% endblock %}
 {% block content %}
+{% from "_back_link.html" import back_link with context %}
 <style>
   /* Mockup layout: a clean header + a hero Draft bar, then a workspace that is
      either the friendly Steps (cards + settings rail) or the full Canvas
@@ -255,7 +256,7 @@
 </div>
 
 <div class="fd" data-view="steps" data-flow-engine-on="{{ 'true' if flows_enabled else 'false' }}" data-can-manage-flows="{{ 'true' if can_manage_flows else 'false' }}">
-  <p><a href="/workflows">All saved flows</a></p>
+  <p>{{ back_link('/workflows', 'Workflows') }}</p>
   <p class="muted">{{ ui('Connector credentials belong in Connections. Older flows using secret expressions must be reviewed before they can run; saved definitions and grants are not changed automatically.') }} <a href="/connections">{{ ui('Connections') }}</a></p>
   <!-- Header: name, the Steps/Canvas switch, and the primary actions. -->
   <div class="fdx-head">

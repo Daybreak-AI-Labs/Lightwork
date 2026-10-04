@@ -13,6 +13,11 @@
              badge_class='warn' if approvals or flow_approvals or flow_approval_coverage != 'current' else 'ok',
              copy='Approve, reject, or send a request back with a note saying what should change.') }}
   {% endcall %}
+  {# A link to one approval (/approvals#approval-12) that is no longer waiting
+     says so instead of landing on a list without it. #}
+  <p class="panel" id="approval-missing" role="status" hidden>This approval was already decided or no longer exists.
+    <a href="#request-decision-history" id="approval-missing-history">See decisions on your requests</a>{% if can_open_page('/audit') %}
+    or <a href="/audit">find it in the Activity log</a>{% endif %}.</p>
   {% if private_count %}<p class="panel">{{ private_count }} pending request{{ '' if private_count == 1 else 's' }} contain private employee content. <a href="/content-access">Request the exact approval-card read</a> before reviewing. Content access does not grant a vote: your current review role, claim and separation-of-duties checks still apply.</p>{% endif %}
 
   {% if flow_approval_coverage != 'current' %}<p class="panel" role="status">Some flow approvals could not be checked. Open your <a href="/automations">flows and runs</a> to inspect older requests, or refresh this page.</p>{% endif %}
@@ -37,4 +42,18 @@
   <div class="panel">
     {% include "_approvals_queue.html" %}
   </div>
+  <script>
+  (function () {
+    var note = document.getElementById('approval-missing'), decisions = document.getElementById('request-decision-history');
+    function check() {
+      var match = /^#approval-([A-Za-z0-9_-]+)$/.exec(window.location.hash);
+      note.hidden = !match || !!document.getElementById('approval-' + match[1]);
+    }
+    document.getElementById('approval-missing-history').addEventListener('click', function () {
+      if (decisions) decisions.open = true;
+    });
+    check();
+    window.addEventListener('hashchange', check);
+  })();
+  </script>
 {% endblock %}

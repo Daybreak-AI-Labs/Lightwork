@@ -225,7 +225,7 @@
     <button type="button" class="cs-item cs-item--button" id="navfinder-open"
             aria-haspopup="dialog" aria-controls="navfinder-dialog" aria-expanded="false">
       <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 4.5h10M3 8h10M3 11.5h6"/></svg>
-      {{ ui("Find a page") }}
+      {{ ui("Search") }}
       <kbd aria-hidden="true" id="cs-find-kbd">Ctrl K</kbd>
     </button>
     {# The same role-filtered navigation as the product shell's sidebar. #}
@@ -394,7 +394,7 @@
           e.preventDefault(); (e.shiftKey ? last : first).focus();
         } else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
       });
-      // Opening "Find a page" from the drawer hands focus to its dialog.
+      // Opening "Search" from the drawer hands focus to its dialog.
       var finder = document.getElementById('navfinder-open');
       if (finder) finder.addEventListener('click', function () { close(false); });
       // Leaving the small-screen layout never leaves the page locked behind the drawer.

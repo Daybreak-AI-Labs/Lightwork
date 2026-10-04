@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}All settings · Lightwork{% endblock %}
 {% block content %}
+{% from "_back_link.html" import back_link with context %}
   {% from "_hero.html" import hero, state %}
   {% from "_settings_all_row.html" import setting_row, part_block %}
   <link rel="stylesheet" href="/static/lightwork-settings-all.css">
@@ -15,7 +16,7 @@
              copy='Reset puts a setting back to its default. Settings marked as affecting safety ask you to confirm first.') }}
   {% endcall %}
 
-  <p><a class="btn btn--ghost" href="/settings">Back to Settings</a></p>
+  <p>{{ back_link('/settings', 'Settings') }}</p>
 
   <details id="settings-tools" class="panel">
     <summary>Configuration profiles, presets and history</summary>

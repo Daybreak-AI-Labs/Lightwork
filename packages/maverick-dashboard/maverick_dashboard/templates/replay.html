@@ -85,6 +85,7 @@
 {% else %}
   <h1 class="page-title">Task replay</h1>
   <p class="page-subtitle">See everything a task did, step by step, check that the record hasn't been altered, and download evidence for auditors.</p>
+  {% if can_open_page('/walkthroughs') %}<p class="muted">To show a finished task to your team, <a href="/walkthroughs">make a video walkthrough</a>.</p>{% endif %}
   <div class="panel">
     {% if goals %}
     <table>

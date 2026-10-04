@@ -5,7 +5,7 @@
   {% set not_found_actions %}
     <a class="btn btn--primary" href="/">Go to the overview</a>
     <a class="btn" href="/chat">Start a task</a>
-    <button class="btn btn--ghost" type="button" id="nf-find">Find a page</button>
+    <button class="btn btn--ghost" type="button" id="nf-find">Search</button>
   {% endset %}
   {% set not_found_lede %}We couldn't find that page. It may have moved, or the link may be out of date.{% endset %}
   {{ hero('', 'Page not found', lede=not_found_lede, actions=not_found_actions) }}

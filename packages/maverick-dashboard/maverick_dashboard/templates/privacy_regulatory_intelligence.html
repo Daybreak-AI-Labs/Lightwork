@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Privacy law research · Lightwork{% endblock %}
 {% block content %}
+{% from "_back_link.html" import back_link with context %}
 {% set places = [
   ('EU', 'European Union'), ('GB', 'United Kingdom'), ('US', 'United States (federal)'),
   ('US-CA', 'California'), ('US-VA', 'Virginia'), ('US-CO', 'Colorado'), ('US-CT', 'Connecticut'),
@@ -35,7 +36,7 @@
         lede='Add the legal texts your organization is licensed to use, ask questions and compare
               countries or states with every answer tied to its source, and get alerts when things
               change. This supports your research; it is not legal advice.') }}
-<p><a class="btn btn--ghost" href="/privacy">Back to Privacy</a></p>
+<p>{{ back_link('/privacy', 'Privacy') }}</p>
 <details class="panel">
   <summary>About this page&rsquo;s safeguards</summary>
   <ul>

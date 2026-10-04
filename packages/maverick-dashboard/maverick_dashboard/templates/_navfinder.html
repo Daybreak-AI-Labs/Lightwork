@@ -1,8 +1,11 @@
-{# The Ctrl+K page finder's dialog shell, shared by the product shell
-   (base.html) and the chat shell (chat_base.html). Its destinations (every
-   page the caller may open, from the same role-filtered registry as the
-   sidebar plus pages folded out of the rail) are fetched from /nav/finder on
-   first open; JavaScript only filters those server-rendered links. #}
+{# The Ctrl+K search dialog, shared by the product shell (base.html) and the
+   chat shell (chat_base.html). Its page destinations (every page the caller
+   may open, from the same role-filtered registry as the sidebar plus pages
+   folded out of the rail) are fetched from /nav/finder on first open;
+   JavaScript only filters and ranks those server-rendered links. Settings
+   and, when record search is on, records come from their own permission-
+   checked searches. One name throughout: the shell button says "Search". #}
+{% set _finder_name = "Search pages, records and settings" if record_search_context else "Search pages and settings" %}
 {# Group labels as the rail shows them; defined here so the partial renders
    the same from either shell. #}
 {% set _group_labels = {'Operate': 'Work', 'Observe': 'Insights', 'Govern': 'Governance', 'Admin': 'Administration', 'Extend': 'Library'} %}
@@ -10,10 +13,10 @@
           aria-labelledby="navfinder-title" aria-describedby="navfinder-help">
     <div class="navfinder__head">
       <div>
-        <h2 id="navfinder-title">{{ ui("Find a page or record" if record_search_context else "Find a page") }}</h2>
-        <p class="sr-only" id="navfinder-help">{{ ui('Type to filter pages. Use the up and down arrow keys to choose a result, Enter to open it, and Escape to close.') }}</p>
+        <h2 id="navfinder-title">{{ ui(_finder_name) }}</h2>
+        <p class="sr-only" id="navfinder-help">{{ ui('Type to search. Use the up and down arrow keys to choose a result, Enter to open it, and Escape to close.') }}</p>
       </div>
-      <button type="button" class="iconbtn navfinder__close" id="navfinder-close" aria-label="{{ ut("Close page finder") }}" lang="{{ ul("Close page finder") }}">
+      <button type="button" class="iconbtn navfinder__close" id="navfinder-close" aria-label="{{ ut("Close search") }}" lang="{{ ul("Close search") }}">
         <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="m3.5 3.5 9 9m0-9-9 9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
       </button>
     </div>
@@ -21,8 +24,8 @@
       <svg width="17" height="17" viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="7" cy="7" r="4.25" stroke="currentColor" stroke-width="1.4"/><path d="m10.25 10.25 3 3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
       <input type="search" id="navfinder-input" autocomplete="off" spellcheck="false"
              role="combobox" aria-autocomplete="list" aria-controls="navfinder-results"
-             aria-expanded="false" aria-label="{{ ut("Filter navigation pages") }}"
-             placeholder="{{ ut("Find a task, page, or setting…") }}" lang="{{ ul("Find a task, page, or setting…") }}" />
+             aria-expanded="false" aria-labelledby="navfinder-title"
+             placeholder="{{ ut(_finder_name ~ "…") }}" lang="{{ ul(_finder_name ~ "…") }}" />
       <kbd aria-hidden="true">Esc</kbd>
     </div>
     <p class="navfinder__count" id="navfinder-count" role="status" aria-live="polite" aria-atomic="true"></p>
@@ -45,7 +48,7 @@
     {% endif %}
     {# Destinations arrive from GET /nav/finder only when the finder opens. #}
     <ul class="navfinder__results" id="navfinder-results" role="listbox"
-        aria-label="{{ ut("Navigation pages") }}" lang="{{ ul("Navigation pages") }}"
+        aria-label="{{ ut("Search results") }}" lang="{{ ul("Search results") }}"
         data-navfinder-src="/nav/finder"></ul>
     <p class="navfinder__empty" id="navfinder-empty" hidden>{{ ui('No matching pages. Try a broader search.') }}</p>
     {% if record_search_context %}

@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Privacy request · Lightwork{% endblock %}
 {% block content %}
+{% from "_back_link.html" import back_link with context %}
 {% set kind_labels = {
   'access': 'Copy of their data',
   'portability': 'Move their data',
@@ -53,7 +54,7 @@
      data-received="{{ dsar.received_date }}"
      data-answer-hint="{% if sent_answers %}Sent the &ldquo;{{ sent_answers[-1].label }}&rdquo; notice from Lightwork on {{ sent_answers[-1].date }}{% endif %}"
      {% if fulfillment %}data-fulfillment-id="{{ fulfillment.id }}" data-revision="{{ fulfillment.revision }}"{% endif %}>
-  <p class="muted" style="margin-bottom: var(--space-2);"><a href="/privacy">← Back to Privacy</a></p>
+  <p class="muted" style="margin-bottom: var(--space-2);">{{ back_link('/privacy', 'Privacy') }}</p>
   <h1 class="page-title">{{ kind_label }}: request from {{ dsar.subject_id }}</h1>
   <p class="page-subtitle">
     <span class="badge {{ 'done' if dsar.status == 'fulfilled' else 'warn' if dsar.status in ('awaiting_erasure', 'unverified') else 'info' if dsar.status == 'open' else '' }}">{{ status_labels.get(dsar.status, dsar.status | humanize) }}</span>

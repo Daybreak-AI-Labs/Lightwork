@@ -156,14 +156,19 @@ def _state_locked(request, *, seen_id=None):
             "background": enrollment, "private_delivery": delivery_status(actor)}
 
 
+def page_authority(request):
+    """The page's own admission; navigation offers the page only when it passes."""
+    auth.require_permission(request, "view")
+    if not auth.caller_principal(request):
+        raise HTTPException(403, "Sign in with your own account to see personal notifications.")
+
+
 @router.get("/notifications")
 def page(request: Request):
     from maverick import config, experience_preferences
     from maverick.personal_notifications import personal_alerts_on
 
-    auth.require_permission(request, "view")
-    if not auth.caller_principal(request):
-        raise HTTPException(403, "Sign in with your own account to see personal notifications.")
+    page_authority(request)
     if config.config_source_errors(include_tenant=True):
         unavailable = "Notification settings could not be read. Ask an administrator to check All settings."
     elif not experience_preferences.enabled():

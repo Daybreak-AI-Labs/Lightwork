@@ -105,7 +105,7 @@ def test_nav_workflows_points_to_index(monkeypatch, tmp_path):
     t = _client().get("/workflows").text
     assert_navigation_link(t, "/workflows", "Workflows")
     designer = _client().get("/flows/designer").text
-    assert 'href="/workflows">All saved flows</a>' in designer
+    assert '<a class="back-link" href="/workflows">' in designer and ">Back to Workflows<" in designer
     assert 'href="/workflows" class="active" aria-current="page"' in designer
 
 

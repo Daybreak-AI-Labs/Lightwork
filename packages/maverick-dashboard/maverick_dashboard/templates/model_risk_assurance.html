@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}AI assurance · Lightwork{% endblock %}
 {% block content %}
+{% from "_back_link.html" import back_link with context %}
 <style>
   .assurance-stats {
     display:grid;
@@ -885,7 +886,7 @@
 {% include "_governance_operations.html" %}
 {% include "_ops_ai_governance.html" %}
 
-<p><a class="btn" href="/security">Back to Security &amp; GRC</a></p>
+<p>{{ back_link('/security', 'Security & GRC') }}</p>
 
 <script>
 // Shared helpers for this page: one plain sentence per failure, never a code.

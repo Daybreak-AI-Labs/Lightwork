@@ -7,6 +7,9 @@ from html.parser import HTMLParser
 import pytest
 from fastapi.testclient import TestClient
 
+# Their routes also need a named account, which the local owner does not have.
+NAMED_ACCOUNT_PAGES = {"/notifications", "/access-requests", "/devices", "/get-started/employee"}
+
 
 class _Items(HTMLParser):
     def __init__(self) -> None:
@@ -47,7 +50,8 @@ def test_fragment_lists_the_finder_registry_with_the_listbox_contract(client, mo
     assert "<dialog" not in response.text and "<ul" not in response.text
     items = _Items()
     items.feed(response.text)
-    expected = [ln["href"] for g in ui_visibility.finder_pages(None) for ln in g["links"]]
+    expected = [ln["href"] for g in ui_visibility.finder_pages(None) for ln in g["links"]
+                if ln["href"] not in NAMED_ACCOUNT_PAGES]
     assert [o["href"] for o in items.options] == expected
     assert items.list_items == len(expected)
     for option in items.options:
@@ -71,7 +75,7 @@ def test_fragment_excludes_unavailable_companion_destinations(client, monkeypatc
     assert response.status_code == 200
     items = _Items()
     items.feed(response.text)
-    unavailable = {"/companion/admin"}
+    unavailable = {"/companion/admin", *NAMED_ACCOUNT_PAGES}
     if not personal_available:
         unavailable.add("/companion")
     expected = [

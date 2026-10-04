@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}License · Lightwork{% endblock %}
 {% block content %}
+{% from "_back_link.html" import back_link with context %}
   {% from "_hero.html" import hero, state as statebox %}
   {% set summary = state.summary %}
   {% set signing = state.signing %}
@@ -99,7 +100,7 @@
                 copy=summary.summary) }}
   {% endcall %}
 
-  <p><a class="btn btn--ghost" href="/settings">Back to Settings</a></p>
+  <p>{{ back_link('/settings', 'Settings') }}</p>
 
   <section class="panel" aria-labelledby="license-current-title">
     <div class="section-head"><h2 id="license-current-title">Your license</h2></div>

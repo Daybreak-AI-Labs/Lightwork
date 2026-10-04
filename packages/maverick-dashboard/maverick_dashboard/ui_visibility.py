@@ -939,8 +939,8 @@ PAGES: tuple[dict, ...] = (
         "floor": "view",
         "default": "operate",
     },
-    # Redaction workbench (its preview API requires operate); reached from
-    # goal/trajectory surfaces rather than the sidebar.
+    # Redaction check (its preview API requires operate); linked from a task's
+    # Steps page (trajectory.html) rather than the sidebar.
     {
         "path": "/redact",
         "label": "Redaction check",
@@ -1312,6 +1312,36 @@ PAGES: tuple[dict, ...] = (
         "floor": "view",
         "default": "admin",
     },
+    # -- Personal, help and spending pages ------------------------------------
+    # Live screens the registry did not know, so the page finder could not
+    # offer them. Each floor mirrors the route's own check. Routes that also
+    # need a named account (or, for employee activation, its switch) are
+    # withheld per request by app._account_pages_unavailable. Reached from
+    # their parent pages and the top bar, never the sidebar.
+    {"path": "/help", "label": "Help and diagnostics", "group": "Operate",
+     "icon": "check", "floor": "view", "default": "view", "in_nav": False},
+    {"path": "/notifications", "label": "Your notifications", "group": "Operate",
+     "icon": "check", "floor": "view", "default": "view", "in_nav": False},
+    {"path": "/my-work", "label": "My background work", "group": "Operate",
+     "icon": "target", "floor": "view", "default": "view", "in_nav": False},
+    {"path": "/conversations", "label": "My conversations", "group": "Operate",
+     "icon": "chat", "floor": "view", "default": "view", "in_nav": False},
+    {"path": "/get-started/employee", "label": "Your first useful result", "group": "Operate",
+     "icon": "check", "floor": "view", "default": "view", "in_nav": False},
+    {"path": "/project-workspaces", "label": "Project workspaces", "group": "Operate",
+     "icon": "fleets", "floor": "view", "default": "view", "in_nav": False},
+    {"path": "/devices", "label": "Your paired devices", "group": "Operate",
+     "icon": "settings", "floor": "view", "default": "view", "in_nav": False},
+    {"path": "/access-requests", "label": "Permission requests", "group": "Operate",
+     "icon": "key", "floor": "view", "default": "view", "in_nav": False},
+    {"path": "/budget", "label": "Your budget", "group": "Observe",
+     "icon": "spend", "floor": "view", "default": "view", "in_nav": False},
+    {"path": "/cost-reconciliation", "label": "Compare cost records", "group": "Observe",
+     "icon": "spend", "floor": "view", "default": "view", "in_nav": False},
+    # Its route requires an installation administrator.
+    {"path": "/provider-spending", "label": "Provider spending", "group": "Observe",
+     "icon": "spend", "floor": "admin", "default": "admin", "scope": "global",
+     "in_nav": False},
 )
 
 # Moderate sidebar declutter: keep a focused set of everyday destinations in the
@@ -1369,6 +1399,43 @@ GROUP_TITLES: dict[str, str] = {
 def group_title(group: str) -> str:
     """The sidebar, finder and Settings title for a registry group."""
     return GROUP_TITLES.get(group, group)
+
+# What the page finder (Ctrl+K) matches beyond a page's label. HEADINGS holds
+# a page's own heading where it differs from the label, so typing the words a
+# person reads on the page finds it. SYNONYMS holds the plain words people
+# type for a job ("approve" -> Approvals). The finder ranks an exact label,
+# then an exact heading, then an exact synonym first (see
+# static/lightwork-navfinder.js). Neither ever changes who can see a page.
+HEADINGS: dict[str, str] = {
+    "/budget": "Your budget before work starts",
+    "/companion": "Your companion",
+    "/companion/admin": "Companion policies",
+}
+SYNONYMS: dict[str, tuple[str, ...]] = {
+    "/approvals": ("approve", "approval", "decision", "decisions", "decide", "sign-off", "sign off"),
+    # Agent controls holds the emergency stop and resume controls, and every
+    # role that can find it can open it.
+    "/agent-control-plane": ("pause", "stop", "emergency stop", "halt", "stop all work", "resume work"),
+    "/billing": ("invoice", "invoices", "bill", "bills"),
+    "/spend": ("cost", "costs", "spending"),
+    "/help": ("help", "docs", "documentation", "support"),
+    # The Activity log is also where activity is downloaded for auditors.
+    "/audit": ("audit log", "history", "export"),
+    "/privacy/rights-orchestration": (
+        "dsar", "data subject request", "data subject access request", "rights request",
+    ),
+    "/users": ("invite", "people", "colleague", "colleagues", "add user", "members", "team members"),
+    "/notifications": ("notification", "notifications", "alerts"),
+    # Security & GRC keeps the incident register; Privacy keeps breaches.
+    "/security": ("incident", "incidents", "security incident"),
+    "/privacy": ("breach", "data breach"),
+    # The sidebar's "New task" button opens Chat.
+    "/chat": ("new task", "start a task", "new chat", "ask"),
+    "/get-started/employee": ("get started", "first task"),
+    "/conversations": ("chats", "chat history", "past chats"),
+    "/access-requests": ("request access", "ask for permission"),
+    "/shoring": ("hand a team's work", "hand over a team's work"),
+}
 
 # Lockout guard: the pages an admin needs to *undo* a bad matrix save. Always
 # visible + reachable for the admin role, no matter what the store says.
@@ -1666,6 +1733,8 @@ def _grouped_links(
                 "label": page["label"],
                 "icon": page["icon"],
                 "aliases": page.get("aliases", ""),
+                "heading": HEADINGS.get(page["path"], ""),
+                "synonyms": SYNONYMS.get(page["path"], ()),
             }
         )
     # Technical setup and diagnostics stay discoverable after everyday work.
@@ -1736,4 +1805,6 @@ __all__ = [
     "finder_pages",
     "matrix",
     "switched_off_paths",
+    "HEADINGS",
+    "SYNONYMS",
 ]

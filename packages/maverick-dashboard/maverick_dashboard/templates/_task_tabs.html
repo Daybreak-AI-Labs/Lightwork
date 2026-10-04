@@ -1,9 +1,10 @@
 {# The one set of tabs every task page shares: Result (the chat view),
    Steps (step-by-step history), Plan (the map of smaller steps) and Problems.
    `current` names the tab of the page including this. #}
+{% from "_back_link.html" import back_link %}
 {% macro task_tabs(goal, current) %}
 <nav class="task-tabs" aria-label="Task pages">
-  <a class="task-tabs__back" href="/goals">← All tasks</a>
+  {{ back_link('/goals', 'Tasks', 'task-tabs__back') }}
   <ul class="task-tabs__list">
     {% for key, label, href in [('result', 'Result', '/chat/goal/' ~ goal.id),
                                 ('steps', 'Steps', '/goals/' ~ goal.id ~ '/trajectory'),
