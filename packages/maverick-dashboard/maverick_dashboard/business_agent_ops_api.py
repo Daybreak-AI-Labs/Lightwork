@@ -229,13 +229,24 @@ def _equip(profile, plan, principal: str, actor: str) -> str:
 @router.post("/api/v1/agents/business-setup/draft", status_code=202)
 def start_business_agent_draft(request: Request, body: DraftIn) -> dict:
     """Draft (never save) a specialist from a business description."""
-    from maverick.intake import IntakeSpec
+    from maverick.domain import available_domains, user_dir
+    from maverick.intake import IntakeSpec, _slug
     from maverick.orchestrator import _execution_principal
 
     from ._shared import require_provider_or_400
     from .ops_jobs import JOBS, Busy, identity
 
     _guard(request)
+    name = body.name.strip()
+    if not name:
+        raise HTTPException(422, "Enter a name for the new specialist.")
+    candidate = _slug(name)
+    if candidate in available_domains() or (user_dir() / f"{candidate}.toml").exists():
+        raise HTTPException(
+            409,
+            f"A specialist called “{name}” already exists. Choose another name for the new specialist. "
+            "The existing specialist and its safeguards have not changed.",
+        )
     use_ai = body.use_ai
     if use_ai:
         try:
@@ -244,7 +255,7 @@ def start_business_agent_draft(request: Request, body: DraftIn) -> dict:
             use_ai = False  # the command's fallback: a deterministic draft, not an error
     principal = _execution_principal(user_id=execution_user_id_from_request(request), capability=None)
     actor = caller_principal(request) or principal
-    spec = IntakeSpec(name=body.name.strip(), description=body.description.strip(), industry=body.industry.strip())
+    spec = IntakeSpec(name=name, description=body.description.strip(), industry=body.industry.strip())
     owner, tenant = identity(request)
     try:
         job = JOBS.start(owner=owner, tenant=tenant, kind=_DRAFT, work=lambda: _draft(spec, use_ai, principal, actor))

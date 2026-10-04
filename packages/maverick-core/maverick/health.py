@@ -377,7 +377,8 @@ def _check_sandbox(cfg: dict) -> None:
     # the "unsupported" catch-all while build_sandbox actually runs it.
     backend = str(cfg.get("sandbox", {}).get("backend", "local") or "local").strip().lower()
     if backend == "local":
-        _row(GREEN, "sandbox", "local subprocess")
+        _row(YELLOW, "sandbox", "work runs directly on this computer, without isolation",
+             fix="start Docker or Podman, then select its container in Lightwork > Permissions > Where work runs")
         return
     if backend == "docker":
         _check_sandbox_docker()
@@ -445,6 +446,75 @@ def _check_sandbox(cfg: dict) -> None:
         f"backend={backend} not recognized",
         fix=f"supported: {', '.join(BUILTIN_SANDBOX_BACKENDS)}, or ep:<name>",
     )
+
+
+_FILE_WORK_TOOLS = ("shell", "write_file", "apply_patch", "str_replace_editor", "ast_edit")
+
+
+def file_work_limits(cfg: dict) -> tuple[list[str], list[str]]:
+    """Configured first-run blocks and higher-priority effective tool blocks."""
+    from .runtime_overrides import denied_tools as runtime_denied_tools
+
+    security = cfg.get("security") or {}
+    if not isinstance(security, dict):
+        security = {}
+    denied = {name for name in (security.get("denied_tools") or [])
+              if isinstance(name, str)}
+    allowed = {name for name in (security.get("allowed_tools") or [])
+               if isinstance(name, str)}
+    runtime_denied = runtime_denied_tools()
+    setup = [name for name in _FILE_WORK_TOOLS if name in denied]
+    other = [name for name in _FILE_WORK_TOOLS
+             if (allowed and name not in allowed) or name in runtime_denied]
+    return setup, other
+
+
+def file_work_notice(cfg: dict, *, backend: str | None = None) -> str:
+    """Plain, pre-task explanation of missing file/program authority."""
+    setup, other = file_work_limits(cfg)
+    chosen = str(backend or (cfg.get("sandbox") or {}).get("backend") or "local").lower()
+    if not setup and not other:
+        return ""
+    if other and not setup:
+        return (
+            "An additional organization rule limits file changes or program "
+            "execution. Review Permissions or ask an administrator before "
+            "starting a task that needs those actions."
+        )
+    if chosen == "local":
+        message = (
+            "File changes or program execution are off in this setup. "
+            "Lightwork can still answer questions. Start Docker or Podman, "
+            "then open Lightwork > Permissions > Where work runs, choose its "
+            "container and select Allow file work before asking for files or programs."
+        )
+    else:
+        message = (
+            "File changes or program execution are still off. Open Lightwork > "
+            "Permissions > Where work runs and select Allow file work after the "
+            "container is running."
+        )
+    if other:
+        message += " Another organization rule may still block those actions."
+    return message
+
+
+def _check_file_work(cfg: dict) -> None:
+    if not cfg:
+        return  # the missing/corrupt config row already explains the blocker
+    from .runtime_overrides import RuntimeOverridesSecurityError
+
+    try:
+        setup, other = file_work_limits(cfg)
+    except (RuntimeOverridesSecurityError, OSError, TypeError, ValueError):
+        _row(RED, "file work", "the effective tool rules could not be verified",
+             fix="repair the saved policy, then run lightwork doctor again")
+        return
+    if not setup and not other:
+        _row(GREEN, "file work", "file and program actions are allowed by tool rules")
+        return
+    _row(YELLOW, "file work", "file changes or program execution are limited",
+         fix=file_work_notice(cfg))
 
 
 CHANNEL_DEPS = {
@@ -890,6 +960,7 @@ def diagnose() -> int:
     _check_anthropic()
     _check_openai()
     _check_sandbox(cfg)
+    _check_file_work(cfg)
     _check_channels(cfg)
     _check_world_db()
     _check_shield()

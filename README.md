@@ -36,6 +36,18 @@ complete setup in Lightwork. If the release has no binary for your platform,
 request a customer package. Repository access is an engineering arrangement:
 cloning the repository also copies internal research, audit and patent files.
 
+After connecting an AI service, a first task can be run in Chat or from the
+terminal without file or program access:
+
+```bash
+lightwork start "Draft a one-page plan to reduce our customer support response time without adding headcount. State your assumptions and the facts you need from me."
+```
+
+If Docker or Podman was not running at setup, file changes and program
+execution remain off. Start a container service, then use **Permissions → Where
+work runs → Allow file work** in Lightwork before asking it to create files or
+run programs. `lightwork doctor` shows the current limitation.
+
 ## Status
 
 Alpha with an engineering source-install path. Release automation

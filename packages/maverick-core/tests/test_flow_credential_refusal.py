@@ -151,6 +151,25 @@ def test_durable_legacy_snapshot_resume_refuses_without_replaying_history():
     assert store.load_flow(saved.id).nodes["legacy"].params == flow.nodes["legacy"].params
 
 
+def test_dry_run_refuses_vault_expression_without_saving_resolved_value(
+        tmp_path, monkeypatch):
+    from maverick.flow import execution
+
+    monkeypatch.setattr("maverick.paths.data_dir", lambda *p, **k: tmp_path.joinpath(*p))
+    flow = action_flow("{{secret('LIGHTWORK_LOCAL_SECRET_FIXTURE')}}")
+    for node in flow.nodes.values():
+        node.tool = "web_search"
+    ag, act = execution.sandbox_runners()
+
+    run = execution.execute(flow, agent_runner=ag, action_runner=act,
+                            record_outcomes=False)
+    saved = store.load_run(run.run_id)
+
+    assert saved.status == "failed" and "Connections" in saved.error
+    assert saved.data == {} and saved.input_data == {}
+    assert "synthetic-credential-only" not in str(saved)
+
+
 def test_legacy_definition_remains_readable_without_migrating_credentials():
     flow = action_flow("{{secret('LIGHTWORK_LOCAL_SECRET_FIXTURE')}}")
     for node in flow.nodes.values():

@@ -36,6 +36,7 @@ from .domain import (
     _coerce_workflow,
     builtin_domains,
     load_domain,
+    load_domains,
     user_dir,
 )
 
@@ -418,10 +419,12 @@ def save_profile(profile: DomainProfile, *, approved: bool,
     if not _DOMAIN_ID_RE.fullmatch(profile.name):
         raise ValueError("specialist name cannot be used as a saved identity")
     if profile.name in builtin_domains():
-        raise ValueError("specialist name belongs to a built-in specialist")
+        raise FileExistsError("specialist name belongs to a built-in specialist")
     d = Path(dest_dir) if dest_dir else user_dir()
     d.mkdir(parents=True, exist_ok=True)
     path = d / f"{profile.name}.toml"
+    if profile.name in load_domains(d):
+        raise FileExistsError("specialist name belongs to an existing workspace specialist")
     created = False
     try:
         with path.open("x", encoding="utf-8") as target:

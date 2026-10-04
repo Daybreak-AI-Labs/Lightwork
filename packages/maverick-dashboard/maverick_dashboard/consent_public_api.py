@@ -5176,9 +5176,19 @@ def create_consent_public_router(  # noqa: C901 - closure wires one isolated rou
             body.signal == "dnt" and request.headers.get("dnt") != "1"
         ):
             raise HTTPException(status_code=422, detail="privacy signal header required")
+        # Preference receipts can only deny purposes governed by consent. Other
+        # lawful bases are present in the published banner, but recording them
+        # here would reject the *entire* browser signal.
         purposes = [
-            str(item["id"]) for item in contract.public_configuration["configuration"]["purposes"]
+            str(item["id"])
+            for item in contract.public_configuration["configuration"]["purposes"]
+            if item["lawful_basis"] == "consent"
         ]
+        if not purposes:
+            raise HTTPException(
+                status_code=409,
+                detail="no consent purposes are configured for this privacy signal",
+            )
         from maverick import consent_preferences as preference_ops
 
         store = deps.preference_store_for(authority.binding.tenant_id)

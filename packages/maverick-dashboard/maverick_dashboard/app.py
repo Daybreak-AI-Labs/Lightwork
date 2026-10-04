@@ -3942,6 +3942,14 @@ async def tenants_page(request: Request) -> HTMLResponse:
         tenants = list_tenants()
     except Exception:  # pragma: no cover -- never 500 the console
         tenants = []
+    try:
+        from maverick.tenant.registry import list_removed_tenants
+
+        removed_tenants = list_removed_tenants()
+        removed_error = ""
+    except Exception:
+        removed_tenants = []
+        removed_error = "Removed workspace history is unavailable. Ask an administrator to check the installation."
     from .workspace_display import duplicate_workspace_ids
 
     duplicate_ids = duplicate_workspace_ids((t.id, t.display_name or t.id) for t in tenants)
@@ -3956,7 +3964,8 @@ async def tenants_page(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(
         request,
         "tenants.html",
-        {"tenants": tenants, "duplicate_ids": duplicate_ids, "is_admin": True, "billing_on": billing_on},
+        {"tenants": tenants, "removed_tenants": removed_tenants, "removed_error": removed_error,
+         "duplicate_ids": duplicate_ids, "is_admin": True, "billing_on": billing_on},
     )
 
 

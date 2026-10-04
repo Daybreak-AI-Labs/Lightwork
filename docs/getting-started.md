@@ -61,43 +61,43 @@ another limit or none. **Settings → Task limits** can change that choice later
 Usage remains metered, and organization allowances remain independent. See
 [task limits and spend accounting](task-limits.md).
 
-Then:
-
-The file-writing example below needs an isolated work area. If Docker was not
-running during setup, Lightwork says that file changes and program execution
-are off. Start with a research or writing task. When Docker or Podman is
-running, open **Permissions → Where work runs**, choose its container, then
-confirm **Allow file work** on that page before trying the example. The page
-checks the container service again and shows any other rules that still block
-those tools.
+Start with a task that works even when file changes and program execution are
+off:
 
 ```bash
-maverick start "Build a CLI that emails me a digest of today's top Hacker News stories — research the API, write it, and verify it runs"
+maverick start "Draft a one-page plan to reduce our customer support response time without adding headcount. State your assumptions and the facts you need from me."
 ```
 
 ## Watch the swarm decompose
 
-Run `maverick monitor` in a second terminal. The orchestrator plans the goal, then spawns specialist sub-agents that work in parallel — here a researcher pins down the API, a coder writes the tool, and a verifier runs it:
+Run `maverick monitor` in a second terminal. The orchestrator plans the goal
+and shows its work. For the first task above, an illustrative monitor view is:
 
 ```
 Goal #1 active  2m elapsed
-Build a CLI that emails me a digest of today's top Hacker News stories
+Draft a one-page support response plan
 
 Plan tree
-  ├─        done  #2 Research the Hacker News Firebase API
-  ├─      active  #3 Write the digest CLI (fetch + format + send)
-  ├─      active  #4 Verify it runs and emails a sample digest
-  ├─     pending  #5 Write a short usage README
+  ├─        done  #2 Identify likely response-time bottlenecks
+  ├─      active  #3 Draft actions that do not require hiring
+  └─     pending  #4 Check assumptions and questions for the owner
 
 Latest episode #7 (running)  $0.0431  in=18,204 out=2,910 tools=11
 
 Recent activity
-  4s ago [researcher] decision: top stories live at /v0/topstories.json, then /v0/item/<id>.json
-  3s ago [coder] tool_call: write_file hn_digest.py (118 lines)
-  1s ago [verifier] tool_call: run "python hn_digest.py --dry-run" -> printed 10 stories
+  4s ago [researcher] decision: separate volume from process delays
+  3s ago [writer] draft: owner-facing plan with assumptions
+  1s ago [verifier] review: mark unsupported savings estimates
 
 Cumulative spend on this DB: $0.21
 ```
+
+To create files or run programs later, start Docker or Podman, open
+**Permissions → Where work runs**, choose its container, then confirm
+**Allow file work**. Lightwork checks that the container is running and shows
+any other policy that still blocks those actions. Run `maverick doctor` to see
+the same limitation from the terminal. After that setup, a code-writing task
+can use the isolated work area.
 
 When done:
 

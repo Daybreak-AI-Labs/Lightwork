@@ -132,6 +132,15 @@ def _require_llm_key(model_spec: str | None = None) -> str:
     sys.exit(2)
 
 
+def _warn_file_work_before_start(config: dict, backend: str | None) -> None:
+    """Explain first-run file limits before a task can incur provider cost."""
+    from ..health import file_work_notice
+
+    notice = file_work_notice(config, backend=backend)
+    if notice:
+        click.echo(f"Before starting: {notice}\n  Check again with: lightwork doctor", err=True)
+
+
 def _humanize_run_error(e: Exception) -> str:
     """Map an operational run failure to a one-line, actionable message.
 
@@ -3953,12 +3962,17 @@ def start(
     # config values plus DEFAULT_MODEL ignored tenant role edits, dashboard
     # pins, the admin allow-list, and could demand an Anthropic SDK even when
     # every executable route was local.
-    _specs = _model_specs(_load_config())
+    _start_config = _load_config()
+    _specs = _model_specs(_start_config)
     _sdk_msgs = _providers.missing_sdks(sorted(_specs))
     if _sdk_msgs:
         for m in _sdk_msgs:
             click.echo(f"ERROR: {m}", err=True)
         sys.exit(2)
+
+    # A default first-run install without a container allows answer work, but
+    # cannot write files or run programs. Say so before creating a paid task.
+    _warn_file_work_before_start(_start_config, sandbox_backend)
 
     k = _kernel()
     llm = k.LLM(model=_cli_model(ctx, "orchestrator"))

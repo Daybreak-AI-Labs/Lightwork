@@ -23,6 +23,13 @@ function defaults(admin) {
       flagged: [{ specialist: "Invoice drafter", can_reach: ["send_payment"] }] },
     "/api/v1/workforce-ops/test-suite": { cases: 4, specialists: 3, problems: 0, technical: [],
       list: [{ specialist: "Payroll", task: "Run payroll", expects: ["refuses"] }] },
+    "/api/v1/workforce-ops/test-suite/specialists": { specialists: [{ value: "finance_ap", label: "Accounts payable" }] },
+    "/api/v1/workforce-ops/test-suite/customer": { live_enabled: true, cases: [{
+      id: "a".repeat(32), specialist: "finance_ap", revision: 1, task: "Could these invoices be duplicates?",
+      includes: ["duplicate"], excludes: ["payment sent"], refusal: false, citation: false
+    }], runs: [] },
+    "/api/v1/workforce-ops/test-suite/customer/run": { job: { id: "abcdef0123456789", state: "done", can_stop: false,
+      result: { run: { state: "done", passed: 1, total: 1 } } } },
     "/api/v1/workforce-ops/setup-check": { job: { id: "0123456789abcdef", state: "done", can_stop: false, result: {  // pragma: allowlist secret
       specialists: 40, must_fix: 1, could_improve: 2, more: 0, findings: [{ specialist: "Invoice drafter",
         must_fix: ["It has no limit on how risky its actions may be."], could_improve: [], technical: ["max_risk is unset"] }] } } },
@@ -32,12 +39,13 @@ function defaults(admin) {
   };
 }
 
-async function fixture(markup, { admin = true, inventory = {} } = {}) {
+async function fixture(markup, { admin = true, inventory = {}, responses = {} } = {}) {
   const dom = new JSDOM(markup, { url: "https://lightwork.example/workforce", runScripts: "outside-only" });
   const { window } = dom;
   const calls = [];
   const table = defaults(admin);
   Object.assign(table["/api/v1/workforce-ops/inventory"], inventory);
+  Object.assign(table, responses);
   window.mvErrorText = (failure, action) => `Could not ${action}.`;
   window.mvPlainDetail = () => "";
   window.mvHuman = (v) => String(v).replace(/_/g, " ");
@@ -45,8 +53,10 @@ async function fixture(markup, { admin = true, inventory = {} } = {}) {
   window.mvToast = (m) => calls.push({ toast: m });
   window.mvConfirm = async (m) => { calls.push({ confirm: m }); return true; };
   window.fetch = async (url, init = {}) => {
-    calls.push({ url, method: init.method || "GET" });
-    const answer = table[url.split("?")[0]];
+    calls.push({ url, method: init.method || "GET", body: init.body });
+    const path = url.split("?")[0];
+    const answer = table[path] || (path.startsWith("/api/v1/workforce-ops/test-suite/customer/run/")
+      ? table["/api/v1/workforce-ops/test-suite/customer/run/*"] : null);
     return new Response(JSON.stringify(answer || {}), { status: answer ? 200 : 404, headers: { "Content-Type": "application/json" } });
   };
   const settle = async () => { for (let i = 0; i < 60; i++) await new Promise((done) => setImmediate(done)); };
@@ -95,6 +105,76 @@ test("non-admins do not see the download or the setup check", async (t) => {
   t.after(() => ui.window.close());
   assert.equal(ui.doc.getElementById("wo-inv-download").hidden, true);
   assert.equal(ui.doc.getElementById("wo-lint-run").closest("section").hidden, true);
+  assert.equal(ui.doc.getElementById("wo-test-form").hidden, true);
+});
+
+test("customer can edit and run a saved specialist answer check from Workforce", async (t) => {
+  const ui = await fixture(partial("_workforce_ops.html"));
+  t.after(() => ui.window.close());
+  const select = ui.doc.getElementById("wo-test-specialist");
+  select.value = "finance_ap";
+  select.dispatchEvent(new ui.window.Event("change"));
+  await ui.settle();
+  assert.match(ui.doc.getElementById("wo-tests-list").textContent, /Could these invoices be duplicates/);
+  assert.equal(ui.doc.getElementById("wo-test-form").hidden, false);
+  ui.doc.querySelector("#wo-tests-list button").click();
+  assert.equal(ui.doc.getElementById("wo-test-task").value, "Could these invoices be duplicates?");
+  ui.doc.getElementById("wo-test-form").dispatchEvent(new ui.window.Event("submit", {cancelable: true}));
+  await ui.settle();
+  const save = ui.calls.find((c) => c.url === "/api/v1/workforce-ops/test-suite/customer" && c.method === "POST");
+  assert.ok(save);
+  assert.equal(JSON.parse(save.body).expected_revision, 1);
+  ui.doc.getElementById("wo-test-run").click();
+  await ui.settle();
+  const run = ui.calls.find((c) => c.url === "/api/v1/workforce-ops/test-suite/customer/run" && c.method === "POST");
+  assert.match(JSON.parse(run.body).operation_id, /^[a-f0-9]{32}$/);
+  assert.deepEqual(JSON.parse(run.body).case_ids, ["a".repeat(32)]);
+  assert.deepEqual(JSON.parse(run.body).case_revisions, {["a".repeat(32)]: 1});
+  assert.match(ui.doc.getElementById("wo-test-run-out").textContent, /1 of 1 answers passed/);
+});
+
+test("a larger saved set lets a person choose a bounded subset", async (t) => {
+  const cases = Array.from({length: 6}, (_, i) => ({id: String(i).repeat(32), specialist: "finance_ap",
+    revision: 1, task: "Check invoice example " + i, includes: ["duplicate"], excludes: [],
+    refusal: false, citation: false}));
+  const ui = await fixture(partial("_workforce_ops.html"), {responses: {
+    "/api/v1/workforce-ops/test-suite/customer": {live_enabled: true, cases, runs: []}
+  }});
+  t.after(() => ui.window.close());
+  const select = ui.doc.getElementById("wo-test-specialist");
+  select.value = "finance_ap";
+  select.dispatchEvent(new ui.window.Event("change"));
+  await ui.settle();
+  const boxes = ui.doc.querySelectorAll(".wo-test-choice");
+  assert.equal(ui.doc.getElementById("wo-test-run").disabled, true);
+  boxes[1].click(); boxes[3].click();
+  assert.equal(ui.doc.getElementById("wo-test-run").disabled, false);
+  ui.doc.getElementById("wo-test-run").click();
+  await ui.settle();
+  const run = ui.calls.find((c) => c.url === "/api/v1/workforce-ops/test-suite/customer/run" && c.method === "POST");
+  assert.deepEqual(JSON.parse(run.body).case_ids, [cases[1].id, cases[3].id]);
+  assert.deepEqual(JSON.parse(run.body).case_revisions, {[cases[1].id]: 1, [cases[3].id]: 1});
+});
+
+test("an uncertain paid check reads its original result without posting another request", async (t) => {
+  const ui = await fixture(partial("_workforce_ops.html"), {responses: {
+    "/api/v1/workforce-ops/test-suite/customer/run": {job: {id: "unknown-1", state: "done", can_stop: false,
+      result: {run: {state: "unknown", passed: 0, total: 1, message: "Provider result uncertain."}}}},
+    "/api/v1/workforce-ops/test-suite/customer/run/*": {run: {state: "unknown", passed: 0, total: 1,
+      message: "Original result still uncertain."}}
+  }});
+  t.after(() => ui.window.close());
+  const select = ui.doc.getElementById("wo-test-specialist");
+  select.value = "finance_ap";
+  select.dispatchEvent(new ui.window.Event("change"));
+  await ui.settle();
+  ui.doc.getElementById("wo-test-run").click();
+  await ui.settle();
+  ui.doc.getElementById("wo-test-run").click();
+  await ui.settle();
+  assert.equal(ui.calls.filter((c) => c.url === "/api/v1/workforce-ops/test-suite/customer/run" && c.method === "POST").length, 1);
+  assert.ok(ui.calls.some((c) => c.url && c.url.startsWith("/api/v1/workforce-ops/test-suite/customer/run/") && c.method === "GET"));
+  assert.match(ui.doc.getElementById("wo-test-run-status").textContent, /Original result still uncertain/);
 });
 
 test("tasks coming due list overdue first with links and waiting questions", async (t) => {

@@ -390,7 +390,7 @@ def enroll(
             raise ExternalAgentsError("expires_days must be a positive number")
         entry["expires_at"] = time.time() + float(expires_days) * 86400
     try:
-        agent = put_agent(entry)
+        agent = put_agent(entry, preserve_existing_identity=True)
     except AgentTrustError as e:
         raise ExternalAgentsError(
             _safe_exception_text(e, fallback="external-agent enrollment failed")

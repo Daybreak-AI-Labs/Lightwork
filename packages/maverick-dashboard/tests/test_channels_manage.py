@@ -170,6 +170,82 @@ def test_email_sender_check_is_configurable_and_required_from_the_page():
     })["runtime"]["status"] == "passed"
 
 
+@pytest.mark.parametrize("channel,missing,config", [
+    ("telegram", "telegram", {"bot_token": "fixture"}),
+    ("slack", "slack_sdk", {"app_token": "fixture", "bot_token": "fixture"}),
+    ("discord", "discord", {"bot_token": "fixture"}),
+    ("matrix", "nio", {}),
+    ("sms", "twilio", {"account_sid": "fixture", "auth_token": "fixture",
+                        "from_number": "+12025550111"}),
+    ("rcs", "google.auth", {}),
+    ("teams", "jwt", {"app_id": "fixture", "app_password": "fixture",
+                      "tenant_id": "fixture"}),
+])
+def test_missing_channel_sdk_blocks_readiness_and_local_preflight(monkeypatch, channel, missing, config):
+    from maverick_dashboard import integration_readiness
+
+    original = integration_readiness.importlib.util.find_spec
+    monkeypatch.setattr(integration_readiness.importlib.util, "find_spec",
+                        lambda name: None if name == missing else original(name))
+    configured = {"enabled": True, **config}
+    readiness = integration_readiness.channel_readiness(channel, configured)
+    assert readiness["state"] == "dependency_failed"
+    assert readiness["dependency"]["status"] == "failed"
+    assert missing in readiness["dependency"]["evidence"]["missing_modules"]
+    assert "installation administrator" in readiness["dependency"]["detail"]
+    assert "restart the chat service in Settings" in readiness["dependency"]["detail"]
+    assert integration_readiness.probe_channel(channel, configured)["verified"] is False
+
+
+def test_missing_telegram_sdk_is_visible_on_channels_page_and_api(monkeypatch):
+    from maverick.config import load_config
+    from maverick_dashboard import integration_readiness, settings_store
+
+    original = integration_readiness.importlib.util.find_spec
+    monkeypatch.setattr(integration_readiness.importlib.util, "find_spec",
+                        lambda name: None if name == "telegram" else original(name))
+    settings_store.set_channel("telegram", True, {"bot_token": "fixture"})
+    effective = load_config()["channels"]["telegram"]
+    integration_readiness.record("channel", "telegram", effective, verified=True,
+                                 detail="previous connection test worked")
+    client = _client()
+    page = client.get("/channels")
+    assert page.status_code == 200
+    assert "Telegram support is missing" in page.text
+    assert "Manage the chat service" in page.text
+    assert "1 turned on · 0 working · 1 failed" in page.text
+    response = client.get("/api/v1/channels")
+    assert response.status_code == 200
+    telegram = next(row for row in response.json()["channels"] if row["name"] == "telegram")
+    assert telegram["readiness"]["state"] == "dependency_failed"
+    integration_readiness.clear("channel", "telegram")
+
+
+def test_channel_tests_stop_before_external_call_when_support_is_missing(monkeypatch):
+    from maverick_dashboard import channel_check_api, integration_readiness, settings_store
+
+    original = integration_readiness.importlib.util.find_spec
+    monkeypatch.setattr(integration_readiness.importlib.util, "find_spec",
+                        lambda name: None if name == "slack_sdk" else original(name))
+    monkeypatch.setattr(channel_check_api, "check_credentials",
+                        lambda *_args: pytest.fail("external credential test must not run"))
+    monkeypatch.setattr(channel_check_api, "send_test",
+                        lambda *_args: pytest.fail("external send must not run"))
+    settings_store.set_channel("slack", True, {"app_token": "fixture", "bot_token": "fixture"})
+    client = _client()
+    headers = {**_ORIGIN, "accept": "application/json"}
+    checked = client.post("/channels/test", headers=headers, data={"channel": "slack"})
+    assert checked.status_code == 200
+    assert checked.json()["ok"] is False
+    assert "Slack support is missing" in checked.json()["message"]
+    sent = client.post("/channels/send-test", headers=headers,
+                       data={"channel": "slack", "to": "#general"})
+    assert sent.status_code == 200
+    assert sent.json()["ok"] is False
+    assert "Slack support is missing" in sent.json()["message"]
+    integration_readiness.clear("channel", "slack")
+
+
 def test_save_channel_enables_and_hides_secret():
     c = _client()
     r = c.post("/channels/save", headers=_ORIGIN, follow_redirects=False, data={

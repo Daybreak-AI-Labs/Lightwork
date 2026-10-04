@@ -1849,6 +1849,10 @@ class LLM:
                     and not bedrock_environment["AWS_REGION"].strip()
                     and not bedrock_environment["AWS_DEFAULT_REGION"].strip()):
                 bedrock_environment["AWS_REGION"] = raw_region.strip()
+            raw_model = pcfg.get("model_id")
+            if (isinstance(raw_model, str) and raw_model.strip()
+                    and not bedrock_environment["BEDROCK_MODEL_ID"].strip()):
+                bedrock_environment["BEDROCK_MODEL_ID"] = raw_model.strip()
             common_environment.update(bedrock_environment)
         elif provider == "codex_cli":
             from .providers.codex_cli_provider import _ENV_ALLOWLIST

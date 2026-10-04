@@ -9,8 +9,8 @@ control-plane state, not any one tenant's data.
 Lifecycle: ``create`` → ``suspend`` / ``resume`` → ``delete`` (optionally
 purging the tenant's data dir). :func:`assert_tenant_active` is the enforcement
 hook a request path calls before doing work for a tenant, so a suspended tenant
-is refused. Identifiers are never recycled: immutable namespace reservations
-and deletion tombstones outlive the roster and optional data purge. Before any
+is refused. Identifiers are never recycled: namespace reservations and
+deletion history outlive the roster and optional data purge. Before any
 registry or deletion history exists, single-tenant and unprovisioned deployments
 retain their existing behavior.
 """
@@ -33,6 +33,7 @@ from ..file_lock import (
 )
 from ..paths import (
     _tenant_namespace_key,
+    _tenant_segment,
     bind_tenant_namespace,
     canonical_tenant_id,
     maverick_home,
@@ -126,33 +127,61 @@ def _retirement_path(tenant_id: str):
     return maverick_home() / ".tenant-deletions" / (hashlib.sha256(key.encode("ascii")).hexdigest() + ".json")
 
 
-def _retired(tenant_id: str) -> bool:
+def _retirement(tenant_id: str) -> dict | None:
     from ..file_lock import ensure_private_file
     path = _retirement_path(tenant_id)
     if not path.exists():
-        return False
+        return None
     try:
         ensure_private_file(path)
         value = _decode_json(atomic_read_text(path), label="tenant deletion tombstone")
-        if (not isinstance(value, dict) or value.get("version") != 1
+        if (not isinstance(value, dict) or value.get("version") not in (1, 2)
+                or not isinstance(value.get("id"), str)
                 or _tenant_namespace_key(value["id"]) != _tenant_namespace_key(tenant_id)
                 or value["id"] != canonical_tenant_id(value["id"])):
             raise ValueError("invalid deletion identity")
+        when = value.get("deleted_at")
+        if not isinstance(when, (int, float)) or not math.isfinite(when) or when < 0:
+            raise ValueError("invalid deletion time")
+        if value["version"] == 2:
+            saved = TenantRecord.from_dict(value.get("record"))
+            if (saved.id != value["id"] or value.get("state") not in ("removed", "restored")
+                    or type(value.get("purged")) is not bool):
+                raise ValueError("invalid deletion record")
     except (OSError, ValueError, TypeError, KeyError) as exc:
         raise TenantRegistryError("Tenant deletion history is unavailable; provisioning and admission are refused.") from exc
-    return True
+    return value
 
 
-def _retire(tenant_id: str) -> None:
+def _retired(tenant_id: str) -> bool:
+    value = _retirement(tenant_id)
+    return value is not None and value.get("state", "removed") == "removed"
+
+
+def tenant_retired(tenant_id: str) -> bool:
+    """Public read gate for role stores outside the core package."""
+    return _retired(_lookup_id(tenant_id))
+
+
+def _retire(tenant_id: str, record: TenantRecord, *, purge: bool) -> None:
     from ..file_lock import atomic_create_text
     path = _retirement_path(tenant_id)
-    if _retired(tenant_id):
+    previous = _retirement(tenant_id)
+    if previous is not None and previous.get("state", "removed") == "removed":
         return
     ensure_private_directory(path.parent)
-    try:
-        atomic_create_text(path, json.dumps({"version": 1, "id": tenant_id, "deleted_at": time.time()}, sort_keys=True))
-    except FileExistsError:
-        _retired(tenant_id)  # validate the concurrent immutable winner
+    value = {
+        "version": 2, "id": tenant_id, "deleted_at": time.time(),
+        "state": "removed", "purged": purge, "record": record.to_dict(),
+    }
+    payload = json.dumps(value, sort_keys=True)
+    if previous is not None:
+        atomic_write_text(path, payload)
+    else:
+        try:
+            atomic_create_text(path, payload)
+        except FileExistsError:
+            _retirement(tenant_id)  # validate the concurrent winner
 
 
 def _legacy_role_names() -> set[str]:
@@ -833,7 +862,7 @@ def delete_tenant(tenant_id: str, *, purge: bool = False) -> bool:
         # Durable before roster removal or optional purge. A crash here leaves
         # an unavailable tenant, never a reusable incarnation or active row.
         bind_tenant_namespace(tid)
-        _retire(tid)
+        _retire(tid, records[tid], purge=purge)
         del records[tid]
         _save(records)
     if purge:
@@ -845,6 +874,90 @@ def delete_tenant(tenant_id: str, *, purge: bool = False) -> bool:
         if "tenants" in root.parts:
             shutil.rmtree(root, ignore_errors=True)
     return True
+
+
+def list_removed_tenants() -> list[dict[str, object]]:
+    """Admin-facing removal history; records stay private and unselectable."""
+    from ..file_lock import ensure_private_file
+
+    root = maverick_home() / ".tenant-deletions"
+    if not root.exists():
+        return []
+    ensure_private_directory(root)
+    rows: list[dict[str, object]] = []
+    for path in root.glob("*.json"):
+        ensure_private_file(path)
+        value = _decode_json(atomic_read_text(path), label="tenant deletion tombstone")
+        if not isinstance(value, dict) or not isinstance(value.get("id"), str):
+            raise TenantRegistryError("Tenant deletion history is unavailable.")
+        tid = _validate_id(value["id"])
+        if path != _retirement_path(tid):
+            raise TenantRegistryError("Tenant deletion history has an invalid identity.")
+        saved = _retirement(tid)
+        if saved is None or saved.get("state", "removed") != "removed":
+            continue
+        record = saved.get("record") or {}
+        retained = (maverick_home() / "tenants" / _tenant_segment(tid)).is_dir()
+        rows.append({
+            "id": tid,
+            "display_name": str(record.get("display_name") or tid),
+            "removed_at": saved["deleted_at"],
+            "restorable": saved["version"] == 2 and not saved["purged"] and retained,
+        })
+    return sorted(rows, key=lambda row: float(row["removed_at"]), reverse=True)
+
+
+def restore_tenant(tenant_id: str) -> TenantRecord:
+    """Restore one retained workspace as paused, without restoring old access.
+
+    The namespace claim remains permanent; this is an explicit recovery of the
+    *same* archived workspace, not provisioning a fresh tenant under its id.
+    """
+    tid = _lookup_id(tenant_id)
+    with _locked(strict=True):
+        saved = _retirement(tid)
+        if saved is None or saved.get("state", "removed") != "removed":
+            raise ValueError("Workspace is not removed.")
+        if saved["version"] != 2 or saved["purged"]:
+            raise ValueError("This workspace has no recoverable saved record.")
+        root = maverick_home() / "tenants" / _tenant_segment(tid)
+        if not root.is_dir():
+            raise ValueError("The workspace records are missing; restore them from a backup first.")
+        if _tenant_namespace_key(tid) in _legacy_role_names():
+            raise ValueError("Old member access must be cleared before recovery.")
+        records = _load()
+        rec = TenantRecord.from_dict(saved["record"])
+        existing = records.get(tid)
+        if existing is not None and existing != replace(
+            rec, display_name=existing.display_name, status=SUSPENDED,
+            updated_at=existing.updated_at,
+        ):
+            raise ValueError("Workspace recovery conflicts with an existing roster record.")
+        if existing is None:
+            if any(_tenant_namespace_key(other.id) == _tenant_namespace_key(tid)
+                   for other in records.values()):
+                raise ValueError("Workspace recovery conflicts with an existing identifier.")
+            names = {workspace_display_key(other.display_name or other.id)
+                     for other in records.values()}
+            original_name = rec.display_name or rec.id
+            if workspace_display_key(original_name) in names:
+                for suffix in range(1, 1001):
+                    label = "recovered" if suffix == 1 else f"recovered {suffix}"
+                    candidate = f"{original_name} ({label})"
+                    if workspace_display_key(candidate) not in names:
+                        rec = replace(rec, display_name=candidate)
+                        break
+                else:
+                    raise DuplicateWorkspaceName("No available recovery name; rename the newer workspace first.")
+            rec = replace(rec, status=SUSPENDED, updated_at=time.time())
+            records[tid] = rec
+            _save(records)
+        else:
+            rec = existing
+        saved["state"] = "restored"
+        saved["restored_at"] = time.time()
+        atomic_write_text(_retirement_path(tid), json.dumps(saved, sort_keys=True))
+        return rec
 
 
 def is_active(tenant_id: str | None) -> bool:
@@ -1273,7 +1386,7 @@ __all__ = [
     "TenantSuspended", "UnknownTenant",
     "TenantRegistryError", "DuplicateWorkspaceName",
     "list_tenants", "get_tenant", "workspace_display_key", "create_tenant", "suspend_tenant",
-    "resume_tenant", "delete_tenant", "set_quota", "set_plan",
+    "resume_tenant", "delete_tenant", "list_removed_tenants", "restore_tenant", "tenant_retired", "set_quota", "set_plan",
     "set_stripe_customer_id", "set_billing_status", "set_byok",
     "set_feature_overrides",
     "get_tenant_by_stripe_customer",

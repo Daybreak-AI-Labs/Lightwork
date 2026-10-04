@@ -261,6 +261,9 @@
   var listCount = document.getElementById("aet-list-count");
   var filterForm = document.getElementById("aet-filter-form");
   var createForm = document.getElementById("aet-create-form");
+  var createControls = document.getElementById("aet-create-controls");
+  var inventoryStatus = document.getElementById("aet-inventory-status");
+  var inventoryLink = document.getElementById("aet-inventory-link");
   var updateForm = document.getElementById("aet-update-form");
   var updatePanel = document.getElementById("aet-update-panel");
   var entities = [];
@@ -399,9 +402,11 @@
     return Array.prototype.slice.call(box.querySelectorAll('input[name="collaborator"]:checked')).map(function (item) { return item.value; });
   }
   async function loadPickers() {
+    var inventoryLoaded = false;
     try {
       var inventory = await requestAt("/api/v1/security/assurance/ai-inventory", {}, 4 * 1024 * 1024);
-      entities = (Array.isArray(inventory.assets) ? inventory.assets : []).filter(function (asset) {
+      if (!Array.isArray(inventory.assets)) throw invalidResponse();
+      entities = inventory.assets.filter(function (asset) {
         return isRecord(asset) && ID_PATTERN.test(String(asset.asset_id || "")) && asset.status === "present";
       }).map(function (asset) {
         return {
@@ -410,9 +415,17 @@
           label: String(asset.display_name || "Unnamed AI system") + (asset.asset_type ? " (" + human(asset.asset_type) + ")" : "")
         };
       });
+      inventoryLoaded = true;
     } catch (_error) {
       entities = [];
     }
+    createControls.disabled = !can.operate || !inventoryLoaded || !entities.length;
+    inventoryStatus.textContent = !inventoryLoaded
+      ? "Could not load AI systems. Choose Check again above to retry. Existing tasks remain available."
+      : !entities.length
+        ? "No AI systems are ready to choose. Add one in AI inventory first."
+        : entities.length + " AI " + (entities.length === 1 ? "system is" : "systems are") + " available.";
+    inventoryLink.hidden = inventoryLoaded && !!entities.length;
     try {
       var directory = await requestAt("/api/v1/people/assignable", {}, 512 * 1024);
       people = Array.isArray(directory.items) ? directory.items.filter(function (item) {
@@ -432,7 +445,8 @@
     fillCollaborators(document.querySelector('[data-collaborator-picker="create"]'), []);
     if (!entities.length) {
       var createEntity = field(createForm, "entity_id");
-      createEntity.options[0].textContent = "No AI systems in the inventory yet — add them on the AI oversight page";
+      createEntity.options[0].textContent = inventoryLoaded
+        ? "No AI systems in inventory yet" : "AI systems could not be loaded";
     }
   }
 

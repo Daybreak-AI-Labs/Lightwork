@@ -1920,6 +1920,8 @@
     var generation = ++draftGeneration;
     pendingDraft = { description: desc, flowId: flowId, snapshot: snapshot };
     var button = document.getElementById('fd-draft');
+    var retry = document.getElementById('fd-draft-retry');
+    if (retry) retry.hidden = true;
     if (button) button.setAttribute('aria-busy', 'true');
     say('Drafting… (a few seconds)');
     try {
@@ -1933,6 +1935,7 @@
       if (draftSnapshot() !== snapshot || document.getElementById('fd-nl').value.trim() !== desc ||
           saveInFlight || publishInFlight || applyInFlight) {
         say('The draft was not loaded because the workflow or description changed. Your edits were kept; draft again when ready.', true);
+        if (retry) retry.hidden = false;
         return;
       }
       var draftedFlow = result.flow;
@@ -1947,8 +1950,12 @@
       var draftNotes = Array.isArray(result.notes) ? result.notes : [];
       say(typeof draftNotes[0] === 'string'
         ? draftNotes[0] : 'Drafted ✓ — review the steps, then save.', !!draftNotes.length);
+      if (retry) retry.hidden = !draftNotes.length;
     } catch (e) {
-      if (generation === draftGeneration) say(e.message || 'Could not draft the flow. Please try again.', true);
+      if (generation === draftGeneration) {
+        say(e.message || 'Could not draft the flow. Please try again.', true);
+        if (retry) retry.hidden = false;
+      }
     } finally {
       if (generation === draftGeneration) {
         pendingDraft = null;
@@ -2471,6 +2478,10 @@
     b.addEventListener('click', function () { addNode(b.getAttribute('data-add')); });
   });
   document.getElementById('fd-draft').addEventListener('click', draft);
+  document.getElementById('fd-draft-retry').addEventListener('click', draft);
+  document.getElementById('fd-nl').addEventListener('input', function () {
+    document.getElementById('fd-draft-retry').hidden = true;
+  });
   ['fd-sched-freq', 'fd-sched-time', 'fd-sched-dom', 'fd-sched-minute'].forEach(function (id) {
     var e = document.getElementById(id); if (e) e.addEventListener('change', chooseSchedule);
   });

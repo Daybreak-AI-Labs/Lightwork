@@ -31,6 +31,7 @@ SENSITIVE_OPERATIONS: dict[str, str] = {
     "rotate_keys": "Rotating signing or workspace keys",
     "change_auth_settings": "Changing sign-in, administrator or key-service settings",
     "delete_workspace": "Deleting a workspace",
+    "restore_workspace": "Restoring a removed workspace",
     "revoke_sessions": "Signing other devices or people out",
 }
 

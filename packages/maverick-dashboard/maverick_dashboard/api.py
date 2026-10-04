@@ -1293,12 +1293,72 @@ async def delete_tenant(
 ) -> Response:
     require_global_permission(request, "admin")
     step_up.require_recent_mfa(request, "delete_workspace")
+    import os
+
     from maverick.tenant import registry as tenant_registry
 
-    _get_tenant_or_404(tenant_id)
-    tenant_registry.delete_tenant(tenant_id, purge=purge)
-    await _audit_tenant_change(request, "tenant_deleted", tenant_id, purge=purge)
+    from . import rbac, settings_store, workspace_tenants
+
+    existing = tenant_registry.get_tenant(tenant_id)
+    if existing is None:
+        if not tenant_registry.tenant_retired(tenant_id):
+            raise HTTPException(status_code=404, detail="workspace not found")
+        if purge:
+            raise HTTPException(status_code=409, detail="Removed workspaces cannot be erased by retrying Remove.")
+    else:
+        if os.environ.get("MAVERICK_TENANT", "").strip() == tenant_id:
+            raise HTTPException(status_code=409, detail=(
+                "This installation is fixed to this workspace. Change that binding before removing it."
+            ))
+        tenant_registry.delete_tenant(tenant_id, purge=purge)
+    try:
+        revoked = rbac.clear_tenant_roles(tenant_id)
+        cleared = workspace_tenants.clear_tenant_selections(tenant_id)
+        local_selection_cleared = settings_store.clear_deleted_active_tenant(tenant_id)
+    except Exception as exc:
+        # The tombstone already denies every old member. A retry of this same
+        # endpoint completes cleanup without reopening the retained records.
+        raise HTTPException(status_code=503, detail=(
+            "Workspace access is closed, but member cleanup could not be confirmed. Retry Remove."
+        )) from exc
+    await _audit_tenant_change(request, "tenant_deleted", tenant_id, purge=purge,
+                               revoked_members=revoked, cleared_selections=cleared,
+                               local_selection_cleared=local_selection_cleared)
     return Response(status_code=204)
+
+
+@router.get("/admin/tenants/removed/list")
+async def removed_tenants(request: Request) -> list[dict[str, object]]:
+    require_global_permission(request, "admin")
+    from maverick.tenant.registry import list_removed_tenants
+
+    return list_removed_tenants()
+
+
+@router.post("/admin/tenants/{tenant_id}/restore", response_model=TenantOut)
+async def restore_tenant(request: Request, tenant_id: str) -> TenantOut:
+    require_global_permission(request, "admin")
+    step_up.require_recent_mfa(request, "restore_workspace")
+    from maverick.tenant import registry as tenant_registry
+
+    from . import rbac, workspace_tenants
+
+    # Legacy role files may predate removal cleanup. Clear them before any
+    # retained workspace can be re-admitted; never reactivate former members.
+    if not tenant_registry.tenant_retired(tenant_id):
+        raise HTTPException(status_code=404, detail="removed workspace not found")
+    try:
+        rbac.clear_tenant_roles(tenant_id)
+        workspace_tenants.clear_tenant_selections(tenant_id)
+        rec = tenant_registry.restore_tenant(tenant_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=(
+            "Workspace recovery could not be confirmed. The records remain closed; refresh and retry."
+        )) from exc
+    await _audit_tenant_change(request, "tenant_restored", tenant_id, status="suspended")
+    return _to_tenant_out(rec)
 
 
 # Per-tenant RBAC: a principal can hold a different role in each tenant. These

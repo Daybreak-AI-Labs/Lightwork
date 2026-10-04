@@ -944,12 +944,11 @@ def default_action_runner(
 
         def audit_result(
             status: str,
-            result: object,
             *,
             disposition: str,
+            safe_summary: str | None = None,
         ) -> bool:
             from ..audit import EventKind, audit_event
-            from ..tool_authz import _audit_summary
 
             return audit_event(
                 EventKind.TOOL_RESULT,
@@ -962,7 +961,13 @@ def default_action_runner(
                 call_commitment_algorithm=TOOL_CALL_COMMITMENT_ALGORITHM,
                 status=status,
                 disposition=disposition,
-                output_summary=_audit_summary(result),
+                # Connector output can echo request credentials under an
+                # innocent key, defeating pattern-only redaction. Keep the
+                # signed receipt content-free; status/disposition and the
+                # call commitment carry the evidence needed for review.
+                output_summary=safe_summary or (
+                    "Tool completed" if status == "ok" else "Tool failed"
+                ),
             )
 
         try:
@@ -1016,8 +1021,8 @@ def default_action_runner(
                 try:
                     audit_result(
                         "error",
-                        f"ERROR: {type(e).__name__}",
                         disposition=disposition,
+                        safe_summary=f"ERROR: {type(e).__name__}",
                     )
                 except BaseException:
                     # A terminal writer failure must never replace the caller's
@@ -1036,12 +1041,12 @@ def default_action_runner(
                     try:
                         audit_result(
                             "error",
-                            f"ERROR: {type(e).__name__}",
                             disposition=(
                                 "budget_exceeded"
                                 if isinstance(e, BudgetExceeded)
                                 else "halted"
                             ),
+                            safe_summary=f"ERROR: {type(e).__name__}",
                         )
                     except AuditRefused:
                         # Preserve the control-flow stop.  The tool boundary has
@@ -1072,7 +1077,6 @@ def default_action_runner(
             try:
                 result_recorded = audit_result(
                     "ok" if ok else "error",
-                    result,
                     disposition="completed" if ok else "tool_error",
                 )
             except AuditRefused:
@@ -1100,10 +1104,14 @@ def sandbox_runners() -> tuple[AgentRunner, ActionRunner]:
     connector, so a user can safely test a flow with sample input before wiring
     it to a live trigger. Each returns a labeled placeholder + a success outcome."""
     def agent(brief: str, data: dict) -> tuple[Any, float | None]:
-        return (f"[dry-run agent] {str(brief)[:120]}", 1.0)
+        # The rendered brief can contain private sample input. It does not
+        # belong in the saved test run as a mock agent result.
+        return ("[dry-run agent] completed", 1.0)
 
     def action(tool: str, params: dict, data: dict) -> tuple[Any, float | None]:
-        return ({"dry_run": True, "tool": tool, "params": params}, 1.0)
+        # Rendered parameters are passed only to a live connector. Echoing
+        # them here copied arbitrary credential values into the run record.
+        return ({"dry_run": True, "tool": tool, "parameters": "withheld"}, 1.0)
     return agent, action
 
 

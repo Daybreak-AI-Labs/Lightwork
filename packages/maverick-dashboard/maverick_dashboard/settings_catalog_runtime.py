@@ -893,6 +893,10 @@ def _memory(S) -> tuple:
           "The key for the hosted indexing service. It is stored sealed and never shown "
           "again.", "secret", group, "", "maverick.config", subgroup="Document search",
           max_length=500),
+        S("knowledge", "store_api_key", "Qdrant index key",
+          "The key for your Qdrant index. It is separate from the indexing service "
+          "key, stored sealed and never shown again.", "secret", group, "",
+          "maverick.config", subgroup="Document search", max_length=500),
         S("knowledge", "path", "File for the search index",
           "Where on the server the search index is kept when it is a file here. Leave empty "
           "to keep it in each workspace's own folder.", "text", group, "", "maverick.config",

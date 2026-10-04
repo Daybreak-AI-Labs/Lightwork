@@ -383,6 +383,32 @@ class TestExecution:
         assert run.nodes["a"]["outcome"] == 1.0 and run.nodes["b"]["outcome"] == 1.0
         assert node_outcomes.stats("dry") == {}          # nothing grounded
 
+    def test_dry_run_never_echoes_rendered_params_or_brief_in_saved_data(
+            self, tmp_path, monkeypatch):
+        from maverick.flow import store
+
+        _patch_home(tmp_path, monkeypatch)
+        private_value = "cedar-marble-4829-7731"  # pragma: allowlist secret
+        f = Flow(id="private-dry", name="Private test", start="a", nodes={
+            "a": FlowNode(id="a", kind=NODE_AGENT,
+                          brief=f"Summarize {private_value}", output="draft", next="b"),
+            "b": FlowNode(id="b", kind=NODE_ACTION, tool="web_search",
+                          params={"body": f"pin={private_value}"}, output="posted"),
+        })
+        ag, act = execution.sandbox_runners()
+
+        run = execution.execute(f, agent_runner=ag, action_runner=act,
+                                data={"sample": "ordinary"}, record_outcomes=False)
+        saved = store.load_run(run.run_id)
+
+        assert run.status == "completed" and saved.status == "completed"
+        assert saved.data["posted"] == {
+            "dry_run": True, "tool": "web_search", "parameters": "withheld",
+        }
+        assert private_value not in str(run.data)
+        assert private_value not in str(saved.data)
+        assert private_value not in str(saved.input_data)
+
     def test_execute_preserves_queued_placeholder_idem_and_inputs(self, tmp_path, monkeypatch):
         # A queued placeholder (saved by enqueue with the idempotency key + inputs)
         # keeps those fields when the job later runs it.

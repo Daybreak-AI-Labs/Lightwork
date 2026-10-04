@@ -2676,6 +2676,66 @@ def _write_dsar_export_artifact(path: Path, intent: dict, bundle: dict) -> str:
     return digest
 
 
+def _remove_closed_dsar_export(record: dict) -> bool:
+    """Remove only this request's authentic local export after durable close.
+
+    The path in a record is untrusted: derive the destination from the current
+    tenant and request ID, then require any stored path and digest to agree.
+    A missing file is a successful retry; a changed, linked, or unreadable
+    artifact is left in place for an administrator to investigate.
+    """
+    from .paths import data_dir
+
+    export_dir = data_dir("dsar_requests") / "exports"
+    path = Path(os.path.abspath(os.fspath(export_dir / f"{record['id']}-export.json")))
+    fulfillment = record.get("fulfillment")
+    if fulfillment is not None and not isinstance(fulfillment, dict):
+        return False
+    if fulfillment:
+        recorded_path = fulfillment.get("export_path")
+        recorded_digest = fulfillment.get("artifact_sha256")
+        try:
+            path_matches = (
+                isinstance(recorded_path, str)
+                and Path(os.path.abspath(recorded_path)) == path
+            )
+        except (OSError, ValueError):
+            path_matches = False
+        if (
+            not path_matches
+            or fulfillment.get("export_schema") != _DSAR_EXPORT_SCHEMA
+            or not isinstance(recorded_digest, str)
+            or re.fullmatch(r"[0-9a-f]{64}", recorded_digest) is None
+        ):
+            return False
+    try:
+        _validated_private_directory(path.parent, must_exist=True)
+        before = path.lstat()
+    except FileNotFoundError:
+        return True
+    except (OSError, ValueError):
+        return False
+    if _unsafe_path_alias(path, before) or not stat.S_ISREG(before.st_mode) or before.st_nlink != 1:
+        return False
+    recovered = _load_dsar_export_artifact(path, intent=_dsar_export_intent(record))
+    if recovered is None or (fulfillment and recovered[1] != fulfillment["artifact_sha256"]):
+        return False
+    try:
+        # Recheck the directory and leaf after parsing, immediately before
+        # unlinking. Normal app writers are serialized by the request record;
+        # the private directory excludes other users' filesystem writes.
+        _validated_private_directory(path.parent, must_exist=True)
+        after = path.lstat()
+        if _unsafe_path_alias(path, after) or _file_identity(after) != _file_identity(before):
+            return False
+        path.unlink()
+    except FileNotFoundError:
+        return True
+    except (OSError, ValueError):
+        return False
+    return True
+
+
 def dsar_clock(record: dict, *, now: float | None = None) -> dict:
     """The live clock fields for one request, computed from the stored
     deadlines so the list, the detail page and the alerting (work package
@@ -3300,6 +3360,10 @@ def close_dsar(request_id: str, *, closed_by: str = "") -> dict | None:
         r["status"] = "closed"
         r["closed_at"] = time.time()
         r["closed_by"] = _actor_label(closed_by)
+        if r.get("kind") in ("access", "portability"):
+            # Publish the close before touching its export. A crash now leaves
+            # a durable pending marker that a repeated close can finish.
+            r["export_cleanup"] = {"status": "pending"}
         _queue_audit(r, "close", closed_by)
         changed = True
 
@@ -3310,6 +3374,32 @@ def close_dsar(request_id: str, *, closed_by: str = "") -> dict | None:
         saved = _audit_mutation(_DSAR, "dsar", saved)
     if changed:
         _emit_record_event("dsar.closed", "dsar", saved)
+    if saved is not None and saved.get("kind") in ("access", "portability"):
+        removed = _remove_closed_dsar_export(saved)
+        outcome = {
+            "status": "removed" if removed else "failed",
+            "message": (
+                "No export file remains for this request."
+                if removed else
+                "The request is closed, but its export file could not be safely removed. "
+                "Retry export cleanup or ask an administrator for help."
+            ),
+        }
+
+        def _record_cleanup(r: dict) -> None:
+            # A concurrent retry that succeeded must not be overwritten by a
+            # slower failed attempt. Success may always replace a failure.
+            if r.get("status") != "closed":
+                return
+            if not removed and (r.get("export_cleanup") or {}).get("status") == "removed":
+                return
+            if r.get("export_cleanup") != outcome:
+                r["export_cleanup"] = outcome
+                _queue_audit(r, "export_cleanup", closed_by)
+
+        saved = _DSAR.update(request_id, _record_cleanup)
+        if saved is not None and isinstance(saved.get("_audit_pending"), (dict, list)):
+            saved = _audit_mutation(_DSAR, "dsar", saved)
     return saved
 
 

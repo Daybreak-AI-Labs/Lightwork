@@ -241,11 +241,12 @@ def build_embedder(cfg: dict | None = None) -> Embedder:
         return DeterministicEmbedder(int(cfg.get("dim", 256)))
 
     if provider == "hosted":
-        key = cfg.get("api_key") or os.environ.get("MAVERICK_EMBED_API_KEY", "")
+        key = (cfg.get("api_key") or os.environ.get("VOYAGE_API_KEY")
+               or os.environ.get("MAVERICK_EMBED_API_KEY", ""))
         if not key:
             raise RuntimeError(
                 "knowledge: hosted embedder selected but no API key (set "
-                "[knowledge] api_key or MAVERICK_EMBED_API_KEY); or set "
+                "[knowledge] api_key, VOYAGE_API_KEY, or MAVERICK_EMBED_API_KEY); or set "
                 "embedder = 'deterministic' for offline/dev retrieval."
             )
         return HostedEmbedder(

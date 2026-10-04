@@ -189,10 +189,16 @@
   });
 
   on('dsar-close', function () {
-    ask('Close this request? It will no longer count toward the deadline list.', 'Close request').then(function (ok) {
+    var retry = page.getAttribute('data-status') === 'closed';
+    ask(retry ? 'Try removing this request’s saved export again?' :
+        'Close this request? It will no longer count toward the deadline list.',
+        retry ? 'Retry cleanup' : 'Close request').then(function (ok) {
       if (!ok) return;
-      call('POST', base + encodeURIComponent(requestId) + '/close').then(function () {
-        say('Request closed.'); reloadSoon();
+      call('POST', base + encodeURIComponent(requestId) + '/close').then(function (result) {
+        var cleanup = result && result.export_cleanup;
+        say(cleanup && cleanup.status === 'failed' ? cleanup.message :
+            retry ? 'Saved export cleanup complete.' : 'Request closed.');
+        reloadSoon();
       }).catch(function (f) { fail(f, 'close the request'); });
     });
   });

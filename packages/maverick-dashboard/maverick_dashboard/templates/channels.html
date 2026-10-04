@@ -24,8 +24,12 @@
       </label>
       {% endmacro %}
   {% set configured_count = managed | selectattr('configured') | list | length %}
-  {% set verified_count = managed | selectattr('readiness.live.status', 'equalto', 'verified') | list | length %}
-  {% set failed_count = managed | selectattr('readiness.live.status', 'equalto', 'failed') | list | length %}
+  {% set verified_count = managed | selectattr('readiness.state', 'equalto', 'live_verified') | list | length %}
+  {% set failures = namespace(count=0) %}
+  {% for c in managed if c.readiness.state in ['dependency_failed', 'runtime_failed', 'live_failed', 'policy_denied'] %}
+    {% set failures.count = failures.count + 1 %}
+  {% endfor %}
+  {% set failed_count = failures.count %}
   {% call hero('Meet people where they work', 'Channels',
                subtitle='Slack, email and more',
                lede='Connect the chat apps your team already uses, so people can

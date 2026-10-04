@@ -226,6 +226,101 @@ class TestDsar:
         listed = privacy_ops.list_dsars()
         assert [x["status"] for x in listed if x["id"] == r["id"]] == ["fulfilled"]
 
+    def test_close_removes_export_only_after_durable_close(self, monkeypatch):
+        opened = privacy_ops.open_dsar("jordan@example.com", "access", channel="email")
+        fulfilled = privacy_ops.fulfill_dsar(opened["id"])
+        path = Path(fulfilled["fulfillment"]["export_path"])
+        assert path.is_file()  # Available to deliver before close.
+        original_unlink = Path.unlink
+        observed = []
+
+        def unlink_after_commit(target, *args, **kwargs):
+            if target == path:
+                observed.append(privacy_ops._DSAR.load(opened["id"])["status"])
+            return original_unlink(target, *args, **kwargs)
+
+        with monkeypatch.context() as patch:
+            patch.setattr(Path, "unlink", unlink_after_commit)
+            closed = privacy_ops.close_dsar(opened["id"], closed_by="privacy-lead")
+
+        assert observed == ["closed"]
+        assert closed["status"] == "closed"
+        assert closed["export_cleanup"]["status"] == "removed"
+        assert not path.exists()
+        revision = closed["revision"]
+        repeated = privacy_ops.close_dsar(opened["id"])
+        assert repeated["export_cleanup"]["status"] == "removed"
+        assert repeated["revision"] == revision
+
+    def test_failed_export_cleanup_is_visible_and_retryable(self, monkeypatch):
+        opened = privacy_ops.open_dsar("jordan@example.com", "portability", channel="email")
+        fulfilled = privacy_ops.fulfill_dsar(opened["id"])
+        path = Path(fulfilled["fulfillment"]["export_path"])
+        original_unlink = Path.unlink
+
+        def refuse_once(target, *args, **kwargs):
+            if target == path:
+                raise PermissionError("simulated file lock")
+            return original_unlink(target, *args, **kwargs)
+
+        with monkeypatch.context() as patch:
+            patch.setattr(Path, "unlink", refuse_once)
+            first = privacy_ops.close_dsar(opened["id"])
+
+        assert first["status"] == "closed" and path.is_file()
+        assert first["export_cleanup"]["status"] == "failed"
+        assert "could not be safely removed" in first["export_cleanup"]["message"]
+        assert privacy_ops.get_dsar(opened["id"])["export_cleanup"]["status"] == "failed"
+        retried = privacy_ops.close_dsar(opened["id"])
+        assert retried["status"] == "closed"
+        assert retried["export_cleanup"]["status"] == "removed"
+        assert not path.exists()
+
+    def test_close_refuses_tampered_export_path_and_artifact(self, tmp_path):
+        opened = privacy_ops.open_dsar("jordan@example.com", "access", channel="email")
+        fulfilled = privacy_ops.fulfill_dsar(opened["id"])
+        path = Path(fulfilled["fulfillment"]["export_path"])
+        unrelated = tmp_path / "unrelated.json"
+        unrelated.write_text("leave me alone", encoding="utf-8")
+
+        def plant_other_path(record):
+            record["fulfillment"] = {**record["fulfillment"], "export_path": str(unrelated)}
+
+        privacy_ops._DSAR.update(opened["id"], plant_other_path)
+        refused = privacy_ops.close_dsar(opened["id"])
+        assert refused["export_cleanup"]["status"] == "failed"
+        assert path.is_file() and unrelated.read_text(encoding="utf-8") == "leave me alone"
+
+        def restore_path(record):
+            record["fulfillment"] = {**record["fulfillment"], "export_path": str(path)}
+
+        privacy_ops._DSAR.update(opened["id"], restore_path)
+        path.write_text("{}", encoding="utf-8")
+        refused_artifact = privacy_ops.close_dsar(opened["id"])
+        assert refused_artifact["export_cleanup"]["status"] == "failed"
+        assert path.is_file() and path.read_text(encoding="utf-8") == "{}"
+
+    def test_close_removes_bound_orphan_from_interrupted_fulfillment(self):
+        from maverick.file_lock import ensure_private_directory
+        from maverick.paths import data_dir
+
+        opened = privacy_ops.open_dsar("jordan@example.com", "access", channel="email")
+        out_dir = ensure_private_directory(data_dir("dsar_requests") / "exports")
+        path = out_dir / f"{opened['id']}-export.json"
+        intent = privacy_ops._dsar_export_intent(opened)
+        bundle = {
+            "subject": {"user_id": opened["subject_id"], "channel": "email"},
+            "tenant": None, "counts": {"facts": 1},
+        }
+        privacy_ops._write_dsar_export_artifact(path, intent, bundle)
+        assert privacy_ops.get_dsar(opened["id"])["status"] == "open"
+
+        closed = privacy_ops.close_dsar(opened["id"])
+
+        assert closed["status"] == "closed"
+        assert closed["export_cleanup"]["status"] == "removed"
+        assert not path.exists()
+
     def test_erasure_fulfillment_is_structured_not_shell_text(self):
         subject = "jordan@example.com & calc.exe | whoami > owned.txt"
         channel = "email & echo %COMSPEC% ^ !PATH!"

@@ -28,7 +28,11 @@
   {% elif not r.configured %}
     {% set overall, cls, sentence = 'Not set up', '', 'Add the details to set up this connection.' %}
   {% elif r.dependency.status == 'failed' %}
-    {% set overall, cls, sentence = 'Needs attention', 'blocked', 'Something this connection needs is missing on the computer running Lightwork. Share the technical details with whoever installed it.' %}
+    {% if r.dependency.evidence.kind == 'channel_adapter' %}
+      {% set overall, cls, sentence = 'Needs attention', 'blocked', r.dependency.detail %}
+    {% else %}
+      {% set overall, cls, sentence = 'Needs attention', 'blocked', 'Something this connection needs is missing on the computer running Lightwork. Share the technical details with whoever installed it.' %}
+    {% endif %}
   {% elif r.runtime.status == 'failed' %}
     {% set overall, cls, sentence = 'Needs attention', 'blocked', 'Some details are missing or wrong. Check them and save again.' %}
   {% elif r.live.status == 'failed' %}
@@ -41,6 +45,9 @@
   <div class="integration-readiness" style="display: grid; gap: var(--space-1); min-width: min(100%, 15rem); font-size: var(--text-sm);">
     <div><span class="muted">Status:</span> <span class="badge {{ cls }}">{{ overall }}</span></div>
     <p class="muted integration-readiness__copy" style="margin: 0;">{{ sentence }}</p>
+    {% if r.dependency.status == 'failed' and r.dependency.evidence.kind == 'channel_adapter' %}
+    <p class="muted integration-readiness__copy" style="margin: 0;">This local check does not prove messages can be delivered. <a href="/settings?focus=ops-services-title">Manage the chat service</a> after the installation is repaired, then send a test message.</p>
+    {% endif %}
     <details>
       <summary>Technical details</summary>
       <ul class="muted integration-readiness__steps" style="margin: var(--space-1) 0; padding-left: var(--space-4);">
@@ -56,6 +63,9 @@
       {% elif r.dependency.status == 'failed' %}{{ r.dependency.detail }}
       {% else %}{{ r.live.detail }}{% endif %}
       </p>
+      {% if r.dependency.evidence.kind == 'channel_adapter' and r.dependency.evidence.missing_modules %}
+      <p class="muted integration-readiness__copy" style="margin: 0;">Missing component names for your installer: {{ r.dependency.evidence.missing_modules | join(', ') }}.</p>
+      {% endif %}
     </details>
   </div>
 {% endmacro %}

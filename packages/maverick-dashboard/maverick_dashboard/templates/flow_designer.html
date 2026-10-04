@@ -7,6 +7,7 @@
      (palette + svg + props). Every engine control keeps its id; the layout
      just repositions them and shows/hides per view. */
   .fd { display: flex; flex-direction: column; gap: var(--space-3); }
+  #fd-draft-retry[hidden] { display: none; }
   .fdx-head { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
   .fdx-head .fd__name { flex: 0 1 260px; font-weight: var(--font-semibold); }
   .fdx-head__spacer { margin-inline-start: auto; }
@@ -54,8 +55,8 @@
   .fdx-panel details > summary { cursor: pointer; font-weight: var(--font-semibold); }
   .fdx-panel details[open] > summary { margin-bottom: var(--space-3); }
   .fdx-mini { color: var(--muted); font-size: var(--text-xs); margin: var(--space-2) 0 0; }
-  .fd__nl { flex: 1; min-width: 220px; display: flex; gap: var(--space-2); }
-  .fd__nl input { flex: 1; }
+  .fd__nl { flex: 1; min-width: 220px; display: flex; flex-wrap: wrap; gap: var(--space-2); }
+  .fd__nl input { flex: 1; min-width: min(160px, 100%); }
   .fd__palette { display: flex; flex-direction: column; gap: var(--space-2); overflow-y: auto; }
   .fd__palette button { justify-content: flex-start; text-align: left; }
   .fd__canvas-wrap { border: 1px solid var(--border); border-radius: var(--radius-lg);
@@ -288,6 +289,7 @@
   <div class="fd__nl">
     <input class="input" id="fd-nl" placeholder="Describe your workflow in plain English…" aria-label="Describe your workflow" />
     <button class="btn btn--primary" type="button" id="fd-draft">✨ Draft</button>
+    <button class="btn btn--ghost" type="button" id="fd-draft-retry" hidden>Try draft again</button>
   </div>
   <div class="fd__examples" id="fd-examples" aria-label="Example workflows"></div>
 

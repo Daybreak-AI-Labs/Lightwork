@@ -3,7 +3,7 @@
 (function () {
   'use strict';
   var addMsg = document.getElementById('tenant-add-msg');
-  var rowMsg = document.getElementById('tenant-quota-msg');
+  var rowMsg = document.getElementById('tenant-quota-msg') || document.getElementById('removed-tenants-msg');
 
   function errorText(failure, action) {
     return window.mvErrorText ? window.mvErrorText(failure, action) : 'Could not ' + action + '. Please try again.';
@@ -120,7 +120,7 @@
   var questions = {
     suspend: ['Pause {name}? No new work can start in it until you resume it. Nothing is deleted.', 'Pause', 'pause the workspace', 'POST', '/suspend', '{name} is paused.'],
     resume: ['Resume {name}? Work can start in it again.', 'Resume', 'resume the workspace', 'POST', '/resume', '{name} is active again.'],
-    delete: ['Remove {name} from the list? No one will be able to open it any more. Its stored records stay on this computer.', 'Remove workspace', 'remove the workspace', 'DELETE', '', '{name} was removed.']
+    delete: ['Remove {name} from the list? Access and member roles will be revoked. Its stored records stay on this computer for deliberate recovery.', 'Remove workspace', 'remove the workspace', 'DELETE', '', '{name} was removed.']
   };
   document.querySelectorAll('[data-tenant-action]').forEach(function (button) {
     button.addEventListener('click', async function () {
@@ -138,6 +138,29 @@
         reloadSoon();
       } catch (failure) {
         rowMsg.textContent = errorText(failure, q[2]);
+        button.disabled = false;
+      }
+    });
+  });
+
+  document.querySelectorAll('[data-tenant-restore]').forEach(function (button) {
+    button.addEventListener('click', async function () {
+      var row = button.closest('[data-removed-workspace]');
+      var name = row.dataset.removedName;
+      var ok = await window.mvConfirm('Restore ' + name + ' with its old records? It will stay paused, and former members will not regain access.', {okText: 'Restore paused workspace'});
+      if (!ok) return;
+      button.disabled = true;
+      rowMsg.textContent = 'Restoring…';
+      try {
+        var restored = await send(base(row.dataset.removedWorkspace) + '/restore', 'POST');
+        var restoredName = restored.display_name || name;
+        rowMsg.textContent = restoredName + ' was restored as paused. Review it before resuming.';
+        if (window.mvToastAfterReload) window.mvToastAfterReload(rowMsg.textContent);
+        reloadSoon();
+      } catch (failure) {
+        var plain = '';
+        try { if (failure && typeof failure.clone === 'function') { var body = await failure.clone().json(); plain = window.mvPlainDetail ? window.mvPlainDetail(body && body.detail) : ''; } } catch (ignored) {}
+        rowMsg.textContent = plain || errorText(failure, 'restore the workspace');
         button.disabled = false;
       }
     });

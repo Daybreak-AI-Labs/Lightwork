@@ -28,6 +28,7 @@ the last test result; changing the configuration returns it to "not tested yet".
 """
 from __future__ import annotations
 
+import os
 import re
 from typing import Any
 
@@ -127,14 +128,25 @@ def _configured(name: str, state: dict[str, Any], table: dict[str, Any]) -> tupl
         from maverick.config import azure_provider_configuration_missing
 
         return (not azure_provider_configuration_missing(table)), "sign-in"
+    if name == "bedrock":
+        region = (str(table.get("region") or "").strip()
+                  or os.environ.get("AWS_REGION", "").strip()
+                  or os.environ.get("AWS_DEFAULT_REGION", "").strip())
+        mode = str(table.get("auth_mode") or os.environ.get("BEDROCK_AUTH_MODE") or "").strip().lower()
+        if not region:
+            return False, ""
+        if mode == "iam":
+            return True, "AWS sign-in"
+        key_ready = bool(state.get("api_key_configured") or os.environ.get("AWS_BEARER_TOKEN_BEDROCK"))
+        if mode == "api_key" or key_ready:
+            return key_ready, "key"
+        return False, ""
     if state.get("api_key_configured"):
         if name == "openai_compatible" and not state.get("base_url_configured"):
             return False, ""
         return True, "key"
     if name in _KEY_REQUIRED or name == "openai_compatible":
         return False, ""
-    if name == "bedrock" and str(table.get("auth_mode", "")).strip().lower() == "iam":
-        return True, "AWS sign-in"
     if name == "codex_cli":
         try:
             from maverick.providers.codex_cli_provider import _auth_file_present
@@ -196,12 +208,25 @@ def _provider_row(name: str, label: str, cfg: dict[str, Any], roles: list[str]) 
                    reason="The last connection test worked.")
     elif runtime["status"] == "failed":
         reason = plain_reason(live.get("detail") or runtime.get("detail") or "")
+        if name in {"azure", "bedrock"} and _HTTP_STATUS.search(str(live.get("detail") or "")):
+            code = int(_HTTP_STATUS.search(str(live.get("detail") or "")).group(1))
+            if code in (401, 403):
+                reason = "The service did not accept this sign-in. Check the account's model access and try again."
         row["last_test"].update(status="failed", reason=reason)
         if (live.get("evidence", {}).get("blocked_by_egress_policy")
                 or "egress policy" in str(live.get("detail") or "").lower()):
             row.update(status="blocked", status_label="Blocked by outbound-connection rules", reason=reason)
         else:
             row.update(status="failed", status_label="Connection failed: " + reason, reason=reason)
+    elif name in {"azure", "bedrock"} and live.get("status") == "unknown" and live.get("tested_at"):
+        kind = live.get("evidence", {}).get("kind")
+        reason = {
+            "price_preflight": "Add this model's spending ceiling under Models, then test again.",
+            "model_mismatch": "The default task model differs from the saved connection. Choose the saved model under Models, then test again.",
+            "budget_limit": "The connection check reached its spending or token limit. Review the model's ceiling, then test again.",
+        }.get(kind, "The connection check could not confirm a usable model response. Review its details and test again.")
+        row["last_test"].update(status="unknown", reason=reason)
+        row.update(status="blocked", status_label="Needs attention: " + reason, reason=reason)
     elif live.get("stale"):
         word = _saved_word(saved)
         row.update(status="untested", status_label=f"{word} saved, not tested yet",

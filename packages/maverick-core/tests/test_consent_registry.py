@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import time
 
 import pytest
 from maverick import config
@@ -128,6 +129,12 @@ def test_status_channel_and_time_are_validated():
             policy_version="v1", channel="web", actor="ops",
             recorded_at=-5.0,
         )
+    with pytest.raises(ValueError, match="future"):
+        cr.record_consent(
+            "bob", purpose="p", status="granted",
+            policy_version="v1", channel="web", actor="ops",
+            recorded_at=time.time() + 3600,
+        )
 
 
 def test_onetrust_import_maps_statuses_and_skips_the_unmappable():
@@ -243,6 +250,40 @@ def test_backdated_event_never_flips_a_newer_withdrawal():
     assert prefs["purposes"]["marketing"]["status"] == "withdrawn"
 
 
+def test_legacy_future_grant_cannot_pin_the_current_choice():
+    saved = cr.record_consent(
+        "alice@example.com", purpose="marketing", status="withdrawn",
+        policy_version="2026-02", channel="web", actor="ops",
+    )
+    future = {**saved["history"][-1], "status": "granted",
+              "recorded_at": time.time() + 86400 * 365}
+
+    def legacy(value):
+        value["history"].append(future)
+        value["current_status"] = "granted"
+        value["last_recorded_at"] = future["recorded_at"]
+
+    cr._RECEIPTS.update(saved["id"], legacy, expected_revision=saved["revision"],
+                        action="legacy_fixture", actor="ops")
+    assert cr.subject_preferences("alice@example.com")["purposes"]["marketing"]["status"] == "withdrawn"
+    assert cr.consent_posture()["by_purpose"]["marketing"]["withdrawn"] == 1
+    assert cr.export_receipts()[0]["current_status"] == "withdrawn"
+    repaired = cr.record_consent(
+        "alice@example.com", purpose="marketing", status="withdrawn",
+        policy_version="2026-03", channel="web", actor="ops",
+    )
+    assert repaired["current_status"] == "withdrawn"
+    assert repaired["last_recorded_at"] < future["recorded_at"]
+
+
+def test_accepted_sender_clock_skew_cannot_outrank_later_withdrawal():
+    row = {"history": [
+        {"status": "granted", "recorded_at": 1300.0, "received_at": 1000.0},
+        {"status": "withdrawn", "recorded_at": 1001.0, "received_at": 1001.0},
+    ]}
+    assert cr._latest_valid_event(row, 1002.0)["status"] == "withdrawn"
+
+
 def test_site_scan_ignores_relative_src_paths():
     # A relative path with a doubled slash must not be read as a host.
     page = """
@@ -318,11 +359,11 @@ def test_webhook_verifies_hmac_then_maps_events(tmp_path, monkeypatch):
     # A backdated push can never flip the projection back.
     newer = json.dumps({"subject": "alice@example.com",
                         "purpose": "marketing", "status": "withdrawn",
-                        "recorded_at": 2_000_000_000.0}).encode()
+                        "recorded_at": float(ts + 1)}).encode()
     cr.ingest_consent_webhook(newer, _signed(newer, ts), ts)
     stale = json.dumps({"subject": "alice@example.com",
                         "purpose": "marketing", "status": "granted",
-                        "recorded_at": 1_000_000_000.0}).encode()
+                        "recorded_at": float(ts - 3600)}).encode()
     cr.ingest_consent_webhook(stale, _signed(stale, ts), ts)
     prefs = cr.subject_preferences("alice@example.com")
     assert prefs["purposes"]["marketing"]["status"] == "withdrawn"

@@ -723,6 +723,29 @@ def test_cli_backup_create_names_the_key_files_left_out():
     assert r.output.strip().splitlines()[-1].startswith("backup written:")
 
 
+def test_cli_whole_home_backup_receipt_names_workspace_keys(tmp_path):
+    from click.testing import CliRunner
+    from maverick.cli import main
+
+    home = tmp_path / "wholehome"
+    _seed(home)
+    _seed_workspace_key_material(home)
+
+    with _whole_home(home):
+        result = CliRunner().invoke(
+            main, ["backup", "create", "--out", str(tmp_path / "wholehome.tgz")]
+        )
+
+    assert result.exit_code == 0, result.output
+    receipt = result.output.split("backup written:")[0]
+    for name in _WORKSPACE_KEY_FILES:
+        assert f"  {name}" in receipt, result.output
+    with tarfile.open(tmp_path / "wholehome.tgz", "r:gz") as archive:
+        members = archive.getnames()
+    for name in _WORKSPACE_KEY_FILES:
+        assert f"data/{name}" not in members
+
+
 def test_cli_backup_create_with_keys_does_not_claim_any_were_left_out():
     from click.testing import CliRunner
     from maverick.cli import main

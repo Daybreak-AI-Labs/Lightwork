@@ -16,6 +16,158 @@
     (Array.isArray(nodes) ? nodes : [nodes]).forEach(function (n) { if (n) box.appendChild(n); });
   }
   var RUNGS = { observe: 'Watch only', suggest: 'Suggest', request: 'Ask before acting', auto: 'Act on their own' };
+  var testAdmin = false;
+  var testCases = [];
+  var testLiveEnabled = false;
+  var editingCase = null;
+  function runStorageKey(specialist) { return 'lightwork-specialist-answer-run:' + specialist; }
+  function pendingRun(specialist) {
+    try { return window.sessionStorage.getItem(runStorageKey(specialist)); } catch (error) { return null; }
+  }
+  function pendingRunCases(specialist) {
+    try { return JSON.parse(window.sessionStorage.getItem(runStorageKey(specialist) + ':cases') || '[]'); }
+    catch (error) { return []; }
+  }
+  function clearPendingRun(specialist) {
+    try {
+      window.sessionStorage.removeItem(runStorageKey(specialist));
+      window.sessionStorage.removeItem(runStorageKey(specialist) + ':cases');
+    } catch (error) { /* no browser storage */ }
+  }
+  function newRunId() {
+    if (!window.crypto || !window.crypto.getRandomValues || !window.sessionStorage) return null;
+    var bytes = new Uint8Array(16); window.crypto.getRandomValues(bytes);
+    return Array.from(bytes, function (b) { return b.toString(16).padStart(2, '0'); }).join('');
+  }
+
+  function testPhrases(id) {
+    return $(id).value.split(/\r?\n/).map(function (x) { return x.trim(); }).filter(Boolean);
+  }
+  function testCriteria(c) {
+    var parts = [];
+    if (c.includes.length) parts.push('Must mention: ' + c.includes.join(', '));
+    if (c.excludes.length) parts.push('Must never say: ' + c.excludes.join(', '));
+    if (c.refusal) parts.push('Must refuse');
+    if (c.citation) parts.push('Must reference a source');
+    return parts.join(' · ');
+  }
+  function clearTestEditor() {
+    editingCase = null;
+    $('wo-test-form').reset();
+    $('wo-test-form-title').textContent = 'Add an answer check';
+    $('wo-test-cancel').hidden = true;
+  }
+  function editTest(c) {
+    editingCase = c;
+    $('wo-test-form-title').textContent = 'Edit answer check';
+    $('wo-test-task').value = c.task;
+    $('wo-test-includes').value = c.includes.join('\n');
+    $('wo-test-excludes').value = c.excludes.join('\n');
+    $('wo-test-refusal').checked = c.refusal;
+    $('wo-test-citation').checked = c.citation;
+    $('wo-test-cancel').hidden = false;
+    $('wo-test-task').focus();
+  }
+  function renderTests(data) {
+    testCases = data.cases || [];
+    testLiveEnabled = !!data.live_enabled;
+    var list = [];
+    if (!testCases.length) list.push(el('p', 'No answer checks yet. Add one below.', 'muted'));
+    else {
+      list.push(el('p', plural(testCases.length, 'saved check') + ' for this specialist. Choose up to 5 for the next run.'));
+      var rows = testCases.map(function (c) {
+        var choose = el('input'); choose.type = 'checkbox'; choose.className = 'wo-test-choice';
+        choose.value = c.id; choose.checked = testCases.length <= 5;
+        choose.setAttribute('aria-label', 'Include this answer check in the next run');
+        choose.addEventListener('change', updateRunAvailability);
+        var actions = el('span');
+        if (testAdmin) {
+          var edit = el('button', 'Edit', 'btn btn--ghost'); edit.type = 'button';
+          edit.addEventListener('click', function () { editTest(c); });
+          var remove = el('button', 'Remove', 'btn btn--ghost'); remove.type = 'button';
+          remove.addEventListener('click', async function () {
+            if (!(await window.mvConfirm('Remove this answer check?', {okText: 'Remove check'}))) return;
+            remove.disabled = true;
+            try {
+              await J.request(API + '/test-suite/customer/remove', {method: 'POST', json: {
+                specialist: c.specialist, identity: c.id, expected_revision: c.revision
+              }});
+              clearTestEditor(); await loadCustomerTests();
+            } catch (failure) { $('wo-test-status').textContent = await J.problem(failure, 'remove the check'); }
+            finally { remove.disabled = false; }
+          });
+          actions.appendChild(edit); actions.appendChild(document.createTextNode(' ')); actions.appendChild(remove);
+        }
+        return [choose, c.task, testCriteria(c), actions];
+      });
+      list.push(J.table(['Choose', 'Question', 'A passing answer', ''], rows));
+    }
+    fill('wo-tests-list', list);
+    document.querySelectorAll('#wo-my-tests .wo-test-admin').forEach(function (n) { n.hidden = !testAdmin; });
+    var run = $('wo-test-run');
+    updateRunAvailability();
+    var pending = pendingRun($('wo-test-specialist').value);
+    run.textContent = pending ? 'Check original result' : 'Check answers';
+    $('wo-test-new-run').hidden = !testAdmin || !pending;
+    if (!data.live_enabled) {
+      var p = el('p', 'Live answer checks are off. An administrator can enable bounded model tests in All settings.', 'muted');
+      var link = el('a', 'Open All settings'); link.href = '/settings/all'; p.appendChild(document.createTextNode(' ')); p.appendChild(link);
+      list.push(p); fill('wo-tests-list', list);
+    }
+    var history = data.runs || [];
+    if (!history.length) { fill('wo-test-history', el('p', 'No live checks have been run yet.', 'muted')); return; }
+    fill('wo-test-history', history.map(function (r) {
+      var box = el('details');
+      var state = r.state === 'done' ? (r.passed + ' of ' + r.total + ' passed')
+        : r.state === 'stopped' ? 'Stopped after ' + r.results.length + ' answers'
+          : r.state === 'prepared' ? 'Not started' : 'Result uncertain after ' + r.results.length + ' answers';
+      box.appendChild(el('summary', J.when(r.started_at) + ' · ' + state));
+      if (r.message) box.appendChild(el('p', r.message));
+      box.appendChild(el('p', 'Model: ' + r.model + '. Recorded cost: ' + J.money(r.spent_dollars) +
+        '. Each check used the specialist instructions shown by this version; no actions or company knowledge were used.', 'muted'));
+      if (r.results.length) box.appendChild(J.table(['Question', 'Answer', 'Result'], r.results.map(function (answer) {
+        return [answer.task, answer.answer, answer.passed ? 'Passed' : 'Needs review'];
+      })));
+      return box;
+    }));
+  }
+  async function loadCustomerTests() {
+    var specialist = $('wo-test-specialist').value;
+    clearTestEditor();
+    if (!specialist) {
+      fill('wo-tests-list', el('p', 'Choose a specialist to see its answer checks.', 'muted'));
+      fill('wo-test-history', null);
+      document.querySelectorAll('#wo-my-tests .wo-test-admin').forEach(function (n) { n.hidden = true; });
+      return;
+    }
+    $('wo-test-status').textContent = 'Loading answer checks…';
+    try {
+      var data = await J.request(API + '/test-suite/customer?specialist=' + encodeURIComponent(specialist));
+      $('wo-test-status').textContent = '';
+      renderTests(data);
+    } catch (failure) { $('wo-test-status').textContent = await J.problem(failure, 'load the answer checks'); }
+  }
+  function selectedTestIds() {
+    return Array.from(document.querySelectorAll('#wo-tests-list .wo-test-choice:checked'), function (box) { return box.value; });
+  }
+  function updateRunAvailability() {
+    var count = selectedTestIds().length;
+    $('wo-test-run').disabled = !testLiveEnabled || !count || count > 5;
+    if (testCases.length > 5) $('wo-test-status').textContent = count > 5
+      ? 'Choose no more than 5 checks for one run.' : count ? '' : 'Choose up to 5 checks to run.';
+  }
+  async function loadTestSpecialists() {
+    try {
+      var data = await J.request(API + '/test-suite/specialists');
+      var select = $('wo-test-specialist');
+      (data.specialists || []).forEach(function (s) {
+        var option = el('option', s.label); option.value = s.value; select.appendChild(option);
+      });
+      var requested = new URLSearchParams(location.search).get('specialist');
+      if (requested && (data.specialists || []).some(function (s) { return s.value === requested; })) select.value = requested;
+      await loadCustomerTests();
+    } catch (failure) { $('wo-test-status').textContent = await J.problem(failure, 'list the specialists'); }
+  }
 
   // ---- what each specialist can do -------------------------------------------------
   var suitesLoaded = false;
@@ -59,6 +211,8 @@
     if (!$('wo-root')) return;
     J.request('/api/v1/value-proof/access').then(function (a) {
       document.querySelectorAll('#wo-root .wo-admin').forEach(function (n) { n.hidden = !(a && a.admin); });
+      testAdmin = !!(a && a.admin);
+      if ($('wo-test-specialist').value) loadCustomerTests();
     }).catch(function () { /* controls stay hidden */ });
     $('wo-inv-suite').addEventListener('change', loadInventory);
     loadInventory();
@@ -106,6 +260,114 @@
     }).catch(async function (failure) {
       fill('wo-suite', el('p', await J.problem(failure, 'load the test suite')));
     });
+
+    $('wo-test-specialist').addEventListener('change', loadCustomerTests);
+    $('wo-test-cancel').addEventListener('click', clearTestEditor);
+    $('wo-test-form').addEventListener('submit', async function (event) {
+      event.preventDefault();
+      var specialist = $('wo-test-specialist').value;
+      if (!specialist) return;
+      var save = $('wo-test-save'); save.disabled = true;
+      $('wo-test-status').textContent = 'Saving…';
+      try {
+        var body = { specialist: specialist, task: $('wo-test-task').value,
+          includes: testPhrases('wo-test-includes'), excludes: testPhrases('wo-test-excludes'),
+          refusal: $('wo-test-refusal').checked, citation: $('wo-test-citation').checked };
+        if (editingCase) { body.identity = editingCase.id; body.expected_revision = editingCase.revision; }
+        await J.request(API + '/test-suite/customer', {method: 'POST', json: body});
+        await loadCustomerTests();
+      } catch (failure) { $('wo-test-status').textContent = await J.problem(failure, 'save the answer check'); }
+      finally { save.disabled = false; }
+    });
+    async function readOriginal(specialist, id) {
+      try {
+        var result = await J.request(API + '/test-suite/customer/run/' + encodeURIComponent(id));
+        var r = result.run;
+        $('wo-test-run-status').textContent = r.state === 'done'
+          ? r.passed + ' of ' + r.total + ' answers passed. Open Previous checks to review them.'
+          : r.state === 'prepared' ? 'The request was saved but has not started. Check the original request again to start it.'
+            : r.message || 'The original request may still be running. No second request was sent.';
+        if (r.state === 'done' || r.state === 'stopped') clearPendingRun(specialist);
+        await loadCustomerTests();
+        return r;
+      } catch (failure) {
+        $('wo-test-run-status').textContent = failure && failure.status === 404
+          ? 'No saved result is visible yet. The original request may still be starting. Check again; no second request was sent.'
+          : await J.problem(failure, 'check the original result');
+        return null;
+      }
+    }
+    async function launch(specialist, id, caseIds) {
+      var revisions = {};
+      caseIds.forEach(function (caseId) {
+        var found = testCases.find(function (c) { return c.id === caseId; });
+        if (found) revisions[caseId] = found.revision;
+      });
+      var started = await J.request(API + '/test-suite/customer/run',
+        {method: 'POST', json: {specialist: specialist, operation_id: id,
+          case_ids: caseIds, case_revisions: revisions}});
+      if (started.run) {
+        await readOriginal(specialist, id);
+        return;
+      }
+      var done = await J.follow(started.job, {status: $('wo-test-run-status'), out: $('wo-test-run-out'),
+        action: 'check the answers', render: function (d) {
+          var r = d.run;
+          return el('p', r.state === 'done' ? r.passed + ' of ' + r.total + ' answers passed. Open Previous checks to review them.'
+            : (r.message || 'The check stopped early. Open Previous checks for completed answers.'));
+        }});
+      if (!done || done.state === 'failed') await readOriginal(specialist, id);
+      else {
+        if (done.result && done.result.run && ['done', 'stopped'].includes(done.result.run.state)) clearPendingRun(specialist);
+        await loadCustomerTests();
+      }
+    }
+    $('wo-test-run').addEventListener('click', async function () {
+      var specialist = $('wo-test-specialist').value;
+      var selected = selectedTestIds();
+      if (!specialist || !selected.length || selected.length > 5) return;
+      var id = pendingRun(specialist);
+      var button = $('wo-test-run'); button.disabled = true;
+      try {
+        if (id) {
+          var original = await readOriginal(specialist, id);
+          if (original && original.state === 'prepared' && await window.mvConfirm(
+            'No provider call started for this request. Try starting the same request?', {okText: 'Try original request'})) {
+            await launch(specialist, id, pendingRunCases(specialist));
+          }
+          return;
+        }
+        if (!(await window.mvConfirm('Check ' + plural(selected.length, 'answer') +
+          ' now? This may make paid AI requests. The run has a $0.25 spending limit, uses no tools, and never automatically retries an interrupted request.',
+          {okText: 'Check answers'}))) return;
+        id = newRunId();
+        if (!id) { $('wo-test-run-status').textContent = 'This browser cannot keep a safe request reference, so no check was started.'; return; }
+        try {
+          window.sessionStorage.setItem(runStorageKey(specialist), id);
+          window.sessionStorage.setItem(runStorageKey(specialist) + ':cases', JSON.stringify(selected));
+        }
+        catch (error) {
+          clearPendingRun(specialist);
+          id = null;
+          $('wo-test-run-status').textContent = 'This browser cannot keep a safe request reference, so no check was started.';
+          return;
+        }
+        await launch(specialist, id, selected);
+      } catch (failure) {
+        $('wo-test-run-status').textContent = await J.problem(failure, 'check the answers');
+        if (id) await readOriginal(specialist, id);
+      } finally { updateRunAvailability(); }
+    });
+    $('wo-test-new-run').addEventListener('click', async function () {
+      var specialist = $('wo-test-specialist').value;
+      if (!(await window.mvConfirm('Start a separate paid check? The original request may still be running or billed. Review its result and provider accounting first.',
+        {okText: 'Start separately'}))) return;
+      clearPendingRun(specialist);
+      $('wo-test-run-status').textContent = 'The original request reference was cleared. Review Previous checks before starting another.';
+      $('wo-test-run').textContent = 'Check answers';
+      $('wo-test-new-run').hidden = true;
+    });
+    loadTestSpecialists();
   }
 
   // ---- tasks coming due --------------------------------------------------------------

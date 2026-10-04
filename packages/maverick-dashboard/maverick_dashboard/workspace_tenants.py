@@ -129,6 +129,11 @@ def set_selection(principal: str, tenant_id: str | None) -> None:
         raise ValueError("tenant id cannot be empty")
     path = store_path()
     with _locked(path):
+        if selected is not None:
+            from maverick.tenant.registry import tenant_retired
+
+            if tenant_retired(selected):
+                raise ValueError("removed workspace cannot be selected")
         data = _load()
         previous = data.get(name, {"tenant_id": None, "generation": 0})
         if previous["tenant_id"] == selected:
@@ -141,6 +146,30 @@ def set_selection(principal: str, tenant_id: str | None) -> None:
             "schema": _SCHEMA,
             "selections": data,
         }, indent=2, sort_keys=True))
+
+
+def clear_tenant_selections(tenant_id: str) -> int:
+    """Clear stale navigation and invalidate queued selection generations."""
+    from maverick.file_lock import atomic_write_text
+    from maverick.paths import _tenant_namespace_key
+
+    key = _tenant_namespace_key(tenant_id)
+    path = store_path()
+    with _locked(path):
+        data = _load()
+        changed = 0
+        for entry in data.values():
+            selected = entry["tenant_id"]
+            if selected is not None and _tenant_namespace_key(selected) == key:
+                entry["tenant_id"] = None
+                entry["generation"] = int(entry["generation"]) + 1
+                changed += 1
+        if changed:
+            atomic_write_text(path, json.dumps({
+                "schema": _SCHEMA,
+                "selections": data,
+            }, indent=2, sort_keys=True))
+        return changed
 
 
 def principal_can_select(principal: str, tenant_id: str) -> bool:
@@ -183,6 +212,7 @@ __all__ = [
     "accessible_tenant_ids",
     "get_selection",
     "get_selection_binding",
+    "clear_tenant_selections",
     "principal_can_select",
     "set_selection",
     "store_path",

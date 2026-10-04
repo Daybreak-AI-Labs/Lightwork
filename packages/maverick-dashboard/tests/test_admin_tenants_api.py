@@ -119,7 +119,70 @@ def test_deleted_workspace_cannot_adopt_old_membership_or_payload(purge, monkeyp
     assert fresh.json()["id"] == "former-2"
     assert rbac.get_tenant_role("former-2", "user:old") is None
     assert not (data_dir(tenant="former-2") / "synthetic.txt").exists()
-    assert rbac.get_tenant_role("former", "user:old") == "admin"
+    assert rbac.get_tenant_role("former", "user:old") is None
+    assert "former" not in rbac._load_tenant()
+    removed_list = client.get("/api/v1/admin/tenants/removed/list")
+    assert removed_list.status_code == 200
+    assert removed_list.json()[0]["restorable"] is not purge
+
+
+def test_restore_retained_workspace_is_paused_and_reinvites_members(monkeypatch):
+    from maverick.paths import data_dir, maverick_home
+    from maverick_dashboard import rbac, settings_store, workspace_tenants
+
+    monkeypatch.setattr(rbac, "tenant_store_path", lambda: maverick_home() / "dashboard-tenant-roles.json")
+    assert client.post("/api/v1/admin/tenants", json={"id": "recover", "display_name": "Recover"}).status_code == 201
+    rbac.set_tenant_role("recover", "user:former", "admin")
+    workspace_tenants.set_selection("user:former", "recover")
+    settings_store.set_active_tenant("recover")
+    (data_dir(tenant="recover") / "private.txt").write_text("retained data", encoding="utf-8")
+
+    removed = client.request(
+        "DELETE", "/api/v1/admin/tenants/recover",
+        headers={"x-lightwork-expected-tenant": "recover"},
+    )
+    assert removed.status_code == 204, removed.text
+    assert workspace_tenants.get_selection("user:former") is None
+    assert rbac.get_tenant_role("recover", "user:former") is None
+    assert settings_store.active_tenant() is None
+
+    newer = client.post("/api/v1/admin/tenants", json={"display_name": "Recover"})
+    assert newer.status_code == 201, newer.text
+    assert newer.json()["id"] == "recover-2"
+    assert not (data_dir(tenant="recover-2") / "private.txt").exists()
+    assert client.get("/tenants").status_code == 200
+    assert "Restore as paused" in client.get("/tenants").text
+
+    restored = client.post("/api/v1/admin/tenants/recover/restore")
+    assert restored.status_code == 200, restored.text
+    assert restored.json()["status"] == "suspended"
+    assert restored.json()["display_name"] == "Recover (recovered)"
+    assert (data_dir(tenant="recover") / "private.txt").read_text(encoding="utf-8") == "retained data"
+    assert rbac.get_tenant_role("recover", "user:former") is None
+    assert workspace_tenants.get_selection("user:former") is None
+    assert client.post("/api/v1/admin/tenants", json={"id": "recover"}).status_code == 409
+    assert client.request("DELETE", "/api/v1/admin/tenants/recover").status_code == 204
+    assert client.post("/api/v1/admin/tenants", json={"id": "recover"}).status_code == 409
+
+
+def test_deleted_workspace_cleanup_can_be_retried_after_membership_store_failure(monkeypatch):
+    from maverick.paths import maverick_home
+    from maverick_dashboard import rbac
+
+    monkeypatch.setattr(rbac, "tenant_store_path", lambda: maverick_home() / "dashboard-tenant-roles.json")
+    assert client.post("/api/v1/admin/tenants", json={"id": "retry"}).status_code == 201
+    rbac.set_tenant_role("retry", "user:former", "admin")
+    original = rbac.clear_tenant_roles
+    def refuse_cleanup(_tenant):
+        raise OSError("write failed")
+
+    monkeypatch.setattr(rbac, "clear_tenant_roles", refuse_cleanup)
+    failed = client.request("DELETE", "/api/v1/admin/tenants/retry")
+    assert failed.status_code == 503
+    assert rbac.get_tenant_role("retry", "user:former") is None  # tombstone denies even with stale file
+    monkeypatch.setattr(rbac, "clear_tenant_roles", original)
+    assert client.request("DELETE", "/api/v1/admin/tenants/retry").status_code == 204
+    assert "retry" not in rbac._load_tenant()
 
 
 def test_tenant_has_no_cap_unless_one_is_chosen():

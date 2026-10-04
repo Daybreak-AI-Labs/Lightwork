@@ -107,6 +107,7 @@ def test_run_express_enables_all_safe_features(monkeypatch, tmp_path: Path):
         "write_file",
         "apply_patch",
         "str_replace_editor",
+        "ast_edit",
     }
     # Self-learning is on WITHOUT executable-tool or external-MCP autonomy.
     assert config["self_learning"]["create_tools"] is False
@@ -203,6 +204,7 @@ def test_run_consumer_writes_safe_defaults(monkeypatch, tmp_path: Path):
     assert "browser" in config["security"]["denied_tools"]
     assert "shell" in config["security"]["denied_tools"]
     assert "write_file" in config["security"]["denied_tools"]
+    assert "ast_edit" in config["security"]["denied_tools"]
     assert config["retention"]["audit_days"] == 30
     assert config["rate_limits"]["web_search"] == "5/60"
     assert config["persona"]["user_name"] == "Alex"
@@ -269,6 +271,8 @@ def test_run_consumer_demo_command_runs_a_real_first_outcome(monkeypatch, tmp_pa
     assert "--domain finance_ap" in out
     assert "--model" not in out
     assert "File changes and program execution are off" in out
+    assert "Permissions" in out and "Allow file work" in out
+    assert "Setup complete" not in out
 
 
 def test_run_consumer_creates_workdir(monkeypatch, tmp_path: Path):
