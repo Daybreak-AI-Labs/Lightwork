@@ -480,13 +480,15 @@
         if (!d) return '';
         var diff = (d.getTime() - Date.now()) / 1000;
         var abs = Math.abs(diff), past = diff < 0;
-        var units = [[60, 'second'], [3600, 'minute'], [86400, 'hour'], [604800, 'day'], [2629800, 'week'], [31557600, 'month']];
+        // [seconds in one unit, unit, size of the next unit]. Each value is
+        // counted in its own unit; one that rounds up to the next unit
+        // ("60 minutes") is shown in that unit instead ("1 hour").
+        var units = [[1, 'second', 60], [60, 'minute', 3600], [3600, 'hour', 86400], [86400, 'day', 604800],
+          [604800, 'week', 2629800], [2629800, 'month', 31557600], [31557600, 'year', Infinity]];
         if (abs < 45) return past ? 'just now' : 'in a moment';
-        var value, unit = 'year', size = 31557600;
-        for (var i = 1; i < units.length; i++) {
-          if (abs < units[i][0]) { unit = units[i - 1][1]; size = units[i - 1][0]; break; }
-        }
-        value = Math.round(abs / size);
+        var i = 0;
+        while (Math.round(abs / units[i][0]) * units[i][0] >= units[i][2]) i++;
+        var size = units[i][0], unit = units[i][1], value = Math.round(abs / size);
         if (typeof Intl !== 'undefined' && Intl.RelativeTimeFormat) {
           try { return new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' }).format(past ? -value : value, unit); } catch (e) {}
         }
