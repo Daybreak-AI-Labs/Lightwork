@@ -538,8 +538,9 @@
     }
     .btn:hover { border-color: var(--border-strong); text-decoration: none; }
     .btn:active { transform: translateY(1px); }
-    /* Primary action: brand fill + a soft brand-tinted lift so it reads as
-       the tactile, glass-era button used across the redesigned screens. */
+    /* Primary action, high contrast theme: brand fill with a soft lift. Every
+       other theme uses the text-coloured primary under "controls" at the end
+       of this sheet; those two rules are the only primary-button looks. */
     .btn--primary { background: var(--brand); border-color: transparent; color: var(--brand-fg);
       box-shadow: 0 2px 10px color-mix(in srgb, var(--brand) 32%, transparent); }
     .btn--primary:hover { background: var(--brand-hi); border-color: transparent;
@@ -550,12 +551,6 @@
       background-color: color-mix(in srgb, var(--text) 8%, transparent);
     }
     .btn--danger { background: var(--danger); border-color: var(--danger); color: var(--danger-fg); }
-    /* Class names some pages used that never existed; they render as the
-       real primary button instead of an unstyled one. */
-    .btn-primary, .btn.primary { background: var(--brand); border-color: transparent; color: var(--brand-fg);
-      box-shadow: 0 2px 10px color-mix(in srgb, var(--brand) 32%, transparent); }
-    .btn-primary:hover, .btn.primary:hover { background: var(--brand-hi); border-color: transparent; }
-    .btn-danger, .btn.danger { background: var(--danger); border-color: var(--danger); color: var(--danger-fg); }
     /* A plain <button> in page content gets the standard button look rather
        than the browser default. */
     #content button:not([class]) {
@@ -891,17 +886,6 @@
         border-color: color-mix(in srgb, var(--text) 24%, transparent);
         box-shadow: var(--shadow-md), var(--glass-edge);
       }
-      /* Primary action: a glass-era button — subtle vertical gradient with a
-         specular top edge, so it reads as a lit key, not a flat rectangle. */
-      body:not(.theme-hicontrast) .btn--primary {
-        background: linear-gradient(180deg, var(--brand-hi), var(--brand));
-        box-shadow: 0 2px 14px color-mix(in srgb, var(--brand) 38%, transparent),
-          inset 0 1px 0 0 color-mix(in srgb, #ffffff 22%, transparent);
-      }
-      body:not(.theme-hicontrast) .btn--primary:hover {
-        background: linear-gradient(180deg,
-          color-mix(in srgb, var(--brand-hi) 86%, #ffffff 14%), var(--brand-hi));
-      }
       body:not(.theme-hicontrast) :where(
         .btn:not(.btn--primary):not(.btn--danger), .ctl, .iconbtn, .halt-pill,
         .input, .select, .textarea, input:not([type="checkbox"]):not([type="radio"]),
@@ -964,9 +948,6 @@
         background: var(--scrim);
         -webkit-backdrop-filter: blur(3px);
         backdrop-filter: blur(3px);
-      }
-      body:not(.theme-hicontrast) .btn--primary {
-        box-shadow: 0 2px 14px color-mix(in srgb, var(--brand) 38%, transparent);
       }
       @media (prefers-reduced-transparency: reduce) {
         body:not(.theme-hicontrast) {
@@ -1524,6 +1505,7 @@ th, .stat .label, .hero-statebox__label { font-family: var(--font-mono); letter-
 
 /* controls */
 .btn { border-radius: 8px; font-weight: 600; }
+/* Primary action in every theme except high contrast (see .btn--primary). */
 body:not(.theme-hicontrast) .btn--primary { background: var(--text); border-color: transparent; color: var(--bg); box-shadow: none; }
 body:not(.theme-hicontrast) .btn--primary:hover { background: color-mix(in srgb, var(--text) 88%, var(--bg)); border-color: transparent; box-shadow: none; }
 .input, .select, .textarea { background: var(--bg); border-radius: 8px; }
