@@ -9800,8 +9800,24 @@ def chat_page(request: Request) -> HTMLResponse:
             "goal_max_wall_seconds": configured_max_wall_seconds(),
             "flows_enabled": flow.enabled(),
             "can_enable_flows": has_global_permission(request, "admin") and "MAVERICK_FLOWS" not in os.environ,
+            # What Lightwork can do (examples for the person's department) and
+            # one limit that is true in code.
+            "chat_examples": _chat_examples(request),
+            "chat_limits": _CHAT_LIMITS,
         },
     )
+
+
+def _chat_examples(request: Request) -> dict:
+    try:
+        from .chat_examples import examples_for
+
+        return examples_for(request)
+    except Exception:  # pragma: no cover -- the empty chat renders without examples
+        return {"department": None, "examples": [], "sample": None}
+
+
+from .chat_examples import LIMITS as _CHAT_LIMITS  # noqa: E402
 
 
 def _director_choices() -> list[dict]:
