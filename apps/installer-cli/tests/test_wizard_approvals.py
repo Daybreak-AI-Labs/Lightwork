@@ -1,4 +1,5 @@
-"""Approvals wizard step: undo window + high-risk confirmation -> [approval]."""
+"""Approvals wizard step: undo window, high-risk confirmation and who approves
+a risky action the requester asked for -> [approval]."""
 from __future__ import annotations
 
 
@@ -7,7 +8,9 @@ def test_pick_approvals_defaults(monkeypatch):
 
     monkeypatch.setattr(wizard, "_q_text", lambda *_a, **kw: kw["default"])
     monkeypatch.setattr(wizard, "_q_confirm", lambda *_a, **kw: kw["default"])
-    assert wizard.pick_approvals() == {"undo_grace_seconds": 30, "require_acknowledgement": True}
+    monkeypatch.setattr(wizard, "_q_select", lambda *_a, **kw: kw["default"])
+    assert wizard.pick_approvals() == {"undo_grace_seconds": 30, "require_acknowledgement": True,
+                                       "separate_approver": "when_available"}
 
 
 def test_pick_approvals_bounds_and_choices(monkeypatch):
@@ -15,17 +18,38 @@ def test_pick_approvals_bounds_and_choices(monkeypatch):
 
     monkeypatch.setattr(wizard, "_q_text", lambda *_a, **_kw: "99999")
     monkeypatch.setattr(wizard, "_q_confirm", lambda *_a, **_kw: False)
-    assert wizard.pick_approvals() == {"undo_grace_seconds": 3600, "require_acknowledgement": False}
+    monkeypatch.setattr(wizard, "_q_select", lambda _message, choices, **_kw: choices[1])
+    assert wizard.pick_approvals() == {"undo_grace_seconds": 3600, "require_acknowledgement": False,
+                                       "separate_approver": "always"}
     monkeypatch.setattr(wizard, "_q_text", lambda *_a, **_kw: "not a number")
     assert wizard.pick_approvals()["undo_grace_seconds"] == 30
+
+
+def test_every_separate_approver_choice_is_a_mode_the_kernel_knows(monkeypatch):
+    from maverick.safety.dual_control import SEPARATE_APPROVER_MODES
+    from maverick_installer import wizard
+
+    offered = []
+
+    def remember(_message, choices, **_kw):
+        offered.extend(choices)
+        return choices[-1]
+
+    monkeypatch.setattr(wizard, "_q_text", lambda *_a, **kw: kw["default"])
+    monkeypatch.setattr(wizard, "_q_confirm", lambda *_a, **kw: kw["default"])
+    monkeypatch.setattr(wizard, "_q_select", remember)
+    assert wizard.pick_approvals()["separate_approver"] == "never"
+    assert tuple(choice.split()[0] for choice in offered) == SEPARATE_APPROVER_MODES
 
 
 def test_step_and_config_section():
     from maverick_installer import wizard
 
     assert ("approvals", "Approvals") in wizard.STEPS
-    lines = wizard._cfg_approval({"undo_grace_seconds": 45, "require_acknowledgement": True})
+    lines = wizard._cfg_approval({"undo_grace_seconds": 45, "require_acknowledgement": True,
+                                  "separate_approver": "always"})
     assert lines[1] == "[approval]"
     assert "undo_grace_seconds = 45" in lines
     assert "require_acknowledgement = true" in lines
+    assert 'separate_approver = "always"' in lines
     assert wizard._cfg_approval(None) == []

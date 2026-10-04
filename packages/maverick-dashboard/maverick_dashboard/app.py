@@ -8569,16 +8569,23 @@ def _approval_source(provenance: str | None) -> str | None:
     return None
 
 
-def _approval_viewer_context(request: Request | None) -> dict:
-    """Who is looking at the queue, so a card can say "your own request"
-    exactly when the enforced rule treats it as one."""
+def _approval_viewer_context(request: Request | None, approvals: list) -> dict:
+    """Who is looking at the queue, so a card can say "your own request", and
+    -- when the enforced rules keep that person from approving it (someone
+    else must, or under two-person approval their vote doesn't count) -- why."""
     if request is None:
-        return {"approval_viewer": "", "self_approval_allowed": False}
-    from maverick.safety.dual_control import allow_self_approval
-
+        return {"approval_viewer": "", "own_request_notes": {}}
     from .api import _supervisor
+    from .approval_decisions import own_request_note
 
-    return {"approval_viewer": _supervisor(request), "self_approval_allowed": allow_self_approval()}
+    viewer = _supervisor(request)
+    world = _world()
+    notes = {}
+    for approval in approvals:
+        note = own_request_note(world, approval, viewer)
+        if note:
+            notes[approval.id] = note
+    return {"approval_viewer": viewer, "own_request_notes": notes}
 
 
 def _approval_queue_context(approvals: list, request: Request | None = None) -> dict:
@@ -8645,7 +8652,7 @@ def _approval_queue_context(approvals: list, request: Request | None = None) -> 
         "approval_actions": approval_actions,
         "approval_scopes": approval_scopes,
         "assessment_ids": assessment_ids,
-        **_approval_viewer_context(request),
+        **_approval_viewer_context(request, approvals),
     }
 
 

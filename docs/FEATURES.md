@@ -4976,6 +4976,10 @@ tested without spawning py-spy.
   counts once (enforced by the `(approval_id, approver)` PK); `GET
   /approvals/{id}/state` shows quorum progress; a barred self-approval is 403.
   Off by default (`required = 1` = legacy single approver); SQLite migration v21.
+  With one approver, `[approval] separate_approver` (default `when_available`)
+  has someone other than the requester approve a high/critical action whenever
+  another eligible approver exists (`channel_approvals.separate_approver_refusal`,
+  enforced in `record_vote` for the dashboard, Slack and Teams).
 - **Web dashboard** — run list, plan-tree, chat at `/chat`,
   [root conversation summaries and shared durable SSE replay](./dashboard-read-models.md)
   (schema 37 root indexes; monotonic heartbeat deadlines), and an approval queue with

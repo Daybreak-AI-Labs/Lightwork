@@ -23,10 +23,12 @@
     {% set card = cards.get(a.id) if cards else None %}
     {% set card_status = card_statuses.get(a.id, 'legacy') if card_statuses else 'legacy' %}
     {% set scope_text = approval_scopes.get(a.id, '') if approval_scopes and approval_scopes.get(a.id) else 'The item described' %}
-    {# What is enforced: one approver may be the person who asked; under
-       two-person approval their vote counts only if self-approval is on. #}
+    {# What is enforced: the person who asked may approve their own request
+       unless someone else must (a high-risk request when another approver is
+       available, or always if so configured; under two-person approval
+       unless self-approval is on). The note says why. #}
     {% set own_request = approval_viewer|default('') and a.requested_by and a.requested_by == approval_viewer %}
-    {% set own_vote_counts = (a.approvals_required or 1) <= 1 or self_approval_allowed|default(false) %}
+    {% set own_note = own_request_notes.get(a.id, '') if own_request_notes else '' %}
     <article class="approval-item" data-id="{{ a.id }}" data-label="{{ action_label }}" data-risk="{{ a.risk }}"{% if own_request %} data-own-request="yes"{% endif %}
              data-scope="{{ scope_text }}"
              {% if card %}data-target="{{ card.target.label }}" data-spending="{{ _budget_text(card.budget) | trim }}" data-irreversible="{{ 'yes' if card.consequences.irreversible else 'no' }}"{% endif %}
@@ -82,9 +84,9 @@
         {% endif %}
       </div>
       <p class="approval-item__decided muted" hidden></p>
-      {% if own_request and not own_vote_counts %}<p class="muted approval-own-note">You asked for this, so other people must approve it.</p>{% endif %}
+      {% if own_note %}<p class="muted approval-own-note">{{ own_note }}</p>{% endif %}
       <div class="approval-actions">
-        <button type="button" class="btn approval-btn" data-id="{{ a.id }}" data-action="approve"{% if card %} data-binding="{{ card.binding_sha256 }}"{% endif %}{% if card_status in ('expired', 'invalid', 'legacy') %} disabled title="A new request is needed before this can be approved"{% elif own_request and not own_vote_counts %} disabled title="You asked for this, so other people must approve it."{% endif %}>Approve</button>
+        <button type="button" class="btn approval-btn" data-id="{{ a.id }}" data-action="approve"{% if card %} data-binding="{{ card.binding_sha256 }}"{% endif %}{% if card_status in ('expired', 'invalid', 'legacy') %} disabled title="A new request is needed before this can be approved"{% elif own_note %} disabled title="{{ own_note }}"{% endif %}>Approve</button>
         <button type="button" class="btn btn--ghost approval-btn" data-id="{{ a.id }}" data-action="deny">Reject</button>
         <button type="button" class="btn btn--ghost approval-btn" data-id="{{ a.id }}" data-action="revise">Send back for changes</button>
       </div>
@@ -590,11 +592,15 @@
         : state.approved_count + ' of ' + required + ' required approvals received.'];
       if (state.your_approval_recorded) words.push('Your approval is recorded.');
       else if (state.requested_by_you) words.push(!state.self_approval_counts
-        ? 'You asked for this, so other people must approve it.'
+        ? (state.own_request_note || 'You asked for this, so other people must approve it.')
         : required <= 1 ? 'You asked for this, so approving it approves your own request.'
           : 'You asked for this; your approval counts as one of them.');
       text.textContent = words.join(' ');
-      if (state.your_approval_recorded) { var approve = row.querySelector('[data-action="approve"]'); if (approve) approve.disabled = true; }
+      var approve = row.querySelector('[data-action="approve"]');
+      if (approve && (state.your_approval_recorded || (state.requested_by_you && !state.self_approval_counts))) {
+        approve.disabled = true;
+        if (state.own_request_note) approve.title = state.own_request_note;
+      }
     } catch (_) { /* Existing decision controls retain their server-side checks. */ }
   });
 }());

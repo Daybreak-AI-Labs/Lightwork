@@ -57,6 +57,17 @@ def _reviewer_current(record: dict) -> bool:
     return "admin" in rbac.permissions_for(auth.global_role_for_principal(reviewer))
 
 
+def _grant_current(grant: dict, *, owner: str, resource_kind: str, resource_id: str,
+                   resource_revision: str | None = None) -> bool:
+    """An approved, unexpired, independently reviewed read grant for exactly this resource."""
+    return not (grant.get("tenant") != tenant() or grant.get("owner") != owner
+                or grant.get("resource_kind") != resource_kind
+                or grant.get("resource_id") != str(resource_id)
+                or (resource_revision is not None and grant.get("resource_revision") != resource_revision)
+                or grant.get("status") != "approved" or grant.get("_audit_pending")
+                or grant.get("expires_at", 0) <= time.time() or not _reviewer_current(grant))
+
+
 def may_read_employee_content(request, owner: str, *, resource_kind: str, resource_id: str, resource_revision: str | None = None) -> bool:
     from maverick.audit import record as record_audit
 
@@ -76,12 +87,9 @@ def may_read_employee_content(request, owner: str, *, resource_kind: str, resour
         return False
     try:
         for grant in STORE.list():
-            if (grant.get("tenant") != tenant() or grant.get("requester") != actor
-                    or grant.get("owner") != owner or grant.get("resource_kind") != resource_kind
-                    or grant.get("resource_id") != str(resource_id)
-                    or (resource_revision is not None and grant.get("resource_revision") != resource_revision)
-                    or grant.get("status") != "approved" or grant.get("_audit_pending")
-                    or grant.get("expires_at", 0) <= time.time() or not _reviewer_current(grant)):
+            if grant.get("requester") != actor or not _grant_current(
+                    grant, owner=owner, resource_kind=resource_kind, resource_id=resource_id,
+                    resource_revision=resource_revision):
                 continue
             # Every actual exceptional read needs its own confirmed receipt.
             return record_audit("employee_content_read", agent=actor, actor=actor,
@@ -121,6 +129,33 @@ def can_read_approval(request, approval, world=None) -> bool:
         return False
     return may_read_employee_content(request, resource["owner"], resource_kind="approval",
         resource_id=resource["resource_id"], resource_revision=resource["resource_revision"])
+
+
+def approval_readers(approval, world) -> set[str]:
+    """The people who can open this approval card on the Approvals page.
+
+    Its owner, plus (while exceptional access is on) anyone holding a current,
+    independently reviewed read grant for exactly this card -- the same rules
+    :func:`can_read_approval` applies to a reader. An unreadable grant store
+    opens nothing, as it would for that reader."""
+    try:
+        resource = approval_resource(approval, world)
+    except HTTPException:
+        return set()
+    readers = {resource["owner"]} if resource["owner"] else set()
+    if not enabled():
+        return readers
+    try:
+        for grant in STORE.list():
+            requester = grant.get("requester")
+            if isinstance(requester, str) and requester and _grant_current(
+                    grant, owner=resource["owner"], resource_kind="approval",
+                    resource_id=resource["resource_id"],
+                    resource_revision=resource["resource_revision"]):
+                readers.add(requester)
+    except Exception:
+        return {resource["owner"]} if resource["owner"] else set()
+    return readers
 
 
 def require_approval_content(request, approval_id, world=None):

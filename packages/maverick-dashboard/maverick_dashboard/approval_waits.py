@@ -39,9 +39,9 @@ def _decide_by(approval) -> float | None:
 
 def _who(request: Request, world, approval) -> tuple[str, int]:
     """``(who, remaining)``: "you" or "approver" for one approval needed,
-    "more" (yours can count) or "others" when several people must agree."""
-    from maverick.safety.dual_control import allow_self_approval
-
+    "more" (yours can count) or "others" when several people must agree, or
+    when the person who asked must leave it to someone else."""
+    from .approval_decisions import own_request_note
     from .auth import has_permission
     from .content_access import can_read_approval
 
@@ -50,9 +50,9 @@ def _who(request: Request, world, approval) -> tuple[str, int]:
     approvers = list(state.get("approvers") or [])
     remaining = max(1, required - len(approvers))
     viewer = _viewer(request)
-    own = bool(viewer) and viewer == (approval.requested_by or "")
-    counts = not own or required <= 1 or allow_self_approval()
-    can_decide = (counts and viewer not in approvers and has_permission(request, "operate")
+    if own_request_note(world, approval, viewer):
+        return "others", remaining
+    can_decide = (viewer not in approvers and has_permission(request, "operate")
                   and can_read_approval(request, approval, world))
     if required <= 1:
         return ("you" if can_decide else "approver"), remaining

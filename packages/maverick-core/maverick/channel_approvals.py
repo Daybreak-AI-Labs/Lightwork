@@ -16,6 +16,10 @@ the dashboard:
   person read what it will do, plus the typed word ``APPROVE`` for Critical.
   Every surface writes the same ``approval_confirmation`` audit event, tagged
   with the channel.
+* :func:`separate_approver_refusal` says when the person who asked for a High
+  or Critical action must leave the approval to someone else (``[approval]
+  separate_approver``); :func:`require_separate_approver` refuses such a vote
+  before its confirmation is recorded, and :func:`record_vote` again.
 * :func:`record_vote` applies one approver's vote through
   ``WorldModel.decide_approval_audited`` and reconciles a lost commit
   acknowledgement by the vote's stable outbox id.
@@ -74,6 +78,7 @@ _STATUS_CODES: dict[str, int] = {
     "expired": 409,
     "stale_card": 409,
     "vote_not_accepted": 403,
+    "separate_approver": 403,
     "pending_finalization": 409,
     "not_decided": 409,
     "too_late": 409,
@@ -380,12 +385,77 @@ def audit_approval_decision(world, event) -> bool:
 
 
 # ----------------------------------------------------------------------------
+# A second person approves high-risk actions when one is available.
+# ----------------------------------------------------------------------------
+
+_SEPARATE_APPROVER_WORDS = {
+    "always": "You asked for this, so someone else must approve it.",
+    "when_available": "Another approver is available, so someone else must approve this.",
+}
+
+
+def other_approver_available(world: Any, approval: Any, requester: str) -> bool:
+    """Whether someone other than ``requester`` could decide ``approval`` now.
+
+    The people who can decide are the dashboard's to name (its roles, content
+    access and linked chat accounts); the kernel without the dashboard has no
+    such roster, so nobody else is known there."""
+    try:
+        from maverick_dashboard.approval_decisions import other_eligible_approvers
+    except ImportError:
+        return False
+    return bool(other_eligible_approvers(world, approval, requester))
+
+
+def separate_approver_refusal(world: Any, approval: Any, who: str) -> str:
+    """Why ``who`` may not approve ``approval`` themselves, or ``""``.
+
+    Only the person who asked is ever refused, only for a High or Critical
+    request with one approver, and only as ``[approval] separate_approver``
+    says: always, or (the default) whenever another person could decide it.
+    Rejecting is never refused. Every surface asks this one question: the
+    Approvals page disables its Approve button with the sentence, and
+    :func:`record_vote` refuses the vote with it."""
+    requester = " ".join(str(getattr(approval, "requested_by", "") or "").split())
+    if not requester or requester != " ".join(str(who or "").split()):
+        return ""
+    from .safety.dual_control import separate_approver_applies, separate_approver_mode
+
+    if not separate_approver_applies(getattr(approval, "risk", ""),
+                                     getattr(approval, "approvals_required", 1)):
+        return ""
+    mode = separate_approver_mode()
+    if mode == "never":
+        return ""
+    if mode == "when_available" and not other_approver_available(world, approval, requester):
+        return ""
+    return _SEPARATE_APPROVER_WORDS.get(mode, _SEPARATE_APPROVER_WORDS["always"])
+
+
+def require_separate_approver(world: Any, approval_id: int, who: str) -> None:
+    """Refuse the requester's own approval when someone else must give it.
+
+    Surfaces call this before they record the confirmation step, and
+    :func:`record_vote` calls it again before the vote. A retry of a vote that
+    was already accepted keeps its original outcome."""
+    approval = world.get_approval(int(approval_id))
+    if approval is None or approval.status != "pending":
+        return  # the decision path answers "already decided"
+    refusal = separate_approver_refusal(world, approval, who)
+    if refusal and world.get_approval_audit_event(
+            world.approval_audit_event_id(int(approval_id), "approved", who)) is None:
+        raise ChannelApprovalRefused("separate_approver", refusal)
+
+
+# ----------------------------------------------------------------------------
 # The vote itself (shared by the dashboard routes and every channel).
 # ----------------------------------------------------------------------------
 
 def record_vote(world: Any, approval_id: int, status: str, who: str) -> Any:
     """Apply one approver's vote and return its outbox event.
 
+    The person who asked may be told to leave a High or Critical approval to
+    someone else (``separate_approver``, see :func:`separate_approver_refusal`).
     Under N-of-M dual control a vote can be refused for segregation-of-duties
     reasons (the requester can't self-approve, or an approver identity is
     needed) -- ``vote_not_accepted`` -- which is distinct from an unknown or
@@ -397,6 +467,8 @@ def record_vote(world: Any, approval_id: int, status: str, who: str) -> Any:
     deciding whether this request failed (``outcome_uncertain`` is safe to
     retry; ``outbox_integrity_error`` is not).
     """
+    if status == "approved":
+        require_separate_approver(world, approval_id, who)
     event_id = world.approval_audit_event_id(approval_id, status, who)
     try:
         event = world.decide_approval_audited(approval_id, status, decided_by=who)
@@ -594,6 +666,7 @@ def decide_from_channel(
         )
     if decision == "approved":
         require_current_card(approval, binding=binding, now=current)
+        require_separate_approver(world, int(approval_id), who)
     require_acknowledgement(approval, who=who, channel=channel, decision=decision,
                             confirmed=confirmed, acknowledged=acknowledged,
                             typed_confirmation=typed_confirmation)
@@ -797,12 +870,15 @@ __all__ = [
     "decision_summary",
     "deliver_approval_audit_event",
     "needs_confirmation",
+    "other_approver_available",
     "record_vote",
     "register_approval_announcer",
+    "require_separate_approver",
     "registered_announcers",
     "require_acknowledgement",
     "require_current_card",
     "safe_action_label",
+    "separate_approver_refusal",
     "slack_announcements_configured",
     "spending_text",
     "undo_decision",

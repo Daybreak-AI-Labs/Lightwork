@@ -6,8 +6,10 @@ so the Approvals page, the Microsoft Teams cards and the Slack cards share ONE
 implementation. This module adds only what the dashboard owns: the HTTP
 error mapping the ``/api/v1/approvals/{id}/approve|deny|undo`` routes answer
 with, the role check for a chat vote (the linked person needs ``operate``,
-like a dashboard voter), the "send back for changes" form of a denial, and
-the queue-row projection the Teams cards render.
+like a dashboard voter), the "send back for changes" form of a denial, the
+queue-row projection the Teams cards render, and who else could decide a
+request (:func:`eligible_approvers`), which the shared separate-approver rule
+asks before the person who asked may approve their own high-risk request.
 """
 from __future__ import annotations
 
@@ -16,6 +18,7 @@ import logging
 from fastapi import HTTPException
 from maverick.channel_approvals import (
     CONFIRM_RISKS,
+    SETTINGS_PROVENANCE,
     ChannelApprovalRefused,
     approval_requires_acknowledgement,
     approval_undo_grace_seconds,
@@ -24,7 +27,9 @@ from maverick.channel_approvals import (
     record_vote,
     require_acknowledgement,
     require_current_card,
+    require_separate_approver,
     safe_action_label,
+    separate_approver_refusal,
 )
 from maverick.channel_approvals import decide_from_channel as _decide_shared
 from maverick.channel_approvals import undo_decision as _undo_shared
@@ -62,6 +67,16 @@ def require_current_decision_card(world, approval_id: int, binding: str) -> None
         require_current_card(approval, binding=binding)
     except ChannelApprovalRefused as exc:
         raise HTTPException(status_code=409, detail=exc.message) from exc
+
+
+def _require_separate_approver(world, approval_id: int, who: str) -> None:
+    """The person who asked may have to leave a high-risk approval to someone
+    else (403 with the plain reason), checked before any confirmation is
+    recorded. The shared vote checks it again."""
+    try:
+        require_separate_approver(world, approval_id, who)
+    except ChannelApprovalRefused as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
 
 
 def _require_acknowledgement(world, approval_id: int, payload: dict, who: str, *,
@@ -283,6 +298,91 @@ def send_back_from_channel(*, approval_id: int, principal: str, rationale: str,
     return {**result, "status": "superseded", "rationale": text}
 
 
+# ------------------------------------------------------ who can decide a request
+
+
+def _may_decide(principal: str) -> bool:
+    """Holds ``operate`` in this workspace and is not deprovisioned."""
+    from . import rbac, scim_groups
+    from .auth import role_for_principal
+
+    try:
+        if "operate" not in rbac.permissions_for(role_for_principal(principal)):
+            return False
+        return scim_groups.active_for_principal(principal) is not False
+    except Exception:  # an unreadable roster lets nobody decide, so nobody counts
+        return False
+
+
+def _chat_approvers(approval) -> set[str]:
+    """People linked in a chat app where this request's card is posted.
+
+    Slack posts every card to its approvals channel and Teams to each linked
+    approver; protected-settings requests are decided in the dashboard only."""
+    if getattr(approval, "provenance", None) == SETTINGS_PROVENANCE:
+        return set()
+    people: set[str] = set()
+    try:
+        from maverick.channel_approvals import slack_announcements_configured
+
+        if slack_announcements_configured():
+            from maverick.channel_identities import all_links
+
+            people.update(principal for principal, links in all_links().items()
+                          if any(link.get("channel") == "slack" for link in links))
+    except Exception:  # an unreadable link store adds nobody
+        pass
+    try:
+        from maverick.approval_notify import teams_approvals_enabled
+
+        if teams_approvals_enabled():
+            from maverick.teams_identity import approver_links
+
+            people.update(str(link.get("principal") or "") for link in approver_links())
+    except Exception:  # an unreadable link store adds nobody
+        pass
+    return {person for person in people if person}
+
+
+def eligible_approvers(world, approval) -> set[str]:
+    """Everyone who could decide ``approval`` now, by the rules each surface
+    already enforces.
+
+    On the Approvals page: people holding ``operate`` in this workspace who
+    can open the request -- its owner, or a current, reviewed read grant for
+    exactly this card (:func:`content_access.approval_readers`). In Slack or
+    Teams, where its card is posted: linked people holding ``operate``. A
+    deprovisioned person never counts. Nobody here is invented: no new role,
+    and a store that can't be read adds nobody."""
+    from .content_access import approval_readers
+
+    candidates = approval_readers(approval, world) | _chat_approvers(approval)
+    return {person for person in candidates if _may_decide(person)}
+
+
+def other_eligible_approvers(world, approval, requester: str) -> list[str]:
+    """The eligible approvers other than ``requester``, sorted."""
+    who = " ".join(str(requester or "").split())
+    return sorted(person for person in eligible_approvers(world, approval) if person != who)
+
+
+def own_request_note(world, approval, viewer: str) -> str:
+    """What the person who asked is told when their approval can't settle it.
+
+    ``""`` for anyone else, or when the requester may approve. With one
+    approver, the separate-approver rule (``[approval] separate_approver``);
+    with two or more, the requester's vote counts only when ``[security]
+    allow_self_approval`` is on."""
+    who = " ".join(str(viewer or "").split())
+    if not who or who != " ".join(str(getattr(approval, "requested_by", "") or "").split()):
+        return ""
+    if max(1, int(getattr(approval, "approvals_required", 1) or 1)) > 1:
+        from maverick.safety.dual_control import allow_self_approval
+
+        return "" if allow_self_approval() else "You asked for this, so other people must approve it."
+    return separate_approver_refusal(world, approval, who)
+
+
 def approval_view(approval_id: int, *, world=None) -> dict | None:
     """The queue row as the dashboard shows it: safe labels, decoded card, source.
 
@@ -351,6 +451,9 @@ __all__ = [
     "approval_undo_grace_seconds",
     "approval_view",
     "decide_from_channel",
+    "eligible_approvers",
+    "other_eligible_approvers",
+    "own_request_note",
     "require_current_decision_card",
     "send_back_from_channel",
     "undo_from_channel",

@@ -1273,11 +1273,14 @@ def pick_signed_skills() -> dict[str, Any]:
 
 
 def pick_approvals() -> dict[str, Any]:
-    """``[approval]``: the undo window and the high-risk confirmation.
+    """``[approval]``: the undo window, the high-risk confirmation and who
+    approves a risky action the requester asked for.
 
     The Approvals page is the human-in-command loop: a decision can be undone
-    for ``undo_grace_seconds`` (the agent waits that long before acting) and
-    approving a high or critical risk request needs an explicit confirmation.
+    for ``undo_grace_seconds`` (the agent waits that long before acting),
+    approving a high or critical risk request needs an explicit confirmation,
+    and ``separate_approver`` says whether someone other than the person who
+    asked must approve it (default: whenever another approver is available).
     """
     console.print()
     console.print(
@@ -1294,9 +1297,19 @@ def pick_approvals() -> dict[str, Any]:
         "requests? (a ticked box for high, typing APPROVE for critical)",
         default=True,
     )
+    separate = _q_select(
+        "  Who approves a high or critical risk action someone asked for?",
+        [
+            "when_available - Someone else, whenever another approver is available (default).",
+            "always         - Always someone else, even if the request then waits and expires.",
+            "never          - The person who asked may approve it.",
+        ],
+        default="when_available - Someone else, whenever another approver is available (default).",
+    ).split()[0]
     return {
         "undo_grace_seconds": max(0, min(undo_seconds, 3600)),
         "require_acknowledgement": bool(require_ack),
+        "separate_approver": separate,
     }
 
 
@@ -7349,7 +7362,8 @@ def _cfg_core(
 def _cfg_approval(approval: dict[str, Any] | None) -> list[str]:
     if not approval:
         return []
-    # Approvals page: undo window (the agent waits it out) + high-risk confirmation.
+    # Approvals page: undo window (the agent waits it out), high-risk
+    # confirmation, and who approves a risky action the requester asked for.
     lines = ["", "[approval]"]
     for k, v in approval.items():
         _emit_kv(lines, k, v)

@@ -132,6 +132,11 @@ scan_output     = true
 # (a ticked box; typing APPROVE for critical) unless switched off.
 undo_grace_seconds      = 30
 require_acknowledgement = true
+# Who approves a high or critical risk action someone asked for:
+# "when_available" (default) = someone else whenever another approver could
+# decide it, else the requester (recorded as a self-approval); "always" =
+# always someone else; "never" = the requester may approve it.
+separate_approver       = "when_available"
 
 [sandbox]
 backend = "local"                   # local | docker | ssh | podman | devcontainer | firecracker | kubernetes
