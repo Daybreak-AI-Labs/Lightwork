@@ -55,6 +55,15 @@ KIND_LABELS: dict[str, str] = {
     "tenant_deleted": "Workspace removed",
     "codebase_action": "Code project action", "immune_action": "Safety monitoring action",
     "approval_decision": "Approval decided", "approval_requested": "Approval requested",
+    "channel_approval_decision": "Approval decided in a chat app",
+}
+# Approval steps recorded as consent results, named for what the person did.
+APPROVAL_ACTION_LABELS: dict[str, str] = {
+    "approval_decision_undone": "Approval decision undone",
+    "approval_confirmation": "Approval confirmed",
+    "approval_rejection_reason": "Rejection reason recorded",
+    "approval_revision_requested": "Sent back for changes",
+    "approval_decided_via_channel": "Approval decided in a chat app",
 }
 FIELD_LABELS: dict[str, str] = {
     "goal_id": "Task", "tool": "Tool", "name": "Name", "reason": "Reason", "detail": "Details",
@@ -68,6 +77,8 @@ FIELD_LABELS: dict[str, str] = {
     "phase": "Step", "repo": "Code project", "proposal": "Change",
     "email": "Email", "channel": "Chat app", "enabled": "Turned on", "suites": "Departments",
     "occurred_at": "Occurred at", "approval_id": "Approval", "scope": "Recorded in",
+    "decided_by": "Decided by", "previously_decided_by": "Earlier decision by",
+    "self_approval": "Approved own request",
 }
 _HIDDEN = {"v", "ts", "kind", "agent", "goal_id", "hash", "prev_hash", "sig", "key_id", "projection"}
 # Machine identifiers (event ids, fingerprints, 64-hex tokens) are kept for
@@ -81,7 +92,7 @@ _TIME_KEYS = {"occurred_at", "created_at", "decided_at", "expires_at", "started_
               "ended_at", "finished_at", "updated_at", "requested_at", "at"}
 _PERSON_KEYS = ("principal", "actor", "user", "requested_by", "decided_by", "owner")
 _SLUG_KEYS = {"name", "tool", "action", "stage", "provider", "rule", "outcome", "status",
-              "decision", "risk", "source", "phase", "labels", "agent"}
+              "decision", "risk", "source", "phase", "labels", "agent", "channel"}
 _SLUG = re.compile(r"[a-z][a-z0-9]*(?:[_.:-][a-z0-9]+)*")
 
 
@@ -91,6 +102,12 @@ def kind_label(kind: object) -> str:
 
 def event_label(event: dict) -> str:
     """Name a known administrator action without exposing arbitrary audit text."""
+    if event.get("kind") == "consent_result":
+        action = event.get("action")
+        if action is None and isinstance(event.get("payload"), dict):
+            action = event["payload"].get("action")
+        if isinstance(action, str) and action in APPROVAL_ACTION_LABELS:
+            return APPROVAL_ACTION_LABELS[action]
     if event.get("kind") == "control_plane_action":
         from .content_access import VISIBLE_CONTROL_ACTIONS
 
@@ -148,8 +165,11 @@ def _technical(key: str, value: Any) -> bool:
 
 def event_details(event: dict) -> list[tuple[str, str, str]]:
     """``[(raw key, label, text)]`` for the readable detail fields of an event."""
+    # An approval step's action is already the event's name ("Approval confirmed").
+    named = event.get("kind") == "consent_result" and event.get("action") in APPROVAL_ACTION_LABELS
     return [(str(k), field_label(k), value_text(str(k), v))
-            for k, v in event.items() if k not in _HIDDEN and not _technical(str(k), v)]
+            for k, v in event.items() if k not in _HIDDEN and not _technical(str(k), v)
+            and not (named and k == "action")]
 
 
 def event_technical(event: dict) -> list[tuple[str, str, str]]:

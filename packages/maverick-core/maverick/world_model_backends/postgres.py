@@ -4439,7 +4439,9 @@ class PostgresWorldModel:
                 "WHERE approval_id = %s ORDER BY decided_at", (approval_id,),
             )
             rows = cur.fetchall()
-        approvers = [r[0] for r in rows if r[1] == "approved"]
+        from ..world_model import _single_approver
+
+        approvers = _single_approver(appr, [r[0] for r in rows if r[1] == "approved"])
         scope, params = _approval_outbox_scope()
         with self._tx() as cur:
             cur.execute(

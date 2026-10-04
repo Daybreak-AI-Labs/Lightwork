@@ -273,6 +273,15 @@ templates.env.filters["identity"] = _idfmt.humanize_principal
 templates.env.filters["role_label"] = _idfmt.role_label
 templates.env.filters["permission_label"] = _idfmt.permission_label
 templates.env.filters["humanize"] = _idfmt.humanize
+# One run-status vocabulary for the chat badge, composer and recents.
+from maverick.channel_approvals import spending_text as _approval_spending  # noqa: E402
+
+from .run_status import status_label as _run_status_label  # noqa: E402
+
+# The spending line every approval surface shares: a sentence, never a mapping.
+templates.env.filters["approval_spending"] = _approval_spending
+
+templates.env.globals["run_status_label"] = _run_status_label
 # Plain labels for model ids, setting sources and sizes (administration pages).
 from . import plain_labels as _plain_labels  # noqa: E402
 
@@ -1411,6 +1420,9 @@ app.include_router(project_workspaces_router)
 app.include_router(task_handoffs_router)
 
 app.include_router(my_work_router)
+from .approval_waits import router as approval_waits_router  # noqa: E402
+
+app.include_router(approval_waits_router)
 app.include_router(conversation_organization_router)
 from .first_outcome_api import router as first_outcome_router  # noqa: E402
 from .in_app_routes import router as in_app_router  # noqa: E402
@@ -7399,7 +7411,7 @@ def oversight_page(request: Request) -> HTMLResponse:
     except Exception:
         approvals, pending = [], None
         source_errors.append("Your approval queue is unavailable. Its current size is unknown.")
-    approval_context = _approval_queue_context(approvals)
+    approval_context = _approval_queue_context(approvals, request)
     try:
         active = len(w.list_goals(status="active", owner=owner_filter))
     except Exception:
@@ -8557,7 +8569,19 @@ def _approval_source(provenance: str | None) -> str | None:
     return None
 
 
-def _approval_queue_context(approvals: list) -> dict:
+def _approval_viewer_context(request: Request | None) -> dict:
+    """Who is looking at the queue, so a card can say "your own request"
+    exactly when the enforced rule treats it as one."""
+    if request is None:
+        return {"approval_viewer": "", "self_approval_allowed": False}
+    from maverick.safety.dual_control import allow_self_approval
+
+    from .api import _supervisor
+
+    return {"approval_viewer": _supervisor(request), "self_approval_allowed": allow_self_approval()}
+
+
+def _approval_queue_context(approvals: list, request: Request | None = None) -> dict:
     """Build the exact-operation review context shared by approval surfaces."""
 
     from maverick.approval_cards import ApprovalCardError, decode_approval_detail
@@ -8621,6 +8645,7 @@ def _approval_queue_context(approvals: list) -> dict:
         "approval_actions": approval_actions,
         "approval_scopes": approval_scopes,
         "assessment_ids": assessment_ids,
+        **_approval_viewer_context(request),
     }
 
 
@@ -8640,6 +8665,7 @@ def approvals_page(request: Request) -> HTMLResponse:
     so a view-only caller must not read it via the HTML page either.
     """
     require_permission(request, "operate")
+    from . import content_access
     from .content_access import can_read_approval
     from .flow_approval_inbox import pending_for_request
 
@@ -8655,7 +8681,9 @@ def approvals_page(request: Request) -> HTMLResponse:
             "flow_approvals": flow_approvals["items"],
             "flow_approval_coverage": flow_approvals["coverage"],
             "private_count": len(pending) - len(approvals),
-            **_approval_queue_context(approvals),
+            # Link to Content access only when asking for a card read is on.
+            "content_access_on": content_access.enabled(),
+            **_approval_queue_context(approvals, request),
         },
         headers={"Cache-Control": "private, no-store"},
     )
@@ -9791,6 +9819,10 @@ def _chat_threads(request: Request, w, *, active_root: int | None = None) -> lis
         goals.extend(goal for goal in pinned_roots(request, w) if goal.id not in known)
     except Exception:
         pass  # Current authorized tasks remain readable if organization storage is unavailable.
+    from maverick.stop_reasons import stop_payload
+
+    from .run_status import status_label
+
     threads: list[dict] = []
     for g in goals:
         target_id = ChatThreads(w).latest(g.id)
@@ -9798,6 +9830,13 @@ def _chat_threads(request: Request, w, *, active_root: int | None = None) -> lis
         if target is None:
             continue
         assert_goal_access(request, target)
+        stop_kind = None
+        if target.status == "blocked":
+            # The same word the open chat shows: a run that stopped on a broken
+            # AI connection reads "Stopped", any other pause reads "Paused".
+            stopped = w.goal_stream_state(target_id, include_result=True)
+            stop = stop_payload(stopped.status, stopped.result) if stopped is not None else None
+            stop_kind = stop["kind"] if stop else None
         try:
             metadata = organization(request, w, g.id)
         except Exception:
@@ -9806,6 +9845,7 @@ def _chat_threads(request: Request, w, *, active_root: int | None = None) -> lis
             continue
         threads.append({
             "id": g.id, "target_id": target_id, "title": metadata["title"] or g.title, "status": target.status,
+            "state_label": status_label(target.status, stop_kind),
             "pinned": metadata["pinned"], "archived": metadata["archived"],
             "active": g.id == active_root, "updated_at": g.updated_at,
         })

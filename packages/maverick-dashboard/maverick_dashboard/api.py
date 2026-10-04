@@ -4355,6 +4355,7 @@ def _binder_payload(days: int = 90) -> dict:
         if not (cutoff <= float(approval.requested_at or 0) <= now):
             continue
         state = w.approval_state(approval.id) or {}
+        approvers = list(state.get("approvers") or [])
         approvals.append(
             {
                 "id": approval.id,
@@ -4367,7 +4368,10 @@ def _binder_payload(days: int = 90) -> dict:
                 "decided_at": approval.decided_at,
                 "approvals_required": approval.approvals_required,
                 "approved_count": int(state.get("approved_count") or 0),
-                "approvers": list(state.get("approvers") or []),
+                "approvers": approvers,
+                # The person who asked approved their own request.
+                "self_approved": bool(approval.status == "approved" and approval.requested_by
+                                      and approval.requested_by in approvers),
                 "audit_pending_count": int(state.get("audit_pending_count") or 0),
                 "effective": bool(state.get("effective")),
             }
@@ -14671,6 +14675,7 @@ async def deny_approval(request: Request, approval_id: int) -> Response:
         if not audit.audit_event(
             audit.EventKind.CONSENT_RESULT,
             agent=who,
+            actor=who,
             action="approval_rejection_reason",
             approval_id=int(approval_id),
             reason=reason,
@@ -14750,6 +14755,7 @@ async def revise_approval(request: Request, approval_id: int) -> Response:
     recorded = audit.audit_event(
         audit.EventKind.CONSENT_RESULT,
         agent=who,
+        actor=who,
         action="approval_revision_requested",
         approval_id=approval_id,
         superseded_binding_sha256=old_binding,
@@ -14831,7 +14837,16 @@ def approval_state(request: Request, approval_id: int) -> dict:
     st = _world().approval_state(approval_id)
     if st is None:
         raise HTTPException(status_code=404, detail="no such approval")
-    return {**st, "your_approval_recorded": _supervisor(request) in st.get("approvers", [])}
+    from maverick.safety.dual_control import allow_self_approval
+
+    who = _supervisor(request)
+    own = bool(st.get("requested_by")) and st.get("requested_by") == who
+    return {**st, "your_approval_recorded": who in st.get("approvers", []),
+            # What is actually enforced: one approver may be the person who
+            # asked; under two-person approval their vote counts only when
+            # [security] allow_self_approval is on.
+            "requested_by_you": own,
+            "self_approval_counts": int(st.get("approvals_required") or 1) <= 1 or allow_self_approval()}
 
 
 @router.post("/approvals/{approval_id}/claim")

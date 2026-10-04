@@ -7,18 +7,30 @@
                lede='Risky actions an agent wants to take wait here. Nothing
                      goes ahead until a person approves it, and every decision
                      is recorded in the audit log.') %}
+    {% set open_count = (approvals | length) + (flow_approvals | length) %}
+    {% set private_count = private_count | default(0) %}
+    {# Never "All clear" while anything is waiting, even a request this person
+       can't open (it belongs to a colleague's private task). #}
     {{ state('Current state',
-             ((approvals | length) + (flow_approvals | length)) ~ (' request waiting' if (approvals | length) + (flow_approvals | length) == 1 else ' requests waiting'),
-             badge='Action needed' if approvals or flow_approvals else ('Check needed' if flow_approval_coverage != 'current' else 'All clear'),
-             badge_class='warn' if approvals or flow_approvals or flow_approval_coverage != 'current' else 'ok',
-             copy='Approve, reject, or send a request back with a note saying what should change.') }}
+             (open_count ~ (' request waiting' if open_count == 1 else ' requests waiting')) if open_count
+               else ((private_count ~ (" request is waiting that you can't open here" if private_count == 1 else " requests are waiting that you can't open here")) if private_count
+               else '0 requests waiting'),
+             badge='Action needed' if open_count else ('Waiting' if private_count else ('Check needed' if flow_approval_coverage != 'current' else 'All clear')),
+             badge_class='warn' if open_count or private_count or flow_approval_coverage != 'current' else 'ok',
+             copy='Approve, reject, or send a request back with a note saying what should change.' if open_count or not private_count
+               else 'The person who asked can open and decide their own request.') }}
   {% endcall %}
   {# A link to one approval (/approvals#approval-12) that is no longer waiting
      says so instead of landing on a list without it. #}
   <p class="panel" id="approval-missing" role="status" hidden>This approval was already decided or no longer exists.
     <a href="#request-decision-history" id="approval-missing-history">See decisions on your requests</a>{% if can_open_page('/audit') %}
     or <a href="/audit">find it in the Activity log</a>{% endif %}.</p>
-  {% if private_count %}<p class="panel">{{ private_count }} pending request{{ '' if private_count == 1 else 's' }} contain private employee content. <a href="/content-access">Request the exact approval-card read</a> before reviewing. Content access does not grant a vote: your current review role, claim and separation-of-duties checks still apply.</p>{% endif %}
+  {% if private_count %}<p class="panel" id="approval-private-note">
+    {% if open_count %}{{ private_count }} more {{ 'request is' if private_count == 1 else 'requests are' }} waiting that you can't open here.{% endif %}
+    {{ 'It comes' if private_count == 1 else 'They come' }} from a colleague's private task. The person who asked can open and decide their own request.
+    {% if content_access_on %}To review one yourself, <a href="/content-access">ask for access to that approval card</a>. Access lets you read the card; your role and the approval rules still decide whether your decision counts.
+    {% else %}Asking for access to a colleague's approval card is turned off. An installation administrator can turn on “Employee content access requests” in Settings.{% endif %}
+  </p>{% endif %}
 
   {% if flow_approval_coverage != 'current' %}<p class="panel" role="status">Some flow approvals could not be checked. Open your <a href="/automations">flows and runs</a> to inspect older requests, or refresh this page.</p>{% endif %}
   {% if flow_approvals %}<section class="panel" aria-labelledby="flow-approvals-title">

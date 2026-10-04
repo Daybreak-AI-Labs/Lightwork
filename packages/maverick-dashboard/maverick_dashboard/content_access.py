@@ -140,12 +140,44 @@ def require_employee_content(request, owner: str, *, resource_kind: str, resourc
         raise HTTPException(403, "Employee content is private. Request a scoped, independently reviewed read in Content access.")
 
 
+# Approval decisions are governance evidence: who decided, on which request,
+# through which channel, and whether the requester approved their own request.
+# These are identities and fixed words, never the request's content.
+APPROVAL_AUDIT_KINDS = frozenset({"approval_decision", "consent_result", "channel_approval_decision"})
+APPROVAL_AUDIT_ACTIONS = frozenset({
+    "approval_decision_undone", "approval_confirmation", "approval_rejection_reason",
+    "approval_revision_requested", "approval_decided_via_channel",
+})
+# A decision made in Lightwork itself needs no channel note; chat apps do.
+_APPROVAL_CHANNELS = frozenset({"slack", "teams", "email"})
+
+
+def _approval_fields(event: dict) -> dict:
+    safe = {}
+    for name in ("decided_by", "previously_decided_by"):
+        value = event.get(name)
+        if isinstance(value, str) and 0 < len(value) <= 256 and value.isprintable():
+            safe[name] = value
+    if isinstance(event.get("self_approval"), bool):
+        safe["self_approval"] = event["self_approval"]
+    approval_id = event.get("approval_id")
+    if isinstance(approval_id, int) and not isinstance(approval_id, bool):
+        safe["approval_id"] = approval_id
+    if event.get("channel") in _APPROVAL_CHANNELS:
+        safe["channel"] = event["channel"]
+    if event.get("action") in APPROVAL_AUDIT_ACTIONS:
+        safe["action"] = event["action"]
+    return safe
+
+
 def _audit_fields(event: dict, *, kind: str = "") -> dict:
     """Control metadata only; free-form explanations and tool names stay private."""
     safe = {key: event[key] for key in (
         "actor", "principal", "tenant", "status", "ok", "cost_usd", "input_tokens", "output_tokens",
         "revision", "record_type", "record_id", "record_sha256", "access_request",
     ) if key in event and isinstance(event[key], (str, bool, int, float))}
+    if kind in APPROVAL_AUDIT_KINDS:
+        safe.update(_approval_fields(event))
     if kind == "setting_changed":
         # Setting receipts may contain private configuration values. Only
         # bounded identifiers and the completion state belong in metadata.
