@@ -925,7 +925,7 @@
     box.textContent = '';
     var t = DATA.transfers || { flows: [], total: 0, unsafeguarded: 0 };
     if (!t.total) {
-      empty(box, 'No cross-border transfers recorded yet', 'Transfers appear here once your processing record or a transfer assessment names where personal data goes.');
+      empty(box, 'No cross-border transfers recorded yet', 'Transfers appear here once your processing record or a transfer assessment names where personal data goes. Add them in the Privacy workspace.');
       return;
     }
     var okN = t.total - t.unsafeguarded;

@@ -269,7 +269,7 @@
         if (!data.keys.length) {
           var none = el('li');
           none.appendChild(window.mvEmpty
-            ? window.mvEmpty('No keys pinned', 'Pinned keys appear here. Until you pin one, checkpoints signed by any key this installation trusts are accepted.', null, { compact: true })
+            ? window.mvEmpty('No keys pinned', 'Pinned keys appear here. Until you pin one, checkpoints signed by any key this installation trusts are accepted. Pin a key below to accept only the checkpoints it signs.', null, { compact: true })
             : el('span', 'muted', 'No keys are pinned.'));
           list.appendChild(none);
         }

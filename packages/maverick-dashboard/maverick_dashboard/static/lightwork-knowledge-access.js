@@ -1035,7 +1035,7 @@
       var empty = archivedView ?
         ["No finished requests are in the archive yet", "Finished requests appear here once they are archived."] : readyView ?
         ["No finished requests are ready to archive", "Requests appear here when they can be archived. Complete a review or release a legal hold first."] :
-        ["No correction or removal requests yet", "Requests to correct, exclude or delete a source appear here with their status. To make one, open a source with View details, then use Request a correction or removal."];
+        ["No correction or removal requests yet", "Requests to correct, exclude or delete a source appear here with their status. Open a source with View details, then use Request a correction or removal to make one."];
       requests.appendChild(window.mvEmpty ? window.mvEmpty(empty[0], empty[1], null, { compact: true })
         : node("p", "muted", empty[0] + ". " + empty[1]));
       return;

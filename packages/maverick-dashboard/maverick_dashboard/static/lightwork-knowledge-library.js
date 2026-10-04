@@ -67,7 +67,7 @@
     if (jobsContext && jobsContext !== payload.context) { jobsPanel.replaceChildren(); pendingRebuild = null; throw new Error("Your workspace changed. Reload to review rebuilds."); }
     jobsContext = payload.context; jobsPanel.replaceChildren(el("h3", "Search index rebuild jobs"));
     if (!payload.jobs.length) {
-      var title = "No rebuild jobs to show", body = "Rebuilds you start appear here with their progress and cost. Archived operation receipts remain recorded.";
+      var title = "No rebuild jobs to show", body = "Rebuilds you start appear here with their progress and cost. Use Rebuild search index on a collection to start one. Archived operation receipts remain recorded.";
       jobsPanel.appendChild(window.mvEmpty ? window.mvEmpty(title, body, null, { compact: true }) : el("p", title + ". " + body));
     }
     payload.jobs.forEach(function(job) {

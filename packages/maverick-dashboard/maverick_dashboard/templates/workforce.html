@@ -172,7 +172,7 @@
         B.empty(document.getElementById('bd-depts'), 'No departmental work yet',
           'Tasks each department finishes and takes on appear here once a deployed team starts work.', DEPLOY);
         B.empty(document.getElementById('bd-dept-spend'), 'No spend yet',
-          'Agent spend by department appears here as deployed teams finish tasks.');
+          'Agent spend by department appears here as deployed teams finish tasks.' + (DEPLOY ? ' Deploy a team below to start.' : ''));
       }
 
       B.donut(document.getElementById('bd-completion'), {
@@ -218,7 +218,7 @@
         lbox.appendChild(ul);
       } else {
         B.empty(lbox, 'No work recorded yet',
-          'The specialists with the best delivery appear here once a deployed team finishes tasks.');
+          'The specialists with the best delivery appear here once a deployed team finishes tasks.' + (DEPLOY ? ' Deploy a team below to start.' : ''));
       }
     }
 

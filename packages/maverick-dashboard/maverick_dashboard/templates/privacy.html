@@ -154,7 +154,7 @@
         const flows = d.flows || [];
         if (!flows.length) {
           const title = 'No cross-border transfers recorded yet';
-          const body = 'Transfers appear here once your processing record or a transfer assessment names where personal data goes.';
+          const body = 'Transfers appear here once your processing record or a transfer assessment names where personal data goes. Add them through the processing record (RoPA) or a transfer assessment.';
           if (window.mvEmpty) box.replaceChildren(window.mvEmpty(title, body, null, { compact: true }));
           else box.textContent = title + '. ' + body;
           return;

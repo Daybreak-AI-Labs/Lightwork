@@ -770,6 +770,7 @@
     .mv-empty__title + .mv-empty__action { margin-top: var(--space-2); }
     /* Compact: inside panels, tiles and charts. */
     .mv-empty--compact { text-align: start; padding: var(--space-3) var(--space-4); font-size: var(--text-sm); }
+    .mv-empty--compact:not(:last-child) { margin-bottom: var(--space-3); }
     .mv-empty--compact .mv-empty__title { font-size: var(--text-sm); }
     .mv-empty--compact .mv-empty__body { margin: 0 0 var(--space-2); max-width: none; }
     .mv-empty--compact .mv-empty__body:last-child { margin-bottom: 0; }
@@ -1081,6 +1082,8 @@
   flex-wrap: wrap; gap: var(--space-3); margin: var(--space-2) 0; }
 .hero-statebox__copy { color: var(--muted); font-size: var(--text-sm);
   min-height: 2.5em; margin: 0; }
+/* A lede straight under the title (no subtitle) still gets breathing room. */
+.hero-title + .hero-lede { margin-top: var(--space-3); }
 /* The page's main action lives in the header: one btn--primary per view. */
 .hero-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2);
   margin-top: var(--space-4); }
