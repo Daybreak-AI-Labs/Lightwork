@@ -19,6 +19,7 @@
   {% if record_search_context %}<meta name="lightwork-search-context" content="{{ record_search_context }}">{% endif %}
   <title>{% block title %}Lightwork{% endblock %}</title>
   <link rel="stylesheet" href="{{ asset('lightwork.css') }}" />
+  <link rel="stylesheet" href="{{ asset('lightwork-command.css') }}" />
   {% if custom_theme_css %}
   <style{% if csp_style_nonce is defined %} nonce="{{ csp_style_nonce }}"{% endif %}>
 {{ custom_theme_css }}
@@ -228,6 +229,7 @@
       {{ ui("Search") }}
       <kbd aria-hidden="true" id="cs-find-kbd">Ctrl K</kbd>
     </button>
+    {% with shortcuts_open_class="cs-item cs-item--button" %}{% include "_shortcuts_open.html" %}{% endwith %}
     {# The same role-filtered navigation as the product shell's sidebar. #}
     <nav class="cs-product" aria-label="{{ ut('Primary') }}" lang="{{ ul('Primary') }}">
       {% include "_sidebar_nav.html" %}
@@ -272,6 +274,7 @@
   </aside>
   <div class="cs-backdrop" id="cs-backdrop" aria-hidden="true"></div>
   {% include "_navfinder.html" %}
+  {% include "_shortcuts.html" %}
   <main id="content" tabindex="-1">
     {% include "_halt_banner.html" %}
     <div class="cs-topbar">
@@ -325,6 +328,8 @@
   <script src="{{ asset('lightwork-markdown.js') }}"></script>
   <script src="{{ asset('lightwork-voice.js') }}" defer></script>
   <script src="{{ asset('lightwork-navfinder.js') }}" defer></script>
+  <script src="{{ asset('lightwork-shortcuts.js') }}" defer></script>
+  <script src="{{ asset('lightwork-pins.js') }}" defer></script>
   <script src="{{ asset('lightwork-settings-search.js') }}" defer></script>
   {% if record_search_context %}<link rel="stylesheet" href="{{ asset('lightwork-record-search.css') }}"><script src="{{ asset('lightwork-record-search.js') }}" defer></script>{% endif %}
   <script>

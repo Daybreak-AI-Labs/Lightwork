@@ -1441,6 +1441,41 @@ SYNONYMS: dict[str, tuple[str, ...]] = {
     "/shoring": ("hand a team's work", "hand over a team's work"),
 }
 
+# The sidebar's "Pinned pages" for someone who has not chosen any yet: a
+# starting set for their role, in order. Defaults only -- the first change a
+# person makes saves their own list -- and a page the person cannot open is
+# never offered (see pin_preset). "approver" and "privacy-officer" are the
+# names the Users page derives for those custom roles; any other custom role
+# starts from the preset its name or strongest permission suggests.
+PIN_PRESETS: dict[str, tuple[str, ...]] = {
+    "admin": ("/settings", "/users", "/audit"),
+    "operator": ("/goals", "/approvals", "/deliverables"),
+    "approver": ("/approvals", "/goals", "/deliverables"),
+    "privacy-officer": ("/privacy/rights-orchestration", "/privacy"),
+    "auditor": ("/audit", "/audit/receipts", "/assessments"),
+    "viewer": ("/deliverables", "/overview"),
+}
+_PRESET_BY_PERMISSION = (("admin", "admin"), ("operate", "operator"), ("audit", "auditor"), ("view", "viewer"))
+
+
+def pin_preset(role: str | None, allowed) -> list[str]:
+    """The starting pins for ``role``: the first preset that offers at least
+    one page in ``allowed`` (the pages the person may open), keeping only
+    those pages. A role's own preset comes first, then one its name suggests,
+    then one for its strongest permission."""
+    if not role:
+        return []
+    names = [role] if role in PIN_PRESETS else []
+    names += [name for word, name in (("privacy", "privacy-officer"), ("approv", "approver")) if word in role]
+    held = rbac.permissions_for(role)
+    names += [name for permission, name in _PRESET_BY_PERMISSION if permission in held]
+    for name in names:
+        pages = [path for path in PIN_PRESETS[name] if path in allowed]
+        if pages:
+            return pages
+    return []
+
+
 # Lockout guard: the pages an admin needs to *undo* a bad matrix save. Always
 # visible + reachable for the admin role, no matter what the store says.
 LOCKED = frozenset({("/settings", "admin"), ("/users", "admin")})
@@ -1811,4 +1846,6 @@ __all__ = [
     "switched_off_paths",
     "HEADINGS",
     "SYNONYMS",
+    "PIN_PRESETS",
+    "pin_preset",
 ]

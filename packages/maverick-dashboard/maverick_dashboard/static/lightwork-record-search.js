@@ -23,7 +23,8 @@
     }
     async function search(append){
       if(kind.value==='pages'){clear();status.textContent='Showing navigation pages only.';return;}
-      var query=input.value.trim();
+      // Without a scope prefix such as "#" (the finder narrows the search).
+      var query=finder.query?finder.query():input.value.trim();
       if(Array.from(query).length>200){clear();status.textContent='Use 200 characters or fewer to search records.';return;}
       if(!query&&kind.value!=='history'){clear();status.textContent='Type a name or reference to search records.';return;}
       if(!append)clear();
@@ -46,7 +47,9 @@
       }catch(error){if(current===generation){rows=[];next=null;cursor=null;snapshot='';more.hidden=true;finder.setRecords([]);status.textContent=error&&error.plain?error.message:errText(error,'search records');}}
       finally{if(current===generation)more.disabled=false;}
     }
-    dialog.addEventListener('lightwork:finder-query',function(event){clear();if(event.detail.reason==='closed')return;status.textContent='Type a name or reference to search records.';timer=setTimeout(function(){search(false);},300);});
+    // A search narrowed to commands, pages, people or settings leaves records out.
+    var narrowed={actions:'Showing commands only.',pages:'Showing navigation pages only.',people:'Showing people only.',settings:'Showing settings only.',approvals:'Showing requests waiting for your decision.'};
+    dialog.addEventListener('lightwork:finder-query',function(event){clear();if(event.detail.reason==='closed')return;if(narrowed[event.detail.scope]){status.textContent=narrowed[event.detail.scope];return;}status.textContent='Type a name or reference to search records.';timer=setTimeout(function(){search(false);},300);});
     kind.addEventListener('change',async function(){
       clear(); purposeLabel.hidden=kind.value!=='knowledge'; if(history)history.hidden=kind.value!=='history';
       if(kind.value==='knowledge'){

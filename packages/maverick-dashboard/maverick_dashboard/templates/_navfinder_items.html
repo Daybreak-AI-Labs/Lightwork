@@ -21,7 +21,8 @@
          data-synonyms="{{ _synonyms }}"
          data-search="{{ _link.label }} {{ ut(_link.label) }} {{ _group_labels.get(_group.label, _group.label) }} {{ ut(_group_labels.get(_group.label, _group.label)) }} {{ _group.label }} {{ _link.href }} {{ _link.aliases }} {{ _heading }} {{ _synonyms | replace('|', ' ') }}">
         <span class="navfinder__label">{{ ui(_link.label) }}</span>
-        <span class="navfinder__group">{{ ui(_group_labels.get(_group.label, _group.label)) }}</span>
+        {# Where the page lives: "Area › Page". #}
+        <span class="navfinder__group">{{ ui(_group_labels.get(_group.label, _group.label)) }} › {{ ui(_link.label) }}</span>
       </a>
     </li>
   {% endfor %}

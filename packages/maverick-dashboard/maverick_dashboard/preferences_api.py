@@ -53,7 +53,10 @@ def _state(request: Request, thread: int | None = None) -> dict:
     principal = _principal(request)
     state = preferences.state(principal, thread=_thread(request, thread))
     destinations = _destinations(request)
-    state["values"]["favorites"] = [item for item in state["values"]["favorites"] if item in destinations]
+    # The one pin list (the sidebar's Pinned pages): the person's own, or their
+    # role's starting set until they choose; only pages they may open now.
+    from .navigation_api import pin_hrefs
+    state["values"]["favorites"], _preset = pin_hrefs(state, destinations, _app()._page_role(request))
     if state["values"]["start_page"] not in destinations:
         state["values"]["start_page"] = "/chat"
     return {**state, "context": context_for(request), "destinations": destinations,
