@@ -8,6 +8,7 @@ from fastapi import APIRouter, HTTPException, Request, Response
 
 from .auth import assert_goal_access, caller_principal, has_permission, require_permission
 from .draft_api import context_for
+from .run_status import status_label
 
 router = APIRouter(tags=["my-work"])
 LIMIT = 200
@@ -29,9 +30,11 @@ def _task_source(request, world, owner):
                       "pending": "Waiting to start.", "active": "Work is running.", "running": "Work is running.",
                       "blocked": "Waiting for an answer or another prerequisite. Open the task for the current blocker.",
                       "failed": "Stopped with a problem. Review its evidence before choosing whether to retry.",
-                      "cancelled": "Cancellation requested. Cleanup may still be finishing; earlier external changes are not undone.",
+                      "cancelled": "Stopped. Cleanup may still be finishing; earlier external changes are not undone.",
                       "done": "Saved result is ready for review. This alone does not verify external delivery."}.get(status, "Open the task to review its current state.")
-            rows.append({"kind": "task", "id": str(goal.id), "title": goal.title, "state": status,
+            # The same words the task page and the chat list use (run_status.py).
+            rows.append({"kind": "task", "id": str(goal.id), "title": goal.title,
+                         "state": status_label(status) or status,
                          "detail": detail, "updated_at": goal.updated_at,
                          "href": f"/chat/goal/{goal.id}", "action": "Open result" if status == "done" else "Open task controls"})
         coverage.append({"source": "Tasks and saved outcomes", "state": "partial" if len(goals) > LIMIT else "current"})

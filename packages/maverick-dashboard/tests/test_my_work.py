@@ -40,3 +40,21 @@ def test_auth_off_projection_does_not_expand_to_named_employee_work(monkeypatch)
     result = work._model(object())
     assert result["items"] == []
     assert result["coverage"][0]["state"] == "unavailable"
+
+
+def test_task_rows_use_the_same_status_words_as_the_task_page(monkeypatch):
+    from maverick_dashboard import app
+
+    goals = [SimpleNamespace(id=3, owner="user:alice", title="Stopped one", status="cancelled", updated_at=5),
+             SimpleNamespace(id=4, owner="user:alice", title="Running one", status="active", updated_at=6)]
+
+    class World:
+        def list_goals(self, **kwargs):
+            return goals
+    monkeypatch.setattr(app, "_world", lambda: World())
+    monkeypatch.setattr(work, "caller_principal", lambda _: "user:alice")
+    monkeypatch.setattr(work, "has_permission", lambda *_: False)
+    monkeypatch.setattr(work, "assert_goal_access", lambda *_: None)
+    monkeypatch.setattr(work, "context_for", lambda _: "a" * 64)
+    states = {row["title"]: row["state"] for row in work._model(object())["items"]}
+    assert states == {"Stopped one": "Stopped", "Running one": "Working"}
