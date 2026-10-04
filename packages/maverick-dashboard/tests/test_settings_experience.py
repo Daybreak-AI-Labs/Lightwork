@@ -65,3 +65,9 @@ def test_signed_in_people_find_their_notification_settings(client, monkeypatch):
     _signed_in(monkeypatch, "viewer")
     for query in ("notification", "notifications", "digest"):
         assert any(item["href"] == "/notifications#notification-preferences" for item in _items(client, query))
+
+
+def test_one_letter_searches_skip_all_settings_but_keep_dedicated_controls(client):
+    one = _items(client, "t")
+    assert one and not any(item["href"].startswith("/settings/all") for item in one)
+    assert any(item["href"].startswith("/settings/all") for item in _items(client, "th"))

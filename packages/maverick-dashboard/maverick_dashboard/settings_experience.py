@@ -253,7 +253,8 @@ def search(request: Request, q: str = Query('', max_length=200)):
                             'scope': scope, 'required_role': role, 'effective': value, 'source': source}))
     if auth.has_global_permission(request, 'admin'):
         layers = page._sources()
-        for setting in (catalog.SETTINGS if opens("/settings/all") else ()):
+        # A single letter matches most of All settings: wait for a second one.
+        for setting in (catalog.SETTINGS if opens("/settings/all") and len(q.strip()) >= 2 else ()):
             if matches(page._search_text(setting)):
                 state = page._resolve(setting, layers)
                 if setting.secret:
