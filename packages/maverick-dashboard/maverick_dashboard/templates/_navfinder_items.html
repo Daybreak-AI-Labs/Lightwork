@@ -7,6 +7,7 @@
    hold "|"-separated names the ranking compares whole; data-search is
    everything a match may come from. #}
 {% set _group_labels = {'Operate': 'Work', 'Observe': 'Insights', 'Govern': 'Governance', 'Admin': 'Administration', 'Extend': 'Library'} %}
+{% set _go_to_keys = nav_go_to_keys if nav_go_to_keys is defined else [] %}
 {% for _group in finder_pages %}
   {% set _navfinder_group_index = loop.index0 %}
   {% for _link in _group.links %}
@@ -21,8 +22,8 @@
          data-synonyms="{{ _synonyms }}"
          data-search="{{ _link.label }} {{ ut(_link.label) }} {{ _group_labels.get(_group.label, _group.label) }} {{ ut(_group_labels.get(_group.label, _group.label)) }} {{ _group.label }} {{ _link.href }} {{ _link.aliases }} {{ _heading }} {{ _synonyms | replace('|', ' ') }}">
         <span class="navfinder__label">{{ ui(_link.label) }}</span>
-        {# Where the page lives: "Area › Page". #}
-        <span class="navfinder__group">{{ ui(_group_labels.get(_group.label, _group.label)) }} › {{ ui(_link.label) }}</span>
+        {# Where the page lives: "Area › Page", and its go-to keys if it has them. #}
+        <span class="navfinder__group">{{ ui(_group_labels.get(_group.label, _group.label)) }} › {{ ui(_link.label) }}{% for _key, _href, _label in _go_to_keys if _href == _link.href %} <span class="navfinder__keys" aria-hidden="true"><kbd>G</kbd> <kbd>{{ _key | upper }}</kbd></span>{% endfor %}</span>
       </a>
     </li>
   {% endfor %}

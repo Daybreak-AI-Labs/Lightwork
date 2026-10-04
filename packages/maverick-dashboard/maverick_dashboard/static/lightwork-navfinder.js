@@ -144,9 +144,25 @@
       return terms.every(function (term) { return haystack.indexOf(term) !== -1; }) ? 1 : 0;
     }
 
+    // The person's pinned and recent pages, from the sidebar's own lists:
+    // {href: [list, position]} with pins (0) before recent pages (1).
+    var personal = {};
+    function readPersonal() {
+      personal = {};
+      if (typeof doc.querySelectorAll !== "function") return;
+      ["pins", "recent"].forEach(function (list, rankOfList) {
+        Array.prototype.forEach.call(doc.querySelectorAll('[data-nav-list="' + list + '"] a[href]'), function (link, position) {
+          var href = link.getAttribute("href");
+          if (!personal[href]) personal[href] = [rankOfList, position];
+        });
+      });
+    }
+
     // Best matches first. A command and a page that match equally well put
-    // the command first (typing "pause" offers the emergency stop itself);
-    // equal pages keep the sidebar's registry order.
+    // the command first (typing "pause" offers the emergency stop itself),
+    // then the person's pinned and recent pages; other equal pages keep the
+    // sidebar's registry order. An empty box starts with pinned and recent
+    // pages, then the commands, then every other page.
     function rank(scope, query) {
       var terms = query.split(" ").filter(Boolean);
       var entries = [];
@@ -154,9 +170,16 @@
         actionOptions.forEach(function (option, index) { entries.push({option: option, kind: 0, index: index}); });
       }
       if (scope === "all" || scope === "pages") {
-        pageOptions.forEach(function (option, index) { entries.push({option: option, kind: 1, index: index}); });
+        pageOptions.forEach(function (option, index) {
+          var mine = personal[option.getAttribute("href")];
+          entries.push({option: option, kind: mine ? 1 + mine[0] : 3, index: mine ? mine[1] : index});
+        });
       }
-      entries.forEach(function (entry) { entry.score = terms.length ? score(entry.option, query, terms) : 1; });
+      entries.forEach(function (entry) {
+        entry.score = terms.length ? score(entry.option, query, terms) : 1;
+        // Before the commands while nothing is typed.
+        if (!terms.length && (entry.kind === 1 || entry.kind === 2)) entry.kind -= 3;
+      });
       return entries.sort(function (a, b) { return b.score - a.score || a.kind - b.kind || a.index - b.index; });
     }
 
@@ -297,7 +320,7 @@
       actionOptions.forEach(function (option) { hide(option, true); });
       pageOptions.forEach(function (option) { hide(option, true); });
       ranked.forEach(function (entry) { hide(entry.option, !entry.score); });
-      var order = ranked.map(function (entry) { return entry.kind + ":" + entry.index; }).join(",");
+      var order = ranked.map(function (entry) { return entry.option.id; }).join(",");
       if (order !== placedOrder) {
         placeRanked(ranked);
         placedOrder = order;
@@ -392,6 +415,7 @@
       input.setAttribute("aria-expanded", "true");
       input.value = "";
       refreshPinLabel();
+      readPersonal();
       if (loaded) filterResults(); else ensureLoaded();
       if (typeof dialog.showModal === "function") {
         dialog.showModal();

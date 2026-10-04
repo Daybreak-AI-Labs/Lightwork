@@ -121,7 +121,7 @@ from .i18n_journeys import region as _journey_region
 from .i18n_journeys import text as _journey_text
 from .model_tests_api import router as model_tests_router
 from .my_work_api import router as my_work_router
-from .navigation_api import command_list, personal_view
+from .navigation_api import GO_TO_KEYS, command_list, personal_view
 from .navigation_api import router as navigation_router
 from .oidc_login import router as oidc_login_router
 from .outcome_accounting_api import router as outcome_accounting_router
@@ -665,6 +665,7 @@ def _nav_context(request: Request) -> dict:
         "nav_commands": command_list(can_create_goal=can_create_goal, can_halt=can_halt,
                                      can_open_page=can_open_page, global_admin=viewer_global_admin,
                                      personal=personal),
+        "nav_go_to_keys": GO_TO_KEYS,
     }
 
 

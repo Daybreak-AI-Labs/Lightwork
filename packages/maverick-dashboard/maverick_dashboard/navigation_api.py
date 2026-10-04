@@ -23,6 +23,17 @@ from . import auth
 
 router = APIRouter()
 _PRIVATE = {"Cache-Control": "private, no-store"}
+# The go-to keys (G, then a letter). The shortcuts dialog lists them -- and its
+# script binds exactly what it lists -- and the command menu shows each one
+# beside its page. Home is everyone's; each other key appears only for people
+# who may open its page.
+GO_TO_KEYS: tuple[tuple[str, str, str], ...] = (
+    ("h", "/", "Go to Home, your start page"),
+    ("t", "/goals", "Go to Tasks"),
+    ("a", "/approvals", "Go to Approvals"),
+    ("r", "/deliverables", "Go to Results"),
+    ("s", "/settings", "Go to Settings"),
+)
 # People results per request; the Users page itself shows everyone.
 PEOPLE_LIMIT = 20
 

@@ -31,9 +31,9 @@
       <div data-shortcut="mod+k" data-shortcut-run="finder"><dt><kbd data-shortcut-mod>Ctrl</kbd> <kbd>K</kbd></dt><dd>{{ ui('Search or run a command') }}</dd></div>
       <div data-shortcut="/" data-shortcut-run="finder"><dt><kbd>/</kbd></dt><dd>{{ ui('Search') }}</dd></div>
       <div data-shortcut="?" data-shortcut-run="shortcuts"><dt><kbd>?</kbd></dt><dd>{{ ui('Show help and shortcuts') }}</dd></div>
-      <div data-shortcut="g h" data-shortcut-href="/"><dt>{{ _sequence('G', 'H') }}</dt><dd>{{ ui('Go to Home, your start page') }}</dd></div>
-      {% for _key, _href, _label in [('t', '/goals', 'Go to Tasks'), ('a', '/approvals', 'Go to Approvals'), ('r', '/deliverables', 'Go to Results'), ('s', '/settings', 'Go to Settings')] %}
-      {% if _can_open and _can_open(_href) %}
+      {# navigation_api.GO_TO_KEYS; the command menu shows the same keys. #}
+      {% for _key, _href, _label in (nav_go_to_keys if nav_go_to_keys is defined else []) %}
+      {% if _href == '/' or (_can_open and _can_open(_href)) %}
       <div data-shortcut="g {{ _key }}" data-shortcut-href="{{ _href }}"><dt>{{ _sequence('G', _key | upper) }}</dt><dd>{{ ui(_label) }}</dd></div>
       {% endif %}
       {% endfor %}

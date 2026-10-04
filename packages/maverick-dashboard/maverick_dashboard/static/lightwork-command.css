@@ -1,8 +1,13 @@
 /* The command menu's extras, Help and shortcuts, and the sidebar's Pinned and
    Recent pages (both shells). Colours and spacing come from lightwork.css. */
 
-/* ---------- Help and shortcuts entry, right below Search ---------- */
-.sidebar .navhelp__open { margin-top: calc(-1 * var(--space-2)); }
+/* ---------- Help and shortcuts entry, right below Search ----------
+   A quiet row under the search box rather than a second search box. */
+.sidebar .navhelp__open {
+  margin-top: calc(-1 * var(--space-2)); background: transparent; border-color: transparent;
+}
+.sidebar .navhelp__open:hover { background: var(--surface-2); border-color: transparent; }
+.sidebar .navhelp__open:focus-visible { outline: 2px solid var(--brand); outline-offset: -2px; }
 .cs-item--button .nav-label { flex: 1; }
 
 /* ---------- Pinned and Recent pages ---------- */
@@ -73,6 +78,11 @@
 }
 .navfinder__mode[hidden] { display: none; }
 .navfinder__results a [data-navfinder-verb] { color: var(--muted); font-weight: var(--font-normal); }
+.navfinder__keys { white-space: nowrap; margin-inline-start: var(--space-1); }
+.navfinder__keys kbd {
+  color: var(--muted); background: var(--surface-1); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); padding: 0 0.3rem; font: 500 var(--text-xs)/1.45 var(--font-mono);
+}
 
 /* ---------- Help and shortcuts dialog ---------- */
 .shortcuts {

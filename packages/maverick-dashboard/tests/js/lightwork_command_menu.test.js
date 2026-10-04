@@ -47,8 +47,8 @@ function commandItems(names) {
     `><span class="navfinder__label">${label}</span><span class="navfinder__group">Command</span></a></li>`).join("");
 }
 
-function menu({ people = true, records = true, composer = false, armed = false, commands = null } = {}) {
-  const dom = new JSDOM(`<!doctype html><body class="${armed ? "halt-armed" : ""}">
+function menu({ people = true, records = true, composer = false, armed = false, commands = null, sidebar = "" } = {}) {
+  const dom = new JSDOM(`<!doctype html><body class="${armed ? "halt-armed" : ""}">${sidebar}
     <button id="navfinder-open"></button><button id="nav-toggle"></button>
     <a href="#" id="halt-pill" role="button" data-can-halt="true">Running</a>
     ${composer ? '<form action="/chat/send"><textarea name="title" id="composer-field"></textarea></form>' : ""}
@@ -301,5 +301,20 @@ test("only the commands rendered for this person exist", () => {
   assert.deepEqual(ui.type(">"), ["#navfinder-input", "#shortcuts-dialog"]);
   assert.deepEqual(ui.type("pause"), ["/agent-control-plane"]);
   assert.deepEqual(ui.type("approve"), ["/approvals"]);
+  ui.dom.window.close();
+});
+
+test("an empty box starts with the person's pinned and recent pages, which also win ties", () => {
+  const sidebar = '<ul data-nav-list="pins"><li><a href="/users">Users</a></li><li><a href="/goals">Tasks</a></li></ul>' +
+    '<ul data-nav-list="recent"><li><a href="/settings">Settings</a></li><li><a href="/users">Users</a></li></ul>';
+  const ui = menu({ sidebar });
+  const all = ui.type("");
+  assert.deepEqual(all.slice(0, 3), ["/users", "/goals", "/settings"]);
+  assert.deepEqual(all.slice(3, 3 + COMMANDS.length), COMMANDS.map(([, href]) => href));
+  assert.deepEqual(all.slice(3 + COMMANDS.length), ["/approvals", "/agent-control-plane", "/help"]);
+  // Typing ranks by match first (Settings starts with "s"; "stop" and
+  // "support" are synonyms that do); among equal matches -- an "s" inside the
+  // name -- pinned pages lead, in pin order, before other pages.
+  assert.deepEqual(ui.type("/ s"), ["/settings", "/agent-control-plane", "/help", "/users", "/goals", "/approvals"]);
   ui.dom.window.close();
 });

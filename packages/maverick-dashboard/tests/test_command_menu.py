@@ -214,8 +214,19 @@ def test_finder_prefixes_listed_match_what_applies(client, monkeypatch):
     assert _shell(client)[0].prefixes == [">", "/", ":"]
 
 
-def test_page_results_show_where_each_page_lives(client):
+def _option_text(items: str, href: str) -> str:
+    option = re.search(r'<a [^>]*href="' + re.escape(href) + r'".*?</a>', items, re.DOTALL).group(0)
+    context = option[option.index('class="navfinder__group"'):]
+    return " ".join(unescape(re.sub(r"<[^>]+>", " ", context.split(">", 1)[1])).split())
+
+
+def test_page_results_show_where_each_page_lives_and_its_go_to_keys(client):
+    from maverick_dashboard import navigation_api
+
     _as("operator")
     items = client.get("/nav/finder").text
-    tasks = re.search(r'href="/goals".*?<span class="navfinder__group">(.*?)</span>\s*</a>', items, re.DOTALL).group(1)
-    assert " ".join(unescape(re.sub(r"<[^>]+>", "", tasks)).split()) == "Work › Tasks"
+    assert _option_text(items, "/goals") == "Work › Tasks G T"
+    assert _option_text(items, "/overview") == "Insights › Overview"
+    # The keys shown are the ones the shortcuts dialog lists and binds.
+    shown = dict(re.findall(r'data-shortcut="g (\w)" data-shortcut-href="([^"]+)"', client.get("/overview").text))
+    assert shown == {key: href for key, href, _ in navigation_api.GO_TO_KEYS if href != "/settings"}
