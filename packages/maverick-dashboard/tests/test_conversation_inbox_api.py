@@ -222,7 +222,10 @@ def test_uncertain_dispatch_is_never_reinvoked_after_restart(setup, monkeypatch)
     assert state["state"] == "submitted" and state["goal_id"] == receipt["goal_id"]
 
 
-def test_new_capability_has_typed_policy_catalog_and_explicit_installer_opt_in(monkeypatch):
+def test_new_capability_has_typed_policy_catalog_and_installer_opt_out(monkeypatch):
+    # On by default (the owner's choice on 4 October): people can add
+    # guidance while a task runs. The installer offers an explicit "off",
+    # which is written and stays off.
     try:
         import tomllib
     except ModuleNotFoundError:
@@ -232,9 +235,17 @@ def test_new_capability_has_typed_policy_catalog_and_explicit_installer_opt_in(m
     fields = [row for row in settings_catalog.SETTINGS if row.section == "conversation_inbox"]
     assert {row.key for row in fields} == {"enabled", "guidance", "queue", "independent", "max_pending"}
     assert all(row.group in settings_catalog.GROUPS for row in fields)
+    assert settings_catalog.BY_ID["conversation_inbox.enabled"].default is True
     document = tomllib.loads("\n".join(wizard._cfg_advanced({"allow_conversation_inbox": True}, [])))
     assert document["conversation_inbox"] == {"enabled": True, "guidance": True, "queue": True, "independent": True, "max_pending": 20}
     assert "conversation_inbox" not in tomllib.loads("\n".join(wizard._cfg_advanced({}, [])))
+    declined = tomllib.loads("\n".join(wizard._cfg_advanced({"allow_conversation_inbox": False}, [])))
+    assert declined["conversation_inbox"] == {"enabled": False}
+    monkeypatch.setattr(wizard, "_q_confirm", lambda *_, default=False, **__: default)
+    monkeypatch.setattr(wizard, "_q_select", lambda *_, default=None, **__: default)
+    monkeypatch.setattr(wizard, "_q_text", lambda *_, default="", **__: default)
+    monkeypatch.setattr(wizard, "_q_checkbox", lambda *_, **__: [])
+    assert wizard.pick_advanced()["allow_conversation_inbox"] is True
 
 
 def test_typed_copilot_uses_native_scope_receipts_and_explicit_guidance_decision(setup):
@@ -330,3 +341,22 @@ def test_closed_source_keeps_owned_receipts_and_cancellation_without_new_executi
         "expected_revision": item["revision"], "action": "cancel"})
     assert cancelled.status_code == 200 and cancelled.json()["item"]["state"] == "cancelled"
     assert len(world.list_goals()) == 1
+
+
+def test_the_composer_explanations_are_plain_and_translated():
+    """While a task runs, the composer says what each message will do in plain
+    words, in every draft language."""
+    import re as _re
+    from pathlib import Path
+
+    from maverick_dashboard import i18n_journeys
+    script = (Path(__file__).resolve().parents[1] / "maverick_dashboard" / "static"
+              / "lightwork-conversation-inbox.js").read_text(encoding="utf-8")
+    explanations = _re.search(r"const text=\{guidance:'(.*?)',queue:'(.*?)',independent:'(.*?)'\}", script)
+    assert explanations is not None
+    turned_off = "Sending messages during a task is turned off for this workspace. You can send a follow-up once the task finishes."
+    assert turned_off in script and "Background messages are disabled" not in script
+    for sentence in [*(text.replace("\\'", "'") for text in explanations.groups()), turned_off]:
+        assert not _re.search(r"billable|runner|consumes|snapshot|policy", sentence), sentence
+        for lang in i18n_journeys.TRANSLATION_LANGS:
+            assert i18n_journeys.text(sentence, lang) != sentence, (lang, sentence)

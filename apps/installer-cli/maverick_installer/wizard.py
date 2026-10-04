@@ -5018,9 +5018,9 @@ def pick_advanced() -> dict[str, Any]:
             "Import previews every change and keeps current policy checks.", default=True,
         ),
         "allow_conversation_inbox": _q_confirm(
-            "Enable durable conversation guidance, queued messages and explicitly separate tasks while work is running? "
-            "Guidance requires review and a safe checkpoint; existing task ownership, permissions and spending limits remain enforced.",
-            default=False,
+            "Let people add guidance, queue their next message or start separate work while a task runs? On by default. "
+            "Guidance is reviewed and read at the task's next safe point; existing task ownership, permissions and spending limits remain enforced.",
+            default=True,
         ),
         "allow_personal_preferences": _q_confirm(
             "Allow account-scoped writing style, display preferences, pinned pages, saved task filters and daily work layout? "
@@ -8915,6 +8915,9 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
         lines.extend(_feature_locks)
     if advanced.get("allow_conversation_inbox") is True:
         lines.extend(["", "[conversation_inbox]", "enabled = true", "guidance = true", "queue = true", "independent = true", "max_pending = 20"])
+    elif advanced.get("allow_conversation_inbox") is False:
+        # On by default, so only a deliberate "no" is written (and stays off).
+        lines.extend(["", "[conversation_inbox]", "enabled = false"])
     if advanced.get("tree_of_thought"):
         lines.append("")
         lines.append("[planning]")

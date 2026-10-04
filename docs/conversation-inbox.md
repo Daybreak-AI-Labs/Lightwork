@@ -1,6 +1,8 @@
 # Conversation messages during background work
 
-An administrator enables **Keep conversation responsive during tasks** in Settings → All settings → Chat channels, or opts in during installation. Guidance, queued messages, separate tasks and the maximum pending count have independent administrator controls. Workspace settings can narrow organization ceilings. Existing execution ownership, permissions, task concurrency and spending limits still apply.
+**Keep conversation responsive during tasks** is on by default (`[conversation_inbox] enabled`, default `true`): people can send messages while a task runs. An administrator can turn it off in Settings → All settings → Chat channels or during installation; an explicit `enabled = false` in the organization or workspace settings always stays off, and the composer then says sending during a task is turned off for the workspace. Guidance, queued messages, separate tasks and the maximum pending count have independent administrator controls. Workspace settings can narrow organization ceilings. Existing execution ownership, permissions, task concurrency and spending limits still apply. The inbox needs a signed-in, named account; a dashboard without sign-in keeps the earlier behaviour (send again once the task finishes).
+
+While a task runs, the composer says in plain words what the chosen kind of message will do: guidance is saved, checked once more, and read by the task at its next safe point without starting a new task; a queued message starts as the next task when the current one finishes; a separate task starts now, alongside the current one.
 
 In an owned task conversation the employee chooses a boundary before sending:
 

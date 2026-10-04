@@ -158,3 +158,19 @@ def test_other_owner_workspace_and_reused_metadata_cannot_read_inbox(setup):
         module.ConversationInbox(world, principal="user:other", authorize=lambda goal: None).state(goal)
     with tenant_scope(tenant="tenant-b"), pytest.raises(PermissionError):
         inbox.state(goal)
+
+
+@pytest.mark.parametrize(("global_table", "active_table", "enabled"), [
+    ({}, {}, True),                                   # on by default
+    ({"enabled": False}, {}, False),                  # an organization "off" stays off
+    ({}, {"enabled": False}, False),                  # so does a workspace "off"
+    ({"enabled": True}, {"enabled": True}, True),
+])
+def test_messages_during_a_task_are_on_by_default_and_off_stays_off(monkeypatch, global_table,
+                                                                     active_table, enabled):
+    monkeypatch.setattr(module.config, "config_source_errors", lambda include_tenant=False: [])
+    monkeypatch.setattr(module.config, "load_global_config",
+                        lambda: {"conversation_inbox": dict(global_table)})
+    monkeypatch.setattr(module.config, "load_config", lambda: {"conversation_inbox": dict(active_table)})
+    assert module.policy()["enabled"] is enabled
+    assert module.policy()["modes"] == ["guidance", "queue", "independent"]
