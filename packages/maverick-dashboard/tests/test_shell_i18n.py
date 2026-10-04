@@ -87,3 +87,15 @@ def test_stop_copy_has_two_distinct_scopes_and_keeps_review_qualification():
         assert local[1] == cluster[1] == lang
         assert local[0] != cluster[0]
         assert "ar" not in i18n_journeys.messages()[i18n_journeys.key("Stop work")]
+
+
+@pytest.mark.parametrize("name", ["base.html", "chat_base.html", "recovery_shell.html"])
+def test_every_shell_loads_localization_after_its_primary_content(name):
+    html = render(name, "fr")
+    head, body = html.split("</head>", 1)
+    revision, _ = i18n_journeys.browser_catalog_asset("fr")
+    catalog = f'<script src="/static/lightwork-i18n-catalog/fr/{revision}.js"'
+    runtime = '<script src="/static/lightwork-i18n.js"'
+    assert catalog not in head and runtime not in head
+    assert body.count(catalog) == body.count(runtime) == 1
+    assert body.index("</main>") < body.index(catalog) < body.index(runtime)

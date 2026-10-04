@@ -1,6 +1,16 @@
 """Draft workflow authoring copy; linguistic and consequence review pending."""
 
 ROWS = [('Workflow builder', 'Créateur de workflows', 'Workfloweditor', 'ワークフロービルダー', '工作流构建器'),
+ ('Workflows are turned off.', 'Les workflows sont désactivés.', 'Workflows sind deaktiviert.',
+  'ワークフローは無効になっています。', '工作流已关闭。'),
+ ('Turn them on in Learning', 'Activez-les dans Apprentissage', 'In Lernen aktivieren',
+  '「学習」で有効にする', '在“学习”中启用'),
+ ('to draft one here.', 'pour en créer un brouillon ici.', 'um hier einen Entwurf zu erstellen.',
+  'と、ここで下書きを作成できます。', '，即可在此创建草稿。'),
+ ('Ask the person who manages this installation to turn them on.',
+  'Demandez à la personne qui gère cette installation de les activer.',
+  'Bitten Sie die für diese Installation zuständige Person, sie zu aktivieren.',
+  'この環境の管理者に有効化を依頼してください。', '请联系此系统的管理员将其启用。'),
  ('manual builder', 'créateur manuel', 'manuellen Editor', '手動ビルダー', '手动构建器'),
  ('Reusable template', 'Modèle réutilisable', 'Wiederverwendbare Vorlage', '再利用可能なテンプレート', '可复用模板'),
  ('repeat the work with new details each time',

@@ -437,6 +437,15 @@
     </div>
   </div>
 
+  <section class="panel" id="workflow-versions" hidden aria-labelledby="workflow-versions-title">
+    <h2 id="workflow-versions-title">{{ ui("Draft versions and publication") }}</h2>
+    <p>{{ ui("Review the saved draft here. Save edits above before checking a sample. Samples validate inputs and show rendered instructions; they never call an AI model, tool, or external service.") }}</p>
+    <p id="workflow-versions-status" role="status" aria-live="polite"></p>
+    <button class="btn" type="button" id="workflow-versions-refresh">{{ ui("Refresh version review") }}</button>
+    <div id="workflow-versions-content"></div>
+  </section>
+{% endblock %}
+{% block scripts_extra %}
   <script src="/static/lightwork-template-connections.js"></script>
 <script>
   (function () {
@@ -1736,12 +1745,5 @@
     document.querySelector('.wf').addEventListener('click', function (event) { if (recovery && !event.target.closest('.draft-recovery')) recovery.changed(); });
   })();
   </script>
-  <section class="panel" id="workflow-versions" hidden aria-labelledby="workflow-versions-title">
-    <h2 id="workflow-versions-title">{{ ui("Draft versions and publication") }}</h2>
-    <p>{{ ui("Review the saved draft here. Save edits above before checking a sample. Samples validate inputs and show rendered instructions; they never call an AI model, tool, or external service.") }}</p>
-    <p id="workflow-versions-status" role="status" aria-live="polite"></p>
-    <button class="btn" type="button" id="workflow-versions-refresh">{{ ui("Refresh version review") }}</button>
-    <div id="workflow-versions-content"></div>
-  </section>
   <script src="/static/lightwork-workflow-versions.js"></script>
 {% endblock %}
