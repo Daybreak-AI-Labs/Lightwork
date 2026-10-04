@@ -321,3 +321,26 @@ def test_task_templates_show_readable_blanks_in_results(tmp_path, monkeypatch):
     rows = history._workflows(object())
     assert [row["title"] for row in rows] == ["Weekly update for [Team]"]
     assert "{{" not in json.dumps(rows)
+
+
+def test_switched_off_workspace_modules_are_not_available_not_failed(monkeypatch):
+    from maverick.third_party_executive_reports import ThirdPartyExecutiveReportConfigError
+    from maverick_dashboard import third_party_executive_reports_api as reports_api
+    from maverick_dashboard import vendor_onboarding_composition as onboarding
+
+    monkeypatch.setattr(reports_api, "_require_report_permission", lambda request, permission: None)
+    monkeypatch.setattr(reports_api, "_tenant_id", lambda: "workspace-a")
+    monkeypatch.setattr(onboarding, "settings", lambda: SimpleNamespace(enable=False))
+
+    def reports_request(code):
+        def factory(**kwargs):
+            raise ThirdPartyExecutiveReportConfigError(code)
+        return SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(third_party_executive_reports_runtime_factory=factory)))
+
+    with tenant_scope(tenant="workspace-a"):
+        model = search.search({"reports": lambda: sources._reports(reports_request("executive_report_disabled")),
+                               "onboarding": lambda: sources._onboarding(object())}, query="")
+    assert [row["state"] for row in model["coverage"]] == ["not available", "not available"]
+    assert model["complete"] is True
+    broken = search.search({"reports": lambda: sources._reports(reports_request("executive_report_configuration_unavailable"))}, query="")
+    assert broken["coverage"][0]["state"] == "unavailable" and broken["complete"] is False

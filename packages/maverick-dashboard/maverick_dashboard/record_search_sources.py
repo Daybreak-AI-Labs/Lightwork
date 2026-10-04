@@ -61,9 +61,10 @@ def _onboarding(request):
     from maverick.paths import current_tenant_id_strict
 
     from .vendor_onboarding_api import _binding, _call
+    from .vendor_onboarding_composition import settings
 
-    if not current_tenant_id_strict():
-        raise SourceOff("no workspace selected")
+    if not current_tenant_id_strict() or not settings().enable:
+        raise SourceOff("vendor onboarding is off in this workspace")
     rows = _call(_binding(request), "list")
     out = []
     for row in rows[:SOURCE_LIMIT]:
@@ -126,11 +127,18 @@ def _vault(request):
 
 
 def _reports(request):
+    from maverick.third_party_executive_reports import ThirdPartyExecutiveReportConfigError
+
     from .third_party_executive_reports_api import _require_report_permission, _tenant_id
 
     _require_report_permission(request, "view")
     tenant = _workspace(_tenant_id)
-    selected = request.app.state.third_party_executive_reports_runtime_factory(tenant_id=tenant, request=request)
+    try:
+        selected = request.app.state.third_party_executive_reports_runtime_factory(tenant_id=tenant, request=request)
+    except ThirdPartyExecutiveReportConfigError as exc:
+        if exc.error_code == "executive_report_disabled":
+            raise SourceOff("executive reports are off in this workspace") from exc
+        raise
     rows = selected.store.list_reports(caller_role=selected.role_view, limit=500)
     return Source([item("report", row.report_id, getattr(getattr(row, "brand", None), "report_title", "Executive report"),
                         href=link("/third-party/executive-reports", "report", row.report_id),

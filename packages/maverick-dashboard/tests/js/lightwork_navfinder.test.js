@@ -328,3 +328,17 @@ test("ranked pages move in the listbox and keep records and settings after them"
   assert.deepEqual(ui.domOrder(), RANKED_PAGES.map(([href]) => href).concat(["/chat/goal/1"]));
   ui.dom.window.close();
 });
+
+test("the status counts settings shown as well as pages", () => {
+  const ui = rankedFinder(RANKED_PAGES);
+  ui.type("settings");
+  ui.finder.setSettings([
+    { href: "/settings?focus=settings-theme", title: "Your colour theme", group: "Personal / device", effective: "", required_role: "" },
+    { href: "/settings/all?group=safety&id=x", title: "Another setting", group: "Safety", effective: "", required_role: "" },
+  ]);
+  assert.equal(ui.doc.getElementById("navfinder-count").textContent, "2 pages, 2 settings shown");
+  // Pages stay first; settings follow in the order the server ranked them.
+  assert.deepEqual([...ui.finder.visibleOptions()].map((option) => option.getAttribute("href")),
+    ["/settings", "/consent/publish-settings", "/settings?focus=settings-theme", "/settings/all?group=safety&id=x"]);
+  ui.dom.window.close();
+});

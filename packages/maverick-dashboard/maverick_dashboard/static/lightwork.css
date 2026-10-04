@@ -396,10 +396,12 @@
       color: var(--brand); background: var(--brand-subtle);
       border-color: color-mix(in srgb, var(--brand) 26%, transparent);
     }
-    .navfinder__label { font-weight: var(--font-medium); }
+    .navfinder__label { flex: 1 1 10rem; min-width: 0; font-weight: var(--font-medium); }
+    /* Long setting and record details wrap beside the name instead of
+       squeezing it to one letter per line. */
     .navfinder__group {
-      flex: none; color: var(--muted); font-size: var(--text-xs);
-      white-space: nowrap;
+      flex: 0 1 auto; min-width: 0; max-width: 55%; color: var(--muted);
+      font-size: var(--text-xs); text-align: end;
     }
     .navfinder__empty {
       margin: 0; padding: var(--space-6) var(--space-4) var(--space-7);

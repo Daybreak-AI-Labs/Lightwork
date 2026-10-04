@@ -17,4 +17,6 @@ ROWS = [
     ("Provider spending", "Dépenses par fournisseur", "Ausgaben nach Anbieter", "プロバイダー別の支出", "服务商支出"),
     ("Output styles", "Styles de réponse", "Antwortstile", "出力スタイル", "输出样式"),
     ("Back to Projects", "Retour aux projets", "Zurück zu den Projekten", "プロジェクトに戻る", "返回项目"),
+    ("{count} setting shown", "{count} paramètre affiché", "{count} Einstellung angezeigt", "設定{count}件を表示", "已显示{count}项设置"),
+    ("{count} settings shown", "{count} paramètres affichés", "{count} Einstellungen angezeigt", "設定{count}件を表示", "已显示{count}项设置"),
 ]

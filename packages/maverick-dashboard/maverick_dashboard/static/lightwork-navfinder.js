@@ -169,14 +169,17 @@
       if (global.LightworkI18n) {
         var locale = global.LightworkI18n;
         locale.set(count, locale.plural("{count} page", "{count} pages", pages));
-        if (recordOptions.length) {
+        [[recordOptions, "{count} record shown", "{count} records shown"],
+         [settingOptions, "{count} setting shown", "{count} settings shown"]].forEach(function (part) {
+          if (!part[0].length) return;
           count.appendChild(doc.createTextNode(", "));
-          var recordCount = doc.createElement("span");
-          locale.set(recordCount, locale.plural("{count} record shown", "{count} records shown", recordOptions.length));
-          count.appendChild(recordCount);
-        }
+          var partCount = doc.createElement("span");
+          locale.set(partCount, locale.plural(part[1], part[2], part[0].length));
+          count.appendChild(partCount);
+        });
       } else count.textContent = (pages === 1 ? "1 page" : pages + " pages") +
-        (recordOptions.length ? ", " + recordOptions.length + " records shown" : "");
+        (recordOptions.length ? ", " + recordOptions.length + " records shown" : "") +
+        (settingOptions.length ? ", " + settingOptions.length + (settingOptions.length === 1 ? " setting shown" : " settings shown") : "");
       empty.hidden = visible.length !== 0;
       results.hidden = visible.length === 0;
       setActive(visible.length ? 0 : -1, false);
