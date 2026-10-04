@@ -67,7 +67,10 @@ def test_finished_task_bell_to_owner_inbox_and_seen_state(client_and_actor):
     assert client.get("/api/v1/notifications/personal/summary").json()["unseen"] == 0
 
     actor["principal"] = "user:bob"
-    assert client.get("/api/v1/notifications/personal/summary").json()["unseen"] == 0
+    assert client.get("/api/v1/notifications/personal/summary").json()["unseen"] == 1
+    assert [(row["goal_id"], row["title"]) for row in
+            client.get("/api/v1/notifications/personal").json()["items"]] == [
+                (other, "Other person's private task")]
     assert "Owner's private task" not in client.get("/notifications").text
 
 
@@ -82,3 +85,32 @@ def test_disabled_alerts_have_a_working_explanation_page(client_and_actor):
     assert "Personal task alerts are turned off" in page.text
     assert 'id="notification-preferences"' not in page.text
     assert client.get("/api/v1/notifications/personal/summary").status_code == 403
+
+
+def test_owner_is_enrolled_at_task_creation_and_first_check_catches_fast_outcomes(
+    client_and_actor, monkeypatch,
+):
+    from maverick import personal_identity, personal_notification_recipients
+
+    client, _actor, world, _home = client_and_actor
+    monkeypatch.setattr(personal_identity, "principal_current", lambda actor: actor == "user:alice")
+    completed = world.create_goal("Finished before inbox opened", owner="user:alice")
+    failed = world.create_goal("Failed before inbox opened", owner="user:alice")
+    waiting = world.create_goal("Waiting before inbox opened", owner="user:alice")
+    other = world.create_goal("Another person's task", owner="user:bob")
+    assert personal_notification_recipients.principals() == ["user:alice"]
+
+    world.set_goal_status(completed, "done", result="Private result")
+    world.set_goal_status(failed, "failed", result="Private failure")
+    world.ask("Private question", waiting)
+    world.set_goal_status(other, "done", result="Another private result")
+
+    first = client.get("/api/v1/notifications/personal")
+    assert first.status_code == 200
+    rows = first.json()["items"]
+    assert {(row["goal_id"], row["category"]) for row in rows} == {
+        (completed, "completed"), (failed, "failed"), (waiting, "needs-decision")}
+    assert all(row["href"] == f'/chat/goal/{row["goal_id"]}' for row in rows)
+    assert "Private result" not in first.text and "Another person's task" not in first.text
+    second = client.get("/api/v1/notifications/personal").json()["items"]
+    assert {row["id"] for row in second} == {row["id"] for row in rows}

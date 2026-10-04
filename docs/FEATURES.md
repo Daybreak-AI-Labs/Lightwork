@@ -368,19 +368,17 @@ here.
   (`role_stats.py` `<domain>::<role>` keys); a domain run's routing guidance
   prefers its own department's track record and falls back to the global
   signal when history is thin.
-- **Counterfactual promotion** — the self-improvement controller can judge a
-  learned change (tool/prompt/policy) on its confounder-adjusted *causal*
-  effect on outcomes, not a correlation that merely co-occurred with success
-  (`promotion_effect.py`: stratified/subclassification ATE with a confidence
-  interval over the logged trajectory population). The evidence gate then
-  requires the effect's lower confidence bound to clear the margin, and every
-  promotion records the effect, its CI, the naive (confounded) number for
-  contrast, and the confounders adjusted for. Fail-closed by calibration: an
-  estimate with too little overlap, or one that leaks a non-zero effect under a
-  within-stratum placebo permutation, is refused. Distinct from per-swarm CSCA
-  (`credit.py`) — this is offline, corpus-level, for promotion decisions.
-  Default-on via `[self_improvement] causal_promotion`; applies only when
-  self-improvement is enabled.
+- **Controlled-evidence promotion** — `promotion_effect.py` compares outcomes
+  within recorded context groups and reports overlap, a confidence interval,
+  and a permutation p-value. Ordinary task history remains observational:
+  matching by recorded fields cannot exclude unrecorded reasons why a change
+  was tried on easier work. Such comparisons can surface candidates, but cannot
+  authorize automatic promotion. A promotion-grade estimate requires
+  prospectively randomized assignment, sufficient support in both arms, and
+  an observed effect that clears the evidence margin. The receipt retains the
+  assignment design, p-value, interval, and sample counts. The
+  `[self_improvement] causal_promotion` interlock is on when self-improvement is
+  enabled; the current trajectory-to-unit adapter does not assert randomization.
 - **Capability grading on the promotion receipt** — the capability
   non-escalation gate always refused a widening change, but the durable receipt
   did not record *what the gate concluded*, so a third party reading the ledger
@@ -395,17 +393,18 @@ here.
   their hash-chained journal entries still verify. A verifier must read that
   absence as *unknown*, never as bounded; an unrecognised grading fails closed
   rather than being downgraded to a weaker one.
-- **Model-based counterfactual rollouts** — when confounding is so severe that no
+- **Model-based counterfactual rollouts** — when measured strata have no
   stratum has both arms (zero overlap), stratification is blind; g-computation
   over a tabular transition model fit from the logged `(state, action) ->
-  next_state` records (`counterfactual_rollout.py`) recovers the effect anyway by
+  next_state` records (`counterfactual_rollout.py`) simulates a possible effect by
   re-simulating each context with the decision forced to treated vs control and
   rolling forward to a terminal outcome. Returns the same `EffectEstimate`, so
   the gate is unchanged. Fail-closed by calibration: trustworthy only when the
   model predicts held-out one-step transitions, both actions have support, and a
-  null-action placebo reads ~0. The tabular learning half of the Operating Twin
-  (a generative transition model is a drop-in behind the same interface); same
-  `causal_promotion` knob.
+  null-action placebo reads ~0. A model fit to observational trajectories still
+  cannot establish a causal effect; the promotion gate requires independent
+  controlled evidence. The tabular learning half of the Operating Twin uses the
+  same `causal_promotion` knob.
 - **Pre-execution rehearsal** — before a high-impact tool runs, compare it with
   the learned world-model (`rehearsal.py`). It is **observe-only by default**:
   an unfamiliar or poor prediction is logged but does not stop the action.
@@ -1977,32 +1976,29 @@ here.
   in the same Postgres database as the world-model backend (cosine `<=>`
   search); it takes an injected embedder rather than embedding itself, so
   recall reuses the local fastembed model.
-- **Cognitive Data Engine — the causal improvement flywheel** (`data_engine.py`
+- **Cognitive Data Engine — outcome-pattern discovery** (`data_engine.py`
   + `flywheel.py`, `maverick flywheel`, default-on `[data_engine] enable` /
   `MAVERICK_DATA_ENGINE`) — the Tesla-style data engine for a governed
-  workforce: production failures are triaged by their **causal** impact on real
-  outcomes (fix what moves reality most, not what's merely frequent), the worst
-  actions are mined into **guardrails** (`negative_knowledge.py` — kept only
-  when the causal harm is trustworthy and self-retired when it's gone),
+  workforce: production failures are triaged by observed outcome differences
+  within recorded context groups. These are hypotheses for review, not proof of
+  cause. Candidate guardrails (`negative_knowledge.py`) need controlled
+  evidence before automatic promotion,
   beneficial actions consolidate into **habits** (`procedural_memory.py`, a
   reinforce/forget curve), and the whole loop composes in one pass. It reads the
   trajectory store and can be disabled independently. Observable
   read-only at `GET /api/v1/flywheel` (mined guardrails + consolidated habits).
-- **Causal estimators — the rigor under the flywheel** (`promotion_effect.py`,
-  `counterfactual_rollout.py`) — effects are estimated, not guessed: a
-  stratified/subclassification ATE with a confidence interval, a placebo
-  refutation, and a `trustworthy` calibration gate (`estimate_effect`), plus a
-  g-computation rollout over a learned tabular world-model
-  (`estimate_effect_via_rollout`). An untrustworthy estimate never promotes a
-  change. Validated to recover a known effect under confounding while rejecting
-  the naive (confounded) contrast.
-- **Operations Scientist — discover a better process and prove it**
+- **Outcome-comparison estimators** (`promotion_effect.py`,
+  `counterfactual_rollout.py`) — a stratified difference and a learned-model
+  rollout help rank hypotheses. The statistical gate uses sample variance and
+  compares the observed statistic with shuffled assignments; the average of
+  shuffles is not a refutation. Neither method alone establishes causation from
+  observational logs, and those logs cannot clear the promotion gate.
+- **Operations Scientist — propose a process change for a controlled trial**
   (`operations_scientist.py`, default-on `[operations_scientist] enable` /
-  `MAVERICK_OPERATIONS_SCIENTIST`) — pairs a causally-harmful action with the
-  beneficial habit that should replace it ("stop A; do B"), validates the swap
-  in the world-model **before** spending a real experiment, and only a
-  trustworthy positive lift is promoted to a live trial. Discovery, not just
-  labour; it can be disabled independently.
+  `MAVERICK_OPERATIONS_SCIENTIST`) — pairs a harmful-looking action pattern with
+  a candidate replacement ("stop A; do B"), simulates the swap in the learned
+  model, and prioritizes candidates for a real trial. The simulated lift is a
+  forecast, not a measured causal gain; it can be disabled independently.
 - **Consequence Engine — reality is the reward** (`consequence.py`, `maverick
   record-outcome`, dashboard `POST /api/v1/outcomes`, default-on `[consequence]
   enable` / `MAVERICK_CONSEQUENCE`) — when a real downstream result lands (an
@@ -2302,11 +2298,12 @@ here.
   before/after outcomes, versions the definition, and autonomously reverts a
   regression. It grounds which tool a reliable agent node keeps calling
   (`node_tools.py`, sourced from the trajectory store) so a **hardening**
-  proposal (agent → deterministic action) can name — and, under `[flows]
-  auto_apply`, autonomously apply — the inferred tool instead of waiting for a
-  human to pick one. Both autonomy knobs (`auto_evolve` revert, `auto_apply`
-  forward) are toggled from the Learning page, deliberately kept outside the
-  blanket learning control. `evolution_log.improvement_count()` reports the
+  proposal (agent → deterministic action) can name a candidate tool. The
+  proposal is currently review-only because tool-name history does not prove
+  the parameters or effects needed for a safe replay; `auto_apply` cannot
+  activate it. The Learning page exposes the separate evolution controls,
+  including automatic regression revert when enabled.
+  `evolution_log.improvement_count()` reports the
   self-rewrites that stuck (reverted ones netted out) as the moat number. A failed run records WHICH node failed (`FlowRun.cursor`) and can
   **resume from the failed step** with the data as of the failure
   (`execution.execute(from_failure=True)`, `POST /flows/runs/{id}/retry?from_failure=1`)

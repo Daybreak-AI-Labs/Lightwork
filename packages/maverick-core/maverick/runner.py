@@ -339,6 +339,7 @@ def _runner_principal_binding(world, goal, execution_principal):
 def _goal_run_exception_status(world, goal_id: int, exc: Exception) -> str:
     """Distinguish an intentional legacy hold from a retryable run crash."""
     from .event_admission import EventRegistryUnavailable, LegacyEventGoalHeld
+    from .stop_reasons import exception_stop_text, explain_stop
 
     if isinstance(exc, LegacyEventGoalHeld):
         return "blocked"
@@ -350,7 +351,10 @@ def _goal_run_exception_status(world, goal_id: int, exc: Exception) -> str:
     # retryable queue result so the worker's existing policy can decide.
     log.exception("goal #%s crashed inside run_goal_sync", goal_id)
     try:
-        world.set_goal_status(goal_id, "blocked", result="internal error")
+        if _finished_goal_status(world, goal_id) not in {"done", "failed", "cancelled"}:
+            reason = exception_stop_text(exc)
+            world.set_goal_status(goal_id, "failed", result=reason)
+            world.append_event(goal_id, "Lightwork", "error", explain_stop(reason).message)
     except Exception:  # pragma: no cover
         log.exception("failed to reclaim goal #%s after crash", goal_id)
     return "error"

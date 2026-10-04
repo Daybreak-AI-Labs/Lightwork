@@ -8,17 +8,19 @@ in All settings; the installer provides the same choice.
 
 The in-product inbox refreshes every 30 seconds while visible. Administrators
 can also enable `personal_background` in All settings or the installer. The
-dashboard then observes explicitly enrolled accounts while their pages are
-closed, releasing eligible digests at the next observation. Opening the inbox
-enrolls that named account in an encrypted tenant-local registry. The UI shows
+dashboard then observes enrolled accounts while their pages are
+closed, releasing eligible digests at the next observation. Creating work for
+a current named account or opening its inbox enrolls that account in an
+encrypted tenant-local registry. A first observation delivers a task completed
+after enrollment while suppressing older completed-task history. The UI shows
 the last completed background observation; enabled is not described as delivered.
 The worker shares the dashboard shutdown supervisor, active-tenant checks,
 current named-account authority, and the complete source projection (including
 budget warnings). Revoked membership stops observation and removes that
 account's enrollment and inbox state. At most 100 recipients are observed per
 cycle with a rotating cursor and 20-second work budget; busy deployments may
-observe less frequently than 30 seconds. Organization webhook alerts keep their
-separate policy.
+observe less frequently than 30 seconds. Organization webhook alerts, including
+ntfy, keep their separate policy and do not carry private task updates.
 
 Administrators can additionally enable `personal_external` and save an HTTPS
 dashboard origin in `personal_dashboard_url`. The installer exposes both. A

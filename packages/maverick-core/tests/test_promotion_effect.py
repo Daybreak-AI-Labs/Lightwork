@@ -1,6 +1,4 @@
-"""Counterfactual promotion: the effect estimator must deconfound, and the
-promotion gate must judge a causal candidate on its effect's lower bound.
-"""
+"""Observed comparisons inform hypotheses; controlled evidence gates adoption."""
 from __future__ import annotations
 
 from maverick import promotion_effect as pe
@@ -28,18 +26,21 @@ def test_recovers_effect_under_confounding():
     est = pe.estimate_effect(units, adjusted_for=("stratum",))
     assert abs(est.effect - 0.10) < 1e-9          # stratification recovers the truth
     assert est.naive_effect > 0.45                # ... while the naive number lies
-    assert est.trustworthy
-    assert abs(est.ci_low - 0.10) < 1e-9          # zero within-arm variance -> tight CI
+    assert not est.trustworthy                  # logged use was not randomized
+    assert est.permutation_p_value == 1.0
+    assert abs(est.ci_low - 0.10) < 1e-9
 
 
-def test_placebo_is_near_zero():
+def test_mean_permutation_is_not_used_as_a_refutation():
     units = _units([
         ("A", 1, 0.9, 10), ("A", 0, 0.8, 4),
         ("B", 1, 0.3, 4),  ("B", 0, 0.2, 10),
     ])
     est = pe.estimate_effect(units)
-    # Permuting treatment within strata severs the real link -> ~0.
-    assert abs(est.placebo_effect) < 0.05
+    # The old zero-mean check always passed. Observational evidence is never
+    # promoted even with strong overlap and a clean-looking comparison.
+    assert not est.trustworthy
+    assert est.permutation_p_value == 1.0
 
 
 def test_ci_contains_true_effect_with_variance():
@@ -51,7 +52,35 @@ def test_ci_contains_true_effect_with_variance():
     est = pe.estimate_effect(units)
     assert abs(est.effect - 0.10) < 1e-9
     assert est.ci_low < 0.10 < est.ci_high        # non-degenerate interval covers truth
-    assert est.trustworthy
+    assert not est.trustworthy
+
+
+def test_prospective_randomization_can_clear_the_gate():
+    units = [pe.Unit(1, 0.8, ("s",), randomized=True) for _ in range(12)]
+    units += [pe.Unit(0, 0.4, ("s",), randomized=True) for _ in range(12)]
+    est = pe.estimate_effect(units)
+    assert est.randomized and est.trustworthy
+    assert est.permutation_p_value <= 0.05
+    assert est.ci_low > 0.0
+    verdict = propose_with_effect("prompt", "controlled improvement", est, rollback="snap")
+    assert verdict.promote, verdict.blocking_reason
+
+
+def test_hidden_workload_difference_cannot_promote_observed_tool_use():
+    # The tool happens to be used on easy work within the same recorded domain.
+    # The observed difference is large, but the unrecorded difficulty caused it.
+    units = [pe.Unit(1, 0.95, ("same-domain",)) for _ in range(20)]
+    units += [pe.Unit(0, 0.35, ("same-domain",)) for _ in range(20)]
+    est = pe.estimate_effect(units)
+    assert est.effect > 0.5 and not est.trustworthy
+    verdict = propose_with_effect("prompt", "easy-work mirage", est, rollback="snap")
+    assert not verdict.promote
+
+
+def test_singleton_arm_does_not_create_zero_width_confidence():
+    units = [pe.Unit(1, 0.9, ("single",)), pe.Unit(0, 0.2, ("single",))]
+    est = pe.estimate_effect(units)
+    assert est.n_used == 0 and not est.trustworthy
 
 
 def test_low_overlap_is_untrustworthy():

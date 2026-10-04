@@ -8,6 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 from maverick import audit, config, world_model
 from maverick.candidate_promotion import DeploymentObservation
+from maverick.outcome_accounting import COST_COVERAGE_FAMILIES
 from maverick.outcome_pilot_start_gate import (
     OutcomePilotAdmissionRequired,
     require_work_item_admission,
@@ -745,6 +746,8 @@ def test_rejected_and_missing_cases_stay_in_denominator_cost_not_invented(record
     assert result["groups"]["all"]["accepted"] == 0
     assert result["groups"]["all"]["reported_minutes_difference"] == 55
     assert result["groups"]["all"]["reported_cost_difference"] is None
+    assert result["evidence_readiness"]["reported_effort_comparison_ready"] is False
+    assert result["evidence_readiness"]["reported_cost_comparison_ready"] is False
     assert result["provider_invoice_verified"] is False
     assert result["holdout_exposure_verified"] is False
     records["1"]["version"] = "c" * 64
@@ -1009,9 +1012,12 @@ def test_prepare_task_in_app_is_private_idempotent_and_does_not_run(monkeypatch)
 
 def test_total_cost_per_accepted_includes_rejected_cases_and_requires_complete_coverage(records):
     record = create(records)
+    coverage = {family: {"status": "included", "note": "Recorded in the total-cost source."}
+                for family in COST_COVERAGE_FAMILIES}
     for number in range(1, 5):
         records[str(number)].update(finished=True, accepted=number == 1, version="b" * 64)
-        body = observation(record["revision"], baseline_cost="100", ai_total_cost="25", currency="USD", criteria_met=number == 1)
+        body = observation(record["revision"], baseline_cost="100", ai_total_cost="25", currency="USD", criteria_met=number == 1,
+                           cost_coverage=coverage)
         body["operation_id"] = "observation-operation-" + str(number)
         record = pilots.observe(record["id"], str(number), body, context="alice", actor="user:alice", resolve=lambda k, r: records[r])
         group = pilots.report(record, resolve=lambda k, r: records[r])["groups"]["all"]
@@ -1021,6 +1027,11 @@ def test_total_cost_per_accepted_includes_rejected_cases_and_requires_complete_c
     assert group["reported_ai_cost_per_accepted"] == "100"
     assert group["reported_cost_difference"] == "300"
     assert group["acceptance_rate"] == .25
+    readiness = pilots.report(record, resolve=lambda k, r: records[r])["evidence_readiness"]
+    assert readiness["reported_effort_comparison_ready"] is True
+    assert readiness["frozen_criteria_review_ready"] is True
+    assert readiness["reported_cost_comparison_ready"] is True
+    assert readiness["causal_release_lift_qualified"] is False
 
 
 def test_review_queue_lists_other_peoples_protected_pilots_in_this_workspace_only(records, monkeypatch):

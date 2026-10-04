@@ -3,7 +3,7 @@ next step and a link; raw exception text is admin-only technical detail."""
 from __future__ import annotations
 
 import pytest
-from maverick.stop_reasons import RAW_TEXT_LIMIT, explain_stop
+from maverick.stop_reasons import RAW_TEXT_LIMIT, exception_stop_text, explain_stop
 
 RAW_TENANT = ("over quota: tenant policy unavailable or inactive: "
               "tenant is suspended or unknown: 'owner-browser'")
@@ -110,3 +110,64 @@ def test_empty_result_is_a_generic_stop_with_no_technical_text():
 def test_technical_text_is_bounded():
     stop = explain_stop("x" * (RAW_TEXT_LIMIT * 3))
     assert len(stop.technical) <= RAW_TEXT_LIMIT
+
+
+@pytest.mark.parametrize(("name", "status", "kind"), [
+    ("AuthenticationError", 401, "provider_authentication"),
+    ("RateLimitError", 429, "provider_rate_limit"),
+    ("InternalServerError", 500, "provider_unavailable"),
+    ("NotFoundError", 404, "provider_model_not_found"),
+    ("APIConnectionError", None, "provider_connection"),
+])
+def test_sdk_failure_has_a_specific_safe_customer_remedy(name, status, kind):
+    error_type = type(name, (Exception,), {"__module__": "openai"})
+    error = error_type("secret-provider-response user:alice")
+    error.status_code = status
+    saved = exception_stop_text(error)
+    stop = explain_stop(saved)
+    assert stop.kind == kind
+    assert "secret-provider-response" not in saved + stop.message + stop.action
+    assert stop.action
+
+
+def test_legacy_provider_500_is_not_described_as_a_lightwork_internal_error():
+    stop = explain_stop("internal error: InternalServerError: Error code: 500")
+    assert stop.kind == "provider_unavailable"
+    assert "Try again" in stop.action
+
+
+def test_non_provider_exception_stays_generic_without_its_text():
+    assert exception_stop_text(RuntimeError("private path C:\\keys\\ai")) == "internal error"
+
+
+def test_failed_run_finalization_keeps_provider_cause_and_safe_work_log():
+    from types import SimpleNamespace
+
+    from maverick.orchestrator import _RunLifecycle
+
+    class World:
+        def __init__(self):
+            self.goal = SimpleNamespace(status="active")
+            self.events = []
+
+        def get_goal(self, _goal_id):
+            return self.goal
+
+        def set_goal_status(self, _goal_id, status, result=None):
+            self.goal.status = status
+            self.goal.result = result
+
+        def append_event(self, _goal_id, _agent, kind, content):
+            self.events.append((kind, content))
+
+    world = World()
+    lifecycle = _RunLifecycle(world, 7, None)
+    lifecycle.started = True
+    error_type = type("InternalServerError", (Exception,), {"__module__": "openai"})
+    error = error_type("secret provider payload")
+    error.status_code = 500
+    lifecycle.finish(error)
+    assert world.goal.status == "failed"
+    assert explain_stop(world.goal.result).kind == "provider_unavailable"
+    assert world.events == [("error", "The AI service is not responding.")]
+    assert "secret provider payload" not in lifecycle.summary + world.goal.result

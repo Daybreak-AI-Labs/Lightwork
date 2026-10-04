@@ -26,6 +26,7 @@ from maverick.commitment_viability import (
     assess,
     confirm_dependency,
     confirm_option,
+    explain_resource_gaps,
     propose_shared_dependencies,
 )
 from maverick.governed_records import GovernedRecordStore
@@ -286,6 +287,7 @@ def project(record: dict, *, now: float | None = None,
     model = _snapshot(record["model"])
     revisions = _current_versions(record)
     result = assess(model, now=now, current_source_revisions=revisions)
+    gaps = explain_resource_gaps(model, now=now, current_source_revisions=revisions)
     proposals = propose_shared_dependencies(model, _traces(record), now=now,
                                             current_source_revisions=revisions)
     return {"id": record["id"], "title": record["title"],
@@ -293,6 +295,9 @@ def project(record: dict, *, now: float | None = None,
             "labels": record["labels"], "basis": record["basis"],
             "model": asdict(model), "traces": record["traces"],
             "sources": record["sources"], "assessment": asdict(result),
+            "resource_gaps": [asdict(item) for item in gaps],
+            "resource_gap_blocked_by_order_change": any(
+                not item.acceptance.current(now, revisions) for item in model.commitments),
             "proposals": [asdict(item) for item in proposals],
             "audit_status": "pending" if record.get("_audit_pending") else "recorded",
             "archived": archive is not None,

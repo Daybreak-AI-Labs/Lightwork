@@ -701,6 +701,7 @@ class Goal:
     execution_principal: str = ""
     domain: str = ""
     project_id: int | None = None
+    completed_at: float | None = None
 
 
 @dataclass
@@ -1746,7 +1747,14 @@ class WorldModel:
                 (parent_id, _enc_field(title), _enc_field(description), now, now,
                  owner, execution_principal, domain or "", project_id, _enc_field(selection)),
             )
-            return cur.lastrowid
+            goal_id = cur.lastrowid
+        # Register after the goal transaction commits: background observation
+        # may start immediately, and notification availability must not decide
+        # whether a customer's task is accepted.
+        from .personal_notification_recipients import enroll_task_owner
+
+        enroll_task_owner(owner)
+        return goal_id
 
     def goal_connection_selection(self, goal_id: int) -> str:
         row = self._read_one("SELECT connection_selection FROM goals WHERE id=?", (goal_id,))
@@ -2437,6 +2445,22 @@ class WorldModel:
             sql += " LIMIT ? OFFSET ?"
             params = params + (max(1, int(limit)), max(0, int(offset)))
         rows = self._read_all(sql, params)
+        return _goals_from_rows(rows)
+
+    def list_goal_results(self, *, owner: str, limit: int = 26,
+                          offset: int = 0) -> list[Goal]:
+        """Completed root tasks with saved output for the owner's Results page.
+
+        Results are encrypted at rest, so filter on presence in SQL and let
+        ``_goals_from_rows`` decrypt only the requested page. Subtasks stay in
+        their parent conversation instead of crowding out customer work.
+        """
+        rows = self._read_all(
+            "SELECT * FROM goals WHERE owner=? AND parent_id IS NULL "
+            "AND status='done' AND result IS NOT NULL "
+            "ORDER BY id DESC LIMIT ? OFFSET ?",
+            (owner, max(1, min(int(limit), 100)), max(0, int(offset))),
+        )
         return _goals_from_rows(rows)
 
     def personal_alert_goals(self, owner: str, *, since: float, after_id: int = 0,

@@ -1,35 +1,15 @@
-"""Deconfounded effect estimation for the promotion ladder.
+"""Stratified outcome comparison for governed improvement decisions.
 
-The self-improvement controller promotes a change when its evidence beats
-baseline (``candidate_score - baseline_score``). Today that evidence is a
-*correlational* aggregate -- a tool's raw success rate, a before/after eval mean
--- and in a system that rewrites **itself**, correlational credit is a
-superstition pump: a change that merely co-occurs with success (because it was
-tried on easier sub-goals, or alongside the decision that actually mattered)
-gets promoted, reinforced, and compounded.
+Logged tool use is observational. Matching episodes by recorded context can
+remove measured differences, but cannot rule out easier tasks, operator choices,
+or other unrecorded causes. Such comparisons are useful for *finding candidates*
+and are never promotion-grade causal evidence on their own.
 
-This module turns that evidence from a correlation into a **causal effect**. It
-estimates the effect of a candidate change on task outcome from the logged
-trajectory population, adjusting for confounders by *stratification*: within each
-cell of comparable context, compare treated vs untreated outcomes, then average
-the per-cell effects weighted by cell size (the subclassification estimator). A
-cell with no overlap (only treated, or only untreated) carries no causal
-information and is dropped -- and the fraction of data we *can* compare on
-(``overlap``) is reported, never hidden.
-
-It is deliberately distinct from :mod:`maverick.credit` (CSCA), which does
-*online, per-swarm* leave-one-out Shapley credit for sub-agents. This is
-*offline, corpus-level* effect estimation for **promotion** decisions, and the
-two compose (CSCA can weight which sub-trajectories feed this estimator).
-
-Posture (kernel rule 1): ON by default as part of governed learning. The
-estimator is a pure function (usable anywhere), but the controller only
-consults a causal effect when the ``[self_improvement] causal_promotion`` knob
-is on. Crucially it is **fail-safe
-by calibration**: an estimate built on too little overlap, or one that leaks a
-non-zero effect under a placebo (treatment permuted within strata, which *must*
-be ~0), is marked ``trustworthy=False`` -- and the producer refuses to promote
-on an untrustworthy estimate. Promote only what you can show *caused* the win.
+The estimator reports overlap, uncertainty, and a permutation test of the
+observed association. Promotion-grade ``trustworthy`` requires prospectively
+randomized assignment supplied by a controlled experiment; callers deriving
+units from ordinary trajectories cannot claim that design. A permutation test
+cannot validate randomization or detect an unmeasured common cause.
 """
 from __future__ import annotations
 
@@ -41,28 +21,31 @@ from .config import governed_learning_env_flag
 
 # Two-sided 95% normal quantile.
 _Z95 = 1.959963984540054
-_PLACEBO_PERMUTATIONS = 64
+_PLACEBO_PERMUTATIONS = 999
 
 
 @dataclass(frozen=True)
 class Unit:
-    """One episode reduced to a causal record.
+    """One episode reduced to an outcome-comparison record.
 
     ``treatment`` is 1 when the candidate change was present, 0 when absent;
     ``outcome`` is the episode's task outcome in [0, 1] (e.g. the terminal
     verifier confidence / success label); ``stratum`` is the confounder cell --
     a hashable key of the comparable-context features (domain, depth bucket,
-    ...). Episodes only compare *within* a stratum.
+    ...). Episodes only compare *within* a stratum. ``randomized`` must only be
+    set for an arm assigned prospectively by a controlled experiment; ordinary
+    trajectory capture leaves it False.
     """
 
     treatment: int
     outcome: float
     stratum: tuple
+    randomized: bool = False
 
 
 @dataclass(frozen=True)
 class EffectEstimate:
-    """A confounder-adjusted effect with everything needed to trust (or not) it."""
+    """A stratified comparison with its evidence limits exposed."""
 
     effect: float
     ci_low: float
@@ -75,10 +58,12 @@ class EffectEstimate:
     placebo_effect: float
     trustworthy: bool
     adjusted_for: tuple[str, ...] = field(default_factory=tuple)
+    permutation_p_value: float = 1.0
+    randomized: bool = False
 
 
 def enabled() -> bool:
-    """Whether the controller should consult causal effects. ON by default."""
+    """Whether the controller should consult controlled-effect evidence."""
     _v = governed_learning_env_flag("MAVERICK_CAUSAL_PROMOTION")
     if _v is not None:
         return _v
@@ -95,7 +80,9 @@ def _mean_var(xs: list[float]) -> tuple[float, float, int]:
     if n == 0:
         return 0.0, 0.0, 0
     m = sum(xs) / n
-    v = sum((x - m) ** 2 for x in xs) / n
+    # The sampling variance of an arm mean needs n-1; one observation cannot
+    # establish within-arm uncertainty and is excluded from the calibrated ATE.
+    v = sum((x - m) ** 2 for x in xs) / (n - 1) if n > 1 else 0.0
     return m, v, n
 
 
@@ -119,8 +106,8 @@ def _stratified_ate(strata: dict) -> tuple[float, float, int, int]:
     total_w = 0
     strata_used = 0
     for control, treated in strata.values():
-        if not control or not treated:
-            continue  # no overlap in this cell -> no causal information
+        if len(control) < 2 or len(treated) < 2:
+            continue  # no support for both arm variances in this cell
         m1, v1, n1 = _mean_var(treated)
         m0, v0, n0 = _mean_var(control)
         w = n1 + n0
@@ -148,23 +135,28 @@ def _naive_difference(units: list[Unit]) -> float:
     return m1 - m0
 
 
-def _placebo_effect(strata: dict, *, seed: int, permutations: int = _PLACEBO_PERMUTATIONS) -> float:
-    """Mean ATE after permuting treatment labels *within* each stratum.
+def _permutation_diagnostics(
+    strata: dict, observed: float, *, seed: int,
+    permutations: int = _PLACEBO_PERMUTATIONS,
+) -> tuple[float, float]:
+    """Return the null mean and two-sided randomization p-value.
 
-    Permuting inside strata preserves the confounding structure but severs any
-    real treatment->outcome link, so a faithful estimator must return ~0. A
-    materially non-zero placebo means the estimate is an artifact, not an effect.
+    The null mean is retained as a diagnostic, never a trust gate: it tends to
+    zero even for a badly confounded observed association. The p-value instead
+    compares the observed statistic with the full shuffled distribution. This
+    test only has a causal interpretation for prospectively randomized units.
     """
     rng = random.Random(seed)
     # Only overlapping strata matter (they're the ones that carry the estimate).
     pools = [
         (control + treated, len(treated))
         for control, treated in strata.values()
-        if control and treated
+        if len(control) >= 2 and len(treated) >= 2
     ]
     if not pools:
-        return 0.0
+        return 0.0, 1.0
     acc = 0.0
+    as_extreme = 0
     for _ in range(permutations):
         weighted_effect = 0.0
         total_w = 0
@@ -178,8 +170,11 @@ def _placebo_effect(strata: dict, *, seed: int, permutations: int = _PLACEBO_PER
             w = len(pool)
             weighted_effect += w * (m1 - m0)
             total_w += w
-        acc += weighted_effect / total_w if total_w else 0.0
-    return acc / permutations
+        null_effect = weighted_effect / total_w if total_w else 0.0
+        acc += null_effect
+        if abs(null_effect) >= abs(observed) - 1e-12:
+            as_extreme += 1
+    return acc / permutations, (as_extreme + 1) / (permutations + 1)
 
 
 def estimate_effect(
@@ -191,26 +186,35 @@ def estimate_effect(
     placebo_tol: float = 0.05,
     placebo_seed: int = 0,
 ) -> EffectEstimate:
-    """Estimate the confounder-adjusted effect of a change on task outcome.
+    """Compare outcomes within measured strata, with a conservative trust gate.
 
-    ``trustworthy`` is the calibration gate: it requires enough overlapping data
-    (``overlap >= min_overlap`` and ``n_used >= min_used``) and a placebo effect
-    within ``placebo_tol`` of zero. The producer refuses to promote when it is
-    False (fail-closed).
+    ``placebo_tol`` is retained for existing callers and now sets the two-sided
+    permutation significance threshold. The gate also requires enough supported
+    randomized units; ordinary observed trajectories are diagnostic only.
     """
     n_total = len(units)
     if n_total == 0:
         return EffectEstimate(0.0, 0.0, 0.0, 0, 0, 0, 0.0, 0.0, 0.0, False, adjusted_for)
+    if not all(u.treatment in (0, 1) and math.isfinite(u.outcome)
+               and 0.0 <= u.outcome <= 1.0 for u in units):
+        return EffectEstimate(0.0, 0.0, 0.0, 0, n_total, 0, 0.0, 0.0, 0.0,
+                              False, adjusted_for)
     strata = _strata(units)
     ate, var, n_used, strata_used = _stratified_ate(strata)
     half = _Z95 * math.sqrt(var) if var > 0 else 0.0
     overlap = n_used / n_total if n_total else 0.0
-    placebo = _placebo_effect(strata, seed=placebo_seed)
+    randomized = all(u.randomized for u in units)
+    placebo, p_value = (
+        _permutation_diagnostics(strata, ate, seed=placebo_seed)
+        if randomized and n_used >= min_used and overlap >= min_overlap
+        else (0.0, 1.0)
+    )
     trustworthy = (
-        n_used >= min_used
+        randomized
+        and n_used >= min_used
         and overlap >= min_overlap
         and strata_used >= 1
-        and abs(placebo) <= placebo_tol
+        and p_value <= placebo_tol
     )
     return EffectEstimate(
         effect=ate,
@@ -224,6 +228,8 @@ def estimate_effect(
         placebo_effect=placebo,
         trustworthy=trustworthy,
         adjusted_for=tuple(adjusted_for),
+        permutation_p_value=p_value,
+        randomized=randomized,
     )
 
 
@@ -234,7 +240,7 @@ def units_from_trajectories(
     outcome_fn,
     stratum_fn,
 ) -> list[Unit]:
-    """Build causal units from a flat trajectory step stream (one per episode).
+    """Build observational units from a flat trajectory step stream.
 
     ``steps`` is any iterable of :class:`maverick.trajectory_store.TrajectoryStep`
     (e.g. ``store.iter_steps()``). Steps are grouped by ``(goal_id, episode_id)``;

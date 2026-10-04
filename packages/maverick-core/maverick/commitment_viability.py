@@ -322,6 +322,27 @@ class Assessment:
     recomputed_commitment_ids: tuple[str, ...]
 
 
+@dataclass(frozen=True)
+class ResourceGap:
+    """Reported resource shortfall, not a discovered supplier or deliverable promise.
+
+    ``confirmed_shortfall_units`` excludes uncertain stock and unexercised
+    choices. ``remaining_shortfall_units`` is the shortfall even if all usable
+    uncertain stock and recorded choices arrive on time. A zero remaining
+    shortfall is conditional, never proof that those effects will occur.
+    """
+
+    commitment_ids: tuple[str, ...]
+    kind: Kind
+    key: str
+    first_shortfall_at: float
+    confirmed_shortfall_units: int
+    remaining_shortfall_units: int
+    remaining_first_shortfall_at: float | None
+    conditional_source_ids: tuple[str, ...]
+    option_ids: tuple[str, ...]
+
+
 def _revision_digest(revisions: Mapping[str, str]) -> str:
     if not isinstance(revisions, Mapping) or any(
         not isinstance(key, str) or not isinstance(value, str) for key, value in revisions.items()
@@ -397,6 +418,75 @@ def _covered(
                 return False
             units -= needed
     return True
+
+
+def _resource_shortfall(
+    commitments: tuple[Commitment, ...], demands: Mapping[str, tuple[Demand, ...]],
+    supply: tuple[tuple[float, int], ...], key: tuple[Kind, str],
+) -> tuple[float | None, int]:
+    """Maximum cumulative deficit at each due date in the fixed resource model."""
+    due_dates = sorted({item.due_at for item in commitments
+                        if any((part.kind, part.key) == key for part in demands[item.id])})
+    first = None
+    maximum = 0
+    for due in due_dates:
+        needed = sum(part.units for item in commitments if item.due_at <= due
+                     for part in demands[item.id] if (part.kind, part.key) == key)
+        ready = sum(units for ready_at, units in supply if ready_at <= due)
+        deficit = max(0, needed - ready)
+        if deficit and first is None:
+            first = due
+        maximum = max(maximum, deficit)
+    return first, maximum
+
+
+def explain_resource_gaps(
+    snapshot: Snapshot, *, now: float, current_source_revisions: Mapping[str, str],
+) -> tuple[ResourceGap, ...]:
+    """Show bounded, source-aware resource boundaries for the declared model.
+
+    No new external capability is inferred or executed. Expired choices do not
+    count; overdue work needs a new review rather than hypothetical rescue.
+    """
+    _time(now, "now")
+    _revision_digest(current_source_revisions)
+    demands = _effective_demands(snapshot)
+    gaps = []
+    for ids in _component_ids(snapshot, demands):
+        commitments = tuple(item for item in snapshot.commitments if item.id in ids)
+        if any(item.due_at <= now or not item.acceptance.current(now, current_source_revisions)
+               for item in commitments):
+            continue
+        keys = sorted({(part.kind, part.key) for item in commitments
+                       for part in demands[item.id]})
+        for kind, key in keys:
+            lots = tuple(item for item in snapshot.lots if (item.kind, item.key) == (kind, key))
+            confirmed = tuple((item.ready_at, item.units) for item in lots
+                              if item.certainty == "confirmed"
+                              and item.evidence.current(now, current_source_revisions))
+            possible_lots = tuple(item for item in lots if item.certainty != "unavailable"
+                                  or not item.evidence.current(now, current_source_revisions))
+            options = tuple(item for item in snapshot.options
+                            if (item.kind, item.key) == (kind, key) and now < item.expires_at)
+            possible = tuple((item.ready_at, item.units) for item in possible_lots) + tuple(
+                (max(item.ready_at, now + item.lead_seconds), item.units) for item in options
+            )
+            first, confirmed_units = _resource_shortfall(commitments, demands, confirmed, (kind, key))
+            if not confirmed_units or first is None:
+                continue
+            remaining_first, remaining_units = _resource_shortfall(
+                commitments, demands, possible, (kind, key)
+            )
+            conditional_sources = tuple(sorted(
+                {item.evidence.source_id for item in possible_lots
+                 if item.certainty != "confirmed" or not item.evidence.current(now, current_source_revisions)}
+                | {item.evidence.source_id for item in options
+                   if not item.evidence.current(now, current_source_revisions)}
+            ))
+            gaps.append(ResourceGap(ids, kind, key, first, confirmed_units,
+                                    remaining_units, remaining_first, conditional_sources,
+                                    tuple(item.id for item in options)))
+    return tuple(gaps)
 
 
 def _state(
@@ -664,8 +754,8 @@ def recompute_after_dependency(
 
 
 __all__ = [
-    "ActionPlan", "Assessment", "Commitment", "ComponentResult", "Demand",
+    "ActionPlan", "Assessment", "Commitment", "ComponentResult", "Demand", "ResourceGap",
     "DependencyProposal", "Evidence", "Lot", "OwnerConfirmation", "ReversibleOption",
     "SharedDependency", "Snapshot", "TraceObservation", "assess", "confirm_dependency",
-    "confirm_option", "propose_shared_dependencies", "recompute_after_dependency",
+    "confirm_option", "explain_resource_gaps", "propose_shared_dependencies", "recompute_after_dependency",
 ]

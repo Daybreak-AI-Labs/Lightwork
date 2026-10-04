@@ -3,9 +3,9 @@
 > Enterprise recursive multi-agent swarm. One kernel, every model.
 
 Lightwork is an **agentic enterprise platform**: a governed AI workforce of
-2,031 prebuilt specialists across 53 business suites that provably improves
-with use — deployed in your own environment. It drives any
-LLM (Claude, GPT, Kimi, Grok, Gemini, DeepSeek, Ollama, OpenRouter), and
+2,031 prebuilt specialists across business suites, with reviewable learning
+and improvement controls — deployed in your own environment. It supports
+configured model providers including Claude, GPT, Gemini, DeepSeek, Ollama, and OpenRouter, and
 ships a governed, auditable safety surface built for regulated teams.
 Lightwork is proprietary, commercially licensed software (see
 [`LICENSE`](https://daybreak-ai-labs.github.io/Lightwork/license/)).
@@ -14,17 +14,16 @@ Lightwork is proprietary, commercially licensed software (see
 
 - **Long-horizon software work**: recursive agent-spawns-agent
   orchestration with shared world model, budgets, and audit log.
-- **Use your existing chat subscriptions**: ChatGPT Plus, Claude Pro,
-  Kimi, X Premium, Gemini Advanced — drive them from the agent via
-  captured browser sessions, no extra API spend. Note: session providers
-  have no native function-calling, so Lightwork gives them tools through a
-  **simulated** markdown tool-call protocol — it works for tool-using
-  roles, but reliability is model-dependent and weaker than an API-key
-  provider's native tool use.
+- **Choose an AI connection**: connect a supported API provider or a
+  self-hosted model from the product, then test the connection before work
+  starts. Provider charges and task limits depend on the connection and
+  settings you choose.
 - **Computer use & web browser**: Anthropic-spec computer-use tool +
   Playwright-driven browser tool, with kill switches and an audit
   trail for every action.
-- **Multi-channel deployment**: Telegram, Discord, Slack, Signal,
+- **Messaging channels**: connect supported services such as Telegram,
+  Discord, Slack, Signal, and email in the Channels page, then send a test
+  message to confirm delivery.
 - **Primary-source data grounding**: analyst packs are auto-granted 37
   read-only public-data connectors (SEC EDGAR, FRED, Treasury, World Bank,
   FDIC, Census, BLS, EIA, openFDA, NPPES, ClinicalTrials, USAspending,
@@ -40,8 +39,6 @@ Lightwork is proprietary, commercially licensed software (see
   caps) across all 2,031 packs with a non-vacuous fault-injection control
   (property-fuzzed up to 5,000 iterations),
   plus hostile-argument fuzzing of every connector and tool.
-  Email, Matrix, Microsoft Teams, WhatsApp, SMS, iMessage — one config, all
-  channels.
 - **Build an agent from a demonstration**: record a reviewed example of the job,
   then synthesize the agent that does it — `maverick learn-demo <file>`
   ingests that transcript, induces a profile through the same

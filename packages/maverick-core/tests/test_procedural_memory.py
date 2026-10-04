@@ -1,6 +1,4 @@
-"""The Hippocampus: consolidate causally-beneficial habits, reinforce ones that
-keep proving themselves, and FORGET ones that stop -- without losing the good.
-"""
+"""Memory must not turn observational patterns into automatic habits."""
 from __future__ import annotations
 
 from maverick import procedural_memory as pm
@@ -29,22 +27,20 @@ def _corpus(good_tool="Y"):
     return steps
 
 
-def test_consolidate_keeps_only_causally_beneficial():
+def test_observed_difference_does_not_create_a_habit():
     mems = pm.consolidate(_corpus("Y"))
-    assert [m.action for m in mems] == ["Y"]
-    assert mems[0].benefit > 0 and mems[0].strength == pm._BASE
+    assert mems == []
 
 
-def test_reinforcement_strengthens_a_recurring_habit():
-    first = pm.consolidate(_corpus("Y"))
-    second = pm.consolidate(_corpus("Y"), prior=first)   # Y proves itself again
-    assert second[0].action == "Y"
-    assert second[0].strength > first[0].strength         # climbed
+def test_observed_difference_does_not_reinforce_an_existing_habit():
+    first = [pm.Memory("Y", 0.5, pm._BASE)]
+    second = pm.consolidate(_corpus("Y"), prior=first)
+    assert second[0].strength < first[0].strength
 
 
 def test_unreinforced_memory_decays_and_is_forgotten():
-    # Y is strong, then the corpus stops showing Y as beneficial -> it fades.
-    mems = pm.consolidate(_corpus("Y"))
+    # Previously accepted memories fade without controlled reinforcement.
+    mems = [pm.Memory("Y", 0.5, pm._BASE)]
     neutral = []  # nothing beneficial in an empty corpus
     cycle1 = pm.consolidate(neutral, prior=mems)
     assert pm.MemoryStore(path=None) is not None  # store import smoke
@@ -59,7 +55,7 @@ def test_unreinforced_memory_decays_and_is_forgotten():
 def test_store_recall_and_roundtrip(tmp_path):
     path = tmp_path / "m.json"
     store = pm.MemoryStore(path=path)
-    store.update(pm.consolidate(_corpus("Y")))
+    store.update([pm.Memory("Y", 0.5, pm._BASE)])
     assert store.recall()[0].action == "Y"
     assert store.strength_of("Y") == pm._BASE
     assert pm.MemoryStore(path=path).recall()[0].action == "Y"  # persisted
@@ -80,6 +76,6 @@ def test_recall_empty_store_is_noop(tmp_path):
 def test_recall_prompt_surfaces_habits(tmp_path):
     store = pm.MemoryStore(path=tmp_path / "m.json")
     assert pm.recall_prompt(store=store) == ""        # empty -> no prompt change
-    store.update(pm.consolidate(_corpus("Y")))
+    store.update([pm.Memory("Y", 0.5, pm._BASE)])
     prompt = pm.recall_prompt(store=store)
     assert "Learned habits" in prompt and "prefer 'Y'" in prompt

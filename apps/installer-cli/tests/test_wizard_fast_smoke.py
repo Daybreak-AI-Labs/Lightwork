@@ -39,6 +39,22 @@ def test_explicit_config_path_wins_and_keeps_env_adjacent(monkeypatch, tmp_path)
     assert env_file == target.parent / ".env"
 
 
+def test_lightwork_home_and_config_aliases_match_core_precedence(monkeypatch, tmp_path):
+    from maverick_installer import wizard
+
+    monkeypatch.delenv("MAVERICK_HOME", raising=False)
+    monkeypatch.delenv("MAVERICK_CONFIG", raising=False)
+    monkeypatch.setenv("LIGHTWORK_HOME", str(tmp_path / "product-home"))
+    monkeypatch.delenv("LIGHTWORK_CONFIG", raising=False)
+    assert wizard._resolve_config_paths()[1] == tmp_path / "product-home" / "config.toml"
+
+    target = tmp_path / "chosen" / "config.toml"
+    monkeypatch.setenv("LIGHTWORK_CONFIG", str(target))
+    assert wizard._resolve_config_paths()[1] == target
+    monkeypatch.setenv("MAVERICK_CONFIG", str(tmp_path / "legacy-wins.toml"))
+    assert wizard._resolve_config_paths()[1] == tmp_path / "legacy-wins.toml"
+
+
 def test_fast_setup_writes_and_smoke_reads_the_explicit_config(tmp_path):
     """Exercise the real writer/loader contract in a fresh interpreter."""
     target = tmp_path / "operator" / "lightwork.toml"
@@ -56,7 +72,7 @@ result = wizard.run_fast()
 
 from maverick.config import config_path, load_config
 expected = Path({str(target)!r})
-assert result == 0
+assert result == 1  # Setup is saved, but a missing AI key cannot be reported ready.
 assert wizard.CONFIG_FILE == expected
 assert config_path() == expected
 assert expected.is_file()
@@ -67,13 +83,15 @@ assert load_config()["sandbox"]["backend"] == "local"
         {
             "HOME": str(isolated_home),
             "USERPROFILE": str(isolated_home),
-            "MAVERICK_HOME": str(tmp_path / "ignored-home"),
-            "MAVERICK_CONFIG": str(target),
+            "LIGHTWORK_HOME": str(tmp_path / "ignored-home"),
+            "LIGHTWORK_CONFIG": str(target),
             "PYTHONIOENCODING": "utf-8",
             "PYTHONPATH": os.pathsep.join((str(installer_root), str(core_root))),
         }
     )
     env.pop("ANTHROPIC_API_KEY", None)
+    env.pop("MAVERICK_HOME", None)
+    env.pop("MAVERICK_CONFIG", None)
 
     completed = subprocess.run(  # noqa: S603 - exact interpreter and test script
         [sys.executable, "-c", script],
@@ -88,6 +106,8 @@ assert load_config()["sandbox"]["backend"] == "local"
     )
 
     assert completed.returncode == 0, completed.stdout + completed.stderr
+    assert "AI is not connected" in completed.stdout
+    assert "Fast setup finished" not in completed.stdout
 
 
 def _stub(monkeypatch, tmp_path: Path, *, smoke: bool):
@@ -112,7 +132,17 @@ def test_fast_setup_fails_when_the_smoke_test_fails(monkeypatch, tmp_path):
 def test_fast_setup_succeeds_when_the_smoke_test_passes(monkeypatch, tmp_path):
     """Control: rejection only means something if acceptance also works."""
     wizard = _stub(monkeypatch, tmp_path, smoke=True)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     assert wizard.run_fast() == 0
+
+
+def test_fast_setup_without_key_is_incomplete_even_if_config_smoke_passes(monkeypatch, tmp_path, capsys):
+    wizard = _stub(monkeypatch, tmp_path, smoke=True)
+    assert wizard.run_fast() == 1
+    output = capsys.readouterr().out
+    assert "AI is not connected" in output
+    assert "Saved setup:" in output
+    assert "Fast setup finished" not in output
 
 
 def test_the_config_is_still_written_before_the_smoke_test_verdict(

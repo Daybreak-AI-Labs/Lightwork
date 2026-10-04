@@ -50,9 +50,16 @@ def _state(provider, period):
     if shared is not None:
         total, receipts = shared.read_provider_cap(period, provider)
     else:
-        ledger = cap._load(cap._ledger_path())
-        total = ledger.get(period, {}).get(provider, 0.0)
-        receipts = ledger.get(cap._RECEIPTS, {}).get(period, {}).get(provider, {})
+        ledger_path = cap._ledger_path()
+        if cap._use_indexed_ledger(ledger_path):
+            from . import provider_spend_sqlite
+            total, receipts = provider_spend_sqlite.read_bucket(
+                ledger_path, period, provider, cap,
+            )
+        else:
+            ledger = cap._load(ledger_path)
+            total = ledger.get(period, {}).get(provider, 0.0)
+            receipts = ledger.get(cap._RECEIPTS, {}).get(period, {}).get(provider, {})
     cap._validate_receipts(total, receipts)
     return total, receipts, shared
 
@@ -100,6 +107,37 @@ def status(period=None, *, provider=None, offset=0, limit=100):
         result["shared"] = cap._shared_world() is not None
     except cap.ProviderAccountingUnavailable:
         result["shared"] = True
+    if result["shared"]:
+        result["ledger_health"] = {
+            "format": "shared", "available": result["available"],
+            "message": ("Shared spending records are available." if result["available"] else
+                        "Shared spending records need the database administrator's recovery."),
+        }
+    else:
+        try:
+            from . import provider_spend_sqlite
+            ledger_path = cap._ledger_path()
+            if cap._use_indexed_ledger(ledger_path):
+                result["ledger_health"] = provider_spend_sqlite.health(ledger_path, cap)
+            else:
+                ledger = cap._load(ledger_path)
+                receipts = ledger.get(cap._RECEIPTS, {})
+                rows = [row for providers in receipts.values()
+                        for entries in providers.values() for row in entries.values()]
+                result["ledger_health"] = {
+                    "format": "standard", "available": True,
+                    "receipt_count": len(rows),
+                    "unresolved_count": sum(row["state"] != "settled" for row in rows),
+                    "bytes": ledger_path.stat().st_size if ledger_path.exists() else 0,
+                    "single_file_copy_available": True,
+                    "message": "Spending records are healthy.",
+                }
+        except Exception:
+            result["available"] = False
+            result["ledger_health"] = {
+                "format": "indexed", "available": False,
+                "message": "Spending records need recovery; new AI calls are blocked.",
+            }
     return result
 
 
@@ -116,7 +154,10 @@ def diagnostics():
 
 
 def _local_sha():
-    path = cap._ledger_path()
+    from . import provider_spend_sqlite
+    path = (provider_spend_sqlite.database_path(cap._ledger_path())
+            if provider_spend_sqlite.is_active(cap._ledger_path())
+            else cap._ledger_path())
     try:
         file_lock.ensure_private_file(path)
         with path.open("rb") as stream:
@@ -190,7 +231,12 @@ def export_accounting():
         payload = {"schema": "lightwork.provider-accounting-export.v1", "target": target(),
                    "created_at": time.time(), "ledger": data}
         signed = backup._authenticate_for_write(payload, workspace_recovery._key())
-        return (json.dumps(signed, allow_nan=False) + "\n").encode("utf-8")
+        encoded = (json.dumps(signed, allow_nan=False) + "\n").encode("utf-8")
+        if len(encoded) > 12 * 1024 * 1024:
+            raise SpendingReviewError(
+                "Spending records exceed the single-file copy limit. Use a full Workspace recovery backup."
+            )
+        return encoded
 
 
 def _isolated(isolated):
@@ -220,7 +266,7 @@ def inspect_import(upload, *, isolated):
             ledger = cap._load(candidate)
         totals = []
         for period, bucket in ledger.items():
-            if period == cap._RECEIPTS:
+            if period in {cap._RECEIPTS, cap._ATTEMPT_INDEX}:
                 continue
             for provider, total in bucket.items():
                 rows = ledger.get(cap._RECEIPTS, {}).get(period, {}).get(provider, {})
@@ -284,6 +330,35 @@ def prepare_repair(upload, totals, evidence, *, actor, context, isolated, receip
     return public_review(record)
 
 
+def _apply_repair(record, identifier, intent):
+    path = cap._ledger_path()
+    with file_lock.cross_process_lock(path, strict=True):
+        if record["target"] != target():
+            raise SpendingReviewError("The accounting authority changed. Reload before continuing.")
+        replacement = copy.deepcopy(record["replacement"])
+        # An exact post-write retry only finishes the retained audit record.
+        from . import provider_spend_sqlite
+        source_path = (provider_spend_sqlite.database_path(path)
+                       if provider_spend_sqlite.is_active(path) else path)
+        current_sha = _local_sha()
+        try:
+            already_replaced = cap._load(path) == replacement
+        except cap.ProviderAccountingUnavailable:
+            already_replaced = False
+        if already_replaced:
+            return
+        if current_sha != record["expected"]:
+            raise RecordConflict("The failed accounting state changed. Prepare a new repair review.")
+        intent()
+        if source_path.exists():
+            failed = data_dir("provider_accounting_reviews", identifier + ".failed")
+            if not failed.exists():
+                file_lock.atomic_create_bytes(failed, file_lock.atomic_read_bytes(source_path))
+            if hashlib.sha256(file_lock.atomic_read_bytes(failed)).hexdigest() != record["expected"]:
+                raise SpendingReviewError("The preserved failed accounting copy does not match the review.")
+        cap._save(path, replacement)
+
+
 def apply(identifier, *, actor, context, isolated, confirm):
     if confirm is not True:
         raise SpendingReviewError("Explicitly confirm the reviewed final provider costs.")
@@ -323,25 +398,7 @@ def apply(identifier, *, actor, context, isolated, confirm):
         cap._mutate(record["provider"], record["period"], reconcile,
                     path=cap._ledger_path(), shared=shared)
     else:
-        path = cap._ledger_path()
-        with file_lock.cross_process_lock(path, strict=True):
-            if record["target"] != target():
-                raise SpendingReviewError("The accounting authority changed. Reload before continuing.")
-            replacement = copy.deepcopy(record["replacement"])
-            # An exact post-write retry only finishes the retained audit record.
-            encoded = json.dumps(replacement, allow_nan=False).encode("utf-8")
-            current_sha = _local_sha()
-            if current_sha != hashlib.sha256(encoded).hexdigest():
-                if current_sha != record["expected"]:
-                    raise RecordConflict("The failed accounting state changed. Prepare a new repair review.")
-                intent()
-                if path.exists():
-                    failed = data_dir("provider_accounting_reviews", identifier + ".failed")
-                    if not failed.exists():
-                        file_lock.atomic_create_bytes(failed, file_lock.atomic_read_bytes(path))
-                    if hashlib.sha256(file_lock.atomic_read_bytes(failed)).hexdigest() != record["expected"]:
-                        raise SpendingReviewError("The preserved failed accounting copy does not match the review.")
-                cap._save(path, replacement)
+        _apply_repair(record, identifier, intent)
     current = _REVIEWS.get(identifier)
     completed = _REVIEWS.update(identifier, lambda value: value.update(state="completed"),
                                 expected_revision=current["revision"], action="complete", actor=actor)

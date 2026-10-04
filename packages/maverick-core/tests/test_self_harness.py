@@ -3159,6 +3159,36 @@ def test_forget_line_removes_domain_scoped_line(monkeypatch, store):
     assert "keep me" in sh.recall_addendum("M", store)               # model-wide untouched
 
 
+def test_exact_lesson_withdrawal_keeps_other_scopes_and_refuses_stale_review(monkeypatch, store):
+    line = "Check the source before answering."
+    blocks = {"M": sh._ADDENDUM_HEADER + "\n- " + line,
+              sh._scoped_key("M", "domain=finance"): sh._ADDENDUM_HEADER + "\n- " + line}
+    _write_shared_fixture(blocks, store)
+    current = {row["scope"]: row for row in sh.line_efficacy("M", store)}
+    assert set(current) == {"", "domain=finance"}
+    assert current[""]["token"] != current["domain=finance"]["token"]
+
+    scoped = current["domain=finance"]
+    assert sh.forget_addendum("M", line=line, scope=scoped["scope"],
+                             expected_token=scoped["token"], path=store)
+    assert [row["scope"] for row in sh.line_efficacy("M", store)] == [""]
+    assert line in sh.recall_addendum("M", store)
+
+    bare = current[""]
+    meta = sh.load_line_meta(store)
+    sh._upsert_line_meta(meta, "M", line, {"source_goal_ids": [0]}, now=2)
+    sh._write_line_meta(meta, store)
+    with pytest.raises(ValueError, match="changed"):
+        sh.forget_addendum("M", line=line, scope="", expected_token=bare["token"], path=store)
+    assert line in sh.recall_addendum("M", store)
+
+    fresh = sh.line_efficacy("M", store)[0]
+    monkeypatch.setattr(sh, "_shared_sources_current", lambda _ids: False)
+    with pytest.raises(ValueError, match="changed"):
+        sh.forget_addendum("M", line=line, scope="", expected_token=fresh["token"], path=store)
+    assert line in sh.load_addenda(store)["M"]
+
+
 def test_efficacy_and_canary_cover_domain_scoped_lines(monkeypatch, store):
     ctrl = _enable(monkeypatch)
     line = _promote_domain_line(store, ctrl, canary=True)

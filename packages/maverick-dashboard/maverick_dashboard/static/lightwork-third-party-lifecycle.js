@@ -13,7 +13,7 @@
   var canAudit = root.getAttribute("data-can-audit") === "true";
   var statusLine = document.getElementById("tpl-status");
 
-  var state = { me: "", people: [], peopleByRef: {}, vendors: [], templates: [], assessments: [], lifecycles: [], plans: [] };
+  var state = { me: "", namedSignin: false, localOwnerSetupAvailable: false, people: [], peopleByRef: {}, vendors: [], templates: [], assessments: [], lifecycles: [], plans: [] };
 
   var AREAS = [["security", "Security"], ["privacy", "Privacy"], ["compliance", "Compliance"], ["operational", "Operations"], ["ethics", "Ethics"], ["ai", "AI"]];
   var ANSWER_TYPES = [["boolean", "Yes or no"], ["single_choice", "Pick one choice"], ["multi_choice", "Pick several choices"], ["integer", "A number"], ["text_ref", "A document"]];
@@ -81,9 +81,12 @@
   function loadPeople() {
     return api("GET", "/people").then(function (d) {
       state.me = d.me; state.people = d.items || [];
+      state.namedSignin = d.named_signin === true;
+      state.localOwnerSetupAvailable = d.local_owner_setup_available === true;
+      document.getElementById("tpl-new-template").disabled = !state.namedSignin;
       state.peopleByRef = {};
       state.people.forEach(function (p) { state.peopleByRef[p.value] = p.label; });
-    }).catch(function () { state.people = []; });
+    }).catch(function () { state.people = []; state.namedSignin = false; document.getElementById("tpl-new-template").disabled = true; });
   }
   function loadVendors() {
     return R.call("GET", "/api/v1/vendors").then(function (d) {
@@ -98,7 +101,7 @@
       api("GET", "/lifecycles").then(function (d) { state.lifecycles = d.items || []; }),
       api("GET", "/offboarding").then(function (d) { state.plans = d.items || []; }),
     ]).then(function () {
-      renderTemplates(); renderAssessments(); renderLifecycles(); renderPlans();
+      renderTemplates(); renderAssessments(); renderLifecycles(); renderPlans(); renderReviewerGuidance();
       say("Up to date.");
     }).catch(fail("load the lifecycle records"));
   }
@@ -108,6 +111,24 @@
     return state.templates.filter(function (t) { return t.template_id === templateId; })
       .reduce(function (m, t) { return Math.max(m, t.version); }, 0);
   }
+  function renderReviewerGuidance() {
+    var panel = document.getElementById("tpl-reviewer-guidance");
+    var message = document.getElementById("tpl-reviewer-message");
+    var signin = document.getElementById("tpl-signin-link");
+    var invite = document.getElementById("tpl-invite-link");
+    var pending = state.templates.filter(function (t) { return t.state === "pending_approval"; });
+    var oldAuthor = pending.some(function (t) { return t.needs_named_author === true; }) || state.plans.some(function (p) { return p.needs_named_initiator === true && p.state !== "completed"; });
+    var mine = pending.some(function (t) { return t.authored_by === state.me; }) || state.plans.some(function (p) { return p.initiated_by === state.me && p.state !== "completed"; });
+    panel.hidden = state.namedSignin && !oldAuthor && !mine;
+    signin.hidden = state.namedSignin;
+    invite.hidden = !state.namedSignin || oldAuthor;
+    signin.href = state.localOwnerSetupAvailable ? "/auth/local-owner" : "/settings/all?id=auth.oidc.enable";
+    message.textContent = !state.namedSignin
+      ? "Questionnaire approvals need two people with their own sign-ins. " + (state.localOwnerSetupAvailable ? "Set up the owner account on this computer" : "Set up your company sign-in") + ", then add another administrator in Users."
+      : oldAuthor
+        ? "A review started before individual sign-ins cannot receive a second-person approval safely. Write a new questionnaire version or start a new offboarding plan while signed in, then ask another administrator to approve it."
+        : "You cannot approve a review you started. Add another administrator in Users, give them this workspace, and ask them to approve it from this page.";
+  }
   function renderTemplates() {
     R.table(document.getElementById("tpl-templates"), [
       { label: "Questionnaire", value: function (t) { return words(t.title_ref); } },
@@ -115,10 +136,11 @@
       { label: "Questions", value: function (t) { return (t.questions || []).length; } },
       { label: "Status", value: function (t) { return R.badge(t.state === "approved" ? "Approved" : t.state === "retired" ? "Retired" : "Waiting for approval", t.state === "approved" ? "ok" : "warn"); } },
       { label: "Written by", value: function (t) { return words(t.authored_by); } },
+      { label: "Next step", value: function (t) { return t.state === "approved" ? "Ready for assessments" : t.state === "retired" ? "No longer used" : t.needs_named_author ? "Write a new version after sign-in" : t.authored_by === state.me ? "Another administrator must approve" : "A different administrator can approve"; } },
     ], state.templates, [
-      { label: "Approve", kind: "primary", when: function (t) { return canAdmin && t.state === "pending_approval"; }, run: approveTemplate },
-      { label: "New version", when: function (t) { return t.version === latestVersion(t.template_id); }, run: function (t) { openTemplateForm(t); } },
-    ], { text: "No questionnaires yet. Write your first one; a different administrator approves it before use.", action: { label: "New questionnaire", run: function () { openTemplateForm(null); } } });
+      { label: "Approve", kind: "primary", when: function (t) { return canAdmin && state.namedSignin && state.me && !t.needs_named_author && t.authored_by !== state.me && t.state === "pending_approval"; }, run: approveTemplate },
+      { label: "New version", when: function (t) { return state.namedSignin && t.version === latestVersion(t.template_id); }, run: function (t) { openTemplateForm(t); } },
+    ], { text: "No questionnaires yet. Write your first one; a different administrator approves it before use.", action: state.namedSignin ? { label: "New questionnaire", run: function () { openTemplateForm(null); } } : null });
   }
   function approveTemplate(t) {
     R.confirm("Approve \"" + words(t.title_ref) + "\" version " + t.version + "? It can then be used for assessments. You can't approve a questionnaire you wrote yourself.", "Approve").then(function (ok) {
@@ -278,7 +300,7 @@
   }
   function newAssessment() {
     var approved = state.templates.filter(function (t) { return t.state === "approved"; });
-    if (!approved.length) { say("Approve a questionnaire first. Assessments can only use approved questionnaires."); return; }
+    if (!approved.length) { say("A different administrator needs to approve a questionnaire first. Open Users to invite a reviewer."); return; }
     var vendorOpts = state.vendors.length ? state.vendors.concat([{ value: "", label: "Another vendor (type the name below)" }]) : [{ value: "", label: "Type the vendor's name below" }];
     var answererOpts = [{ value: "vendor", label: "The vendor, through an invitation link" }].concat(peopleOptions());
     R.form("New assessment", [
@@ -397,7 +419,7 @@
     ], state.lifecycles, [
       { label: "Mark active", kind: "primary", when: function (l) { return l.stage === "onboarding" || (l.stage === "suspended" && canAdmin); }, run: function (l) { transition(l, "active"); } },
       { label: "Suspend", kind: "danger", when: function (l) { return canAdmin && (l.stage === "active" || l.stage === "onboarding"); }, run: function (l) { transition(l, "suspended"); } },
-      { label: "Start offboarding", kind: "danger", when: function (l) { return canAdmin && !l.offboarding_plan_id && (l.stage === "active" || l.stage === "suspended"); }, run: beginOffboarding },
+      { label: "Start offboarding", kind: "danger", when: function (l) { return canAdmin && state.namedSignin && !l.offboarding_plan_id && (l.stage === "active" || l.stage === "suspended"); }, run: beginOffboarding },
       { label: "Save a record", run: function (l) { exportRecord("/lifecycles/", l.lifecycle_id); } },
     ], { text: "No vendors are being tracked yet.", action: { label: "Start tracking a vendor", run: newLifecycle } });
   }
@@ -476,7 +498,7 @@
       { label: "Tasks", kind: "primary", run: openPlan },
       { label: "Place legal hold", kind: "danger", when: function (p) { return canAdmin && !p.legal_hold && p.state !== "completed"; }, run: function (p) { legalHold(p, true); } },
       { label: "Lift legal hold", when: function (p) { return canAdmin && p.legal_hold; }, run: function (p) { legalHold(p, false); } },
-      { label: "Approve completion", when: function (p) { return canAdmin && p.state !== "completed" && !p.legal_hold; }, run: completePlan },
+      { label: "Approve completion", when: function (p) { return canAdmin && state.namedSignin && state.me && !p.needs_named_initiator && p.initiated_by !== state.me && p.state !== "completed" && !p.legal_hold; }, run: completePlan },
     ], { text: "No vendors are being offboarded. Start offboarding from the vendor list above." });
   }
   function openPlan(p) {

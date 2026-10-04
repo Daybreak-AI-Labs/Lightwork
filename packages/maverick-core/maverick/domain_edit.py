@@ -21,8 +21,10 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import os
 import re
 import stat
+from functools import lru_cache
 from pathlib import Path
 
 from .domain import (
@@ -67,6 +69,106 @@ _ARRAY_KEYS = ("allow_tools", "deny_tools", "allow_paths", "allow_hosts",
 # (where a backslash is a separator) and cannot address a sibling file.
 _OVERRIDE_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}\Z")
 _MAX_OVERRIDE_BYTES = 256 * 1024
+_TOOL_NAMES_UNSET = object()
+
+
+def _action_label(name: str) -> str:
+    """A short customer-facing action name, without registry identifiers."""
+    familiar = {
+        "web_search": "Search the web",
+        "knowledge_search": "Search company knowledge",
+        "code_exec": "Run calculations",
+        "ledger_read": "Read financial records",
+    }
+    if name in familiar:
+        return familiar[name]
+    words = name.replace("_", " ").replace("-", " ").replace(".", " ").split()
+    verbs = {"read": "Read", "write": "Update", "create": "Create",
+             "search": "Search", "list": "List", "send": "Send"}
+    if words and words[-1] in verbs:
+        return verbs[words[-1]] + " " + " ".join(words[:-1])
+    return " ".join(words).capitalize() or "An action"
+
+
+@lru_cache(maxsize=8)
+def _registered_tool_names(config_digest: str) -> frozenset[str] | None:
+    """One built-in action inventory per effective installation configuration.
+
+    The digest is a cache key only; no configuration values or credentials are
+    retained. Settings changes invalidate the snapshot on the next request.
+    """
+    from .tools import base_tool_names
+
+    names = base_tool_names(configured_optional=True)
+    if names is None:
+        return None
+    names.update({"send_to_agent", "recv_from_agent"})
+    # The agent adds these after base_registry, subject to the same feature
+    # switches. Omitting knowledge_search would falsely block most built-ins.
+    from .config import get_capabilities, knowledge_access_enabled
+
+    if knowledge_access_enabled():
+        names.add("knowledge_search")
+    if (get_capabilities().get("code_exec", False)
+            or os.environ.get("MAVERICK_CODE_EXEC", "").strip().lower()
+            in {"1", "true", "yes", "on"}):
+        names.add("code_exec")
+    return frozenset(names)
+
+
+def _configured_tool_names() -> frozenset[str] | None:
+    try:
+        from .config import config_path, load_config
+
+        digest = hashlib.sha256(
+            json.dumps({"config": load_config(), "config_path": str(config_path()),
+                        "code_exec": os.environ.get("MAVERICK_CODE_EXEC"),
+                        "knowledge_access": os.environ.get("MAVERICK_KNOWLEDGE_ACCESS")},
+                       sort_keys=True, default=str).encode("utf-8")
+        ).hexdigest()
+        names = _registered_tool_names(digest)
+        if names is None:
+            _registered_tool_names.cache_clear()
+        return names
+    except Exception:
+        # A failed inventory is not a positive readiness verdict.
+        return None
+
+
+def workflow_readiness(
+    profile: DomainProfile, known_tools: frozenset[str] | None | object = _TOOL_NAMES_UNSET,
+) -> dict:
+    """Explain whether a pack's required workflow actions are registered.
+
+    This is deliberately narrower than live readiness: credentials, permissions,
+    remote service health and provider availability are checked when work runs.
+    The run-time factory still makes the final admission decision.
+    """
+    if known_tools is _TOOL_NAMES_UNSET:
+        known_tools = _configured_tool_names()
+    required = {tool for step in profile.workflow for tool in step.tools}
+    if known_tools is None:
+        return {"state": "unknown", "missing_tools": [], "missing_optional_tools": [],
+                "fix_url": "/settings", "label": "Setup check unavailable"}
+    missing = sorted(required - known_tools)
+    optional = sorted(set(profile.allow_tools) - required - known_tools)
+    if missing:
+        return {
+            "state": "needs_setup", "missing_tools": missing,
+            "missing_labels": [_action_label(name) for name in missing],
+            "missing_optional_tools": optional,
+            "fix_url": ("/settings/all?id=capabilities.web_search"
+                        if "web_search" in missing else "/connections"),
+            "label": ("Needs Web search" if set(missing) == {"web_search"}
+                      else f"Needs {len(missing)} workflow action{'s' if len(missing) != 1 else ''}"),
+        }
+    return {
+        "state": "action_ready", "missing_tools": [],
+        "missing_optional_tools": optional,
+        "fix_url": None,
+        "label": ("Can start; some optional actions need setup" if optional
+                  else "Can start"),
+    }
 
 
 def _validated_override_name(name: str) -> str:
@@ -259,6 +361,7 @@ def _resolved_view(name: str, directory: str | Path | None = None) -> dict | Non
         return None
     raw = read_override(name, directory)
     errors, warnings = lint_profile(prof)
+    readiness = workflow_readiness(prof)
     return {
         "name": name,
         "generation": _override_generation(name, (Path(directory) if directory else user_dir()) / f"{name}.toml"),
@@ -282,6 +385,7 @@ def _resolved_view(name: str, directory: str | Path | None = None) -> dict | Non
         "overridden": sorted(overridden_fields(raw)),
         "errors": errors,
         "warnings": warnings,
+        "readiness": readiness,
     }
 
 
@@ -313,6 +417,7 @@ def list_agents(directory: str | Path | None = None) -> list[dict]:
     """Roster for the editor: every available pack, flagged by whether the
     client has overridden it and whether it carries a workflow."""
     overrides = _load_raw_domains(Path(directory) if directory else user_dir())
+    known_tools = _configured_tool_names()
     out: list[dict] = []
     for name, prof in sorted(available_domains().items()):
         out.append({
@@ -322,6 +427,7 @@ def list_agents(directory: str | Path | None = None) -> list[dict]:
             "description": prof.description,
             "is_override": name in overrides,
             "has_workflow": bool(prof.workflow),
+            "readiness": workflow_readiness(prof, known_tools),
         })
     return out
 
@@ -329,4 +435,5 @@ def list_agents(directory: str | Path | None = None) -> list[dict]:
 __all__ = [
     "overlay_toml", "validate_override", "write_override", "read_override",
     "remove_override", "resolved_view", "list_agents", "rejected_override_view",
+    "workflow_readiness",
 ]

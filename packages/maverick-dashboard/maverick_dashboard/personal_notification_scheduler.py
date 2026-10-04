@@ -39,7 +39,7 @@ def observe(principal: str) -> bool:
     from maverick import config
     from maverick import experience_preferences as preferences
     from maverick.personal_identity import principal_current
-    from maverick.personal_notification_recipients import observed, withdraw
+    from maverick.personal_notification_recipients import observed, status, withdraw
     from maverick.personal_notifications import PersonalInbox, validate_preferences
     from maverick.tenant.registry import assert_tenant_active
     from maverick.world_model import close_world_if_owned, open_world
@@ -57,7 +57,8 @@ def observe(principal: str) -> bool:
             sources, _, _, _ = _projection(None, principal, world=world)
             choice = validate_preferences(preferences.state(principal)["values"].get("notification_preferences", {}))
             inbox = PersonalInbox(principal).refresh(sources, choice,
-                allow_critical=(config.load_config().get("notifications") or {}).get("personal_critical_bypass") is True)
+                allow_critical=(config.load_config().get("notifications") or {}).get("personal_critical_bypass") is True,
+                enrolled_at=status(principal)["enrolled_at"])
             observed(principal)
             if (config.load_config().get("notifications") or {}).get("personal_external") is True and choice["external_links"]:
                 from maverick.personal_notification_delivery import dispatch

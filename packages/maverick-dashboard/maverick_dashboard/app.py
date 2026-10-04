@@ -2591,11 +2591,22 @@ async def bearer_auth(request: Request, call_next):
             # caller: its Origin is chrome-extension://… and it is accepted
             # only behind the operator's explicit opt-in (see extension_cors).
             if not _is_same_origin(request) and _allowed_extension_origin(request) is None:
+                script_without_origin = (
+                    request.url.path.startswith("/api/")
+                    and not request.headers.get("origin")
+                    and not request.headers.get("referer")
+                )
                 return JSONResponse(
                     {
-                        "detail": "cross-site request blocked — for your security, "
-                        "changes must be made from the Lightwork page "
-                        "itself. Reload the dashboard and try again."
+                        "detail": (
+                            "Local API writes need an Origin header matching this Lightwork "
+                            "address, or an API key created in Account > API keys and sent as "
+                            "Authorization: Bearer <key>. See the REST API guide."
+                            if script_without_origin else
+                            "cross-site request blocked — for your security, changes must "
+                            "be made from the Lightwork page itself. Reload the dashboard "
+                            "and try again."
+                        )
                     },
                     status_code=403,
                 )
@@ -3818,15 +3829,38 @@ def _deliverable_specs() -> list[dict]:
 
 @app.get("/deliverables", response_class=HTMLResponse)
 def deliverables_page(request: Request, role: str = "") -> HTMLResponse:
-    """The persona inbox: runs grouped by the deliverable their pack declares,
-    scoped to the role that consumes them -- "my forecasts", "assessments
-    awaiting my sign-off" -- instead of the flat ``/goals`` stream.
-
-    With no explicit ``?role=``, defaults to the caller's own persona roles
-    (``[personas]`` config) so a logged-in analyst lands on their deliverables;
-    ``?role=all`` widens to everything, ``?role=<r>`` picks a single role."""
+    """Show the caller's completed work; explicit role links browse pack output."""
     from .auth import caller_suites
-    from .deliverables import build_inbox, persona_roles_for, recent_runs_by_domain
+    from .deliverables import PAGE_SIZE, build_inbox, persona_roles_for, recent_runs_by_domain
+
+    owner = goal_owner_filter(request)
+    if not role:
+        try:
+            page = max(1, min(int(request.query_params.get("page", "1")), 10_000))
+        except ValueError:
+            page = 1
+        rows = _world().list_goal_results(
+            owner=owner, limit=PAGE_SIZE + 1, offset=(page - 1) * PAGE_SIZE,
+        )
+        shown = rows[:PAGE_SIZE]
+        shown_domains = {g.domain for g in shown}
+        gates = {s["domain"]: s for s in (_deliverable_specs() if shown_domains else [])
+                 if s["domain"] in shown_domains}
+        try:
+            signoffs = _world().signoffs_for_goals([g.id for g in shown])
+        except Exception:  # pragma: no cover -- sign-off lookup never hides finished work
+            signoffs = {}
+        awaiting = [
+            {"id": g.id, "title": g.title, "updated_at": g.updated_at,
+             "deliverable": gates[g.domain]["deliverable"], "gate": gates[g.domain]["gate"]}
+            for g in shown if g.domain in gates and gates[g.domain]["gate"]
+            and not signoffs.get(g.id)
+        ]
+        return templates.TemplateResponse(request, "deliverables.html", {
+            "browse": False, "recent_results": shown, "awaiting": awaiting,
+            "result_labels": {domain: spec["deliverable"] for domain, spec in gates.items()},
+            "results_page": page, "results_more": len(rows) > PAGE_SIZE,
+        })
 
     # Job-function scoping: a scoped caller's inbox lists only their
     # departments' deliverable specs (plus generic packs), matching /agents.
@@ -3835,7 +3869,6 @@ def deliverables_page(request: Request, role: str = "") -> HTMLResponse:
         spec for spec in _deliverable_specs()
         if allowed is None or set(spec["suites"]) <= allowed
     ]
-    owner = goal_owner_filter(request)
     # One grouped read for every pack's latest runs, not one query per pack.
     runs_by_domain = recent_runs_by_domain(_world(), [s["domain"] for s in specs], owner=owner)
     ids = [g.id for runs in runs_by_domain.values() for g in runs]
@@ -3851,6 +3884,7 @@ def deliverables_page(request: Request, role: str = "") -> HTMLResponse:
     # ?role=all is the explicit request to browse the whole catalogue even
     # before any result exists; the plain page shows a real empty state.
     model["showing_all"] = role == "all"
+    model["browse"] = True
     return templates.TemplateResponse(request, "deliverables.html", model)
 
 
@@ -12970,9 +13004,14 @@ async def flow_run_page(request: Request, flow_id: str, run_id: str) -> HTMLResp
     (redacted), and the recovery actions (approve/reject, retry, retry from the
     failed step). Data comes from /api/v1/flows/runs/{run_id} client-side, so
     owner-scoping and the flow-engine gate are enforced by the API."""
-    return templates.TemplateResponse(
-        request, "flow_run.html", {"flow_id": flow_id, "run_id": run_id}
-    )
+    from maverick.config import get_flows
+
+    signed_in = bool(caller_principal(request))
+    return templates.TemplateResponse(request, "flow_run.html", {
+        "flow_id": flow_id, "run_id": run_id,
+        "learning_example_panel": signed_in,
+        "learning_capture_panel": signed_in and get_flows().get("action_episode_capture") is True,
+    })
 
 
 @app.get("/automations", response_class=HTMLResponse)

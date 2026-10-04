@@ -13,6 +13,10 @@
   var identityTransition = null;
   var accessMessage = "Your recovery access is unavailable. Sign in with an authorized account and reload this page before continuing.";
   function say(text) { get("status").textContent = text; }
+  function clearApprovalCode() {
+    get("installation-code").value = "";
+    get("installation-code-copy-status").textContent = "";
+  }
   function currentNativeReview() {
     return !!nativeReview && /^[0-9a-f]{32}$/.test(nativeReview.id)
       && typeof nativeReview.expires_at === "number" && Number.isFinite(nativeReview.expires_at)
@@ -713,14 +717,14 @@
     nativeReview = null;
     get("installation-native-review").textContent = "";
     get("installation-confirm").checked = false;
-    get("installation-code").value = "";
+    clearApprovalCode();
     clearIdentityTransition();
     installationPoints = [];
     get("installation-point").replaceChildren();
     get("installation-retire-confirm").checked = false;
     get("installation-retire-point").replaceChildren();
     var result = await request("status");
-    if (state && result.context !== state.context) { channelDrafts.clear(); clearReconciliation(); clearReview(); clearIdentityTransition(); get("installation-transition-file").value = ""; get("installation-code").value = ""; get("installation-confirm").checked = false; }
+    if (state && result.context !== state.context) { channelDrafts.clear(); clearReconciliation(); clearReview(); clearIdentityTransition(); get("installation-transition-file").value = ""; clearApprovalCode(); get("installation-confirm").checked = false; }
     state = result;
     renderBootstrapStatus();
     get("identity").textContent = "Workspace: " + result.tenant + " · Lightwork " + result.application_version;
@@ -1063,7 +1067,7 @@
   get("encryption-confirm").addEventListener("change", controls);
   async function authorizeInstallation(rollback) {
     if (!get("installation-confirm").checked) return;
-    get("installation-code").value = "";
+    clearApprovalCode();
     var body = { confirm: true, confirm_all_workspaces: true, native_handoff: get("installation-handoff").checked };
     if (!rollback) {
       if (!currentNativeReview()) throw new Error("Check for updates in the native app and refresh this page to review the exact release.");
@@ -1086,7 +1090,7 @@
     clearIdentityTransition(); get("installation-transition-file").value = "";
   }
   on("installation-transition-review", async function () {
-    clearIdentityTransition(); get("installation-code").value = "";
+    clearIdentityTransition(); clearApprovalCode();
     var file = get("installation-transition-file").files[0], binding = state.context;
     if (!file || file.size > 65536) throw new Error("Choose the signed review file (no larger than 64 KB).");
     var envelope = await file.text();
@@ -1097,29 +1101,50 @@
       "\nPublisher: " + result.from_publisher + " → " + result.to_publisher + "\nUpdate key fingerprints: " + result.from_key_sha256 + " → " + result.to_key_sha256 +
       "\nNew admissions end: " + new Date(result.expires_at * 1000).toISOString() + ". Rollback is limited to the exact retained pair and compatible unchanged protected state. Windows verifies each installer's publisher trust before execution.";
   });
-  get("installation-transition-file").addEventListener("change", function () { clearIdentityTransition(); get("installation-code").value = ""; controls(); });
+  get("installation-transition-file").addEventListener("change", function () { clearIdentityTransition(); clearApprovalCode(); controls(); });
   get("installation-transition-confirm").addEventListener("change", controls);
   on("installation-authorize", function () { return authorizeInstallation(false); });
   on("installation-rollback", function () { return authorizeInstallation(true); });
   get("installation-confirm").addEventListener("change", controls);
-  get("installation-point").addEventListener("change", function () { get("installation-code").value = ""; get("installation-confirm").checked = false; controls(); });
+  get("installation-point").addEventListener("change", function () { clearApprovalCode(); get("installation-confirm").checked = false; controls(); });
   get("installation-retire-point").addEventListener("change", function () { get("installation-retire-confirm").checked = false; controls(); });
   get("installation-retire-confirm").addEventListener("change", controls);
   on("installation-retire", async function () {
     var selected = installationPoints.find(function (item) { return item.id === get("installation-retire-point").value; });
     if (!selected || !selected.can_retire || !get("installation-retire-confirm").checked) return;
     get("installation-retire-confirm").checked = false;
-    get("installation-code").value = "";
+    clearApprovalCode();
     await request("installation/" + encodeURIComponent(selected.id) + "/retire", { confirm: true, sha256: selected.record_sha256 });
     await load();
     say("The selected installation point was retired. A signed retirement receipt has been kept.");
   });
   action(async function () { await load(); say("Review coverage and keep a separate recovery key copy before relying on snapshots."); });
-  // Copy the private approval code for the desktop app's Install & updates.
+  // Recovery mode has its own shell, so the ordinary clipboard/toast helpers
+  // are not present. Keep the result beside the button where it is visible.
   var copyCode = document.getElementById("wrec-installation-code-copy");
-  if (copyCode) copyCode.addEventListener("click", function () {
-    var code = get("installation-code").value.trim();
-    if (!code) { window.mvToast("There is no approval code yet. Review an update above first.", {error: true}); return; }
-    window.mvCopy(code);
+  if (copyCode) copyCode.addEventListener("click", async function () {
+    var field = get("installation-code");
+    var status = get("installation-code-copy-status");
+    var code = field.value.trim();
+    if (!code) { status.textContent = "There is no approval code yet. Review an update above first."; return; }
+    var copied = false;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      try { await navigator.clipboard.writeText(code); copied = true; } catch (error) { /* try local copy below */ }
+    }
+    if (!copied) {
+      var area;
+      try {
+        area = document.createElement("textarea");
+        area.value = code; area.style.position = "fixed"; area.style.opacity = "0";
+        document.body.appendChild(area); area.select();
+        copied = !!(document.execCommand && document.execCommand("copy"));
+      } catch (error) { copied = false; }
+      finally { if (area) area.remove(); }
+    }
+    if (copied) { status.textContent = "Approval code copied."; copyCode.focus(); }
+    else {
+      field.focus(); field.select();
+      status.textContent = "Could not copy automatically. The code is selected above; copy it yourself.";
+    }
   });
 })();

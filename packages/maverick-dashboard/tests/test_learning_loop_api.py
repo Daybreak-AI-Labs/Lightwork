@@ -70,6 +70,8 @@ def test_every_change_needs_a_global_admin(client, monkeypatch):
         ("/refinements/0123456789abcdef/revert", {}),
         ("/run", {"scope": "main"}),
         ("/corpus-quality", {}),
+        ("/lessons/withdraw", {"model_id": "M", "token": "a" * 64,
+                               "reason": "Current policy changed.", "confirm": True}),
     ):
         assert client.post(API + path, json=body).status_code == 403, path
 
@@ -160,6 +162,109 @@ def test_read_outs_use_offered_models_only(client, monkeypatch):
     eff = client.get(API + "/efficacy", params={"model_id": "claude-x"}).json()
     assert [row["text"] for row in eff["lessons"]] == ["always cite the source", "never cite the source"]
     assert client.get(API + "/efficacy", params={"model_id": "made-up"}).status_code == 422
+
+
+def test_exact_lesson_withdrawal_requires_current_review_and_leaves_other_scope(client, monkeypatch):
+    from pathlib import Path
+
+    from maverick import self_harness as sh
+    store = Path(os.environ["HOME"]) / "addenda.json"
+    monkeypatch.setattr(sh, "_store_path", lambda: store)
+    line = "Check the source before answering."
+    scoped = sh._scoped_key("M", "domain=finance")
+    sh._write_addenda({"M": sh._ADDENDUM_HEADER + "\n- " + line,
+                       scoped: sh._ADDENDUM_HEADER + "\n- " + line}, store)
+    meta = {}
+    for key in ("M", scoped):
+        sh._upsert_line_meta(meta, key, line, {"source_goal_ids": [0]}, now=1)
+    sh._write_line_meta(meta, store)
+    rows = client.get(API + "/efficacy", params={"model_id": "M"}).json()["lessons"]
+    assert len(rows) == 2
+    selected = next(row for row in rows if row["scope_label"] == "Department: finance")
+    body = {"model_id": "M", "token": selected["token"],
+            "reason": "This department changed its policy.", "confirm": True}
+    assert client.post(API + "/lessons/withdraw", json=dict(body, reason="short")).status_code == 422
+    removed = client.post(API + "/lessons/withdraw", json=body)
+    assert removed.status_code == 200, removed.text
+    assert removed.json()["removed"] is True
+    current = client.get(API + "/efficacy", params={"model_id": "M"}).json()["lessons"]
+    assert len(current) == 1 and current[0]["scope_label"] == "All work"
+    assert client.post(API + "/lessons/withdraw", json=body).status_code == 409
+
+
+def test_lesson_withdrawal_refuses_when_learning_audit_unavailable(client, monkeypatch):
+    from pathlib import Path
+
+    from maverick import self_harness as sh
+    from maverick_dashboard import learning_loop_api as native
+    store = Path(os.environ["HOME"]) / "addenda.json"
+    monkeypatch.setattr(sh, "_store_path", lambda: store)
+    sh._write_addenda({"M": sh._ADDENDUM_HEADER + "\n- Check totals"}, store)
+    meta = {}
+    sh._upsert_line_meta(meta, "M", "Check totals", {"source_goal_ids": [0]}, now=1)
+    sh._write_line_meta(meta, store)
+    token = client.get(API + "/efficacy", params={"model_id": "M"}).json()["lessons"][0]["token"]
+    def refuse(*_args, **_kwargs):
+        raise HTTPException(503, "The activity log refused this change.")
+    from fastapi import HTTPException
+    monkeypatch.setattr(native, "_audit", refuse)
+    response = client.post(API + "/lessons/withdraw", json={
+        "model_id": "M", "token": token, "reason": "It conflicts with current policy.", "confirm": True})
+    assert response.status_code == 503
+    assert len(sh.line_efficacy("M")) == 1
+
+
+def test_copilot_reviews_and_withdraws_the_same_current_lesson(client, monkeypatch):
+    from pathlib import Path
+
+    from cryptography.fernet import Fernet
+    from maverick import self_harness as sh
+    from maverick_dashboard import product_operations as ops
+    from maverick_dashboard import product_operations_learning_lessons as lessons
+
+    store = Path(os.environ["HOME"]) / "addenda.json"
+    monkeypatch.setattr(sh, "_store_path", lambda: store)
+    sh._write_addenda({"M": sh._ADDENDUM_HEADER + "\n- Check totals"}, store)
+    meta = {}
+    sh._upsert_line_meta(meta, "M", "Check totals", {"source_goal_ids": [0]}, now=1)
+    sh._write_line_meta(meta, store)
+
+    codec = Fernet(Fernet.generate_key())
+    monkeypatch.setattr(ops, "_gate", lambda _request: None)
+    monkeypatch.setattr(ops, "_context", lambda _request: "c" * 64)
+    monkeypatch.setattr(ops, "enabled_families", lambda: {"learning"})
+    monkeypatch.setattr(ops, "adapters", lambda: {entry.id: entry for entry in lessons.entries()})
+    monkeypatch.setattr(ops.crypto_at_rest, "seal_to_str", lambda value: "sealed:" + codec.encrypt(value.encode()).decode())
+    monkeypatch.setattr(ops.crypto_at_rest, "is_sealed_str", lambda value: value.startswith("sealed:"))
+    monkeypatch.setattr(ops.crypto_at_rest, "unseal_from_str", lambda value: codec.decrypt(value[7:].encode()).decode())
+
+    base = "/api/v1/copilot/product-operations"
+    selection = {"kind": "learning_model", "id": "M"}
+    catalog = client.post(base + "/catalog", json={"page": "/learned", "selection": selection}).json()
+    by_id = {item["id"]: item for item in catalog["operations"]}
+    assert set(by_id) == {"learning.lesson_results", "learning.withdraw_lesson"}
+    read = client.post(base + "/prepare", json={"page": "/learned", "selection": selection,
+        "operation": "learning.lesson_results", "context": catalog["context"],
+        "revision": by_id["learning.lesson_results"]["revision"], "arguments": {}})
+    assert read.status_code == 200 and read.json()["read_only"]
+    assert read.json()["details"]["lessons"][0]["text"] == "Check totals"
+
+    choice = by_id["learning.withdraw_lesson"]["fields"][0]["choices"][0]["value"]
+    review = client.post(base + "/prepare", json={"page": "/learned", "selection": selection,
+        "operation": "learning.withdraw_lesson", "context": catalog["context"],
+        "revision": by_id["learning.withdraw_lesson"]["revision"],
+        "arguments": {"lesson": choice, "reason": "The policy changed and this is wrong."}})
+    assert review.status_code == 200, review.text
+    assert "Check totals" in str(review.json()["changes"])
+    assert client.post(base + "/execute", json={"token": review.json()["token"],
+        "confirmed": False}).status_code == 400
+    done = client.post(base + "/execute", json={"token": review.json()["token"],
+        "confirmed": True})
+    assert done.status_code == 200, done.text
+    assert done.json()["status"] == "confirmed"
+    assert sh.line_efficacy("M") == []
+    assert client.post(base + "/execute", json={"token": review.json()["token"],
+        "confirmed": True}).status_code == 409
 
 
 def _finished(client, started, timeout: float = 15.0) -> dict:

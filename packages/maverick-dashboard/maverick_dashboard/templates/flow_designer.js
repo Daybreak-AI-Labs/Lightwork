@@ -2491,6 +2491,19 @@
   document.getElementById('fd-publish').addEventListener('click', publishFlow);
   document.getElementById('fd-turn-off').addEventListener('click', function () { retireFlow('off', this); });
   document.getElementById('fd-delete-flow').addEventListener('click', function () { retireFlow('delete', this); });
+  document.addEventListener('lightwork:product-operation-complete', function (event) {
+    var outcome = event.detail || {};
+    if (outcome.status !== 'confirmed') return;
+    if (outcome.operation === 'learning.workflow_delete') {
+      markClean(); window.location.assign('/workflows');
+    } else if (outcome.operation === 'learning.workflow_turn_off') {
+      rootFlow.published = false;
+      rootFlow.published_version = 0;
+      rootFlow.published_revision = '';
+      syncSaveButtons();
+      say('Turned off. New automatic starts have stopped; existing runs may continue.');
+    }
+  });
   document.getElementById('fd-run').addEventListener('click', function () { run(true); });
   document.getElementById('fd-run-real').addEventListener('click', function () { run(false); });
   document.getElementById('fd-history').addEventListener('click', showHistory);

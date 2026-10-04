@@ -16,6 +16,10 @@
     return node;
   };
   const date = value => value ? new Date(value * 1000).toLocaleString() : 'Not available';
+  const inputDate = value => {
+    const d = new Date(value * 1000), pad = part => String(part).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  };
   const local = value => {
     const d = new Date(value);
     if (!value || Number.isNaN(d.getTime())) throw new Error('Enter a complete date and time.');
@@ -149,6 +153,37 @@
     parent.append(section);
     return section;
   }
+  function exploreAlternative(data, gap) {
+    const form = $('cmv-new');
+    form.reset();
+    const set = (name, value) => { form.elements.namedItem(name).value = String(value); };
+    set('title', (data.title + ' · alternate choice').slice(0, 200));
+    for (const [index, suffix] of ['a','b'].entries()) {
+      const order = data.model.commitments[index];
+      if (!order) continue;
+      set(`order_${suffix}_name`, data.labels[order.id] || order.id);
+      set(`order_${suffix}_due_at`, inputDate(order.due_at));
+      set(`order_${suffix}_material_units`, order.demands.find(part => part.kind === 'material')?.units || 1);
+      form.elements.namedItem(`order_${suffix}_uses_capacity`).checked = order.demands.some(part => part.kind === 'capacity');
+    }
+    const capacity = data.model.lots.find(lot => lot.kind === 'capacity');
+    const stock = data.model.lots.find(lot => lot.kind === 'material');
+    set('capacity_name', data.labels['work-center'] || 'Work center');
+    set('capacity_units', capacity?.units || 1);
+    set('material_name', data.labels.material || 'Material');
+    set('stock_units', stock?.units || 0);
+    set('stock_certainty', stock?.certainty || 'unknown');
+    set('option_kind', gap.kind);
+    set('option_units', Math.min(gap.remaining_shortfall_units, 1000000));
+    // A new choice is a new operator assertion. Never copy its evidence or
+    // approval from the earlier review.
+    for (const name of ['option_name','option_ready_at','option_expires_at','option_cost_note','basis','review_by']) set(name, '');
+    set('option_lead_hours', 0);
+    $('cmv-copy-note').hidden = false;
+    $('cmv-new-details').open = true;
+    form.elements.namedItem('option_name').focus();
+    say('The existing figures were copied into a new review. Recheck them, then enter the new choice and its source before saving.');
+  }
   function render(data) {
     if (observationDraftOwner && observationDraftOwner !== data.id) resetObservation();
     observationDraftOwner = data.id;
@@ -188,6 +223,36 @@
       const names = component.commitment_ids.map(id => data.labels[id] || id).join(' and ');
       card(components, names, [language[component.status] || component.status,
         component.plans.length ? component.plans.length + ' conditional path available below.' : 'No current conditional path was found in this model.']);
+    }
+    const gaps = $('cmv-gaps'); gaps.replaceChildren();
+    const resourceGaps = data.resource_gaps || [];
+    if (data.resource_gap_blocked_by_order_change) {
+      card(gaps, 'Order details need rechecking', ['At least one accepted-order report changed or expired. Lightwork cannot calculate its resource gap from those figures. Start a new review with current order details.']);
+    }
+    if (resourceGaps.length) gaps.append(el('h3', 'Where the reported plan runs short'));
+    for (const gap of resourceGaps) {
+      const resource = data.labels[gap.key] || (gap.kind === 'capacity' ? 'Work capacity' : 'Material');
+      const names = gap.commitment_ids.map(id => data.labels[id] || id).join(' and ');
+      const lines = [
+        `For ${names}, confirmed reported ${resource} falls short by up to ${gap.confirmed_shortfall_units} units. The first shortfall is at ${date(gap.first_shortfall_at)}.`,
+        gap.remaining_shortfall_units ?
+          `Even if every still-possible report and recorded choice becomes real on time, this model still needs up to ${gap.remaining_shortfall_units} more ${resource} units. The first remaining shortfall is at ${date(gap.remaining_first_shortfall_at)}.` :
+          'The uncertain reports or recorded choice could cover this shortfall, but they must be checked and the actual effect observed before anyone relies on them.',
+      ];
+      const sources = gap.conditional_source_ids.map(id => id.split(':').slice(-1)[0].replaceAll('-', ' '));
+      const choices = gap.option_ids.map(id => data.labels[id] || id);
+      if (sources.length) lines.push('Reports to recheck: ' + sources.join(', ') + '.');
+      if (choices.length) lines.push('Conditional choices: ' + choices.join(', ') + '. Recording or confirming a choice does not acquire these units.');
+      const section = card(gaps, resource, lines);
+      if (gap.remaining_shortfall_units && !data.archived && !data.archive_pending) {
+        const button = el('button', 'Explore another choice in a new review');
+        button.type = 'button'; button.className = 'btn';
+        button.addEventListener('click', () => exploreAlternative(data, gap));
+        section.append(button);
+      }
+    }
+    if (!resourceGaps.length && !data.resource_gap_blocked_by_order_change && assessed.status === 'infeasible') {
+      card(gaps, 'The review window has passed', ['A past delivery time cannot be repaired by adding a hypothetical resource. Start a new review with current commitments and source reports.']);
     }
     const options = $('cmv-options'); options.replaceChildren();
     const option = data.model.options[0];
@@ -284,7 +349,7 @@
     change('create', async () => {
       const body={...draft}; body.operation_id=uniqueOperation('create',body);
       const result=await request('','POST',body);
-      await list(); await open(result.id); $('cmv-new-details').open=false;
+      await list(); await open(result.id); $('cmv-new-details').open=false; $('cmv-copy-note').hidden=true;
     });
   });
   $('cmv-trace').addEventListener('submit', event => {

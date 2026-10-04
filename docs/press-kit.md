@@ -10,8 +10,8 @@ Lightwork is a proprietary, commercially licensed agent runtime for enterprises
 and regulated teams that need AI agents they can govern, audit, and run
 entirely in their own environment. Hand it a goal and its orchestrator
 decomposes the work and spawns specialist sub-agents — researcher, coder,
-writer, verifier — that work in parallel under hard dollar, wall-clock, and
-tool-call caps, with every input, tool call, and output screened by the Agent
+writer, verifier — that work in parallel under administrator-configured
+task limits, with inputs, tool calls, and outputs screened by the Agent
 Shield safety layer and every action recorded in a signed, append-only audit
 log. The runtime is self-hosted — laptop, Docker, VPS, Kubernetes, or
 air-gapped — and model-agnostic: 12 LLM providers, routable per role, so
@@ -23,17 +23,17 @@ from other languages over MCP and gRPC. Lightwork is developed by Day AI Labs.
 
 Lightwork is a proprietary, commercially licensed, self-hosted AI agent runtime
 for enterprises. A recursive orchestrator decomposes goals and spawns
-specialist sub-agents that work in parallel under hard budget caps, behind a
+specialist sub-agents that work in parallel under configurable task limits, behind a
 safety shield, with a signed audit log. It ships 2,031 prebuilt specialist
 agents across 53 business suites (every pack lint-audited for least-privilege
 envelopes), a closed learning lifecycle — agents consolidate experience,
-provably improve, and every learned change is audited and reversible — plus
+propose reviewed improvements, with audited and reversible changes — plus
 286 built-in tool modules, 514 reusable skills, 17 channels, 9 sandbox backends, and 12 LLM providers.
 
 ### 25-word version
 
 Lightwork is a proprietary, self-hosted multi-agent runtime for enterprises: a
-recursive swarm under hard budget caps, a safety shield, and a signed,
+recursive swarm with configurable task limits, a safety shield, and a signed,
 append-only audit log.
 
 ## Key facts
@@ -51,7 +51,8 @@ append-only audit log.
   parallel specialist sub-agents, with a default-on verifier, reflexion
   retries, and a graded critic.
 - **Safety**: the Agent Shield layer screens at three chokepoints (input,
-  tool call, output); hard budget caps and a killswitch bound every run.
+  tool call, output); administrators can set task limits, and a killswitch
+  can stop work. Ordinary tasks without configured limits are not capped.
 - **Surface area** (counts from `FEATURES.md`): 286 built-in tool modules and
   514 reusable skills; 2,877 write-capable enterprise REST/GraphQL connectors
   plus 37 read-only primary-source / public-data connectors (SEC EDGAR, FRED,

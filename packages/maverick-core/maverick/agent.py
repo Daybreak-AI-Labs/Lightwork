@@ -2244,8 +2244,11 @@ class Agent:
         if _skills:
             try:
                 from .skill import stats as skill_stats
+                from .skills import learned_skill_use_key
                 names = [s.name for s in _skills]
-                skill_stats.record_use(names)
+                exact_uses = [key for s in _skills
+                              if (key := learned_skill_use_key(s))]
+                skill_stats.record_use(names + exact_uses)
                 self.ctx.skills_used.update(names)
             except Exception:
                 pass

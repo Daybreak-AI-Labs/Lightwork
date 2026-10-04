@@ -304,17 +304,45 @@ def _parse_jira(payload: dict) -> IssueEvent | None:
 
 def _parse_gitlab(payload: dict) -> IssueEvent | None:
     # GitLab fires {object_kind: "issue", object_attributes: {...},
-    # assignees: [{username, ...}]}. An assignment is an open/update whose
-    # assignees include the bot.
+    # assignees: [{username, ...}]}. An open is the initial assignment;
+    # updates/reopens need evidence that the bot was newly assigned. Edits to
+    # title, labels or description while it remains assigned must not start
+    # another paid goal.
     if payload.get("object_kind") != "issue":
         return None
     attrs = payload.get("object_attributes") or {}
-    if attrs.get("action") not in ("open", "update", "reopen"):
+    action = attrs.get("action")
+    if action not in ("open", "update", "reopen"):
         return None
     assignees = payload.get("assignees") or []
     candidates = [str(a.get("username") or "") for a in assignees if isinstance(a, dict)]
     if not _is_bot(candidates, "gitlab"):
         return None
+    if action != "open":
+        changes = payload.get("changes") or {}
+        if not isinstance(changes, dict):
+            return None
+        changed = next((changes[key] for key in ("assignees", "assignee_ids", "assignee_id") if key in changes), None)
+        if not isinstance(changed, dict) or "previous" not in changed or "current" not in changed:
+            return None
+        if changed["previous"] == changed["current"]:
+            return None
+        previous = changed["previous"]
+        old_assignees = previous if isinstance(previous, list) else [previous]
+        old_names = [str(row["username"]) for row in old_assignees
+                     if isinstance(row, dict) and row.get("username")]
+        if _is_bot(old_names, "gitlab"):
+            return None
+        bot_ids = {str(row.get("id")) for row in assignees if isinstance(row, dict)
+                   and _is_bot([str(row.get("username") or "")], "gitlab") and row.get("id") is not None}
+        if old_assignees and not old_names and not bot_ids:
+            # With only prior numeric IDs and no current bot ID, the hook
+            # cannot prove this bot was newly assigned. Do not spend again.
+            return None
+        old_ids = {str(row.get("id")) if isinstance(row, dict) else str(row)
+                   for row in old_assignees if row is not None}
+        if bot_ids & old_ids:
+            return None
     project = payload.get("project") or {}
     path = str(project.get("path_with_namespace") or "")
     iid = attrs.get("iid")

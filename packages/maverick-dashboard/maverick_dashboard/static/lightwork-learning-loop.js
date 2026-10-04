@@ -246,30 +246,69 @@
   // ---- self-coaching read-outs ------------------------------------------
   var picker = $('llp-model');
   function model() { return picker && picker.value ? picker.value : ''; }
+  function publishModel() {
+    document.dispatchEvent(new CustomEvent('lightwork:copilot-selection',
+      { detail: { selection: model() ? { kind: 'learning_model', id: model() } : {} } }));
+  }
+  async function withdrawLesson(row, reason, buttonEl) {
+    var chosenModel = model();
+    var why = reason.value.trim();
+    if (why.length < 10) { say('llp-harness-msg', 'Explain why this lesson should be removed in at least 10 characters.'); return; }
+    if (!(await window.mvConfirm('Remove this exact lesson for ' + row.scope_label + '? New work will no longer use it. Past work remains recorded.',
+      { okText: 'Remove lesson' }))) return;
+    buttonEl.disabled = true;
+    say('llp-harness-msg', 'Removing the lesson…');
+    try {
+      await post('/lessons/withdraw', { model_id: chosenModel, token: row.token, reason: why, confirm: true });
+      say('llp-harness-msg', 'Lesson removed. New work will no longer use it.');
+    } catch (failure) {
+      say('llp-harness-msg', await problem(failure, 'remove the lesson') + ' Refresh the results to check its current state.');
+    } finally {
+      await Promise.all([loadModels(), loadLog()]);
+      buttonEl.disabled = false;
+    }
+  }
+  function lessonAction(row) {
+    var cell = el('td');
+    var details = el('details');
+    details.appendChild(el('summary', 'Remove lesson'));
+    var label = el('label', 'Why remove this lesson?');
+    var reason = el('textarea', null, 'textarea');
+    reason.rows = 2;
+    reason.maxLength = 1000;
+    reason.required = true;
+    label.appendChild(reason);
+    details.appendChild(label);
+    details.appendChild(el('p', 'Only this lesson in this part of the work will be removed. Past work stays in the activity record.', 'muted'));
+    details.appendChild(button('Confirm removal', 'btn btn--danger', function (b) { withdrawLesson(row, reason, b); }));
+    cell.appendChild(details);
+    return cell;
+  }
   function loadEfficacy() {
     var rows = $('llp-eff-rows');
     if (!model()) return Promise.resolve();
     return get('/efficacy?model_id=' + encodeURIComponent(model())).then(function (data) {
       rows.textContent = '';
       if (!data.lessons.length) {
-        var tr = el('tr'); var td = el('td', 'This model has no currently available shared lessons.'); td.colSpan = 4;
+        var tr = el('tr'); var td = el('td', 'This model has no currently available shared lessons.'); td.colSpan = admin ? 5 : 4;
         tr.appendChild(td); rows.appendChild(tr); return;
       }
       data.lessons.forEach(function (r) {
         var tr = el('tr');
         var lesson = el('td', r.text);
-        if (r.department) lesson.appendChild(el('div', 'Only for ' + (window.mvHuman ? window.mvHuman(r.department) : r.department), 'muted'));
+        lesson.appendChild(el('div', r.scope_label, 'muted'));
         tr.appendChild(lesson);
         tr.appendChild(el('td', String(r.went_well)));
         tr.appendChild(el('td', String(r.did_not)));
         var rate = el('td', pct(r.rate));
         if (r.recent_rate != null) rate.appendChild(el('div', 'Lately ' + pct(r.recent_rate), 'muted'));
         tr.appendChild(rate);
+        if (admin) tr.appendChild(lessonAction(r));
         rows.appendChild(tr);
       });
     }).catch(async function (failure) {
       rows.textContent = '';
-      var tr = el('tr'); var td = el('td', await problem(failure, 'load the lesson results')); td.colSpan = 4;
+      var tr = el('tr'); var td = el('td', await problem(failure, 'load the lesson results')); td.colSpan = admin ? 5 : 4;
       tr.appendChild(td); rows.appendChild(tr);
     });
   }
@@ -303,18 +342,27 @@
       list.appendChild(el('li', await problem(failure, 'see the learning activity'), 'muted'));
     });
   }
-  function modelChanged() { return Promise.all([loadEfficacy(), loadConflicts()]); }
+  function modelChanged() { publishModel(); return Promise.all([loadEfficacy(), loadConflicts()]); }
   function loadModels() {
     return get('/models').then(function (data) {
+      var previous = model();
       picker.textContent = '';
       if (!data.models.length) {
-        picker.appendChild(el('option', 'No models yet'));
+        var empty = el('option', 'No models yet'); empty.value = '';
+        picker.appendChild(empty);
         picker.disabled = true;
+        $('llp-eff-rows').textContent = '';
+        var row = el('tr'); var cell = el('td', 'No currently available shared lessons.'); cell.colSpan = admin ? 5 : 4;
+        row.appendChild(cell); $('llp-eff-rows').appendChild(row);
+        $('llp-conf').textContent = '';
+        publishModel();
         return;
       }
+      picker.disabled = false;
       data.models.forEach(function (m) {
         var o = el('option', m.label); o.value = m.value; picker.appendChild(o);
       });
+      if (data.models.some(function (m) { return m.value === previous; })) picker.value = previous;
       return modelChanged();
     }).catch(async function (failure) {
       say('llp-harness-msg', await problem(failure, 'load the models'));

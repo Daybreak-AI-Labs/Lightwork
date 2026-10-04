@@ -1437,6 +1437,18 @@ def test_existing_dashboard_page_and_asset_are_usable(web):
     assert "innerHTML" not in asset.text
 
 
+def test_vendor_page_gives_local_operator_an_individual_signin_path(web, monkeypatch):
+    client, *_ = web
+    monkeypatch.setattr("maverick_dashboard.vendor_onboarding_page.caller_principal", lambda _request: None)
+    monkeypatch.setattr("maverick_dashboard.vendor_onboarding_page.local_owner_setup_available", lambda _request: True)
+    response = client.get("/third-party/vendor-onboarding")
+    assert response.status_code == 200
+    assert 'data-named-signin="false"' in response.text
+    assert "Set up individual sign-ins for vendor reviews" in response.text
+    assert 'href="/auth/local-owner"' in response.text
+    assert 'href="/users"' in response.text
+
+
 def test_vendor_page_without_workspace_shows_workspace_picker(web, monkeypatch):
     client, *_ = web
     monkeypatch.delenv("MAVERICK_TENANT", raising=False)

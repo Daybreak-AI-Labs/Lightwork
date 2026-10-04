@@ -9,6 +9,9 @@ const tick = () => new Promise(resolve => setImmediate(resolve));
 function report() {
   return {context:'alice',id:'OPL-test',title:'<script>bad</script>',customer:'Example',workflow:'Review',criteria:'Good evidence',revision:2,
     admission:{status:'complete',expected_count:4,admitted_count:4,manifest_sha256:'b'.repeat(64),completion_sha256:'c'.repeat(64)},
+    evidence_readiness:{reported_effort_comparison_ready:false,frozen_criteria_review_ready:false,
+      reported_cost_comparison_ready:false,causal_release_lift_qualified:false,
+      next_steps:['Review every planned case.']},
     groups:{all:{accepted:0,planned:4,paired:0,unavailable:0,reported_minutes_difference:null,reported_cost_difference:null}},limitations:['Operator reported.'],
     cases:[{id:'1',label:'A case',allocation:'holdout',status:'unmeasured',measurement:null,
       source:{href:'/chat/goal/1',version:'a'.repeat(64),accepted:false,runtime_cost_usd:null}}]};
@@ -45,6 +48,8 @@ test('record picker, missing coverage, source titles and unknown values render h
   assert.equal(ui.d.querySelector('#op-report input[name="baseline_minutes"]').value,'');
   assert.match(ui.d.getElementById('op-report').textContent,/provider invoice unverified/);
   assert.match(ui.d.getElementById('op-report').textContent,/complete for all 4 planned cases/);
+  assert.match(ui.d.getElementById('op-report').textContent,/The reported effort difference is partial/);
+  assert.match(ui.d.getElementById('op-report').textContent,/Review every planned case/);
   ui.dom.window.close();
 });
 test('lost save keeps measurements and exact retry identity without automatic retry',async()=>{

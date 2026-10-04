@@ -5,6 +5,7 @@
 # with `source.md|destination.md`.
 index.md
 getting-started.md
+using-lightwork.md
 configuration.md
 task-limits.md
 provider-spending.md

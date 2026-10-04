@@ -1,23 +1,9 @@
-"""The Hippocampus -- consolidate beneficial experience into procedural memory.
+"""Retain and decay supported procedural memories.
 
-Cure the agent's amnesia. Today's agent is a brilliant colleague with total
-anterograde amnesia: every session starts from zero, fine-tuning is lab-side and
-forgets, RAG is a sticky note. There's no *consolidation* -- no hippocampus
-writing episodic experience into durable procedural skill while you sleep.
-
-This is that consolidation. Between shifts, the episodic record (the trajectory
-store -- the fast hippocampal log) is distilled into PROCEDURAL memory: the
-actions that *causally help* (positive, trustworthy effect on outcome via
-``promotion_effect``), each carrying a **strength** that grows when the pattern
-keeps proving itself and **decays** otherwise -- so good habits persist and stale
-ones fade, *without catastrophic forgetting* (a reinforced memory never drops; an
-unreinforced one fades over a few cycles). It is the positive complement of
-``negative_knowledge`` (which consolidates causally-*harmful* patterns into
-guardrails): this consolidates the causally-*good* ones into recallable memories.
-
-Pure: consolidation runs over the captured trajectory corpus when the flywheel
-turns (``[data_engine]``, on by default), and ``recall`` on an empty store
-returns nothing (no behaviour change).
+Ordinary trajectory history can suggest a helpful action but cannot establish
+that the action caused the result. Automatic consolidation requires a
+promotion-grade comparison; observed task history alone creates no new habit.
+Previously accepted memories still decay when fresh evidence is absent.
 """
 from __future__ import annotations
 
@@ -45,7 +31,7 @@ class Memory:
     """A consolidated 'this action helps' habit, with a reinforcement strength."""
 
     action: str
-    benefit: float      # causal effect on outcome (> 0)
+    benefit: float      # supported outcome difference (> 0)
     strength: float     # 0..1; grows on reinforcement, decays otherwise
 
     def to_dict(self) -> dict:
@@ -57,8 +43,8 @@ def consolidate(steps, prior=(), *, decay: float = _DECAY, reinforce: float = _R
                 retire_below: float = _RETIRE_BELOW, outcome_fn=None) -> list[Memory]:
     """One consolidation cycle: reinforce habits that still help, decay the rest.
 
-    Beneficial = an action whose confounder-adjusted effect on outcome is
-    positive with confidence (``ci_low > 0``). Priors decay by ``decay``;
+    Beneficial = an action with promotion-grade controlled evidence and a
+    positive lower confidence bound (``ci_low > 0``). Priors decay by ``decay``;
     still-beneficial ones are reinforced by ``reinforce`` (net climb); new ones
     enter at ``base``; anything below ``retire_below`` is forgotten. ``outcome_fn``
     (default ``_terminal_outcome``) lets the flywheel ground consolidation in real

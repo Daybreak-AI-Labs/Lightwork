@@ -41,6 +41,7 @@
   <details class="panel" id="cmv-new-details">
     <summary><strong>Start a promise review</strong></summary>
     <p>Enter the figures your team currently reports. Lightwork will record who entered them and when they must be checked again. It does not verify supplier stock or reserve any resource.</p>
+    <p id="cmv-copy-note" hidden>Figures were copied from an earlier review for convenience. Recheck every figure, then enter the new choice, its source, and a fresh review time before saving.</p>
     <form id="cmv-new" class="cmv-stack">
       <label>Review name<input class="input" name="title" required maxlength="200" placeholder="October customer orders"></label>
       <div class="cmv-grid">
@@ -91,6 +92,7 @@
     <p id="cmv-report-explanation"></p>
     <p id="cmv-source-note"></p>
     <div id="cmv-components"></div>
+    <div id="cmv-gaps"></div>
     <div id="cmv-options"></div>
     <div id="cmv-proposals"></div>
     <details><summary>Reported sources and review times</summary><div id="cmv-sources"></div></details>

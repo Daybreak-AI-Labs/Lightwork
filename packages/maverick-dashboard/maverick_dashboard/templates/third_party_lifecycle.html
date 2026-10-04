@@ -20,6 +20,12 @@
      data-can-admin="{{ 'true' if lifecycle_can_admin else 'false' }}"
      data-can-audit="{{ 'true' if lifecycle_can_audit else 'false' }}">
   <p class="muted" id="tpl-status" role="status" aria-live="polite">Loading…</p>
+  <section class="panel" id="tpl-reviewer-guidance" aria-labelledby="tpl-reviewer-title" hidden>
+    <h2 id="tpl-reviewer-title">A second person needs to review</h2>
+    <p id="tpl-reviewer-message"></p>
+    <p><a id="tpl-signin-link" class="btn btn--primary" href="/auth/local-owner" hidden>Set up individual sign-ins</a>
+       <a id="tpl-invite-link" class="btn btn--primary" href="/users" hidden>Add another administrator</a></p>
+  </section>
 
   <div class="section-head"><h2>Questionnaires</h2><button type="button" class="btn btn--primary" id="tpl-new-template">New questionnaire</button></div>
   <section class="panel" aria-label="Questionnaires">

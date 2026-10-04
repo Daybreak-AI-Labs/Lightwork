@@ -1671,15 +1671,17 @@ def base_registry(
     return reg
 
 
-def base_tool_names() -> set[str] | None:
+def base_tool_names(*, configured_optional: bool = False) -> set[str] | None:
     """Best-effort set of the built-in tool names, for callers that need to
     diff a pack's declared tools against what actually exists (the agent
     factory's capability-provisioning step).
 
     Builds the base registry against an in-memory world and a local sandbox --
-    no provider keys, no network, no optional high-impact tools. Returns the
-    registered names, or ``None`` if assembly fails (a caller then skips
-    tool-existence checks rather than guessing). Never raises.
+    no provider keys or network. The default omits optional high-impact tools;
+    ``configured_optional=True`` includes only those enabled in this
+    deployment, so a roster can show honest workflow-action availability.
+    Returns the registered names, or ``None`` if assembly fails (a caller
+    then skips tool-existence checks rather than guessing). Never raises.
     """
     world = None
     try:
@@ -1687,10 +1689,21 @@ def base_tool_names() -> set[str] | None:
         from ..world_model import open_world
 
         world = open_world(None)
+        if configured_optional:
+            from ..config import get_capabilities
+
+            caps = get_capabilities()
+        else:
+            caps = {}
         reg = base_registry(
             world,
             LocalBackend(),
-            _include_generated_tools=False,
+            enable_computer_use=bool(caps.get("computer_use", False)),
+            enable_browser=bool(caps.get("browser", False)),
+            enable_web_search=bool(caps.get("web_search", False)),
+            enable_mobile_tools=bool(caps.get("mobile_tools", False)),
+            enable_ros=bool(caps.get("ros", False)),
+            _include_generated_tools=configured_optional,
             _skip_tool_acl=True,
         )
         return {t.name for t in reg.all()}

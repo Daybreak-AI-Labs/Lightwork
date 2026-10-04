@@ -62,6 +62,11 @@ def test_native_review_is_durable_owner_scoped_and_explicitly_unverified(web, mo
     assert report.status_code == 200
     data = report.json()
     assert data["assessment"]["status"] == "infeasible"
+    assert len(data["resource_gaps"]) == 1
+    assert data["resource_gaps"][0]["confirmed_shortfall_units"] == 1
+    assert data["resource_gaps"][0]["remaining_shortfall_units"] == 0
+    assert data["resource_gaps"][0]["option_ids"] == ["conditional-option"]
+    assert data["resource_gap_blocked_by_order_change"] is False
     assert data["assessment"]["latest_safe_bundle_decision_at"] is not None
     assert data["source_quality"] == "operator_reported"
     assert data["external_reservation_verified"] is False
@@ -175,6 +180,8 @@ def test_copilot_can_archive_and_read_retained_review(web, monkeypatch):
                                    "copilot-archive-review-0001").status == "replayed"
     assessment = copilot.assessment_snapshot(object(), selection)
     assert assessment.details["archived"] is True
+    assert assessment.details["resource_gaps"][0]["confirmed_shortfall_units"] == 1
+    assert assessment.details["resource_gap_blocked_by_order_change"] is False
 
 
 def test_reported_trace_requires_owner_review_and_recomputes_both_orders(monkeypatch):

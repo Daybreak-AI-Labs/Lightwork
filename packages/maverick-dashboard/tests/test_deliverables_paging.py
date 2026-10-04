@@ -193,11 +193,18 @@ class TestPageAtCatalogScale:
 
     def test_the_default_view_pages_without_inventing_a_role(self, tmp_path, monkeypatch):
         world = self._world(tmp_path, monkeypatch)
-        # One finished run, so the workspace has results to show.
-        gid = world.create_goal("Refresh the cash forecast", "", domain="finance_cash13w")
-        world.set_goal_status(gid, "done", result="ok")
+        # Results pages contain only the caller's actual finished work, not
+        # thousands of never-produced specialist templates.
+        for i in range(PAGE_SIZE + 1):
+            gid = world.create_goal(f"Finished task {i}", "")
+            world.set_goal_status(gid, "done", result="ok")
         first = client.get("/deliverables")
+        assert "Finished task 25" in first.text
+        assert "Finished task 0" not in first.text
         assert 'href="/deliverables?page=2" rel="next"' in first.text
+        second = client.get("/deliverables?page=2")
+        assert "Finished task 0" in second.text
+        assert 'href="/deliverables?page=1" rel="prev"' in second.text
 
     def test_odd_page_numbers_are_forgiven(self, tmp_path, monkeypatch):
         self._world(tmp_path, monkeypatch)

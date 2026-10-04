@@ -108,13 +108,14 @@ def _systems(S) -> tuple:
           "Save an outline of each task's steps, with secrets removed, as the material "
           "learning works from.", "toggle", group, True, "maverick.trajectory_store",
           subgroup=_LEARN, env=("MAVERICK_TRAJECTORY_CAPTURE",)),
-        S("self_improvement", "causal_promotion", "Check an improvement really caused the gain",
-          "Before a learned change is adopted, check that it caused the improvement rather "
-          "than something else that changed at the same time.", "toggle", group, True,
+        S("self_improvement", "causal_promotion", "Require a controlled comparison before adopting changes",
+          "Only adopt a learned change automatically when a prospectively controlled "
+          "comparison has enough evidence. Ordinary task history can suggest what to try, "
+          "but cannot prove what caused the result.", "toggle", group, True,
           "maverick.promotion_effect", subgroup=_LEARN, env=("MAVERICK_CAUSAL_PROMOTION",),
           weaker=False,
-          warning="Learned changes could be adopted because results improved at the same "
-                  "time, without checking that the change caused it."),
+          warning="Automatic adoption can mistake a coincidental improvement for one "
+                  "caused by the change."),
         S("self_improvement", "factory_learning", "Improve how new agents are built",
           "Learn from the gaps found when new agents are set up, so the next ones start "
           "better. Needs governed improvement on.", "toggle", group, True,

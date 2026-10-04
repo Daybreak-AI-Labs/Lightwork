@@ -155,19 +155,29 @@ async def _file(request: Request) -> bytes:
 
 
 def _check(raw: bytes) -> dict[str, Any]:
-    from maverick.config_install import ConfigInstallError, config_findings, parse_config_bytes
+    from maverick.config_install import (
+        ConfigInstallError,
+        blocking_config_findings,
+        config_findings,
+        parse_config_bytes,
+    )
     try:
         cfg = parse_config_bytes(raw)
     except ConfigInstallError as exc:
         return {"valid": False, "summary": "This isn't a valid settings file, so it can't be installed.",
                 "problems": 0, "technical": [{"level": "error", "text": str(exc)[:300]}]}
     findings = config_findings(cfg)
-    errors = [f for f in findings if getattr(f, "severity", "") == "error"]
-    summary = ("The file is valid and ready to install." if not findings else
-               f"The file can be installed. The settings check found {len(findings)} thing"
-               f"{'s' if len(findings) != 1 else ''} to look at"
-               + (f", {len(errors)} of which this version will ignore" if errors else "") + ".")
-    return {"valid": True, "summary": summary, "problems": len(findings),
+    blocking = blocking_config_findings(findings)
+    if blocking:
+        summary = (f"This file has {len(blocking)} setting"
+                   f"{'s' if len(blocking) != 1 else ''} Lightwork cannot use. "
+                   "Correct them and check the file again. Nothing has changed.")
+    elif findings:
+        summary = (f"The file is ready to install. Review {len(findings)} note"
+                   f"{'s' if len(findings) != 1 else ''} below.")
+    else:
+        summary = "The file is ready to install."
+    return {"valid": not blocking, "summary": summary, "problems": len(findings),
             "sections": len([k for k, v in cfg.items() if isinstance(v, dict)]),
             "technical": [{"level": getattr(f, "severity", "info"),
                            "text": f"{getattr(f, 'section', '')}: {getattr(f, 'message', '')}"[:300]}

@@ -154,6 +154,25 @@
       });
       box.append(check, feedback); report.append(box);
     }
+    if (data.evidence_readiness) {
+      const ready = data.evidence_readiness, box = node('section'); box.className = 'panel';
+      box.append(node('h3', 'What this evidence supports'));
+      box.append(node('p', ready.reported_effort_comparison_ready ?
+        'Every planned case has a current complete pair. You can review the reported hands-on effort difference across the full cohort.' :
+        'The reported effort difference is partial. Do not present it as the result for all planned cases.'));
+      box.append(node('p', ready.frozen_criteria_review_ready ?
+        'Every case has a recorded decision against the criteria set before work began.' :
+        'At least one case still needs a decision against the original criteria.'));
+      box.append(node('p', ready.reported_cost_comparison_ready ?
+        'Every case has reported total cost, one currency, and a complete cost-family declaration. This is still operator-reported evidence, not an independently verified invoice.' :
+        'The cost comparison is not ready to use as a complete financial result.'));
+      box.append(node('p', 'This pilot does not establish that a release caused an improvement or that the reported result will repeat for another customer.'));
+      if (ready.next_steps.length) {
+        box.append(node('h4', 'What to finish'));
+        const list = node('ul'); ready.next_steps.forEach(text => list.append(node('li', text))); box.append(list);
+      }
+      report.append(box);
+    }
     for (const [name, g] of Object.entries(data.groups)) {
       const box = node('section'); box.className = 'panel';
       box.append(node('h3', name === 'all' ? 'All planned cases' : name === 'holdout' ? 'Fixed evaluation group' : 'Process refinement group'));

@@ -320,6 +320,16 @@ def _active_cache_context() -> tuple[str, str]:
     return current_tenant_id_strict() or "__shared__", os.fspath(data_dir())
 
 
+def _goal_reason_code(g, open_ids: list[int]) -> str | None:
+    """One stable cause across task details and event polling."""
+    if open_ids:
+        return "awaiting_input"
+    from maverick.stop_reasons import stop_payload
+
+    stop = stop_payload(g.status, g.result)
+    return stop["kind"] if stop else None
+
+
 def _to_goal_out(g) -> GoalOut:
     from .goal_waiting import open_question_ids
     from .plain_labels import risk_label
@@ -332,6 +342,7 @@ def _to_goal_out(g) -> GoalOut:
         title=g.title,
         description=g.description,
         result=g.result,
+        reason_code=_goal_reason_code(g, open_ids),
         risk_tier=risk.get("tier"),
         risk_reasons=risk.get("reasons"),
         needs_input=bool(open_ids),
@@ -1758,10 +1769,12 @@ def goal_events(
     from .goal_waiting import open_question_ids
 
     open_ids = open_question_ids(w, g)
+    stop = stop_payload(g.status, g.result)
     return GoalEventsResponse(
         status=g.status,
         result=g.result,
-        stop=stop_payload(g.status, g.result),
+        reason_code=_goal_reason_code(g, open_ids),
+        stop=stop,
         next_id=events[-1].id if events else since,
         events=[
             GoalEventOut(id=e.id, agent=e.agent, kind=e.kind, content=e.content, ts=e.ts)
@@ -8224,13 +8237,11 @@ async def list_installed_skills() -> list[SkillOut]:
 
 @router.get("/flywheel")
 def get_flywheel_state(request: Request) -> dict:
-    """What the Cognitive Data Engine has learned from the workforce's own outcomes.
+    """Read-only view of supported guardrails and procedural memories.
 
-    A read-only window into the moat: the **guardrails** it has mined (actions it
-    causally shows lower outcomes, each with the effect that justifies it -- and
-    auto-dropped when the harm is gone) and the **habits** it has consolidated
-    (causally-beneficial actions, with a reinforcement strength). Empty until the
-    flywheel has turned. Read-only; never mutates."""
+    Observed task-history patterns alone are not treated as causal proof or
+    promoted into these lists. Empty until promotion-grade evidence exists.
+    """
     out: dict = {"guardrails": [], "habits": [], "signal": {}}
     try:
         from maverick.negative_knowledge import shared as _guardrails
@@ -13316,6 +13327,16 @@ async def copilot_endpoint(request: Request, payload: CopilotIn) -> dict:
         if item.role == "user" and item.content.strip()
     ]
 
+    # Exact read questions use live, request-authorized native records. Their
+    # contents stay on this server; no model receives private tasks or reviews.
+    from .copilot_live_state import answer as live_answer
+    from .copilot_live_state import intent as live_intent
+
+    if live_intent(msg) is not None:
+        live = await run_in_threadpool(live_answer, request, msg, payload.page,
+                                       payload.selected_goal_id)
+        return {**live, "page_context": public_context(context, permissions)}
+
     # The browser offers only registered, reviewed operations before it asks
     # this read-only guide. A direct action request that reaches this endpoint
     # has no operation receipt and must never be delegated to a text model.
@@ -13437,6 +13458,27 @@ async def copilot_endpoint(request: Request, payload: CopilotIn) -> dict:
     }
 
 
+def _agent_action_errors(name: str, payload: AgentOverrideIn) -> list[str]:
+    """Reject newly granted actions the installed runtime cannot execute."""
+    from maverick.domain_edit import resolved_view
+    from maverick.sandbox import build_sandbox
+    from maverick.tools import base_registry
+
+    proposed = set(payload.allow_tools or ())
+    proposed.update(tool for step in (payload.workflow or ()) for tool in step.tools)
+    if not proposed:
+        return []
+    current = resolved_view(name) or {}
+    already = set(current.get("allow_tools") or ())
+    already.update(tool for step in current.get("workflow", ()) for tool in step.get("tools", ()))
+    added = proposed - already
+    if not added:
+        return []
+    available = {tool.name for tool in base_registry(world=_world(), sandbox=build_sandbox()).all()}
+    return [f"Action {tool!r} is not available in this installation. Choose an action from the list."
+            for tool in sorted(added - available)]
+
+
 @router.post("/agents/{name}/validate")
 async def validate_agent_override(request: Request, name: str, payload: AgentOverrideIn) -> dict:
     """Lint the merged result of a proposed override without persisting it."""
@@ -13446,6 +13488,10 @@ async def validate_agent_override(request: Request, name: str, payload: AgentOve
     from maverick.domain_edit import validate_override
 
     errors, warnings = validate_override(name, payload.model_dump(exclude_unset=True))
+    try:
+        errors.extend(_agent_action_errors(name, payload))
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Available actions could not be checked. Try again shortly.") from exc
     return {"ok": not errors, "errors": errors, "warnings": warnings}
 
 
@@ -13457,12 +13503,17 @@ async def save_agent_override(request: Request, name: str, payload: AgentOverrid
     from maverick.domain_edit import OverrideConflict, write_override
 
     try:
+        errors = _agent_action_errors(name, payload)
+        if errors:
+            raise ValueError("; ".join(errors))
         return write_override(name, payload.model_dump(exclude_unset=True, exclude={"expected_generation"}),
                               expected_generation=payload.expected_generation, return_view=True)
     except OverrideConflict as e:
         raise HTTPException(status_code=409, detail=str(e)) from e
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e)) from e
+    except Exception as e:
+        raise HTTPException(status_code=503, detail="Available actions could not be checked. Try again shortly.") from e
 
 
 @router.delete("/agents/{name}/override")
@@ -16247,6 +16298,17 @@ def _department_entitled_for_request(key: str) -> bool:
     return department_entitled(key, tenant=tenant)
 
 
+def _department_action_status(members: list[str], agents_by_name: dict[str, dict]) -> dict:
+    """A team count from the same action check shown in the specialist picker."""
+    states = [agents_by_name.get(name, {}).get("readiness", {}).get("state", "unknown")
+              for name in members]
+    return {
+        "ready_specialists": states.count("action_ready"),
+        "setup_needed_specialists": states.count("needs_setup"),
+        "unknown_specialists": states.count("unknown"),
+    }
+
+
 @router.get("/departments")
 async def list_departments_api(request: Request) -> list[dict]:
     """Departments (suites) as deployable teams: title, charter, headcount.
@@ -16257,14 +16319,17 @@ async def list_departments_api(request: Request) -> list[dict]:
     their departments; unscoped callers (auth off / admin / no grant) see all.
     """
     from maverick.departments import list_departments
+    from maverick.domain_edit import list_agents
 
     allowed = caller_suites(request)
+    agents_by_name = {agent["name"]: agent for agent in list_agents()}
     out = []
     for d in list_departments():
         if allowed is not None and d.key not in allowed:
             continue
         row = d.to_dict()
         row["entitled"] = _department_entitled_for_request(d.key)
+        row.update(_department_action_status(d.members, agents_by_name))
         out.append(row)
     return out
 
@@ -16273,6 +16338,7 @@ async def list_departments_api(request: Request) -> list[dict]:
 async def get_department_api(request: Request, key: str) -> dict:
     """One department with its specialist roster (name + description + risk)."""
     from maverick.departments import get_department, roster
+    from maverick.domain_edit import list_agents
 
     dept = get_department(key)
     if dept is None:
@@ -16282,8 +16348,11 @@ async def get_department_api(request: Request, key: str) -> dict:
     require_suite(request, key)
     out = dept.to_dict()
     out["entitled"] = _department_entitled_for_request(key)
+    agents_by_name = {agent["name"]: agent for agent in list_agents()}
+    out.update(_department_action_status(dept.members, agents_by_name))
     out["roster"] = [
-        {"name": p.name, "description": p.description or "", "max_risk": p.max_risk or "low"}
+        {"name": p.name, "description": p.description or "", "max_risk": p.max_risk or "low",
+         "readiness": agents_by_name.get(p.name, {}).get("readiness", {"state": "unknown"})}
         for p in roster(key)
     ]
     return out
@@ -16310,7 +16379,8 @@ async def deploy_department_api(request: Request, key: str) -> dict:
     from maverick.fleet import load_fleet
     from maverick.suite_grants import DepartmentAccessError
 
-    if get_department(key) is None:
+    dept = get_department(key)
+    if dept is None:
         raise HTTPException(status_code=404, detail="no such department")
     require_suite(request, key)
 
@@ -16331,6 +16401,20 @@ async def deploy_department_api(request: Request, key: str) -> dict:
         raise HTTPException(
             status_code=402,
             detail="departments add-on requires an active tenant",
+        )
+    if not _department_entitled_for_request(key):
+        raise HTTPException(status_code=402, detail=str(EntitlementError(key)))
+
+    from maverick.domain_edit import list_agents
+
+    by_name = {agent["name"]: agent for agent in list_agents()}
+    action_status = _department_action_status(dept.members, by_name)
+    if (action_status["ready_specialists"] == 0
+            and action_status["unknown_specialists"] == 0):
+        raise HTTPException(
+            status_code=409,
+            detail="This team has no specialists whose required actions are available. "
+                   "Open View team to see what needs setup before deploying.",
         )
 
     try:

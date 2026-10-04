@@ -123,6 +123,7 @@ def _draft(spec, use_ai: bool, principal: str, actor: str) -> dict:
 
 def _approve(profile, plan, docs: list[tuple[str, bytes]], actor: str, principal: str = "") -> dict:
     from maverick.audit import AuditRefused, audit_event
+    from maverick.domain import available_domains
     from maverick.intake import (
         IntakeSpec,
         attach_docs_to_profile,
@@ -130,10 +131,30 @@ def _approve(profile, plan, docs: list[tuple[str, bytes]], actor: str, principal
         save_profile,
     )
     try:
-        audit_event("business_agent_approved", agent="dashboard", actor=actor, agent_name=profile.name,
-                    documents=len(docs))
+        audit_event("business_agent_approval_requested", agent="dashboard", actor=actor,
+                    agent_name=profile.name, documents=len(docs))
     except AuditRefused:
         return {"saved": False, "message": "The activity log couldn't record this approval, so nothing was saved."}
+    try:
+        saved_path = Path(save_profile(profile, approved=True))
+    except PermissionError:
+        return {"saved": False, "message": "This installation's plan doesn't include new specialists, so it wasn't saved."}
+    except FileExistsError:
+        return {"saved": False, "message": "A specialist with this name already exists. Open it from the list or use a different name."}
+    except (ValueError, OSError):
+        return {"saved": False, "message": "This specialist could not be saved. Check its name and try again."}
+    try:
+        if profile.name not in available_domains():
+            saved_path.unlink(missing_ok=True)
+            return {"saved": False, "message": "This specialist did not pass its final setup check. Nothing was added."}
+        audit_event("business_agent_approved", agent="dashboard", actor=actor,
+                    agent_name=profile.name, documents=len(docs))
+    except AuditRefused:
+        saved_path.unlink(missing_ok=True)
+        return {"saved": False, "message": "The activity log couldn't record this approval, so nothing was saved."}
+    except Exception:
+        saved_path.unlink(missing_ok=True)
+        return {"saved": False, "message": "This specialist could not be confirmed. Nothing was added."}
     loaded, note = 0, ""
     with tempfile.TemporaryDirectory(prefix="lw-onboard-") as folder:
         paths = []
@@ -151,11 +172,6 @@ def _approve(profile, plan, docs: list[tuple[str, bytes]], actor: str, principal
             else:
                 spec = IntakeSpec(name=profile.name, doc_paths=paths)
                 loaded = attach_docs_to_profile(spec, profile, kb)
-        try:
-            save_profile(profile, approved=True)
-        except PermissionError:
-            return {"saved": False, "message": "This installation's plan doesn't include new specialists, so it "
-                                               "wasn't saved."}
     added = ""
     if plan is not None and not plan.is_empty():
         try:

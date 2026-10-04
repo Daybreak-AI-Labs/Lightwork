@@ -69,3 +69,17 @@ def test_changed_result_requires_an_observed_previous_result(tmp_path, monkeypat
     assert not inbox.refresh([source], prefs)['items']
     source['version'] = 'digest-two'
     assert len(inbox.refresh([source], prefs)['items']) == 1
+
+
+def test_first_observation_delivers_only_completions_after_enrollment(tmp_path, monkeypatch):
+    _plaintext_test_storage(monkeypatch)
+    now = time.time()
+    inbox = alerts.PersonalInbox('user:alice', tmp_path / 'alice.enc')
+    old = {**_source(1, 'done:1', 'completed'), 'occurred_at': now - 60}
+    fresh = {**_source(2, 'done:1', 'completed'), 'occurred_at': now + 1}
+    result = inbox.refresh([old, fresh], alerts.validate_preferences({}),
+                           now=now + 2, enrolled_at=now)
+    assert [item['goal_id'] for item in result['items']] == [2]
+    again = inbox.refresh([old, fresh], alerts.validate_preferences({}),
+                          now=now + 3, enrolled_at=now)
+    assert [item['id'] for item in again['items']] == [item['id'] for item in result['items']]

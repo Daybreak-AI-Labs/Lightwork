@@ -9,8 +9,9 @@ Configures Lightwork for a fresh install. Sets up:
   - budget caps
   - API keys (stored beside config.toml, referenced from it via ${VAR})
 
-Writes ``$MAVERICK_CONFIG`` when explicitly selected, otherwise
-``$MAVERICK_HOME/config.toml`` (default ``~/.maverick/config.toml``), plus a
+Writes ``$MAVERICK_CONFIG`` (or ``$LIGHTWORK_CONFIG``) when explicitly
+selected, otherwise ``$MAVERICK_HOME/config.toml`` (or
+``$LIGHTWORK_HOME/config.toml``; default ``~/.maverick/config.toml``), plus a
 sibling ``.env``. The agent reads from the same resolution contract.
 
 v0.1.1 additions (council UX feedback):
@@ -54,18 +55,29 @@ def _resolve_config_paths() -> tuple[Path, Path, Path]:
     """Resolve exactly the paths used by :mod:`maverick.config`.
 
     The previous import-time ``Path.home() / '.maverick'`` ignored the
-    documented ``MAVERICK_HOME``/``MAVERICK_CONFIG`` overrides.  The wizard
+    documented home/config overrides.  The standalone installer imports before
+    the core mirrors LIGHTWORK_* to MAVERICK_*, so apply that same precedence
+    here rather than writing into an unrelated home.  The wizard
     could therefore overwrite the real user config and then smoke-test a
     different, still-empty location.  Environment is fixed before a CLI
     process imports this module, so resolving once here keeps the existing
     monkeypatchable constants while aligning both sides of the handoff.
     """
-    explicit = os.environ.get("MAVERICK_CONFIG", "").strip()
+    explicit = (
+        os.environ["MAVERICK_CONFIG"]
+        if "MAVERICK_CONFIG" in os.environ
+        else os.environ.get("LIGHTWORK_CONFIG", "")
+    ).strip()
     if explicit:
         config_file = Path(explicit).expanduser()
         config_dir = config_file.parent
     else:
-        config_dir = Path(os.environ.get("MAVERICK_HOME", "~/.maverick")).expanduser()
+        home = (
+            os.environ["MAVERICK_HOME"]
+            if "MAVERICK_HOME" in os.environ
+            else os.environ.get("LIGHTWORK_HOME", "~/.maverick")
+        )
+        config_dir = Path(home).expanduser()
         config_file = config_dir / "config.toml"
     return config_dir, config_file, config_dir / ".env"
 
@@ -346,6 +358,37 @@ def _safe_float(s: str, *, default: float) -> float:
         return float(str(s or "").strip())
     except (TypeError, ValueError):
         return default
+
+
+def _prompt_positive_number(question: str, *, default: str, dollars: bool = False) -> float:
+    """Keep a spending or duration answer explicit; never replace bad input."""
+    while True:
+        raw = _q_text(question, default=default).strip()
+        if dollars and raw.startswith("$"):
+            raw = raw[1:].strip()
+        try:
+            value = float(raw)
+        except ValueError:
+            value = float("nan")
+        if math.isfinite(value) and value > 0:
+            return value
+        console.print("[yellow]Enter a number above zero (for example, $10).[/yellow]")
+
+
+def _prompt_positive_dollars(question: str, *, default: str) -> float:
+    return _prompt_positive_number(question, default=default, dollars=True)
+
+
+def _prompt_positive_integer(question: str, *, default: str) -> int:
+    while True:
+        raw = _q_text(question, default=default).strip()
+        try:
+            value = int(raw)
+        except ValueError:
+            value = 0
+        if value > 0:
+            return value
+        console.print("[yellow]Enter a whole number above zero.[/yellow]")
 
 
 # ---------- prompt primitives ----------
@@ -784,7 +827,8 @@ def welcome() -> None:
             "Next you'll pick a setup mode: a quick consumer flow (a few\n"
             "questions, safe defaults) or advanced (configure every model,\n"
             "channel, safety level, and budget). After setup, use Lightwork\n"
-            "Settings for supported changes.",
+            "Settings for supported changes.\n\n"
+            f"Setup will be saved at {CONFIG_FILE}.",
             border_style="cyan",
         )
     )
@@ -1264,18 +1308,11 @@ def pick_budget() -> dict[str, Any]:
         default=True,
     )
     budget: dict[str, Any] = {
-        "max_dollars": _safe_float(
-            _q_text("  Max $ per run", default="2.0"),
-            default=2.0,
+        "max_dollars": _prompt_positive_dollars("  Max $ per run", default="2.0"),
+        "max_wall_seconds": _prompt_positive_number(
+            "  Max wall-clock seconds per run", default="1800"
         ),
-        "max_wall_seconds": _safe_float(
-            _q_text("  Max wall-clock seconds per run", default="1800"),
-            default=1800.0,
-        ),
-        "max_tool_calls": _safe_int(
-            _q_text("  Max tool calls per run", default="500"),
-            default=500,
-        ),
+        "max_tool_calls": _prompt_positive_integer("  Max tool calls per run", default="500"),
     } if enabled else {"task_limits_enabled": False}
     # Keep the safe default and explain the in-product recovery for a private
     # rate. The legacy estimate mode remains an explicit operator choice.
@@ -9980,6 +10017,7 @@ def run_fast() -> int:
     console.print(
         "[bold]Fast setup:[/bold] using safe defaults. "
         "Open Lightwork Settings after setup to make changes.\n"
+        f"Setup will be saved at {CONFIG_FILE}.\n"
     )
     providers = ["anthropic"]
     role_models: dict[str, str] = {}  # use ROLE_MODELS defaults
@@ -10046,12 +10084,24 @@ def run_fast() -> int:
             )
         )
         return 1
+    if not keys:
+        console.print()
+        console.print(
+            Panel.fit(
+                "[bold yellow]Setup saved, but AI is not connected.[/bold yellow]\n\n"
+                "No AI provider key was found, so Lightwork cannot run a task yet. "
+                "Open Lightwork > Settings > AI services and add your provider key.\n"
+                f"Saved setup: {CONFIG_FILE}",
+                border_style="yellow",
+            )
+        )
+        return 1
     console.print()
     console.print(
         Panel.fit(
             "[bold green]Fast setup finished.[/bold green]\n\n"
             'Try: [bold]maverick start "hello"[/bold]\n'
-            "(If no provider key was saved, add one in Settings first.)\n"
+            f"Saved setup: {CONFIG_FILE}\n"
             "[dim]The maverick command is also available as lightwork.[/dim]",
             border_style="green",
         )
@@ -10147,7 +10197,7 @@ def _consumer_budget() -> dict[str, Any]:
     if pick == "Standard ($2, 30 minutes)":
         return {"max_dollars": 2.0, "max_wall_seconds": 1800.0}
     if pick == "custom":
-        dollars = _safe_float(_q_text("  Custom cap ($)", default="5.0"), default=5.0)
+        dollars = _prompt_positive_dollars("  Custom cap ($)", default="5.0")
     else:
         dollars = float(pick.lstrip("$"))
     return {"max_dollars": dollars, "max_wall_seconds": 1800.0}

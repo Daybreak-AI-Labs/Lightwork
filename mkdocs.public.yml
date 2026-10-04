@@ -41,6 +41,7 @@ nav:
   - Home:
       - Welcome: index.md
       - Getting started: getting-started.md
+      - Use Lightwork: using-lightwork.md
   - Guides:
       - Configuration: configuration.md
       - Task limits and spend accounting: task-limits.md

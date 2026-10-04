@@ -6,7 +6,17 @@ results, stream live progress, manage facts and skills, view spend.
 
 ## Auth
 
-By default, no auth -- the server binds to `127.0.0.1` only.
+By default, no bearer is required on the same computer because the server
+binds to `127.0.0.1` only. For a local script that changes anything, send an
+`Origin` header matching the dashboard address, such as
+`Origin: http://127.0.0.1:8765`. A write without that header receives a 403;
+the check prevents a page opened in your browser from changing Lightwork in
+the background. Read-only local requests do not need this header.
+
+For a long-running integration, create an API key in **Account › API keys** in
+the product and send it as a Bearer header. The key is the recommended route
+for a script that cannot supply an exact local Origin. Use the product's
+local-owner enrollment first if this is a new single-user installation.
 
 For VPS / remote deployments, set `MAVERICK_DASHBOARD_TOKEN` and
 bind to `0.0.0.0` behind Caddy (TLS). Every API request then needs
@@ -106,14 +116,19 @@ A goal with status `blocked` is not running, but it is not always finished:
 - `needs_input: true` -- the task asked a question and is waiting for a
   person. `open_question_ids` lists the questions to answer with
   `POST /api/v1/goals/{id}/answer`. `GET /api/v1/goals/{id}/events` reports
-  `terminal: false` while this holds, so a client that stops at `terminal`
+  `reason_code: "awaiting_input"` and `terminal: false` while this holds, so a client that stops at `terminal`
   keeps watching until the task is answered and continues. Stop polling on
   `terminal`, not on `status == "blocked"`.
 - `needs_input: false` -- the task stopped for another reason (a failed or
   refused run, a spending or quota limit, a halt, a hold nobody approved).
-  `terminal` is `true` and `result` says why in plain words. There is no
-  separate machine-readable reason code for these yet, so an integration that
-  must tell them apart has to read `result`.
+  `terminal` is `true`; `reason_code` gives a stable machine-readable cause
+  and `stop` gives the plain-language message, next step, and optional link.
+
+`reason_code` is also on `GET /api/v1/goals/{id}`. It is `null` for work that
+has not stopped. Examples include `provider_authentication`,
+`provider_rate_limit`, `provider_unavailable`, `spending_limit`, and
+`policy_blocked`; clients should handle an unrecognized code as a stopped
+task and display the accompanying `stop` guidance.
 
 `needs_input` is read from the open questions alone. A task that asked a
 question, was continued without an answer and then stopped for another reason
@@ -160,11 +175,14 @@ do not generate a new key to retry uncertain work. The maintained
 [REST lifecycle example](clients/examples/rest_lifecycle.py) sends at most one POST
 and switches to receipt GET on uncertainty.
 
+The following example is for a local installation without a Bearer key. On a
+remote installation, use a personal or service-account API key instead.
+
 ```bash
 # REQUEST_KEY must be your previously persisted key for this logical request.
 curl --fail-with-body --max-time 15 -X POST http://127.0.0.1:8765/api/v1/goals \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $MAVERICK_DASHBOARD_TOKEN" \
+  -H "Origin: http://127.0.0.1:8765" \
   -H "Idempotency-Key: $REQUEST_KEY" \
   -d '{"title":"Compare pgvector and Qdrant","description":"Write to report.md",
        "max_dollars":2.0,"max_wall_seconds":1800}'
@@ -177,7 +195,6 @@ only this read with the same key, account and workspace:
 ```bash
 curl --fail-with-body --max-time 15 \
   'http://127.0.0.1:8765/api/v1/goal-submissions/receipt?kind=api' \
-  -H "Authorization: Bearer $MAVERICK_DASHBOARD_TOKEN" \
   -H "Idempotency-Key: $REQUEST_KEY" -H 'Cache-Control: no-cache'
 ```
 

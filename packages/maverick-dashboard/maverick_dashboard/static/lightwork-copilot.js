@@ -28,7 +28,7 @@
   var recentTimer = null;
   var clientScope = null, failedMessage = null;
   var opener = null;
-  var generation = 0, sending = false, catalog = null, actionBusy = false;
+  var generation = 0, sending = false, catalog = null, actionBusy = false, selectedGoalId = null;
   var operations = document.getElementById('mv-copilot-operations');
   var operationStatus = document.getElementById('mv-copilot-operation-status');
   var operationButtons = document.getElementById('mv-copilot-operation-buttons');
@@ -177,6 +177,7 @@
   }
 
   var setupLinks = ["/start", "/settings#settings-integrations", "/settings#settings-models",
+    "/settings#settings-model-prices",
     "/settings#settings-maintenance", "/providers"];
 
   function renderProviderSetup(payload) {
@@ -189,10 +190,10 @@
     // instead of an empty panel. The built-in page guide still answers.
     if (modelBlocked && hello) {
       hello.textContent = String(payload.model_route_reason || "Choose an available AI model in Settings.") +
-        " The built-in page guide still answers questions about this page.";
+        " Live task and decision answers and the page guide remain available.";
     } else if (readiness && readiness.verdict !== "ready" && hello) {
-      hello.textContent = "Connect an AI service to use Copilot. " + String(readiness.reason || "") +
-        " Until then, the built-in page guide answers questions about this page.";
+      hello.textContent = "Live task and decision answers work without an AI service. Connect an AI service for broader Copilot questions. " +
+        String(readiness.reason || "") + " The page guide also works now.";
     }
     if (!modelBlocked && next && typeof next.href === "string" && setupLinks.indexOf(next.href) !== -1) {
       setup = {href: next.href, label: next.label};
@@ -341,6 +342,19 @@
     note.textContent = 'The selected work changed. Earlier questions and drafts were cleared.';
     if (controller()) controller().invalidate();
   });
+  document.addEventListener('lightwork:copilot-selection', function (event) {
+    var value = event.detail && event.detail.selection;
+    var id = value && value.kind === 'goal' && (value.goal_id || value.id);
+    selectedGoalId = Number.isSafeInteger(id) && id > 0 ? id : null;
+  });
+  function liveReadQuestion(message) {
+    var normalized = message.toLowerCase().trim().replace(/[?!. ]+$/, '').replace(/\s+/g, ' ');
+    return /^(?:what (?:needs|requires) (?:my |your )?approval|(?:show(?: me)?|list) (?:my )?(?:pending )?approvals|do i have (?:any )?(?:pending )?approvals)(?: please)?$/.test(normalized) ||
+      /^(?:(?:show(?: me)?|list) my (?:running|active|in.progress) tasks|(?:what|which) (?:of my )?tasks are (?:running|active|in.progress))(?: please)?$/.test(normalized) ||
+      /^why (?:did|has|is) (?:my|this|the|goal|task|run|goal \d+|task \d+|run \d+) (?:goal |task |run )?(?:fail|failed|stop|stopped|blocked)(?: please)?$/.test(normalized) ||
+      /^(?:what is (?:the status of )?(?:my |this |the )?(?:goal|task)(?: \d{1,18})?(?: status)?|(?:show|check) (?:my|this) (?:goal|task) status|how is (?:my|this) (?:goal|task) doing)(?: please)?$/.test(normalized) ||
+      /^(?:find|search for|look up) my task(?: called| named)? .{2,100}$/.test(normalized);
+  }
   window.addEventListener('focus', expireRecent);
   document.addEventListener('visibilitychange', expireRecent);
 
@@ -401,7 +415,8 @@
     sendButton.setAttribute("aria-busy", "true");
     try {
       if (!(await verifyScope(started))) return;
-      if (catalog && controller()) {
+      var liveRead = liveReadQuestion(message);
+      if (!liveRead && catalog && controller()) {
         var proposed = await operationRequest('/propose', {method: 'POST', body: JSON.stringify({
           selection: controller().selection, expected_scope: catalog.scope, message: message
         })});
@@ -442,7 +457,7 @@
           return;
         }
       }
-      var productProposal = window.LightworkProductOperations && await window.LightworkProductOperations.propose(message);
+      var productProposal = !liveRead && window.LightworkProductOperations && await window.LightworkProductOperations.propose(message);
       if (productProposal === 'unavailable') {
         if (started === generation && !panel.hidden) {
           failedMessage = requestRow;
@@ -459,11 +474,11 @@
         method: "POST",
         headers: {"Content-Type": "application/json", Accept: "application/json", "X-Lightwork-Copilot-Context": clientScope},
         credentials: "same-origin",
-        body: JSON.stringify({
+        body: JSON.stringify(Object.assign({
           message: message,
           page: window.location.pathname,
           history: history.slice(-6)
-        })
+        }, selectedGoalId ? {selected_goal_id: selectedGoalId} : {}))
       });
       var payload;
       try { payload = await response.json(); }
@@ -478,6 +493,8 @@
         note.textContent = payload.warning || "The AI provider is not available — using the built-in page guide.";
       } else if (payload.mode === "built_in") {
         note.textContent = payload.warning || "Built-in page guide — no AI provider needed.";
+      } else if (payload.mode === "live") {
+        note.textContent = 'Checked current ' + (payload.source || 'product') + ' records. No AI provider was used.';
       } else {
         note.textContent = payload.warning ||
           "AI answers can be wrong — check them against what the page shows before acting.";

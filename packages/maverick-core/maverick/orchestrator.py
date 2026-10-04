@@ -1450,14 +1450,26 @@ class _RunLifecycle:
         if error is not None:
             cancelled = isinstance(error, asyncio.CancelledError)
             allowance_stop = isinstance(error, BudgetExceeded)
-            self.summary = (
-                _budget_stop_message(self.budget, self.goal_id, error) if allowance_stop
-                else cancellation_message(error) if cancelled else f"internal error: {error}"
-            )
-            self.outcome = "interrupted" if cancelled or allowance_stop else "failure"
-            self.world.set_goal_status(
-                self.goal_id, "cancelled" if cancelled else "blocked", result=self.summary,
-            )
+            if cancelled or allowance_stop:
+                self.summary = (
+                    cancellation_message(error) if cancelled
+                    else _budget_stop_message(self.budget, self.goal_id, error)
+                )
+                self.outcome = "interrupted"
+                self.world.set_goal_status(
+                    self.goal_id, "cancelled" if cancelled else "blocked",
+                    result=self.summary,
+                )
+            else:
+                from .stop_reasons import exception_stop_text, explain_stop
+
+                reason = exception_stop_text(error)
+                self.summary = explain_stop(reason).message
+                self.outcome = "failure"
+                goal = self.world.get_goal(self.goal_id)
+                if goal is None or goal.status != "failed":
+                    self.world.set_goal_status(self.goal_id, "failed", result=reason)
+                    self.world.append_event(self.goal_id, "Lightwork", "error", self.summary)
         else:
             goal = self.world.get_goal(self.goal_id)
             if goal.status == "cancelled":
@@ -2099,11 +2111,13 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
             return message
         except Exception as e:
             # Anything else escaping the swarm (LLM auth/network errors, a
-            # sandbox exec failure) used to leave the goal row stuck 'active'
-            # forever -- a ghost in `status` and the dashboard. Mark it failed
-            # and close the episode, then re-raise so the caller can present
-            # the error (the CLI turns it into a one-line message).
+            # sandbox exec failure) must leave a finished state. Keep raw SDK
+            # details in the server log; the saved goal and work log carry a
+            # plain, non-sensitive cause and next step for the customer.
+            from .stop_reasons import exception_stop_text, explain_stop
+
             safe_error = _safe_exception_text(e, fallback="internal run failure")
+            reason = exception_stop_text(e)
             try:
                 _lifecycle.end_episode(f"error: {safe_error}", "failure")
             except Exception:  # pragma: no cover
@@ -2114,8 +2128,9 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
             except Exception:  # pragma: no cover -- telemetry never blocks a run
                 pass
             try:
-                world.set_goal_status(
-                    goal_id, "blocked", result=f"internal error: {safe_error}",
+                world.set_goal_status(goal_id, "failed", result=reason)
+                world.append_event(
+                    goal_id, "Lightwork", "error", explain_stop(reason).message,
                 )
             except Exception:  # pragma: no cover
                 pass

@@ -183,8 +183,8 @@ class SubmissionStore:
                 detail["coverage"] = coverage
             self.execute(connection, "UPDATE attachment_submissions SET state=?,detail=?,updated_at=? WHERE submission_key=?",
                          (state, self.seal(json.dumps(detail)), time.time(), key))
-            self.execute(connection, "UPDATE goals SET result=? WHERE id=? AND status='draft'",
-                         (self.seal(message), receipt["goal_id"]))
+            # Preparation is a receipt state, not an answer. Writing it to
+            # goals.result makes the chat render it as Lightwork's response.
             return self._receipt(connection, key)
 
     def claim_dispatch(self, key):

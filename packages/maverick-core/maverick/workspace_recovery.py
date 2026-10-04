@@ -2695,11 +2695,21 @@ def _reconcile_bootstrap_stage(  # noqa: C901 - one fail-closed staged transacti
         str(item["source"]) for item in items
         if isinstance(item.get("source"), str)
     } | additional_classified | channel_classified
+    indexed_marker = stage / "provider_spend.sqlite3.active"
+    if indexed_marker.exists() and not (
+        (stage / "provider_spend.sqlite3").exists()
+        and (stage / "provider_spend.sqlite3.seal").exists()
+    ):
+        raise RecoveryError("The restored indexed provider spending records are incomplete.")
     spend_path = stage / "provider_spend.json"
     if spend_path.exists():
         classified_sources.add("provider_spend.json")
-        spend = _stage_json(spend_path)
-        if spend is None:
+        spend = None if indexed_marker.exists() else _stage_json(spend_path)
+        if indexed_marker.exists():
+            # This is the immutable pre-migration source, not the current
+            # accounting authority. The indexed database below owns holds.
+            pass
+        elif spend is None:
             items.append(_reconciliation_item(
                 "provider_accounting",
                 "provider_spend.json",
@@ -2746,14 +2756,44 @@ def _reconcile_bootstrap_stage(  # noqa: C901 - one fail-closed staged transacti
     required_path = stage / "provider_spend.json.required"
     if required_path.exists():
         classified_sources.add("provider_spend.json.required")
+        if not indexed_marker.exists():
+            items.append(_reconciliation_item(
+                "provider_accounting",
+                "provider_spend.json.required",
+                "repair-required",
+                prior_state="repair_required",
+                content_sha256=backup._sha256(required_path),
+                safe_state="isolated_review_required",
+                requires_external_readback=True,
+            ))
+    if indexed_marker.exists():
+        classified_sources.add("provider_spend.sqlite3.active")
+        classified_sources.add("provider_spend.sqlite3.seal")
         items.append(_reconciliation_item(
-            "provider_accounting",
-            "provider_spend.json.required",
-            "repair-required",
-            prior_state="repair_required",
-            content_sha256=backup._sha256(required_path),
+            "provider_accounting", "provider_spend.sqlite3.active",
+            "indexed-ledger", prior_state="restored",
+            content_sha256=backup._sha256(indexed_marker),
             safe_state="isolated_review_required",
             requires_external_readback=True,
+        ))
+    for marker in stage.rglob("provider_spend.sqlite3.active"):
+        if marker == indexed_marker:
+            continue
+        if not marker.with_suffix("").is_file() or not marker.parent.joinpath(
+            "provider_spend.sqlite3.seal"
+        ).is_file():
+            raise RecoveryError("The restored indexed provider spending records are incomplete.")
+        relative = marker.relative_to(stage).as_posix()
+        classified_sources.add(relative)
+        classified_sources.add((marker.parent / "provider_spend.sqlite3.seal").relative_to(stage).as_posix())
+        for legacy_name in ("provider_spend.json", "provider_spend.json.required"):
+            legacy = marker.parent / legacy_name
+            if legacy.exists():
+                classified_sources.add(legacy.relative_to(stage).as_posix())
+        items.append(_reconciliation_item(
+            "provider_accounting", relative, "indexed-ledger",
+            prior_state="restored", content_sha256=backup._sha256(marker),
+            safe_state="isolated_review_required", requires_external_readback=True,
         ))
     job_database_count = 0
     now = time.time()
@@ -2820,6 +2860,36 @@ def _reconcile_bootstrap_stage(  # noqa: C901 - one fail-closed staged transacti
                 )
             elif policy == "world":
                 items.extend(_reconcile_world_database(connection, relative, now=now))
+            elif policy == "provider_spend_sqlite":
+                from . import provider_spend_sqlite
+                seal_path = db.with_suffix(".sqlite3.seal")
+                if not seal_path.is_file() or seal_path.read_text(encoding="utf-8").strip() != provider_spend_sqlite._digest_file(db):
+                    raise RecoveryError("Restored provider spending records failed their integrity check.")
+                tables = _sqlite_tables(connection)
+                if not {"meta", "totals", "receipts", "attempts"}.issubset(tables):
+                    raise RecoveryError("Restored provider spending records have an unsupported format.")
+                if connection.execute("SELECT value FROM meta WHERE key='schema'").fetchone() != ("1",):
+                    raise RecoveryError("Restored provider spending records are incomplete.")
+                for period, provider, request_id, payload in connection.execute(
+                    "SELECT period, provider, request_id, payload FROM receipts"
+                ):
+                    row = json.loads(payload)
+                    if not isinstance(row, dict):
+                        raise RecoveryError("Restored provider spending receipt is malformed.")
+                    if row.get("state") == "settled":
+                        continue
+                    receipt_sha = hashlib.sha256(json.dumps(
+                        row, sort_keys=True, separators=(",", ":"), default=str,
+                    ).encode()).hexdigest()
+                    item = _reconciliation_item(
+                        "provider_reservation", relative, request_id,
+                        prior_state=str(row.get("state") or "unknown"),
+                        content_sha256=receipt_sha, safe_state="held",
+                        requires_external_readback=True,
+                    )
+                    item["provider"] = str(provider)[:64]
+                    item["period"] = str(period)[:16]
+                    items.append(item)
             elif policy == "privacy_discovery":
                 items.extend(_reconcile_privacy_discovery_database(
                     connection, relative, now=now

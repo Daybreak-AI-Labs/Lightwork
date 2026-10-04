@@ -129,6 +129,25 @@ def test_reviewed_local_skill_enters_recall_only_after_exact_admission(tmp_path,
                                             use_skills=True)
     assert [item.name for item in recalled] == ["research-pricing"]
     assert "Distilled from" in prompt
+    # A later agent run actually receives the reviewed skill and records use
+    # of this exact instruction set, separate from any older skill with the
+    # same display name.
+    from types import SimpleNamespace
+
+    from maverick.agent import Agent
+    from maverick.skill import stats as skill_stats
+
+    monkeypatch.setattr(skill_stats, "DEFAULT_PATH", tmp_path / "skill-stats.json")
+    agent = Agent.__new__(Agent)
+    agent.role, agent.depth, agent.brief = "orchestrator", 0, "Research competitor pricing"
+    agent._is_goal_root, agent._domain_persona = True, None
+    agent.ctx = SimpleNamespace(max_depth=3, use_skills=True, skills_used=set(), user_id=None)
+    agent._with_harness_addendum = lambda base: base
+    next_prompt = agent._build_system()
+    assert "Distilled from" in next_prompt
+    assert agent.ctx.skills_used == {"research-pricing"}
+    use_key = skills.learned_skill_use_key(recalled[0])
+    assert skill_stats.get(use_key).uses == 1
     assert skills.learned_skill_candidates(store=proposal_dir, skills_dir=installed_dir) == []
     with raises(ValueError, match="already been added"):
         skills.admit_learned_skill("research-pricing", fingerprint, publish_name="another-name",

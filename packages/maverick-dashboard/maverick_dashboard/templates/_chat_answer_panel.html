@@ -4,7 +4,8 @@
          data-status="{{ goal.status }}" data-structured="{{ '1' if rendered and rendered.structured else '0' }}"
          data-operate="{{ '1' if can_operate else '0' }}">
     {% if handoff_closed %}<p id="handoff-closed-notice" role="status">{{ ui('Responsibility was accepted by {actor}. This original conversation is closed to further execution and its history remains private.', actor=handoff_closed.actor) }} <a href="/task-handoffs">{{ ui("View the handoff receipt") }}</a>.</p>{% endif %}
-    <div id="result-section" class="answer" style="display: {% if goal.result and not stop %}block{% else %}none{% endif %};">
+    {% set preparation_text = submission.detail.message if submission is defined and submission else '' %}
+    <div id="result-section" class="answer" style="display: {% if goal.result and not stop and goal.result != preparation_text %}block{% else %}none{% endif %};">
       {% if not stop %}
       {% if rendered and rendered.structured %}
         {% include "_deliverable.html" %}

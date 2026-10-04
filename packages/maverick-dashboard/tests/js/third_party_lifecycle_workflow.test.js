@@ -42,6 +42,7 @@ async function fixture({ admin = true, intercept = () => undefined } = {}) {
   window.mvConfirm = async (m) => { ui.confirms.push(m); return ui.answer; };
   window.mvForm = async (title, fields) => { ui.forms.push({ title, fields }); return ui.formValues.shift() || null; };
   window.mvErrorText = (f, a) => "Could not " + a + ".";
+  window.mvReveal = (element) => { element.hidden = false; };
   window.HTMLElement.prototype.scrollIntoView = () => {};
   const d = data();
   window.fetch = async (url, opts = {}) => {
@@ -50,7 +51,7 @@ async function fixture({ admin = true, intercept = () => undefined } = {}) {
     let reply = await intercept(call);
     const p = call.url.pathname;
     if (reply === undefined) {
-      if (p.endsWith("/people")) reply = { me: ME, items: [{ value: ME, label: "Me" }] };
+      if (p.endsWith("/people")) reply = { me: ME, named_signin: true, local_owner_setup_available: false, items: [{ value: ME, label: "Me" }] };
       else if (p === "/api/v1/vendors") reply = { vendors: [{ id: "vend-acme", name: "Acme Corp" }] };
       else if (p.endsWith("/lifecycle/templates")) reply = { items: d.templates };
       else if (p.endsWith("/lifecycle/assessments")) reply = { items: d.assessments };
@@ -92,6 +93,28 @@ test("non-administrators do not get approval or suspension buttons", async (t) =
   assert.equal(ui.rowButton("tpl-templates", "Privacy check", "Approve"), undefined);
   assert.equal(ui.rowButton("tpl-lifecycles", "Acme", "Suspend"), undefined);
   assert.ok(ui.rowButton("tpl-lifecycles", "Acme", "Mark active"));
+});
+
+test("local shared access explains the named reviewer path and offers no approval", async (t) => {
+  const ui = await fixture({ intercept: (c) => c.url.pathname.endsWith("/people")
+    ? { me: ME, named_signin: false, local_owner_setup_available: true, items: [{ value: ME, label: "Me" }] }
+    : undefined });
+  t.after(() => ui.window.close());
+  assert.equal(ui.el("tpl-new-template").disabled, true);
+  assert.equal(ui.rowButton("tpl-templates", "Privacy check", "Approve"), undefined);
+  assert.equal(ui.el("tpl-reviewer-guidance").hidden, false);
+  assert.equal(ui.el("tpl-signin-link").getAttribute("href"), "/auth/local-owner");
+  assert.match(ui.el("tpl-reviewer-message").textContent, /two people with their own sign-ins/);
+});
+
+test("an author cannot see their own approval and gets an invite path", async (t) => {
+  const own = { ...data().templates[1], authored_by: ME };
+  const ui = await fixture({ intercept: (c) => c.url.pathname.endsWith("/lifecycle/templates") ? { items: [own] } : undefined });
+  t.after(() => ui.window.close());
+  assert.equal(ui.rowButton("tpl-templates", "Privacy check", "Approve"), undefined);
+  assert.match(ui.el("tpl-templates").textContent, /Another administrator must approve/);
+  assert.equal(ui.el("tpl-invite-link").hidden, false);
+  assert.equal(ui.el("tpl-invite-link").getAttribute("href"), "/users");
 });
 
 test("approving carries the row version and a generated request key after a confirmation", async (t) => {

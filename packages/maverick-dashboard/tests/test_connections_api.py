@@ -111,6 +111,36 @@ def test_connections_page_renders(monkeypatch, tmp_path):
     assert r.status_code == 200 and 'id="cx-form"' in r.text
 
 
+def test_local_owner_can_enable_connections_and_save_a_key_without_sign_in(monkeypatch, tmp_path):
+    from maverick import config
+
+    _isolate(monkeypatch, tmp_path)
+    monkeypatch.delenv("MAVERICK_CONNECTIONS", raising=False)
+    monkeypatch.delenv("LIGHTWORK_CONNECTIONS", raising=False)
+    config.reset_config_cache()
+    c = _client()
+
+    before = c.get("/connections")
+    assert before.status_code == 200 and 'data-module-gate="connections"' in before.text
+    enabled = c.post("/api/v1/features/modules", json={"section": "connections", "enabled": True})
+    assert enabled.status_code == 200, enabled.text
+    page = c.get("/connections")
+    assert page.status_code == 200 and 'id="cx-form" data-can-manage="true"' in page.text
+    account_options = c.get("/api/v1/connection-setup")
+    assert account_options.status_code == 200
+    assert account_options.json()["account_sign_in_available"] is False
+    assert c.get("/api/v1/connections/catalog").status_code == 200
+    assert c.get("/api/v1/connections").status_code == 200
+
+    saved = c.post("/api/v1/connections", json={
+        "name": "Salesforce", "connector": "salesforce",
+        "base_url": "https://example.my.salesforce.com", "token": "test-key",
+    })
+    assert saved.status_code == 201, saved.text
+    assert saved.json()["has_token"] is True
+    assert "test-key" not in c.get("/api/v1/connections").text
+
+
 def test_connection_use_policy_roundtrips_without_token(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     c = _client()

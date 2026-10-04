@@ -2,9 +2,8 @@
 
 The work behind ``maverick init --from-file``, shared with the dashboard's
 setup page so an administrator can install a prepared settings file without a
-terminal. The file is parsed (a syntax error refuses the install), linted
-(unknown sections or type problems are reported but never block, since an
-operator may use newer keys than this build knows) and published privately.
+terminal. The file is parsed, checked for settings this build cannot apply,
+and published privately. Advisory findings remain visible without blocking.
 """
 from __future__ import annotations
 
@@ -29,12 +28,15 @@ def parse_config_bytes(data: bytes) -> dict[str, Any]:
 
 
 def config_findings(cfg: dict[str, Any]) -> list[Any]:
-    """Lint findings for a parsed settings file (best effort, never raises)."""
-    try:
-        from .config_lint import lint_config
-        return list(lint_config(cfg))
-    except Exception:  # noqa: BLE001 -- linting never blocks provisioning
-        return []
+    """Lint findings for a parsed settings file; never silently skip the check."""
+    from .config_lint import lint_config
+
+    return list(lint_config(cfg))
+
+
+def blocking_config_findings(findings: list[Any]) -> list[Any]:
+    """Reject values this build will ignore while preserving advisory warnings."""
+    return [f for f in findings if f.severity == "error" or f.message.startswith("unknown ")]
 
 
 def install_config_bytes(data: bytes, dst: Path | None = None, *,
@@ -67,15 +69,10 @@ def _install_config_bytes_locked(data: bytes, dst: Path | None = None, *,
     # create-time protected temp; POSIX mode bits passed to os.open do not
     # provide the equivalent Windows custody boundary.
     ensure_private_directory(dst.parent)
-    try:
-        installed = dst.read_bytes() if dst.is_file() else b""
-        unchanged = (
-            dst.is_file()
-            and installed.replace(b"\r\n", b"\n")
-            == data.replace(b"\r\n", b"\n")
-        )
-    except OSError:
-        unchanged = False
+    existed = dst.is_file()
+    # An unreadable old file cannot be backed up reliably; leave it in place.
+    installed = dst.read_bytes() if existed else b""
+    unchanged = existed and installed.replace(b"\r\n", b"\n") == data.replace(b"\r\n", b"\n")
     if unchanged:
         # A retried deployment should be a true no-op: do not rotate the inode,
         # mtime, or watcher state when the same logical TOML is installed,
@@ -84,16 +81,16 @@ def _install_config_bytes_locked(data: bytes, dst: Path | None = None, *,
         ensure_private_file(dst, 0o600)
         return {"path": dst, "unchanged": True, "backup": None}
     saved = None
-    if backup and dst.is_file():
+    if backup and existed:
         import secrets
-        import shutil
         import time
 
         saved = dst.with_name(f"{dst.name}.bak-{time.strftime('%Y%m%d-%H%M%S')}-{secrets.token_hex(4)}")
-        shutil.copy2(dst, saved)
-        ensure_private_file(saved, 0o600)
+        # Back up the bytes just read with private custody from creation.
+        atomic_write_bytes(saved, installed, mode=0o600)
     atomic_write_bytes(dst, data, mode=0o600)
     return {"path": dst, "unchanged": False, "backup": saved}
 
 
-__all__ = ["ConfigInstallError", "parse_config_bytes", "config_findings", "install_config_bytes"]
+__all__ = ["ConfigInstallError", "parse_config_bytes", "config_findings",
+           "blocking_config_findings", "install_config_bytes"]

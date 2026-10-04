@@ -3,11 +3,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import time
 
 from .crypto_at_rest import seal, unseal
 from .file_lock import atomic_write_bytes, cross_process_lock, ensure_private_directory
 from .paths import current_tenant_id_strict, data_dir
+
+log = logging.getLogger(__name__)
 
 
 def _path():
@@ -40,6 +43,28 @@ def enroll(principal: str) -> None:
         atomic_write_bytes(path, seal(json.dumps(state).encode()), mode=0o600)
 
 
+def enroll_task_owner(principal: str) -> None:
+    """Observe new named-account work without requiring the owner to open a page.
+
+    Goal creation must remain available if optional alerts are misconfigured.
+    The observer rechecks current membership before reading any private work.
+    """
+    if not isinstance(principal, str) or not principal.startswith("user:") or len(principal) > 256:
+        return
+    try:
+        from . import config
+        from .personal_identity import principal_current
+
+        if (config.config_source_errors(include_tenant=True)
+                or (config.load_config().get("notifications") or {}).get("personal_alerts") is not True
+                or not principal_current(principal)):
+            return
+        enroll(principal)
+    except Exception as exc:
+        # Never log the owner, task, path, or credential-bearing exception text.
+        log.warning("Personal task alert enrollment unavailable (%s)", type(exc).__name__)
+
+
 def principals() -> list[str]:
     return sorted(_read()["recipients"])
 
@@ -56,7 +81,7 @@ def observed(principal: str) -> None:
 
 def status(principal: str) -> dict:
     value = _read()["recipients"].get(principal, {})
-    return {"last_observed_at": value.get("observed_at")}
+    return {"enrolled_at": value.get("enrolled_at"), "last_observed_at": value.get("observed_at")}
 
 
 def withdraw(principal: str) -> None:

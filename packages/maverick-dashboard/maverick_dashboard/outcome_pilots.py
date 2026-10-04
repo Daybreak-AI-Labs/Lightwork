@@ -15,6 +15,7 @@ from dataclasses import asdict
 from decimal import Decimal
 
 from maverick.governed_records import GovernedRecordStore
+from maverick.outcome_accounting import COST_COVERAGE_FAMILIES
 from maverick.privacy_ops import RecordConflict
 
 STORE = GovernedRecordStore("outcome_pilots", "OPL", "outcome_pilots")
@@ -561,6 +562,41 @@ def _pair(case, source, frozen_at, admitted_at=None):
     return "paired"
 
 
+def _evidence_readiness(record, rows, groups, admission):
+    """Qualify complete reported evidence, never infer business or release lift."""
+    admitted = (record.get("state", "frozen") == "frozen"
+                and admission["status"] == "complete"
+                and admission["admitted_count"] == admission["expected_count"] == len(rows))
+    paired = admitted and bool(rows) and all(row["status"] == "paired" for row in rows)
+    criteria = paired and all(type(row["measurement"].get("criteria_met")) is bool for row in rows)
+    costs = paired and groups["all"]["reported_cost_difference"] is not None and all(
+        isinstance(row["measurement"].get("cost_coverage"), dict)
+        and set(row["measurement"]["cost_coverage"]) == set(COST_COVERAGE_FAMILIES)
+        and all(isinstance(value, dict) and value.get("status") in {"included", "zero"}
+                for value in row["measurement"]["cost_coverage"].values())
+        for row in rows
+    )
+    next_steps = []
+    if not admitted:
+        next_steps.append("Complete admission for every frozen case before treating the comparison as reviewable.")
+    if any(row["status"] == "unavailable" for row in rows):
+        next_steps.append("Restore authorized access to unavailable cases; keep them in the denominator.")
+    if not paired:
+        next_steps.append("Review every planned case, including missing, changed, rejected, or unfinished work; do not drop it from the cohort.")
+    if paired and not criteria:
+        next_steps.append("Record whether every case met the criteria frozen before work began.")
+    if paired and not costs:
+        next_steps.append("Complete total-cost evidence and every cost family for every case in one currency before using a cost comparison.")
+    return {
+        "reported_effort_comparison_ready": paired,
+        "frozen_criteria_review_ready": criteria,
+        "reported_cost_comparison_ready": costs,
+        "causal_release_lift_qualified": False,
+        "comparison_basis": "operator_reported_observational",
+        "next_steps": next_steps,
+    }
+
+
 def report(record, *, resolve):
     admitted = False
     admission = {"status": "invalid", "expected_count": len(record["cases"]),
@@ -653,12 +689,14 @@ def report(record, *, resolve):
         "Recorded runtime prices are not provider invoices. Reported total cost must include review, rework, and failed attempts."]
     if record.get("release_binding") is not None:
         limitations.append("The frozen release binding records a deployed baseline and proposed candidate at planning time. Case execution does not yet attest which release handled each case, so this pilot cannot establish release lift or a causal improvement.")
+    readiness = _evidence_readiness(record, rows, groups, admission)
     return {"id": record["id"], "title": record["title"], "customer": record["customer"],
             "workflow": record["workflow"], "criteria": record["criteria"], "revision": record["revision"],
             "plan_version": record["plan_version"], "frozen_at": record["frozen_at"], "cases": rows,
             "state": record.get("state", "frozen"),
             "admission": admission,
             "groups": groups, "measurement_basis": "operator_reported",
+            "evidence_readiness": readiness,
             "release_binding": record.get("release_binding"),
             "case_exposure_verified": False, "causal_lift_qualified": False,
             "learning_policy": learning,

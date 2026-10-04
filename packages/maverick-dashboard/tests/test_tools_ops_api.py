@@ -145,6 +145,17 @@ def test_suggested_skill_requires_shared_source_review_and_audited_admission(
     after = client.get("/api/v1/skills/learned-candidates").json()
     assert after["suggestions"] == []
     assert [saved["name"] for saved in after["added"]] == ["renewal-timing"]
+    assert after["added"][0]["recall_ready"] is True
+    assert after["added"][0]["uses"] == 0
+    from maverick.skill import stats as skill_stats
+    skill_stats.record_use([skills.learned_skill_use_key(skills.load_skills()[0])])
+    used = client.get("/api/v1/skills/learned-candidates").json()["added"][0]
+    assert used["uses"] == 1
+    monkeypatch.setenv("MAVERICK_USE_SKILLS", "0")
+    paused = client.get("/api/v1/skills/learned-candidates").json()["added"][0]
+    assert paused["recall_ready"] is False
+    assert "turned off" in paused["status"]
+    monkeypatch.delenv("MAVERICK_USE_SKILLS")
     fp = after["added"][0]["fingerprint"]
     assert client.post("/api/v1/skills/learned-candidates/renewal-timing/withdraw", json={
         "fingerprint": "0" * 64, "confirm": True,

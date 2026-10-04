@@ -15,6 +15,7 @@ from maverick.commitment_viability import (
     assess,
     confirm_dependency,
     confirm_option,
+    explain_resource_gaps,
     propose_shared_dependencies,
     recompute_after_dependency,
 )
@@ -73,6 +74,44 @@ def test_conditional_option_is_not_a_reserved_lot_even_after_owner_confirmation(
                            "confirmed", provider_receipt)))
     current[provider_receipt.source_id] = provider_receipt.revision
     assert assess(observed, now=NOW, current_source_revisions=current).status == "feasible"
+
+
+def test_resource_gap_separates_confirmed_shortfall_from_conditional_supply():
+    snapshot, current = basic_snapshot()
+    gap, = explain_resource_gaps(snapshot, now=NOW, current_source_revisions=current)
+    assert (gap.kind, gap.key, gap.confirmed_shortfall_units,
+            gap.remaining_shortfall_units) == ("material", "m", 1, 0)
+    assert gap.first_shortfall_at == 2_000
+    assert gap.option_ids == ("supplier-hold",)
+
+    late = replace(snapshot.options[0], ready_at=2_100)
+    gap, = explain_resource_gaps(replace(snapshot, options=(late,)), now=NOW,
+                                current_source_revisions=current)
+    assert gap.remaining_shortfall_units == 1
+    assert gap.remaining_first_shortfall_at == 2_000
+
+    unknown = replace(snapshot.lots[1], certainty="unknown")
+    gap, = explain_resource_gaps(replace(snapshot, lots=(snapshot.lots[0], unknown), options=()),
+                                now=NOW, current_source_revisions=current)
+    assert gap.confirmed_shortfall_units == 2
+    assert gap.remaining_shortfall_units == 1
+    assert gap.conditional_source_ids == ("stock",)
+    assert explain_resource_gaps(snapshot, now=2_001, current_source_revisions=current) == ()
+    current["order-a"] = "changed"
+    assert explain_resource_gaps(snapshot, now=NOW, current_source_revisions=current) == ()
+
+
+def test_resource_gap_uses_peak_cumulative_deficit_across_deadlines():
+    first, second, supply = proof("first"), proof("second"), proof("supply")
+    snapshot = Snapshot(1, (
+        Commitment("first", 1_100, (Demand("material", "m", 2),), first),
+        Commitment("second", 2_000, (Demand("material", "m", 3),), second),
+    ), (Lot("one", "material", "m", 1, 900, "confirmed", supply),))
+    gap, = explain_resource_gaps(snapshot, now=NOW,
+                                current_source_revisions=versions(first, second, supply))
+    assert gap.first_shortfall_at == 1_100
+    assert gap.confirmed_shortfall_units == 4
+    assert gap.remaining_shortfall_units == 4
 
 
 def test_source_staleness_and_uncertain_stock_are_never_counted_as_confirmed():

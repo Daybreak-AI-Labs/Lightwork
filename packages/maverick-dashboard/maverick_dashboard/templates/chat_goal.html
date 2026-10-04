@@ -305,7 +305,7 @@
   </section>
   {% endif %}
   {% set status_labels = {'pending': 'queued', 'running': 'working', 'done': 'done', 'blocked': 'paused', 'failed': 'failed', 'cancelled': 'cancelled'} %}
-  {% set stopped_kinds = ('provider_not_ready', 'internal_error', 'unpriced_model') %}
+  {% set stopped_kinds = ('provider_not_ready', 'provider_authentication', 'provider_rate_limit', 'provider_model_not_found', 'provider_unavailable', 'provider_connection', 'provider_configuration', 'internal_error', 'unpriced_model') %}
   <span id="status" class="badge {{ goal.status }}" data-status="{{ goal.status }}" hidden>{{ 'stopped' if goal.status == 'blocked' and stop and stop.kind in stopped_kinds else status_labels.get(goal.status, goal.status) }}</span>
 
   {# Earlier turns of this chat: what was asked before, and what Lightwork answered. #}
@@ -655,7 +655,9 @@
       let currentQuestionId = null, currentQuestionVersion = null, pendingClarification = null;
       let currentStatus = {{ goal.status|tojson }};
       let canOperate = {{ can_operate|tojson }};
+      const preparationMessage = {{ (submission.detail.message if submission else '')|tojson }};
       let lastResult = {{ ('' if stop else (goal.result or ''))|tojson }};
+      if (lastResult === preparationMessage) lastResult = '';
       document.addEventListener('lightwork:task-access-lost', function () {
         canOperate = false;
         const readOnly = document.getElementById('chat-read-only');
@@ -681,7 +683,7 @@
         withheld: 'M8 2.5a5.5 5.5 0 110 11 5.5 5.5 0 010-11zM5.5 8h5',
       };
       const STATUS_LABELS = { pending: 'Queued', running: 'Working', done: 'Done', blocked: 'Paused', failed: 'Failed', cancelled: 'Stopped' };
-      const STOPPED_KINDS = new Set(['provider_not_ready', 'internal_error', 'unpriced_model']);
+      const STOPPED_KINDS = new Set(['provider_not_ready', 'provider_authentication', 'provider_rate_limit', 'provider_model_not_found', 'provider_unavailable', 'provider_connection', 'provider_configuration', 'internal_error', 'unpriced_model']);
       // The kernel replaces model-derived events with one fixed sentence when
       // the evidence gateway is on; the page folds those into a single line.
       const WITHHELD = new Set({{ (withheld_markers or [])|tojson }});
@@ -1189,7 +1191,7 @@
           setStatus(d.status);
           if (!['blocked', 'failed', 'cancelled'].includes(d.status) && haltCard) haltCard.style.display = 'none';
         }
-        if (d.result) {
+        if (d.result && d.result !== preparationMessage) {
           const changed = d.result !== lastResult;
           lastResult = d.result;
           // A clean finish shows its result; a stopped run's result is the

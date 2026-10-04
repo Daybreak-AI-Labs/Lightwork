@@ -3,6 +3,7 @@
   "use strict";
   const root = document.getElementById("vendor-onboarding");
   if (!root) return;
+  if (root.dataset.namedSignin === "false" && root.dataset.offlineDemo !== "true") return;
   const byId = id => document.getElementById(`vo-${id}`);
   const base = root.dataset.apiBase;
   let selected = null;
@@ -521,8 +522,10 @@
     const policy = {forbiddenScope: body === undefined, contextMessage: /active workspace changed/i};
     const early = access.observe(response, null, policy);
     if (early.kind === "conflict") { reviewRefreshRequired = true; approvalCardCurrent = false; reviewedAt = null; }
-    if (["session", "scope"].includes(early.kind))
-      throw new Error("Your sign-in or workspace access changed. Sign in again and reload this page.");
+    if (early.kind === "session")
+      throw new Error("Your sign-in ended. Sign in again and reload this page.");
+    if (early.kind === "scope")
+      throw new Error("This account cannot open this vendor request. Ask an administrator to check your workspace access, then reload this page.");
     if (early.kind === "capability" && actionKey) deniedActions.add(actionKey);
     let data;
     try { data = await response.json(); } catch (_) {

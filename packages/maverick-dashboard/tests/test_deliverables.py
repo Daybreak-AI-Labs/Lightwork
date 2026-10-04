@@ -145,6 +145,23 @@ class TestDeliverablesPage:
         assert "Awaiting sign-off" in t
         assert f'href="/chat/goal/{gid}"' in t   # Review links to the deliverable view
 
+    def test_default_results_show_only_the_local_owner_finished_root_work(self, tmp_path, monkeypatch):
+        w = self._world(tmp_path, monkeypatch)
+        own = w.create_goal("My finished report", "")
+        w.set_goal_status(own, "done", result="Report")
+        other = w.create_goal("Another person's report", "", owner="user:other")
+        w.set_goal_status(other, "done", result="Private")
+        w.create_goal("My unfinished work", "")
+        child = w.create_goal("Internal subtask", "", parent_id=own)
+        w.set_goal_status(child, "done", result="Internal result")
+
+        page = client.get("/deliverables").text
+        assert "My finished report" in page
+        assert "Another person's report" not in page
+        assert "My unfinished work" not in page
+        assert "Internal subtask" not in page
+        assert f'href="/chat/goal/{own}"' in page
+
     def test_role_filter_narrows_and_can_empty(self, tmp_path, monkeypatch):
         self._world(tmp_path, monkeypatch)
         # a role nobody consumes -> empty state, not a 500
@@ -155,17 +172,20 @@ class TestDeliverablesPage:
         assert "13-week cash forecast" in client.get("/deliverables?role=fpa_analyst").text
 
     def test_persona_identity_defaults_inbox_to_my_roles(self, tmp_path, monkeypatch):
-        self._world(tmp_path, monkeypatch)
-        # No-auth single user bound to a persona role -> inbox defaults to "mine".
+        w = self._world(tmp_path, monkeypatch)
+        # The default Results page shows completed work even when the caller
+        # has a persona role; the explicit catalog keeps its role filters.
         monkeypatch.setattr("maverick.config.load_config",
                             lambda *a, **k: {"personas": {"default": ["tax_analyst"]}})
+        gid = w.create_goal("Draft a welcome email", "")
+        w.set_goal_status(gid, "done", result="Welcome!")
         t = client.get("/deliverables").text
-        assert "Showing deliverables for your role" in t
-        assert "tax_analyst" in t
-        # a tax_analyst deliverable shows; a forecast (fpa/treasurer) is filtered out
-        assert "Tax provision" in t
+        assert "Draft a welcome email" in t
+        assert f'href="/chat/goal/{gid}"' in t
+        assert "Browse what specialists can produce" in t
         assert "13-week cash forecast" not in t
-        # ?role=all widens back to everything
+        # A role link still narrows the specialist catalog.
+        assert "Tax provision" in client.get("/deliverables?role=tax_analyst").text
         t_all = client.get("/deliverables?role=all").text
         assert "13-week cash forecast" in t_all
 

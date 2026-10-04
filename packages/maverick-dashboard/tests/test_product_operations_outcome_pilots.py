@@ -16,7 +16,7 @@ BINDING = {
 
 
 def _harness(monkeypatch):
-    current = {"context": "account-workspace", "release": "baseline_active",
+    current = {"context": "account-workspace", "release": "baseline_active", "paired": 0,
                "binding": dict(BINDING), "available": True, "reads": 0}
 
     monkeypatch.setattr(pilots.outcome_pilots_api, "_context", lambda _request: current["context"])
@@ -28,6 +28,18 @@ def _harness(monkeypatch):
                 "release_binding": current["binding"]}
 
     monkeypatch.setattr(pilots.outcome_pilots, "get", get)
+    monkeypatch.setattr(pilots.outcome_pilots_api, "_resolver", lambda _request: lambda *_args: {})
+    monkeypatch.setattr(pilots.outcome_pilots, "report", lambda _record, resolve: {
+        "title": "Receiving pilot", "revision": 1,
+        "groups": {"all": {"planned": 4, "paired": current["paired"], "accepted": 0,
+                           "reported_minutes_difference": None, "reported_cost_difference": None}},
+        "evidence_readiness": {"reported_effort_comparison_ready": current["paired"] == 4,
+                               "reported_cost_comparison_ready": False,
+                               "causal_release_lift_qualified": False, "next_steps": ["Record cost evidence."]},
+        "limitations": ["Operator reported."],
+        "cases": [{"id": str(i), "status": "paired" if i <= current["paired"] else "unmeasured"}
+                  for i in range(1, 5)],
+    })
     def status(_request, _binding):
         current["reads"] += 1
         return {"promotion_state": "staged", "deployment_state": current["release"],
@@ -78,3 +90,22 @@ def test_missing_pilot_or_release_is_not_advertised_as_actionable(monkeypatch):
         current["available"] = False
         hidden = client.post(BASE + "/catalog", json={"page": "/outcome-pilots", "selection": SELECTION}).json()
         assert hidden["operations"] == []
+
+
+def test_copilot_reads_the_full_pilot_evidence_boundary_and_rechecks_changes(monkeypatch):
+    client, current = _harness(monkeypatch)
+    with client:
+        catalog = client.post(BASE + "/catalog", json={"page": "/outcome-pilots", "selection": SELECTION}).json()
+        value = next(item for item in catalog["operations"] if item["id"] == "learning.pilot_value_evidence")
+        assert value["available"] and value["confirmation_required"] is False
+        assert value["details"]["groups"]["all"]["paired"] == 0
+        assert value["details"]["evidence_readiness"]["reported_cost_comparison_ready"] is False
+        prepared = client.post(BASE + "/prepare", json={"page": "/outcome-pilots", "selection": SELECTION,
+            "operation": value["id"], "context": catalog["context"], "revision": value["revision"],
+            "arguments": {}})
+        assert prepared.status_code == 200 and prepared.json()["read_only"] is True
+        current["paired"] = 4
+        stale = client.post(BASE + "/prepare", json={"page": "/outcome-pilots", "selection": SELECTION,
+            "operation": value["id"], "context": catalog["context"], "revision": value["revision"],
+            "arguments": {}})
+        assert stale.status_code == 409

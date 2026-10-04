@@ -41,7 +41,8 @@ function defaults() {
     "/refinements": { enabled: true, require_approval: true, proposals: [PENDING, APPLIED],
       in_force: [{ target: "Standing instructions", title: "Check quote approval", change: "Confirm the quote first", applied_at: 1700000100 }] },
     "/models": { enabled: true, models: [{ value: "claude-x", label: "Claude X" }] },
-    "/efficacy": { lessons: [{ text: "always cite", department: "", went_well: 3, did_not: 1, rate: 0.75, recent_rate: null }] },
+    "/efficacy": { lessons: [{ text: "always cite", department: "", scope_label: "All work",
+      token: "a".repeat(64), went_well: 3, did_not: 1, rate: 0.75, recent_rate: null }] },
     "/conflicts": { pairs: [{ model: "claude-x", first: "always cite", second: "never cite" }] },
     "/log": { events: [{ when: 1700000000, what: "Learned a new lesson", model: "claude-x", lesson: "always cite" }] },
     "/preview": { enabled: true, weaknesses: [{ pattern: "forgot totals", times: 4, kind: "wrong answer", would_add: "check totals" }], scanned: 9, eligible: 5 },
@@ -169,6 +170,33 @@ test("read-outs render lesson results, clashes and the activity timeline", async
   assert.match(ui.doc.getElementById("llp-eff-rows").textContent, /always cite.*3.*1.*75%/);
   assert.match(ui.doc.getElementById("llp-conf").textContent, /may contradict/);
   assert.match(ui.doc.getElementById("llp-log").textContent, /14 Nov 2023: Learned a new lesson/);
+});
+
+test("an administrator can withdraw the exact reviewed lesson from Learned", async (t) => {
+  const ui = await fixture();
+  t.after(() => ui.window.close());
+  const action = ui.doc.querySelector("#llp-eff-rows details");
+  assert.ok(action);
+  action.querySelector("textarea").value = "It conflicts with our current policy.";
+  action.querySelector("button").click();
+  await ui.settle();
+  const sent = ui.calls.find((c) => c.url === "/api/v1/learning-loop/lessons/withdraw");
+  assert.deepEqual(sent.body, { model_id: "claude-x", token: "a".repeat(64),
+    reason: "It conflicts with our current policy.", confirm: true });
+  assert.match(ui.doc.getElementById("llp-harness-msg").textContent, /Lesson removed/);
+});
+
+test("a viewer has no withdrawal control and a declined confirmation sends nothing", async (t) => {
+  const viewer = await fixture({ admin: false });
+  t.after(() => viewer.window.close());
+  assert.equal(viewer.doc.querySelector("#llp-eff-rows details"), null);
+  const admin = await fixture({ confirm: false });
+  t.after(() => admin.window.close());
+  const action = admin.doc.querySelector("#llp-eff-rows details");
+  action.querySelector("textarea").value = "It conflicts with our current policy.";
+  action.querySelector("button").click();
+  await admin.settle();
+  assert.equal(admin.calls.filter((c) => c.url === "/api/v1/learning-loop/lessons/withdraw").length, 0);
 });
 
 test("preview and hold-out check explain results in sentences", async (t) => {

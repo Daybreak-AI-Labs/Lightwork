@@ -174,6 +174,55 @@ class TestParseJira:
         assert parse_issue_event("jira", payload) is not None
 
 
+class TestParseGitLab:
+    def _payload(self, action="update"):
+        return {
+            "object_kind": "issue",
+            "object_attributes": {"action": action, "iid": 7, "title": "Fix it", "description": "Details"},
+            "project": {"path_with_namespace": "team/repo"},
+            "assignees": [{"id": 2, "username": "lightwork-bot"}],
+            "changes": {"assignees": {"previous": [], "current": [{"id": 2, "username": "lightwork-bot"}]}},
+        }
+
+    def test_new_bot_assignment_starts_one_goal(self, monkeypatch):
+        monkeypatch.setenv("MAVERICK_BOT_GITLAB_USERNAME", "lightwork-bot")
+        event = parse_issue_event("gitlab", self._payload())
+        assert event is not None
+        assert event.issue_id == "team/repo#7"
+
+    def test_regular_edits_and_reopen_without_assignment_do_not_start_paid_work(self, monkeypatch):
+        monkeypatch.setenv("MAVERICK_BOT_GITLAB_USERNAME", "lightwork-bot")
+        for action in ("update", "reopen"):
+            payload = self._payload(action)
+            payload["changes"] = {"labels": {"previous": [], "current": ["urgent"]}}
+            assert parse_issue_event("gitlab", payload) is None
+
+    def test_bot_already_assigned_does_not_restart_when_other_assignee_changes(self, monkeypatch):
+        monkeypatch.setenv("MAVERICK_BOT_GITLAB_USERNAME", "lightwork-bot")
+        payload = self._payload()
+        payload["changes"] = {"assignees": {
+            "previous": [{"id": 2, "username": "lightwork-bot"}],
+            "current": [{"id": 2, "username": "lightwork-bot"}, {"id": 3, "username": "person"}],
+        }}
+        assert parse_issue_event("gitlab", payload) is None
+
+    def test_id_based_assignee_change_needs_the_bot_to_be_new(self, monkeypatch):
+        monkeypatch.setenv("MAVERICK_BOT_GITLAB_USERNAME", "lightwork-bot")
+        payload = self._payload()
+        payload["changes"] = {"assignee_ids": {"previous": [1], "current": [2]}}
+        assert parse_issue_event("gitlab", payload) is not None
+        payload["changes"] = {"assignee_ids": {"previous": [2], "current": [2, 3]}}
+        assert parse_issue_event("gitlab", payload) is None
+        payload["assignees"] = [{"username": "lightwork-bot"}]
+        assert parse_issue_event("gitlab", payload) is None  # numeric prior owner cannot be resolved
+
+    def test_open_is_initial_assignment_without_changes(self, monkeypatch):
+        monkeypatch.setenv("MAVERICK_BOT_GITLAB_USERNAME", "lightwork-bot")
+        payload = self._payload("open")
+        payload.pop("changes")
+        assert parse_issue_event("gitlab", payload) is not None
+
+
 class TestUnknownProvider:
     def test_returns_none(self):
         assert parse_issue_event("github", {"type": "Issue"}) is None

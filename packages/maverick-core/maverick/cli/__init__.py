@@ -584,6 +584,7 @@ def _install_config_from_file(src: str) -> None:
 
     from ..config_install import (
         ConfigInstallError,
+        blocking_config_findings,
         config_findings,
         install_config_bytes,
         parse_config_bytes,
@@ -596,17 +597,30 @@ def _install_config_from_file(src: str) -> None:
         cfg = parse_config_bytes(data)
     except (ConfigInstallError, OSError) as e:
         raise click.ClickException(f"invalid TOML in {src}: {e}") from e
-    # Surface unknown-section / type problems, but don't block (operators may use
-    # newer keys than this build knows).
-    for finding in config_findings(cfg):
+    try:
+        findings = config_findings(cfg)
+    except Exception as exc:  # noqa: BLE001 -- never install when validation is unavailable
+        raise click.ClickException(f"could not check settings; no changes made: {exc}") from exc
+    blocking = blocking_config_findings(findings)
+    for finding in findings:
         click.echo(click.style(f"  ! {finding.section}: {finding.message}",
-                               fg="yellow"), err=True)
-    result = install_config_bytes(data)
+                               fg="red" if finding in blocking else "yellow"), err=True)
+    if blocking:
+        raise click.ClickException(
+            f"{len(blocking)} setting(s) cannot be used by this version of Lightwork. "
+            "Correct them and try again; no changes were made."
+        )
+    try:
+        result = install_config_bytes(data, backup=True)
+    except OSError as exc:
+        raise click.ClickException(f"could not install settings; the previous file remains: {exc}") from exc
     dst = result["path"]
     if result["unchanged"]:
         click.echo(click.style(f"config unchanged -> {dst} (0600)", fg="green"))
         return
     click.echo(click.style(f"installed config -> {dst} (0600)", fg="green"))
+    if result["backup"]:
+        click.echo(f"previous settings saved -> {result['backup']}")
 
 
 @main.command()

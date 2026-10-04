@@ -84,6 +84,13 @@ def test_missing_companion_is_explicit_before_runner_and_in_model_context(enviro
     visible = unescape(re.sub(r"<[^>]+>", "", status_panel.group(1))).lower()
     assert "recording.wav" in visible and "could not be read (unavailable)" in visible
     assert world.get_goal(goal_id).status == "pending"
+    assert not world.get_goal(goal_id).result
+    assert re.search(r'id="result-section"[^>]*display: none', page.text)
+    # Existing installs may already have stored the preparation message in
+    # goals.result. Keep it in the status panel, never in the answer panel.
+    world.set_goal_status(goal_id, "pending", result=receipt["detail"]["message"])
+    legacy_page = client.get(f"/chat/goal/{goal_id}")
+    assert re.search(r'id="result-section"[^>]*display: none', legacy_page.text)
 
 
 def test_storage_failure_is_recoverable_draft_and_retry_deduplicates(environment, monkeypatch):

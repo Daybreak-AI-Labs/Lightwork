@@ -54,8 +54,8 @@
     <h3 id="llp-eff-title">Lesson results</h3>
     <table aria-labelledby="llp-eff-title">
       <thead><tr><th scope="col">Lesson</th><th scope="col">Went well</th><th scope="col">Did not</th>
-        <th scope="col">Success</th></tr></thead>
-      <tbody id="llp-eff-rows"><tr><td colspan="4">Choose a model to see its lesson results.</td></tr></tbody>
+        <th scope="col">Success</th>{% if can_manage %}<th scope="col">Action</th>{% endif %}</tr></thead>
+      <tbody id="llp-eff-rows"><tr><td colspan="{{ 5 if can_manage else 4 }}">Choose a model to see its lesson results.</td></tr></tbody>
     </table>
 
     <h3 id="llp-conf-title">Lessons that may clash</h3>

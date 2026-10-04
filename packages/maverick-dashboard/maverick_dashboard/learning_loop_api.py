@@ -76,6 +76,13 @@ class QualityIn(BaseModel):
     confirm: bool = False
 
 
+class WithdrawLessonIn(BaseModel):
+    model_id: str = Field(min_length=1, max_length=200)
+    token: str = Field(pattern=r"^[0-9a-f]{64}$")
+    reason: str = Field(min_length=10, max_length=1000)
+    confirm: Literal[True]
+
+
 def _clip(value: Any, size: int = _MAX_TEXT) -> str:
     text = " ".join(str(value or "").split())
     return text if len(text) <= size else text[: size - 1] + "…"
@@ -298,6 +305,44 @@ def _model_choice(model_id: str | None) -> str | None:
     return model_id
 
 
+def _scope_label(scope: str) -> str:
+    if not scope:
+        return "All work"
+    kind, _, name = scope.partition("=")
+    return {"domain": "Department", "role": "Role", "tool": "Tool"}.get(kind, "Specific work") + (": " + name if name else "")
+
+
+def _current_lesson(model_id: str, token: str) -> dict:
+    from maverick import self_harness
+    model = _model_choice(model_id)
+    row = next((item for item in self_harness.line_efficacy(model)
+                if item["token"] == token), None)
+    if row is None:
+        raise HTTPException(409, "That lesson changed or is no longer available. Refresh the lesson results before deciding.")
+    return row
+
+
+def withdraw_current_lesson(request: Request, model_id: str, token: str, reason: str) -> dict:
+    """One guarded mutation shared by the native page and Copilot."""
+    from maverick import self_harness
+    require_global_permission(request, "admin")
+    if not 10 <= len(reason.strip()) <= 1000:
+        raise HTTPException(422, "Explain why this lesson should be removed in at least 10 characters.")
+    row = _current_lesson(model_id, token)
+    _audit(request, "withdraw_lesson_requested", model_id=model_id,
+           lesson_token=token, reason=reason)
+    try:
+        removed = _bound(request, lambda: self_harness.forget_addendum(
+            model_id, line=row["text"], scope=row["scope"], expected_token=token))()
+    except ValueError as exc:
+        raise HTTPException(409, "That lesson changed. Refresh the lesson results before deciding.") from exc
+    if not removed:
+        raise HTTPException(409, "That lesson is no longer available. Refresh the lesson results.")
+    _audit(request, "withdraw_lesson_completed", model_id=model_id,
+           lesson_token=token, reason=reason)
+    return {"removed": True, "model_id": model_id, "token": token}
+
+
 @router.get("/models")
 async def models(request: Request) -> dict:
     require_permission(request, "view")
@@ -316,11 +361,20 @@ async def efficacy(request: Request, model_id: str = Query(min_length=1, max_len
     model = await run_in_threadpool(_model_choice, model_id)
     rows = await run_in_threadpool(self_harness.line_efficacy, model)
     return {"lessons": [
-        {"text": _clip(r.get("text")), "department": (r.get("domain") or ""),
+        {"text": r["text"], "department": (r.get("domain") or ""),
+         "scope_label": _scope_label(r["scope"]), "token": r["token"],
          "went_well": int(r.get("success") or 0), "did_not": int(r.get("failure") or 0),
          "rate": r.get("rate"), "recent_rate": r.get("recent_rate")}
         for r in rows[:200]
     ], "truncated": len(rows) > 200}
+
+
+@router.post("/lessons/withdraw")
+async def withdraw_lesson(request: Request, body: WithdrawLessonIn) -> dict:
+    from .app import _require_same_origin
+    _require_same_origin(request)
+    return await run_in_threadpool(withdraw_current_lesson, request, body.model_id,
+                                   body.token, body.reason.strip())
 
 
 @router.get("/conflicts")

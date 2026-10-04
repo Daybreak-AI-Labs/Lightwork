@@ -374,6 +374,8 @@ def authority_policy(relative: str, *, is_sqlite: bool) -> str | None:  # noqa: 
         "handoff_nonces.json": "handoff_nonce",
         "provider_spend.json": "provider_spend",
         "provider_spend.json.required": "provider_spend_required",
+        "provider_spend.sqlite3.active": "provider_spend_required",
+        "provider_spend.sqlite3.seal": "provider_spend_required",
         "tenant_registry.json": "tenant_registry",
         "dashboard-owner.json": "dashboard_owner",
         "saml-consumed-assertions.json": "saml_replay",
@@ -550,11 +552,14 @@ def authority_policy(relative: str, *, is_sqlite: bool) -> str | None:  # noqa: 
             return policy
 
     if is_sqlite:
+        if name == "provider_spend.sqlite3":
+            return "provider_spend_sqlite"
         normalized = "/".join(parts)
         sqlite_policies = {
             "jobs.db": "jobs",
             "world.db": "world",
             "knowledge.db": "passive_sqlite",
+            "provider_spend.sqlite3": "provider_spend_sqlite",
             "entity_graph/graph.db": "passive_sqlite",
             "privacy_automation/privacy-data-discovery.sqlite3": "privacy_discovery",
             "privacy_automation/privacy-discovery-remediation.sqlite3": "privacy_remediation",
@@ -879,6 +884,9 @@ AUTHORITY_SAMPLES = {
     "budget_receipts.jsonl": "budget_receipt",
     "provider_spend.json": "provider_spend",
     "provider_spend.json.required": "provider_spend_required",
+    "provider_spend.sqlite3": "provider_spend_sqlite",
+    "provider_spend.sqlite3.active": "provider_spend_required",
+    "provider_spend.sqlite3.seal": "provider_spend_required",
     "tenant_registry.json": "tenant_registry",
     "dashboard-owner.json": "dashboard_owner",
     "privacy_automation/privacy-data-discovery.sqlite3": "privacy_discovery",

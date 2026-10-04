@@ -75,6 +75,8 @@ def test_independent_connections_replay_one_goal_and_claim_dispatch_once(tmp_pat
         receipt = _create(store)
         assert not store.claim_dispatch(receipt["key"])
         store.update(receipt["key"], state="ready", message="Evidence explicitly available or unavailable")
+        assert world.get_goal(ids[0]).result in (None, "")
+        assert store.for_goal(ids[0])["detail"]["message"] == "Evidence explicitly available or unavailable"
         assert store.claim_dispatch(receipt["key"])
         assert not store.claim_dispatch(receipt["key"])
         assert world.get_goal(ids[0]).status == "pending"

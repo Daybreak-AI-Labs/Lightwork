@@ -77,7 +77,8 @@ def _projection(request, actor: str, *, world=None) -> tuple[list[dict], list[di
                 return
             sources.append({"ref": f"goal:{goal.id}:{kind}", "version": str(version),
                             "category": category, "goal_id": goal.id, "project_id": project_id,
-                            "title": goal.title, "label": label, "href": href or f"/chat/goal/{goal.id}"})
+                            "title": goal.title, "label": label, "href": href or f"/chat/goal/{goal.id}",
+                            "occurred_at": getattr(goal, "completed_at", None)})
         add("state", f"{goal.status}:{state_revision}", {"blocked": "Needs attention", "failed": "Did not finish", "done": "Finished"}.get(goal.status, ""))
         if goal.status == "done" and goal.result:
             result_digest = hashlib.sha256(str(goal.result).encode()).hexdigest()
@@ -138,6 +139,7 @@ def _state_locked(request, *, seen_id=None):
     from .draft_api import context_for
     actor = _identity(request)
     enroll(actor)
+    enrollment = status(actor)
     state = preferences.state(actor)
     choice = validate_preferences(state["values"].get("notification_preferences", {}))
     sources, tasks, projects, limited = _projection(request, actor)
@@ -145,12 +147,13 @@ def _state_locked(request, *, seen_id=None):
     if actor != _identity(request):
         raise HTTPException(409, "Your account changed. Reload personal alerts.")
     inbox = PersonalInbox(actor).refresh(sources, choice, seen_id=seen_id,
-        allow_critical=(config.load_config().get("notifications") or {}).get("personal_critical_bypass", False) is True)
+        allow_critical=(config.load_config().get("notifications") or {}).get("personal_critical_bypass", False) is True,
+        enrolled_at=enrollment["enrolled_at"])
     return {**inbox, "preferences": choice, "context": context_for(request), "revision": state["revision"],
             "tasks": tasks, "projects": projects, "partial": limited, "recent_history_days": 7,
             "critical_allowed": (config.load_config().get("notifications") or {}).get("personal_critical_bypass", False) is True,
             "background_enabled": (config.load_config().get("notifications") or {}).get("personal_background") is True,
-            "background": status(actor), "private_delivery": delivery_status(actor)}
+            "background": enrollment, "private_delivery": delivery_status(actor)}
 
 
 @router.get("/notifications")

@@ -410,4 +410,42 @@ def test_people_list_carries_lifecycle_references(environment, monkeypatch) -> N
     ann = api._principal_ref_for("tenant-a", "user:ann@example.com")
     assert {"value": ann, "label": "ann@example.com"} in body["items"]
     assert {"value": me, "label": "Me"} in body["items"]
+    assert body["named_signin"] is True
     assert ("tenant", "operate") in state["permission_calls"]
+
+
+def test_shared_local_operator_cannot_author_or_approve_questionnaires(environment, monkeypatch) -> None:
+    client, _state = environment
+    monkeypatch.setattr(api, "caller_principal", lambda _request: None)
+    monkeypatch.setattr(api, "authenticated_subject", lambda _request, **_kwargs: "authorized-local-operator")
+    people = client.get(f"{API}/people")
+    assert people.status_code == 200
+    assert people.json()["named_signin"] is False
+    created = client.put(f"{API}/templates/local", json=_template_body())
+    assert created.status_code == 403
+    assert "individual sign-ins" in created.json()["detail"]
+    approval = client.post(
+        f"{API}/templates/local/versions/1/approve",
+        json={"expected_revision": 1, "idempotency_key": "approval"},
+    )
+    assert approval.status_code == 403
+    assert "individual account" in approval.json()["detail"]
+
+
+def test_legacy_shared_author_cannot_be_approved_after_owner_claim(environment) -> None:
+    client, _state = environment
+    synthetic = api._principal_ref_for("tenant-a", "authorized-local-operator")
+    store = client.app.state.third_party_lifecycle_store_factory(
+        tenant_id="tenant-a", principal_ref=synthetic,
+        principal_resolver=lambda: synthetic, request=None,
+    )
+    store.create_template_version("tenant-a", "legacy", **_template_body())
+    listing = client.get(f"{API}/templates")
+    assert listing.status_code == 200
+    assert listing.json()["items"][0]["needs_named_author"] is True
+    approval = client.post(
+        f"{API}/templates/legacy/versions/1/approve",
+        json={"expected_revision": 1, "idempotency_key": "approval"},
+    )
+    assert approval.status_code == 409
+    assert "new version" in approval.json()["detail"]

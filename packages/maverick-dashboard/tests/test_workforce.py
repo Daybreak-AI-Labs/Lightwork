@@ -26,6 +26,9 @@ def test_departments_list_includes_finance():
     assert "finance" in depts
     assert depts["finance"]["title"] == "Finance"
     assert depts["finance"]["headcount"] > 0
+    assert sum(depts["finance"][key] for key in (
+        "ready_specialists", "setup_needed_specialists", "unknown_specialists",
+    )) == depts["finance"]["headcount"]
 
 
 def test_department_detail_has_roster():
@@ -33,7 +36,23 @@ def test_department_detail_has_roster():
     assert r.status_code == 200
     body = r.json()
     assert body["roster"], "expected a roster"
-    assert {"name", "description", "max_risk"} <= set(body["roster"][0])
+    assert {"name", "description", "max_risk", "readiness"} <= set(body["roster"][0])
+    assert body["roster"][0]["readiness"]["state"] in {
+        "action_ready", "needs_setup", "unknown",
+    }
+
+
+def test_team_with_no_usable_specialist_is_not_deployed(monkeypatch):
+    import maverick.domain_edit as domain_edit
+    from maverick.departments import get_department
+
+    monkeypatch.setattr(domain_edit, "list_agents", lambda: [
+        {"name": name, "readiness": {"state": "needs_setup"}}
+        for name in get_department("finance").members
+    ])
+    response = client.post("/api/v1/departments/finance/deploy", json={})
+    assert response.status_code == 409
+    assert "no specialists" in response.json()["detail"]
 
 
 def test_unknown_department_404():
@@ -135,7 +154,7 @@ def test_workforce_distinguishes_catalog_from_deployment(monkeypatch):
     assert "2 are set up" in r.text
     assert "specialists on staff" not in r.text
     assert "connectors wired" not in r.text
-    assert "catalog specialists available" in r.text
+    assert "catalog specialists" in r.text
 
 
 def test_workforce_explains_missing_department_charter_without_overclaiming(monkeypatch):
@@ -159,7 +178,7 @@ def test_workforce_explains_missing_department_charter_without_overclaiming(monk
         "No description yet. View the team to see its specialists before you deploy it."
         in r.text
     )
-    assert "1 catalog specialists available" in r.text
+    assert "1 catalog specialists" in r.text
     assert "0 specialists deployed" in r.text
     assert "specialists on staff" not in r.text
     assert "connectors wired" not in r.text
@@ -174,6 +193,14 @@ def test_departments_list_reports_entitlement():
 
 def test_deploy_department_creates_a_fleet(tmp_path, monkeypatch):
     # Self-host (no tenant) is entitled by fail-open; isolate the fleets dir.
+    import maverick.domain_edit as domain_edit
+    from maverick.departments import get_department
+
+    members = get_department("finance").members
+    monkeypatch.setattr(domain_edit, "list_agents", lambda: [
+        {"name": name, "readiness": {"state": "action_ready"}}
+        for name in members
+    ])
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.delenv("MAVERICK_TENANT", raising=False)
     r = client.post("/api/v1/departments/finance/deploy")

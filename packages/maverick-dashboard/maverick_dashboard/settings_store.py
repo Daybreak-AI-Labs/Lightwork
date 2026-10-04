@@ -299,9 +299,9 @@ LEARNING_SUBSYSTEMS: list[dict] = [
      "env": "MAVERICK_TRAJECTORY_CAPTURE",
      "how": "[self_improvement] capture — or MAVERICK_TRAJECTORY_CAPTURE=0"},
     {"key": "causal_promotion", "section": "self_improvement", "config_key": "causal_promotion",
-     "label": "Check an improvement really caused the gain",
-     "description": "Before a learned change is adopted, check that it caused the "
-                    "improvement.",
+     "label": "Require a controlled comparison before adopting changes",
+     "description": "Ordinary task history suggests candidates. Automatic adoption needs "
+                    "a prospectively controlled comparison with enough evidence.",
      "env": "MAVERICK_CAUSAL_PROMOTION", "needs": "self_improvement",
      "how": "[self_improvement] causal_promotion — or MAVERICK_CAUSAL_PROMOTION=0"},
     {"key": "factory_learning", "section": "self_improvement", "config_key": "factory_learning",

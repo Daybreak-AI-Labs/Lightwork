@@ -9,8 +9,9 @@ from fastapi.templating import Jinja2Templates
 from maverick.paths import current_tenant_id_strict
 from maverick.vendor_onboarding import deployment_readiness
 
-from .auth import require_permission
+from .auth import caller_principal, require_permission
 from .draft_api import context_for
+from .local_owner import available as local_owner_setup_available
 
 
 def create_vendor_onboarding_page_router(templates: Jinja2Templates) -> APIRouter:
@@ -28,6 +29,8 @@ def create_vendor_onboarding_page_router(templates: Jinja2Templates) -> APIRoute
             "offline_demo": getattr(request.app.state, "vendor_onboarding_demo", False) is True,
             "deployment": deployment_readiness(),
             "connection_workspace_context": context_for(request),
+            "vendor_named_signin": bool((caller_principal(request) or "").startswith("user:")),
+            "vendor_local_owner_setup_available": local_owner_setup_available(request),
         })
         response.headers.update({
             "Cache-Control": "no-store, private",

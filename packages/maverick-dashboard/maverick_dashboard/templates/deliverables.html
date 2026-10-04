@@ -2,6 +2,60 @@
 {% block title %}Results · Lightwork{% endblock %}
 {% block content %}
   {% from "_hero.html" import hero, state %}
+  {% if not browse %}
+  {% call hero('Your work', 'Results',
+               subtitle='The work Lightwork finished for you',
+               lede='Open a result to read, share, print, or download the saved answer. <a href="/goals">Tasks</a> shows work that is still running or needs attention.' | safe) %}
+    {{ state('Current state',
+             (recent_results | length ~ ' finished task' ~ ('' if recent_results | length == 1 else 's') ~ ' on this page') if recent_results else 'No results yet',
+             badge='Ready to use' if recent_results else 'Nothing finished yet',
+             badge_class='ok' if recent_results else 'idle') }}
+  {% endcall %}
+  {% if awaiting %}
+    <div class="section-head"><h2>Awaiting sign-off</h2><span class="badge warn">{{ awaiting | length }}</span></div>
+    <div class="panel" style="padding: var(--space-2) var(--space-3);">
+      {% for r in awaiting %}
+        <div class="mv-row">
+          <div class="mv-row__main">
+            <div class="mv-row__title">{{ r.deliverable }}</div>
+            <div class="mv-row__sub muted">{{ r.title }} · needs {{ r.gate | humanize | lower }}</div>
+          </div>
+          <div class="mv-row__actions"><a class="btn btn--primary" href="/chat/goal/{{ r.id }}">Review</a></div>
+        </div>
+      {% endfor %}
+    </div>
+  {% endif %}
+  <div class="section-head">
+    <h2>Finished work</h2>
+    <a class="btn btn--ghost" href="/deliverables?role=all">Browse what specialists can produce</a>
+  </div>
+  {% if recent_results %}
+    <div class="card-grid">
+      {% for g in recent_results %}
+        <a class="card dlv-finished" href="/chat/goal/{{ g.id }}">
+          <span class="badge done">Done</span>
+          <strong>{{ g.title }}</strong>
+          {% if result_labels.get(g.domain) %}<span class="muted">{{ result_labels[g.domain] }}</span>{% endif %}
+          <span class="muted" data-when="{{ g.updated_at }}"></span>
+          <span class="dlv-finished__open">Open result →</span>
+        </a>
+      {% endfor %}
+    </div>
+    {% if results_page > 1 or results_more %}
+      <nav class="dlv-pager" aria-label="Results pages">
+        {% if results_page > 1 %}<a class="btn" href="/deliverables?page={{ results_page - 1 }}" rel="prev">Previous</a>{% endif %}
+        <span class="muted">Page {{ results_page }}</span>
+        {% if results_more %}<a class="btn" href="/deliverables?page={{ results_page + 1 }}" rel="next">Next</a>{% endif %}
+      </nav>
+    {% endif %}
+  {% else %}
+    <div class="mv-empty">
+      <p class="mv-empty__title">No results yet</p>
+      <p class="mv-empty__body">Finished tasks with a saved answer appear here.</p>
+      {% if can_create_goal %}<p><a class="btn btn--primary" href="/chat">Start a task</a></p>{% endif %}
+    </div>
+  {% endif %}
+  {% else %}
   {% set produced = items | selectattr('latest') | list %}
   {% set has_results = produced or awaiting %}
   {% call hero('Your AI workforce', 'Results',
@@ -148,6 +202,7 @@
     </div>
   {% endif %}
   {% endif %}
+  {% endif %}
 
   <style>
     .dlv-filter { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-bottom: var(--space-3); }
@@ -174,6 +229,9 @@
     }
     .dlv-run:hover { border-color: var(--brand-border); }
     .dlv-run__title { flex: 1 1 auto; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .dlv-finished { display: flex; flex-direction: column; gap: var(--space-2); color: var(--text); }
+    .dlv-finished:hover { border-color: var(--brand-border); }
+    .dlv-finished__open { color: var(--brand-fg); font-weight: var(--font-semibold); margin-top: auto; }
     .dlv-pager { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: var(--space-3); }
   </style>
 {% endblock %}

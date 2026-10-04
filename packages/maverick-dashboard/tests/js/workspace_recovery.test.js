@@ -1254,19 +1254,25 @@ test('held reading positions are recorded with plain fields and exact checkpoint
   }
 });
 
-test('the private approval code has a Copy code button and an empty code is explained', async () => {
+test('the private approval code copies in recovery mode with feedback beside its button', async () => {
   const h = await harness(async () => ({}));
-  const copied = [], toasts = [];
-  h.dom.window.mvCopy = text => copied.push(text);
-  h.dom.window.mvToast = (text, opts) => toasts.push([text, opts]);
+  const copied = [];
+  Object.defineProperty(h.dom.window.navigator, 'clipboard', { configurable: true,
+    value: { writeText: async text => { copied.push(text); } } });
   const button = h.dom.window.document.getElementById('wrec-installation-code-copy');
+  const status = h.get('installation-code-copy-status');
   assert.equal(button.textContent, 'Copy code');
   button.click();
   assert.deepEqual(copied, []);
-  assert.match(toasts[0][0], /no approval code yet/);
+  assert.match(status.textContent, /no approval code yet/);
   h.get('installation-code').value = '  code-123  ';
-  button.click();
+  button.click(); await tick();
   assert.deepEqual(copied, ['code-123']);
+  assert.match(status.textContent, /code copied/);
+  h.dom.window.navigator.clipboard.writeText = async () => { throw new Error('clipboard unavailable'); };
+  button.click(); await tick();
+  assert.match(status.textContent, /selected above/);
+  assert.equal(h.dom.window.document.activeElement, h.get('installation-code'));
   h.dom.window.close();
 });
 

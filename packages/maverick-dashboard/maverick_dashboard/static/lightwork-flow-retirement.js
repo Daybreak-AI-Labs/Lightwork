@@ -83,10 +83,41 @@
       return false;
     } finally {
       busy = false;
-      if (button && button.isConnected) button.disabled = false;
+      if (button && button.isConnected) button.disabled = button.dataset.flowInactive === 'true';
+    }
+  }
+  async function syncListStatus() {
+    var labels = document.querySelectorAll('[data-flow-status]');
+    if (!labels.length) return;
+    try {
+      var response = await fetch('/api/v1/flows', {cache: 'no-store'});
+      if (!response.ok) throw new Error('Flow status is unavailable.');
+      var data = await response.json();
+      if (!data || !Array.isArray(data.flows)) throw new Error('Flow status is unavailable.');
+      var byId = new Map(data.flows.map(function (flow) { return [flow.id, flow]; }));
+      labels.forEach(function (label) {
+        var flow = byId.get(label.dataset.flowStatus);
+        var off = label.closest('li').querySelector('[data-flow-retire="off"]');
+        var remove = label.closest('li').querySelector('[data-flow-retire="delete"]');
+        if (!flow || typeof flow.published !== 'boolean') {
+          label.textContent = 'This flow is no longer in the list. Refresh to check.';
+          if (off) off.disabled = true;
+          if (remove) remove.disabled = true;
+          return;
+        }
+        label.textContent = flow.published ? 'Published · ready for real runs' : 'Saved draft · turned off';
+        if (off) {
+          off.dataset.flowInactive = flow.published ? 'false' : 'true';
+          off.disabled = !flow.published;
+          off.title = flow.published ? 'Stop new starts and keep the draft' : 'This flow is already turned off';
+        }
+      });
+    } catch (_) {
+      labels.forEach(function (label) { label.textContent = 'Status unavailable. Open this flow to check.'; });
     }
   }
   window.addEventListener('load', function () {
+    syncListStatus();
     try {
       var notice = window.sessionStorage.getItem('lightwork-flow-retirement-notice');
       if (notice) {

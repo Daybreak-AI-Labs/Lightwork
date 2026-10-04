@@ -28,6 +28,25 @@ def test_new_install_budget_defaults_are_optional_and_explicit_choices_survive(m
     monkeypatch.setattr(wizard, "_q_select", lambda *_a, **_kw: "No task limit")
     assert wizard._consumer_budget() == {"task_limits_enabled": False}
 
+
+def test_custom_spending_cap_reasks_instead_of_saving_a_different_or_invalid_limit(monkeypatch):
+    from maverick_installer import wizard
+
+    monkeypatch.setattr(wizard, "_q_select", lambda *_a, **_kw: "custom")
+    answers = iter(["ten dollars", "-3", "NaN", "$10"])
+    monkeypatch.setattr(wizard, "_q_text", lambda *_a, **_kw: next(answers))
+    assert wizard._consumer_budget() == {"max_dollars": 10.0, "max_wall_seconds": 1800.0}
+
+
+def test_advanced_task_limits_reask_invalid_dollars_time_and_calls(monkeypatch):
+    from maverick_installer import wizard
+
+    monkeypatch.setattr(wizard, "_q_confirm", lambda *_a, **kw: kw["default"])
+    answers = iter(["nonsense", "$4.50", "-1", "600", "0", "20", "0.8, 1.0"])
+    monkeypatch.setattr(wizard, "_q_text", lambda *_a, **_kw: next(answers))
+    budget = wizard.pick_budget()
+    assert (budget["max_dollars"], budget["max_wall_seconds"], budget["max_tool_calls"]) == (4.5, 600.0, 20)
+
 def test_pick_mode_default_is_consumer(monkeypatch):
     from maverick_installer import wizard
     captured = {}

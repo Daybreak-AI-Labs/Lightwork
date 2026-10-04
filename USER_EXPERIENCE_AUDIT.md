@@ -568,6 +568,8 @@ no images without alt, axe violations limited to nine distinct rules).
 
 #### UX-027 · P1 · Bug · The Agent Factory's suggested action chips 'Write code' and 'Work with files' grant tools that do not exist ('code', 'files'); a custom agent built with them saves cleanly but cannot even read a file
 
+- **Current branch (2026-10-03):** Suggested chips now use actual action names returned by the installed registry, with plain labels for reading, finding, and changing files and running code. Validation and save reject newly granted actions absent from that registry, so the editor cannot claim a specialist can use the old `code`/`files` placeholders. Previously saved unknown actions remain visible for review and removal; they are not silently granted a replacement action. Focused editor API checks passed; installed-browser acceptance is open.
+
 - **Who / where:** workspace admin, end user, evaluator · `/agents?new=1 -> 'Allowed actions' chips -> Create custom agent`
 - **User impact:** The headline 'describe a specialist in plain English and pick what it can use' journey produces an agent that looks equipped but can do nothing with files or code; the user only discovers it when every task fails or returns an ungrounded answer.
 - **Evidence (reproduced):**
@@ -592,6 +594,7 @@ no images without alt, axe violations limited to nine distinct rules).
   - [C5b-068] packages/maverick-core/maverick/domain.py:46,112 — _DOMAIN_ID_RE is ASCII-only; load_domains swallows the error (271-272, 330-331)
   - [C5b-068] cmd: python3 repro_factory.py → slug 'café_ops' saved; 'loads as a specialist: False'
 - **Recommendation (effort S):** Transliterate/ASCII-fold names in _slug (fallback to a random suffix), validate the slug with the loader's regex before saving, and after save re-read available_domains() and fail loudly if the pack did not load; show the new specialist inline instead of 'Reload the page'.
+- **Current branch (2026-10-03):** New intake identities ASCII-fold common accented names and use a stable suffix for non-ASCII distinctions; non-Latin names get a loadable fallback identity. Generated names that match built-in packs get a separate identity. Saving validates the identifier, refuses silent overwrite, loads the saved pack, and the UI confirms that the workspace catalog actually exposes it before claiming success. Approval now saves before document ingestion, so a rejected pack leaves no orphaned document collection. On success the page opens the new specialist's editor automatically and shows the saved confirmation. Focused intake and business-setup checks passed; installed-browser acceptance is still open.
 - Source: U3-018, C5b-068
 
 #### UX-029 · P1 · Bug · AI Entity Tasks: the AI-system picker never loads because the page calls a URL that does not exist
@@ -728,6 +731,7 @@ no images without alt, axe violations limited to nine distinct rules).
   - packages/maverick-core/maverick/attachment_submissions.py:185-186 — SubmissionStore.update writes that message into goals.result
   - packages/maverick-dashboard/maverick_dashboard/templates/chat_goal.html:326 and :962-979 — result-section shown whenever goal.result/d.result is non-empty
 - **Recommendation (effort S):** Stop storing submission-preparation status in goals.result (keep it in attachment_submissions.detail only), or have the chat page ignore result while status is draft/pending/running unless the stream marks it as the streamed answer. Show preparation status as a small step in the activity strip, and only mention attachments when files were attached.
+- **Current branch (2026-10-03):** Preparation updates now stay in the submission receipt and no longer overwrite the task answer. The existing submission-status panel still explains files when files are present. The answer panel and live update path hide a matching legacy preparation message already saved by an older build. Local admission/chat checks passed; a live browser run remains open.
 - Source: U2-001
 
 #### UX-039 · P1 · Bug · Connections page is unusable in single-user (no sign-in) mode: after 'Turn on connections' the whole 'Add a connection with a key' form is disabled with 'Your connection access changed. Sign in again' — there is no sign-in to use
@@ -1250,6 +1254,14 @@ no images without alt, axe violations limited to nine distinct rules).
 
 #### UX-066 · P1 · Ux · AI provider failure is shown as 'Lightwork stopped — internal error' with status 'Paused': no cause, no remedy
 
+- **Current branch (2026-10-03):** Escaped AI SDK failures now save a stable,
+  non-sensitive cause and a failed state. The finalization boundary preserves
+  it instead of writing the raw provider exception back over it. Chat maps
+  authentication, rate-limit, missing-model, outage, and connection failures
+  to distinct plain-language remedies; a safe problem step is added to the
+  work log. Focused mapping and chat checks passed. A live provider failure
+  still needs installed browser acceptance.
+
 - **Who / where:** end user, workspace admin, evaluator · `/chat/goal/{id} (halt card)`
 - **User impact:** When the AI provider is down, rate-limited or misconfigured the user is told only 'internal error' and that the task is 'Paused'. They cannot tell whether to wait, retry, fix a key or contact an admin, and 'Paused' implies it will continue by itself.
 - **Evidence (reproduced):**
@@ -1268,6 +1280,11 @@ no images without alt, axe violations limited to nine distinct rules).
 
 #### UX-067 · P1 · Ux · Default (no-token) install rejects every scripted API write with a misleading 'Reload the dashboard' 403; docs/api.md says 'no auth' and its template example fails
 
+- **Current branch (2026-10-03):** A local API write without browser headers
+  now explains the exact same-origin header or in-product API-key path. The
+  REST guide and local request example use a matching Origin. The CSRF gate
+  still refuses a forged browser Origin. Focused security checks passed.
+
 - **Who / where:** developer, evaluator · `POST /api/v1/goals (any mutating /api/v1 route) in loopback no-token mode`
 - **User impact:** An evaluator following the REST docs on a fresh install gets a 403 telling them to reload a browser page they are not using; the real remedy (set a server access token and send a Bearer header, or add an Origin header) is documented nowhere.
 - **Evidence (reproduced):**
@@ -1279,6 +1296,14 @@ no images without alt, axe violations limited to nine distinct rules).
 - Source: C3-002
 
 #### UX-068 · P1 · Ux · Goal status 'blocked' means ~20 different things (awaiting your answer, provider crash, quota, Shield refusal, halt…) and the API gives no machine-readable reason
+
+- **Current branch (2026-10-03):** Goal detail/list and short-poll events now
+  expose a stable `reason_code`, including `awaiting_input` when an unanswered
+  question is the active stop and the mapped stop kind for other failures.
+  Existing `needs_input`, question IDs, timestamps, and short-poll terminal
+  semantics remain. Focused endpoint checks passed. Historical open questions
+  left behind after a different stop can still make `needs_input` ambiguous;
+  that state needs a durable reason on the goal itself.
 
 - **Who / where:** developer, end user · `GET /api/v1/goals/{id}, GET /api/v1/goals/{id}/events`
 - **User impact:** An integration cannot tell 'ask the human this question' from 'the provider is down, retry later' from 'refused by policy, do not retry' without regex-matching English result text; a client that trusts terminal:true stops polling a goal that is only waiting for input.
@@ -1293,6 +1318,12 @@ no images without alt, axe violations limited to nine distinct rules).
 - Source: C3-011
 
 #### UX-069 · P1 · Ux · 'Results' (sidebar) never shows the user's own finished work: it lists 2,031 catalog placeholders all reading 'Not produced yet.'
+
+- **Current branch (2026-10-03):** The default Results page now reads paged,
+  completed root tasks with saved answers for the exact caller and links to
+  their conversation. Pack sign-offs remain visible. The thousands of
+  potential outputs are behind the explicit specialist-browse link. Focused
+  page and ownership tests passed; signed-in installed acceptance is open.
 
 - **Who / where:** end user, evaluator · `/deliverables (sidebar Work > Results)`
 - **User impact:** A business user who clicks 'Results' after asking Lightwork for work sees an endless list of other roles' empty templates ('permit & inspection status log — Not produced yet.') and none of their own results; the page named for results is the worst place to find results.
@@ -1569,6 +1600,7 @@ no images without alt, axe violations limited to nine distinct rules).
   - provider_cost_cap.py:137-141 — error shown: 'Provider accounting is unavailable or has unresolved charges. New calls are blocked; reconcile the retained accounting before retrying.'
 - **Recommendation (effort M):** Move receipts/attempt index into an indexed SQLite table in world.db (append/update one row per call) or segment the file by period and prune settled attempt-index rows after the period closes; run prune on a schedule. Add a regression test that per-call cost stays flat from 100 to 10,000 prior calls. Surface ledger size/health in Settings > Maintenance.
 - Source: C4-002
+- **Current branch status (partial):** Healthy JSON ledgers migrate at 512 KiB to an indexed, local SQLite accounting authority. The original JSON remains as a retained migration source; the active marker is published only after the staged database and integrity seal are complete. Failed migration leaves JSON authoritative, while a missing or damaged active database blocks new charges until a reviewed repair or complete Workspace restore. Reserve, settle, and attempt claims update SQLite transactionally, and Settings > Provider Spending reports accounting health, counts, and the appropriate recovery route. At 20,000 prior receipts on a Windows development host (4.29 MB database), check/reserve/settle took about 8/28/26 ms. Every active operation still hashes the entire database to verify the seal, so cost grows with database bytes; this remains a scale limit at larger histories and is not a claim of unlimited or constant-time accounting.
 
 #### UX-089 · P1 · Docs · There is no user guide for the product UI: the public docs never explain chat, approvals, flows, workspaces, users, settings or the governance workbenches
 
@@ -1585,6 +1617,11 @@ no images without alt, axe violations limited to nine distinct rules).
 
 #### UX-090 · P1 · Docs · Flows' advertised differentiator ('hardens a reliable agent step into a deterministic action, inferring the very tool it kept calling… better than Power Automate') can never apply: harden proposals are hard-coded not applicable
 
+- **Current branch (2026-10-03):** README and feature documentation now say
+  hardening is a review-only suggestion until parameters and effects can be
+  verified. They no longer claim autonomous application or superiority to
+  Power Automate. The underlying hardening capability remains unbuilt.
+
 - **Who / where:** evaluator, workspace admin, end user · `README.md:28, docs/FEATURES.md:2244-2250`
 - **User impact:** An evaluator comparing against Power Automate expects flows to cheapen themselves automatically; they only ever see a non-applicable suggestion, flows are off until an admin enables them, and 'import from Power Automate' requires a manual export. The comparative headline is not supportable.
 - **Evidence (code-verified):**
@@ -1597,6 +1634,10 @@ no images without alt, axe violations limited to nine distinct rules).
 - Source: C7-008
 
 #### UX-091 · P1 · Docs · Public docs homepage advertises 'use your existing ChatGPT Plus / Claude Pro / Kimi / X Premium / Gemini Advanced subscriptions via captured browser sessions' — no such providers exist
+
+- **Current branch (2026-10-03):** The public home page now describes
+  supported API/self-hosted connections instead of nonexistent captured
+  subscription sessions. The malformed channel bullet was also repaired.
 
 - **Who / where:** evaluator, end user, IT/security · `docs/index.md (public site home page)`
 - **User impact:** An evaluator reading the first page of the public docs expects to run Lightwork on their consumer chat subscriptions with no API spend; the option does not exist in the product, so the first-hour trial fails on a headline promise. For an enterprise security reviewer, advertising 'captured browser sessions' of consumer accounts (a practice consumer ToS generally prohibit) undermines the 'governed' positioning.
@@ -1611,6 +1652,11 @@ no images without alt, axe violations limited to nine distinct rules).
 - Source: C7-001
 
 #### UX-092 · P1 · Docs · Headline marketing says every run works 'under hard dollar / wall-clock / tool-call caps', but no caps exist by default (task limits were removed)
+
+- **Current branch (2026-10-03):** README, press kit, and tier description
+  now describe configurable task limits and state that omitted limits are not
+  automatic caps. The same copy no longer presents exploratory learning
+  reports as proven customer savings or causal improvement.
 
 - **Who / where:** evaluator, workspace admin, IT/security, developer · `README.md:27, docs/press-kit.md:26,36,54 (public), docs/product-portfolio.md:66`
 - **User impact:** A buyer or admin who trusts the press kit/README believes runaway spend is impossible out of the box; in reality an unattended long goal has no dollar, time or tool ceiling unless someone sets one. The README contradicts itself two bullets apart.
@@ -6596,6 +6642,7 @@ no images without alt, axe violations limited to nine distinct rules).
   - cmd: python3 repro_placebo.py (200 runs; treatment perfectly aligned with an unmeasured easier-task factor, true effect 0) → effect=0.59, placebo_effect=0.0019, trustworthy=True
   - README.md:21 — 'stratified ATE with confidence intervals, placebo refutation, and a trustworthiness gate'; docs/FEATURES.md:345-347
 - **Recommendation (effort M):** Replace with a real refutation (e.g. permutation p-value of the observed ATE vs the permutation distribution, a placebo-outcome/pre-period test, or random-common-cause test), use sample variance, and describe precisely what the gate can and cannot rule out.
+- **Current branch (2026-10-03):** The mean-of-shuffles gate is removed. The estimator now uses sample variance, excludes singleton-arm strata, and compares the observed difference with the shuffled distribution only for units explicitly marked prospectively randomized. Ordinary captured trajectories remain observational and fail closed for automatic promotion, habits, and guardrails; their contrasts are diagnostic only. The producer also refuses model-simulation estimates without randomized provenance. Documentation and in-product setting text no longer claim that task history proves causation. This is a safety correction, not a completed randomized-trial capability: there is not yet an independently verified assignment ledger or customer UI for controlled trials, so this finding remains partially open. Focused local checks: 48 core tests passed with this checkout pinned on `PYTHONPATH`.
 - Source: C5b-053
 
 #### UX-104 · P2 · Trust · `maverick client erase` deletes a client's entire data root without writing any audit record (even with --keep-audit)

@@ -63,15 +63,20 @@
     try {
       var data = await send('/api/v1/setup/settings-file/check', file);
       if (input.files[0] !== file) return;
-      reviewed = {file: file, token: data.review};
+      reviewed = data.valid ? {file: file, token: data.review} : null;
       status.textContent = data.summary;
       var impact = el('ul');
       (data.impact || []).forEach(function (item) { impact.appendChild(el('li', null, (item.change ? item.change + ' - ' : '') + item.label + ': ' + JSON.stringify(item.before) + ' → ' + JSON.stringify(item.after) + '. ' + item.impact + '. ' + item.source + (item.overridden ? ' (file choice is overridden)' : ''))); });
       out.appendChild(impact);
       if (data.technical && data.technical.length) {
-        var details = el('details'); details.appendChild(el('summary', null, 'Technical details (for your IT team)'));
+        var details = el('details'); details.open = !data.valid;
+        details.appendChild(el('summary', null, data.valid ? 'Notes about this file' : 'Settings to correct'));
         var ul = el('ul'); data.technical.forEach(function (t) { ul.appendChild(el('li', 'muted', t.text)); });
         details.appendChild(ul); out.appendChild(details);
+      }
+      if (!data.valid) {
+        var settings = el('a', 'btn btn--ghost', 'Change settings in Lightwork');
+        settings.href = '/settings/all'; out.appendChild(settings);
       }
       install.hidden = !data.valid;
     } catch (failure) { status.textContent = await failText(failure, 'check the file'); } finally { busy = false; }

@@ -117,6 +117,8 @@ def test_api_v1_mutation_blocks_missing_origin(monkeypatch, tmp_path):
     client = _client()
     resp = client.post("/api/v1/facts", json={"key": "x", "value": "y"})
     assert resp.status_code == 403
+    assert "Origin header" in resp.json()["detail"]
+    assert "Account > API keys" in resp.json()["detail"]
 
 
 def test_api_v1_mutation_allows_matching_origin(monkeypatch, tmp_path):

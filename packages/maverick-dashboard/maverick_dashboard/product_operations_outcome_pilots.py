@@ -70,8 +70,43 @@ def prepare(request, selection, _arguments):
     return Preview(current.summary, native=current.details)
 
 
+def value_snapshot(request, selection):
+    """Read the same source-authorized pilot evidence shown by the native page."""
+    pilot_id = _id(selection)
+    context = outcome_pilots_api._context(request)
+    try:
+        record = outcome_pilots.get(pilot_id, context)
+    except LookupError as exc:
+        raise HTTPException(404, "This pilot is no longer available to your account and workspace.") from exc
+    report = outcome_pilots.report(record, resolve=outcome_pilots_api._resolver(request))
+    details = {
+        "pilot": report["title"],
+        "groups": report["groups"],
+        "evidence_readiness": report["evidence_readiness"],
+        "limitations": report["limitations"],
+        "case_exposure_verified": False,
+        "causal_lift_qualified": False,
+        "href": "/outcome-pilots",
+    }
+    current_cases = [(row["id"], row["status"],
+                      row.get("source", {}).get("version")) for row in report["cases"]]
+    return Snapshot(digest([context, pilot_id, report["revision"], current_cases, details]),
+                    "Current source-authorized pilot evidence",
+                    "Review what the full frozen cohort's operator-reported evidence supports and what remains missing. It does not prove causal improvement or independently verified savings.",
+                    details=details)
+
+
+def value_prepare(request, selection, _arguments):
+    current = value_snapshot(request, selection)
+    return Preview(current.summary, native=current.details)
+
+
 def entries():
     return (Adapter("learning.pilot_release_status", "Check this pilot's release", "learning",
                     "/outcome-pilots", ("/outcome-pilots",), EmptyInput,
                     snapshot, prepare,
-                    aliases=("check pilot release", "check this pilot's release")),)
+                    aliases=("check pilot release", "check this pilot's release")),
+            Adapter("learning.pilot_value_evidence", "Review this pilot's value evidence", "learning",
+                    "/outcome-pilots", ("/outcome-pilots",), EmptyInput,
+                    value_snapshot, value_prepare,
+                    aliases=("pilot results", "pilot value", "what did this pilot save")))

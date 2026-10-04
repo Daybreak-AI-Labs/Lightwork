@@ -58,7 +58,8 @@ test('a completed-work suggestion stays a draft until an administrator reviews a
   let added = false;
   const ui = await fixture(markup, (url) => {
     if (url.endsWith('/learned-candidates')) return response({can_add: true, blocked: '',
-      suggestions: added ? [] : [candidate], added: added ? [{name: 'renewal-timing', fingerprint: 'b'.repeat(64)}] : []});
+      suggestions: added ? [] : [candidate], added: added ? [{name: 'renewal-timing', fingerprint: 'b'.repeat(64),
+        recall_ready: true, use_tracking: true, uses: 1, status: 'Available for matching new tasks.'}] : []});
     if (url.endsWith('/admit')) { added = true; return response({name: 'renewal-timing', triggers: candidate.triggers, tools_needed: []}, 201); }
     if (url.endsWith('/withdraw')) { added = false; return response({name: 'renewal-timing', removed: true}); }
     return response({});
@@ -73,6 +74,7 @@ test('a completed-work suggestion stays a draft until an administrator reviews a
   assert.deepEqual(posts(ui.calls, '/admit')[0].body, {fingerprint: candidate.fingerprint,
     publish_name: 'renewal-timing', confirm: true});
   assert.match(ui.document.getElementById('to-learned-added').textContent, /renewal timing/);
+  assert.match(ui.document.getElementById('to-learned-added').textContent, /Used on 1 later task/);
   button(ui.document.getElementById('to-learned-added'), 'Remove').click();
   await ui.settle();
   assert.deepEqual(posts(ui.calls, '/withdraw')[0].body, {fingerprint: 'b'.repeat(64), confirm: true});

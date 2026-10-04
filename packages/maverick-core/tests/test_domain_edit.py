@@ -10,7 +10,14 @@ except ModuleNotFoundError:  # Python 3.10
     import tomli as tomllib  # type: ignore[no-redef]
 
 import pytest
-from maverick.domain import available_domains, builtin_dir, lint_profile, load_domains
+from maverick.domain import (
+    DomainProfile,
+    WorkflowStep,
+    available_domains,
+    builtin_dir,
+    lint_profile,
+    load_domains,
+)
 from maverick.domain_edit import (
     list_agents,
     overlay_toml,
@@ -18,8 +25,26 @@ from maverick.domain_edit import (
     remove_override,
     resolved_view,
     validate_override,
+    workflow_readiness,
     write_override,
 )
+
+
+def test_workflow_readiness_names_missing_actions_without_claiming_live_service():
+    profile = DomainProfile(
+        name="example", allow_tools=["read_file", "web_search", "ledger_read"],
+        workflow=[WorkflowStep(name="research", tools=["web_search"])],
+    )
+    blocked = workflow_readiness(profile, frozenset({"read_file"}))
+    assert blocked["state"] == "needs_setup"
+    assert blocked["missing_tools"] == ["web_search"]
+    assert blocked["fix_url"] == "/settings/all?id=capabilities.web_search"
+    assert blocked["missing_optional_tools"] == ["ledger_read"]
+
+    can_start = workflow_readiness(profile, frozenset({"read_file", "web_search"}))
+    assert can_start["state"] == "action_ready"
+    assert can_start["missing_optional_tools"] == ["ledger_read"]
+    assert workflow_readiness(profile, None)["state"] == "unknown"
 
 
 def _clean_builtin():

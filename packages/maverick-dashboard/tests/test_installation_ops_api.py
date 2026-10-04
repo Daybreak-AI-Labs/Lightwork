@@ -459,9 +459,13 @@ def test_setup_guide_lists_every_assistant_step(client):
 def test_prepared_settings_file_is_checked_then_installed_with_a_backup(client, monkeypatch, tmp_path):
     bad = client.post("/api/v1/setup/settings-file/check", content=b"[safety\n").json()
     assert bad["valid"] is False and not _BANNED.search(bad["summary"])
-    good = b'[safety]\nprofile = "strict"\n[budgets]\nx = 1\n'
+    for unusable in (b'[budgets]\nx = 1\n', b'[budget]\nmax_dollars = "unlimited"\n'):
+        refused = client.post("/api/v1/setup/settings-file/check", content=unusable).json()
+        assert refused["valid"] is False and "review" not in refused
+        assert "cannot use" in refused["summary"]
+    good = b'[safety]\nprofile = "strict"\n'
     checked = client.post("/api/v1/setup/settings-file/check", content=good).json()
-    assert checked["valid"] is True and checked["problems"] >= 1
+    assert checked["valid"] is True and checked["problems"] == 0
     assert client.post("/api/v1/setup/settings-file/install", content=good).status_code == 409
     assert client.post("/api/v1/setup/settings-file/check", content=b"x" * (256 * 1024 + 1)).status_code == 413
     _config(tmp_path, '[safety]\nprofile = "balanced"\n')

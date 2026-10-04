@@ -25,6 +25,35 @@ _GENERIC_MESSAGE = "The run stopped before finishing."
 _GENERIC_ACTION = "Try again. If it keeps stopping, ask an administrator to check the logs."
 
 
+def exception_stop_text(exc: BaseException) -> str:
+    """Store a stable, non-sensitive cause for a failed AI call.
+
+    SDK exception text can contain URLs, account names, and provider response
+    bodies. Those belong in the server log, never in the customer-facing goal.
+    Classification uses SDK type/status rather than matching those bodies.
+    """
+    name = type(exc).__name__
+    module = type(exc).__module__.split(".", 1)[0]
+    provider = module in {"openai", "anthropic"} or name in {
+        "APIConnectionError", "APITimeoutError", "AuthenticationError",
+        "RateLimitError", "InternalServerError", "NotFoundError",
+    }
+    if not provider:
+        return "internal error"
+    status = getattr(exc, "status_code", None)
+    if status in {401, 403} or name == "AuthenticationError":
+        return "provider_error:authentication"
+    if status == 429 or name == "RateLimitError":
+        return "provider_error:rate_limit"
+    if status == 404 or name == "NotFoundError":
+        return "provider_error:model_not_found"
+    if (isinstance(status, int) and status >= 500) or name == "InternalServerError":
+        return "provider_error:unavailable"
+    if name in {"APIConnectionError", "APITimeoutError"}:
+        return "provider_error:connection"
+    return "provider_error:configuration"
+
+
 @dataclass(frozen=True)
 class StopReason:
     """What a person reads when a run stops."""
@@ -50,6 +79,51 @@ def _rx(*parts: str) -> re.Pattern[str]:
 
 # (kind, pattern, message, action, link, link_label) -- first match wins.
 _RULES: tuple[tuple[str, re.Pattern[str], str, str, str | None, str | None], ...] = (
+    (
+        "provider_authentication",
+        _rx(r"^provider_error:authentication$", r"\bAuthenticationError\b"),
+        "The AI connection needs attention.",
+        "Ask an administrator to check the AI account and key, then try again.",
+        "/connections", "Open AI connections",
+    ),
+    (
+        "provider_rate_limit",
+        _rx(r"^provider_error:rate_limit$", r"\bRateLimitError\b",
+            r"Error code: 429\b"),
+        "The AI service is busy right now.",
+        "Try again in a few minutes. If it keeps happening, ask an administrator to check the service account.",
+        None, None,
+    ),
+    (
+        "provider_model_not_found",
+        _rx(r"^provider_error:model_not_found$", r"\bNotFoundError\b"),
+        "The selected AI model is unavailable.",
+        "Ask an administrator to choose an available model, then try again.",
+        "/connections", "Open AI connections",
+    ),
+    (
+        "provider_unavailable",
+        _rx(r"^provider_error:unavailable$", r"\bInternalServerError\b",
+            r"Error code: 5\d\d\b"),
+        "The AI service is not responding.",
+        "Try again in a few minutes. If it keeps happening, ask an administrator to check the connection.",
+        None, None,
+    ),
+    (
+        "provider_connection",
+        _rx(r"^provider_error:connection$", r"\bAPIConnectionError\b",
+            r"\bAPITimeoutError\b"),
+        "Lightwork couldn't reach the AI service.",
+        "Check the AI connection and try again.",
+        "/connections", "Open AI connections",
+    ),
+    (
+        "provider_configuration",
+        _rx(r"^provider_error:configuration$"),
+        "The AI connection could not complete this request.",
+        "Ask an administrator to check the AI connection, then try again.",
+        "/connections", "Open AI connections",
+    ),
     (
         "workspace_paused",
         _rx(r"tenant is suspended or unknown", r"tenant policy unavailable",

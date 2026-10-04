@@ -108,6 +108,21 @@ class TestOverrideLifecycle:
         assert r.json()["errors"]
         assert client.get(f"/api/v1/agents/{name}").json()["is_override"] is False
 
+    def test_factory_cannot_save_actions_missing_from_installed_registry(self, tmp_path):
+        name = "invoice_chaser"
+        body = {"allow_tools": ["files", "code"], "max_risk": "medium",
+                "persona": "Handle invoices using the actions this installation provides."}
+        review = client.post(f"/api/v1/agents/{name}/validate", json=body)
+        assert review.status_code == 200
+        assert any("'files'" in error for error in review.json()["errors"])
+        assert any("'code'" in error for error in review.json()["errors"])
+        saved = client.post(f"/api/v1/agents/{name}/override", json=body)
+        assert saved.status_code == 422
+        assert not (tmp_path / "domains" / f"{name}.toml").exists()
+        body["allow_tools"] = ["read_file", "list_dir"]
+        assert client.post(f"/api/v1/agents/{name}/validate", json=body).json()["ok"]
+        assert client.post(f"/api/v1/agents/{name}/override", json=body).status_code == 200
+
     def test_delete_override_reverts(self):
         name = _clean_builtin_name()
         client.post(f"/api/v1/agents/{name}/override", json={"description": "temp"})

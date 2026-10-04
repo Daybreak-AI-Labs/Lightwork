@@ -369,6 +369,23 @@ def available_skills(skills_dir: Path | None = None) -> list[Skill]:
     return list(by_name.values())
 
 
+def learned_skill_use_key(skill: Skill) -> str:
+    """Version-bound use counter for a reviewed or provider-distilled skill.
+
+    The ordinary name counter still drives ranking. This separate key lets the
+    Skills page prove that this exact learned instruction set was recalled on
+    a later run, even if a withdrawn name was reused for another skill.
+    """
+    if skill.source not in {_REVIEWED_LOCAL_SOURCE, "auto-distilled-provider-v1"}:
+        return ""
+    payload = json.dumps({
+        "name": skill.name, "source": skill.source,
+        "sources": skill.source_goal_ids, "triggers": skill.triggers,
+        "tools": skill.tools_needed, "body": skill.body,
+    }, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+    return "learned:" + hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
 def _decay_weights(names: list[str]) -> dict[str, float]:
     """Track-record multipliers for ``names`` (neutral 1.0 on any failure).
 

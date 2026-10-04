@@ -111,7 +111,8 @@ class PersonalInbox:
         return value
 
     def refresh(self, sources: list[dict], preferences: dict, *, now: float | None = None,
-                allow_critical: bool = False, seen_id: str | None = None) -> dict:
+                allow_critical: bool = False, seen_id: str | None = None,
+                enrolled_at: float | None = None) -> dict:
         now = time.time() if now is None else now
         preferences = validate_preferences(preferences)
         # Source IDs and versions describe semantic changes, never streaming
@@ -139,9 +140,15 @@ class PersonalInbox:
                     continue
                 if source["category"] == "changed-result" and ref not in known and not source.get("changed_after_completion"):
                     continue
-                # Opening an inbox for the first time does not replay every old
-                # completion. Current decisions/problems are useful immediately.
-                if not stored["initialized"] and source["category"] in {"completed", "changed-result"}:
+                # Opening an inbox for the first time does not replay old
+                # completions. A task finished after automatic owner enrollment
+                # must still alert even if the observer's first pass came late.
+                recent_completion = (source["category"] == "completed"
+                                     and isinstance(enrolled_at, (int, float))
+                                     and isinstance(source.get("occurred_at"), (int, float))
+                                     and source["occurred_at"] >= enrolled_at)
+                if (not stored["initialized"] and source["category"] in {"completed", "changed-result"}
+                        and not recent_completion):
                     continue
                 ident = hashlib.sha256(json.dumps([self.principal, ref, source["version"]]).encode()).hexdigest()
                 items.append({"id": ident, "ref": ref, "version": source["version"], "created_at": now,

@@ -63,10 +63,25 @@ def snapshot(request, _selection, *, edit=True):
     revision = hashlib.sha256(json.dumps({"revision": state["revision"], "choices": _choices(state),
         "critical": state["critical_allowed"], "external": state["private_delivery"].get("enabled", False)},
         sort_keys=True).encode()).hexdigest()
+    observed = state["background"].get("last_observed_at")
+    selected = set(state["preferences"]["external_links"])
+    ready = sum(row["id"] in selected and row["available"]
+                for row in state["private_delivery"].get("channels", []))
+    if not state["background_enabled"]:
+        observation = "Background checking is off; your inbox catches up when you open Lightwork."
+    elif observed is None:
+        observation = "Background checking is on, but no completed check has been recorded yet."
+    else:
+        observation = "Background checking is on; the last completed check is recorded in your inbox."
+    summary = ("Personal alerts follow your subscriptions and quiet hours. " + observation
+               + " The shared organization channel, including ntfy, does not receive your private task updates.")
     return Snapshot(revision, "Your personal notification preferences in the current workspace",
-        "Personal alerts use your subscriptions and quiet hours. Organization operational alerts keep their separate policy.",
+        summary,
         {"preferences": state["preferences"], "critical_allowed": state["critical_allowed"],
-         "background_enabled": state["background_enabled"], "partial": state["partial"]}, fields)
+         "background_enabled": state["background_enabled"], "last_observed_at": observed,
+         "private_channels_selected": len(selected), "private_channels_ready": ready,
+         "private_delivery_enabled": state["private_delivery"].get("enabled", False),
+         "partial": state["partial"], "href": "/notifications"}, fields)
 
 
 def _change(current, arguments, *, now):

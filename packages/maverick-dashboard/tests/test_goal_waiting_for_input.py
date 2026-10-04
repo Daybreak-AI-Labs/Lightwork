@@ -42,6 +42,7 @@ def test_a_goal_parked_on_a_question_says_it_needs_input(tmp_path):
     body = client.get(f"/api/v1/goals/{gid}").json()
 
     assert body["status"] == "blocked"
+    assert body["reason_code"] == "awaiting_input"
     assert body["needs_input"] is True
     assert body["open_question_ids"] == [first, second]
 
@@ -54,6 +55,7 @@ def test_a_goal_blocked_for_another_reason_does_not_claim_to_need_input(tmp_path
     body = client.get(f"/api/v1/goals/{gid}").json()
 
     assert body["status"] == "blocked"
+    assert body["reason_code"] == "internal_error"
     assert body["needs_input"] is False
     assert body["open_question_ids"] == []
 
@@ -128,6 +130,7 @@ def test_events_are_not_terminal_while_the_goal_waits_for_an_answer(tmp_path):
     body = client.get(f"/api/v1/goals/{gid}/events").json()
 
     assert body["status"] == "blocked"
+    assert body["reason_code"] == "awaiting_input"
     assert body["terminal"] is False
     assert body["needs_input"] is True
     assert body["open_question_ids"] == [qid]

@@ -57,6 +57,7 @@
         <div class="mv-row__main">
           <div class="mv-row__title">{{ f.name or (f.id|humanize) }}</div>
           <div class="mv-row__sub">{{ f.nodes }} step{{ '' if f.nodes == 1 else 's' }}</div>
+          <div class="mv-row__sub" data-flow-status="{{ f.id }}">Checking flow status…</div>
           <details hidden><summary>Technical details</summary><p class="muted">Flow reference: <code>{{ f.id }}</code></p></details>
         </div>
         {% if can_operate_workflows %}<div class="mv-row__actions">

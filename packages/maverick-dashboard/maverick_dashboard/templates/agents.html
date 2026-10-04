@@ -301,7 +301,7 @@
                  value="{{ ((selected.description or (selected.name | humanize)) if selected else '') }}">
           <datalist id="agent-picker-list">
             {% for a in agents %}
-            <option value="{{ (a.description or (a.name | humanize)) }}{% if a.is_override %} (custom){% endif %}" data-name="{{ a.name }}"></option>
+            <option value="{{ (a.description or (a.name | humanize)) }}{% if a.is_override %} (custom){% endif %}" data-name="{{ a.name }}" data-ready="{{ '1' if a.readiness.state == 'action_ready' else '0' }}" label="{{ a.readiness.label }}"{% if a.readiness.state != 'action_ready' %} disabled{% endif %}></option>
             {% endfor %}
           </datalist>
           <button type="button" class="btn" id="agent-picker-open">Open</button>
@@ -310,12 +310,27 @@
           <a class="btn{% if creating %} btn--primary{% endif %}" href="/agents?new=1#agent-form" id="btn-new-agent">＋ New custom agent</a>
           {% endif %}
         </div>
+        <label class="sub" style="display:inline-flex;align-items:center;gap:var(--space-2);margin-top:var(--space-2);">
+          <input id="agent-show-needs-setup" type="checkbox"> Show specialists that need setup
+        </label>
+        <p class="sub" style="margin:var(--space-1) 0 0;">The list starts with specialists whose required actions are available. Live connections, permissions and the AI service are checked when work starts.</p>
         {% elif editable %}
         <a class="btn btn--primary" href="/agents?new=1#agent-form" id="btn-new-agent">＋ New custom agent</a>
         {% endif %}
       </div>
 
       {% if selected %}
+      <div class="panel" role="status" style="margin-bottom:var(--space-3);">
+        <strong>{{ selected.readiness.label }}</strong>
+        {% if selected.readiness.state == 'needs_setup' %}
+        <p class="muted">Required actions are unavailable here: {{ selected.readiness.missing_labels | join(', ') }}.</p>
+        <a href="{{ selected.readiness.fix_url }}">Review setup</a>
+        {% elif selected.readiness.state == 'unknown' %}
+        <p class="muted">Lightwork could not check this specialist's required actions. Ask an administrator to review setup before assigning work.</p>
+        {% else %}
+        <p class="muted">The required actions are present. Live connections, permissions and the AI service are checked when work starts.</p>
+        {% endif %}
+      </div>
       <div style="display:flex; gap:var(--space-2); align-items:center; margin-bottom:var(--space-3);">
         <button type="button" class="btn btn--primary" id="btn-jobcard">📋 View job card</button>
         <span class="sub">the specialist's job description, manager scorecard &amp; cost tier</span>
@@ -534,10 +549,16 @@
     (function () {
       var picker = document.getElementById('agent-picker');
       if (!picker) return;
+      var showAll = document.getElementById('agent-show-needs-setup');
+      if (showAll) showAll.addEventListener('change', function () {
+        document.querySelectorAll('#agent-picker-list option').forEach(function (option) {
+          option.disabled = !showAll.checked && option.dataset.ready !== '1';
+        });
+      });
       function go() {
         var v = picker.value.trim(); if (!v) return;
         var match = Array.prototype.find.call(document.querySelectorAll('#agent-picker-list option'), function (o) {
-          return o.value.toLowerCase() === v.toLowerCase() || o.dataset.name === v;
+          return !o.disabled && (o.value.toLowerCase() === v.toLowerCase() || o.dataset.name === v);
         });
         if (match) location.href = '/agents?name=' + encodeURIComponent(match.dataset.name);
       }
@@ -545,8 +566,8 @@
       var open = document.getElementById('agent-picker-open');
       if (open) open.addEventListener('click', function () {
         go();
-        if (!Array.prototype.some.call(document.querySelectorAll('#agent-picker-list option'), function (o) { return o.value.toLowerCase() === picker.value.trim().toLowerCase(); })) {
-          mvToast('Choose a specialist from the list as you type.', { error: true });
+        if (!Array.prototype.some.call(document.querySelectorAll('#agent-picker-list option'), function (o) { return !o.disabled && o.value.toLowerCase() === picker.value.trim().toLowerCase(); })) {
+          mvToast('Choose a specialist from the list, or show those needing setup.', { error: true });
         }
       });
     })();
@@ -723,15 +744,16 @@
       var host = document.getElementById('skill-chips');
       var input = document.getElementById('f-allow');
       if (!host || !input) return;
-      var SUGGEST = ['web_search', 'email', 'browser', 'code', 'shell', 'files'];
+      var SUGGEST = ['web_search', 'email', 'browser', 'read_file', 'list_dir', 'write_file', 'code_exec', 'shell'];
       var sel = (input.value || '').split(/\s+/).filter(Boolean);
+      var installed = null;
 
       function sync() { input.value = sel.join(' '); }
       function render() {
         host.textContent = '';
         var seen = {};
         sel.forEach(function (t) { seen[t] = 1; addChip(t, true); });
-        SUGGEST.forEach(function (t) { if (!seen[t]) addChip(t, false); });
+        SUGGEST.forEach(function (t) { if (installed && installed.has(t) && !seen[t]) addChip(t, false); });
         var add = document.createElement('button');
         add.type = 'button'; add.className = 'chip add'; add.textContent = '+ Add another action';
         add.addEventListener('click', async function () {
@@ -752,8 +774,10 @@
         b.type = 'button'; b.className = 'chip' + (on ? ' on' : '');
         if (on) { var t = document.createElement('span'); t.className = 'tick'; t.textContent = '✓'; b.appendChild(t); }
         var labels = { web_search: 'Search the web', email: 'Email', browser: 'Browse websites',
-          code: 'Write code', shell: 'Run commands', files: 'Work with files' };
-        b.appendChild(document.createTextNode(labels[tool] || humanName(tool)));
+          read_file: 'Read files', list_dir: 'Find files', write_file: 'Change files',
+          code_exec: 'Run code', shell: 'Run commands' };
+        b.appendChild(document.createTextNode((installed && !installed.has(tool) ? 'Unavailable: ' : '')
+          + (labels[tool] || humanName(tool))));
         b.setAttribute('aria-pressed', String(on));
         b.addEventListener('click', function () {
           var i = sel.indexOf(tool);
@@ -763,6 +787,10 @@
         host.appendChild(b);
       }
       render();
+      toolChoices().then(function (tools) {
+        installed = tools.length ? new Set(tools.map(function (tool) { return tool.value; })) : null;
+        render();
+      });
     })();
 
     // ---- risk segmented control -> hidden #f-risk select ----
@@ -828,6 +856,15 @@
         msg.replaceChildren(document.createTextNode('Team set up. '), link,
           document.createTextNode(' to give it work.'));
       }
+      function blockedTeam(d) {
+        return Number.isInteger(d.ready_specialists) && Number.isInteger(d.unknown_specialists)
+          && d.ready_specialists === 0 && d.unknown_specialists === 0;
+      }
+      function readinessText(d, total) {
+        if (!Number.isInteger(d.ready_specialists)) return '';
+        return d.ready_specialists + ' of ' + total + ' can start'
+          + (d.unknown_specialists ? '; ' + d.unknown_specialists + ' need a setup check' : '');
+      }
       function render(list) {
         if (!list.length) { host.innerHTML = '<p class="muted">No departments yet. Your specialist packs appear here as deployable teams.</p>'; return; }
         host.innerHTML = list.map(function (d) {
@@ -835,13 +872,16 @@
           var n = members.length || d.headcount || 0;
           var preview = members.slice(0, 3).map(function (m) { return memberLabel(m, d.key); }).join(' · ');
           if (n > 3) preview += ' +' + (n - 3) + ' more';
+          var unavailable = blockedTeam(d);
+          var disable = unavailable ? ' disabled title="Set up at least one specialist before deploying this team"' : '';
           var deploy = d.entitled
-            ? '<button type="button" class="btn btn--primary dep-deploy" data-key="' + esc(d.key) + '" aria-label="Deploy ' + esc(d.title) + ' team" style="font-size:var(--text-sm);">Deploy team</button>'
-            : '<button type="button" class="btn dep-deploy" data-key="' + esc(d.key) + '" aria-label="Deploy ' + esc(d.title) + ' team" style="font-size:var(--text-sm);">Deploy team</button><span class="dept__addon">paid add-on</span>';
+            ? '<button type="button" class="btn btn--primary dep-deploy" data-key="' + esc(d.key) + '" aria-label="Deploy ' + esc(d.title) + ' team" style="font-size:var(--text-sm);"' + disable + '>Deploy team</button>'
+            : '<button type="button" class="btn dep-deploy" data-key="' + esc(d.key) + '" aria-label="Deploy ' + esc(d.title) + ' team" style="font-size:var(--text-sm);"' + disable + '>Deploy team</button><span class="dept__addon">paid add-on</span>';
           return '<div class="dept" data-key="' + esc(d.key) + '">'
             + '<div class="dept__head"><span class="dept__avatar">' + esc(initials(d.title)) + '</span>'
             + '<span><div class="dept__name">' + esc(d.title) + '</div>'
-            + '<div class="dept__sub">' + esc(d.charter || (n + ' specialists')) + '</div></span></div>'
+            + '<div class="dept__sub">' + esc(d.charter || (n + ' specialists')) + '</div>'
+            + (readinessText(d, n) ? '<div class="dept__sub">' + esc(readinessText(d, n)) + '</div>' : '') + '</span></div>'
             + (preview ? '<p class="dept__preview">' + esc(preview) + '</p>' : '')
             + '<div class="dept__foot">' + deploy
             + '<button type="button" class="btn btn--ghost dep-details" data-key="' + esc(d.key) + '" aria-label="View ' + esc(d.title) + ' details" style="font-size:var(--text-sm);">Details</button></div>'
@@ -872,7 +912,9 @@
         var members = d.members || [];
         var n = members.length || d.headcount || 0;
         document.getElementById('dept-dlg-sub').textContent =
-          n + ' specialist' + (n === 1 ? '' : 's') + (d.entitled ? '' : ' · paid add-on');
+          n + ' specialist' + (n === 1 ? '' : 's') +
+          (readinessText(d, n) ? ' · ' + readinessText(d, n) : '') +
+          (d.entitled ? '' : ' · paid add-on');
         document.getElementById('dept-dlg-charter').textContent = d.charter || '';
         var ul = document.getElementById('dept-dlg-members');
         ul.innerHTML = '';
@@ -888,7 +930,7 @@
           ul.appendChild(li);
         }
         document.getElementById('dept-dlg-msg').textContent = '';
-        dlgDeploy.disabled = dlgDeploy.dataset.inFlight === 'true';
+        dlgDeploy.disabled = dlgDeploy.dataset.inFlight === 'true' || blockedTeam(d);
         dlgDeploy.setAttribute('aria-label', 'Deploy ' + (d.title || key) + ' team');
         dlg.showModal();
       }
@@ -1173,6 +1215,16 @@
           <div class="jc-role" id="jc-role"></div>
         </div>
         <button type="button" class="btn btn--ghost jc-close" id="jc-close">Close</button>
+      </div>
+      <div class="jc-sec" role="status"><h3>Can this specialist start?</h3>
+        <p><strong>{{ selected.readiness.label }}</strong></p>
+        {% if selected.readiness.state == 'needs_setup' %}
+        <p class="muted">Required actions: {{ selected.readiness.missing_labels | join(', ') }}. <a href="{{ selected.readiness.fix_url }}">Review setup</a></p>
+        {% elif selected.readiness.state == 'unknown' %}
+        <p class="muted">Lightwork could not check the required actions. Ask an administrator to review setup before assigning work.</p>
+        {% else %}
+        <p class="muted">This checks required actions only; live connections, permissions and the AI service are checked when work starts.</p>
+        {% endif %}
       </div>
       <div class="jc-cards" id="jc-stats"></div>
       <div class="jc-sec"><h3>Cost level</h3>

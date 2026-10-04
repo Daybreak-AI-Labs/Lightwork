@@ -9,6 +9,7 @@
   const $ = id => document.getElementById('biz-' + id);
   const base = '/api/v1/agents/business-setup';
   const RISK = { low: 'Low: only reads and drafts', medium: 'Medium: can take everyday actions' };
+  const addedKey = 'lightwork-business-agent-added';
   let job = null, busy = false;
   function make(tag, cls, text) {
     const node = document.createElement(tag);
@@ -17,6 +18,20 @@
     return node;
   }
   function say(text) { $('status').textContent = text; }
+  try {
+    const added = sessionStorage.getItem(addedKey);
+    if (added) {
+      sessionStorage.removeItem(addedKey);
+      const message = JSON.parse(added);
+      if (message && message.name) {
+        const label = 'Added “' + human(message.name) + '”.' + (message.documents_loaded ? ' Loaded ' + message.documents_loaded + ' document parts into its memory.' : '')
+          + (message.message ? ' ' + message.message : '');
+        say(label);
+        const editorStatus = document.getElementById('agent-msg');
+        if (editorStatus) editorStatus.textContent = label;
+      }
+    }
+  } catch (_) { /* Private browsing may disable session storage; the specialist still opens. */ }
   function failText(failure, what) {
     return typeof window.mvErrorText === 'function' ? window.mvErrorText(failure, what) : 'Could not ' + what + '. Please try again.';
   }
@@ -106,8 +121,8 @@
       const result = data.result || {};
       if (result.saved !== true) { say(result.message || 'The specialist wasn’t added.'); return; }
       job = null; $('review').hidden = true;
-      say('Added “' + human(result.name) + '”.' + (result.documents_loaded ? ' Loaded ' + result.documents_loaded + ' document parts into its memory.' : '')
-        + (result.message ? ' ' + result.message : '') + ' Reload the page to see it in the list.');
+      try { sessionStorage.setItem(addedKey, JSON.stringify(result)); } catch (_) { /* Open it anyway. */ }
+      window.location.assign('/agents?name=' + encodeURIComponent(result.name) + '#agent-form');
     } catch (error) { say(failText(error, 'add the specialist')); }
     finally { lock(false); $('status').focus(); }
   });

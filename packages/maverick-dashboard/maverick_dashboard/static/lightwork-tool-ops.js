@@ -233,9 +233,10 @@
                 var saved = await request('/api/v1/skills/learned-candidates/' + encodeURIComponent(row.name) + '/admit',
                   {method: 'POST', json: {fingerprint: row.fingerprint, publish_name: chosen, confirm: true}});
                 var current = await refresh();
-                if (current && (current.added || []).some(function (item) { return item.name === saved.name; })) {
+                var confirmed = current && (current.added || []).find(function (item) { return item.name === saved.name; });
+                if (confirmed) {
                   if (window.lwAppendSkill) window.lwAppendSkill(saved);
-                  say(status, 'Added ' + human(saved.name) + '. Agents can use it on the next matching task.');
+                  say(status, 'Added ' + human(saved.name) + '. ' + (confirmed.status || 'Check its current use status below.'));
                 } else {
                   say(status, 'The add request returned, but the current skill list could not confirm it. Refresh before trying again.');
                 }
@@ -254,10 +255,11 @@
           data.added.forEach(function (row) {
             var card = el('div', 'sk-actions');
             card.appendChild(el('span', null, human(row.name)));
-            if (row.source_shared === false) {
-              card.appendChild(el('span', 'muted sk-small', row.status ||
-                'Paused: source task access is unavailable. Agents cannot use this skill now; you can still remove it.'));
-            }
+            if (row.status) card.appendChild(el('span', 'muted sk-small', row.status));
+            if (row.recall_ready === true) card.appendChild(el('span', 'muted sk-small',
+              row.use_tracking === false ? 'Use history is turned off.' :
+                (row.uses > 0 ? 'Used on ' + plural(row.uses, 'later task') + '.' :
+                  'No later task has used this skill yet.')));
             var remove = button('Remove', 'btn--danger');
             remove.setAttribute('aria-label', 'Remove ' + human(row.name));
             remove.addEventListener('click', async function () {

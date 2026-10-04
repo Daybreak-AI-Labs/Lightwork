@@ -60,7 +60,8 @@
     el('spend-period-kind').disabled = el('spend-period').disabled = el('spend-period-day').disabled = el('spend-provider').disabled = busy;
     el('spend-load-period').disabled = busy;
     el('spend-open-review').disabled = busy || !state || !el('spend-review-pick').value;
-    el('spend-export').disabled = busy || !state || !state.available || state.shared;
+    el('spend-export').disabled = busy || !state || !state.available || state.shared
+      || state.ledger_health?.single_file_copy_available === false;
     ['spend-import', 'spend-inspect'].forEach(id => { el(id).disabled = busy || !state || !state.isolated || state.shared; });
     el('spend-hold-form').querySelectorAll('input,select,textarea,button').forEach(node => { node.disabled = busy || !holds.length; });
     el('spend-apply').disabled = busy || !state || !review || !el('spend-confirm').checked;
@@ -78,8 +79,10 @@
       retainedReview(null); clear();
     }
     if (!response.ok) {
+      let detail = '';
+      try { detail = String((await response.clone().json()).detail || ''); } catch (_) { /* non-JSON response */ }
       throw new Error(response.status === 409
-        ? 'Something changed since you loaded this page. Refresh and try again.'
+        ? (detail || 'Something changed since you loaded this page. Refresh and try again.')
         : (window.mvErrorText ? window.mvErrorText(response, 'finish this step') : 'This step could not be completed. Refresh and try again.'));
     }
     return response;
@@ -105,6 +108,13 @@
     const response = await request('?' + params.toString());
     state = await response.json();
     providerOptions(el('spend-provider'), provider, true);
+    const health = state.ledger_health || {};
+    el('spend-health').textContent = (health.message || 'Spending record health could not be checked.')
+      + (Number.isInteger(health.receipt_count) ? ` ${health.receipt_count.toLocaleString()} provider requests recorded.` : '')
+      + (Number.isInteger(health.unresolved_count) && health.unresolved_count
+        ? ` ${health.unresolved_count.toLocaleString()} request${health.unresolved_count === 1 ? '' : 's'} still need a final cost.` : '')
+      + (health.single_file_copy_available === false
+        ? ' This history needs a full Workspace recovery backup; the smaller checked copy is unavailable.' : '');
     message(state.available ? 'Spending is up to date.' : 'Spending records can\'t be read safely right now. Requests to providers with a limit are paused; no balance was reset.');
     if (!state.providers.length && state.available) {
       paragraph(el('spend-balances'), 'No spending limits are set for any provider.');

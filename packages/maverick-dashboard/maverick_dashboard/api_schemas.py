@@ -211,6 +211,10 @@ class GoalOut(BaseModel):
     title: str
     description: str | None = None
     result: str | None = None
+    # Stable machine-readable cause for a stopped run. ``awaiting_input``
+    # takes priority over a generic blocked status; absent while work is
+    # running or finished successfully.
+    reason_code: str | None = None
     # How risky the task's wording looks ("medium"/"high"; absent when low),
     # and why in plain words. A reading of the words, not of the actions.
     risk_tier: str | None = None
@@ -409,6 +413,7 @@ class GoalEventOut(BaseModel):
 class GoalEventsResponse(BaseModel):
     status: str
     result: str | None
+    reason_code: str | None = None
     # Plain-language stop reason (message, action, link) for a stopped goal.
     stop: dict | None = None
     next_id: int
@@ -1742,6 +1747,7 @@ class CopilotIn(BaseModel):
 
     message: str = Field(min_length=1, max_length=2_000)
     page: str = Field(default="", max_length=200)
+    selected_goal_id: int | None = Field(default=None, ge=1, le=2**63 - 1)
     history: list[CopilotHistoryItem] = Field(default_factory=list, max_length=6)
 
 

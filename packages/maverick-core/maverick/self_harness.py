@@ -32,6 +32,7 @@ profile; ``MAVERICK_SELF_HARNESS=0`` or config can opt out.
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import logging
 import math
@@ -400,6 +401,14 @@ def _line_id(model_id: str, line: str) -> str:
     return h.hexdigest()[:16]
 
 
+def _lesson_token(store_key: str, line: str, meta: dict[str, dict]) -> str:
+    """Bind an operator decision to one scoped line and its promotion time."""
+    rec = meta.get(_line_id(store_key, line)) or {}
+    raw = json.dumps([store_key, line, rec.get("updated_at")],
+                     ensure_ascii=False, separators=(",", ":"))
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
 def load_line_meta(path: Path | None = None) -> dict[str, dict]:
     """The ``{line_id: record}`` provenance sidecar (empty on any error)."""
     if _world_routed(path if path is not None else _store_path()):
@@ -642,7 +651,9 @@ def list_learned(path: Path | None = None) -> dict[str, list[str]]:
 
 
 def forget_addendum(model_id: str, *, line: str | None = None,
-                    domain: str | None = None, path: Path | None = None) -> bool:
+                    domain: str | None = None, scope: str | None = None,
+                    expected_token: str | None = None,
+                    path: Path | None = None) -> bool:
     """Operator rollback: remove a model's learned addendum, or a single line.
 
     The user-facing undo handle for self-harness learning. By default it spans ALL
@@ -653,6 +664,11 @@ def forget_addendum(model_id: str, *, line: str | None = None,
     if there was nothing matching to remove."""
     p = path if path is not None else _store_path()
     from .file_lock import cross_process_lock
+    if scope is not None and domain is not None:
+        raise ValueError("choose one lesson scope")
+    if expected_token is not None and (line is None or scope is None
+                                       or re.fullmatch(r"[0-9a-f]{64}", expected_token) is None):
+        raise ValueError("an exact current lesson is required")
     removed = False
     with _lock, cross_process_lock(p), _store_rmw_lock(p):
         before = load_addenda(p)
@@ -660,13 +676,23 @@ def forget_addendum(model_id: str, *, line: str | None = None,
         # so a full rollback can't ORPHAN a domain-scoped block that recall still
         # injects, and a single-line forget can target a line in any scope. With an
         # explicit domain, operate ONLY on that scope's composite key.
-        if domain:
+        if scope is not None:
+            sk = _scoped_key(str(model_id), scope)
+            keys = [sk] if sk in before else []
+        elif domain:
             sk = _scoped_key(str(model_id), f"domain={domain}")
             keys = [sk] if sk in before else []
         else:
             keys = _model_store_keys(before, model_id)
         if not keys:
             return False
+        if expected_token is not None:
+            current_meta = load_line_meta(p)
+            if (line not in _bullets(before[keys[0]])
+                    or not _shared_line_current(keys[0], line, current_meta)
+                    or not hmac.compare_digest(
+                        _lesson_token(keys[0], line, current_meta), expected_token)):
+                raise ValueError("the selected lesson changed; review it again")
         after = dict(before)
         touched: list[str] = []
         for k in keys:
@@ -2363,6 +2389,7 @@ def line_efficacy(model_id: str, path: Path | None = None) -> list[dict]:
         _, ctx = _split_key(k)
         domain = ctx[len("domain="):] if ctx.startswith("domain=") else None
         out.append({"text": ln, "domain": domain, "success": s, "failure": f,
+                    "scope": ctx, "token": _lesson_token(k, ln, meta),
                     "total": total, "rate": (s / total) if total else None,
                     "recent_success": rs, "recent_failure": rf,
                     "recent_rate": (rs / recent) if recent else None})

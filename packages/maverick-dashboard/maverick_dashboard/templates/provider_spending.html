@@ -11,6 +11,12 @@
     <button type="button" id="spend-refresh" class="btn">Refresh</button>
     <a class="btn btn--ghost" href="/spending-limits">Spending limits</a>
   </p>
+  <section aria-labelledby="spend-health-title"><h2 id="spend-health-title">Spending record health</h2>
+    <p id="spend-health" role="status">Checking records…</p>
+    <p class="muted">Lightwork keeps each provider request and its cost record so a repeated request cannot quietly spend twice.
+      If records need attention, review the amounts below and use the recovery steps on this page.
+      Keep a full <a href="/workspace/recovery">Workspace recovery</a> copy before moving this installation.</p>
+  </section>
   <section aria-labelledby="spend-balances-title"><h2 id="spend-balances-title">Spending by period</h2>
     <div class="spend-row">
       <label for="spend-period-kind">Show
@@ -63,7 +69,8 @@
   </section>
   <section aria-labelledby="spend-backup-title"><h2 id="spend-backup-title">Keep a checked copy of spending records</h2>
     <p>Make a recovery key in <a href="/workspace/recovery">Workspace recovery</a> first. Keep the copy and the key in
-      different places. The copy includes every set-aside amount and confirmed total.</p>
+      different places. The copy includes every set-aside amount and confirmed total. For a large history,
+      use a full Workspace recovery backup.</p>
     <p class="spend-row"><button id="spend-export" type="button" class="btn" disabled>Download a checked copy</button>
       <button type="button" id="spend-diagnostics" class="btn btn--ghost" disabled>Download details for support</button></p>
   </section>

@@ -65,7 +65,7 @@ environments*.
 |---|---|:---:|:---:|:---:|
 | Recursive multi-agent swarm | Splits a big goal into pieces, spawns specialist agents to work them in parallel, and double-checks the result before answering. | ✓ | ✓ | ✓ |
 | Multi-provider model routing | Run on any model (Claude, GPT, Gemini, local) and assign the best model to each job — no vendor lock-in. | ✓ | ✓ | ✓ |
-| Hard budget caps | Set a dollar / time / token ceiling per run; the system stops itself before it overspends. | ✓ | ✓ | ✓ |
+| Configurable task limits | Set dollar, time, or token ceilings in Settings. Omitted limits do not cap ordinary tasks. | ✓ | ✓ | ✓ |
 | Sandboxed execution (local + Docker) | Agents run code in an isolated container instead of on your machine, so nothing escapes. | ✓ | ✓ | ✓ |
 | Skills + Knowledge (RAG) | Agents reuse learned "recipes" and answer grounded in *your* documents, with citations. | ✓ | ✓ | ✓ |
 | Primary-source data grounding | Analyst packs are auto-granted 37 read-only public-data connectors (SEC EDGAR, FRED, Treasury, Census, BLS, openFDA, CourtListener, ...) so answers cite authoritative primary sources, not just model recall. On by default; kill-switch + wizard step. | ✓ | ✓ | ✓ |

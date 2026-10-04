@@ -9,7 +9,7 @@
     {{ state('Deployment state',
              deployed_specialists ~ ' specialists deployed',
              badge=departments | length ~ ' departments', badge_class='ok',
-             copy=pack_total ~ ' specialists are available in the catalog. ' ~
+             copy=pack_total ~ ' specialists are listed in the catalog. ' ~
                   configured_connectors ~ ' of ' ~ connector_total ~
                   ' connected apps are set up; whether each one is working is shown on Connections.') }}
   {% endcall %}
@@ -90,7 +90,8 @@
         <p class="muted">{{ d.charter or
           'No description yet. View the team to see its specialists before you deploy it.' }}</p>
         <p>
-          <span class="badge">{{ d.headcount }} catalog specialists available</span>
+          <span class="badge">{{ d.headcount }} catalog specialists</span>
+          <span class="badge dept-readiness" role="status">Checking actions…</span>
           {% if not entitlements.get(d.key) %}<span class="badge">Add-on required</span>{% endif %}
         </p>
         <p>
@@ -232,12 +233,20 @@
 
       function renderTeam(d) {
         var rows = (d.roster || []).map(function (p) {
+          var readiness = p.readiness || {};
+          var missing = (readiness.missing_tools || []).map(human).join(', ');
+          var action = readiness.state === 'needs_setup'
+            ? esc(readiness.label || 'Needs setup') + (missing ? '<br><small>' + esc(missing) + '</small>' : '') +
+              ' <a href="' + esc(readiness.fix_url || '/connections') + '">Review setup</a>'
+            : readiness.state === 'action_ready'
+              ? esc(readiness.label || 'Can start') : 'Setup check unavailable';
           return "<tr><td>" + esc(human(p.name)) + "</td><td>" + esc(p.description) +
-            "</td><td>" + esc(human(p.max_risk)) + "</td></tr>";
+            "</td><td>" + action + "</td><td>" + esc(human(p.max_risk)) + "</td></tr>";
         }).join("");
         return "<table><caption>" + esc(d.title) + " — roster</caption>" +
           "<thead><tr><th scope=\"col\">Specialist</th><th scope=\"col\">Does</th>" +
-          "<th scope=\"col\">Max risk</th></tr></thead><tbody>" + rows + "</tbody></table>";
+          "<th scope=\"col\">Action check</th><th scope=\"col\">Max risk</th></tr></thead><tbody>" + rows + "</tbody></table>" +
+          '<p class="muted">This checks required workflow actions. Live connections, permissions and the AI service are checked when work starts.</p>';
       }
 
       function renderReview(r) {
@@ -262,6 +271,34 @@
       var modalTitle = document.getElementById("dept-modal-title");
       var modalSub = document.getElementById("dept-modal-sub");
       var modalBody = document.getElementById("dept-modal-body");
+      fetch('/api/v1/departments').then(function (r) {
+        if (!r.ok) throw new Error('load');
+        return r.json();
+      }).then(function (departments) {
+        (departments || []).forEach(function (d) {
+          var card = Array.prototype.find.call(document.querySelectorAll('#dept-grid .card'), function (item) {
+            return item.dataset.key === d.key;
+          });
+          if (!card) return;
+          var badge = card.querySelector('.dept-readiness');
+          var ready = Number(d.ready_specialists || 0);
+          var unknown = Number(d.unknown_specialists || 0);
+          badge.textContent = unknown
+            ? ready + ' of ' + d.headcount + ' can start; ' + unknown + ' need a setup check'
+            : ready + ' of ' + d.headcount + ' can start';
+          if (ready === 0 && unknown === 0) {
+            var deploy = card.querySelector('button[data-act="deploy"]');
+            if (deploy) {
+              deploy.disabled = true;
+              deploy.title = 'No specialist in this team can start until its required actions are set up.';
+            }
+          }
+        });
+      }).catch(function () {
+        document.querySelectorAll('.dept-readiness').forEach(function (badge) {
+          badge.textContent = 'Setup check unavailable';
+        });
+      });
       function openModal(title, sub) {
         modalTitle.textContent = title;
         modalSub.textContent = sub || "";

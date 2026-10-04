@@ -36,6 +36,21 @@ function harness(saved) {
   };
 }
 
+test("live task question reaches the current task read path before action proposals", async () => {
+  const h = harness();
+  let proposed = 0;
+  h.w.LightworkProductOperations = {isBusy: () => false, open: () => {}, close: () => {},
+    propose: async () => { proposed += 1; return false; }};
+  await h.open();
+  h.w.document.dispatchEvent(new h.w.CustomEvent('lightwork:copilot-selection',
+    {detail: {selection: {kind: 'goal', id: 7, goal_id: 7}}}));
+  await h.ask('Why did my goal fail?');
+  const sent = h.calls.filter(call => call.url === '/api/v1/copilot').at(-1);
+  assert.equal(sent.body.selected_goal_id, 7);
+  assert.equal(proposed, 0);
+  h.close();
+});
+
 test("recent Copilot chat returns on another page in the same scoped tab", async () => {
   const first = harness();
   await first.open(); await first.ask("What is next?");

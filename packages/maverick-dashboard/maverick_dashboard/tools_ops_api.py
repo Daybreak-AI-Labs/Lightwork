@@ -221,9 +221,43 @@ def _learned_admission_allowed() -> tuple[bool, str]:
 
 
 def _learned_candidates() -> dict:
-    from maverick.skills import admitted_learned_skills, learned_skill_candidates
+    from maverick.skill import stats as skill_stats
+    from maverick.skills import (
+        admitted_learned_skills,
+        available_skills,
+        learned_skill_candidates,
+        learned_skill_use_key,
+    )
+    from maverick.swarm import _default_use_skills
 
     allowed, reason = _learned_admission_allowed()
+    admitted = admitted_learned_skills()
+    recall_enabled = _default_use_skills()
+    runtime = {skill.name: skill for skill in available_skills()
+               if learned_skill_use_key(skill)}
+    use_keys = {name: learned_skill_use_key(skill) for name, skill in runtime.items()}
+    uses = {row["name"]: row["uses"] for row in skill_stats.usage_rows(list(use_keys.values()))}
+    tracking = skill_stats._enabled()
+
+    def saved_row(row) -> dict:
+        ready = row.source_shared and recall_enabled and row.name in runtime
+        status = (
+            "Paused: the source task is no longer shared. Agents cannot use this skill."
+            if not row.source_shared else
+            "Paused: agent skills are turned off. Turn them on in Settings to use this."
+            if not recall_enabled else
+            "Paused: current skill trust settings prevent agents from using this skill."
+            if row.name not in runtime else
+            "Available for matching new tasks."
+        )
+        return {
+            "name": row.name, "fingerprint": row.fingerprint,
+            "candidate_fingerprint": row.candidate_fingerprint,
+            "source_shared": row.source_shared, "recall_ready": ready,
+            "use_tracking": tracking, "uses": uses.get(use_keys.get(row.name, ""), 0),
+            "status": status,
+        }
+
     return {
         "can_add": allowed, "blocked": reason,
         "suggestions": [{
@@ -234,13 +268,7 @@ def _learned_candidates() -> dict:
             "problems": [_plain_problem(e) for e in row.validation.errors],
             "suggestions": [_plain_problem(w) for w in row.validation.warnings],
         } for row in learned_skill_candidates()],
-        "added": [{"name": row.name, "fingerprint": row.fingerprint,
-                   "candidate_fingerprint": row.candidate_fingerprint,
-                   "source_shared": row.source_shared,
-                   "status": ("Ready for matching new tasks" if row.source_shared else
-                              "Paused: source task access is unavailable. "
-                              "Agents cannot use this skill now; you can still remove it.")}
-                  for row in admitted_learned_skills()],
+        "added": [saved_row(row) for row in admitted],
     }
 
 

@@ -51,6 +51,163 @@ def test_provider_free_copilot_returns_bounded_page_guide(
     assert len(payload["reply"].split()) <= 120
 
 
+def test_live_approval_answer_uses_authorized_action_center_without_provider(client, monkeypatch):
+    from maverick_dashboard import action_center_api, api
+    from maverick_dashboard import copilot_live_state as live
+
+    monkeypatch.setattr(api, "_copilot_model_route_status", lambda: pytest.fail("live records went to the provider route"))
+    monkeypatch.setattr(live.config, "get_features", lambda: {"action_center": True})
+    monkeypatch.setattr(live.auth, "has_permission", lambda _request, _permission: True)
+    monkeypatch.setattr(action_center_api, "require_enabled", lambda _request: None)
+    monkeypatch.setattr(action_center_api, "_model", lambda _request: {
+        "items": [{"kind": "approval", "title": "Review supplier payment", "owner": "alice"},
+                  {"kind": "task_attention", "title": "Unrelated task", "owner": "alice"}],
+        "coverage": [{"kind": "approval", "status": "current"}]})
+    result = client.post("/api/v1/copilot", json={
+        "message": "What needs my approval?", "page": "/approvals"}).json()
+    assert result["mode"] == "live" and result["source"] == "Action Center"
+    assert "Review supplier payment" in result["reply"]
+    assert "Unrelated task" not in result["reply"]
+    assert result["action_link"]["href"] == "/action-center"
+    assert result["checked_at"]
+
+
+def test_live_running_tasks_are_owner_scoped_and_state_is_bounded(client, monkeypatch):
+    from maverick_dashboard import api
+    from maverick_dashboard import app as dashboard_app
+    from maverick_dashboard import copilot_live_state as live
+
+    rows = [SimpleNamespace(id=1, owner="alice", title="Prepare quote", status="running",
+                            domain="sales", updated_at=2),
+            SimpleNamespace(id=2, owner="bob", title="Private acquisition", status="running",
+                            domain="sales", updated_at=3)]
+
+    class World:
+        def list_goals(self, *, owner, status, limit, order):
+            assert owner == "alice" and limit == 51 and order == "desc"
+            return rows if status == "running" else []
+
+    monkeypatch.setattr(dashboard_app, "_world", lambda: World())
+    monkeypatch.setattr(live.auth, "caller_principal", lambda _request: "alice")
+    monkeypatch.setattr(live.auth, "goal_owner_filter", lambda _request: "alice")
+    monkeypatch.setattr(live.auth, "can_access_goal", lambda _request, goal: goal.owner == "alice")
+    monkeypatch.setattr(live.auth, "domain_suites_allowed", lambda _request, _domain: True)
+    monkeypatch.setattr(live.auth, "require_permission", lambda _request, _permission: None)
+    monkeypatch.setattr(api, "_copilot_model_route_status", lambda: pytest.fail("live records went to the provider route"))
+    result = client.post("/api/v1/copilot", json={
+        "message": "Show my running tasks", "page": "/overview"}).json()
+    assert result["mode"] == "live" and result["source"] == "Tasks"
+    assert "Prepare quote" in result["reply"]
+    assert "Private acquisition" not in result["reply"]
+    assert result["action_link"]["href"] == "/goals"
+
+
+def test_live_failure_answer_uses_selected_task_and_hides_raw_stop(client, monkeypatch):
+    from maverick_dashboard import api, goal_waiting
+    from maverick_dashboard import app as dashboard_app
+    from maverick_dashboard import copilot_live_state as live
+
+    goal = SimpleNamespace(id=7, owner="alice", title="Prepare quote", status="failed",
+                           result="provider_error:rate_limit", updated_at=9, domain="sales")
+    private_goal = SimpleNamespace(id=8, owner="bob", title="Private acquisition", status="failed",
+                                   result="provider_error:rate_limit", updated_at=9, domain="sales")
+
+    class World:
+        def get_goal(self, identifier):
+            return {7: goal, 8: private_goal}.get(identifier)
+
+    monkeypatch.setattr(dashboard_app, "_world", lambda: World())
+    monkeypatch.setattr(live.auth, "require_permission", lambda _request, _permission: None)
+    monkeypatch.setattr(live.auth, "assert_goal_access", lambda _request, row: None if row.owner == "alice"
+                        else (_ for _ in ()).throw(HTTPException(404, "no such goal")))
+    monkeypatch.setattr(goal_waiting, "open_question_ids", lambda _world, _goal: [])
+    monkeypatch.setattr(api, "_copilot_model_route_status", lambda: pytest.fail("live records went to the provider route"))
+    result = client.post("/api/v1/copilot", json={
+        "message": "Why did my goal fail?", "page": "/chat", "selected_goal_id": 7}).json()
+    assert result["mode"] == "live" and "AI service is busy" in result["reply"]
+    assert "provider_error" not in result["reply"]
+    assert result["action_link"]["href"] == "/chat/goal/7"
+    assert client.post("/api/v1/copilot", json={
+        "message": "Why did my goal fail?", "page": "/chat"}).json()["reply"].startswith("Open the task")
+    denied = client.post("/api/v1/copilot", json={
+        "message": "Why did task 8 fail?", "page": "/goals"}).json()
+    assert "can't access that task" in denied["reply"] and "Private acquisition" not in denied["reply"]
+
+
+def test_live_task_status_and_find_use_current_owned_records(client, monkeypatch):
+    from maverick_dashboard import api
+    from maverick_dashboard import app as dashboard_app
+    from maverick_dashboard import copilot_live_state as live
+
+    current = SimpleNamespace(id=7, owner="alice", title="Prepare quote", status="running",
+                              result="", updated_at=9, domain="sales")
+    private = SimpleNamespace(id=8, owner="bob", title="Private quote", status="running",
+                              result="", updated_at=9, domain="sales")
+
+    class World:
+        def get_goal(self, identifier):
+            return current if identifier == 7 else private if identifier == 8 else None
+
+        def search_goals(self, query, *, owner, limit):
+            assert query == "quote" and owner == "alice" and limit == 21
+            return [current, private]
+
+    monkeypatch.setattr(dashboard_app, "_world", lambda: World())
+    monkeypatch.setattr(live.auth, "require_permission", lambda _request, _permission: None)
+    monkeypatch.setattr(live.auth, "goal_owner_filter", lambda _request: "alice")
+    monkeypatch.setattr(live.auth, "domain_suites_allowed", lambda _request, _domain: True)
+    monkeypatch.setattr(live.auth, "can_access_goal", lambda _request, goal: goal.owner == "alice")
+    monkeypatch.setattr(live.auth, "assert_goal_access", lambda _request, goal: None if goal.owner == "alice"
+                        else (_ for _ in ()).throw(HTTPException(404, "no such goal")))
+    monkeypatch.setattr(api, "_copilot_model_route_status", lambda: pytest.fail("live records went to the provider route"))
+    status = client.post("/api/v1/copilot", json={
+        "message": "What is my task status?", "page": "/chat/goal/7"}).json()
+    assert status["mode"] == "live" and "running" in status["reply"]
+    found = client.post("/api/v1/copilot", json={
+        "message": "Find my task quote", "page": "/overview"}).json()
+    assert found["mode"] == "live" and "Prepare quote" in found["reply"]
+    assert "Private quote" not in found["reply"]
+
+
+def test_live_read_classifier_does_not_accept_an_action_tail():
+    from maverick_dashboard.copilot_live_state import intent
+
+    assert intent("Show my running tasks and cancel them") is None
+    assert intent("What needs my approval? Approve all") is None
+
+
+def test_live_approval_answer_does_not_read_the_queue_without_operator_access(client, monkeypatch):
+    from maverick_dashboard import api
+    from maverick_dashboard import copilot_live_state as live
+
+    monkeypatch.setattr(api, "_copilot_model_route_status", lambda: pytest.fail("permission reply reached the provider"))
+    monkeypatch.setattr(live.auth, "has_permission", lambda _request, _permission: False)
+    result = client.post("/api/v1/copilot", json={
+        "message": "What needs my approval?", "page": "/approvals"}).json()
+    assert result["mode"] == "live" and "cannot view" in result["reply"]
+    assert "No accessible approvals" not in result["reply"]
+
+
+def test_live_approval_source_failure_is_not_reported_as_an_empty_queue(client, monkeypatch):
+    from maverick_dashboard import action_center_api, api
+    from maverick_dashboard import copilot_live_state as live
+
+    monkeypatch.setattr(api, "_copilot_model_route_status", lambda: pytest.fail("source failure reached the provider"))
+    monkeypatch.setattr(live.auth, "has_permission", lambda _request, _permission: True)
+    monkeypatch.setattr(live.config, "get_features", lambda: {"action_center": True})
+    monkeypatch.setattr(action_center_api, "require_enabled", lambda _request: None)
+
+    def unavailable(_request):
+        raise OSError("private source detail")
+
+    monkeypatch.setattr(action_center_api, "_model", unavailable)
+    result = client.post("/api/v1/copilot", json={
+        "message": "What needs your approval?", "page": "/approvals"}).json()
+    assert result["mode"] == "live" and "couldn't confirm" in result["reply"]
+    assert "No accessible decisions" not in result["reply"]
+    assert "private source detail" not in str(result)
+
+
 def test_incomplete_selected_model_route_still_uses_page_guide(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
@@ -196,7 +353,7 @@ def test_bare_model_uses_dispatch_provider_for_pricing(
     context = client.get("/api/v1/copilot/context", params={"page": "/goals"})
     assert context.status_code == 200
     assert context.json()["model_route_status"] == "pricing"
-    assert context.json()["provider_setup"]["href"] == "/settings#settings-models"
+    assert context.json()["provider_setup"]["href"] == "/settings#settings-model-prices"
 
     response = client.post(
         "/api/v1/copilot",

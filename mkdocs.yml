@@ -90,6 +90,7 @@ nav:
   - Home:
       - Welcome: index.md
       - Getting started: getting-started.md
+      - Use Lightwork: using-lightwork.md
       - Operator first run: operator-first-run.md
   - Guides:
       - Configuration: configuration.md

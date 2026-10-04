@@ -95,7 +95,8 @@ def _state_revision(context, row, projection):
     result = projection["assessment"]
     return digest([context, row["id"], row["revision"], result["status"],
                    result["stale_source_ids"], result["latest_safe_bundle_decision_at"],
-                   projection["proposals"]])
+                   projection["proposals"], projection["resource_gaps"],
+                   projection["resource_gap_blocked_by_order_change"]])
 
 
 def _checked(call):
@@ -117,9 +118,11 @@ def assessment_snapshot(request, selection):
     context, row, projection = _selected(request, selection, allow_archived=True)
     result = projection["assessment"]
     return Snapshot(_state_revision(context, row, projection),
-                    "Current operator-reported orders, stock, capacity and source review windows",
-                    "Assess both accepted orders in the reported model. No stock, supplier choice, or external reservation is independently verified.",
+                    "Current reported orders, resource gaps and source review windows",
+                    "Assess both accepted orders and any reported stock or capacity shortfall. No stock, supplier choice, or external reservation is independently verified.",
                     {"title": row["title"], "assessment": result, "labels": row["labels"],
+                     "resource_gaps": projection["resource_gaps"],
+                     "resource_gap_blocked_by_order_change": projection["resource_gap_blocked_by_order_change"],
                      "sources": projection["sources"], "proposals": projection["proposals"],
                      "archived": projection["archived"], "retired_at": projection["retired_at"],
                      "source_quality": "operator_reported", "external_reservation_verified": False,
