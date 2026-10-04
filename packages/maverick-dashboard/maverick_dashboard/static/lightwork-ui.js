@@ -164,7 +164,7 @@
           var out0 = {};
           for (var i = 0; i < fields.length; i++) {
             var s = fields[i];
-            var promptLabel = (s.label || s.key) + (s.required ? ' *' : '');
+            var promptLabel = (s.label || s.key) + (s.required ? ' (required)' : '');
             var boolField = s.type === 'bool' || s.type === 'checkbox';
             var choices = (s.options || []).map(function (o) {
               return String(o && o.value != null ? o.value : o);
@@ -220,7 +220,7 @@
             wrap.appendChild(ctl); wrap.appendChild(l1);
           } else {
             var lab = document.createElement('label'); lab.setAttribute('for', id);
-            lab.textContent = (f.label || f.key) + (f.required ? ' *' : ''); lab.lang = 'und'; lab.dir = 'auto';
+            lab.textContent = f.label || f.key; lab.lang = 'und'; lab.dir = 'auto';
             wrap.appendChild(lab);
             if (f.type === 'select') {
               ctl = document.createElement('select');
@@ -947,6 +947,74 @@
           if (btn) { btn.disabled = false; btn.removeAttribute('aria-busy'); }
         }
       });
+    })();
+
+    // Required fields say so beside their label: one small "Required" for
+    // every [required] control, on load and for forms added later (dialogs,
+    // rows built from data). The required attribute already tells assistive
+    // technology, so the marker is aria-hidden. A label that already says it
+    // (an asterisk or the word "required") is left as written.
+    (function () {
+      if (typeof document.querySelectorAll !== 'function' || !document.body) return;
+      var CONTROLS = 'input[required], select[required], textarea[required]';
+      function labelFor(control) {
+        if (control.type === 'hidden') return null;
+        if (control.type === 'radio') {
+          var group = control.closest('fieldset');
+          return group && group.querySelector('legend');
+        }
+        return control.labels && control.labels.length ? control.labels[0] : null;
+      }
+      // The label's own words, without the text of a field it wraps.
+      function ownText(node) {
+        var text = '';
+        Array.prototype.forEach.call(node.childNodes, function (child) {
+          if (child.nodeType === 3) text += child.nodeValue;
+          else if (child.nodeType === 1 && !child.matches('input, select, textarea, button, datalist')) text += ownText(child);
+        });
+        return text;
+      }
+      function mark(control) {
+        var label = labelFor(control);
+        if (!label || label.querySelector('.mv-required') || /\*|\brequired\b/i.test(ownText(label))) return;
+        var marker = document.createElement('span');
+        marker.className = 'mv-required'; marker.setAttribute('aria-hidden', 'true');
+        marker.setAttribute('data-mv-required', ''); marker.lang = 'en'; marker.textContent = 'Required';
+        // Beside the words: before a field the label wraps, after a checkbox's words.
+        var field = label.contains(control) && !/^(checkbox|radio)$/.test(control.type) ? control : null;
+        while (field && field.parentNode !== label) field = field.parentNode;
+        if (field) label.insertBefore(marker, field); else label.appendChild(marker);
+      }
+      function unmark(control) {
+        var label = labelFor(control);
+        var marker = label && label.querySelector('[data-mv-required]');
+        if (!marker) return;
+        if (control.type === 'radio' && label.parentNode.querySelector('input[type="radio"][required]')) return;
+        marker.remove();
+      }
+      function markWithin(root) {
+        if (root.matches && root.matches(CONTROLS)) mark(root);
+        if (root.querySelectorAll) Array.prototype.forEach.call(root.querySelectorAll(CONTROLS), mark);
+      }
+      // A label whose words were rewritten (a translation, a renamed field) gets its marker back.
+      function relabel(node) {
+        var label = node.nodeType === 1 && node.closest('label, legend');
+        if (!label) return;
+        var control = label.tagName === 'LEGEND' ? label.parentNode.querySelector('input[type="radio"][required]') : label.control;
+        if (control && control.required) mark(control);
+      }
+      markWithin(document);
+      if (typeof MutationObserver !== 'function') return;
+      new MutationObserver(function (changes) {
+        changes.forEach(function (change) {
+          if (change.type === 'attributes') {
+            if (change.target.required) mark(change.target); else unmark(change.target);
+            return;
+          }
+          Array.prototype.forEach.call(change.addedNodes, function (node) { if (node.nodeType === 1) markWithin(node); });
+          relabel(change.target);
+        });
+      }).observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['required'] });
     })();
 
     // Reveal invalid fields before native form validation attempts to focus

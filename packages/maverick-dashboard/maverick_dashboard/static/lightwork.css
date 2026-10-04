@@ -742,6 +742,11 @@
     .mv-form__field input.input, .mv-form__field select { width: 100%; }
     .mv-form__check { display: flex; align-items: center; gap: var(--space-2); }
     .mv-form__help { color: var(--muted); font-size: var(--text-xs); margin-top: 2px; }
+    /* "Required" beside the label of a [required] field (added by lightwork-ui.js). */
+    .mv-required {
+      margin-inline-start: 0.5em; color: var(--muted); font-size: var(--text-xs);
+      font-weight: var(--font-medium); letter-spacing: normal; text-transform: none; white-space: nowrap;
+    }
     .mv-form__err { color: var(--danger, #dc2626); font-size: var(--text-sm); min-height: 1em; margin: 0 0 var(--space-2); }
     /* Shared list-row: an icon/title + muted subline + trailing actions. */
     .mv-row { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-3) var(--space-4); border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface-1); transition: border-color .12s ease; animation: mv-rise 180ms ease-out both; }
