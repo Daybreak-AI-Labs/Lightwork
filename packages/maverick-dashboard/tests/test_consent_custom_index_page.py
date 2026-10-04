@@ -61,7 +61,7 @@ def test_workbench_is_store_free_closed_and_liquid_glass(client: TestClient) -> 
         "style-src 'self' 'nonce-",
     ):
         assert directive in csp
-    assert "Find People by Preference" in response.text
+    assert "Find people by preference" in response.text
     assert "What you search for is never saved" in response.text
     assert "searching stops until the question is rebuilt" in response.text
     assert 'id="custom-index-operations" disabled' in response.text
@@ -188,7 +188,7 @@ def test_workbench_rejects_query_material_and_requires_tenant(
 ) -> None:
     response = client.get(f"{ROUTE}?tenant_id=caller-selected")
     assert response.status_code == 404
-    assert "Find People by Preference" not in response.text
+    assert "Find people by preference" not in response.text
 
     def missing_tenant() -> None:
         raise page.HTTPException(

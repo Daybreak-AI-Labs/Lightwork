@@ -51,7 +51,7 @@ def test_delivery_page_lists_destinations_and_confirms_external_sends(isolated_p
     response = client.get("/consent/delivery")
     assert response.status_code == 200
     page = response.text
-    assert "Send Choices to Other Systems" in page
+    assert "Send choices to other systems" in page
     assert "/api/v1/consent/delivery" in page
     # Records load on open, with a button per row.
     for host in ("cd-destination-table", "cd-dead-table", "cd-history-table", "cd-ambiguous-table"):

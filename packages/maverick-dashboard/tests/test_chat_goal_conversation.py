@@ -80,7 +80,7 @@ def test_goal_page_folds_the_kernels_withheld_markers_and_renders_prose(page_env
     # The chat shell exposes the real, role-filtered product navigation.
     assert 'class="chat-shell' in text
     assert 'aria-label="Chats"' in text
-    assert 'aria-label="Lightwork product"' in text
+    assert 'aria-label="Primary"' in text
     # The rail opens saved flows; the designer is one click from that page.
     assert 'href="/workflows"' in text
     assert 'href="/action-center"' in text

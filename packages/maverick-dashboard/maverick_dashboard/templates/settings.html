@@ -590,7 +590,7 @@
         </tr></thead>
         <tbody>
           {% for grp in visibility_matrix %}
-          <tr><th colspan="{{ 1 + visibility_roles|length }}" scope="colgroup" class="settings-group-row">{{ grp.label }}</th></tr>
+          <tr><th colspan="{{ 1 + visibility_roles|length }}" scope="colgroup" class="settings-group-row">{{ grp.title or grp.label }}</th></tr>
           {% for pg in grp.pages %}
           <tr data-settings-search-item>
             <td>{{ pg.label }}{% if not pg.in_nav %} <span class="muted settings-note">· opened from other pages, not the menu</span>{% endif %}</td>

@@ -125,7 +125,7 @@ v3 issue operations. Validate the actual tenant's token type, endpoint, scopes,
 project permissions and egress policy during live acceptance; these tests do
 not establish that an arbitrary Jira token or hosting configuration works.
 
-Open **Third parties → AI Vendor Onboarding** as a named authenticated user with
+Open **Third parties → AI vendor onboarding** as a named authenticated user with
 `operate` permission and an active tenant. Anonymous sessions and a shared static
 dashboard token do not provide a named human reviewer. The request composition
 derives tenant, actor, configured resource owner and enrolled credential

@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% from "_hero.html" import hero %}
-{% block title %}Opt Out Everywhere · Lightwork{% endblock %}
+{% block title %}Opt out everywhere · Lightwork{% endblock %}
 {% block head_extra %}<link rel="stylesheet" href="/static/lightwork-consent-workbench.css">{% endblock %}
 {% block content %}
 {% set go_admin = global_opt_out_can_admin %}
@@ -9,7 +9,7 @@
      data-api-base="{{ api_base }}" data-copilot-page="/consent/global-opt-out"
      data-module-enabled="{{ 'false' if module_off else 'true' }}"
      data-can-admin="{{ 'true' if go_admin else 'false' }}" data-can-audit="{{ 'true' if go_audit else 'false' }}">
-  {{ hero('Consent requests', 'Opt Out Everywhere',
+  {{ hero('Consent requests', 'Opt out everywhere',
           lede='Let people opt out of the sale or sharing of their data in one step, from your mobile app or a link in an email. Each request goes to your privacy requests team as an opt-out request.') }}
   {% include "_consent_nav.html" %}
   {% if module_off %}{% from "_module_gate.html" import module_gate %}{{ module_gate("consent_preferences.global_opt_out", "Global opt-out", detail="Honours a person's opt-out across every website and app you connect.") }}{% endif %}

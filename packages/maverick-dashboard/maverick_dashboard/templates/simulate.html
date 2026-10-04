@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% from "_hero.html" import hero %}
-{% block title %}Test a Safety Rule · Lightwork{% endblock %}
+{% block title %}Test a safety rule · Lightwork{% endblock %}
 {% block head_extra %}
 <style{% if csp_style_nonce is defined %} nonce="{{ csp_style_nonce }}"{% endif %}>
   .research-simulation-table { table-layout: fixed; }
@@ -14,7 +14,7 @@
 </style>
 {% endblock %}
 {% block content %}
-  {{ hero('Safety', 'Test a Safety Rule',
+  {{ hero('Safety', 'Test a safety rule',
           lede='See whether Lightwork would allow an action, block it, or ask a person first. Nothing actually runs.') }}
 
   <div class="panel">

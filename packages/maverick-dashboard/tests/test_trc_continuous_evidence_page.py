@@ -35,7 +35,7 @@ def test_page_lists_sources_and_names_all_stock_collectors(page_client):
     response = page_client.get("/compliance/continuous-evidence")
     assert response.status_code == 200
     page = response.text
-    assert "Continuous Evidence Operations" in page
+    assert "Continuous evidence" in page
     assert "/api/v1/compliance/continuous-evidence" in page
     assert "/static/lightwork-trc-continuous-evidence.js" in page
     for name in (
@@ -117,7 +117,7 @@ def test_main_dashboard_mounts_page_api_visibility_and_copilot(monkeypatch):
     assert page["floor"] == "operate"
     assert page["in_nav"] is True
     context = context_for_page("/compliance/continuous-evidence")
-    assert context.title == "Continuous Evidence Operations"
+    assert context.title == "Continuous evidence"
     templates = Path(__file__).resolve().parents[1] / "maverick_dashboard" / "templates"
     assert 'href="/compliance/continuous-evidence"' in (
         templates / "compliance.html"

@@ -1,0 +1,58 @@
+{#- The one sidebar navigation, shared by both shells (base.html and
+    chat_base.html): the "Most used" shortcuts, then every registry group.
+    nav_groups comes from the _nav_context context processor: the page
+    registry (maverick_dashboard.ui_visibility.PAGES) filtered to what the
+    caller's RBAC role may see. Auth off -> the full nav, as before. -#}
+{# One sidebar link. Approvals carries an empty count badge that the sidebar
+   script fills after the page has loaded (hidden while nothing waits). A page
+   whose module is switched off (only administrators still see it) says so in
+   text, not colour alone. #}
+{% macro _nav_link(link, active, current) -%}
+<a href="{{ link.href }}"{% if active %} class="active"{% if current %} aria-current="page"{% endif %}{% endif %}{% if link.off %} aria-label="{{ ut('{page} (turned off)', page=ut(link.label)) }}"{% endif %}{% if link.href == '/approvals' %} data-approvals-badge{% endif %}><svg class="nav-ic" aria-hidden="true"><use href="#i-{{ link.icon or 'dot' }}"></use></svg><span class="nav-label">{{ ui(link.label) }}</span>{% if link.off %}<span class="nav-off" aria-hidden="true">{{ ui('Off') }}</span>{% endif %}{% if link.href == '/approvals' %}<span class="nav-count" hidden></span>{% endif %}</a>
+{%- endmacro %}
+{# The five most-used pages sit above the groups so a first visit never
+   lands on closed headers alone. Only pages the caller may see appear. #}
+{% set _quick_hrefs = ['/chat', '/goals', '/approvals', '/deliverables', '/settings'] %}
+{% set _path = request.url.path if request else '' %}
+{# The dashboard lands on /chat, so highlight Chat when at the bare root. #}
+{% set _active_path = '/chat' if _path == '/' else ('/workflows' if _path.startswith('/flows/') else _path) %}
+{# Prefer the most-specific visible route so nested pages do not expose
+   more than one aria-current="page" landmark. #}
+{% set _active_nav = namespace(href='') %}
+{% for _group in nav_groups %}
+  {% for _link in _group.links %}
+    {% if (_active_path == _link.href or _active_path.startswith(_link.href ~ '/')) and (_link.href|length > _active_nav.href|length) %}
+      {% set _active_nav.href = _link.href %}
+    {% endif %}
+  {% endfor %}
+{% endfor %}
+{% set _quick = namespace(links=[]) %}
+{% for _href in _quick_hrefs %}
+  {% for _group in nav_groups %}{% for _link in _group.links if _link.href == _href %}
+    {% set _quick.links = _quick.links + [_link] %}
+  {% endfor %}{% endfor %}
+{% endfor %}
+{% if _quick.links %}
+<ul class="navquick-list" aria-label="{{ ut('Most used') }}" lang="{{ ul('Most used') }}">
+  {% for _link in _quick.links %}
+    {% set _active = (_active_nav.href == _link.href) %}
+    <li>{{ _nav_link(_link, _active, true) }}</li>
+  {% endfor %}
+</ul>
+{% endif %}
+{% for _group in nav_groups %}
+  <div class="navgrp">
+    <button type="button" class="navgrp__toggle" data-grp="{{ _group.label }}"
+            aria-expanded="true" aria-controls="navgrp-{{ loop.index0 }}">
+      <span class="navgrp__label">{{ ui(_group.title or _group.label) }}</span>
+      <svg class="navgrp__caret" width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 3.5 L5 6.5 L8 3.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </button>
+    <ul class="navgrp__items" id="navgrp-{{ loop.index0 }}">
+      {% for _link in _group.links %}
+        {% set _active = (_active_nav.href == _link.href) %}
+        {# A page that also sits in the Most used list carries its aria-current there. #}
+        <li>{{ _nav_link(_link, _active, _link.href not in _quick_hrefs) }}</li>
+      {% endfor %}
+    </ul>
+  </div>
+{% endfor %}

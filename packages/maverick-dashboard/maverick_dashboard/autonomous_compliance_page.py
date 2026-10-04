@@ -112,6 +112,8 @@ def create_autonomous_compliance_page_router(
                 "status_labels": catalog.STATUS_LABELS,
                 "status_meanings": {**catalog.STATUS_MEANINGS, **STATUS_MEANINGS},
                 "module_summaries": MODULE_SUMMARIES,
+                # Each card names its page exactly as the sidebar and heading do.
+                "page_names": {page["path"]: page["label"] for page in ui_visibility.PAGES},
                 "status_badge_class": catalog.STATUS_BADGE_CLASS,
                 "pricing_mailto": PRICING_MAILTO,
             },

@@ -70,7 +70,7 @@ def test_workbench_is_store_free_closed_and_copilot_enabled(client: TestClient) 
     ):
         assert directive in csp
     assert "style-src 'self' 'nonce-" in csp
-    assert "Contracts and Engagements" in response.text
+    assert "Contracts and engagements" in response.text
     assert 'id="tpc-operations" disabled' in response.text
     assert "Checking that contracts are available" in response.text
     assert "Record the key facts here, not the full contract text." in response.text

@@ -323,6 +323,16 @@
     [dir="rtl"] .navgrp__toggle[aria-expanded="false"] .navgrp__caret { transform: rotate(90deg); }
     .navgrp__toggle[aria-expanded="false"] + .navgrp__items { display: none; }
     .navgrp__items { list-style: none; margin: 0; padding: 0; }
+    /* Sidebar badges, in text rather than colour alone: how many approvals
+       are waiting, and "Off" on a page whose module is switched off. */
+    .nav-count, .nav-off {
+      flex: none; margin-inline-start: auto; padding: 0 0.45rem;
+      border-radius: var(--radius-pill); text-align: center;
+      font-size: var(--text-xs); line-height: 1.5;
+    }
+    .nav-count { min-width: 1.5em; font-weight: var(--font-semibold); color: var(--brand-fg); background: var(--brand); }
+    .nav-count[hidden] { display: none; }
+    .nav-off { font-weight: var(--font-medium); color: var(--muted); border: 1px solid var(--border); }
 
     /* Registry-backed page finder / command palette. The trigger belongs to
        the sidebar, while the dialog lives at shell level so it remains usable

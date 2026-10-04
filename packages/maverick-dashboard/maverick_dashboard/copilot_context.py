@@ -13,6 +13,11 @@ from dataclasses import dataclass
 from re import IGNORECASE, Pattern
 from re import compile as compile_regex
 
+from .ui_visibility import PAGES as _REGISTRY_PAGES
+
+# The registry label is each page's one name: sidebar, heading, browser title
+# and the Copilot guide all use it.
+_REGISTRY_LABELS = {page["path"]: page["label"] for page in _REGISTRY_PAGES}
 _READ_ONLY_BOUNDARY = (
     "Copilot guidance is read-only and never grants authority or executes an action."
 )
@@ -156,11 +161,17 @@ _GENERIC = CopilotPageContext(
 )
 
 
+def _registered(path: str, **fields: object) -> CopilotPageContext:
+    """A hand-written guide for a registry page, titled with its registry label."""
+
+    return CopilotPageContext(path=path, title=_REGISTRY_LABELS[path], **fields)
+
+
 _CONTEXTS = tuple(
     _ensure_read_only(context)
     for context in (
-        CopilotPageContext(
-            path="/commitment-reviews", title="Promise reviews",
+        _registered(
+            path="/commitment-reviews",
             summary="Review whether two accepted orders can still be delivered with the capacity and materials your team reports.",
             capabilities=(
                 "Compare the reported capacity, materials, deadlines, and conditional options for two orders.",
@@ -182,8 +193,8 @@ _CONTEXTS = tuple(
                 "What happens if these orders share capacity?",
             ),
         ),
-        CopilotPageContext(
-            path="/workflows", title="Flows",
+        _registered(
+            path="/workflows",
             summary="Find your saved flows, reusable templates, and specialist instructions.",
             capabilities=(
                 "Create and edit visual flows when the flow engine is on and you have operator access.",
@@ -201,8 +212,8 @@ _CONTEXTS = tuple(
                 "How do I review the results of a flow?",
             ),
         ),
-        CopilotPageContext(
-            path="/approvals", title="Approvals",
+        _registered(
+            path="/approvals",
             summary="Review work Lightwork has paused for a person's decision.",
             capabilities=(
                 "Read what a proposed step will do and what remains uncertain.",
@@ -223,8 +234,8 @@ _CONTEXTS = tuple(
                 "What if nobody decides in time?",
             ),
         ),
-        CopilotPageContext(
-            path="/facts", title="Shared business facts",
+        _registered(
+            path="/facts",
             summary="Browse shared facts by name, source, tag and age, then inspect exact current details and recorded versions.",
             capabilities=("Search bounded server pages and select facts for read-only review.",
                           "Review an exact single-fact edit, tag change, historical restore or removal through native controls and authorized Copilot actions."),
@@ -235,8 +246,8 @@ _CONTEXTS = tuple(
                         "Compare the saved value with your draft if another person changed the fact."),
             suggested_questions=("Find shared business facts", "Review selected facts and history", "Edit the selected fact's tags"),
         ),
-        CopilotPageContext(
-            path="/content-access", title="Employee content access",
+        _registered(
+            path="/content-access",
             summary="Employee content stays private while administrators govern policy and audit metadata.",
             capabilities=("Request a specific task, approval-card read or exact chat-identity export for a stated purpose.",
                           "Review, deny or revoke an independently requested read and inspect its receipts."),
@@ -261,9 +272,8 @@ _CONTEXTS = tuple(
                         "Review saved per-step receipts and record external handoff evidence."),
             suggested_questions=("What remains after deactivation?", "Does a handoff owner receive private task access?"),
         ),
-        CopilotPageContext(
+        _registered(
             path="/companion/admin",
-            title="Employee companions",
             summary=(
                 "Workspace administrators enroll employees and set the policy "
                 "for personal task status and optional AI draft conversations."
@@ -294,9 +304,8 @@ _CONTEXTS = tuple(
                 "How do I change an employee's companion policy?",
             ),
         ),
-        CopilotPageContext(
+        _registered(
             path="/companion",
-            title="My companion",
             summary=(
                 "Check your own task status and, when your administrator permits "
                 "it, ask for AI drafts alongside work that is still running."
@@ -328,9 +337,8 @@ _CONTEXTS = tuple(
                 "How do I clear my conversation history?",
             ),
         ),
-        CopilotPageContext(
+        _registered(
             path="/assurance/cloud-agents",
-            title="Cloud Agent Governance",
             summary=(
                 "Inventory and govern registered agents in Bedrock, Azure AI Foundry, "
                 "Vertex AI, and reviewed Databricks framework mappings."
@@ -356,9 +364,8 @@ _CONTEXTS = tuple(
                 "What does reconciliation prove?",
             ),
         ),
-        CopilotPageContext(
+        _registered(
             path="/ai-evidence-analysis",
-            title="AI Evidence Analysis",
             summary=(
                 "Extract bounded technical facts from an attested artifact and route the "
                 "criteria-pinned result to a distinct human reviewer."
@@ -384,9 +391,8 @@ _CONTEXTS = tuple(
                 "When should I revoke an analysis?",
             ),
         ),
-        CopilotPageContext(
+        _registered(
             path="/ai-entity-tasks",
-            title="AI Entity Tasks",
             summary=(
                 "Manage review and remediation tasks tied to exact AI inventory entity revisions."
             ),
@@ -412,9 +418,8 @@ _CONTEXTS = tuple(
                 "When can a task be purged?",
             ),
         ),
-        CopilotPageContext(
+        _registered(
             path="/governance-agents",
-            title="Governance Agents",
             summary=(
                 "Run closed, evidence-cited workflows for breach response, privacy risk, "
                 "program analysis, knowledge governance, and third-party risk."
@@ -440,9 +445,8 @@ _CONTEXTS = tuple(
                 "How do policy and evidence revisions stay pinned?",
             ),
         ),
-        CopilotPageContext(
+        _registered(
             path="/agent-control-plane",
-            title="Agent Control Plane",
             summary=(
                 "Inspect and operate bounded controls over native principals and registered "
                 "external agents, with a separately scoped deployment emergency halt."
@@ -469,9 +473,8 @@ _CONTEXTS = tuple(
                 "How should I verify state and audit evidence after a control attempt?",
             ),
         ),
-        CopilotPageContext(
+        _registered(
             path="/audit/evolution-ledger",
-            title="Evolution Ledger",
             summary=(
                 "Inspect a bounded, digest-only projection of durable promotion and "
                 "rollback lifecycle evidence without opening source journal content."
@@ -498,9 +501,8 @@ _CONTEXTS = tuple(
                 "Why is the durable promotion source unavailable or empty?",
             ),
         ),
-        CopilotPageContext(
+        _registered(
             path="/consent",
-            title="Consent and Preferences",
             summary=(
                 "Govern version-bound consent choices, pseudonymous profiles, tracker "
                 "enforcement, and privacy-bounded consent analytics."
@@ -531,9 +533,8 @@ _CONTEXTS = tuple(
                 "What evidence is required to unlink or relink a profile?",
             ),
         ),
-        CopilotPageContext(
+        _registered(
             path="/consent/custom-indexes",
-            title="Custom Consent Indexes",
             summary=(
                 "Create governed indexes over approved volunteered profile-data elements "
                 "and run exact, privacy-minimized subject searches."
@@ -560,9 +561,8 @@ _CONTEXTS = tuple(
                 "What does an index search return?",
             ),
         ),
-        CopilotPageContext(
+        _registered(
             path="/consent/bulk-jobs",
-            title="Consent Bulk Jobs",
             summary=(
                 "Run tenant-scoped, credit-limited asynchronous receipt exports "
                 "and governed consent-subject lifecycle actions."
@@ -588,9 +588,8 @@ _CONTEXTS = tuple(
                 "What does a successful export prove?",
             ),
         ),
-        CopilotPageContext(
+        _registered(
             path="/consent/publish-settings",
-            title="Consent Publish Settings",
             summary=(
                 "Govern immutable website runtime settings pinned to exact consent "
                 "property and publication authority."
@@ -616,9 +615,8 @@ _CONTEXTS = tuple(
                 "How do rollback and withdrawal differ?",
             ),
         ),
-        CopilotPageContext(
+        _registered(
             path="/consent/global-opt-out",
-            title="Global Opt-Out",
             summary=(
                 "Govern a versioned mobile and email Global Opt-Out experience "
                 "that submits a real profile-bound opt-out rights request."
@@ -644,9 +642,8 @@ _CONTEXTS = tuple(
                 "What still requires live-device validation?",
             ),
         ),
-        CopilotPageContext(
+        _registered(
             path="/consent/application-scans",
-            title="Application Consent Scans",
             summary=(
                 "Inspect bounded mobile and connected-app manifests and govern "
                 "cited observations through independent review and retention."
@@ -672,9 +669,8 @@ _CONTEXTS = tuple(
                 "What still needs live-device testing?",
             ),
         ),
-        CopilotPageContext(
+        _registered(
             path="/consent/publishing",
-            title="Consent Publishing",
             summary=(
                 "Enroll exact web or mobile properties and promote immutable, structured consent "
                 "resources through preview, publish, rollback, and withdrawal."
@@ -699,9 +695,8 @@ _CONTEXTS = tuple(
                 "How do rollback and withdrawal differ?",
             ),
         ),
-        CopilotPageContext(
+        _registered(
             path="/consent/experiments",
-            title="Consent Experiments",
             summary=(
                 "Govern immutable consent-presentation experiments, bounded assignments and outcomes, "
                 "statistical review, and fail-safe rollback to control."
@@ -726,9 +721,8 @@ _CONTEXTS = tuple(
                 "What does a winning variant not prove?",
             ),
         ),
-        CopilotPageContext(
+        _registered(
             path="/consent/delivery",
-            title="Consent Delivery",
             summary=(
                 "Synchronize immutable preference receipts to exact HTTPS destinations through a "
                 "signed, retryable queue with explicit dispatch and recovery."
@@ -756,9 +750,8 @@ _CONTEXTS = tuple(
                 "How should I reconcile an ambiguous delivery?",
             ),
         ),
-        CopilotPageContext(
+        _registered(
             path="/consent/public-clients",
-            title="Public Consent Clients",
             summary=(
                 "Mint and revoke exact-origin browser or service clients for the active consent "
                 "publication and receipt policy."
@@ -783,9 +776,8 @@ _CONTEXTS = tuple(
                 "What must match before I mint a client?",
             ),
         ),
-        CopilotPageContext(
+        _registered(
             path="/consent/native",
-            title="Consent in Your Apps",
             summary=(
                 "Operate application and device authority for the attested mobile and "
                 "OTT/CTV consent runtime and its offline-verifiable receipt keys."
@@ -811,9 +803,8 @@ _CONTEXTS = tuple(
                 "What remains to be validated on live devices?",
             ),
         ),
-        CopilotPageContext(
+        _registered(
             path="/consent/profile-data",
-            title="Consent Profile Data",
             summary=(
                 "Govern closed profile-data catalogs and journeys with revision-pinned publication, "
                 "independent approval, integrity, and retention controls."
@@ -838,9 +829,8 @@ _CONTEXTS = tuple(
                 "Who may approve a catalog or journey?",
             ),
         ),
-        CopilotPageContext(
+        _registered(
             path="/consent/scan-inventory",
-            title="Consent Scan Inventory",
             summary=(
                 "Run bounded browser scans against enrolled properties, review minimized tracker "
                 "discoveries, and bridge only fresh approved mappings."
@@ -865,9 +855,8 @@ _CONTEXTS = tuple(
                 "When may a discovery be bridged?",
             ),
         ),
-        CopilotPageContext(
+        _registered(
             path="/consent/scan-notice-proposals",
-            title="Scan Disclosure Proposals",
             summary=(
                 "Turn independently reviewed scan evidence into content-free, revision-pinned "
                 "disclosure proposals for separate approval and local acceptance."
@@ -892,9 +881,8 @@ _CONTEXTS = tuple(
                 "What does local acceptance not do?",
             ),
         ),
-        CopilotPageContext(
+        _registered(
             path="/consent/trust-center-authority",
-            title="Consumer Trust Center Authority",
             summary=(
                 "Govern digest-bound consumer capability grants and privacy-rights case authority "
                 "through server-resolved identity and multi-party approval."
@@ -926,9 +914,8 @@ _CONTEXTS = tuple(
                 "What does the brand projection prove, and what remains external?",
             ),
         ),
-        CopilotPageContext(
+        _registered(
             path="/data-use",
-            title="Data Use Governance",
             summary=(
                 "Authorize data use from catalog bindings, independently sourced decision context, "
                 "reviewed labels, policy, exceptions, and provider-neutral control intent."
@@ -953,9 +940,8 @@ _CONTEXTS = tuple(
                 "When can a provider write occur?",
             ),
         ),
-        CopilotPageContext(
+        _registered(
             path="/data-use/providers",
-            title="Native Data Controls",
             summary=(
                 "Apply authorized data-use decisions to exact Snowflake and Databricks resources "
                 "through server-controlled credentials and safe-deny reconciliation."
@@ -980,9 +966,8 @@ _CONTEXTS = tuple(
                 "What does rollback restore?",
             ),
         ),
-        CopilotPageContext(
+        _registered(
             path="/compliance",
-            title="Technology Risk and Compliance",
             summary=(
                 "Triage governed compliance assessments, evidence needs, control work, and exports "
                 "without turning local workflow state into a compliance conclusion."
@@ -1006,9 +991,8 @@ _CONTEXTS = tuple(
                 "What does an assessment state prove?",
             ),
         ),
-        CopilotPageContext(
+        _registered(
             path="/compliance/grc-studio",
-            title="No-code GRC Studio",
             summary=(
                 "Visually compose closed-schema GRC objects, fields, forms, rules, "
                 "collector bindings, and report views under governed publication."
@@ -1034,9 +1018,8 @@ _CONTEXTS = tuple(
                 "What does the runtime projection prove?",
             ),
         ),
-        CopilotPageContext(
+        _registered(
             path="/compliance/policy-links",
-            title="Policy Publication Links",
             summary=(
                 "Publish immutable, independently reviewed policy versions through stable links, "
                 "scheduled promotion, fail-closed retrieval, and bounded evidence operations."
@@ -1061,9 +1044,8 @@ _CONTEXTS = tuple(
                 "How are private links rotated safely?",
             ),
         ),
-        CopilotPageContext(
+        _registered(
             path="/compliance/scoping",
-            title="Technology Risk and Compliance Scoping",
             summary=(
                 "Publish closed, reference-only questionnaires and compute, independently approve, "
                 "sign, export, and verify exact compliance-scope revisions."
@@ -1088,9 +1070,8 @@ _CONTEXTS = tuple(
                 "Who must be independent in scoping?",
             ),
         ),
-        CopilotPageContext(
+        _registered(
             path="/compliance/scope-actions",
-            title="Compliance Scope Actions",
             summary=(
                 "Derive a governed action plan from an independently finalized scope and approved "
                 "mapping catalog, then approve, apply, reconcile, roll back, and export it."
@@ -1115,9 +1096,8 @@ _CONTEXTS = tuple(
                 "How do I recover an uncertain callback?",
             ),
         ),
-        CopilotPageContext(
+        _registered(
             path="/compliance/continuous-evidence",
-            title="Continuous Evidence Operations",
             summary=(
                 "Operate exact continuous-evidence definitions, enrollments, bounded collection "
                 "cycles, digest-only observations, change alerts, recovery, and integrity."
@@ -1143,9 +1123,8 @@ _CONTEXTS = tuple(
                 "What does a successful observation not prove?",
             ),
         ),
-        CopilotPageContext(
+        _registered(
             path="/privacy",
-            title="Privacy Operations",
             summary=(
                 "Coordinate privacy assessments, residual-risk review, vendor paper, program "
                 "insights, lineage, and governed privacy records."
@@ -1170,9 +1149,8 @@ _CONTEXTS = tuple(
                 "What does lineage show?",
             ),
         ),
-        CopilotPageContext(
+        _registered(
             path="/privacy/data-discovery",
-            title="Privacy Data Discovery",
             summary=(
                 "Enroll exact data sources, run bounded provider scans, review minimized findings, "
                 "and promote only fresh four-eyes-approved classifications."
@@ -1200,9 +1178,8 @@ _CONTEXTS = tuple(
                 "When may a classification be bridged?",
             ),
         ),
-        CopilotPageContext(
+        _registered(
             path="/privacy/regulatory-intelligence",
-            title="Privacy Regulatory Intelligence",
             summary=(
                 "Govern licensed regulatory sources, immutable evidence, corpus-grounded research, "
                 "jurisdiction comparison, saved queries, alerts, reports, and retention."
@@ -1227,9 +1204,8 @@ _CONTEXTS = tuple(
                 "What does an abstention mean?",
             ),
         ),
-        CopilotPageContext(
+        _registered(
             path="/privacy/rights-orchestration",
-            title="Privacy Rights Orchestration",
             summary=(
                 "Open and coordinate minimized privacy-rights cases, external identity evidence, "
                 "tasks, callbacks, approvals, closure, integrity, and retention."
@@ -1254,9 +1230,8 @@ _CONTEXTS = tuple(
                 "What does a callback record prove?",
             ),
         ),
-        CopilotPageContext(
+        _registered(
             path="/privacy/rights-consumer-delivery",
-            title="Privacy Rights Consumer Delivery",
             summary=(
                 "Mint digest-retained consumer delivery capabilities, govern exact response packages, "
                 "revoke deliveries, export evidence, and purge retention-eligible records."
@@ -1284,9 +1259,8 @@ _CONTEXTS = tuple(
                 "What is excluded from this operator page?",
             ),
         ),
-        CopilotPageContext(
+        _registered(
             path="/privacy/notice-governance",
-            title="Privacy Notice Governance",
             summary=(
                 "Govern digest-only privacy-notice releases and the optional exact-target "
                 "local bridge into tenant-private Consent Publishing authority."
@@ -1313,9 +1287,8 @@ _CONTEXTS = tuple(
                 "How does rollback choose the exact prior bundle?",
             ),
         ),
-        CopilotPageContext(
+        _registered(
             path="/third-party/contracts",
-            title="Contracts & Engagements",
             summary=(
                 "Govern first-class Contract and Engagement records tied to exact "
                 "third-party vendor revisions."
@@ -1341,9 +1314,8 @@ _CONTEXTS = tuple(
                 "When can an archived record be purged?",
             ),
         ),
-        CopilotPageContext(
+        _registered(
             path="/third-party/executive-reports",
-            title="Third-Party Executive Reports",
             summary=(
                 "Create role-scoped, brandable PDF reports from exact revision- and "
                 "digest-pinned third-party records."
@@ -1369,9 +1341,8 @@ _CONTEXTS = tuple(
                 "How are download grants protected?",
             ),
         ),
-        CopilotPageContext(
+        _registered(
             path="/administration/document-vault",
-            title="Governed Document Vault",
             summary=(
                 "Custody bounded approved document bytes in tenant-private encrypted "
                 "storage and deliver them only through one-time principal-bound grants."
@@ -1397,9 +1368,8 @@ _CONTEXTS = tuple(
                 "What still needs external acceptance?",
             ),
         ),
-        CopilotPageContext(
+        _registered(
             path="/third-party/intelligence",
-            title="Third-Party Intelligence",
             summary=(
                 "Govern licensed vendor intelligence, screening, explainable risk, enhanced due "
                 "diligence, monitoring, delivery, and a consent-bound contribution exchange."
@@ -1428,9 +1398,8 @@ _CONTEXTS = tuple(
                 "Which findings require human review?",
             ),
         ),
-        CopilotPageContext(
+        _registered(
             path="/third-party/lifecycle",
-            title="Third-Party Lifecycle",
             summary=(
                 "Coordinate versioned vendor assessments, conditional workflow, evidence references, "
                 "callbacks, offboarding, independent completion, audit, and retention."
@@ -1455,9 +1424,8 @@ _CONTEXTS = tuple(
                 "What does callback state prove?",
             ),
         ),
-        CopilotPageContext(
+        _registered(
             path="/third-party/collaboration",
-            title="Third-Party Collaboration",
             summary=(
                 "Invite consenting vendors into a scoped external portal and govern respondent "
                 "attestations, document manifests, follow-up, rotation, revocation, and retention."
@@ -1482,9 +1450,8 @@ _CONTEXTS = tuple(
                 "How should an invitation credential be handled?",
             ),
         ),
-        CopilotPageContext(
+        _registered(
             path="/governance/inventory",
-            title="Governance Inventory",
             summary=(
                 "Inspect one revision-pinned, digest-only inventory across AI Governance, "
                 "Consent, Data Use, Privacy, Tech Risk, and Third-Party Management."
@@ -1510,9 +1477,8 @@ _CONTEXTS = tuple(
                 "How should I safely reconcile or recover a snapshot?",
             ),
         ),
-        CopilotPageContext(
+        _registered(
             path="/security/governance",
-            title="AI Governance Workspace",
             summary=(
                 "Run plain-language EU AI Act and governance workflows for legal, "
                 "privacy, compliance, and HR teams."
@@ -1538,9 +1504,8 @@ _CONTEXTS = tuple(
                 "What does this workspace not prove?",
             ),
         ),
-        CopilotPageContext(
+        _registered(
             path="/security/assurance",
-            title="Model Risk and AI Assurance",
             summary=(
                 "Operate the AI evidence gateway, model-risk controls, and sixteen bounded governance "
                 "modules from one assurance workspace."
@@ -1572,9 +1537,8 @@ _CONTEXTS = tuple(
                 "What does this workspace not prove?",
             ),
         ),
-        CopilotPageContext(
+        _registered(
             path="/privacy/drop",
-            title="California DROP Requests",
             summary=(
                 "Bridge an independently enrolled California DROP record into the privacy-rights "
                 "workflow and track a terminal, evidence-backed outcome."
@@ -1606,9 +1570,8 @@ _CONTEXTS = tuple(
                 "Which records block retiring a principal-binding key revision?",
             ),
         ),
-        CopilotPageContext(
+        _registered(
             path="/assessments",
-            title="Assessments",
             summary=(
                 "Create, assign, answer, discuss, review, and decide governed assessments "
                 "against exact questionnaire and evidence revisions."
@@ -1631,9 +1594,8 @@ _CONTEXTS = tuple(
                 "What should I review before deciding?",
             ),
         ),
-        CopilotPageContext(
+        _registered(
             path="/assess/evidence-autopopulation",
-            title="Assessment Evidence Proposals",
             summary=(
                 "Turn released evidence analyses into cited assessment-answer proposals "
                 "without treating documents as attestations."

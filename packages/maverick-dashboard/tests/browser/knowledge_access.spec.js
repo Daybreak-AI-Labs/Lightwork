@@ -113,7 +113,8 @@ for (const width of [320, 1280]) test(`knowledge access is usable and honest at 
     return route.fulfill({status: 404, json: {detail: 'Synthetic route unavailable'}});
   });
   await page.goto('/knowledge-access');
-  await expect(page.getByRole('heading', {name: 'Find knowledge you can use now'})).toBeVisible();
+  await expect(page.getByRole('heading', {name: 'Knowledge', exact: true, level: 1})).toBeVisible();
+  await expect(page.locator('.ka-lede')).toContainText('Find knowledge you can use now');
   await expect(page.locator('#ka-requests')).toContainText('retire or retrain the model');
   await expect(page.locator('#ka-requests')).toContainText('does not erase its influence from learned weights');
 

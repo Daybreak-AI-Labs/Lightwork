@@ -12,7 +12,7 @@
   {% else %}{% set state_label = '' %}{% endif %}
   <li><a data-conversation-root="{{ t.id }}" href="/chat/goal/{{ t.target_id }}"{% if t.active %} class="active" aria-current="true"{% endif %}{% if state_label %} aria-describedby="chat-status-{{ t.id }}"{% endif %} title="{{ t.title }}" lang="und" dir="auto">{% if t.pinned %}{{ ui('Pinned:') }} {% endif %}<bdi lang="und" dir="auto" data-user-content>{{ t.title }}</bdi>{% if t.archived %} {{ ui('(archived)') }}{% endif %}</a>{% if state_label %}<span class="cs-list__status cs-list__status--{{ t.status }}" id="chat-status-{{ t.id }}">{{ state_label }}</span>{% endif %}</li>
   {% else %}
-  <li class="cs-empty">{{ ui('No chats yet.') }} <a href="/chat" style="display:inline; padding:0;">{{ ui('Start a chat') }}</a></li>
+  <li class="cs-empty">{{ ui('No chats yet.') }}{% if can_create_goal %} <a href="/chat" style="display:inline; padding:0;">{{ ui('Start a chat') }}</a>{% endif %}</li>
   {% endfor %}
 </ul>
 {% endmacro %}

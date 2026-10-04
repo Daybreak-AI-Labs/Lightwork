@@ -1,13 +1,13 @@
 {% extends "base.html" %}
 {% from "_hero.html" import hero %}
 {% from "_module_gate.html" import module_gate %}
-{% block title %}Disclosure Suggestions · Lightwork{% endblock %}
+{% block title %}Disclosure suggestions · Lightwork{% endblock %}
 {% block head_extra %}<link rel="stylesheet" href="/static/lightwork-consent-workbench.css">{% endblock %}
 {% block content %}
 {% set np_on = consent_scan_notice_proposals_enabled %}
 {% set np_admin = consent_can_admin if consent_can_admin is defined else true %}
 <div class="governance-workbench" id="csnp-root" data-enabled="{{ 'true' if np_on else 'false' }}" data-can-admin="{{ 'true' if np_admin else 'false' }}">
-  {{ hero('Consent review', 'Disclosure Suggestions',
+  {{ hero('Consent review', 'Disclosure suggestions',
           lede='Turn a reviewed website scan into an updated list of the trackers your privacy notice should mention. Three different people take part: one suggests the update, a second approves it and a third accepts it.') }}
   {% include "_consent_nav.html" %}
   {% if not np_on %}

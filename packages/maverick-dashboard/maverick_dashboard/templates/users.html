@@ -37,7 +37,7 @@
   {% endset %}
   {% from "_empty_state.html" import empty_state %}
   {% set users_actions %}<a class="btn btn--primary" href="#invite-email">Invite someone</a>{% endset %}
-  {% call hero('Administration', 'Users & roles',
+  {% call hero('Administration', 'Users',
                subtitle='Who can use Lightwork',
                lede=users_lede,
                actions=users_actions if (global_admin and invites_on) else '') %}

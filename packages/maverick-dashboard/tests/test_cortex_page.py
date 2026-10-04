@@ -94,7 +94,7 @@ def test_page_renders_the_brain_and_is_hardened(monkeypatch) -> None:
     assert "'unsafe-inline'" not in csp and "style-src 'self' 'nonce-" in csp
     assert "script-src 'self'" in csp
     body = response.text
-    assert "<title>Knowledge · Lightwork</title>" in body
+    assert "<title>Cortex memory diagnostics · Lightwork</title>" in body
     assert body.count("<h1") == 1
     assert "Search your connected sources" in body
     # the figure: the lattice canvas at its native size, captioned
@@ -202,8 +202,8 @@ def test_page_is_a_hidden_read_only_compatibility_console() -> None:
     assert entry["group"] == "Advanced tools"
     assert entry["floor"] == "view" and entry["default"] == "view"
     assert entry["in_nav"] is False
-    base = (Path(page.__file__).parent / "templates" / "base.html").read_text(encoding="utf-8")
-    assert f'id="i-{entry["icon"]}"' in base
+    sprite = (Path(page.__file__).parent / "templates" / "_icon_sprite.html").read_text(encoding="utf-8")
+    assert f'id="i-{entry["icon"]}"' in sprite
     # Compatibility is reachable directly but does not duplicate the primary
     # Knowledge destination in the sidebar.
     for role in (None, "viewer", "auditor", "operator", "admin"):
@@ -247,7 +247,7 @@ def test_mounted_page_renders_through_the_dashboard_shell(monkeypatch, tmp_path)
         client = TestClient(dash_app.app, headers={"Origin": "http://testserver"})
         response = client.get(page.PAGE_PATH)
         assert response.status_code == 200, response.text[:400]
-        assert "<title>Knowledge · Lightwork</title>" in response.text
+        assert "<title>Cortex memory diagnostics · Lightwork</title>" in response.text
         assert "style-src 'self' 'nonce-" in response.headers["content-security-policy"]
         assert '<a href="/cortex"' not in response.text
         assert '<a href="/knowledge-access"' in response.text

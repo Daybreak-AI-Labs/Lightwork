@@ -39,7 +39,7 @@ def test_page_exposes_complete_honest_operator_workbench(page_client) -> None:
     response = page_client.get("/consent/scan-notice-proposals")
     assert response.status_code == 200
     page = response.text
-    assert "Disclosure Suggestions" in page
+    assert "Disclosure suggestions" in page
     assert "Three different people take part" in page
     assert "does not change your website or write any notice text" in page
     assert "/api/v1/consent/scan-notice-proposals" in page
@@ -178,5 +178,5 @@ def test_main_dashboard_mounts_page_api_visibility_tips_and_parent_links(
     client = TestClient(app, headers={"Origin": "http://testserver"})
     response = client.get("/consent/scan-notice-proposals")
     assert response.status_code == 200, response.text
-    assert "Disclosure Suggestions" in response.text
+    assert "Disclosure suggestions" in response.text
     assert 'data-module-gate="consent_preferences.scanner.notice_proposals"' in response.text

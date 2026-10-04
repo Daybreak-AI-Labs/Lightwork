@@ -14436,6 +14436,21 @@ def list_approvals(request: Request, response: Response) -> dict:
             "private_count": len(rows) - len(readable), "content_access_url": "/content-access"}
 
 
+@router.get("/approvals/waiting-count")
+def approvals_waiting_count(request: Request, response: Response) -> dict:
+    """How many decisions the Approvals page shows this person: the sidebar
+    badge. Fetched after the page has loaded, so it never delays a render;
+    the same permission and content-access filtering as the page itself."""
+    require_permission(request, "operate")
+    response.headers["Cache-Control"] = "private, no-store"
+    w = _world()
+    from .content_access import can_read_approval
+    from .flow_approval_inbox import pending_for_request
+
+    readable = sum(1 for a in w.pending_approvals() if can_read_approval(request, a, w))
+    return {"waiting": readable + len(pending_for_request(request)["items"])}
+
+
 def _approval_api_row(approval) -> dict:
     """Project one approval without exposing a malformed structured envelope."""
     from maverick.approval_cards import (

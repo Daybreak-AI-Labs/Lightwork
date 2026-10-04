@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Knowledge · Lightwork{% endblock %}
+{% block title %}Cortex memory diagnostics · Lightwork{% endblock %}
 {% block head_extra %}
 <style nonce="{{ csp_style_nonce }}">
   .ctx { display: grid; gap: var(--space-5); }
@@ -71,7 +71,7 @@
 <div class="ctx" id="ctx-root" data-api-base="{{ api_base }}" data-copilot-page="{{ page_path }}"
      data-enabled="{{ 'true' if status.enabled else 'false' }}"
      data-source-labels='{{ source_labels | tojson }}'>
-  {% call hero('Your workspace', 'Knowledge',
+  {% call hero('Your workspace', 'Cortex memory diagnostics',
                subtitle='Search your connected sources',
                lede='Find information in the knowledge sources available to your
                      workspace, including cited documents, skills, lessons and

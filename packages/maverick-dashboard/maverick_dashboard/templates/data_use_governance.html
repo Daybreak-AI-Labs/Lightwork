@@ -1,13 +1,13 @@
 {% extends "base.html" %}
 {% from "_hero.html" import hero %}
 {% from "_module_gate.html" import module_gate %}
-{% block title %}Data Use Rules · Lightwork{% endblock %}
+{% block title %}Data use rules · Lightwork{% endblock %}
 {% block head_extra %}<link rel="stylesheet" href="/static/lightwork-consent-workbench.css">{% endblock %}
 {% block content %}
 {% set du_on = data_use_enabled %}
 {% set du_admin = data_use_can_admin if data_use_can_admin is defined else true %}
 <div class="governance-workbench" id="dug-root" data-can-admin="{{ 'true' if du_admin else 'false' }}" data-enabled="{{ 'true' if du_on else 'false' }}" data-compiler="{{ 'true' if data_use_compiler_enabled else 'false' }}">
-  {{ hero('Data governance', 'Data Use Rules',
+  {{ hero('Data governance', 'Data use rules',
           lede='Describe your data, record why it may be used, set rules for who can use it and how, and decide requests from projects that want to use it.') }}
   <nav class="cw-nav" aria-label="Data use tools">
     <div class="cw-nav__group">

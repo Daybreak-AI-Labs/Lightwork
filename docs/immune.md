@@ -201,7 +201,7 @@ Each goal costs two model-driven runs. Only aggregate results are ledgered.
 
 ## Dashboard
 
-**Govern → Immune layer** (`/immune`, audit permission) shows:
+**Governance → Safety monitoring** (`/immune`, audit permission) shows:
 - the roster's composition-risk trifectas and exfiltration counts;
 - catch rates and earned authority from decided canaries;
 - twin replays and awareness probes;

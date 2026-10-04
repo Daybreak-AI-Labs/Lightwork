@@ -118,7 +118,7 @@ def test_disabled_modules_fail_closed_and_page_offers_controls():
 
     page = client.get("/security/governance")
     assert page.status_code == 200
-    assert "Governance workspace" in page.text
+    assert "AI governance" in page.text
     assert "EU AI Act workflows is turned off" in page.text
     assert "Staff AI training tracking is turned off" in page.text
     assert "Serious-incident reporting is turned off" in page.text

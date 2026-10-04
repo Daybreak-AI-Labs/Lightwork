@@ -1,13 +1,13 @@
 {% extends "base.html" %}
 {% from "_hero.html" import hero %}
 {% from "_module_gate.html" import module_gate %}
-{% block title %}Banner and Preference Center · Lightwork{% endblock %}
+{% block title %}Banner and preference center · Lightwork{% endblock %}
 {% block head_extra %}<link rel="stylesheet" href="/static/lightwork-consent-workbench.css">{% endblock %}
 {% block content %}
 {% set pub_on = consent_publishing_enabled %}
 {% set pub_admin = consent_can_admin if consent_can_admin is defined else true %}
 <div class="governance-workbench">
-  {{ hero('Consent experiences', 'Banner and Preference Center',
+  {{ hero('Consent experiences', 'Banner and preference center',
           lede='Build the consent banner and preference center people see on your websites and apps, preview it, and publish it. Every published version is kept, so you can restore an earlier one at any time.') }}
   {% include "_consent_nav.html" %}
   {% if not pub_on %}

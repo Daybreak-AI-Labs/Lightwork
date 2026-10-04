@@ -39,7 +39,7 @@ def test_page_is_liquid_glass_copilot_wired_and_permission_aware(monkeypatch) ->
     assert "'unsafe-inline'" not in response.headers["content-security-policy"]
     assert "style-src 'self' 'nonce-" in response.headers["content-security-policy"]
     body = response.text
-    assert "Mobile App Consent" in body
+    assert "Mobile app consent" in body
     assert f'data-copilot-page="{page.PAGE_PATH}"' in body
     assert page.ASSET_PATH in body
     assert "/static/lightwork-consent-workbench.js" in body
@@ -79,14 +79,16 @@ def test_page_has_nav_and_closed_copilot_context() -> None:
     visibility = next(item for item in ui_visibility.PAGES if item["path"] == page.PAGE_PATH)
     assert visibility == {
         "path": "/consent/native",
-        "label": "Consent in Your Apps",
+        "label": "Mobile app consent",
+        "aliases": "Consent in Your Apps",
         "group": "Consent",
         "icon": "key",
         "floor": "view",
         "default": "audit",
+        "module": "consent_preferences.native_sdk",
         "in_nav": True,
     }
     context = copilot_context.context_for_page(page.PAGE_PATH)
-    assert context.title == "Consent in Your Apps"
+    assert context.title == "Mobile app consent"
     assert any("no permissive fallback" in item for item in context.boundaries)
     assert any("live-device" in item for item in context.boundaries)

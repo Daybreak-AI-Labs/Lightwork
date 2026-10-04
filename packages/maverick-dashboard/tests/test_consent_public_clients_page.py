@@ -53,7 +53,7 @@ def test_public_clients_page_explains_once_only_credentials_and_sdk(isolated_pag
     response = client.get("/consent/public-clients")
     assert response.status_code == 200
     page = response.text
-    assert "Website and App Keys" in page
+    assert "Website and app keys" in page
     assert "shown only once" in page and "Your new key (shown once)" in page
     assert "LightworkConsent" in page
     assert "/api/v1/public/consent/sdk.js" in page
