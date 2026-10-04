@@ -170,6 +170,12 @@
   .ask__send:hover { background: var(--brand-hi); transform: translateY(-1px); }
   .ask__send:active { transform: none; }
   .ask__send:disabled { opacity: 0.45; cursor: default; transform: none; }
+  /* A step waiting on the Approvals page: who decides and by when. */
+  .approval-wait {
+    margin: 0 0 var(--space-3); padding: var(--space-2) var(--space-3);
+    border: 1px solid var(--border); border-inline-start: 3px solid var(--warn); border-radius: var(--radius-md);
+  }
+  .approval-wait a { margin-inline-start: var(--space-1); }
   /* A stopped run: a quiet notice with one obvious action, not a warning box. */
   .halt-card {
     margin-top: var(--space-4); padding: var(--space-3) var(--space-4);
@@ -401,6 +407,7 @@
     <script src="/static/lightwork-conversation-organization.js" defer></script>
     <p id="task-authority" role="status" data-goal="{{ goal.id }}" data-operate="{{ '1' if can_operate else '0' }}">{% if not can_operate %}This task is read-only for your current account. Permission requests explains who can review access; your draft remains available.{% endif %}</p>
     <p id="goal-action-msg" role="status" aria-live="polite" class="muted" style="min-height: 1em; margin: 0 0 0.75rem;"></p>
+    <p id="approval-wait" class="approval-wait" role="status" aria-live="polite" hidden></p>
     <details class="activity" id="work-activity"{% if goal.status == 'draft' %} hidden{% endif %}>
       <summary class="activity__bar" aria-label="{{ ut('Agent activity — expand to show the full work log') }}">
         <span class="spinner" id="work-spin" aria-hidden="true"></span>
@@ -936,6 +943,67 @@
       const replyAttach = document.getElementById('reply-attach');
       let submitting = false;
       let stopRequested = false;
+      // A risky step parked on the Approvals page (see approval_waits.py).
+      let approvalWait = null, approvalWaitLoading = false;
+      const approvalWaitEl = document.getElementById('approval-wait');
+      function approvalWaitText(item) {
+        const count = cgNumber(item.remaining);
+        if (item.who === 'you') return cgText('A step needs approval. Waiting for your approval on the Approvals page.');
+        if (item.who === 'more') return cgText(item.remaining === 1
+          ? 'A step needs approval. Waiting for {count} more approval on the Approvals page; yours can count.'
+          : 'A step needs approval. Waiting for {count} more approvals on the Approvals page; yours can count.', {count: count});
+        if (item.who === 'others') return cgText(item.remaining === 1
+          ? 'A step needs approval. Waiting for {count} other person to approve it on the Approvals page.'
+          : 'A step needs approval. Waiting for {count} other people to approve it on the Approvals page.', {count: count});
+        return cgText('A step needs approval. Waiting for an approver on the Approvals page.');
+      }
+      function deadlineText(ts) {
+        // The shared time helpers (lightwork-ui.js): the viewer's own zone,
+        // plus how long is left ("in 4 minutes").
+        if (window.mvTimeAbsolute && window.mvTimeRelative) {
+          const absolute = window.mvTimeAbsolute(ts), relative = window.mvTimeRelative(ts);
+          if (absolute) return relative ? absolute + ' (' + relative + ')' : absolute;
+        }
+        return cgDate(ts);
+      }
+      let approvalWaitShown = '';
+      function showApprovalWait(item) {
+        const changed = JSON.stringify(item || null) !== JSON.stringify(approvalWait);
+        approvalWait = item || null;
+        if (!approvalWaitEl) return;
+        const sentence = approvalWait ? approvalWaitText(approvalWait) + (approvalWait.decide_by
+          ? ' ' + cgText('If nobody decides by {time}, the step is refused and nothing runs.',
+            {time: deadlineText(approvalWait.decide_by)}) : '') : '';
+        // Checked every few seconds; redrawn only when the words change (the
+        // time left), so a screen reader is not told the same thing again.
+        if (sentence !== approvalWaitShown) {
+          approvalWaitShown = sentence;
+          approvalWaitEl.replaceChildren();
+          approvalWaitEl.hidden = !approvalWait;
+          if (approvalWait) {
+            const text = document.createElement('span');
+            text.textContent = sentence;
+            const link = document.createElement('a');
+            link.href = approvalWait.href || '/approvals';
+            link.textContent = cgText('Open the Approvals page');
+            approvalWaitEl.append(text, ' ', link);
+          }
+          const now = document.getElementById('work-now');
+          if (now && !done) cgCopy(now, approvalWait ? 'Waiting for approval…' : 'Working…');
+        }
+        if (changed) syncComposer();
+      }
+      async function pollApprovalWait() {
+        if (approvalWaitLoading || !approvalWaitEl) return;
+        if (done) { showApprovalWait(null); return; }
+        approvalWaitLoading = true;
+        try {
+          const r = await fetch('/api/v1/goals/' + goalId + '/approval-wait', {credentials: 'same-origin', cache: 'no-store'});
+          if (!r.ok || r.redirected) return;  // keep what is shown; the next tick retries
+          const j = await r.json();
+          showApprovalWait(!done && Array.isArray(j.waiting) && j.waiting.length ? j.waiting[0] : null);
+        } catch (_) { /* the next tick retries */ } finally { approvalWaitLoading = false; }
+      }
       let questionsFresh = false;
       let questionLoading = false;
 
@@ -986,9 +1054,11 @@
           // Say why Send is unavailable while the task works, and where Stop is.
           const explain = running && !inboxReady && canOperate && stoppable;
           runNote.hidden = !explain;
-          if (explain) cgCopy(runNote, inbox && inbox.disabledByPolicy
-            ? 'Lightwork is working on this task. Sending messages during a task is turned off for this workspace, so Send works again when it finishes. To end the task now, press Stop.'
-            : 'Lightwork is working on this task. Send works again when it finishes. To end the task now, press Stop.');
+          if (explain) cgCopy(runNote, approvalWait
+            ? 'This task is waiting for approval before it continues. Send works again when it finishes. To end the task now, press Stop.'
+            : inbox && inbox.disabledByPolicy
+              ? 'Lightwork is working on this task. Sending messages during a task is turned off for this workspace, so Send works again when it finishes. To end the task now, press Stop.'
+              : 'Lightwork is working on this task. Send works again when it finishes. To end the task now, press Stop.');
           else runNote.textContent = '';
         }
         answerInput.disabled = !canOperate || submitting;
@@ -1247,6 +1317,7 @@
         if (d.terminal === true) {
           done = true;
           cancelBtn.disabled = true;
+          showApprovalWait(null);
         }
         if (['failed', 'cancelled'].includes(currentStatus)) renderHalted();
         if (stopRequested && currentStatus === 'cancelled') cgCopy(actionMsg,'Stop recorded. Cleanup may still be finishing; already completed changes are not undone.');
@@ -1333,9 +1404,11 @@
       // A goal already 'blocked' on load resolves to either a question or a
       // halt card right away, instead of waiting for the next poll tick.
       if (currentStatus === 'blocked') pollQuestions();
+      if (!done) pollApprovalWait();
       // Poll questions on a longer cadence so the form picks up on
-      // ask_user that happens between event ticks.
-      setInterval(function() { if (!done && document.visibilityState !== 'hidden') pollQuestions(); }, 5000);
+      // ask_user that happens between event ticks; the same tick notices a
+      // step parked on the Approvals page.
+      setInterval(function() { if (!done && document.visibilityState !== 'hidden') { pollQuestions(); pollApprovalWait(); } }, 5000);
     })();
   </script>
   <script src="/static/lightwork-task-resume.js" defer></script>

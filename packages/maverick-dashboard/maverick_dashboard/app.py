@@ -1339,6 +1339,9 @@ app.include_router(project_workspaces_router)
 app.include_router(task_handoffs_router)
 
 app.include_router(my_work_router)
+from .approval_waits import router as approval_waits_router  # noqa: E402
+
+app.include_router(approval_waits_router)
 app.include_router(conversation_organization_router)
 from .first_outcome_api import router as first_outcome_router  # noqa: E402
 from .in_app_routes import router as in_app_router  # noqa: E402

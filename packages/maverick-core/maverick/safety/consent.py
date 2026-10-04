@@ -682,6 +682,16 @@ def require_consent(
         # path below (fail-open: the kernel never *requires* the dashboard).
     # 3) Interactive prompt (or non-tty deny).
     if not sys.stdin.isatty():
+        if mode == "ask":
+            # "Ask a person": a task someone started in Lightwork's chat sends
+            # the step to the Approvals page and waits for them. Nobody deciding
+            # in time is still the refusal below, and the request is withdrawn.
+            asked = _decide_via_dashboard(
+                action, risk, scope, detail, provenance, approval_card,
+                withdraw_on_timeout=True, chat_tasks_only=True,
+            )
+            if asked is not None:
+                return _decided(asked, action, scope, detail, raise_on_deny)
         d = _emit(ConsentDecision(False, "non-tty-deny", risk, ts), action, scope, detail)
         if raise_on_deny:
             raise ConsentDenied(action)
@@ -714,6 +724,19 @@ def require_consent(
     if not granted and raise_on_deny:
         raise ConsentDenied(action)
     return d
+
+
+def _decided(
+    decision: ConsentDecision,
+    action: str,
+    scope: str | None,
+    detail: str | None,
+    raise_on_deny: bool,
+) -> ConsentDecision:
+    decision = _emit(decision, action, scope, detail)
+    if not decision.granted and raise_on_deny:
+        raise ConsentDenied(action)
+    return decision
 
 
 def require_person(
@@ -774,6 +797,11 @@ def _dashboard_timeout() -> float:
         return max(0.0, float(raw))
     except ValueError:
         return 300.0
+
+
+def dashboard_wait_seconds() -> float:
+    """How long a task waits for a decision on the Approvals page (seconds)."""
+    return _dashboard_timeout()
 
 
 def _consent_requester(wm) -> str | None:
@@ -1282,29 +1310,59 @@ def approval_decision_settles_at(row: object, *, grace: float | None = None) -> 
     return float(decided_at) + grace
 
 
-def _decide_via_dashboard(
+# Task states after which a waiting request can no longer be acted on: the
+# person pressed Stop, or the run finished or paused for good. A decision made
+# later must not start the step in a run nobody is following any more.
+_TASK_OVER = frozenset({"cancelled", "done", "completed", "failed", "error", "blocked"})
+
+
+def _web_chat_goal(wm) -> int | None:
+    """The running task when a person started it in Lightwork's chat, else None.
+
+    That person follows the task on its chat page and can open the Approvals
+    page, so "ask" sends the decision there. A headless run (the command line,
+    a webhook, a schedule, an API script) has no chat behind it.
+    """
+    try:
+        from ..chat_threads import ChatThreads
+        from ..logging_config import current_goal_id
+
+        goal_id = current_goal_id()
+        if goal_id is None:
+            return None
+        return goal_id if ChatThreads(wm).binding(goal_id) is not None else None
+    except Exception:  # an unreadable binding never widens who is asked
+        return None
+
+
+def _task_over(wm, goal_id: int | None) -> bool:
+    if goal_id is None:
+        return False
+    try:
+        goal = wm.get_goal(goal_id)
+    except Exception:  # a failed read keeps waiting; the approval poll fails closed
+        return False
+    return goal is None or str(getattr(goal, "status", "") or "") in _TASK_OVER
+
+
+def _withdraw_approval(wm, approval_id: int, by: str) -> None:
+    """Take a request nobody can act on any more off the Approvals page."""
+    try:
+        wm.decide_approval(approval_id, "denied", decided_by=by)
+    except Exception:  # pragma: no cover -- the refusal stands either way
+        pass
+
+
+def _park_approval(
+    wm,
     action: str,
     risk: str,
     scope: str | None,
     detail: str | None,
     provenance: str | None,
-    approval_card: Mapping[str, object] | None = None,
-    *,
-    withdraw_on_timeout: bool = False,
-) -> ConsentDecision | None:
-    """Park the action in the world model and poll for a dashboard decision.
-
-    Returns a ConsentDecision once the operator approves/denies via the
-    dashboard /approvals page, or ``None`` if the world model is
-    unavailable or the wait times out -- the caller then falls back to
-    the interactive/non-tty path (fail-open per the kernel contract).
-    """
-    try:
-        from ..world_model import close_world_if_owned, open_world
-        wm = open_world()  # client/tenant-floored: the same DB the dashboard reads
-    except Exception as e:  # world model missing/unwritable -> fail-open
-        log.warning("consent: dashboard mode unavailable, falling back: %s", e)
-        return None
+    approval_card: Mapping[str, object] | None,
+) -> tuple[int, Mapping[str, object]]:
+    """Queue the exact request on the Approvals page; raise when it can't be."""
     # Approval-delegation routing (opt-in via [governance.delegation] rules):
     # a risk/tool rule can route this approval to a specific delegate. No-op
     # (route returns None) when no rules are configured, so the default queue
@@ -1326,25 +1384,65 @@ def _decide_via_dashboard(
     except Exception:  # pragma: no cover -- config never blocks consent
         required = 1
     requester = _consent_requester(wm)
-    try:
-        from ..approval_cards import encode_approval_detail
+    from ..approval_cards import encode_approval_detail
 
-        if approval_card is None:
-            approval_card = _dashboard_approval_card(
-                action, risk, scope, detail, provenance, requester,
-            )
-        detail = encode_approval_detail(approval_card)
-        approval_id = wm.create_approval(
-            action, risk=risk, scope=scope, detail=detail, provenance=provenance,
-            approvals_required=required, requested_by=requester,
+    if approval_card is None:
+        approval_card = _dashboard_approval_card(
+            action, risk, scope, detail, provenance, requester,
         )
-    except Exception as e:
-        log.warning("consent: cannot queue approval, falling back: %s", e)
-        close_world_if_owned(wm)
-        return None
+    stored = encode_approval_detail(approval_card)
+    approval_id = wm.create_approval(
+        action, risk=risk, scope=scope, detail=stored, provenance=provenance,
+        approvals_required=required, requested_by=requester,
+    )
     # Chat channels get the same card with decision buttons: the world model
     # announces it (maverick.approval_notify) right after the row commits.
+    return approval_id, approval_card
 
+
+def _settled_decision(row, approval_card: Mapping[str, object], risk: str) -> ConsentDecision:
+    """The final answer for a decision whose undo window has passed."""
+    granted = row.status == "approved"
+    source = "dashboard"
+    if granted:
+        try:
+            from ..approval_cards import (
+                decode_approval_detail,
+                require_current_approval_card,
+            )
+
+            stored = decode_approval_detail(row.detail)
+            if stored is None:
+                raise ValueError("legacy approval detail")
+            expected_binding = str(approval_card["binding_sha256"])
+            require_current_approval_card(
+                stored, expected_binding=expected_binding,
+            )
+        except Exception:
+            # A decision can become stale between the API vote and this
+            # poll. Return a denial; operation-permit consumers also
+            # rebuild all live authority immediately before the effect.
+            granted = False
+            source = "dashboard-stale"
+    return ConsentDecision(
+        granted,
+        source,
+        risk,
+        time.time(),
+        actor=str(getattr(row, "decided_by", "") or ""),
+    )
+
+
+def _await_dashboard_decision(
+    wm,
+    approval_id: int,
+    approval_card: Mapping[str, object],
+    risk: str,
+    *,
+    goal_id: int | None,
+    withdraw_on_timeout: bool,
+) -> ConsentDecision | None:
+    """Poll the parked request until a person decides, the task stops, or time runs out."""
     # monotonic for the elapsed-time window: a wall-clock jump must not collapse
     # the human-approval window (timing out a risky-action prompt early) or
     # extend it (stalling the agent). The decision record below keeps wall time.
@@ -1354,8 +1452,12 @@ def _decide_via_dashboard(
         try:
             row = wm.get_approval(approval_id)
         except Exception:
-            close_world_if_owned(wm)
             return None
+        if _task_over(wm, goal_id):
+            # Stop (or the end of the run) withdraws the request, so a later
+            # approval can never start the step after the person pressed Stop.
+            _withdraw_approval(wm, approval_id, "system:task-stopped")
+            return ConsentDecision(False, "task-stopped", risk, time.time())
         if row is not None and row.status != "pending":
             # The person can still undo for the grace window: keep polling
             # (a decision seen near the deadline still gets its full window;
@@ -1364,49 +1466,66 @@ def _decide_via_dashboard(
             if remaining > 0:
                 time.sleep(min(1.0, remaining))
                 continue
-            granted = row.status == "approved"
-            source = "dashboard"
-            if granted:
-                try:
-                    from ..approval_cards import (
-                        decode_approval_detail,
-                        require_current_approval_card,
-                    )
-
-                    stored = decode_approval_detail(row.detail)
-                    if stored is None:
-                        raise ValueError("legacy approval detail")
-                    expected_binding = str(approval_card["binding_sha256"])
-                    require_current_approval_card(
-                        stored, expected_binding=expected_binding,
-                    )
-                except Exception:
-                    # A decision can become stale between the API vote and this
-                    # poll. Return a denial; operation-permit consumers also
-                    # rebuild all live authority immediately before the effect.
-                    granted = False
-                    source = "dashboard-stale"
-            decision = ConsentDecision(
-                granted,
-                source,
-                risk,
-                time.time(),
-                actor=str(getattr(row, "decided_by", "") or ""),
-            )
-            close_world_if_owned(wm)
-            return decision
+            return _settled_decision(row, approval_card, risk)
         if time.monotonic() >= deadline:
             break
         time.sleep(1.0)
     if withdraw_on_timeout:
         # Nobody decided in time and the caller will not act on a later vote:
         # take the request off the Approvals page instead of leaving it there.
-        try:
-            wm.decide_approval(approval_id, "denied", decided_by="system:no-decision")
-        except Exception:  # pragma: no cover -- the refusal stands either way
-            pass
-    close_world_if_owned(wm)
+        _withdraw_approval(wm, approval_id, "system:no-decision")
     return None  # timed out: caller falls back
+
+
+def _decide_via_dashboard(
+    action: str,
+    risk: str,
+    scope: str | None,
+    detail: str | None,
+    provenance: str | None,
+    approval_card: Mapping[str, object] | None = None,
+    *,
+    withdraw_on_timeout: bool = False,
+    chat_tasks_only: bool = False,
+) -> ConsentDecision | None:
+    """Park the action in the world model and poll for a dashboard decision.
+
+    Returns a ConsentDecision once the operator approves/denies via the
+    dashboard /approvals page (or a refusal when the task is stopped while it
+    waits), or ``None`` if the world model is unavailable or the wait times
+    out -- the caller then falls back to the interactive/non-tty path
+    (fail-open per the kernel contract). ``chat_tasks_only`` parks the request
+    only for a task a person started in Lightwork's chat and returns ``None``
+    at once for anything else.
+    """
+    try:
+        from ..world_model import close_world_if_owned, open_world
+        wm = open_world()  # client/tenant-floored: the same DB the dashboard reads
+    except Exception as e:  # world model missing/unwritable -> fail-open
+        log.warning("consent: dashboard mode unavailable, falling back: %s", e)
+        return None
+    try:
+        if chat_tasks_only:
+            goal_id = _web_chat_goal(wm)
+            if goal_id is None:
+                return None
+        else:
+            from ..logging_config import current_goal_id
+
+            goal_id = current_goal_id()
+        try:
+            approval_id, approval_card = _park_approval(
+                wm, action, risk, scope, detail, provenance, approval_card,
+            )
+        except Exception as e:
+            log.warning("consent: cannot queue approval, falling back: %s", e)
+            return None
+        return _await_dashboard_decision(
+            wm, approval_id, approval_card, risk,
+            goal_id=goal_id, withdraw_on_timeout=withdraw_on_timeout,
+        )
+    finally:
+        close_world_if_owned(wm)
 
 
 def _format_prompt(
