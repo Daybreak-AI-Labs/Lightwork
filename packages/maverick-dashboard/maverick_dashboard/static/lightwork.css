@@ -545,6 +545,10 @@
     .btn--primary:hover { background: var(--brand-hi); border-color: transparent;
       box-shadow: 0 4px 14px color-mix(in srgb, var(--brand) 40%, transparent); }
     .btn--ghost { background: transparent; }
+    /* Quiet buttons: transparent until hovered, then a faint fill. */
+    .btn--ghost:where(:not(.btn--primary, .btn--danger, :disabled)):hover {
+      background-color: color-mix(in srgb, var(--text) 8%, transparent);
+    }
     .btn--danger { background: var(--danger); border-color: var(--danger); color: var(--danger-fg); }
     /* Class names some pages used that never existed; they render as the
        real primary button instead of an unstyled one. */
@@ -1031,6 +1035,15 @@
           -webkit-backdrop-filter: none;
           backdrop-filter: none;
         }
+      }
+      /* Quiet (ghost) buttons are not glass controls. Same weight as the two
+         control rules above and later, so it wins over both: no fill, no
+         blur, no edge highlight; the border stays. */
+      body:not(.theme-hicontrast) :where(.btn--ghost:not(.btn--primary):not(.btn--danger)) {
+        background-color: transparent;
+        -webkit-backdrop-filter: none;
+        backdrop-filter: none;
+        box-shadow: none;
       }
     }
 
