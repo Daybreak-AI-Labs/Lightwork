@@ -7,10 +7,19 @@ minimal fake agent + a stubbed sandbox_run so they need no real LLM/sandbox.
 """
 from __future__ import annotations
 
+from contextlib import nullcontext
 from types import SimpleNamespace
 
 import pytest
 from maverick.tools.code_exec import code_exec_tool
+
+
+@pytest.fixture(autouse=True)
+def _approved_execution(monkeypatch):
+    import maverick.tools.code_exec as module
+
+    monkeypatch.setattr(module, "request_execution_consent", lambda *a, **kw: object())
+    monkeypatch.setattr(module, "consume_operation_consent", lambda permit: nullcontext())
 
 
 class _Budget:
@@ -69,6 +78,41 @@ async def test_runs_declared_tools_then_script(monkeypatch):
     assert '"page": "DATA:http_fetch"' in captured["stdin"]
     assert captured["stdin"].rstrip().endswith("print(len(tools))")
     assert "<tool_output" not in captured["stdin"]  # frame stripped
+
+
+@pytest.mark.asyncio
+async def test_denied_code_exec_does_not_dispatch_declared_calls(monkeypatch):
+    import maverick.tools.code_exec as module
+    from maverick.safety import ConsentDenied
+
+    def deny(*args, **kwargs):
+        raise ConsentDenied("code_exec")
+
+    monkeypatch.setattr(module, "request_execution_consent", deny)
+    captured = _patch_sandbox(monkeypatch)
+    agent = _FakeAgent()
+    out = await code_exec_tool(agent).fn({"code": "print(1)",
+                                          "tool_calls": [{"name": "shell", "arguments": {"cmd": "true"}}]})
+    assert "not approved" in out
+    assert agent.ran == []
+    assert captured == {}
+
+
+@pytest.mark.asyncio
+async def test_code_exec_runs_with_real_one_use_approval(monkeypatch):
+    import maverick.safety.consent as consent
+    import maverick.tools.code_exec as module
+    from maverick.safety import consume_operation_consent
+    from maverick.tools.execution_consent import request_execution_consent
+
+    monkeypatch.setattr(module, "request_execution_consent", request_execution_consent)
+    monkeypatch.setattr(module, "consume_operation_consent", consume_operation_consent)
+    monkeypatch.setattr(consent, "require_consent", lambda *a, **kw: SimpleNamespace(
+        granted=True, source="dashboard", actor="user:reviewer"))
+    captured = _patch_sandbox(monkeypatch, out="approved")
+    out = await code_exec_tool(_FakeAgent()).fn({"code": "print('approved')"})
+    assert out == "approved"
+    assert captured["stdin"].endswith("print('approved')")
 
 
 @pytest.mark.asyncio

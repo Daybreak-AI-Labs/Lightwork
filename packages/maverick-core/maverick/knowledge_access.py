@@ -1667,6 +1667,44 @@ class KnowledgeAccessService:
             "archive_available": archive_available,
         }
 
+    def recovery_candidates(
+        self, tenant: str, *, cursor: str = "", limit: int = 100,
+    ) -> dict:
+        """Find archivable requests in one bounded ID window of an overfilled ledger.
+
+        The ordinary list is deliberately capped at ``_MAX_REQUESTS``. A
+        legacy import can put a finished request beyond that window, so an
+        administrator needs a cursor over IDs without loading every body.
+        This only discovers candidates; ``archive_request`` still performs
+        the revision, source, hold, audit, and local-backend checks.
+        """
+        canonical = canonical_tenant_id(tenant)
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 250:
+            raise ValueError("recovery scan limit must be between 1 and 250")
+        if not isinstance(cursor, str) or len(cursor) > 128:
+            raise ValueError("recovery cursor is invalid")
+        with tenant_scope(tenant=canonical):
+            if not self._archive_available(canonical):
+                raise KnowledgeArchiveUnavailable(
+                    "Finished-request archiving is unavailable on this installation. "
+                    "The request and source restrictions remain in place."
+                )
+            window = list(self.request_store.iter_record_ids(start_after=cursor, limit=limit))
+            items: list[dict] = []
+            next_cursor = None
+            complete = len(window) < limit
+            for position, request_id in window:
+                # Backends rotate to the beginning after the final ID. Never
+                # show that wrapped prefix twice or call it a later page.
+                if cursor and position <= cursor:
+                    complete = True
+                    break
+                next_cursor = position
+                record = self.request_store.get(request_id)
+                if record is not None and record.get("tenant") == canonical and self._archive_ready(canonical, record):
+                    items.append(self._fresh_request_projection(canonical, record))
+        return {"items": items, "next_cursor": None if complete else next_cursor}
+
     def archive_request(
         self, tenant: str, actor: str, request_id: str, *, expected_revision: int,
     ) -> dict:

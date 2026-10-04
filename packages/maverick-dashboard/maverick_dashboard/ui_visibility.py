@@ -700,6 +700,7 @@ PAGES: tuple[dict, ...] = (
         "floor": "operate",
         "default": "operate",
         "in_nav": True,
+        "ready": False,  # Shipped runtime has no durable governance authority.
     },
     {
         "path": "/privacy/drop",

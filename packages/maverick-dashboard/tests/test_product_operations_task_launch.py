@@ -103,6 +103,20 @@ def test_reviewed_start_accepts_one_task_and_recovers_exact_receipt(task_actions
     assert world.get_goal(result["details"]["goal_id"]).title == "Prepare report"
 
 
+def test_reviewed_start_shows_rest_safety_ceiling_before_confirming(task_actions):
+    client, _world, _runs, _principal = task_actions
+    catalog = _catalog(client)
+    review = _prepare(client, catalog, "tasks.start", {
+        "title": "Large request", "max_dollars": 1000,
+        "max_wall_seconds": 1000000,
+    })
+
+    assert review.status_code == 200, review.text
+    changes = {row["label"]: row["after"] for row in review.json()["changes"]}
+    assert changes["Maximum dollars"] == 100.0
+    assert changes["Maximum seconds"] == 86400.0
+
+
 def test_find_returns_only_currently_accessible_task_links(task_actions):
     client, world, _runs, principal = task_actions
     own = world.create_goal("Quarterly accessible report", owner=principal["value"])

@@ -73,7 +73,7 @@ def test_vendor_detail_renders_record_without_form_tokens():
     assert "contracts/acme-dpa.pdf" in body
     assert "Data processing agreement" in body
     # The hosted-form token addresses a public endpoint; it never renders.
-    token = record["questionnaires"][0]["token"]
+    token = record["form_path"].removeprefix("/form/")
     assert token not in body
     # Every section has its button; no raw IDs or lowercase keys to read.
     for label in ("Add contract", "Send a questionnaire", "Link a record", "Add a note",
@@ -90,7 +90,7 @@ def test_vendor_detail_shows_checked_reply_state_and_read_failure(monkeypatch):
     from maverick import form_store
 
     record = _vendor()
-    token = record["questionnaires"][0]["token"]
+    token = record["form_path"].removeprefix("/form/")
     form_store.append(token, {"vr_q1": "yes"})
     answered = client.get(f"/privacy/vendors/{record['id']}")
     assert answered.status_code == 200
@@ -115,13 +115,13 @@ def test_vendor_detail_offers_link_replacement_without_exposing_old_address():
     from maverick import vendor_management as vm
 
     sent = _vendor()
-    old_token = sent["questionnaires"][0]["token"]
+    old_token = sent["form_path"].removeprefix("/form/")
     form_store.append(old_token, {"vr_q1": "yes"})
     replaced = vm.replace_questionnaire_link(
         sent["id"], vm.lookup_digest(old_token), actor="ops",
         expected_revision=sent["revision"],
     )
-    new_token = replaced["questionnaires"][0]["token"]
+    new_token = replaced["form_path"].removeprefix("/form/")
     page = client.get(f"/privacy/vendors/{sent['id']}")
     assert page.status_code == 200
     assert "Replace link" in page.text

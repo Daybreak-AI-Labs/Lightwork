@@ -83,19 +83,42 @@ test("guided source fields keep typed values, tucked-away options and per-source
   assert.equal(ui.context.readSourceConfig().allowed_senders, "alice@example.org");
 });
 
-test("extra settings are name and value rows, never a code box", async () => {
+test("only guided sources are offered and an RSS feed has a required address", async () => {
   const ui = eventFixture(); await settle();
-  ui.get("auto-event-source").value = "custom_source"; ui.context.changeSource();
-  assert.equal(ui.get("auto-event-config-advanced").open, true);
-  ui.get("auto-event-extra-add").listeners.click();
-  const row = ui.get("auto-event-extra").children[0];
-  row._key.value = "region"; row._val.value = "eu";
-  const row2 = ui.context.addExtraRow("retain", "true");
-  assert.ok(row2);
-  assert.deepEqual(JSON.parse(JSON.stringify(ui.context.readSourceConfig())), { region: "eu", retain: true });
+  ui.context.fetch = async url => {
+    if (url === "/api/v1/event-triggers") return ui.reply({ sources: ["custom_source", "rss"], triggers: [] });
+    if (url.endsWith("/history?limit=500")) return ui.reply({ history: [] });
+    if (url.endsWith("/outcomes")) return ui.reply({ outcomes: {} });
+    throw new Error("Unexpected request " + url);
+  };
+  vm.runInContext(source.slice(source.indexOf("    async function loadEventTriggers("),
+    source.indexOf("    async function delEventTrigger(name)")), ui.context);
+  await ui.context.loadEventTriggers();
+  assert.deepEqual(ui.get("auto-event-source").children.map(option => option.value), ["rss"]);
+  assert.match(ui.get("auto-event-source-availability").textContent, /1 additional source is not yet available/);
+  // The minimal Element mock does not auto-select the first option as a browser does.
+  ui.get("auto-event-source").value = "rss"; ui.context.changeSource();
+  assert.equal(ui.get("auto-source-url").required, true);
+  assert.equal(ui.get("auto-event-config-advanced").hidden, true);
+  assert.equal(ui.get("auto-event-create").disabled, false);
   assert.equal(source.includes('id="auto-event-config"'), false);
-  assert.equal(source.includes("Source settings (JSON)"), false);
-  assert.equal(source.includes("Exported definitions (JSON)"), false);
+  assert.equal(source.includes('id="auto-event-extra-add"'), false);
+});
+
+test("no guided source keeps creation unavailable and explains why", async () => {
+  const ui = eventFixture(); await settle();
+  ui.context.fetch = async url => {
+    if (url === "/api/v1/event-triggers") return ui.reply({ sources: ["custom_source"], triggers: [] });
+    if (url.endsWith("/history?limit=500")) return ui.reply({ history: [] });
+    if (url.endsWith("/outcomes")) return ui.reply({ outcomes: {} });
+    throw new Error("Unexpected request " + url);
+  };
+  vm.runInContext(source.slice(source.indexOf("    async function loadEventTriggers("),
+    source.indexOf("    async function delEventTrigger(name)")), ui.context);
+  await ui.context.loadEventTriggers();
+  assert.equal(ui.get("auto-event-source").children.length, 0);
+  assert.equal(ui.get("auto-event-create").disabled, true);
+  assert.match(ui.get("auto-event-source-availability").textContent, /No sources can be set up/);
 });
 
 test("a form source asks the server to create its private link", async () => {

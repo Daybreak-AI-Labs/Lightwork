@@ -14,8 +14,8 @@ None and the caller keeps its configured default — the learner never *lowers*
 safety below what the operator set unless it has evidence.
 
 Deterministic + offline: a capped reservoir with an injectable PRNG, persisted
-atomically (0600) to ``data_dir("budget_tuning.json")``. On by default;
-``[budget] self_tuning = false`` or ``MAVERICK_BUDGET_SELF_TUNING=0`` opts out.
+atomically (0600) to ``data_dir("budget_tuning.json")``. Off by default;
+``[budget] self_tuning = true`` or ``MAVERICK_BUDGET_SELF_TUNING=1`` opts in.
 An explicit configured cap still wins, and a cold class returns no suggestion.
 """
 from __future__ import annotations
@@ -39,15 +39,13 @@ _RESERVOIR = 200             # bounded memory per class
 def enabled() -> bool:
     try:
         from .config import (
-            governed_learning_default,
             governed_learning_env_flag,
             load_config,
         )
         override = governed_learning_env_flag("MAVERICK_BUDGET_SELF_TUNING")
         if override is not None:
             return override
-        return bool(((load_config() or {}).get("budget") or {})
-                    .get("self_tuning", governed_learning_default()))
+        return ((load_config() or {}).get("budget") or {}).get("self_tuning") is True
     except Exception:  # pragma: no cover -- config never blocks a run
         return False
 

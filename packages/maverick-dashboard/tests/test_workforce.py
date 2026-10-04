@@ -55,6 +55,19 @@ def test_team_with_no_usable_specialist_is_not_deployed(monkeypatch):
     assert "no specialists" in response.json()["detail"]
 
 
+def test_team_with_only_unverified_specialists_is_not_deployed(monkeypatch):
+    import maverick.domain_edit as domain_edit
+    from maverick.departments import get_department
+
+    monkeypatch.setattr(domain_edit, "list_agents", lambda: [
+        {"name": name, "readiness": {"state": "unknown"}}
+        for name in get_department("finance").members
+    ])
+    response = client.post("/api/v1/departments/finance/deploy", json={})
+    assert response.status_code == 409
+    assert "setup checks" in response.json()["detail"]
+
+
 def test_unknown_department_404():
     assert client.get("/api/v1/departments/not_a_dept").status_code == 404
     assert client.get("/api/v1/departments/not_a_dept/review").status_code == 404
@@ -257,8 +270,38 @@ def test_deploy_department_creates_a_fleet(tmp_path, monkeypatch):
     fleet = r.json()["fleet"]
     assert fleet["name"] == "dept-finance"
     assert fleet["agents"]
+    assert r.json()["skipped_count"] == 0
     # It is now a real, runnable fleet.
     assert any(f["name"] == "dept-finance" for f in client.get("/api/v1/fleets").json()["fleets"])
+
+
+def test_deploy_excludes_specialists_that_need_setup_and_reports_them(tmp_path, monkeypatch):
+    import maverick.domain_edit as domain_edit
+    from maverick.departments import get_department
+
+    members = get_department("finance").members
+    ready = members[0]
+    monkeypatch.setattr(domain_edit, "list_agents", lambda: [
+        {"name": name, "readiness": {
+            "state": "action_ready" if name == ready else "needs_setup",
+            "label": "Can start" if name == ready else "Needs a connected source",
+            "fix_url": None if name == ready else "/connections",
+        }}
+        for name in members
+    ])
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.delenv("MAVERICK_TENANT", raising=False)
+    response = client.post("/api/v1/departments/finance/deploy")
+    assert response.status_code == 201, response.text
+    body = response.json()
+    assert [agent["name"] for agent in body["fleet"]["agents"]] == [ready]
+    assert body["deployed_count"] == 1
+    assert body["skipped_count"] == len(members) - 1
+    assert all(item["reason"] == "Needs a connected source" and item["fix_url"] == "/connections"
+               for item in body["skipped_specialists"])
+    from maverick.fleet import load_fleet
+
+    assert [agent.name for agent in load_fleet("dept-finance").agents] == [ready]
 
 
 def test_deploy_blocked_without_addon_returns_402(tmp_path, monkeypatch):

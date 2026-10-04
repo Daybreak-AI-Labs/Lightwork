@@ -226,6 +226,10 @@ class GoalOut(BaseModel):
     title: str
     description: str | None = None
     result: str | None = None
+    # Present on REST admission; the exact limits passed to the runner.
+    # A plain goal read has no durable cap record unless submitted with an
+    # Idempotency-Key (whose receipt retains the dispatch intent).
+    limits: dict[str, float | int] | None = None
     # Stable machine-readable cause for a stopped run. ``awaiting_input``
     # takes priority over a generic blocked status; absent while work is
     # running or finished successfully.

@@ -190,8 +190,8 @@ def test_not_ready_pages_are_offered_on_no_customer_surface(monkeypatch, tmp_pat
     from maverick_dashboard import rbac, ui_visibility
 
     held = ui_visibility.not_ready_paths()
-    # Only the Research lab is held back; every governance workbench is offered.
-    assert held == {"/research"}
+    # The Research lab and cloud-agent preview have no customer-ready runtime.
+    assert held == {"/research", "/assurance/cloud-agents"}
     for role in [None, *rbac.ROLES]:
         nav = {ln["href"] for g in ui_visibility.nav_groups(role) for ln in g["links"]}
         finder = {ln["href"] for g in ui_visibility.finder_pages(role) for ln in g["links"]}

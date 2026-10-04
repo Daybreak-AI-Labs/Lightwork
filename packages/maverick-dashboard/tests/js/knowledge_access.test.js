@@ -496,6 +496,31 @@ test('finished requests can be archived from the page without losing the retaine
   ui.dom.window.close();
 });
 
+test('overfilled request view scans bounded batches to reach older finished cases', async () => {
+  const finished = rights({status: 'denied', revision: 2, decision: 'deny',
+    decided_by: ACTOR, decision_evidence_sha256: '0'.repeat(64), archive_ready: true});
+  const capacity = {active_count: 3, active_limit: 2, archive_available: true};
+  const initial = {...requestList(), archived: false, ready_to_archive: false, capacity};
+  const cursor = 'knowledge-req-' + '1'.repeat(40) + '.json';
+  const first = {...requestList(), archived: false, ready_to_archive: true, capacity, next_cursor: cursor};
+  const second = {...requestList([finished]), archived: false, ready_to_archive: true,
+    capacity, next_cursor: null};
+  const ui = await setup([initial, first, second]);
+  assert.match(ui.document.getElementById('ka-capacity').textContent, /scan batches/);
+  ui.document.getElementById('ka-show-ready').click();
+  await tick(); await tick();
+  assert.match(ui.calls[1].url, /\/requests\/recovery\?limit=100&cursor=$/);
+  assert.match(ui.document.getElementById('ka-requests').textContent, /No finished requests in this batch/);
+  const more = ui.document.getElementById('ka-recovery-more');
+  assert.equal(more.hidden, false);
+  more.click();
+  await tick(); await tick();
+  assert.match(ui.calls[2].url, /\/requests\/recovery\?limit=100&cursor=knowledge-req-/);
+  assert.match(ui.document.getElementById('ka-requests').textContent, /Move to finished archive/);
+  assert.equal(more.hidden, true);
+  ui.dom.window.close();
+});
+
 test('failed request-view switches restore the view that owns the visible cards', async () => {
   const finished = rights({status: 'denied', revision: 2, decision: 'deny',
     decided_by: ACTOR, decision_evidence_sha256: '0'.repeat(64), archive_ready: true});

@@ -67,6 +67,34 @@ def test_same_submission_key_replays_one_goal_attachment_and_run(environment):
     assert mismatch.status_code == 409 and len(world.list_goals()) == 1
 
 
+def test_no_file_preparation_is_not_an_answer_on_page_or_refreshed_panel(environment):
+    client, world, runs = environment
+    response = client.post("/chat/send", data={"title": "Draft a plan"}, follow_redirects=False)
+    assert response.status_code == 303 and len(runs) == 1
+    goal_id, receipt, _ = runs[0]
+    assert receipt["detail"]["coverage"] == []
+    assert not world.get_goal(goal_id).result
+
+    page = client.get(f"/chat/goal/{goal_id}")
+    assert page.status_code == 200
+    assert 'id="submission-status"' not in page.text
+    assert re.search(r'id="result-section"[^>]*display: none', page.text)
+
+    # Older builds stored this preparation notice as goals.result. The live
+    # answer-panel refresh must apply the same suppression as the full page.
+    world.set_goal_status(goal_id, "pending", result=receipt["detail"]["message"])
+    legacy_page = client.get(f"/chat/goal/{goal_id}")
+    panel = client.get(f"/chat/goal/{goal_id}/answer-panel")
+    assert legacy_page.status_code == panel.status_code == 200
+    assert re.search(r'id="result-section"[^>]*display: none', legacy_page.text)
+    assert re.search(r'id="result-section"[^>]*display: none', panel.text)
+
+    world.set_goal_status(goal_id, "pending", result="Here is the plan.")
+    answer_panel = client.get(f"/chat/goal/{goal_id}/answer-panel")
+    assert re.search(r'id="result-section"[^>]*display: block', answer_panel.text)
+    assert "Here is the plan." in answer_panel.text
+
+
 def test_missing_companion_is_explicit_before_runner_and_in_model_context(environment):
     client, world, runs = environment
     response = client.post("/chat/send", data={"title": "Read recording"},

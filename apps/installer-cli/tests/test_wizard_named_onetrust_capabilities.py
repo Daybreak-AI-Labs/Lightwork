@@ -19,8 +19,6 @@ def test_named_capability_prompts_enable_safe_dependencies(monkeypatch) -> None:
         "Allow a separately approved proposal",
         "Enable role-aware, brandable third-party executive PDF reports",
         "Enable the packaged Breach Response",
-        "Enable named AWS Bedrock",
-        "Enable the content-free, versioned Databricks",
     )
 
     def answer(prompt, *args, **kwargs):
@@ -40,13 +38,13 @@ def test_named_capability_prompts_enable_safe_dependencies(monkeypatch) -> None:
     assert picked["ai_evidence_analysis"] is True
     assert picked["assessment_evidence_autopopulation"] is True
     assert picked["assessment_evidence_apply"] is True
-    assert picked["ai_cloud_agent_governance"] is True
-    assert picked["databricks_ai_security_framework"] is True
+    assert picked["ai_cloud_agent_governance"] is False
+    assert picked["databricks_ai_security_framework"] is False
     assert picked["evidence_gateway"] is True
     assert picked["ai_inventory"] is True
-    assert picked["ai_policy_management"] is True
-    assert picked["ai_runtime_guardrails"] is True
-    assert picked["policy_packs"] is True
+    assert picked["ai_policy_management"] is False
+    assert picked["ai_runtime_guardrails"] is False
+    assert picked["policy_packs"] is False
     assert picked["third_party_management"]["executive_reports"]["enable"] is True
 
     rendered = tomllib.loads("\n".join(wizard._cfg_security_suite(picked)))
@@ -96,13 +94,13 @@ def test_named_capability_prompts_enable_safe_dependencies(monkeypatch) -> None:
         "download_token_seconds": 300,
     }
     assert rendered["ai_cloud_agent_governance"] == {
-        "enable": True,
+        "enable": False,
         "enabled_providers": [
             "aws_bedrock",
             "azure_ai_foundry",
             "google_vertex_ai",
         ],
-        "databricks_framework_enable": True,
+        "databricks_framework_enable": False,
         "max_records_per_sync": 10_000,
         "max_events_per_batch": 5_000,
         "retention_seconds": 31_536_000,

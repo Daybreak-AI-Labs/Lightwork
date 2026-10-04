@@ -103,7 +103,7 @@ When done:
 
 ```bash
 maverick status      # what's currently active or blocked
-maverick skills      # what the swarm distilled from this run
+maverick skills      # built-in and installed skills; review new suggestions on Skills
 maverick facts       # what it learned about you
 ```
 

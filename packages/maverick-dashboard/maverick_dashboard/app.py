@@ -4446,7 +4446,6 @@ async def vendor_detail_page(request: Request, vendor_id: str) -> HTMLResponse:
     import time as _time
 
     from maverick import vendor_management
-    from maverick.governed_record_lookup import lookup_digest
     if not vendor_management.enabled():
         raise HTTPException(status_code=403,
                             detail="Vendor management is turned off. An administrator can turn it on from the Privacy workspace.")
@@ -4472,8 +4471,8 @@ async def vendor_detail_page(request: Request, vendor_id: str) -> HTMLResponse:
         c["renews_date"] = _date(c.get("renews_at"))
         c["overdue"] = float(c.get("renews_at") or 0) < now
     for q in record.get("questionnaires") or []:
-        token = q.pop("token", None)   # the live form token never reaches a page
-        q["request_id"] = lookup_digest(str(token or ""))
+        # Core returns a non-authorizing request id; no live form address is
+        # available on a read, even to this server-rendered page.
         status = questionnaire_statuses.get(q["request_id"])
         if status is None:
             questionnaire_unavailable = True

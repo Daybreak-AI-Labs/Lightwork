@@ -8,7 +8,7 @@ import os
 import sqlite3
 import threading
 import time
-from contextlib import closing
+from contextlib import closing, nullcontext
 from types import SimpleNamespace
 
 import pytest
@@ -23,6 +23,12 @@ from maverick.tools.sql_query import sql_query
 database_module = importlib.import_module("maverick.tools.database_tool")
 sqlite_module = importlib.import_module("maverick.tools.sql_query")
 LONG_SQL = "WITH RECURSIVE numbers(n) AS (VALUES(1) UNION ALL SELECT n + 1 FROM numbers WHERE n < 100000000) SELECT sum(n) FROM numbers"
+
+
+@pytest.fixture(autouse=True)
+def _approved_sql_writes(monkeypatch):
+    monkeypatch.setattr(sqlite_module, "request_execution_consent", lambda *a, **kw: object())
+    monkeypatch.setattr(sqlite_module, "consume_operation_consent", lambda permit: nullcontext())
 
 
 @pytest.fixture(params=["sqlite", "sqlalchemy"])

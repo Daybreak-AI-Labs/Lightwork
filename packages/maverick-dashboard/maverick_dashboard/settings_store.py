@@ -25,6 +25,8 @@ from pathlib import Path
 
 from maverick import config
 
+from .settings_catalog import CHANNEL_ALLOWLISTS
+
 # Serializes the overlay load-modify-save in-process; cross_process_lock in
 # _locked() extends it across processes (multiple dashboard workers edit
 # provider keys / toggles).
@@ -424,6 +426,18 @@ CHANNELS: list[dict] = [
         {"key": "port", "label": "Webhook port", "secret": False, "type": "int"},
     ]},
 ]
+# The main setup form must include the access list each adapter needs to
+# start. Share the same identity formats as the guided All settings editor.
+for _channel_spec in CHANNELS:
+    _access = CHANNEL_ALLOWLISTS.get(_channel_spec["name"])
+    if _access:
+        _, _, _key, _item, _hint, _pattern, _error = _access
+        _channel_spec["fields"].append({
+            "key": _key, "label": "Who can message Lightwork", "type": "list",
+            "help": f"Add each permitted {_item.lower()} on its own line. Example: {_hint}. "
+                    "Leave this blank to use a list supplied by your server; with no list, nobody can message Lightwork.",
+            "env": f"{_channel_spec['name'].upper()}_{_key.upper()}",
+        })
 _CHANNELS_BY_NAME = {c["name"]: c for c in CHANNELS}
 
 
@@ -2387,6 +2401,27 @@ def set_channel(name: str, enabled: bool, values: dict | None = None) -> None:
             key = field["key"]
             raw = values.get(key)
             val = raw.strip() if isinstance(raw, str) else raw
+            if field.get("type") == "list" and key in values:
+                _access = CHANNEL_ALLOWLISTS[name]
+                pattern, error = _access[5], _access[6]
+                entries = (re.split(r"[,\r\n]+", val) if isinstance(val, str)
+                           else val if isinstance(val, list) else None)
+                if entries is None or len(entries) > 200:
+                    raise ValueError("Add no more than 200 permitted people")
+                people = []
+                for entry in entries:
+                    person = str(entry).strip()
+                    if not person:
+                        continue
+                    if not re.fullmatch(pattern, person):
+                        raise ValueError(f"Enter {error}")
+                    if person not in people:
+                        people.append(person)
+                if people:
+                    ccfg[key] = people
+                else:
+                    ccfg.pop(key, None)
+                continue
             if val in (None, ""):
                 continue  # blank -> keep the stored value (don't wipe a hidden secret)
             if field.get("type") == "int":
@@ -2535,13 +2570,16 @@ def channels_state() -> list[dict]:
             ov_v = ov.get(f["key"])
             raw_v = raw.get(f["key"])
             v = ov_v if ov_v not in (None, "") else raw_v
-            configured = v not in (None, "")
+            configured = v not in (None, "", [])
             # A value set on the server (environment) wins over this page.
             from_server = bool(f.get("env") and os.environ.get(f["env"], "").strip())
             fields.append({
                 "key": f["key"], "label": f["label"],
                 "secret": bool(f.get("secret")), "type": f.get("type", "text"),
-                "value": "" if f.get("secret") else (str(v) if configured else ""),
+                "help": f.get("help", ""), "advanced": bool(f.get("advanced")),
+                "value": ("" if f.get("secret") else
+                          "\n".join(str(item) for item in v) if f.get("type") == "list" and isinstance(v, list)
+                          else str(v) if configured else ""),
                 "hint": ("on the server" if from_server else
                          _mask(v) if (configured and f.get("secret")) else ""),
                 "configured": configured or from_server,

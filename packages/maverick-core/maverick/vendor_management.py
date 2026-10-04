@@ -139,6 +139,30 @@ def _text(value: object, label: str, limit: int) -> str:
     return text
 
 
+def _public_vendor(record: dict[str, Any]) -> dict[str, Any]:
+    """Project a vendor without bearer links, including its link history.
+
+    The exact form address is returned only by the create/replace operation.
+    Subsequent reads and unrelated writes carry a stable, non-authorizing
+    request id so a person can select a link to replace without learning it.
+    """
+    projected = dict(record)
+    questionnaires = []
+    for row in record.get("questionnaires") or []:
+        if not isinstance(row, dict):
+            raise RecordLookupUnavailable("vendor questionnaire entry is invalid")
+        token = row.get("token")
+        if not isinstance(token, str) or not token:
+            raise RecordLookupUnavailable("vendor questionnaire token is invalid")
+        visible = {key: value for key, value in row.items()
+                   if key not in {"token", "previous_links"}}
+        visible["request_id"] = lookup_digest(token)
+        visible["previous_count"] = len(row.get("previous_links") or [])
+        questionnaires.append(visible)
+    projected["questionnaires"] = questionnaires
+    return projected
+
+
 def _vendor_id(name: str) -> str:
     return f"VMR-{_sha256(name.strip().lower())[:24]}"
 
@@ -206,7 +230,7 @@ def set_vendor_status(
     )
     if saved is None:
         raise KeyError(f"vendor is not registered: {vendor_id}")
-    return dict(saved)
+    return _public_vendor(saved)
 
 
 def link_vendor_record(
@@ -246,7 +270,7 @@ def link_vendor_record(
     )
     if saved is None:
         raise KeyError(f"vendor is not registered: {vendor_id}")
-    return dict(saved)
+    return _public_vendor(saved)
 
 
 def request_questionnaire(
@@ -315,7 +339,7 @@ def request_questionnaire(
     )
     if saved is None:
         raise KeyError(f"vendor is not registered: {vendor_id}")
-    return {**dict(saved), "form_path": f"/form/{token}"}
+    return {**_public_vendor(saved), "form_path": f"/form/{token}"}
 
 
 def replace_questionnaire_link(
@@ -381,7 +405,7 @@ def replace_questionnaire_link(
     )
     if saved is None:
         raise KeyError(f"vendor is not registered: {vendor_id}")
-    return {**dict(saved), "form_path": f"/form/{token}"}
+    return {**_public_vendor(saved), "form_path": f"/form/{token}"}
 
 
 def questionnaire_responses(vendor_id: str) -> list[dict[str, Any]]:
@@ -442,7 +466,6 @@ def questionnaire_responses(vendor_id: str) -> list[dict[str, Any]]:
                           "answered" if submissions else row.get("status"),
                 "requested_at": row.get("requested_at"),
                 "requested_by": row.get("requested_by"),
-                "form_path": f"/form/{token}",
                 "reply_count": len(submissions),
                 "submissions": submissions[-10:],
                 "previous_links": previous_links,
@@ -492,7 +515,7 @@ def record_monitoring_note(
     )
     if saved is None:
         raise KeyError(f"vendor is not registered: {vendor_id}")
-    return dict(saved)
+    return _public_vendor(saved)
 
 
 def record_vendor_contract(
@@ -549,7 +572,7 @@ def record_vendor_contract(
     )
     if saved is None:
         raise KeyError(f"vendor is not registered: {vendor_id}")
-    return dict(saved)
+    return _public_vendor(saved)
 
 
 def contract_renewals(
@@ -709,7 +732,7 @@ def prepare_questionnaire_index(*, batches: int = 1, rebuild: bool = False):
 def get_vendor(vendor_id: str) -> dict[str, Any] | None:
     _require_enabled()
     record = _VENDORS.get(_text(vendor_id, "vendor_id", 64))
-    return None if record is None else dict(record)
+    return None if record is None else _public_vendor(record)
 
 
 def list_vendors(*, status: str | None = None) -> list[dict[str, Any]]:
@@ -719,7 +742,7 @@ def list_vendors(*, status: str | None = None) -> list[dict[str, Any]]:
     rows = _VENDORS.list(limit=_SCAN_LIMIT)
     rows.sort(key=lambda row: str(row.get("name") or "").lower())
     return [
-        dict(row) for row in rows
+        _public_vendor(row) for row in rows
         if status is None or row.get("status") == status
     ]
 

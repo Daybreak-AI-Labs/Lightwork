@@ -860,7 +860,27 @@ def _email_configuration_problem(channel_config: dict[str, Any]) -> str:
         re.fullmatch(r"[^@\s,]+@[A-Za-z0-9.-]+", sender) is None or ".." in sender
         for sender in senders
     ):
-        return "Add full permitted email addresses in All settings before email can start work."
+        return "Add full permitted email addresses on the Channels page before email can start work."
+    return ""
+
+
+def _channel_allowlist_problem(channel: str, channel_config: dict[str, Any]) -> str:
+    from maverick_channels.base import normalize_allowlist
+
+    from .settings_catalog import CHANNEL_ALLOWLISTS
+
+    access = CHANNEL_ALLOWLISTS.get(channel)
+    if not access or not access[1] or channel == "email":
+        return ""
+    key, pattern, error = access[2], access[5], access[6]
+    supplied = channel_config.get(key)
+    if supplied is not None and not isinstance(supplied, list):
+        return "The permitted-people list needs attention on the Channels page."
+    people = normalize_allowlist(supplied, f"{channel.upper()}_{key.upper()}")
+    if not people:
+        return "Add permitted people on the Channels page before this chat app can start work."
+    if any(re.fullmatch(pattern, person) is None for person in people):
+        return f"The permitted-people list needs {error} on the Channels page."
     return ""
 
 
@@ -882,6 +902,10 @@ def probe_channel(name: str, channel_config: dict[str, Any]) -> dict[str, Any]:
         if problem:
             return {"verified": False, "detail": problem,
                     "evidence": {"kind": "local_adapter_preflight"}}
+    problem = _channel_allowlist_problem(channel, channel_config)
+    if problem:
+        return {"verified": False, "detail": problem,
+                "evidence": {"kind": "local_adapter_preflight"}}
     missing = [
         field
         for field in _CHANNEL_REQUIRED_FIELDS.get(channel, ())
@@ -934,11 +958,12 @@ def channel_readiness(name: str, channel_config: dict[str, Any]) -> dict[str, An
         ]
         voice_problem = _voice_configuration_problem(channel_config) if channel == "voice" else ""
         email_problem = _email_configuration_problem(channel_config) if channel == "email" else ""
+        allowlist_problem = _channel_allowlist_problem(channel, channel_config)
         runtime = check(
-            "failed" if missing or voice_problem or email_problem else "passed",
+            "failed" if missing or voice_problem or email_problem or allowlist_problem else "passed",
             (
-                voice_problem or email_problem or "missing required field(s): " + ", ".join(missing)
-                if voice_problem or email_problem or missing
+                voice_problem or email_problem or allowlist_problem or "missing required field(s): " + ", ".join(missing)
+                if voice_problem or email_problem or allowlist_problem or missing
                 else "required channel configuration passed local preflight"
             ),
             kind="channel_local_preflight",

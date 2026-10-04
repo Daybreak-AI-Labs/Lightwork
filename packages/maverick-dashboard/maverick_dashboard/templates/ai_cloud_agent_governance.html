@@ -14,7 +14,11 @@
   @media (max-width:700px) { .cag-form { grid-template-columns:1fr; } }
 </style>
 
-{{ hero('Governance', 'Cloud AI agents', lede='See the AI agents running in AWS Bedrock, Azure AI Foundry and Google Vertex AI, check them against your policies, and send approved changes to the provider.') }}
+{% if ai_cloud_agent_governance_configuration_available %}
+{{ hero('Governance', 'Cloud AI agents', lede='See the AI agents running in your connected cloud accounts, check them against your policies, and review changes before they are sent.') }}
+{% else %}
+{{ hero('Governance', 'Cloud AI agents', lede='Cloud agent oversight is in development. Check availability here before planning work around it.') }}
+{% endif %}
 
 {% if not ai_cloud_agent_governance_configuration_available %}
 {% if cag_unavailable_reason == 'workspace' %}
@@ -32,7 +36,8 @@
 {% else %}
 <section class="panel" aria-labelledby="cag-unavailable-title">
   <h2 id="cag-unavailable-title">Cloud AI agents aren't available yet</h2>
-  <p>This is a preview feature, and it hasn't been connected on this installation, so there is nothing to show here. Your workspace is not the problem. Ask an administrator, or prepare a support report on the <a href="/help">Help</a> page, to ask about setting it up.</p>
+  <p>Cloud agent oversight is still in development and is not available in this installation. There are no cloud accounts or agent records to show here. Changing your workspace or turning on a setting will not connect it.</p>
+  <p>If your team needs this capability, <a href="mailto:chris@daybreakailabs.com?subject=Cloud%20agent%20oversight">ask Daybreak about availability</a>. You can also <a href="/help">prepare a support report</a> if something else isn't working.</p>
 </section>
 {% endif %}
 {% elif not ai_cloud_agent_governance_enabled %}

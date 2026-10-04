@@ -6,10 +6,6 @@ from maverick.governed_operations import digest
 from maverick.runner import (
     configured_goal_ceiling_dollars,
     configured_goal_ceiling_wall_seconds,
-    configured_max_dollars,
-    configured_max_wall_seconds,
-    requested_goal_dollars,
-    requested_goal_wall_seconds,
 )
 from pydantic import Field
 
@@ -69,10 +65,13 @@ def find_prepare(request, selection, arguments):
 
 
 def _policy():
-    return {"default_max_dollars": configured_max_dollars(),
-            "default_max_wall_seconds": configured_max_wall_seconds(),
+    defaults = api._rest_goal_limits(GoalIn(title="New task"))
+    return {"default_max_dollars": defaults["max_dollars"],
+            "default_max_wall_seconds": defaults["max_wall_seconds"],
             "configured_ceiling_dollars": configured_goal_ceiling_dollars(),
-            "configured_ceiling_wall_seconds": configured_goal_ceiling_wall_seconds()}
+            "configured_ceiling_wall_seconds": configured_goal_ceiling_wall_seconds(),
+            "api_ceiling_dollars": api._REST_GOAL_MAX_DOLLARS,
+            "api_ceiling_wall_seconds": api._REST_GOAL_MAX_WALL_SECONDS}
 
 
 def start_snapshot(request, selection):
@@ -102,10 +101,12 @@ def start_prepare(request, selection, arguments):
     if not title:
         raise HTTPException(422, "Enter a task before reviewing its start.")
     # Validate against the native launch schema before sealing the review.
-    GoalIn(**{**arguments, "title": title})
+    payload = GoalIn(**{**arguments, "title": title})
     policy = _policy()
-    effective = {"max_dollars": requested_goal_dollars(arguments["max_dollars"]),
-                 "max_wall_seconds": requested_goal_wall_seconds(arguments["max_wall_seconds"])}
+    # This reviewed Copilot action enters the same native goal endpoint. Show
+    # the limits that endpoint will actually dispatch, including REST safety
+    # ceilings on a legacy installation whose general task defaults are off.
+    effective = api._rest_goal_limits(payload)
     return Preview("Start one new task. Its accepted receipt confirms admission, not completion or external delivery.",
         [{"label": "Task", "after": title},
          {"label": "Instructions", "after": arguments["description"]},

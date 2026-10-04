@@ -16,6 +16,9 @@
         {% elif f.type == 'url' %}
         <input class="input" type="url" name="{{ f.key }}" value="{{ f.value }}" placeholder="https://"
                aria-describedby="ch-{{ c.name }}-{{ f.key }}-help" />
+        {% elif f.type == 'list' %}
+        <textarea class="input" name="{{ f.key }}" rows="3"
+                  aria-describedby="ch-{{ c.name }}-{{ f.key }}-help">{{ f.value }}</textarea>
         {% else %}
         <input class="input" type="text" name="{{ f.key }}" value="{{ f.value }}"
                aria-describedby="ch-{{ c.name }}-{{ f.key }}-help" />

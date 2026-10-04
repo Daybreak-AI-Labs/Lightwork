@@ -124,7 +124,7 @@ The CLI installs under two interchangeable names — `lightwork` (shown below) a
 | `lightwork schedule goal / add / list / rm` | Schedule recurring autonomous goals via cron |
 | `lightwork worker` | Drain the scheduled-job queue (runs the recurring tasks) |
 | `lightwork fact / facts` | Get / set persistent facts |
-| `lightwork skills` | List installed + distilled skills |
+| `lightwork skills` | List built-in and installed skills available for recall; review distilled suggestions on the Skills page |
 | `lightwork skill install / remove / info` | Manage the skill marketplace |
 | `lightwork template list / show` | Goal templates with `{{ var }}` substitution |
 | `lightwork learn-demo FILE [--name --no-llm --source --industry --yes]` | Build an agent from a recorded demonstration (parse → induce → approve → save → provision) |

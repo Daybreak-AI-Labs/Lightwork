@@ -8,10 +8,10 @@
   {% from "_hero.html" import hero, state %}
   {% call hero('Self-improving workforce', 'Learned',
                subtitle='Skills and lessons',
-               lede='What Lightwork taught itself: skills and tools it picked up while working, lessons it
-                     learned from its own mistakes, and tools it wrote for itself. Anything here can be removed.') %}
+               lede='What Lightwork proposed or recorded from completed work. Suggested skills need review
+                     on Skills before they can guide a later task. Lessons and tools have their own controls.') %}
     {{ state('Current state',
-             learned | length ~ ' learned skill' ~ ('' if learned | length == 1 else 's') ~ ' and tool' ~ ('' if learned | length == 1 else 's') ~ ' on record',
+             learned | length ~ ' learning record' ~ ('' if learned | length == 1 else 's'),
              badge='Self-coaching on' if harness_enabled else 'Self-coaching off',
              badge_class='ok' if harness_enabled else 'idle',
              copy='Self-learning is switched on or off on the <a href="/learning">Learning</a> page.' | safe) }}
@@ -44,7 +44,7 @@
         </tbody>
       </table>
     {% else %}
-      <p class="muted" id="no-learned">Nothing learned yet. Lightwork picks up skills and tools as it works once self-learning is on.</p>
+      <p class="muted" id="no-learned">Nothing learned yet. Review any suggested skills on <a href="/skills#to-learned-skills">Skills</a> before agents can use them.</p>
       <p><a class="btn btn--ghost" href="/learning">Turn on self-learning</a></p>
     {% endif %}
   </div>

@@ -3595,13 +3595,9 @@ def pick_security_suite() -> dict[str, Any]:
         "runtime receipts? Raw runtime content is never persisted by this plane.",
         default=False,
     )
-    ai_cloud_agent_governance = _q_confirm(
-        "Enable named AWS Bedrock, Azure AI Foundry, and Google Vertex AI agent "
-        "inventory, observability, and policy-enforcement intents? This enables "
-        "the required inventory, policy, and runtime-guardrail authorities but "
-        "does not install credentials or claim provider writes.",
-        default=False,
-    )
+    # The canonical cloud-agent authority is not durable in the shipped
+    # runtime. A wizard toggle would write an enabled config that cannot run.
+    ai_cloud_agent_governance = False
     databricks_ai_security_framework = False
     if ai_cloud_agent_governance:
         ai_inventory = True
@@ -6695,6 +6691,8 @@ def pick_notifications() -> tuple[dict[str, Any], list[str]]:
         default=False,
     ):
         return personal_config, []
+
+
     delivery_receipts = _q_confirm(
         "Keep content-free delivery results for seven days and enable in-product delivery tests?", default=True,
     )
@@ -6737,6 +6735,21 @@ def pick_notifications() -> tuple[dict[str, Any], list[str]]:
             ["DISCORD_NOTIFY_WEBHOOK"],
         )
     return {}, []
+
+
+def _resolve_private_alert_linking(advanced: dict[str, Any], notifications: dict[str, Any]) -> None:
+    """Do not save private delivery without its in-product linking path."""
+    if not notifications.get("personal_external") or advanced.get("allow_personal_data_controls") is True:
+        return
+    if _q_confirm(
+        "Private Slack and Telegram alerts need My Data so people can verify their own account. Turn on My Data now?",
+        default=False,
+    ):
+        advanced["allow_personal_data_controls"] = True
+    else:
+        notifications["personal_external"] = False
+        notifications.pop("personal_dashboard_url", None)
+        console.print("Private delivery stays off. People can still use in-product task alerts.")
 
 
 def pick_deadline_alerts(notifications: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -11239,6 +11252,8 @@ def run(fast: bool = False, resume: bool = False) -> int:
 
     _announce()
     notifications, notify_envs = state.get("_notifications_pair") or pick_notifications()
+    _resolve_private_alert_linking(advanced, notifications)
+    state["advanced"] = advanced
     state["_notifications_pair"] = [notifications, notify_envs]
     _save_partial(state)
 

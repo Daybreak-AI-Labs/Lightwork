@@ -32,6 +32,8 @@ def _snapshot(world, goal):
 
 
 def projection(request, world, goal_id: int) -> dict:
+    from maverick.attachment_submissions import SubmissionStore
+
     from .app import _chat_answer_download_state, _chat_answer_text, _voice_only_mode
 
     require_permission(request, "view")
@@ -48,6 +50,7 @@ def projection(request, world, goal_id: int) -> dict:
         latest = _snapshot(world, fresh)
         if context["answer_version"] != latest["answer_version"]:
             raise product_error(409, "result_changing", "The saved result is still changing. Refresh it again in a moment.", retryable=True)
+        context["submission"] = SubmissionStore(world).for_goal(goal_id)
     except (LookupError, ValueError, TypeError) as exc:
         raise product_error(503, "result_unavailable", "The saved result and its release requirements could not be loaded. Retry to confirm the current version.", retryable=True) from exc
     can_download, download_note = _chat_answer_download_state(world, fresh)

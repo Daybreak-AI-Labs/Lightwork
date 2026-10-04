@@ -5404,9 +5404,9 @@ tested without spawning py-spy.
   The schema-bound API result covers the public `aiEvidenceAnalysisResult`
   outcome locally without claiming OneTrust wire compatibility, calibrated
   detection quality, preview entitlement or customer acceptance.
-- **Named cloud-agent governance and Databricks framework control plane**
-  (`ai_cloud_agent_governance.py`, dashboard `/assurance/cloud-agents`, opt-in
-  `[ai_cloud_agent_governance]`) — exact
+- **Cloud-agent governance research preview (not available in the shipped dashboard)**
+  (`ai_cloud_agent_governance.py`, informational dashboard page
+  `/assurance/cloud-agents`) — experimental
   provider contracts normalize AWS Bedrock, Azure AI Foundry and Google Vertex
   inventories into opaque tenant/scope references with revision manifests,
   observability records, policy evaluations, enforcement intents, signed
@@ -5417,7 +5417,10 @@ tested without spawning py-spy.
   attestation and activation. Canonical state is still process-local in the
   shipped composition; credentials, production transports, broad provider
   writes, licensed framework prose, certification and live acceptance are not
-  included.
+  included. The production runtime intentionally refuses enabled operation
+  until durable canonical state and provider composition ship. Settings and the
+  installer therefore do not offer an enable control. The API remains
+  fail-closed and injectable for controlled development tests.
 - **Assessment-question comments** (`assessment.py`, assessment-session API) —
   create audited, bounded comments only for section/question pairs pinned to
   the saved questionnaire and retrieve deterministic bounded pages ordered by

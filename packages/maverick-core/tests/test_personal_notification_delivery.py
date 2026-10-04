@@ -82,6 +82,18 @@ def test_private_links_never_accept_credentials_or_insecure_origins():
             delivery._base_url({'personal_dashboard_url': address})
 
 
+def test_private_delivery_explains_missing_identity_link_policy(monkeypatch):
+    from maverick import personal_identity
+
+    monkeypatch.setattr(delivery, '_settings', lambda: {'personal_dashboard_url': 'https://dashboard.example.test'})
+    monkeypatch.setattr(personal_identity, 'enabled', lambda: False)
+    monkeypatch.setattr(personal_identity, 'linked_channels', lambda _: [])
+    result = delivery.status('user:alice')
+    assert result['enabled'] is False
+    assert 'enable personal data controls' in result['note']
+    assert result['channels'] == []
+
+
 def test_personal_history_erasure_keeps_other_accounts(tmp_path, monkeypatch):
     monkeypatch.setattr(delivery, 'seal', lambda value: value)
     monkeypatch.setattr(delivery, 'unseal', lambda value: value)

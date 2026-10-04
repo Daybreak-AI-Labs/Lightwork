@@ -374,28 +374,21 @@ _CONTEXTS = tuple(
             path="/assurance/cloud-agents",
             title="Cloud Agent Governance",
             summary=(
-                "Inventory and govern registered agents in Bedrock, Azure AI Foundry, "
-                "Vertex AI, and reviewed Databricks framework mappings."
+                "Cloud agent oversight is a research preview and is not available "
+                "in this installation."
             ),
             capabilities=(
-                "Inspect bounded, server-configured cloud-agent inventory.",
-                "Evaluate revision-pinned policy and prepare governed enforcement intents.",
-                "Dispatch and reconcile an exact intent through enrolled provider authorities.",
+                "Explain the current availability of cloud agent oversight.",
             ),
             boundaries=(
-                "The browser cannot choose credentials, provider URLs, native IDs, or tenants.",
-                "Provider acceptance is not proof of applied state; reconciliation needs a fresh read.",
-                "Inventory is bounded and may be incomplete.",
+                "This installation cannot list agents in cloud accounts or send changes to them.",
+                "Changing workspaces or settings cannot make this preview available.",
             ),
             next_steps=(
-                "Load runtime status and confirm durable provider composition is ready.",
-                "Review inventory before evaluating or preparing an enforcement intent.",
-                "Reconcile ambiguous dispatches before accepting an outcome.",
+                "Ask Daybreak about availability using the email link on this page.",
             ),
             suggested_questions=(
-                "Is this cloud-agent runtime ready?",
-                "How do I safely enforce a policy?",
-                "What does reconciliation prove?",
+                "Can I oversee cloud agents in this installation?",
             ),
         ),
         CopilotPageContext(

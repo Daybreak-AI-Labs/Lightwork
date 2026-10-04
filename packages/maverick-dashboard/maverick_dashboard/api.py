@@ -34,8 +34,12 @@ from fastapi import (
 from maverick.governed_records import RecordConflict
 from maverick.runner import (
     DEFAULT_MAX_DEPTH,
+    DEFAULT_MAX_DOLLARS,
+    DEFAULT_MAX_WALL_SECONDS,
     clamp_task_limit,
     configured_goal_ceiling_dollars,
+    configured_max_dollars,
+    configured_max_wall_seconds,
     requested_goal_dollars,
     requested_goal_wall_seconds,
 )
@@ -331,7 +335,7 @@ def _goal_reason_code(g, open_ids: list[int]) -> str | None:
     return stop["kind"] if stop else None
 
 
-def _to_goal_out(g) -> GoalOut:
+def _to_goal_out(g, *, limits: dict | None = None) -> GoalOut:
     from .goal_waiting import open_question_ids
     from .plain_labels import risk_label
 
@@ -343,6 +347,7 @@ def _to_goal_out(g) -> GoalOut:
         title=g.title,
         description=g.description,
         result=g.result,
+        limits=limits,
         reason_code=_goal_reason_code(g, open_ids),
         risk_tier=risk.get("tier"),
         risk_reasons=risk.get("reasons"),
@@ -1527,6 +1532,35 @@ def create_goal(
                         idempotency_key=request.headers.get("Idempotency-Key") or "")
 
 
+_REST_GOAL_MAX_DOLLARS = 100.0
+_REST_GOAL_MAX_WALL_SECONDS = 86_400.0
+
+
+def _rest_goal_limits(payload: GoalIn) -> dict[str, float | int]:
+    """Finite REST admission limits, independent of legacy no-limit policy.
+
+    The operator's numeric task ceiling still narrows the request. An older
+    installation that deliberately has no general task default keeps that
+    policy for CLI/internal work, while an external REST submission receives
+    the published $2/30-minute default and $100/24-hour upper bound.
+    """
+    dollars = payload.max_dollars
+    if dollars is None:
+        dollars = configured_max_dollars()
+    if dollars is None:
+        dollars = DEFAULT_MAX_DOLLARS
+    seconds = payload.max_wall_seconds
+    if seconds is None:
+        seconds = configured_max_wall_seconds()
+    if seconds is None:
+        seconds = DEFAULT_MAX_WALL_SECONDS
+    return {
+        "max_dollars": min(requested_goal_dollars(dollars), _REST_GOAL_MAX_DOLLARS),
+        "max_wall_seconds": min(requested_goal_wall_seconds(seconds), _REST_GOAL_MAX_WALL_SECONDS),
+        "max_depth": min(payload.max_depth, DEFAULT_MAX_DEPTH),
+    }
+
+
 def _create_goal(
     request: Request,
     payload: GoalIn,
@@ -1576,7 +1610,8 @@ def _create_goal(
     title = (title or "").strip()
     if not title:
         raise HTTPException(status_code=400, detail="title is required")
-    director, description = _api_director(payload, title, description)
+    limits = _rest_goal_limits(payload)
+    director, description = _api_director(payload, title, description, limits["max_dollars"])
     # Run AS a specialist pack (JD hires, department deploys): the orchestrator
     # inherits a domain stamped on the goal row, binding that pack's persona,
     # capability envelope and compartment. Validate against the enabled roster
@@ -1590,10 +1625,10 @@ def _create_goal(
     # Replays and read reconciliation never dispatch work a second time.
     idem_key = idempotency_key.strip()
     # A director autonomy level can only lower the cap (None = no own cap).
-    max_dollars = clamp_task_limit(getattr(director, "max_dollars", None),
-                                   requested_goal_dollars(payload.max_dollars))
-    max_wall_seconds = requested_goal_wall_seconds(payload.max_wall_seconds)
-    max_depth = min(payload.max_depth, DEFAULT_MAX_DEPTH)
+    max_dollars = clamp_task_limit(getattr(director, "max_dollars", None), limits["max_dollars"])
+    max_wall_seconds = limits["max_wall_seconds"]
+    max_depth = limits["max_depth"]
+    limits["max_dollars"] = max_dollars
     receipt = None
     if idem_key:
         from .goal_submission import reserve_api
@@ -1613,7 +1648,7 @@ def _create_goal(
             response.headers["Location"] = f"/api/v1/goals/{g0.id}"
             response.headers["Idempotency-Replayed"] = "true"
             if g0.status != "draft":
-                return _to_goal_out(g0)
+                return _to_goal_out(g0, limits=limits)
             # The first request stopped between admission and its dispatch
             # claim, so nothing is running. The payload (and so its limits) is
             # bound by the fingerprint: finish the claim below. The claim is an
@@ -1646,7 +1681,7 @@ def _create_goal(
             if g1 is not None and g1.status != "draft":
                 response.headers["Location"] = f"/api/v1/goals/{goal_id}"
                 response.headers["Idempotency-Replayed"] = "true" if replay_resume else "false"
-                return _to_goal_out(g1)
+                return _to_goal_out(g1, limits=limits)
             raise HTTPException(status_code=409, detail=(
                 "Request retained; execution admission is unconfirmed. Reconcile before retrying."))
     if user_id:
@@ -1674,7 +1709,7 @@ def _create_goal(
         raise HTTPException(status_code=500, detail="goal vanished after create")
     response.headers["Location"] = f"/api/v1/goals/{goal_id}"
     response.headers["Idempotency-Replayed"] = "true" if receipt is not None and replay_resume else "false"
-    return _to_goal_out(g)
+    return _to_goal_out(g, limits=limits)
 
 
 def _bind_source_analysis(world, goal_id, actor, selection):
@@ -1706,14 +1741,13 @@ def _source_analysis_selection(request: Request, payload: GoalIn):
     return selection
 
 
-def _api_director(payload: GoalIn, title: str, description: str):
+def _api_director(payload: GoalIn, title: str, description: str, max_dollars: float):
     """``(director run or None, description to store)`` for a REST start."""
     if not payload.director_profile:
         return None, description
     from maverick_dashboard.app import _director_run
 
-    director = _director_run(payload.director_profile, title, description,
-                             requested_goal_dollars(payload.max_dollars))
+    director = _director_run(payload.director_profile, title, description, max_dollars)
     return director, director.goal_description
 
 
@@ -1745,9 +1779,14 @@ def reconcile_goal_submission(request: Request, response: Response, kind: str = 
     response.headers["Cache-Control"] = "no-store"
     # A draft was admitted but never dispatched: replaying the request with the
     # same Idempotency-Key runs it. Do not report that as accepted work.
+    intent = (receipt.get("detail") or {}).get("dispatch_intent")
+    limits = ({key: intent[key] for key in ("max_dollars", "max_wall_seconds", "max_depth")}
+              if isinstance(intent, dict) and all(key in intent for key in
+                  ("max_dollars", "max_wall_seconds", "max_depth")) else None)
     return {"state": "not_dispatched" if goal.status == "draft" else "accepted",
             "submission_state": receipt["state"],
             "goal": {"id": goal.id, "status": goal.status},
+            "limits": limits,
             "replayed": True, "execution_confirmed": False}
 
 
@@ -16631,7 +16670,7 @@ async def deploy_department_api(request: Request, key: str) -> dict:
         fleet_name_for,
         get_department,
     )
-    from maverick.fleet import load_fleet
+    from maverick.fleet import load_fleet, save_fleet
     from maverick.suite_grants import DepartmentAccessError
 
     dept = get_department(key)
@@ -16664,16 +16703,15 @@ async def deploy_department_api(request: Request, key: str) -> dict:
 
     by_name = {agent["name"]: agent for agent in list_agents()}
     action_status = _department_action_status(dept.members, by_name)
-    if (action_status["ready_specialists"] == 0
-            and action_status["unknown_specialists"] == 0):
+    if action_status["ready_specialists"] == 0:
         raise HTTPException(
             status_code=409,
-            detail="This team has no specialists whose required actions are available. "
+            detail="This team has no specialists whose required actions passed setup checks. "
                    "Open View team to see what needs setup before deploying.",
         )
 
     try:
-        fleet = deploy_department(key, owner, tenant=tenant)
+        fleet = deploy_department(key, owner, tenant=tenant, save=False)
     except EntitlementError as e:
         raise HTTPException(status_code=402, detail=str(e)) from e
     except DepartmentAccessError as e:
@@ -16684,7 +16722,35 @@ async def deploy_department_api(request: Request, key: str) -> dict:
         ) from e
     if fleet is None:  # suite disabled between the check and the deploy
         raise HTTPException(status_code=404, detail="no such department")
-    return {"fleet": fleet.to_dict()}
+    # A department may have one runnable specialist and many whose required
+    # actions are unavailable. Do not deploy those specialists as selectable
+    # fleet agents only to block their first task after the customer assigns it.
+    ready_names = {
+        name for name in dept.members
+        if by_name.get(name, {}).get("readiness", {}).get("state") == "action_ready"
+    }
+    from dataclasses import replace
+
+    fleet = replace(fleet, agents=tuple(a for a in fleet.agents if a.name in ready_names))
+    if not fleet.agents:
+        raise HTTPException(
+            status_code=409,
+            detail="No ready specialist remains in this team. Open View team to check its setup.",
+        )
+    deployed_names = {a.name for a in fleet.agents}
+    skipped = [
+        {
+            "name": name,
+            "reason": by_name.get(name, {}).get("readiness", {}).get("label")
+                      or "Setup check unavailable",
+            "fix_url": by_name.get(name, {}).get("readiness", {}).get("fix_url")
+                       or "/workforce",
+        }
+        for name in dept.members if name not in deployed_names
+    ]
+    save_fleet(fleet, tenant=tenant or "__active__")
+    return {"fleet": fleet.to_dict(), "deployed_count": len(fleet.agents),
+            "skipped_count": len(skipped), "skipped_specialists": skipped}
 
 
 @router.get("/departments/{key}/review")

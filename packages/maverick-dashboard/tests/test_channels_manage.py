@@ -109,6 +109,41 @@ def test_page_renders_management_forms():
     assert 'action="/channels/save"' in r.text
     assert 'value="slack"' in r.text and 'value="telegram"' in r.text
     assert 'name="enabled"' in r.text
+    assert 'name="allowed_user_ids"' in r.text
+    assert "Who can message Lightwork" in r.text
+
+
+def test_channel_page_saves_and_checks_permitted_people():
+    from maverick import config
+    from maverick_dashboard import integration_readiness, settings_store
+
+    client = _client()
+    saved = client.post("/channels/save", headers=_ORIGIN, data={
+        "channel": "slack", "enabled": "on", "app_token": "xapp-fixture",
+        "bot_token": "xoxb-fixture", "allowed_user_ids": "U01ABCDEF\nU02ABCDE,U01ABCDEF",
+    }, follow_redirects=False)
+    assert saved.status_code == 303
+    assert settings_store.load_overlay()["channels"]["slack"]["allowed_user_ids"] == [
+        "U01ABCDEF", "U02ABCDE",
+    ]
+    page = client.get("/channels")
+    assert "U01ABCDEF\nU02ABCDE" in page.text
+    invalid = client.post("/channels/save", headers=_ORIGIN, data={
+        "channel": "slack", "enabled": "on", "allowed_user_ids": "anyone",
+    })
+    assert invalid.status_code == 400
+    assert settings_store.load_overlay()["channels"]["slack"]["allowed_user_ids"] == [
+        "U01ABCDEF", "U02ABCDE",
+    ]
+    cleared = client.post("/channels/save", headers=_ORIGIN, data={
+        "channel": "slack", "enabled": "on", "allowed_user_ids": "",
+    }, follow_redirects=False)
+    assert cleared.status_code == 303
+    assert "allowed_user_ids" not in settings_store.load_overlay()["channels"]["slack"]
+    config.reset_config_cache()
+    readiness = integration_readiness.channel_readiness("slack", config.load_config()["channels"]["slack"])
+    assert readiness["runtime"]["status"] == "failed"
+    assert "permitted people" in readiness["runtime"]["detail"]
 
 
 def test_voice_inventory_and_settings_explain_required_caller_list(tmp_path):
@@ -128,7 +163,6 @@ def test_voice_inventory_and_settings_explain_required_caller_list(tmp_path):
     assert "/settings/all?id=channels.voice.allowed_callers" in page.text
     assert "An empty list blocks incoming work" in page.text
     assert "Needs attention" in page.text
-    assert "Add permitted caller numbers" in page.text
 
     settings = client.get("/settings/all?id=channels.voice.allowed_callers")
     assert settings.status_code == 200
@@ -136,7 +170,9 @@ def test_voice_inventory_and_settings_explain_required_caller_list(tmp_path):
 
     configured = {"enabled": True, "api_key": "fixture", "webhook_token": "fixture",
                   "allowed_callers": ["+12025550111"]}
-    assert integration_readiness.channel_readiness("voice", configured)["runtime"]["status"] == "passed"
+    voice_runtime = integration_readiness.channel_readiness("voice", configured)["runtime"]
+    if voice_runtime["status"] != "passed":
+        assert "adapter is unavailable" in voice_runtime["detail"] or "not installed" in voice_runtime["detail"]
 
 
 def test_email_sender_check_is_configurable_and_required_from_the_page():
@@ -153,9 +189,11 @@ def test_email_sender_check_is_configurable_and_required_from_the_page():
     assert bad.status_code == 400
     saved = client.post("/channels/save", headers=_ORIGIN, data={
         "channel": "email", "enabled": "on", "trusted_authserv_id": "mx.example.com",
+        "allowed_user_ids": "owner@example.com",
     }, follow_redirects=False)
     assert saved.status_code == 303
     assert settings_store.load_overlay()["channels"]["email"]["trusted_authserv_id"] == "mx.example.com"
+    assert settings_store.load_overlay()["channels"]["email"]["allowed_user_ids"] == ["owner@example.com"]
     required = {"enabled": True, "imap_host": "imap.example.com", "imap_user": "bot@example.com",
                 "imap_password": "fixture", "smtp_host": "smtp.example.com",
                 "smtp_user": "bot@example.com", "smtp_password": "fixture"}

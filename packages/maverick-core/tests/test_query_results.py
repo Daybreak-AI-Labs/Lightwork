@@ -3,12 +3,21 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from contextlib import closing
+from contextlib import closing, nullcontext
 
 import pytest
 from maverick.query_results import MAX_OUTPUT, QueryResult, render_effect
 from maverick.tools.database_tool import database_tool
 from maverick.tools.sql_query import sql_query
+
+
+@pytest.fixture(autouse=True)
+def _approved_sql_writes(monkeypatch):
+    import importlib
+
+    module = importlib.import_module("maverick.tools.sql_query")
+    monkeypatch.setattr(module, "request_execution_consent", lambda *a, **kw: object())
+    monkeypatch.setattr(module, "consume_operation_consent", lambda permit: nullcontext())
 
 
 @pytest.fixture(params=["sqlite", "sqlalchemy"])

@@ -41,15 +41,20 @@ def create_ai_cloud_agent_governance_workbench_router(
             None,
         )
         probe = selected if callable(selected) else enabled_probe
+        runtime_factory = getattr(
+            request.app.state,
+            "ai_cloud_agent_governance_runtime_factory",
+            None,
+        )
         available = False
         # Why the page cannot be used, so the copy can say the true thing:
         # "workspace" (none selected), "not_connected" (nothing on this
         # installation supplies the service) or "unreachable" (it failed).
         unavailable_reason = ""
-        if tenant == "":
-            unavailable_reason = "workspace"
-        elif not callable(probe):
+        if not callable(probe) or not callable(runtime_factory):
             unavailable_reason = "not_connected"
+        elif tenant == "":
+            unavailable_reason = "workspace"
         else:
             try:
                 result = probe(tenant)

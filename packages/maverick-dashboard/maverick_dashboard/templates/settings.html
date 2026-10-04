@@ -718,6 +718,15 @@
     <div data-maintenance-out="diagnostics"></div>
   </div>
 
+  <div class="section-head" data-settings-group="maintenance"><h2>Running code</h2></div>
+  <div class="panel" data-settings-group="maintenance">
+    <p class="muted settings-lead">A person must approve each request before Lightwork runs code or changes a project or database. The request shows what will run and where. One approval covers one run; saved approvals cannot silently authorize later runs.</p>
+    <p><a class="btn btn--ghost" href="/approvals">Review pending requests</a></p>
+    <details class="settings-details"><summary>What this covers</summary>
+      <p class="muted">Commands, notebooks, Python scripts, WebAssembly programs, code-analysis servers, database changes, and Git changes all require a fresh review. Reading a database or inspecting project history does not ask for a code-running approval.</p>
+    </details>
+  </div>
+
   <div class="section-head" data-settings-group="maintenance"><h2>Safety checks for this installation</h2></div>
   <div class="panel" data-settings-group="maintenance" data-maintenance="checks">
     <p class="muted settings-lead">One-button checks your IT or compliance team may ask for. Each one only looks; nothing is changed.</p>

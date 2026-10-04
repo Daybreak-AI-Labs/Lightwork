@@ -820,7 +820,9 @@ def _browser_path_accesses(
     del mutating_only  # every started persistent session may save at exit
     if not args.get("action"):
         return []
-    if os.environ.get("MAVERICK_BROWSER_NO_PERSIST") == "1":
+    from .tools.browser import _persist_enabled
+
+    if not _persist_enabled():
         return []
     state = os.environ.get("MAVERICK_BROWSER_STATE", "")
     if not state:

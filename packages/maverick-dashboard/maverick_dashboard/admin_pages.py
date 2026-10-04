@@ -36,11 +36,12 @@ def _admin_audit(request: Request, action: str, **payload) -> None:
 
 
 def _setting_write(request: Request, section: str, key: str, project,
-                   *, confirmed: bool = False):
+                   *, confirmed: bool = False, changed_fields=None):
     from .settings_audit import bind_setting_write
 
     return bind_setting_write(request, section=section, key=key,
-                              project=project, confirmed=confirmed)
+                              project=project, confirmed=confirmed,
+                              changed_fields=changed_fields)
 
 
 def _provider_audit_value(data: dict, name: str) -> dict[str, str]:
@@ -56,6 +57,23 @@ def _provider_audit_value(data: dict, name: str) -> dict[str, str]:
         "base_url": "set" if value.get("base_url") else "not set",
         "setup_sha256": hashlib.sha256(json.dumps(setup, sort_keys=True).encode()).hexdigest(),
     }
+
+
+def _provider_changed_fields(old: dict, new: dict, name: str) -> list[str]:
+    """Name changed connection fields without recording their values or hashes."""
+    def provider(data: dict) -> dict:
+        providers = data.get("providers") or {}
+        value = providers.get(name) if isinstance(providers, dict) else None
+        return value if isinstance(value, dict) else {}
+
+    before, after = provider(old), provider(new)
+    labels = {
+        "api_key": "access key", "base_url": "service address",
+        "auth_mode": "sign-in method", "deployment": "deployment",
+        "api_version": "service version", "endpoint": "endpoint",
+        "region": "region", "model_id": "model",
+    }
+    return [label for field, label in labels.items() if before.get(field) != after.get(field)]
 
 
 def _rate_audit_value(data: dict, spec: str) -> dict[str, object]:
@@ -703,7 +721,8 @@ async def settings_set_provider(
              if provider_name == "bedrock" else None)
     try:
         with _setting_write(request, "providers", provider_name, lambda d:
-                            _provider_audit_value(d, provider_name)):
+                            _provider_audit_value(d, provider_name), changed_fields=lambda old, new:
+                            _provider_changed_fields(old, new, provider_name)):
             values = {"api_key": key_value, "base_url": base_value}
             if setup is not None:
                 values["details"] = setup
@@ -730,7 +749,8 @@ def settings_clear_provider(request: Request, provider: str = Form(...)) -> Redi
     try:
         name = provider.strip()
         with _setting_write(request, "providers", name, lambda d:
-                            _provider_audit_value(d, name)):
+                            _provider_audit_value(d, name), changed_fields=lambda old, new:
+                            _provider_changed_fields(old, new, name)):
             settings_store.clear_provider(name)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="unknown provider") from exc

@@ -237,12 +237,14 @@ async def channels_test(request: Request, channel: str = Form(...)):
     from .integration_readiness import channel_readiness, record
     name = channel.strip()
     cfg = await run_in_threadpool(_channel_config, name)
-    dependency = (await run_in_threadpool(channel_readiness, name, cfg))["dependency"]
-    if dependency["status"] == "failed":
-        record("channel", name, cfg, verified=False, detail=dependency["detail"],
-               evidence={"kind": "dependency_preflight"})
-        return _answer(request, name, cfg, ok=False, detail=dependency["detail"],
-                       result="test_failed", sentence=dependency["detail"])
+    readiness = await run_in_threadpool(channel_readiness, name, cfg)
+    for kind in ("dependency", "runtime"):
+        preflight = readiness[kind]
+        if preflight["status"] == "failed":
+            record("channel", name, cfg, verified=False, detail=preflight["detail"],
+                   evidence={"kind": f"{kind}_preflight"})
+            return _answer(request, name, cfg, ok=False, detail=preflight["detail"],
+                           result="test_failed", sentence=preflight["detail"])
     ok, detail = await run_in_threadpool(check_credentials, name, cfg)
     record("channel", name, cfg, verified=ok, detail=detail, evidence={"kind": "credential_check"})
     return _answer(request, name, cfg, ok=ok, detail=detail, result="tested" if ok else "test_failed",
@@ -261,12 +263,14 @@ async def channels_send_test(request: Request, channel: str = Form(...), to: str
         raise HTTPException(400, "This chat app can't send a test message from here.")
     destination = _valid_destination(name, to)
     cfg = await run_in_threadpool(_channel_config, name)
-    dependency = (await run_in_threadpool(channel_readiness, name, cfg))["dependency"]
-    if dependency["status"] == "failed":
-        record("channel", name, cfg, verified=False, detail=dependency["detail"],
-               evidence={"kind": "dependency_preflight"})
-        return _answer(request, name, cfg, ok=False, detail=dependency["detail"],
-                       result="send_failed", sentence=dependency["detail"])
+    readiness = await run_in_threadpool(channel_readiness, name, cfg)
+    for kind in ("dependency", "runtime"):
+        preflight = readiness[kind]
+        if preflight["status"] == "failed":
+            record("channel", name, cfg, verified=False, detail=preflight["detail"],
+                   evidence={"kind": f"{kind}_preflight"})
+            return _answer(request, name, cfg, ok=False, detail=preflight["detail"],
+                           result="send_failed", sentence=preflight["detail"])
     ok, detail = await run_in_threadpool(send_test, name, cfg, destination)
     record("channel", name, cfg, verified=ok, detail=detail,
            evidence={"kind": "test_message", "external_delivery_verified": False})

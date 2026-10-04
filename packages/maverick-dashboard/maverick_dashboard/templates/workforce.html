@@ -286,11 +286,13 @@
           badge.textContent = unknown
             ? ready + ' of ' + d.headcount + ' can start; ' + unknown + ' need a setup check'
             : ready + ' of ' + d.headcount + ' can start';
-          if (ready === 0 && unknown === 0) {
+          if (ready === 0) {
             var deploy = card.querySelector('button[data-act="deploy"]');
             if (deploy) {
               deploy.disabled = true;
-              deploy.title = 'No specialist in this team can start until its required actions are set up.';
+              deploy.title = unknown
+                ? 'Setup checks are unavailable. Try again after your administrator checks this installation.'
+                : 'No specialist in this team can start until its required actions are set up.';
             }
           }
         });
@@ -342,9 +344,12 @@
             var res = { ok: response.ok, status: response.status, body: body };
             if (res.ok) {
               var f = res.body.fleet || {};
+              var deployed = (f.agents || []).length;
+              var skipped = Number(res.body.skipped_count || 0);
               box.innerHTML = "<p>Deployed <strong>" + esc(human(f.name)) + "</strong> — " +
-                esc((f.agents || []).length) + " specialists. " +
-                "Give them tasks from <a href=\"/fleets\">Fleets</a>.</p>";
+                esc(deployed) + " specialist" + (deployed === 1 ? '' : 's') + " ready for tasks. " +
+                (skipped ? esc(skipped) + " still need setup and were not deployed. Use View team to see what they need. " : "") +
+                "Give the ready specialists tasks from <a href=\"/fleets\">Fleets</a>.</p>";
             } else if (res.status === 402) {
               box.innerHTML = "<p class=\"muted\">This department is a paid add-on. " +
                 "Ask your administrator to add it to your plan.</p>";

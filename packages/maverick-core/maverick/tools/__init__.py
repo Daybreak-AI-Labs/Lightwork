@@ -1744,8 +1744,10 @@ def _register_optional_tools(
     if enable_browser:
         from .aria_navigate import aria_navigate
         from .browser import browser
-        reg.register(browser())
-        reg.register(aria_navigate())
+        # Sync Playwright objects must be created, used, and closed on one
+        # worker for this customer goal; generic tool threads can rotate.
+        reg.register(browser(managed=True))
+        reg.register(aria_navigate(managed=True))
 
 
 def _apply_tool_acl(reg: ToolRegistry, *, channel: str | None, user_id: str | None) -> None:
