@@ -167,10 +167,12 @@
     .composer__send:disabled, .ask__send:disabled { opacity: 0.45; cursor: default; transform: none; }
     .composer__controls { border: 0; padding: 0; margin: 0; min-width: 0; }
     /* Draft recovery around a composer (_composer_recovery.html) is painted
-       with the page. The panel's status line keeps room for two lines so its
-       first update does not move the composer, and the note keeps the height
-       of its longer text whichever one is showing. */
+       with the page. The panel's status line keeps room for its usual
+       messages (two lines, three on a phone) so its updates do not move the
+       composer, and the note keeps the height of its longer text whichever
+       one is showing. */
     .draft-host .draft-recovery > p:first-child { min-height: calc(2em * var(--leading)); }
+    @media (max-width: 480px) { .draft-host .draft-recovery > p:first-child { min-height: calc(3em * var(--leading)); } }
     .draft-note { display: grid; }
     .draft-note > span { grid-area: 1 / 1; }
     .draft-note > [aria-hidden="true"] { visibility: hidden; }
