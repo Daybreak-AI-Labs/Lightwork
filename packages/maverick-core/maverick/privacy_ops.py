@@ -3359,17 +3359,18 @@ def dsar_answer(record: dict) -> dict | None:
     """The answer on record for a request, or ``None`` when there is none.
 
     Counted: an outcome recorded when closing (``answered`` or ``refused``),
-    a request a named person marked answered (never a deletion -- that needs
-    its erasure result), and a refusal or completion notice that was actually
-    sent (a completion for a deletion request still needs its erasure
-    result). Returns ``{"kind", "on"}`` with the UTC day of the answer."""
+    a request a named person marked answered, whether or not it was closed
+    afterwards (never a deletion -- that needs its erasure result), and a
+    refusal or completion notice that was actually sent (a completion for a
+    deletion request still needs its erasure result). Returns
+    ``{"kind", "on"}`` with the UTC day of the answer."""
     outcome = record.get("outcome")
     if isinstance(outcome, dict):
         if outcome.get("kind") in ("answered", "refused") and outcome.get("answered_on"):
             return {"kind": outcome["kind"], "on": str(outcome["answered_on"])}
         return None
     erasure = record.get("kind") == "erasure"
-    if record.get("status") == "fulfilled" and record.get("fulfilled_at") and not erasure:
+    if record.get("fulfilled_at") and not erasure:
         return {"kind": "answered", "on": _utc_day(record["fulfilled_at"])}
     emails = (record.get("public_form") or {}).get("emails") or []
     for entry in emails if isinstance(emails, list) else ():

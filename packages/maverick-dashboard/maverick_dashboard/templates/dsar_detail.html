@@ -121,7 +121,7 @@
       {% endif %}
       {% if dsar.status != 'closed' %}
         <button type="button" class="btn btn--ghost" id="dsar-close">Close request</button>
-      {% elif not dsar.outcome %}
+      {% elif not dsar.outcome and not answer %}
         <button type="button" class="btn btn--primary" id="dsar-record-outcome">Record how it was answered</button>
       {% endif %}
     </div>

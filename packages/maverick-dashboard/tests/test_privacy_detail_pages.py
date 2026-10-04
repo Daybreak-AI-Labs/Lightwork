@@ -314,6 +314,21 @@ def test_dsar_page_says_whether_an_answer_is_on_record():
     assert 'id="dsar-record-outcome"' not in main
 
 
+def test_a_request_marked_answered_then_closed_still_shows_its_answer():
+    import datetime
+
+    from maverick import privacy_ops
+
+    request = privacy_ops.open_dsar("ola@example.com", "opt_out", opened_by="ops")
+    privacy_ops.fulfill_dsar(request["id"], fulfilled_by="ops")
+    privacy_ops.close_dsar(request["id"], closed_by="ops")
+    main = _main(client.get(f"/privacy/dsar/{request['id']}").text)
+    today = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d")
+    assert f"Answered on {today}" in main
+    assert "Closed without a recorded answer" not in main
+    assert 'id="dsar-record-outcome"' not in main  # nothing left to record
+
+
 def test_completion_notice_points_at_a_step_that_exists():
     from maverick import config, privacy_ops
 

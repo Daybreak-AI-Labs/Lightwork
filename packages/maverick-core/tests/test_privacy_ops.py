@@ -1713,6 +1713,18 @@ class TestDsarOutcomes:
         assert kept["status"] == "closed"
         assert kept["outcome"]["lawful_basis"] == "Tax records kept for 6 years"
 
+    def test_a_request_marked_answered_stays_answered_when_closed(self):
+        r = privacy_ops.open_dsar("k@example.com", "opt_out", jurisdiction="us_ca_ccpa")
+        privacy_ops.fulfill_dsar(r["id"], fulfilled_by="ops")
+        privacy_ops.close_dsar(r["id"], closed_by="ops")
+        dsar = self._report()
+        assert dsar["answered"] == 1 and dsar["closed_without_response"] == 0
+        # A deletion handed over for erasure is not an answer by itself.
+        d = privacy_ops.open_dsar("l@example.com", "erasure")
+        privacy_ops.fulfill_dsar(d["id"], fulfilled_by="ops")
+        privacy_ops.close_dsar(d["id"], closed_by="ops")
+        assert self._report()["closed_without_response"] == 1
+
     def test_a_closed_request_can_have_its_answer_recorded_once(self):
         today = _day(time.time())
         r = privacy_ops.open_dsar("h@example.com", "access", jurisdiction="eu_gdpr")
