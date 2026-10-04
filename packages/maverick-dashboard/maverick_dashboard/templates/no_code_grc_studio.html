@@ -24,7 +24,7 @@
 {% endblock %}
 {% block content %}
 {% from "_module_gate.html" import module_gate %}
-<div class="grcs-shell" id="grc-studio-shell" data-api-base="{{ api_base }}" data-copilot-page="{{ page_path }}" data-can-operate="{{ 'true' if studio_can_operate else 'false' }}" data-can-audit="{{ 'true' if studio_can_audit else 'false' }}" data-can-admin="{{ 'true' if studio_can_admin else 'false' }}">
+<div class="grcs-shell" id="grc-studio-shell" data-api-base="{{ api_base }}" data-copilot-page="{{ page_path }}" data-module-enabled="{{ 'true' if studio_module_enabled else 'false' }}" data-can-operate="{{ 'true' if studio_can_operate else 'false' }}" data-can-audit="{{ 'true' if studio_can_audit else 'false' }}" data-can-admin="{{ 'true' if studio_can_admin else 'false' }}">
   {{ hero('Technology risk and compliance', 'No-code GRC studio', lede='Build your own risk, control, vendor and evidence records, with forms, rules and reports, without writing code. Each version is reviewed and approved by different people before it becomes active in this studio, and you can restore an earlier version at any time.') }}
   {% if not studio_module_enabled %}
   {{ module_gate('tech_risk_compliance.grc_studio', 'No-code GRC studio',
@@ -32,7 +32,7 @@
                  can_activate=studio_can_activate) }}
   {% endif %}
 
-  <section class="panel" aria-labelledby="grcs-status-title">
+  <section class="panel" aria-labelledby="grcs-status-title"{% if not studio_module_enabled %} hidden{% endif %}>
     <div class="section-head"><h2 id="grcs-status-title">Availability</h2><button class="btn btn--ghost" id="grcs-refresh-status" type="button">Refresh</button></div>
     <p><strong id="grcs-readiness">Checking…</strong> <span class="badge idle" id="grcs-status-mark">Checking</span></p>
     <p class="muted" id="grcs-readiness-detail" role="status" aria-live="polite">Checking whether the studio is ready in this workspace.</p>
@@ -65,10 +65,10 @@
         </select></label>
         <div class="grcs-actions"><button class="btn btn--primary" id="grcs-new" type="button"{% if not studio_can_operate %} disabled{% endif %}>Start a new blueprint</button></div>
       </div>
-      <p class="muted" id="grcs-list-status" role="status" aria-live="polite">Loading your blueprints…</p>
+      <p class="muted" id="grcs-list-status" role="status" aria-live="polite">{{ 'Loading your blueprints…' if studio_module_enabled else 'Blueprints appear here once the studio is turned on.' }}</p>
       <div class="grcs-table-wrap"><table><caption class="sr-only">Blueprint versions and what you can do with each</caption>
         <thead><tr><th scope="col">Blueprint</th><th scope="col">Version</th><th scope="col">Status</th><th scope="col">Last change</th><th scope="col">Actions</th></tr></thead>
-        <tbody id="grcs-version-list"><tr><td colspan="5">Loading…</td></tr></tbody></table></div>
+        <tbody id="grcs-version-list">{% if studio_module_enabled %}<tr><td colspan="5">Loading…</td></tr>{% endif %}</tbody></table></div>
     </section>
 
     <section class="panel" id="grcs-view-panel" aria-labelledby="grcs-view-title" hidden>
@@ -170,7 +170,7 @@
           <p class="muted">Fill fields automatically from an evidence collector that is already linked in this workspace. Choose it from the list.</p>
           <div class="grcs-form-grid">
             <label>Link name<input class="input" id="grcs-binding-name" maxlength="100"></label>
-            <label>Collector<select class="select" id="grcs-collector-choice" aria-describedby="grcs-collector-note"><option value="">Loading collectors…</option></select></label>
+            <label>Collector<select class="select" id="grcs-collector-choice" aria-describedby="grcs-collector-note"><option value="">{{ 'Loading collectors…' if studio_module_enabled else 'Choose a collector' }}</option></select></label>
             <p class="muted" id="grcs-collector-note" role="status"></p>
             <details class="grcs-manual"><summary>Technical details: enter a collector by hand</summary>
               <p class="muted">Only needed for a collector that has never been linked here. Your administrator can give you these values.</p>
@@ -212,7 +212,7 @@
         <div class="grcs-form-grid">
           <label>Live blueprint<select class="select" name="studio_id" id="grcs-projection-studio"></select></label>
           <label>What to send<select class="select" name="definition" id="grcs-projection-definition"></select></label>
-          <label>Destination<select class="select" id="grcs-projection-target" aria-describedby="grcs-projection-target-note"><option value="">Loading destinations…</option></select></label>
+          <label>Destination<select class="select" id="grcs-projection-target" aria-describedby="grcs-projection-target-note"><option value="">{{ 'Loading destinations…' if studio_module_enabled else 'Choose a destination' }}</option></select></label>
           <p class="muted" id="grcs-projection-target-note" role="status"></p>
         </div>
         <details class="grcs-manual"><summary>Technical details: enter a destination by hand</summary>
@@ -245,7 +245,7 @@
         </div>
         <ul class="grcs-list" id="grcs-retention-list"></ul>
         <div class="section-head"><h3>Backups</h3><button class="btn" id="grcs-backup" type="button"{% if not studio_can_admin %} disabled{% endif %}>Make a backup now</button></div>
-        <p class="muted" id="grcs-backup-status">{% if studio_can_admin %}Loading backups…{% else %}Only administrators can see backups.{% endif %}</p>
+        <p class="muted" id="grcs-backup-status">{% if not studio_can_admin %}Only administrators can see backups.{% elif studio_module_enabled %}Loading backups…{% else %}Backups appear here once the studio is turned on.{% endif %}</p>
         <div class="grcs-table-wrap"><table><caption class="sr-only">Backups of this studio</caption>
           <thead><tr><th scope="col">Made</th><th scope="col">Check</th></tr></thead>
           <tbody id="grcs-backup-list"></tbody></table></div>

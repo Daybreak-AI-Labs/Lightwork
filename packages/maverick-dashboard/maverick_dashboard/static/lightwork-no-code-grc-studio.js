@@ -494,15 +494,15 @@
       readinessDetail.textContent = ready ? (connected
         ? "Destinations are connected. Check the specific destination before applying a published blueprint to it."
         : "Publishing makes a blueprint active in this studio. It will not update questionnaires, evidence checks or reports elsewhere until an administrator connects those destinations.")
-        : "Ask an administrator to finish setting up the no-code GRC studio for this workspace.";
+        : status.enabled ? "Ask an administrator to finish setting up the no-code GRC studio for this workspace."
+          : "Ask an administrator to turn on the no-code GRC studio for this workspace.";
       $("grcs-projection-panel").hidden = !(ready && status.runtime_projection_preview_configured === true);
       $("grcs-projection-apply").disabled = !permissions.admin || status.runtime_projection_apply_configured !== true;
       if (ready) {
         await loadVersions();
         if (permissions.admin) { loadBackups(); }
       } else {
-        listStatus.textContent = "Nothing to show until the studio is ready.";
-        versionList.replaceChildren();
+        settleLoaders("Nothing to show until the studio is ready.");
       }
     } catch (error) {
       operations.disabled = true;
@@ -510,8 +510,17 @@
       statusMark.textContent = "Not available";
       readiness.textContent = "The studio could not be reached.";
       readinessDetail.textContent = plainError(error, "check the studio");
-      listStatus.textContent = "";
+      settleLoaders(plainError(error, "load your blueprints"));
     }
+  }
+  // Nothing below loads until the studio is ready: say so in every loader
+  // instead of leaving "Loading…" there.
+  function settleLoaders(listText) {
+    listStatus.textContent = listText;
+    versionList.replaceChildren();
+    fillSelect($("grcs-collector-choice"), [], "Not available until the studio is ready");
+    fillSelect($("grcs-projection-target"), [], "Not available until the studio is ready");
+    if (permissions.admin) { $("grcs-backup-status").textContent = "Backups appear here once the studio is ready."; }
   }
 
   // ---------- register ----------
@@ -1298,5 +1307,7 @@
   $("grcs-backup").addEventListener("click", makeBackup);
 
   renderComposer();
-  loadStatus();
+  // A turned-off studio shows its gate instead: nothing is checked or loaded,
+  // and the page already says when blueprints will appear.
+  if (shell.dataset.moduleEnabled !== "false") { loadStatus(); }
 }(typeof window !== "undefined" ? window : globalThis));

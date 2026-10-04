@@ -107,3 +107,30 @@ def test_shipped_app_mounts_page_api_and_private_asset(monkeypatch) -> None:
     assert asset.status_code == 200
     assert asset.headers["cache-control"] == "no-store, private, max-age=0"
     assert asset.headers["x-content-type-options"] == "nosniff"
+
+
+def test_turned_off_studio_shows_its_gate_instead_of_loaders(monkeypatch) -> None:
+    from maverick_dashboard import api
+
+    monkeypatch.setattr(page, "require_permission", lambda *_: None)
+    monkeypatch.setattr(page, "_tenant_selected", lambda: None)
+    monkeypatch.setattr(page, "has_permission", lambda *_: True)
+    monkeypatch.setattr(page, "has_global_permission", lambda *_: True)
+    app = FastAPI()
+    app.include_router(page.create_no_code_grc_studio_page_router(templates()))
+    for enabled in (False, True):
+        monkeypatch.setattr(api, "module_activation_enabled", lambda _section, enabled=enabled: enabled)
+        body = TestClient(app).get(page.PAGE_PATH).text
+        main = body[body.index('<div class="grcs-shell"'):body.index(page.ASSET_PATH)]
+        assert f'data-module-enabled="{"true" if enabled else "false"}"' in main
+        if enabled:
+            assert "data-module-gate" not in main and "Loading your blueprints…" in main
+            continue
+        # The gate follows the title (and shows an ampersand, not "&amp;amp;");
+        # the availability panel is hidden and no loader says "Loading".
+        assert main.index('class="page-title hero-title"') < main.index("data-module-gate")
+        assert "Tech Risk &amp; Compliance" in main and "&amp;amp;" not in main
+        assert '<section class="panel" aria-labelledby="grcs-status-title" hidden>' in main
+        assert "Loading" not in main
+        assert "Blueprints appear here once the studio is turned on." in main
+        assert "Backups appear here once the studio is turned on." in main
