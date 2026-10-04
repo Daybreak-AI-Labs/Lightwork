@@ -87,3 +87,10 @@ def test_badge_never_shows_the_raw_active_status(chat):
     # The page loads the shared vocabulary before its own script uses it.
     assert "lightwork-run-status.js" in page
     assert page.index("lightwork-run-status.js") < page.index("window.LightworkRunStatus")
+
+
+def test_the_shared_vocabulary_is_served_to_the_browser(chat):
+    client, _world = chat
+    response = client.get("/static/lightwork-run-status.js")
+    assert response.status_code == 200
+    assert "LightworkRunStatus" in response.text
