@@ -31,7 +31,10 @@ def test_fonts_are_public_immutable_woff2(noauth, name):
     assert r.content[:4] == b"wOF2"
 
 
-@pytest.mark.parametrize("name", ["../lightwork.css", "inter-400.woff2", "manrope-200.ttf", "..%2F..%2Fapp.py"])
+# A literal "../" is normalized by the client before it is sent, so it would
+# request /static/lightwork.css itself (public: the sign-in page needs it); the
+# encoded traversal is what actually reaches the font route.
+@pytest.mark.parametrize("name", ["..%2Flightwork.css", "inter-400.woff2", "manrope-200.ttf", "..%2F..%2Fapp.py"])
 def test_font_route_is_an_allowlist(noauth, name):
     assert noauth.get(f"/static/fonts/{name}").status_code in (401, 404)   # not on the allowlist: gated or missing, never served
 
