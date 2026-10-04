@@ -27,7 +27,7 @@
   {% endcall %}
   {# Whose tasks these numbers count (value_views). #}
   <p class="muted" id="sp-scope">{% if value_view.scope == 'workspace' %}The heading and charts cover the whole
-    workspace, totals only. Task-by-task rows stay with the people who ran them.{% else %}These numbers
+    workspace, totals only. Per-task rows are not shown in this view.{% else %}These numbers
     cover the tasks you ran.{% endif %}</p>
   <p class="muted">Report scopes: the heading is all time; the charts use the selected period; the task table shows the latest 50 attempts. The download uses its own month selector. Recorded runtime prices exclude subscription fees, taxes, external tools and unreconciled provider adjustments. A missing price is unknown, not free.</p>
 
@@ -127,8 +127,8 @@
       </tbody>
     </table>
     {% elif not value_view.can_operate %}
-      <p class="muted">Task-by-task rows are shown only to the people who ran the tasks. The totals above
-        cover the whole workspace.</p>
+      <p class="muted">Per-task rows are not shown in the whole-workspace view. The totals above cover
+        everyone&rsquo;s tasks.</p>
     {% else %}
       <p class="muted">No finished tasks yet.</p>
       <p><a class="btn btn--primary" href="/chat">Start a task</a></p>
@@ -205,7 +205,7 @@
           }), 'Cost of the ' + D.per_run.length + ' most recent tasks, oldest on the left.');
       } else {
         B.empty(document.getElementById('bd-per-run'), D.scope === 'workspace'
-          ? 'Task-by-task costs stay with the people who ran the tasks.' : 'No finished tasks yet.');
+          ? 'Per-task costs are not shown in the whole-workspace view.' : 'No finished tasks yet.');
       }
 
       var tmax = 1;
@@ -220,7 +220,7 @@
           }), 'The most expensive tasks in this period.');
       } else {
         B.empty(document.getElementById('bd-top-goals'), D.scope === 'workspace'
-          ? 'Task-by-task costs stay with the people who ran the tasks.' : 'No task costs in this period.');
+          ? 'Per-task costs are not shown in the whole-workspace view.' : 'No task costs in this period.');
       }
 
       if ((D.by_platform || []).length) {

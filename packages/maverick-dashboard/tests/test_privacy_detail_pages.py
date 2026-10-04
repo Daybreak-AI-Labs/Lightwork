@@ -324,3 +324,16 @@ def test_completion_notice_points_at_a_step_that_exists():
     config.reset_config_cache()
     page = client.get(f"/privacy/dsar/{request['id']}").text
     assert 'data-fulfillment-state="off"' in page
+
+
+def test_a_closed_request_without_an_answer_is_flagged_in_the_list_and_on_its_page():
+    from maverick import privacy_ops
+
+    request = privacy_ops.open_dsar("noor@example.com", "access", source="public_form",
+                                    status="unverified", opened_by="ops")
+    privacy_ops.close_dsar(request["id"], closed_by="ops")
+    listing = _main(client.get("/privacy").text)
+    assert "No answer on record" in listing
+    page = _main(client.get(f"/privacy/dsar/{request['id']}").text)
+    assert "never confirmed" in page and "not recorded on the request" not in page
+    assert 'data-identity="unverified"' in client.get(f"/privacy/dsar/{request['id']}").text

@@ -36,7 +36,7 @@
   {% endcall %}
   {# Whose tasks these numbers count, and on what assumptions (value_views). #}
   <p class="muted" id="sv-scope">{% if value_view.scope == 'workspace' %}These numbers cover the whole
-    workspace, totals only. Task details stay with the people who ran them.{% else %}These numbers
+    workspace, totals only. Task details are not shown here.{% else %}These numbers
     cover the tasks you ran.{% endif %}</p>
   {% if not report.available %}<p role="alert">{{ report.unavailable_reason }}</p>{% endif %}
   {% if report.incomplete %}<p role="status">History coverage is incomplete. Do not treat these figures as a complete period total.</p>{% endif %}

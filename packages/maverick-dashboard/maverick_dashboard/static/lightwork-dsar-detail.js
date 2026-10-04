@@ -220,9 +220,12 @@
     var title = recordOnly ? 'Record how it was answered' : 'Close this request';
     var erasure = page.getAttribute('data-kind') === 'erasure';
     var hint = page.getAttribute('data-answer-hint') || '';
+    var unconfirmed = page.getAttribute('data-identity') === 'unverified';
     var chosen = '';
     return form(title, [
-      { key: 'kind', label: 'What happened?', type: 'select', required: true, default: 'answered', options: [
+      { key: 'kind', label: 'What happened?', type: 'select', required: true, default: 'answered',
+        help: unconfirmed ? 'Their identity is not confirmed. Confirm it before sending them their data or deleting it.' : undefined,
+        options: [
         { value: 'answered', label: erasure ? 'We answered them (data erased, or kept for a lawful reason)' : 'We sent them the answer' },
         { value: 'refused', label: 'We refused, with a lawful reason' },
         { value: 'withdrawn', label: 'They withdrew the request' },

@@ -4378,6 +4378,8 @@ def _privacy_page_data() -> tuple[dict, dict]:
         records["ai"] = privacy_ops.list_ai_systems()
         records["ropa"] = privacy_ops.list_ropa()
         records["dsar"] = privacy_ops.list_dsars()
+        for row in records["dsar"]:
+            row["answer"] = privacy_ops.dsar_answer(row)
         records["incidents"] = privacy_ops.list_incidents()
         records["paper"] = privacy_ops.list_paper_reviews()
         for rows in (

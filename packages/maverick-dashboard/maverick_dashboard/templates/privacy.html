@@ -707,6 +707,9 @@
               {% if r.status == 'awaiting_erasure' and r.fulfillment %}
                 <br><span class="muted pw-erase-note">Open the request to delete this person&rsquo;s data.</span>
               {% endif %}
+              {% if r.status == 'closed' and not r.answer and (r.outcome or {}).get('kind') != 'withdrawn' %}
+                <br><span class="badge warn">No answer on record</span>
+              {% endif %}
             </td>
             <td {% if r.overdue %}class="pw-due-warn"{% endif %}>
               {% if r.status in ('open', 'unverified', 'awaiting_erasure') %}

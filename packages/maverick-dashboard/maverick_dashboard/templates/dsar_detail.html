@@ -47,6 +47,7 @@
      data-kind="{{ dsar.kind }}"
      data-source="{{ dsar.source or 'dashboard' }}"
      data-status="{{ dsar.status }}"
+     data-identity="{{ (dsar.verification or {}).status or '' }}"
      data-extended="{{ 'yes' if dsar.extended_until else 'no' }}"
      data-fulfillment-state="{{ fulfillment_state }}"
      data-received="{{ dsar.received_date }}"
@@ -83,6 +84,8 @@
         confirmed ({{ method_labels.get(dsar.verification.method, dsar.verification.method | humanize) }}).
       {% elif dsar.status == 'unverified' %}
         not yet confirmed — the requester has not opened their email link.
+      {% elif dsar.verification and dsar.verification.status == 'unverified' %}
+        never confirmed — the requester did not open their email link.
       {% else %}
         not recorded on the request.
       {% endif %}

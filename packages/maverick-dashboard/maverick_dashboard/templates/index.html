@@ -16,7 +16,7 @@
              badge=(counts.active ~ ' active') if counts.active else 'idle',
              badge_class='ok' if counts.active else 'idle',
              copy=counts.done ~ ' delivered · ' ~ counts.blocked ~ ' blocked. '
-               ~ ('Totals for the whole workspace; goal details stay with the people who ran them.'
+               ~ ('Totals for the whole workspace; goal titles are not shown here.'
                   if workspace_view else
                   'Spending and time limits apply when an administrator sets them.')) }}
   {% endcall %}
@@ -141,7 +141,7 @@
         });
         if (!rows.length) {
           B.empty(box, DATA.scope === 'workspace'
-            ? 'Goal titles stay with the people who ran them. The counts above cover the whole workspace.'
+            ? 'Goal titles are not shown in the whole-workspace view. The counts above cover everyone\'s goals.'
             : statusFilter
               ? 'No recent goals with status "' + statusFilter + '".'
               : 'No goals yet.');

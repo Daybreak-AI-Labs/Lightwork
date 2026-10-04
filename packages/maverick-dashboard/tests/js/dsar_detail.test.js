@@ -87,6 +87,14 @@ test("closing asks what happened before anything is sent, and errors stay plain"
   assert.equal(ui.doc.getElementById("dsar-status").textContent, "Could not close the request.");
 });
 
+test("closing warns when the requester's identity was never confirmed", async (t) => {
+  const markup = html.replace('data-kind="erasure"', 'data-kind="erasure" data-identity="unverified"');
+  const ui = await fixture({ formValues: [null], reply: () => json({}), markup });
+  t.after(() => ui.window.close());
+  ui.doc.getElementById("dsar-close").click(); await ui.settle();
+  assert.match(ui.forms[0].fields[0].help, /identity is not confirmed/);
+});
+
 test("cancelling the close form changes nothing", async (t) => {
   const ui = await fixture({ formValues: [null], reply: () => json({}) });
   t.after(() => ui.window.close());
