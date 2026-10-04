@@ -135,3 +135,24 @@ def test_a_rejection_does_not_count_as_an_approver(env, monkeypatch):
     assert row["status"] == "denied"
     assert row["approved_count"] == 0
     assert row["approvers"] == []
+
+
+def test_approval_steps_read_plainly_in_the_log():
+    from maverick_dashboard.audit_actions_api import event_details, event_label, event_who
+    from maverick_dashboard.content_access import audit_metadata
+
+    confirmed = audit_metadata({"kind": "consent_result", "agent": APPROVER, "actor": APPROVER,
+                                "action": "approval_confirmation", "approval_id": 3,
+                                "channel": "dashboard", "summary": "private words"})
+    assert event_label(confirmed) == "Approval confirmed"
+    assert event_who(confirmed) == "dana.admin@northwind.example"
+    labels = [label for _key, label, _text in event_details(confirmed)]
+    assert "Action" not in labels and "Chat app" not in labels
+    assert "private words" not in str(confirmed)
+
+    in_slack = audit_metadata({"kind": "approval_decision", "decided_by": APPROVER, "status": "approved",
+                               "approval_id": 3, "channel": "slack", "self_approval": True})
+    details = {label: text for _key, label, text in event_details(in_slack)}
+    assert details["Chat app"] == "Slack"
+    assert details["Approved own request"] == "Yes"
+    assert event_who(in_slack) == "dana.admin@northwind.example"

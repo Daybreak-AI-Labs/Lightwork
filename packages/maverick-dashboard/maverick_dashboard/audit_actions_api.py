@@ -92,7 +92,7 @@ _TIME_KEYS = {"occurred_at", "created_at", "decided_at", "expires_at", "started_
               "ended_at", "finished_at", "updated_at", "requested_at", "at"}
 _PERSON_KEYS = ("principal", "actor", "user", "requested_by", "decided_by", "owner")
 _SLUG_KEYS = {"name", "tool", "action", "stage", "provider", "rule", "outcome", "status",
-              "decision", "risk", "source", "phase", "labels", "agent"}
+              "decision", "risk", "source", "phase", "labels", "agent", "channel"}
 _SLUG = re.compile(r"[a-z][a-z0-9]*(?:[_.:-][a-z0-9]+)*")
 
 
@@ -165,8 +165,11 @@ def _technical(key: str, value: Any) -> bool:
 
 def event_details(event: dict) -> list[tuple[str, str, str]]:
     """``[(raw key, label, text)]`` for the readable detail fields of an event."""
+    # An approval step's action is already the event's name ("Approval confirmed").
+    named = event.get("kind") == "consent_result" and event.get("action") in APPROVAL_ACTION_LABELS
     return [(str(k), field_label(k), value_text(str(k), v))
-            for k, v in event.items() if k not in _HIDDEN and not _technical(str(k), v)]
+            for k, v in event.items() if k not in _HIDDEN and not _technical(str(k), v)
+            and not (named and k == "action")]
 
 
 def event_technical(event: dict) -> list[tuple[str, str, str]]:

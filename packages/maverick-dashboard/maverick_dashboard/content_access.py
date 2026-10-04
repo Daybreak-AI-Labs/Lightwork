@@ -148,7 +148,8 @@ APPROVAL_AUDIT_ACTIONS = frozenset({
     "approval_decision_undone", "approval_confirmation", "approval_rejection_reason",
     "approval_revision_requested", "approval_decided_via_channel",
 })
-_APPROVAL_CHANNELS = frozenset({"dashboard", "slack", "teams", "email"})
+# A decision made in Lightwork itself needs no channel note; chat apps do.
+_APPROVAL_CHANNELS = frozenset({"slack", "teams", "email"})
 
 
 def _approval_fields(event: dict) -> dict:
