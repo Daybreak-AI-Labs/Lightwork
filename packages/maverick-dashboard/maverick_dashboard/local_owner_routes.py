@@ -90,6 +90,9 @@ def _sign_in(request: Request, email: str, password: str, colleagues: bool) -> s
 async def _submit(request, *, setup):
     colleagues = not setup and local_passphrases.available()
     try:
+        if not setup:
+            # Per client address, before anything is read or hashed.
+            local_passphrases.limit_attempts(request)
         if colleagues:
             local_passphrases.require_same_origin(request)
         else:
@@ -126,7 +129,10 @@ async def _submit(request, *, setup):
         response.headers["Cache-Control"] = "no-store"
         return response
     except HTTPException as exc:
-        return _form(request, setup=setup, message=str(exc.detail), status=exc.status_code)
+        response = _form(request, setup=setup, message=str(exc.detail), status=exc.status_code)
+        if exc.status_code == 429:
+            response.headers["Retry-After"] = "60"
+        return response
     except (UnicodeError, ValueError):
         return _form(request, setup=setup, message="Check the submitted form values.", status=422)
     except Exception:

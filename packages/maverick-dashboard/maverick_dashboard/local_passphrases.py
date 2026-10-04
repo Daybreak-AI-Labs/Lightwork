@@ -7,7 +7,9 @@ sign-in still works only on the computer running Lightwork (``local_owner``).
 
 The rules, hashing and lockout are the owner's: 14 to 1,024 characters,
 scrypt (n=16384, r=8, p=1) with a random per-account salt, and after five
-wrong passphrases the account waits one minute before the next try. Only the
+wrong passphrases the account waits one minute before the next try. The hash
+runs outside the store lock, and each client address may make ten sign-in
+attempts a minute (refused before any hashing). Only the
 hash is stored, in ``~/.maverick/dashboard-passphrases.json`` (0600). There is
 no reset by email: an administrator sends a new invitation, and accepting it
 replaces the passphrase. Any unreadable or malformed store fails closed.
@@ -43,6 +45,8 @@ LOCKED = "Wait one minute before trying to sign in again."
 UNAVAILABLE = "Sign-in is unavailable right now. Ask your administrator to check Lightwork."
 NO_ACCESS = ("This account no longer has access to this workspace. "
              "Ask your administrator for a new invite.")
+TOO_MANY = "Too many sign-in attempts. Wait a minute and try again."
+ATTEMPTS_PER_MINUTE = 10  # per client address, owner and colleagues alike
 
 
 def path():
@@ -161,7 +165,13 @@ def owner_of(email: str) -> bool:
 
 
 def login(request: Request, *, email: str, password: str) -> str:
-    """Verify a colleague's passphrase and return a new session cookie value."""
+    """Verify a colleague's passphrase and return a new session cookie value.
+
+    The slow hash never runs under the store lock, so one sign-in cannot queue
+    every other sign-in (and the server thread each one holds) behind it. The
+    attempt is reserved under the lock first -- counted, and the account locked
+    on the fifth -- so guesses racing in parallel still stop at five per
+    lock window. A correct passphrase clears the count afterwards."""
     if not available():
         raise HTTPException(404, "Passphrase sign-in is not used in this workspace.")
     email = _normal(email)
@@ -171,19 +181,25 @@ def login(request: Request, *, email: str, password: str) -> str:
     with _LOCK, file_lock.cross_process_lock(path(), strict=True):
         accounts = _read()
         row = accounts.get(email)
-        if row is None:
-            local_owner._password(password, _DUMMY_SALT)
-            raise HTTPException(401, NOT_ACCEPTED)
-        if row["locked_until"] > time.time():
-            raise HTTPException(429, LOCKED)
-        if not hmac.compare_digest(local_owner._password(password, row["salt"]), row["password_hash"]):
+        if row is not None:
+            if row["locked_until"] > time.time():
+                raise HTTPException(429, LOCKED)
             row["failures"] = min(5, row["failures"] + 1)
             row["locked_until"] = time.time() + 60 if row["failures"] == 5 else 0
             _write(accounts)
-            raise HTTPException(401, NOT_ACCEPTED)
-        row.update(failures=0, locked_until=0)
+            salt, expected, tenant = row["salt"], row["password_hash"], row["tenant"]
+    if row is None:
+        local_owner._password(password, _DUMMY_SALT)  # same cost, outside the lock
+        raise HTTPException(401, NOT_ACCEPTED)
+    if not hmac.compare_digest(local_owner._password(password, salt), expected):
+        raise HTTPException(401, NOT_ACCEPTED)  # the reserved attempt stands
+    with _LOCK, file_lock.cross_process_lock(path(), strict=True):
+        accounts = _read()
+        current = accounts.get(email)
+        if current is None or current["salt"] != salt or current["password_hash"] != expected:
+            raise HTTPException(401, NOT_ACCEPTED)  # replaced by a new invitation meanwhile
+        current.update(failures=0, locked_until=0)
         _write(accounts)
-        tenant = row["tenant"]
     principal = "user:" + email
     from . import rbac
 
@@ -200,4 +216,33 @@ def login(request: Request, *, email: str, password: str) -> str:
     return mint_local_session(email, request=request)
 
 
-__all__ = ["NOT_ACCEPTED", "available", "login", "owner_of", "prepare", "require_same_origin", "store"]
+_ATTEMPTS = None
+
+
+def limit_attempts(request: Request) -> None:
+    """At most ATTEMPTS_PER_MINUTE sign-in attempts per client address per
+    minute, refused before any passphrase is hashed. The address is the same
+    proxy-aware one the public rights-request form limits: a forwarded-for
+    chain counts only behind a pinned trusted proxy, so the header cannot be
+    used to dodge the limit."""
+    global _ATTEMPTS
+    from maverick.public_rights_form import SlidingWindowLimit
+
+    from .ip_allowlist import client_ip
+
+    if _ATTEMPTS is None:
+        _ATTEMPTS = SlidingWindowLimit(60.0)
+    address = client_ip(request)
+    if not _ATTEMPTS.hit(f"sign-in:{address if address is not None else 'unknown'}",
+                         ATTEMPTS_PER_MINUTE, time.time()):
+        raise HTTPException(429, TOO_MANY, headers={"Retry-After": "60"})
+
+
+def reset_attempt_limit() -> None:
+    """Tests only."""
+    if _ATTEMPTS is not None:
+        _ATTEMPTS.reset()
+
+
+__all__ = ["NOT_ACCEPTED", "TOO_MANY", "available", "limit_attempts", "login", "owner_of", "prepare",
+           "require_same_origin", "reset_attempt_limit", "store"]

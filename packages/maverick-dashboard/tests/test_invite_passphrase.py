@@ -12,9 +12,11 @@ asked for.
 """
 from __future__ import annotations
 
+import json
 import os
 import re
 import stat
+import time
 
 import pytest
 from fastapi.testclient import TestClient
@@ -43,8 +45,10 @@ def workspace(monkeypatch, tmp_path):
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     config.reset_config_cache()
     client_binding.reset_client_cache()
+    from maverick_dashboard import local_passphrases
     from maverick_dashboard.app import app
 
+    local_passphrases.reset_attempt_limit()  # each test starts with a fresh per-address window
     owner = TestClient(app, base_url=LOCAL, client=("127.0.0.1", 50001),
                        headers={"Origin": LOCAL}, follow_redirects=False)
     claimed = owner.post("/auth/local-owner", data={
@@ -52,6 +56,7 @@ def workspace(monkeypatch, tmp_path):
     assert claimed.status_code == 303, claimed.text
     yield owner
     owner.close()
+    local_passphrases.reset_attempt_limit()
     config.reset_config_cache()
     client_binding.reset_client_cache()
 
@@ -243,4 +248,99 @@ def test_with_sso_the_invitation_signs_in_with_the_company_account_and_asks_no_p
     accepted = _remote().post(link)
     assert accepted.status_code == 303, accepted.text
     assert rbac.get_stored_role("user:sso.person@example.test") == "operator"
+    assert not (tmp_path / "dashboard-passphrases.json").exists()
+
+
+def test_parallel_wrong_guesses_get_at_most_five_checks_before_the_lock(workspace, monkeypatch, tmp_path):
+    """The slow hash runs outside the store lock, and each attempt is reserved
+    first, so guesses racing in parallel still stop at five per lock window."""
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+
+    from fastapi import HTTPException
+    from maverick_dashboard import local_owner, local_passphrases
+    from starlette.requests import Request
+
+    assert _accept(_remote(), _invite(workspace)).status_code == 303
+    salt = json.loads((tmp_path / "dashboard-passphrases.json").read_text())["accounts"][COLLEAGUE]["salt"]
+    real, checks, under_lock = local_owner._password, [], []
+
+    def slow_hash(password, value):
+        # No sign-in holds the store lock while it hashes, so one slow guess
+        # never queues every other sign-in (and its server thread) behind it.
+        under_lock.append(local_passphrases._LOCK._is_owned())
+        if value == salt:
+            checks.append(value)
+            time.sleep(0.2)  # the guesses overlap while each one hashes
+        return real(password, value)
+
+    monkeypatch.setattr(local_owner, "_password", slow_hash)
+    request = Request({"type": "http", "method": "POST", "path": "/auth/local-login",
+                       "headers": [], "client": ("192.0.2.40", 50002)})
+    start = threading.Barrier(12)
+
+    def guess(_):
+        start.wait()
+        try:
+            local_passphrases.login(request, email=COLLEAGUE, password=OTHER)
+        except HTTPException as exc:
+            return exc.status_code
+        return 200
+
+    with ThreadPoolExecutor(max_workers=12) as pool:
+        codes = list(pool.map(guess, range(12)))
+    assert len(checks) == 5
+    assert sorted(codes) == [401] * 5 + [429] * 7
+    with pytest.raises(HTTPException) as locked:  # even the right passphrase waits now
+        local_passphrases.login(request, email=COLLEAGUE, password=GOOD)
+    assert locked.value.status_code == 429
+    assert len(checks) == 5
+    with pytest.raises(HTTPException) as unknown:  # an unknown email hashes outside the lock too
+        local_passphrases.login(request, email="nobody@example.test", password=OTHER)
+    assert unknown.value.status_code == 401
+    assert under_lock and not any(under_lock)
+
+
+def test_the_address_limit_answers_before_any_passphrase_check(workspace, monkeypatch):
+    from maverick_dashboard import local_owner
+    from maverick_dashboard.app import app
+
+    real, calls = local_owner._password, []
+    monkeypatch.setattr(local_owner, "_password", lambda password, salt: calls.append(salt) or real(password, salt))
+    browser = _remote()
+    for attempt in range(10):
+        assert _sign_in(browser, email=f"nobody{attempt}@example.test", password=OTHER).status_code == 401
+    assert len(calls) == 10
+    limited = _sign_in(browser, email="nobody@example.test", password=OTHER)
+    assert limited.status_code == 429
+    assert "Too many sign-in attempts. Wait a minute and try again." in limited.text
+    assert len(calls) == 10  # refused before any hashing
+    neighbour = TestClient(app, base_url=REMOTE, client=("192.0.2.77", 50009),
+                           headers={"Origin": REMOTE}, follow_redirects=False)
+    assert _sign_in(neighbour, email="nobody@example.test", password=OTHER).status_code == 401
+
+
+def test_a_correct_sign_in_works_once_the_lock_expires(workspace, monkeypatch):
+    from types import SimpleNamespace
+
+    from maverick_dashboard import local_passphrases
+
+    assert _accept(_remote(), _invite(workspace)).status_code == 303
+    browser = _remote()
+    for _ in range(5):
+        assert _sign_in(browser, password=OTHER).status_code == 401
+    assert _sign_in(browser, password=GOOD).status_code == 429
+    later = time.time() + 61
+    monkeypatch.setattr(local_passphrases, "time", SimpleNamespace(time=lambda: later))
+    assert _sign_in(browser, password=GOOD).status_code == 303
+    # The success clears the count: one more wrong try is not a lockout.
+    assert _sign_in(_remote(), password=OTHER).status_code == 401
+
+
+def test_the_owners_sign_in_on_this_computer_keeps_its_own_lockout(workspace, tmp_path):
+    local = workspace
+    local.cookies.clear()
+    for _ in range(5):
+        assert _sign_in(local, email=OWNER, password=OTHER).status_code == 401
+    assert _sign_in(local, email=OWNER, password=OWNER_PASS).status_code == 429
     assert not (tmp_path / "dashboard-passphrases.json").exists()
