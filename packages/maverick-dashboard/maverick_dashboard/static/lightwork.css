@@ -829,21 +829,25 @@
     }
 
     /* =====================================================================
-       Liquid glass. Panels, chrome, and overlays become translucent,
-       backdrop-blurred surfaces floating over a soft ambient gradient tinted
-       by the active theme's brand/accent. Scoped in @supports so browsers
-       without backdrop-filter keep the solid look above. The high-contrast
-       theme and users who prefer reduced transparency keep solid surfaces —
-       readability always wins over the effect.
+       Surfaces. Panes, rows, controls and dialogs are solid; only the top
+       bar and the sidebar are translucent glass that blurs what scrolls
+       beneath them. A blurred pane behind every click had to be repainted
+       on each keystroke (the slowest interaction per page was 58-89%
+       slower with it), so the full liquid-glass look is opt-in: Glass
+       effects in Display preferences (body.glass-on), or [dashboard] glass
+       for everyone. Scoped in @supports so browsers without backdrop-filter
+       keep the solid look above. The high-contrast theme and users who
+       prefer reduced transparency always keep solid surfaces - readability
+       wins over the effect.
        ===================================================================== */
     @supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
       body:not(.theme-hicontrast) {
-        /* Cleaner glass (website-parity pass): a slightly more solid pane
-           (72%) with a stronger blur reads crisp instead of muddy — text sits
-           on quieter noise; the hairline (16%) and top specular edge (12%)
-           define each pane the way a polished frosted card does. */
-        --glass: color-mix(in srgb, var(--panel) 72%, transparent);
-        --glass-soft: color-mix(in srgb, var(--panel) 58%, transparent);
+        /* Shared material tokens. Page-local panes and controls draw with
+           --glass / --glass-soft, so they are solid here and turn
+           translucent only with Glass effects (below). The hairline (16%)
+           and top specular edge (12%) define each pane in both looks. */
+        --glass: var(--surface-1);
+        --glass-soft: var(--surface-sunken);
         --glass-border: color-mix(in srgb, var(--text) 16%, transparent);
         --glass-edge: inset 0 1px 0 0 color-mix(in srgb, #ffffff 12%, transparent);
         /* The light-catch: a faint diagonal sheen across the top of each pane
@@ -854,15 +858,84 @@
           transparent 46%);
         --glass-shadow: 0 1px 2px rgba(0,0,0,0.16),
           0 10px 28px -14px rgba(0,0,0,0.42);
+      }
+      /* Solid surfaces, the default: the same material as the
+         reduced-transparency fallback further down, so the solid look is
+         the designed one. Overlays keep their elevation. */
+      body:not(.theme-hicontrast) .panel,
+      body:not(.theme-hicontrast) .stat,
+      body:not(.theme-hicontrast) .card,
+      body:not(.theme-hicontrast) .mv-row,
+      body:not(.theme-hicontrast) .mv-empty,
+      body:not(.theme-hicontrast) .glass-surface,
+      body:not(.theme-hicontrast) .status-card,
+      body:not(.theme-hicontrast) .boundary {
+        background: var(--surface-1);
+        border-color: var(--glass-border);
+        box-shadow: var(--shadow-sm);
+      }
+      body:not(.theme-hicontrast) .prefs__panel,
+      body:not(.theme-hicontrast) .mv-confirm,
+      body:not(.theme-hicontrast) .navfinder,
+      body:not(.theme-hicontrast) .arv {
+        background: var(--surface-1);
+        border-color: var(--glass-border);
+        box-shadow: var(--shadow-lg);
+      }
+      body:not(.theme-hicontrast) main :where(
+        .as-card, .cd-card, .ce-card, .cp-card, .cpp-card, .csi-card,
+        .csnp-card, .dug-card, .dup-card, .pcc-card, .pdd-card, .ppl-card,
+        .pri-card, .tpi-card
+      ) {
+        background: var(--surface-1) !important;
+        box-shadow: var(--shadow-sm);
+      }
+      body:not(.theme-hicontrast) main :where(
+        .fb-kpi, .fb-card, .pb-kpi, .pb-card, .gs__step,
+        .msg--user .bubble, .worklog, .deliverable, .signoff, .artifact, .ask,
+        .activity, .lrn__row, .lrn__moat, .pf-tile, .rt-node
+      ) {
+        background:
+          linear-gradient(var(--glass-tint, transparent), var(--glass-tint, transparent)),
+          var(--surface-1);
+        box-shadow: var(--shadow-sm);
+      }
+      body:not(.theme-hicontrast) :where(
+        .btn:not(.btn--primary):not(.btn--danger), .ctl, .iconbtn, .halt-pill,
+        .input, .select, .textarea, input:not([type="checkbox"]):not([type="radio"]),
+        select, textarea, .mv-copilot__prompt
+      ) {
+        background: var(--surface-sunken);
+        border-color: var(--glass-border);
+        box-shadow: none;
+      }
+      /* Nothing else blurs what is behind it - including panes a page styles
+         itself (task rows, the Settings index, Agent Factory cards...) -
+         unless Glass effects is on; never in high contrast. */
+      body:not(.glass-on) :not(.topbar, .sidebar),
+      body.theme-hicontrast :not(.topbar, .sidebar) {
+        -webkit-backdrop-filter: none !important;
+        backdrop-filter: none !important;
+      }
+
+      /* Glass effects (opt-in). Panels, chrome, and overlays become
+         translucent, backdrop-blurred surfaces floating over a soft ambient
+         gradient tinted by the active theme's brand/accent. */
+      body.glass-on:not(.theme-hicontrast) {
+        /* Cleaner glass (website-parity pass): a slightly more solid pane
+           (72%) with a stronger blur reads crisp instead of muddy - text sits
+           on quieter noise. */
+        --glass: color-mix(in srgb, var(--panel) 72%, transparent);
+        --glass-soft: color-mix(in srgb, var(--panel) 58%, transparent);
         /* Glass propagates to every component through the derived surface
            tokens, so page-local classes (chat composer, learning stats, flow
-           toolbars…) pick it up without per-template edits. The values sit
+           toolbars...) pick it up without per-template edits. The values sit
            over the fixed ambient gradient below, so translucency alone reads
            as glass even without a backdrop blur of its own. */
         --surface-1: color-mix(in srgb, var(--panel) 76%, transparent);
         --surface-2: color-mix(in srgb, color-mix(in srgb, var(--panel) 86%, var(--text) 14%) 66%, transparent);
         --surface-sunken: color-mix(in srgb, var(--bg) 56%, transparent);
-        /* Ambient washes: tighter stops + lower amplitude — a clean glow
+        /* Ambient washes: tighter stops + lower amplitude - a clean glow
            behind the glass, not a smear across it. */
         background:
           radial-gradient(1100px 720px at 88% -12%, color-mix(in srgb, var(--brand) 12%, transparent), transparent 56%),
@@ -875,21 +948,21 @@
          mix a DARK brand navy into white, rendering as grey stains (visually a
          dirty screen, caught by the screenshot audit). Keep the effect but at
          whisper strength, and drop the bottom wash entirely. */
-      body.theme-light:not(.theme-hicontrast) {
+      body.glass-on.theme-light:not(.theme-hicontrast) {
         background:
           radial-gradient(1100px 720px at 88% -12%, color-mix(in srgb, var(--brand) 5%, transparent), transparent 62%),
           radial-gradient(920px 640px at -12% 28%, color-mix(in srgb, var(--accent) 4%, transparent), transparent 58%),
           var(--bg);
         background-attachment: fixed;
       }
-      body:not(.theme-hicontrast) .panel,
-      body:not(.theme-hicontrast) .stat,
-      body:not(.theme-hicontrast) .card,
-      body:not(.theme-hicontrast) .mv-row,
-      body:not(.theme-hicontrast) .mv-empty,
-      body:not(.theme-hicontrast) .glass-surface,
-      body:not(.theme-hicontrast) .status-card,
-      body:not(.theme-hicontrast) .boundary {
+      body.glass-on:not(.theme-hicontrast) .panel,
+      body.glass-on:not(.theme-hicontrast) .stat,
+      body.glass-on:not(.theme-hicontrast) .card,
+      body.glass-on:not(.theme-hicontrast) .mv-row,
+      body.glass-on:not(.theme-hicontrast) .mv-empty,
+      body.glass-on:not(.theme-hicontrast) .glass-surface,
+      body.glass-on:not(.theme-hicontrast) .status-card,
+      body.glass-on:not(.theme-hicontrast) .boundary {
         background: var(--glass-sheen), var(--glass);
         -webkit-backdrop-filter: blur(20px) saturate(160%);
         backdrop-filter: blur(20px) saturate(160%);
@@ -899,7 +972,7 @@
       /* Earlier governance modules shipped their own *-card class names.
          Bring those authenticated workbenches into the same material system
          without weakening semantic warning/danger border colors. */
-      body:not(.theme-hicontrast) main :where(
+      body.glass-on:not(.theme-hicontrast) main :where(
         .as-card, .cd-card, .ce-card, .cp-card, .cpp-card, .csi-card,
         .csnp-card, .dug-card, .dup-card, .pcc-card, .pdd-card, .ppl-card,
         .pri-card, .tpi-card
@@ -912,7 +985,7 @@
       /* Legacy board and workflow surfaces opt into the same shared material.
          Their border colors remain page-owned so completion, warning, and
          selected states do not lose semantic meaning. */
-      body:not(.theme-hicontrast) main :where(
+      body.glass-on:not(.theme-hicontrast) main :where(
         .fb-kpi, .fb-card, .pb-kpi, .pb-card, .gs__step,
         .msg--user .bubble, .worklog, .deliverable, .signoff, .artifact, .ask,
         .activity, .lrn__row, .lrn__moat, .pf-tile, .rt-node
@@ -924,14 +997,7 @@
         backdrop-filter: blur(20px) saturate(160%);
         box-shadow: var(--glass-shadow), var(--glass-edge);
       }
-      /* Hovered glass lifts, it doesn't just recolor: the same crisp pane
-         with a touch more elevation. */
-      body:not(.theme-hicontrast) .card:hover,
-      body:not(.theme-hicontrast) .mv-row:hover {
-        border-color: color-mix(in srgb, var(--text) 24%, transparent);
-        box-shadow: var(--shadow-md), var(--glass-edge);
-      }
-      body:not(.theme-hicontrast) :where(
+      body.glass-on:not(.theme-hicontrast) :where(
         .btn:not(.btn--primary):not(.btn--danger), .ctl, .iconbtn, .halt-pill,
         .input, .select, .textarea, input:not([type="checkbox"]):not([type="radio"]),
         select, textarea, .mv-copilot__prompt
@@ -958,6 +1024,7 @@
         background: color-mix(in srgb, var(--text) 32%, transparent);
         border: 2px solid transparent; background-clip: content-box;
       }
+      /* The top bar and sidebar stay glass for everyone. */
       body:not(.theme-hicontrast) .topbar {
         background: color-mix(in srgb, var(--panel) 60%, transparent);
         -webkit-backdrop-filter: blur(20px) saturate(180%);
@@ -972,52 +1039,79 @@
         backdrop-filter: blur(20px) saturate(170%);
         border-inline-end-color: var(--glass-border);
       }
-      body:not(.theme-hicontrast) .prefs__panel,
-      body:not(.theme-hicontrast) .mv-confirm,
-      body:not(.theme-hicontrast) .navfinder,
-      body:not(.theme-hicontrast) .arv {
+      body.glass-on:not(.theme-hicontrast) .prefs__panel,
+      body.glass-on:not(.theme-hicontrast) .mv-confirm,
+      body.glass-on:not(.theme-hicontrast) .navfinder,
+      body.glass-on:not(.theme-hicontrast) .arv {
         background: var(--glass-sheen), var(--glass-soft);
         -webkit-backdrop-filter: blur(28px) saturate(170%);
         backdrop-filter: blur(28px) saturate(170%);
         border-color: var(--glass-border);
         box-shadow: var(--shadow-lg), var(--glass-edge);
       }
-      body:not(.theme-hicontrast) .prefs__panel {
+      body.glass-on:not(.theme-hicontrast) .prefs__panel {
         /* The blurred topbar bounds descendant backdrop filtering. A solid
            themed surface keeps page text from showing through the labels. */
         background: var(--glass-sheen), var(--panel);
       }
-      body:not(.theme-hicontrast) .mv-confirm::backdrop,
-      body:not(.theme-hicontrast) .navfinder::backdrop,
-      body:not(.theme-hicontrast) .arv::backdrop {
+      body.glass-on:not(.theme-hicontrast) .mv-copilot {
+        background: var(--glass-sheen), color-mix(in srgb, var(--panel) 82%, transparent);
+        -webkit-backdrop-filter: blur(24px) saturate(175%);
+        backdrop-filter: blur(24px) saturate(175%);
+      }
+      body.glass-on:not(.theme-hicontrast) .mv-confirm::backdrop,
+      body.glass-on:not(.theme-hicontrast) .navfinder::backdrop,
+      body.glass-on:not(.theme-hicontrast) .arv::backdrop {
         background: var(--scrim);
         -webkit-backdrop-filter: blur(3px);
         backdrop-filter: blur(3px);
       }
       @media (prefers-reduced-transparency: reduce) {
-        body:not(.theme-hicontrast) {
+        body.glass-on:not(.theme-hicontrast),
+        body.glass-on.theme-light:not(.theme-hicontrast) {
           background: var(--bg);
           --surface-1: var(--panel);
           --surface-2: color-mix(in srgb, var(--panel) 86%, var(--text) 14%);
           --surface-sunken: color-mix(in srgb, var(--panel) 78%, var(--bg) 22%);
+          --glass: var(--surface-1);
+          --glass-soft: var(--surface-sunken);
         }
-        body:not(.theme-hicontrast) .panel,
-        body:not(.theme-hicontrast) .stat,
-        body:not(.theme-hicontrast) .card,
-        body:not(.theme-hicontrast) .mv-row,
-        body:not(.theme-hicontrast) .mv-empty,
-        body:not(.theme-hicontrast) .glass-surface,
-        body:not(.theme-hicontrast) .status-card,
-        body:not(.theme-hicontrast) .boundary,
-        body:not(.theme-hicontrast) .prefs__panel,
-        body:not(.theme-hicontrast) .mv-confirm,
-        body:not(.theme-hicontrast) .navfinder {
+        body.glass-on:not(.theme-hicontrast) .panel,
+        body.glass-on:not(.theme-hicontrast) .stat,
+        body.glass-on:not(.theme-hicontrast) .card,
+        body.glass-on:not(.theme-hicontrast) .mv-row,
+        body.glass-on:not(.theme-hicontrast) .mv-empty,
+        body.glass-on:not(.theme-hicontrast) .glass-surface,
+        body.glass-on:not(.theme-hicontrast) .status-card,
+        body.glass-on:not(.theme-hicontrast) .boundary {
           background: var(--surface-1);
           -webkit-backdrop-filter: none;
           backdrop-filter: none;
+          border-color: var(--glass-border);
           box-shadow: var(--shadow-sm);
         }
-        body:not(.theme-hicontrast) main :where(
+        body.glass-on:not(.theme-hicontrast) .prefs__panel,
+        body.glass-on:not(.theme-hicontrast) .mv-confirm,
+        body.glass-on:not(.theme-hicontrast) .navfinder,
+        body.glass-on:not(.theme-hicontrast) .arv {
+          background: var(--surface-1);
+          -webkit-backdrop-filter: none;
+          backdrop-filter: none;
+          border-color: var(--glass-border);
+          box-shadow: var(--shadow-lg);
+        }
+        body.glass-on:not(.theme-hicontrast) .mv-copilot {
+          background: var(--panel);
+          -webkit-backdrop-filter: none;
+          backdrop-filter: none;
+        }
+        body.glass-on:not(.theme-hicontrast) .mv-confirm::backdrop,
+        body.glass-on:not(.theme-hicontrast) .navfinder::backdrop,
+        body.glass-on:not(.theme-hicontrast) .arv::backdrop {
+          -webkit-backdrop-filter: none;
+          backdrop-filter: none;
+        }
+        body.glass-on:not(.theme-hicontrast) main :where(
           .as-card, .cd-card, .ce-card, .cp-card, .cpp-card, .csi-card,
           .csnp-card, .dug-card, .dup-card, .pcc-card, .pdd-card, .ppl-card,
           .pri-card, .tpi-card
@@ -1027,7 +1121,7 @@
           backdrop-filter: none;
           box-shadow: var(--shadow-sm);
         }
-        body:not(.theme-hicontrast) main :where(
+        body.glass-on:not(.theme-hicontrast) main :where(
           .fb-kpi, .fb-card, .pb-kpi, .pb-card, .gs__step,
           .msg--user .bubble, .worklog, .deliverable, .signoff, .artifact, .ask,
           .activity, .lrn__row, .lrn__moat, .pf-tile, .rt-node
@@ -1039,7 +1133,7 @@
           backdrop-filter: none;
           box-shadow: var(--shadow-sm);
         }
-        body:not(.theme-hicontrast) :where(
+        body.glass-on:not(.theme-hicontrast) :where(
           .btn:not(.btn--primary):not(.btn--danger), .ctl, .iconbtn, .halt-pill,
           .input, .select, .textarea, input:not([type="checkbox"]):not([type="radio"]),
           select, textarea, .mv-copilot__prompt
@@ -1047,6 +1141,7 @@
           background: var(--surface-sunken);
           -webkit-backdrop-filter: none;
           backdrop-filter: none;
+          border-color: var(--glass-border);
           box-shadow: none;
         }
         body:not(.theme-hicontrast) .topbar {
@@ -1061,10 +1156,24 @@
           -webkit-backdrop-filter: none;
           backdrop-filter: none;
         }
+        /* Page-local panes too: nothing blurs for reduced transparency. */
+        body :not(.topbar, .sidebar) {
+          -webkit-backdrop-filter: none !important;
+          backdrop-filter: none !important;
+        }
       }
-      /* Quiet (ghost) buttons are not glass controls. Same weight as the two
-         control rules above and later, so it wins over both: no fill, no
-         blur, no edge highlight; the border stays. */
+      /* Hovered panes lift, they don't just recolor: the same crisp pane
+         with a touch more elevation (after every material rule above, so it
+         wins in all three looks). */
+      body:not(.theme-hicontrast) .card:hover,
+      body:not(.theme-hicontrast) .mv-row:hover {
+        border-color: color-mix(in srgb, var(--text) 24%, transparent);
+        box-shadow: var(--shadow-md), var(--glass-edge);
+      }
+      /* Quiet (ghost) buttons are not material controls. Same weight as the
+         control rules above, and later, so it wins over all of them: no fill,
+         no blur, no edge highlight; the border stays. */
+      body.glass-on:not(.theme-hicontrast) :where(.btn--ghost:not(.btn--primary):not(.btn--danger)),
       body:not(.theme-hicontrast) :where(.btn--ghost:not(.btn--primary):not(.btn--danger)) {
         background-color: transparent;
         -webkit-backdrop-filter: none;
@@ -1097,8 +1206,7 @@
 .hero-subtitle { color: var(--accent); font-style: italic; margin: .55rem 0 var(--space-3); }
 .hero-lede { color: var(--muted); max-width: 46rem; margin: 0; font-size: var(--text-md); }
 .hero-statebox { position: relative; padding: var(--space-4); border: 1px solid var(--border);
-  border-radius: var(--radius-lg); background: color-mix(in srgb, var(--panel) 72%, transparent);
-  -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px); }
+  border-radius: var(--radius-lg); background: color-mix(in srgb, var(--panel) 72%, transparent); }
 .hero-statebox__label { color: var(--muted); font-size: var(--text-xs);
   text-transform: uppercase; letter-spacing: .08em; }
 .hero-statebox__row { display: flex; align-items: center; justify-content: space-between;
@@ -1198,8 +1306,8 @@
   width: min(25rem, calc(100vw - 2.2rem)); max-height: min(42rem, calc(100dvh - 7rem));
   overflow: auto; border: 1px solid var(--glass-border, var(--border));
   border-radius: calc(var(--radius-lg) + 4px);
-  background: var(--glass-sheen, none), color-mix(in srgb, var(--panel) 82%, transparent);
-  -webkit-backdrop-filter: blur(24px) saturate(175%); backdrop-filter: blur(24px) saturate(175%);
+  /* Solid; Glass effects makes it translucent (body.glass-on, above). */
+  background: var(--panel);
   box-shadow: var(--shadow-lg), var(--glass-edge, 0 0 transparent); padding: var(--space-4);
 }
 .mv-copilot__head { display: flex; align-items: center;
