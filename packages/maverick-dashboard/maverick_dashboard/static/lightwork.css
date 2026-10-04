@@ -1063,6 +1063,19 @@
   flex-wrap: wrap; gap: var(--space-3); margin: var(--space-2) 0; }
 .hero-statebox__copy { color: var(--muted); font-size: var(--text-sm);
   min-height: 2.5em; margin: 0; }
+/* The page's main action lives in the header: one btn--primary per view. */
+.hero-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2);
+  margin-top: var(--space-4); }
+/* Compact header for working pages: smaller title and padding, and the
+   actions beside the text instead of under it. */
+.hero--compact { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
+  gap: var(--space-3) var(--space-5); padding: var(--space-4) var(--space-5); margin-bottom: var(--space-4); }
+.hero--compact > :first-child { flex: 1 1 20rem; }
+.hero--compact .hero-title { font-size: clamp(1.5rem, 3vw, 2.1rem); }
+.hero--compact .hero-subtitle { margin-bottom: var(--space-1); }
+.hero--compact .hero-lede { font-size: var(--text-sm); margin-top: var(--space-1); }
+.hero--compact .hero-actions { margin-top: 0; }
+.hero--compact .hero-statebox { padding: var(--space-3); }
 @media (max-width: 920px) {
   .hero { grid-template-columns: 1fr; }
 }
