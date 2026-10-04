@@ -52,16 +52,54 @@ def test_unpriced_model_points_to_known_price_setup_without_exposing_the_id():
     assert stop.technical == raw
 
 
+AI_PROVIDER_KEYS = "/settings?focus=ai-provider#settings-integrations"
+
+
 @pytest.mark.parametrize("raw", [
     "provider not ready: ANTHROPIC_API_KEY is not set",
     "httpx.ConnectError: [Errno 111] connection refused",
     "The selected AI model route is incomplete (anthropic: api_key)",
 ])
-def test_provider_problems_link_to_connections(raw):
+def test_provider_problems_link_to_the_ai_provider_keys(raw):
+    # AI keys live in Settings > Connections > Provider keys, not on the
+    # Connections page (connected accounts), which may even be turned off.
     stop = explain_stop(raw)
     assert stop.kind == "provider_not_ready"
-    assert stop.link == "/connections"
+    assert stop.link == AI_PROVIDER_KEYS
     assert "ConnectError" not in stop.message
+
+
+@pytest.mark.parametrize("raw", [
+    "provider_error:authentication", "provider_error:model_not_found",
+    "provider_error:connection", "provider_error:configuration",
+    "provider not ready: OPENAI_API_KEY is not set",
+])
+def test_every_ai_connection_stop_opens_the_provider_keys_with_the_row_focused(raw):
+    stop = explain_stop(raw)
+    assert stop.link == AI_PROVIDER_KEYS
+    assert stop.link_label == "Open AI provider keys" or stop.link_label == "Connect an AI service"
+    assert "/connections" not in stop.link
+
+
+@pytest.mark.parametrize(("missing", "kind"), [
+    ("ap_read_invoice, ap_read_po, ap_read_receipt, gl_read_subledger, stage_payment_batch",
+     "specialist_needs_connection"),
+    ("web_search", "specialist_needs_web_search"),
+])
+def test_a_specialist_that_cannot_start_says_why_and_what_is_safe(missing, kind):
+    raw = (f"domain 'finance_ap' agent build failed: Domain 'finance_ap' cannot deploy: "
+           f"required workflow tools unavailable: {missing}. Configure/enable the named "
+           "adapter or MCP connection, or revise the workflow to read an operator-approved "
+           "workspace export with read_file. No model work has started.. Refusing to run "
+           "without the requested domain capability envelope.")
+    stop = explain_stop(raw)
+    assert stop.kind == kind
+    assert stop.message != "Something went wrong inside Lightwork."
+    assert "No work was started" in stop.message + stop.action
+    for word in ("finance_ap", "read_file", "MCP", "envelope", "ap_read_invoice", "web_search"):
+        assert word not in stop.message + stop.action, word
+    assert stop.link and stop.link_label
+    assert stop.technical == raw
 
 
 @pytest.mark.parametrize("raw", [
