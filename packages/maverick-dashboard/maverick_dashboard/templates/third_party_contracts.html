@@ -17,12 +17,13 @@
 {% block content %}
 {% from "_module_gate.html" import module_gate %}
 <div id="third-party-contracts-shell" data-api-base="{{ api_base }}" data-copilot-page="{{ page_path }}"
+     data-module-enabled="{{ 'true' if contracts_module_enabled else 'false' }}"
      data-can-operate="{{ 'true' if contracts_can_operate else 'false' }}"
      data-can-audit="{{ 'true' if contracts_can_audit else 'false' }}"
      data-can-admin="{{ 'true' if contracts_can_admin else 'false' }}">
   {% call hero('Third-party management', 'Contracts and Engagements',
                lede='Keep track of vendor agreements and the work each vendor does for you, with a clear history of every change.', title_id='tpc-title') %}
-    <div class="hero-statebox" aria-live="polite">
+    <div class="hero-statebox" aria-live="polite"{% if not contracts_module_enabled %} hidden{% endif %}>
       <div class="hero-statebox__label">Availability</div>
       <div class="hero-statebox__row"><strong id="tpc-readiness">Checking…</strong><span class="badge idle" id="tpc-status-mark">Checking</span></div>
       <p class="hero-statebox__copy" id="tpc-readiness-detail" role="status" aria-live="polite">Checking that contracts are available…</p>
@@ -50,7 +51,7 @@
           {% if contracts_can_audit %}<label class="tpc-actions"><input name="include_sensitive_fields" type="checkbox"> Show confidential fields (auditors only)</label>{% endif %}
         </div>
       </form>
-      <p class="muted" id="tpc-list-status" role="status" aria-live="polite">Loading…</p>
+      <p class="muted" id="tpc-list-status" role="status" aria-live="polite">{{ 'Loading…' if contracts_module_enabled else 'Contracts and engagements appear here once this is turned on.' }}</p>
       <div id="tpc-record-list"></div>
       <div id="tpc-detail" hidden></div>
     </section>
