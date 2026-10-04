@@ -226,7 +226,7 @@
     const until = Math.min(endOfDay($('until').value), now + (prepared.max_days || 7) * DAY - 60);
     if (!(until > now)) { say('Choose a date from today up to a week ahead.'); return; }
     const ok = typeof window.mvConfirm === 'function' && await window.mvConfirm(
-      'Keep this run’s details as a learning example until ' + new Date(until * 1000).toLocaleDateString() + '? It’s encrypted and only you can review it.',
+      'Keep this run’s details as a learning example until ' + (window.mvDateAbsolute ? window.mvDateAbsolute(until) : new Date(until * 1000).toLocaleDateString()) + '? It’s encrypted and only you can review it.',
       { okText: 'Keep as example' });
     if (!ok) return;
     const row = await api('', { expected_pause_binding: prepared.expected_pause_binding, allowed_tools: prepared.allowed_tools,
@@ -253,7 +253,7 @@
     const until = Math.min(endOfDay($('grant-until').value), record.retain_until - 60);
     if (!(until > Date.now() / 1000)) { say('Choose a date before the example expires.'); return; }
     const ok = typeof window.mvConfirm === 'function' && await window.mvConfirm(
-      'Allow new flows to learn from this example until ' + new Date(until * 1000).toLocaleDateString() + '? Copies made while learning are kept until then, even if you withdraw it later.',
+      'Allow new flows to learn from this example until ' + (window.mvDateAbsolute ? window.mvDateAbsolute(until) : new Date(until * 1000).toLocaleDateString()) + '? Copies made while learning are kept until then, even if you withdraw it later.',
       { okText: 'Allow learning' });
     if (!ok) return;
     const row = await api('/training-grant', { expected_revision: record.revision, expected_episode_sha256: record.episode_sha256,

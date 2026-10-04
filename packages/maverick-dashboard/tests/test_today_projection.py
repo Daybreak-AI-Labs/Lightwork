@@ -51,3 +51,38 @@ def test_no_pin_after_template_access_revoked(monkeypatch):
     with pytest.raises(HTTPException) as error:
         operations._changes(object(), {'action': 'pin_template', 'item': 'private'})
     assert error.value.status_code == 403
+
+
+def _row(kind, assignment, title):
+    return {"kind": kind, "assignment": assignment, "title": title, "href": "#", "reason": "r"}
+
+
+def test_today_lists_what_waits_on_this_person_and_only_counts_the_shared_queue(monkeypatch):
+    from maverick_dashboard import action_center_api
+
+    model = {
+        "items": [
+            _row("assessment", "available", "Fabrikam Freight"),
+            _row("assessment", "mine", "My vendor review"),
+            _row("approval", "mine", "Archive drafts"),
+            _row("connection_attention", "mine", "Not a decision"),
+        ],
+        "coverage": [
+            {"kind": "assessment", "status": "current"},
+            {"kind": "connection_attention", "status": "disabled"},
+            {"kind": "approval", "status": "unavailable"},
+            {"kind": "signoff", "status": "partial"},
+            {"kind": "task_attention", "status": "unavailable"},
+        ],
+        "generated_at": 1.0,
+    }
+    monkeypatch.setattr(action_center_api, "require_enabled", lambda request: None)
+    monkeypatch.setattr(action_center_api, "_model", lambda request: model)
+    out = today._decisions(object())
+    assert [row["title"] for row in out["items"]] == ["My vendor review", "Archive drafts"]
+    assert out["count"] == 2 and out["available"] == 1
+    # Only real problems with the decision sources are reported: a turned-off
+    # module or a source that loaded fine says nothing.
+    assert [(c["kind"], c["status"]) for c in out["coverage"]] == [
+        ("approval", "unavailable"), ("signoff", "partial")]
+    assert [c["label"] for c in out["coverage"]] == ["Approvals", "Sign-offs"]

@@ -37,7 +37,7 @@ def test_page_renders_full_governed_experiment_workflow(page_client: TestClient)
     response = page_client.get("/consent/experiments")
     assert response.status_code == 200
     page = response.text
-    assert "Banner Experiments" in page
+    assert "Banner experiments" in page
     assert "creates an experiment cannot approve it" in page
     assert "About this page’s safeguards" in page
     assert "/api/v1/consent/experiments" in page

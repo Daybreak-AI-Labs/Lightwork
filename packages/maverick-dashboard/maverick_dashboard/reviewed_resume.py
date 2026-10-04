@@ -44,7 +44,7 @@ def limits(request, goal_id, max_dollars):
 def specialist_setup_block(goal):
     """Do not spend another attempt on a known missing specialist action."""
     stop = stop_payload(goal.status, goal.result)
-    if not stop or stop["kind"] != "specialist_setup":
+    if not stop or stop["kind"] not in {"specialist_setup", "specialist_needs_web_search", "specialist_needs_connection"}:
         return ""
     try:
         from maverick.domain import available_domains

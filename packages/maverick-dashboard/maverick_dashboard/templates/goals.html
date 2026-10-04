@@ -14,7 +14,6 @@
     -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px);
     padding: var(--space-3) var(--space-4); }
   .g-row__id{ font-variant-numeric: tabular-nums; color: var(--muted); font-size: var(--text-sm); flex: 0 0 auto; min-width: 0; }
-  .g-filters{ display: flex; gap: var(--space-2); flex-wrap: wrap; margin: 0 0 var(--space-3); }
   .g-row__main{ flex: 1 1 12rem; min-width: 0; }
   .g-row__title{ font-weight: var(--font-semibold); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .g-row__desc{ color: var(--muted); font-size: var(--text-sm); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -25,16 +24,20 @@
   @media(max-width:540px){
     .g-row__main{flex-basis:100%;order:2}
   }
-  .g-empty{ text-align: center; color: var(--muted); padding: var(--space-6) var(--space-4);
-    border: 1px dashed var(--glass-border, var(--border)); border-radius: var(--radius-lg);
-    background: var(--glass-soft, var(--surface-1)); }
 </style>
 
   {% from "_hero.html" import hero, state %}
+  {% from "_empty_state.html" import empty_state %}
   {% set running = goals | selectattr('status', 'equalto', 'running') | list | length %}
+  {% set goals_actions %}
+    <a class="btn btn--primary" href="/chat">New task</a>
+    <a class="btn" href="/goal-builder">Step-by-step form</a>
+    <a class="btn btn--ghost" href="/graph-editor">Visual task map</a>
+  {% endset %}
   {% call hero('Your AI workforce', 'Tasks',
                subtitle='Every task on record',
-               lede='Find your work, read its result, and open a task to review or continue it.') %}
+               lede='Find your work, read its result, and open a task to review or continue it.',
+               actions=goals_actions if can_create_goal else '') %}
     {{ state('Current state',
              goals | length ~ ' recent task' ~ ('' if goals | length == 1 else 's'),
              badge=(running ~ ' running') if running else ('Ready' if goals else 'None yet'),
@@ -43,29 +46,24 @@
                    and any problems. Available actions depend on your workspace role.') }}
   {% endcall %}
 
+  {% if goals %}
   <div class="g-bar">
-    {% if can_create_goal %}
-    <a class="btn btn--primary" href="/chat">New task</a>
-    <a class="btn" href="/goal-builder">Step-by-step form</a>
-    <a class="btn btn--ghost" href="/graph-editor">Visual task map</a>
-    {% endif %}
-    {% if goals %}
     <input id="run-search-q" type="search" placeholder="Search tasks…"
            aria-label="Search tasks by title or description" autocomplete="off"
            class="input g-bar__search">
-    {% endif %}
   </div>
+  {% endif %}
 
   {% if task_views_available %}{% include "_task_saved_views.html" %}{% endif %}
   {% include "_upcoming_tasks.html" %}
 
   {% if goals %}
-  <div class="g-filters" role="group" aria-label="Show tasks">
-    <button type="button" class="btn btn--primary" data-g-filter="">All</button>
-    <button type="button" class="btn" data-g-filter="running active pending">Running</button>
-    <button type="button" class="btn" data-g-filter="blocked awaiting_approval">Waiting for you</button>
-    <button type="button" class="btn" data-g-filter="failed">Failed</button>
-    <button type="button" class="btn" data-g-filter="done">Done</button>
+  <div class="mv-tabs" role="group" aria-label="Show tasks">
+    <button type="button" class="mv-tab" data-g-filter="" aria-pressed="true">All</button>
+    <button type="button" class="mv-tab" data-g-filter="running active pending" aria-pressed="false">Running</button>
+    <button type="button" class="mv-tab" data-g-filter="blocked awaiting_approval" aria-pressed="false">Waiting for you</button>
+    <button type="button" class="mv-tab" data-g-filter="failed" aria-pressed="false">Failed</button>
+    <button type="button" class="mv-tab" data-g-filter="done" aria-pressed="false">Done</button>
   </div>
   <div class="g-list" id="run-list">
     {% for g in goals %}
@@ -92,16 +90,13 @@
   <button id="run-more" type="button" class="btn" data-next-offset="{{ next_offset }}"
           data-page-size="{{ page_size }}" aria-controls="run-list">Show more tasks</button>
   {% endif %}
+  {% elif can_create_goal %}
+    {{ empty_state('No tasks yet',
+                   'Tasks you start appear here with their plans and results. Describe what you need in plain English to start the first one.',
+                   action_label='Start a task', action_href='/chat') }}
   {% else %}
-    <div class="g-empty">
-      <p style="font-weight: var(--font-semibold); margin: 0 0 var(--space-2);">No tasks yet</p>
-      {% if can_create_goal %}
-      <p style="margin: 0;">Start your first piece of work from <a href="/chat">Chat</a> — describe what you need in plain English.</p>
-      <a class="btn btn--primary" href="/chat" style="margin-top: var(--space-3);">Start a task</a>
-      {% else %}
-      <p style="margin: 0;">Tasks you can view will appear here when work is created.</p>
-      {% endif %}
-    </div>
+    {{ empty_state('No tasks yet',
+                   'Tasks you can view appear here when someone in your workspace starts work you are allowed to see.') }}
   {% endif %}
 
   <script>
@@ -119,7 +114,10 @@
     }
     function render(goals) {
       if (!goals.length) {
-        listEl.innerHTML = '<div class="g-empty" style="padding:var(--space-5);">No matching tasks.</div>';
+        if (window.mvEmpty) {
+          listEl.replaceChildren(mvEmpty('No matching tasks',
+            'Tasks whose title or description match your search appear here. Try other words, or clear the search to see every task.'));
+        } else listEl.textContent = 'No matching tasks.';
         return;
       }
       listEl.innerHTML = goals.map(rowHtml).join('');
@@ -215,14 +213,25 @@
     filterBtns.forEach(function (b) {
       b.addEventListener('click', function () {
         active = b.getAttribute('data-g-filter') || '';
-        filterBtns.forEach(function (x) { x.classList.toggle('btn--primary', x === b); x.setAttribute('aria-pressed', x === b ? 'true' : 'false'); });
+        filterBtns.forEach(function (x) { x.setAttribute('aria-pressed', x === b ? 'true' : 'false'); });
         applyFilter();
+        writeAddress();
       });
     });
     var savedStatuses = {'':'', running:'running active pending', waiting:'blocked awaiting_approval', failed:'failed', done:'done'};
     window.LightworkTaskFilters = {current:function () {
       return {q:input.value.trim(), status:Object.keys(savedStatuses).find(function (key) { return savedStatuses[key] === active; }) || ''};
     }};
+    // The address follows the chosen filter and search, so a copied link or a
+    // refresh shows the same tasks. replaceState keeps Back for leaving the page.
+    var addressTimer = null;
+    function writeAddress() {
+      var params = new URLSearchParams(window.location.search), current = window.LightworkTaskFilters.current();
+      ['status', 'q'].forEach(function (key) { if (current[key]) params.set(key, current[key]); else params.delete(key); });
+      var query = params.toString();
+      window.history.replaceState(window.history.state, '', window.location.pathname + (query ? '?' + query : '') + window.location.hash);
+    }
+    input.addEventListener('input', function () { clearTimeout(addressTimer); addressTimer = setTimeout(writeAddress, 400); });
     function selection() {
       document.dispatchEvent(new CustomEvent('lightwork:copilot-selection', {detail:{selection:{kind:'task_filter', filters:window.LightworkTaskFilters.current()}}}));
     }

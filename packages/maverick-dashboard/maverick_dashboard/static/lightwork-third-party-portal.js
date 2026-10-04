@@ -536,6 +536,7 @@
 
   function dateText(seconds) {
     const when = new Date(seconds * 1000);
+    if (window.mvTimeAbsolute) return window.mvTimeAbsolute(seconds);
     try {
       return when.toLocaleString(undefined, { dateStyle: "long", timeStyle: "short" });
     } catch (_error) {
@@ -1484,7 +1485,7 @@
     text(elements.receiptEvidenceStatus, "Waiting for review");
     text(
       elements.receiptSummary,
-      `${answerCount} ${answerCount === 1 ? "answer" : "answers"} and ${fileCount} ${fileCount === 1 ? "file" : "files"} sent on ${new Date().toLocaleString()}.`,
+      `${answerCount} ${answerCount === 1 ? "answer" : "answers"} and ${fileCount} ${fileCount === 1 ? "file" : "files"} sent on ${(window.mvTimeAbsolute ? window.mvTimeAbsolute(Date.now()) : new Date().toLocaleString())}.`,
     );
     elements.receiptPanel.hidden = false;
   }

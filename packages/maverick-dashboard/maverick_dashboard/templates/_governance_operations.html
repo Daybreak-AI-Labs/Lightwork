@@ -1239,7 +1239,8 @@
   };
   // One plain sentence per failure: never a status code or server wording.
   const safeDetail = async (response, fallback) => {
-    if (typeof window.mvErrorText === "function") return window.mvErrorText({status: response.status}, fallback);
+    // Headers carry the turned-off reason, so "off" is never read as "no permission".
+    if (typeof window.mvErrorText === "function") return window.mvErrorText({status: response.status, headers: response.headers}, fallback);
     if (response.status === 403) return "You do not have permission to do this. Ask an administrator.";
     if (response.status === 404) return "That item no longer exists. Refresh the page to see the latest.";
     if (response.status === 409) return "This was changed since you opened it. Choose it again in the table and retry.";
@@ -1254,7 +1255,12 @@
     } catch (_error) {
       throw new Error("Could not reach the server — check your connection and try again.");
     }
-    if (!response.ok) throw new Error(await safeDetail(response, action));
+    if (!response.ok) {
+      // The refusal's body is never read: release it so the request ends
+      // instead of staying open (the page never went quiet).
+      try { if (response.body) response.body.cancel().catch(() => {}); } catch (_error) { /* already closed */ }
+      throw new Error(await safeDetail(response, action));
+    }
     if (response.status === 204) return null;
     return response.json();
   };
@@ -1414,7 +1420,7 @@
     const seconds = Number(value);
     if (!Number.isFinite(seconds) || seconds <= 0) return "—";
     if (typeof window.mvWhen === "function") return window.mvWhen(seconds);
-    return new Date(seconds * 1000).toLocaleString();
+    return (window.mvTimeAbsolute ? window.mvTimeAbsolute(seconds) : new Date(seconds * 1000).toLocaleString());
   };
   // Fingerprints are computed here from a chosen file or typed text.
   const hex = buffer => Array.from(new Uint8Array(buffer), byte => byte.toString(16).padStart(2, "0")).join("");

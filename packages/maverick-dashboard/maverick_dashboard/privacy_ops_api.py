@@ -139,7 +139,9 @@ async def scan_files(request: Request, asset_id: str, body: ScanFilesIn) -> dict
     from maverick.privacy_ops import RecordConflict
 
     if not dm.enabled():
-        raise HTTPException(status_code=403, detail="The data map is turned off.")
+        from .feature_gate import feature_off
+
+        raise feature_off("data_map", detail="The data map is turned off.")
     await run_in_threadpool(_record, request, "data_map_scan_files", asset=asset_id)
     try:
         return await run_in_threadpool(_scan_files, asset_id, body, _actor(request))
@@ -170,7 +172,9 @@ async def prepare_questionnaire_links(request: Request, body: PrepareIn) -> dict
     from maverick import vendor_management as vm
 
     if not vm.enabled():
-        raise HTTPException(status_code=403, detail="The vendor register is turned off.")
+        from .feature_gate import feature_off
+
+        raise feature_off("vendor_management", detail="The vendor register is turned off.")
     await run_in_threadpool(_record, request, "vendor_questionnaire_links_prepare", start_over=body.start_over)
     try:
         result = await run_in_threadpool(

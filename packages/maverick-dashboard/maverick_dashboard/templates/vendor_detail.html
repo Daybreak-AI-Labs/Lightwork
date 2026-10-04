@@ -2,11 +2,12 @@
 {% from "_hero.html" import hero, state %}
 {% block title %}{{ vendor.name }} · Lightwork{% endblock %}
 {% block content %}
+{% from "_back_link.html" import back_link with context %}
 {% set status_word = {'active': 'Active', 'under_review': 'Under review', 'offboarded': 'No longer used'} %}
 {% set importance = {'low': 'Low', 'medium': 'Medium', 'high': 'High', 'critical': 'Critical'} %}
 {% set contract_kind = {'dpa': 'Data processing agreement', 'msa': 'Master services agreement', 'sla': 'Service level agreement', 'addendum': 'Addendum', 'other': 'Other contract'} %}
 {% set link_kind = {'dpa_review': 'Data processing agreement review', 'paper_review': 'Contract review', 'ai_vendor_assessment': 'AI vendor assessment', 'assessment': 'Assessment', 'contract': 'Contract', 'other': 'Other record'} %}
-  <p class="muted" style="margin-bottom: var(--space-2);"><a href="/privacy">← Privacy workspace</a></p>
+  <p class="muted" style="margin-bottom: var(--space-2);">{{ back_link('/privacy', 'Privacy') }}</p>
   {% call hero('Vendor', vendor.name,
                lede=(vendor.category | humanize or 'No category') ~ ' · Importance: ' ~ importance.get(vendor.criticality, vendor.criticality | humanize)) %}
     {{ state('Status', status_word.get(vendor.status, vendor.status | humanize),

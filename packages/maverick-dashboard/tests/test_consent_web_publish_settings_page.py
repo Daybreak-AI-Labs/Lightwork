@@ -57,7 +57,7 @@ def test_page_is_store_free_liquid_glass_and_candid(client: TestClient) -> None:
     ):
         assert directive in csp
     for text in (
-        "Website Banner Settings",
+        "Website banner settings",
         "About this page’s safeguards",
         "never asks for or stores your site’s one-time security codes",
         "stop being used until you save them again",

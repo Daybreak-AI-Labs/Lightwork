@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}AI vendor onboarding - Lightwork{% endblock %}
+{% block title %}AI vendor onboarding · Lightwork{% endblock %}
 {% block head_extra %}
 <style nonce="{{ csp_style_nonce }}">
   .vo-layout {display:grid; grid-template-columns:minmax(0,1fr) minmax(0,2.3fr); gap:1.5rem}
@@ -20,7 +20,7 @@
   .vo-status span {padding:.5rem .8rem; border:1px solid var(--border); border-radius:8px}
   #vo-message {position:sticky; top:calc(var(--shell-topbar-h,56px) + .5rem); z-index:20; padding:.75rem; border:1px solid var(--border); border-radius:8px; background:var(--panel)}
   #vo-message:empty {display:none}
-  #vo-message[role="alert"] {color:var(--err); border-color:currentColor}
+  #vo-message[role="alert"] {color:var(--danger); border-color:currentColor}
   #vo-cases button {display:block; width:100%; text-align:left; margin:.4rem 0; white-space:normal; height:auto}
   #vo-cases button[aria-current="true"] {border-color:var(--accent); background:var(--surface-2)}
   .vo-queue-controls {display:grid; grid-template-columns:1fr auto; gap:.6rem; align-items:end}
@@ -46,7 +46,7 @@
 {% endblock %}
 {% block content %}
 <section id="vendor-onboarding" aria-labelledby="vo-title" data-api-base="/api/v1/vendor-onboarding" data-workspace-context="{{ connection_workspace_context }}" data-named-signin="{{ 'true' if vendor_named_signin else 'false' }}" data-offline-demo="{{ 'true' if offline_demo else 'false' }}">
-  <h1 id="vo-title" class="page-title">AI Vendor Onboarding</h1>
+  <h1 id="vo-title" class="page-title">AI vendor onboarding</h1>
   {% if offline_demo %}<p role="note"><strong>Offline simulation.</strong> All vendor evidence, reviewer identities and tickets in this demonstration are synthetic.</p>{% endif %}
   <p>Bring in evidence, review the assessment, and approve a verified Jira task. Renewals retain the previous evidence and decisions.</p>
   {% if not offline_demo and not vendor_named_signin %}

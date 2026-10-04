@@ -17,7 +17,7 @@
       var data = await response.json(); if (started !== generation) return;
       list.replaceChildren();
       if (!data.enabled) { summary.textContent = data.message; return; }
-      summary.textContent = 'Checked ' + new Date(data.checked_at * 1000).toLocaleString() + '. ' + data.coverage;
+      summary.textContent = 'Checked ' + (window.mvTimeAbsolute ? window.mvTimeAbsolute(data.checked_at) : new Date(data.checked_at * 1000).toLocaleString()) + '. ' + data.coverage;
       if (!data.items.length) { add('p', 'No saved restart-dependent settings are selected. New work reads current settings through its normal policy checks.', list); return; }
       data.items.forEach(function (item) {
         var section = add('section', '', list); add('h3', item.label, section);
@@ -25,7 +25,7 @@
         add('p', 'Affected module: ' + item.module + '. ' + item.scope, section);
         (item.processes || []).forEach(function (process) {
           add('p', process.consumer + ': startup revision ' + process.startup_revision.slice(0,12) +
-            ', observed ' + new Date(process.checked_at * 1000).toLocaleString() +
+            ', observed ' + (window.mvTimeAbsolute ? window.mvTimeAbsolute(process.checked_at) : new Date(process.checked_at * 1000).toLocaleString()) +
             (process.matches_saved ? ' — matches saved value.' : ' — restart still pending.'), section);
         });
       });

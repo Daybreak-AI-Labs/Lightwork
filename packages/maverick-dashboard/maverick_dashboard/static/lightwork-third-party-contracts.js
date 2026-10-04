@@ -146,9 +146,13 @@
       var ready = status && status.enabled === true && status.configured === true && status.ready === true;
       if (!ready) {
         operations.disabled = true;
-        setReady(false, "Not available", status && status.enabled === false
-          ? "Contracts are turned off for this workspace. An administrator can turn them on above."
+        var off = status && status.enabled === false;
+        setReady(false, "Not available", off
+          ? "Contracts are turned off for this workspace. Ask an administrator to turn them on."
           : "Contracts aren't set up for this workspace yet. Ask your IT team to finish the setup.");
+        // The list never loads until contracts are ready; say why instead of "Loading…".
+        say(listStatus, off ? "Contracts and engagements appear here once this is turned on."
+          : "Contracts and engagements appear here once the setup is finished.");
         return;
       }
       setReady(true, "Ready", "Available actions depend on your permissions.");
@@ -157,6 +161,7 @@
     }).catch(function (f) {
       operations.disabled = true;
       setReady(false, "Not available", R.errorText(f, "check contracts"), "danger");
+      say(listStatus, R.errorText(f, "load the contracts"));
     });
   }
   function filterQuery() {
@@ -514,5 +519,7 @@
   Array.prototype.forEach.call(filters.elements, function (el) { el.addEventListener("change", function () { loadRecords(); }); });
   filters.addEventListener("submit", function (ev) { ev.preventDefault(); loadRecords(); });
   document.getElementById("tpc-refresh-status").addEventListener("click", refreshStatus);
-  refreshStatus();
+  // A turned-off module shows its gate instead: nothing is checked or loaded,
+  // and the page already says when records will appear.
+  if (shell.dataset.moduleEnabled !== "false") { refreshStatus(); }
 }(typeof window !== "undefined" ? window : this));

@@ -90,9 +90,45 @@ def test_datetime_filter_renders_a_time_element_with_date_and_zone():
     html = str(_format_datetime(1790790000))
     assert html.startswith('<time datetime="2026-09-30T')
     assert 'data-mv-time="1790790000.000"' in html
-    assert "30 Sep 2026" in html and "UTC" in html
+    assert "30 Sept 2026" in html and "UTC" in html
     assert str(_format_datetime(1790790000, "absolute")).count('data-mv-time-mode="absolute"') == 1
     assert _format_datetime(None) == "-"
+
+
+def test_datetime_filter_reads_one_format_from_epochs_iso_text_and_calendar_days():
+    from maverick_dashboard.app import _format_datetime
+    # 2026-10-04 14:01:12 UTC: day without a leading zero, 24-hour clock, zone.
+    assert ">4 Oct 2026, 14:01 UTC</time>" in str(_format_datetime(1791122472))
+    iso = str(_format_datetime("2026-10-04T15:01:12+01:00", "absolute"))
+    assert ">4 Oct 2026, 14:01 UTC</time>" in iso and 'data-mv-time="1791122472.000"' in iso
+    assert ">4 Oct 2026, 14:01 UTC</time>" in str(_format_datetime("2026-10-04T14:01:12Z"))
+    day = str(_format_datetime("2026-10-04", "date"))
+    assert day == ('<time datetime="2026-10-04" data-mv-time="2026-10-04"'
+                   ' data-mv-time-mode="date">4 Oct 2026</time>')
+    assert ">4 Oct 2026</time>" in str(_format_datetime(1791122472, "date"))
+    assert _format_datetime("not a time") == "not a time"
+
+
+def test_plain_datetime_text_is_the_datetime_filter_text():
+    from maverick_dashboard.plain_labels import datetime_text
+    assert datetime_text(1791122472) == "4 Oct 2026, 14:01 UTC"
+    assert datetime_text(1791122472, seconds=True) == "4 Oct 2026, 14:01:12 UTC"
+    assert datetime_text(1791122472, date_only=True) == "4 Oct 2026"
+    assert datetime_text(None) == datetime_text("soon") == datetime_text(True) == ""
+    assert datetime_text(1790790000, date_only=True) == "30 Sept 2026"  # as browsers write it
+
+
+def test_money_and_percent_filters_use_one_format():
+    from maverick_dashboard.app import templates
+    money, percent = templates.env.filters["money"], templates.env.filters["percent"]
+    assert money(1234.5) == "$1,234.50"
+    assert money(0) == money(None) == money("n/a") == "$0.00"
+    assert money(-5) == "-$5.00"
+    assert money(0.0004) == "under $0.01"
+    assert money(0.003, decimals=4) == "$0.0030"  # labelled per-unit prices only
+    assert money(75, currency="eur") == "EUR 75.00"
+    assert percent(0) == "0%" and percent(37.46) == "37.5%" and percent(100.0) == "100%"
+    assert percent(12.04) == "12%" and percent(None) == "0%"
 
 
 # ---- activity log ----------------------------------------------------------
@@ -157,8 +193,10 @@ def test_activity_log_hides_machine_ids_and_never_shows_raw_epochs(monkeypatch, 
     assert "e+09" not in page
     assert "Approval decided" in page and "Approved" in page
     # The projected metadata view omits private decision identity and machine
-    # identifiers; its event time is still rendered as a readable time.
+    # identifiers; it still says a person (not Lightwork) decided, and its event
+    # time is rendered as a readable time.
     assert "approval-v1-" not in page and "owner@example.com" not in page
+    assert "A person (name not shown)" in page
     assert re.search(r'data-mv-time="[0-9.]+" data-mv-time-mode="absolute"', page)
 
 
@@ -261,7 +299,8 @@ def test_workspaces_page_has_one_create_form_and_hides_plans_without_billing(mon
 
 def test_results_page_shows_a_real_empty_state_and_a_typeahead():
     body = _client().get("/deliverables").text
-    assert "No results yet — start a task" in body
+    assert '<p class="mv-empty__title">No results yet</p>' in body
+    assert '<a class="btn mv-empty__action" href="/chat">Start a task</a>' in body
     assert "deliverables in view" not in body and 'name="role"' not in body
     catalogue = _client().get("/deliverables?role=all").text
     assert "data-typeahead" in catalogue and "lightwork-typeahead.js" in catalogue

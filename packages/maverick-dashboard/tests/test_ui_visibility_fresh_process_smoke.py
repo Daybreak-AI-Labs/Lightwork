@@ -58,6 +58,11 @@ DOCUMENTED_STATUS_GATES: dict[str, set[int]] = {
     "/today": {403},
     "/my-data": {403},
     "/content-access": {403},
+    "/notifications": {403},
+    "/access-requests": {403},
+    "/devices": {403},
+    # Employee activation is also switched off by default.
+    "/get-started/employee": {403},
 }
 
 created = client.post(

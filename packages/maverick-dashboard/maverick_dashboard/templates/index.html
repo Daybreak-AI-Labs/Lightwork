@@ -2,6 +2,8 @@
 {% block title %}Overview · Lightwork{% endblock %}
 {% block content %}
   {% from "_hero.html" import hero, state %}
+  {# A read-only role counts the whole workspace, totals only (value_views). #}
+  {% set workspace_view = value_view is defined and value_view.scope == 'workspace' %}
   {% call hero('Your AI workforce', 'Overview',
                subtitle='The operating picture',
                lede='Everything your workforce is doing right now — goals in
@@ -9,14 +11,26 @@
                      Start new work from <a href="/chat">chat</a>, or manage
                      the teams on <a href="/workforce">Workforce</a>.' | safe) %}
     {{ state('Current state',
-             counts.total ~ ' goal' ~ ('' if counts.total == 1 else 's') ~ ' on record',
+             counts.total ~ ' goal' ~ ('' if counts.total == 1 else 's') ~ ' on record'
+               ~ (' in this workspace' if workspace_view else ''),
              badge=(counts.active ~ ' active') if counts.active else 'idle',
              badge_class='ok' if counts.active else 'idle',
-             copy=counts.done ~ ' delivered · ' ~ counts.blocked ~ ' blocked.
-                   Spending and time limits apply when an administrator sets them.') }}
+             copy=counts.done ~ ' delivered · ' ~ counts.blocked ~ ' blocked. '
+               ~ ('Totals for the whole workspace; goal titles are not shown here.'
+                  if workspace_view else
+                  'Spending and time limits apply when an administrator sets them.')) }}
   {% endcall %}
 
-  {% if counts.total == 0 %}
+  {% if counts.total == 0 and value_view is defined and not value_view.can_operate %}
+    {# Never tell a role that cannot start goals to start one. #}
+    <div class="panel empty">
+      <h2 class="empty__title">No goals have run in this workspace yet</h2>
+      <p class="muted" style="max-width: 540px; margin: 0 auto;">
+        The totals appear here as soon as people start work. Your role can follow
+        the results but not start goals; ask an administrator if you need to.
+      </p>
+    </div>
+  {% elif counts.total == 0 %}
     <div class="panel empty">
       <h2 class="empty__title">Start your first goal</h2>
       <p class="muted" style="max-width: 540px; margin: 0 auto 1.75rem;">
@@ -122,6 +136,7 @@
       var B = window.LWBoard, DATA = null, statusFilter = '';
 
       function rel(ts) {
+        if (window.mvTimeRelative) return window.mvTimeRelative(ts);
         var secs = Math.floor(Date.now() / 1000 - ts);
         if (secs < 60) return 'just now';
         if (secs < 3600) return Math.floor(secs / 60) + 'm ago';
@@ -140,9 +155,11 @@
           return !statusFilter || g.status === statusFilter;
         });
         if (!rows.length) {
-          B.empty(box, statusFilter
-            ? 'No recent goals with status "' + statusFilter + '".'
-            : 'No goals yet.');
+          B.empty(box, DATA.scope === 'workspace'
+            ? 'Goal titles are not shown in the whole-workspace view. The counts above cover everyone\'s goals.'
+            : statusFilter
+              ? 'No recent goals with status "' + statusFilter + '".'
+              : 'No goals yet.');
           return;
         }
         box.textContent = '';
@@ -169,7 +186,7 @@
           a.textContent = g.title;
           td3.appendChild(a);
           var td4 = B.el('td', 'muted', rel(g.updated_at));
-          td4.title = new Date(g.updated_at * 1000).toLocaleString();
+          td4.title = (window.mvTimeAbsolute ? window.mvTimeAbsolute(g.updated_at) : new Date(g.updated_at * 1000).toLocaleString());
           tr.appendChild(td1); tr.appendChild(td2);
           tr.appendChild(td3); tr.appendChild(td4);
           tbody.appendChild(tr);

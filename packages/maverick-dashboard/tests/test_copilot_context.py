@@ -27,73 +27,73 @@ CANONICAL_CONTEXTS = {
     "/learning": "Learning",
     "/permissions": "Permissions",
     "/connections": "Connections",
-    "/workspace/recovery": "Workspace Recovery",
+    "/workspace/recovery": "Workspace recovery",
     "/settings": "Settings",
     "/users": "Users",
     "/spending-limits": "Spending limits",
     "/tenants": "Workspaces",
-    "/help": "Help and Diagnostics",
-    "/account": "Account",
+    "/help": "Help and diagnostics",
+    "/account": "Your account",
     "/start": "Get started",
-    "/providers": "AI services",
+    "/providers": "Providers",
     "/billing": "Billing",
     "/commitment-reviews": "Promise reviews",
-    "/workflows": "Flows",
-    "/agents": "Specialists",
+    "/workflows": "Workflows",
+    "/agents": "Agent Factory",
     "/workforce": "Workforce",
     "/fleets": "Teams",
     "/approvals": "Approvals",
-    "/facts": "Shared business facts",
-    "/content-access": "Employee content access",
+    "/facts": "Facts",
+    "/content-access": "Content access",
     "/users/departures": "Employee departures",
     "/companion/admin": "Employee companions",
     "/companion": "My companion",
-    "/assurance/cloud-agents": "Cloud Agent Governance",
-    "/ai-evidence-analysis": "AI Evidence Analysis",
-    "/assess/evidence-autopopulation": "Assessment Evidence Proposals",
-    "/administration/document-vault": "Governed Document Vault",
-    "/ai-entity-tasks": "AI Entity Tasks",
-    "/governance-agents": "Governance Agents",
-    "/agent-control-plane": "Agent Control Plane",
-    "/audit/evolution-ledger": "Evolution Ledger",
+    "/assurance/cloud-agents": "Cloud AI agents",
+    "/ai-evidence-analysis": "AI evidence analysis",
+    "/assess/evidence-autopopulation": "Suggested assessment answers",
+    "/administration/document-vault": "Document vault",
+    "/ai-entity-tasks": "AI system tasks",
+    "/governance-agents": "Governance assistants",
+    "/agent-control-plane": "Agent controls",
+    "/audit/evolution-ledger": "Learning history",
     "/governance/inventory": "Governance Inventory",
-    "/consent": "Consent and Preferences",
-    "/consent/publishing": "Consent Publishing",
-    "/consent/experiments": "Consent Experiments",
-    "/consent/delivery": "Consent Delivery",
-    "/consent/public-clients": "Public Consent Clients",
-    "/consent/native": "Consent in Your Apps",
-    "/consent/profile-data": "Consent Profile Data",
-    "/consent/custom-indexes": "Custom Consent Indexes",
-    "/consent/bulk-jobs": "Consent Bulk Jobs",
-    "/consent/publish-settings": "Consent Publish Settings",
-    "/consent/global-opt-out": "Global Opt-Out",
-    "/consent/application-scans": "Application Consent Scans",
-    "/consent/scan-inventory": "Consent Scan Inventory",
-    "/consent/scan-notice-proposals": "Scan Disclosure Proposals",
-    "/consent/trust-center-authority": "Consumer Trust Center Authority",
-    "/data-use": "Data Use Governance",
-    "/data-use/providers": "Native Data Controls",
-    "/compliance": "Technology Risk and Compliance",
-    "/compliance/grc-studio": "No-code GRC Studio",
-    "/compliance/policy-links": "Policy Publication Links",
-    "/compliance/scoping": "Technology Risk and Compliance Scoping",
-    "/compliance/scope-actions": "Compliance Scope Actions",
-    "/compliance/continuous-evidence": "Continuous Evidence Operations",
-    "/privacy": "Privacy Operations",
-    "/privacy/data-discovery": "Privacy Data Discovery",
-    "/privacy/regulatory-intelligence": "Privacy Regulatory Intelligence",
-    "/privacy/rights-orchestration": "Privacy Rights Orchestration",
-    "/privacy/rights-consumer-delivery": "Privacy Rights Consumer Delivery",
-    "/privacy/notice-governance": "Privacy Notice Governance",
-    "/privacy/drop": "California DROP Requests",
-    "/third-party/contracts": "Contracts & Engagements",
-    "/third-party/executive-reports": "Third-Party Executive Reports",
-    "/third-party/intelligence": "Third-Party Intelligence",
+    "/consent": "Consent & Preferences",
+    "/consent/publishing": "Banner and preference center",
+    "/consent/experiments": "Banner experiments",
+    "/consent/delivery": "Send choices to other systems",
+    "/consent/public-clients": "Website and app keys",
+    "/consent/native": "Mobile app consent",
+    "/consent/profile-data": "Preference questions",
+    "/consent/custom-indexes": "Find people by preference",
+    "/consent/bulk-jobs": "Bulk consent changes",
+    "/consent/publish-settings": "Website banner settings",
+    "/consent/global-opt-out": "Opt out everywhere",
+    "/consent/application-scans": "App tracking checks",
+    "/consent/scan-inventory": "Tracker scans",
+    "/consent/scan-notice-proposals": "Disclosure suggestions",
+    "/consent/trust-center-authority": "Trust center access",
+    "/data-use": "Data use rules",
+    "/data-use/providers": "Snowflake and Databricks",
+    "/compliance": "Compliance",
+    "/compliance/grc-studio": "No-code GRC studio",
+    "/compliance/policy-links": "Policy links",
+    "/compliance/scoping": "Find which controls apply",
+    "/compliance/scope-actions": "Turn scope into tasks",
+    "/compliance/continuous-evidence": "Continuous evidence",
+    "/privacy": "Privacy",
+    "/privacy/data-discovery": "Find personal data",
+    "/privacy/regulatory-intelligence": "Privacy law research",
+    "/privacy/rights-orchestration": "Privacy requests",
+    "/privacy/rights-consumer-delivery": "Send people their data",
+    "/privacy/notice-governance": "Privacy notices",
+    "/privacy/drop": "California DROP requests",
+    "/third-party/contracts": "Contracts and engagements",
+    "/third-party/executive-reports": "Executive Vendor Reports",
+    "/third-party/intelligence": "Third-party intelligence",
     "/third-party/lifecycle": "Third-Party Lifecycle",
     "/third-party/collaboration": "Third-Party Collaboration",
-    "/security/governance": "AI Governance Workspace",
-    "/security/assurance": "Model Risk and AI Assurance",
+    "/security/governance": "AI governance",
+    "/security/assurance": "AI assurance",
     "/assessments": "Assessments",
 }
 
@@ -186,6 +186,18 @@ def test_panel_tips_are_page_specific_and_do_not_repeat_internal_boundaries() ->
     )["boundaries"][0]
 
 
+def test_hand_written_guides_use_the_registry_page_name() -> None:
+    """The Copilot names a page exactly as its sidebar entry and heading do."""
+    from maverick_dashboard.ui_visibility import PAGES
+
+    labels = {page["path"]: page["label"] for page in PAGES}
+    for context in copilot_context._CONTEXTS:
+        if context.path in labels:
+            assert context.title == labels[context.path], context.path
+    # Only a page outside the registry keeps its own hand-written title.
+    assert {context.path for context in copilot_context._CONTEXTS} - set(labels) == {"/users/departures"}
+
+
 def test_every_registered_dashboard_page_gets_page_specific_copilot_help() -> None:
     from maverick_dashboard.ui_visibility import PAGES
 
@@ -276,7 +288,7 @@ def test_privacy_detail_pages_use_the_closed_privacy_context(page: str) -> None:
     context = copilot_context.context_for_page(page)
 
     assert context.path == "/privacy"
-    assert context.title == "Privacy Operations"
+    assert context.title == "Privacy"
 
 
 @pytest.mark.parametrize(
@@ -411,8 +423,8 @@ def test_consent_delivery_context_covers_named_adapters_and_reconciliation() -> 
     [
         ("What is the authority boundary?", "Keep in mind: "),
         ("How do I get started?", "Start here: "),
-        ("What can this feature do?", "Model Risk and AI Assurance can help you: "),
-        ("Explain this workspace", "Model Risk and AI Assurance: "),
+        ("What can this feature do?", "AI assurance can help you: "),
+        ("Explain this workspace", "AI assurance: "),
     ],
 )
 def test_built_in_reply_is_deterministic_read_only_and_bounded(
@@ -477,7 +489,7 @@ def test_personal_capability_question_is_not_an_execution_request(question: str)
 
     assert copilot_context.is_action_request(question) is False
     reply = copilot_context.built_in_reply(context, question)
-    assert reply.startswith("Flows can help you: ")
+    assert reply.startswith("Workflows can help you: ")
     assert "operator access" in reply
     assert copilot_context.is_action_request("Can you create a flow for me?") is True
 

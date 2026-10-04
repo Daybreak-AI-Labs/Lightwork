@@ -267,6 +267,7 @@ def send_back_from_channel(*, approval_id: int, principal: str, rationale: str,
     recorded = audit.audit_event(
         audit.EventKind.CONSENT_RESULT,
         agent=result["decided_by"],
+        actor=result["decided_by"],
         action="approval_revision_requested",
         approval_id=int(approval_id),
         channel=channel,

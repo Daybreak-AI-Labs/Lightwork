@@ -125,3 +125,48 @@ def test_hiding_a_page_does_not_revoke_its_role_permission(scoped_client):
     ui_visibility.set_visibility("/security", "operator", False)
     assert scoped_client.get("/security").status_code == 403
     assert scoped_client.get("/api/v1/security").status_code == 200
+
+
+# Live screens the registry now governs so the page finder can offer them.
+# A role finds each one exactly when the screen's own route admits that role.
+REGISTERED_SCREENS = (
+    "/help", "/notifications", "/my-work", "/conversations", "/get-started/employee",
+    "/project-workspaces", "/devices", "/access-requests", "/budget",
+    "/cost-reconciliation", "/provider-spending",
+)
+
+
+@pytest.mark.parametrize("role", ["viewer", "auditor", "operator", "admin"])
+def test_registered_screens_are_offered_exactly_where_their_routes_admit(scoped_client, role):
+    from maverick_dashboard import rbac, ui_visibility
+
+    rbac.set_role("user:customer", role)
+    finder = scoped_client.get("/nav/finder")
+    assert finder.status_code == 200
+    for path in REGISTERED_SCREENS:
+        assert ui_visibility.page_for(path)["path"] == path
+        offered = f'href="{path}"' in finder.text
+        status = scoped_client.get(path).status_code
+        assert status in {200, 403}, (role, path, status)
+        assert offered == (status == 200), (role, path, status)
+    # The installation-wide spending page stays with administrators.
+    assert ('href="/provider-spending"' in finder.text) == (role == "admin")
+
+
+# Pages whose registry floor once sat below their route's own check, so search
+# and the sidebar offered them to roles the route then refused.
+FLOOR_MATCHED_SCREENS = ("/safety", "/oversight", "/plugins")
+
+
+@pytest.mark.parametrize("role", ["viewer", "auditor", "operator", "admin"])
+def test_floor_matched_screens_are_offered_exactly_where_their_routes_admit(scoped_client, role):
+    from maverick_dashboard import rbac
+
+    rbac.set_role("user:customer", role)
+    finder = scoped_client.get("/nav/finder")
+    assert finder.status_code == 200
+    for path in FLOOR_MATCHED_SCREENS:
+        offered = f'href="{path}"' in finder.text
+        status = scoped_client.get(path).status_code
+        assert status in {200, 403}, (role, path, status)
+        assert offered == (status == 200), (role, path, status)

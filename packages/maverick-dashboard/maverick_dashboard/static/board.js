@@ -31,10 +31,14 @@ window.LWBoard = (function () {
     return n;
   }
   function fmt(n) { return (n == null ? 0 : n).toLocaleString(); }
+  // The shared formats from lightwork-ui.js; the fallbacks only cover a
+  // render that lands before the shell script has loaded.
   function money(n) {
-    return '$' + (n == null ? 0 : n).toLocaleString(undefined,
+    n = n == null ? 0 : n;
+    return window.mvMoney ? window.mvMoney(n) : '$' + n.toLocaleString(undefined,
       { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   }
+  function now() { return window.mvTimeAbsolute ? window.mvTimeAbsolute(Date.now()) : new Date().toLocaleString(); }
 
   // ---- shared tooltip ------------------------------------------------------
   var tip = null;
@@ -385,9 +389,13 @@ window.LWBoard = (function () {
     box.appendChild(wrap);
   }
 
-  function empty(box, msg) {
+  // An empty chart or list: the shared compact empty state (window.mvEmpty
+  // from lightwork-ui.js) — what will appear here, then (body) how to get the
+  // first one, plus an optional {label, href} next step.
+  function empty(box, msg, body, action) {
     box.textContent = '';
-    box.appendChild(el('p', 'bd-empty muted', msg));
+    if (window.mvEmpty) { box.appendChild(window.mvEmpty(msg, body, action, { compact: true })); return; }
+    box.appendChild(el('p', 'bd-empty muted', body ? msg + '. ' + body : msg));
   }
 
   // Fold a daily series into 7-day buckets (sums) — long windows read as a
@@ -436,7 +444,7 @@ window.LWBoard = (function () {
         .then(function (D) {
           if (retired || request !== generation || selectedDays !== days) return;
           cfg.render(D);
-          updated = selectedDays + ' days, ' + new Date().toLocaleTimeString();
+          updated = selectedDays + ' days, checked ' + now();
           stamp('Showing ' + updated + ' · updates every minute');
         })
         .catch(function (e) {

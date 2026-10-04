@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
+from datetime import datetime, timezone
 
 _UPPER_WORDS = {"gpt": "GPT", "ai": "AI", "llm": "AI model", "vl": "VL", "api": "API",
                 "sms": "SMS", "ros": "ROS", "ui": "UI", "pro": "Pro"}
@@ -277,15 +278,59 @@ def unique_slug(name: object, taken, *, fallback: str = "item", max_len: int = 4
     return f"{base}-{n}"
 
 
-def money(value: object) -> str:
-    """Dollars to two places; tiny non-zero amounts read as "under $0.01"."""
+def day_text(day) -> str:
+    """A calendar day the way browsers write it on English pages: "4 Oct 2026",
+    "30 Sept 2026" (en-GB spells September "Sept")."""
+    month = day.strftime("%b")
+    return f"{day.day} {'Sept' if month == 'Sep' else month} {day.year}"
+
+
+def datetime_text(value: object, *, seconds: bool = False, date_only: bool = False) -> str:
+    """Epoch seconds as the shared server-side text: "4 Oct 2026, 14:01 UTC".
+
+    The |datetime filter wraps this text in a <time> the browser rewrites in the
+    viewer's zone; plain strings (option labels, chat replies, printed reports)
+    use it directly. ``seconds`` adds ":05" where two moments a minute apart must
+    stay distinct; ``date_only`` gives "4 Oct 2026". "" when unreadable.
+    """
+    if isinstance(value, bool):
+        return ""
+    try:
+        when = datetime.fromtimestamp(float(value), tz=timezone.utc)
+    except (TypeError, ValueError, OverflowError, OSError):
+        return ""
+    if date_only:
+        return day_text(when)
+    return f"{day_text(when)}, {when.strftime('%H:%M:%S' if seconds else '%H:%M')} UTC"
+
+
+def money(value: object, decimals: int = 2, currency: str = "USD") -> str:
+    """Money the way every page shows it (``mvMoney`` in lightwork-ui.js too):
+    "$1,234.56" or "-$5.00", tiny non-zero amounts as "under $0.01".
+
+    ``decimals=4`` is only for a labelled per-unit price ("$0.0030 per 1K
+    tokens"). Another currency shows its code ("EUR 75.00").
+    """
     try:
         amount = float(value or 0)
     except (TypeError, ValueError):
-        return "$0.00"
-    if 0 < abs(amount) < 0.005:
-        return "under $0.01"
-    return f"${amount:,.2f}"
+        amount = 0.0
+    smallest = 10.0 ** -decimals
+    if 0 < abs(amount) < smallest / 2:
+        return "under " + money(smallest, decimals, currency)
+    number = f"{abs(amount):,.{decimals}f}"
+    sign = "-" if amount < 0 else ""
+    code = str(currency or "USD").upper()
+    return f"{sign}${number}" if code == "USD" else f"{sign}{code} {number}"
+
+
+def percent(value: object) -> str:
+    """A percentage with at most one decimal: 0 -> "0%", 37.46 -> "37.5%"."""
+    try:
+        amount = float(value or 0)
+    except (TypeError, ValueError):
+        amount = 0.0
+    return f"{amount:,.1f}".removesuffix(".0") + "%"
 
 
 def size(num_bytes: object) -> str:
@@ -326,6 +371,7 @@ def register(env) -> None:
     env.filters.setdefault("capability_label", capability_label)
     env.filters.setdefault("feature_label", feature_label)
     env.filters.setdefault("money", money)
+    env.filters.setdefault("percent", percent)
     env.filters.setdefault("agent_role", agent_role_title)
     env.filters.setdefault("agent_role_help", agent_role_help)
     env.filters.setdefault("effort_label", lambda v: EFFORT_LABELS.get(str(v or ""), str(v or "").capitalize()))

@@ -77,8 +77,9 @@
     catch (_error) { throw failure("response_invalid_json", "Lightwork returned something unexpected. Refresh the page and try again.", response.status); }
   }
 
-  function friendly(status) {
-    if (typeof global.mvErrorText === "function") return global.mvErrorText({ status }, "finish this");
+  function friendly(status, headers) {
+    // Headers carry the turned-off reason, so "off" is never read as "no permission".
+    if (typeof global.mvErrorText === "function") return global.mvErrorText({ status, headers }, "finish this");
     if (status === 403) return "You do not have permission to do this. Ask an administrator.";
     if (status === 404) return "That document no longer exists. Refresh the page to see the latest.";
     if (status === 409) return "This document changed since you opened the page. Refresh and try again.";
@@ -90,7 +91,7 @@
   async function parseJsonResponse(response) {
     const payload = await readBoundedJson(response);
     if (!response.ok) {
-      const error = failure("request_failed", friendly(response.status), response.status);
+      const error = failure("request_failed", friendly(response.status, response.headers), response.status);
       error.technical = payload && typeof payload.detail === "string" ? payload.detail : "";
       throw error;
     }
@@ -147,7 +148,7 @@
   }
   function when(ts) {
     if (typeof global.mvWhen === "function") return global.mvWhen(ts);
-    return ts ? new Date(ts * 1000).toLocaleString() : "";
+    return ts ? (window.mvTimeAbsolute ? window.mvTimeAbsolute(ts) : new Date(ts * 1000).toLocaleString()) : "";
   }
   function megabytes(bytes) {
     if (!Number.isFinite(bytes)) return "";

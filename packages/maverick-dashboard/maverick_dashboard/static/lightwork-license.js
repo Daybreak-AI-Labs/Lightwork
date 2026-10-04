@@ -21,7 +21,7 @@
   function when(isoDate) {
     if (!isoDate) return '';
     var parsed = new Date(isoDate + 'T00:00:00');
-    return isNaN(parsed.getTime()) ? isoDate : parsed.toLocaleDateString();
+    return isNaN(parsed.getTime()) ? isoDate : window.mvDateAbsolute ? window.mvDateAbsolute(isoDate) : parsed.toLocaleDateString();
   }
   function installed() { return page.dataset.installed === 'true'; }
 

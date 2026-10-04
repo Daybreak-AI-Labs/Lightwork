@@ -21,7 +21,8 @@
     el('open').disabled=unavailable||!el('drafts').value;el('more').hidden=!hasMore;el('save').textContent=current?'Save draft answers':'Start draft';
   }
   async function api(path,method='GET',body){const response=await fetch(base+path,{method,credentials:'same-origin',cache:'no-store',headers:{'Content-Type':'application/json',...(contract?{'X-Lightwork-Intake-Context':contract.context}:{})},...(body!==undefined?{body:JSON.stringify(body)}:{})});
-    if([401,403].includes(response.status)){lock();throw new Error('Your sign-in or access changed. Sign in again and reload AI business intake.');}
+    // A refusal's body is never read: release it so the request ends instead of staying open.
+    if([401,403].includes(response.status)){response.body?.cancel().catch(()=>{});lock();throw new Error('Your sign-in or access changed. Sign in again and reload AI business intake.');}
     const friendly=action=>window.mvErrorText?window.mvErrorText(response,action):'Could not '+action+'. Please try again.';
     if(response.status>=500)throw new Error('The intake service is unavailable. Your answers are kept; try again.');
     const raw=await response.text();if(new TextEncoder().encode(raw).length>2*1024*1024)throw new Error('The intake response is too large. Narrow the draft search.');

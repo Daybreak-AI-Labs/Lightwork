@@ -1205,3 +1205,13 @@ test("review mutations carry the selected revision and the actual corrected answ
   assert.deepEqual(submitted.corrections, { training: { answer: "no", note: "Vendor terms reviewed" } });
 });
 
+
+test("a request list that cannot load leaves no queue loader spinning", async () => {
+  const ui = fixture([], call => call.url.endsWith("/cases") ? response({detail: "Vendor onboarding is disabled"}, 409) : undefined);
+  ui.byId("attention-summary").textContent = "Loading request attention…";
+  ui.byId("page-status").textContent = "Loading requests…";
+  await ui.settle();
+  assert.equal(ui.byId("message").getAttribute("role"), "alert");
+  assert.equal(ui.byId("attention-summary").textContent, "");
+  assert.equal(ui.byId("page-status").textContent, "Requests could not be loaded. See the message above, then choose Refresh requests.");
+});

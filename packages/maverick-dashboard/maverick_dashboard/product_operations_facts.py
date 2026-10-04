@@ -13,6 +13,7 @@ from pydantic import Field
 
 from . import auth, facts_api
 from .draft_api import context_for
+from .plain_labels import datetime_text
 from .product_operations import Adapter, EmptyInput, Outcome, Preview, Snapshot, StrictInput
 
 STORE = GovernedRecordStore("fact_operation_receipts", "FOP", "fact_operation_receipt")
@@ -123,7 +124,7 @@ def snapshot(request, selection, *, action):
         fields = [_field("labels", "Tags separated by commas", ", ".join(item.get("tags") or []), max_length=1300)]
     elif action == "restore":
         fields = [_field("version", "Saved version to restore as a new edit", kind="select", required=True,
-                         choices=[{"value": digest(version), "label": datetime.fromtimestamp(version["valid_from"], timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")}
+                         choices=[{"value": digest(version), "label": datetime_text(version["valid_from"], seconds=True)}
                                   for version in records[0]["history"]])]
     blocked = ("An administrator can enable fact tags in Memory & learning settings." if action == "tags" and not facts_api.tags_enabled() else
                "No retained version is available to restore." if action == "restore" and not records[0]["history"] else "")

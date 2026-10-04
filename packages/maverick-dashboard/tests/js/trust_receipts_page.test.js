@@ -31,6 +31,8 @@ async function fixture({ intercept = () => undefined, status = statusBody() } = 
   window.mvConfirm = async (message) => { ui.confirms.push(message); return ui.answer; };
   window.mvErrorText = (f, action) => "Could not " + action + ".";
   window.mvCopy = (t) => ui.saved.push(["copy", t]);
+  window.mvTimeAbsolute = (ts) => "time:" + ts;
+  window.mvDateAbsolute = (day) => "date:" + day;
   window.URL.createObjectURL = () => "blob:x";
   window.URL.revokeObjectURL = () => {};
   window.HTMLAnchorElement.prototype.click = function () { ui.saved.push(["download", this.download]); };
@@ -65,6 +67,9 @@ test("decisions load with plain labels, a decision-type list and a create button
   const kinds = [...ui.el("rcp-kind").options].map((o) => o.textContent);
   assert.deepEqual(kinds, ["All decisions", "Governance denied", "Tool call"]);
   assert.equal(ui.el("rcp-custody").textContent, "On this computer");
+  // Times and days come from the shared formatters, never the browser default.
+  assert.match(table, /time:1767312000/);
+  assert.deepEqual([...ui.el("rcp-day").options].map((o) => o.textContent), ["date:2026-01-02 (latest)", "date:2026-01-01"]);
   ui.el("rcp-kind").value = "governance_denied";
   ui.el("rcp-kind").dispatchEvent(new ui.window.Event("change"));
   assert.equal(ui.el("rcp-rows").querySelectorAll("tr").length, 1);

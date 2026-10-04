@@ -40,7 +40,11 @@
     var parts = typeof value === 'string' && /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
     var date = parts ? new Date(Number(parts[1]), Number(parts[2])-1, Number(parts[3])) : value instanceof Date ? value : new Date(typeof value === 'number' || /^\d+(?:\.\d+)?$/.test(value) ? Number(value) * 1000 : value);
     if (Number.isNaN(date.getTime())) return text('Unknown');
-    return new Intl.DateTimeFormat(data.locale || data.language || 'en', options || (parts ? {dateStyle: 'medium'} : {dateStyle: 'medium', timeStyle: 'short'})).format(date);
+    // The same pattern as mvTimeAbsolute in lightwork-ui.js: "4 Oct 2026, 14:01 BST"
+    // on English pages in every browser; a translated interface uses its locale.
+    var day = {day: 'numeric', month: 'short', year: 'numeric'};
+    var locale = !data.language || data.language === 'en' ? 'en-GB' : data.locale || data.language;
+    return new Intl.DateTimeFormat(locale, options || (parts ? day : Object.assign({hour: '2-digit', minute: '2-digit', timeZoneName: 'short'}, day))).format(date);
   }
   function plural(one, other, count) {
     var category = new Intl.PluralRules(data.locale || data.language || 'en').select(Number(count));
@@ -73,6 +77,8 @@
     (root || document).querySelectorAll('[data-product-date]').forEach(function (element) { if (!element.closest('[data-user-content]')) { element.textContent = formatDate(element.dataset.productDate); element.lang = data.locale || data.language; element.dir = 'auto'; } });
     (root || document).querySelectorAll('[data-product-number]').forEach(function (element) { if (!element.closest('[data-user-content]')) { element.textContent = number(element.dataset.productNumber); element.lang = data.locale || data.language; element.dir = 'auto'; } });
     (root || document).querySelectorAll('form[data-product-validation]').forEach(validation);
+    // lightwork-ui.js formatted server times before this locale was known.
+    if (data.language && data.language !== 'en' && window.mvFormatTimes) window.mvFormatTimes(root || document);
   }
   window.LightworkI18n = {text: text, set: set, languageFor: function (source) { return lookup(source).lang; }, has: function (source) { return Object.prototype.hasOwnProperty.call(data.catalog || {}, source); },
     number: number, formatDate: formatDate, plural: plural, translate: translate, validation: validation, locale: data.locale, language: data.language};

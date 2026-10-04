@@ -1,22 +1,25 @@
 {% extends "base.html" %}
 {% block title %}{{ title }} · Lightwork{% endblock %}
 {% block content %}
-  <section class="panel" style="text-align: center; padding: 3rem 1.5rem;" aria-labelledby="request-error-title">
-    <h1 id="request-error-title" style="font-size: 1.4rem; margin-bottom: .75rem;">{{ title }}</h1>
-    <p class="muted" style="max-width: 36rem; margin: 0 auto 1.5rem;">{{ message }}</p>
-    <div style="display: flex; justify-content: center; gap: var(--space-3); flex-wrap: wrap; margin-top: 1.5rem;">
-      {% if gate == 'off' %}<a class="btn btn--primary" href="/settings#settings-sections">Open Settings</a>{% endif %}
-      {% if gate == 'step_up' %}<a class="btn btn--primary" href="{{ reauthenticate or path }}">Sign in again</a>{% endif %}
-      <a class="btn{% if gate not in ('off', 'step_up') %} btn--primary{% endif %}" href="{{ path }}">Reload this page</a>
-      {% if status == 403 %}<a class="btn" href="/workspace/tenant">Choose a workspace</a>{% endif %}
-      <a class="btn" href="/">Back to home</a>
-    </div>
-    <details class="muted" style="font-size: var(--text-sm); margin-top: var(--space-4);">
-      <summary>Support details</summary>
-      <p>Page: {{ path }} · Reference: {{ status }}</p>
-      <button type="button" class="btn btn--ghost" data-copy-support="Page {{ path }}, reference {{ status }}">Copy support details</button>
-    </details>
-  </section>
+  {% from "_hero.html" import hero %}
+  {% set error_actions %}
+    {% if gate == 'off' %}<a class="btn btn--primary" href="/settings#settings-sections">Open Settings</a>{% endif %}
+    {% if gate == 'step_up' %}<a class="btn btn--primary" href="{{ reauthenticate or path }}">Sign in again</a>{% endif %}
+    <a class="btn{% if gate not in ('off', 'step_up') %} btn--primary{% endif %}" href="{{ path }}">Reload this page</a>
+    {% if status == 403 %}<a class="btn" href="/workspace/tenant">Choose a workspace</a>{% endif %}
+    <a class="btn" href="/">Back to home</a>
+  {% endset %}
+  {{ hero('', title, lede=message, title_id='request-error-title', actions=error_actions) }}
+  {% if gate == 'off' and feature %}
+    {# The feature is off, not forbidden: whoever may turn it on can do so here. #}
+    {% from "_module_gate.html" import module_gate %}
+    {{ module_gate(feature.section, feature.label) }}
+  {% endif %}
+  <details class="panel muted" style="font-size: var(--text-sm);">
+    <summary>Support details</summary>
+    <p>Page: {{ path }} · Reference: {{ status }}</p>
+    <button type="button" class="btn btn--ghost" data-copy-support="Page {{ path }}, reference {{ status }}">Copy support details</button>
+  </details>
   <script>
     document.querySelectorAll('[data-copy-support]').forEach(function (b) {
       b.addEventListener('click', function () { if (window.mvCopy) mvCopy(b.getAttribute('data-copy-support')); });

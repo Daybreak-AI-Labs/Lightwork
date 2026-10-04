@@ -62,3 +62,16 @@ def test_automations_uses_shared_section_head(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     t = _client().get("/automations").text
     assert 'class="section-head"' in t and "auto__section-head" not in t
+
+
+def test_section_titles_have_one_size():
+    # A bare <h2> (a panel's title) rendered at 12px while the same title in
+    # a .section-head rendered at 18px. Section titles share one size now.
+    import pathlib
+    import re
+    css = (pathlib.Path(__file__).resolve().parents[1] / "maverick_dashboard" / "static" / "lightwork.css").read_text(encoding="utf-8")
+    base = re.search(r"(?m)^\s*h2 \{([^}]*)\}", css)
+    assert base is not None
+    assert "font-size: var(--text-lg)" in base.group(1)
+    section_head = re.search(r"\.section-head h2 \{([^}]*)\}", css)
+    assert section_head is not None and "font-size: var(--text-lg)" in section_head.group(1)

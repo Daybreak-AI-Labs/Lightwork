@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Audit binder · Lightwork{% endblock %}
 {% block content %}
+{% from "_back_link.html" import back_link with context %}
 <style>
   .bnd-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr)); gap: var(--space-4); margin: var(--space-3) 0 var(--space-4); }
   .bnd-stat .v { font-size: var(--text-2xl); font-weight: var(--font-semibold); font-variant-numeric: tabular-nums; }
@@ -32,7 +33,7 @@
       <option value="{{ value }}"{% if value == days %} selected{% endif %}>{{ label }}</option>
       {% endfor %}
     </select>
-    <a class="btn btn--ghost" href="/audit">Back to the activity log</a>
+    {{ back_link('/audit', 'Activity log') }}
   </div>
 
   <div class="section-head"><h2>Tamper-evident activity log</h2></div>
@@ -87,7 +88,7 @@
           <td>{{ (a.requested_by | identity) if a.requested_by else '—' }}</td>
           <td>{{ (a.decided_by | identity) if a.decided_by else '—' }}</td>
           <td>{{ a.approved_count }} of {{ a.approvals_required }}</td>
-          <td>{% if a.approvers %}{% for p in a.approvers %}{{ p | identity }}{% if not loop.last %}, {% endif %}{% endfor %}{% else %}—{% endif %}</td>
+          <td>{% if a.approvers %}{% for p in a.approvers %}{{ p | identity }}{% if p == a.requested_by %} (their own request){% endif %}{% if not loop.last %}, {% endif %}{% endfor %}{% else %}—{% endif %}</td>
           <td>{{ ('Waiting (' ~ a.audit_pending_count ~ ')') if a.audit_pending_count else 'Yes' }}</td>
         </tr>
         {% endfor %}

@@ -1901,7 +1901,7 @@
     var ok = 0, err = 0, ns = run.nodes || {};
     for (var k in ns) { if (ns[k].outcome === 1) ok++; else if (ns[k].outcome === 0) err++; }
     var head = run.status === 'completed' ? '✓ Finished' : (run.status === 'rejected' ? '✋ Rejected' : '⚠ The run stopped with a problem');
-    var cost = run.cost_dollars ? ' · $' + Number(run.cost_dollars).toFixed(2) : '';
+    var cost = run.cost_dollars ? ' · ' + (window.mvMoney ? window.mvMoney(run.cost_dollars) : '$' + Number(run.cost_dollars).toFixed(2)) : '';
     var ORIGINS = { webhook: 'started by another app', schedule: 'started on schedule', event_trigger: 'started by a new item' };
     var origin = (run.origin && run.origin !== 'manual')
       ? ' · ' + (run.origin.indexOf('event:v2:') === 0

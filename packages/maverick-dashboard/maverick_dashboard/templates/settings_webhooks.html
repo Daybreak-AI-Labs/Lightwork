@@ -1,16 +1,17 @@
 {% extends "base.html" %}
 {% block title %}Webhooks · Lightwork{% endblock %}
 {% block content %}
+{% from "_back_link.html" import back_link with context %}
 <style>
   #wh-page .input { box-sizing: border-box; width: 100%; max-width: 100%; }
   #wh-page label { display: block; margin-block: var(--space-2); }
   #wh-page .row { display: flex; gap: var(--space-2); flex-wrap: wrap; align-items: center; }
   #wh-page table td, #wh-page table th { vertical-align: top; overflow-wrap: anywhere; }
   #wh-page .status-dead { color: var(--danger, #c33); font-weight: 600; }
-  #wh-page .status-delivered { color: var(--ok, #2a7); }
+  #wh-page .status-delivered { color: var(--success); }
 </style>
 <div id="wh-page">
-  <p class="muted" style="margin-bottom: var(--space-2);"><a href="/settings">← Back to Settings</a></p>
+  <p class="muted" style="margin-bottom: var(--space-2);">{{ back_link('/settings', 'Settings') }}</p>
   <h1 class="page-title">Webhooks</h1>
   <p class="page-subtitle">Send a signed message to another system when something happens to a request, incident, assessment, vendor contract, approval or policy. Each delivery is logged and retried up to five times over about an hour; after that it is marked dead until you retry it.</p>
   <p id="wh-msg" role="status" aria-live="polite" class="muted"></p>
@@ -74,18 +75,24 @@
   </div>
   <noscript>Enable browser scripting to manage subscriptions and see deliveries.</noscript>
 </div>
+{% endblock %}
+{% block scripts_extra %}
 <script>
 (function () {
   'use strict';
   var $ = function (id) { return document.getElementById(id); };
   var say = function (text) { $('wh-msg').textContent = text; };
   var esc = function (s) { return String(s == null ? '' : s); };
-  var when = function (t) { return t ? new Date(t * 1000).toLocaleString() : '—'; };
+  var when = function (t) { return window.mvTimeAbsolute(t) || '—'; };
+  // Failures read as plain sentences; a validation reply that is already one is kept.
+  var fail = function (action) {
+    return function (e) { say((e.status === 400 || e.status === 422) && window.mvPlainDetail(e.detail) || window.mvErrorText(e, action)); };
+  };
   function req(method, url, body) {
     return fetch(url, { method: method, headers: { 'Content-Type': 'application/json' },
       body: body === undefined ? undefined : JSON.stringify(body) })
       .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) {
-        if (!r.ok) { throw new Error((j && j.detail && (typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail))) || ('Request failed (' + r.status + ')')); }
+        if (!r.ok) { var failure = new Error('request failed'); failure.status = r.status; failure.detail = j && j.detail; throw failure; }
         return j; }); });
   }
   function cell(tr, text, cls) { var td = document.createElement('td'); td.textContent = text; if (cls) td.className = cls; tr.appendChild(td); return td; }
@@ -108,16 +115,16 @@
         actions.appendChild(button('Edit', function () { edit(s); }));
         actions.appendChild(button(s.enabled ? 'Turn off' : 'Turn on', function () {
           req('PATCH', '/api/v1/webhooks/subscriptions/' + encodeURIComponent(s.id), { enabled: !s.enabled })
-            .then(function () { say('Subscription updated.'); loadSubs(); }).catch(function (e) { say(e.message); });
+            .then(function () { say('Subscription updated.'); loadSubs(); }).catch(fail('update the subscription'));
         }));
         actions.appendChild(button('Send test event', function () {
           req('POST', '/api/v1/webhooks/subscriptions/' + encodeURIComponent(s.id) + '/test')
             .then(function (r) { var dl = r.delivery || {}; say('Test event ' + dl.status + (dl.last_status_code ? ' (HTTP ' + dl.last_status_code + ')' : '') + (dl.last_error ? ': ' + dl.last_error : '.')); loadDeliveries(); })
-            .catch(function (e) { say(e.message); });
+            .catch(fail('send the test event'));
         }));
         tr.appendChild(actions); tbody.appendChild(tr);
       });
-    }).catch(function (e) { say(e.message); });
+    }).catch(fail('load the subscriptions'));
   }
   function edit(s) {
     $('wh-id').value = s.id; $('wh-url').value = s.url; $('wh-desc').value = s.description || '';
@@ -138,7 +145,7 @@
     var p = id ? req('PATCH', '/api/v1/webhooks/subscriptions/' + encodeURIComponent(id), body)
                : req('POST', '/api/v1/webhooks/subscriptions', body);
     p.then(function () { say(id ? 'Subscription updated.' : 'Subscription added.'); reset(); loadSubs(); })
-     .catch(function (e) { say(e.message); });
+     .catch(fail('save the subscription'));
   });
   function loadDeliveries() {
     var status = $('wh-filter-status').value;
@@ -157,12 +164,12 @@
         if (r.status !== 'delivered') {
           actions.appendChild(button('Retry now', function () {
             req('POST', '/api/v1/webhooks/deliveries/' + encodeURIComponent(r.id) + '/retry')
-              .then(function () { say('Retried.'); loadDeliveries(); }).catch(function (e) { say(e.message); });
+              .then(function () { say('Retried.'); loadDeliveries(); }).catch(fail('retry the delivery'));
           }));
         }
         tr.appendChild(actions); tbody.appendChild(tr);
       });
-    }).catch(function (e) { say(e.message); });
+    }).catch(fail('load the deliveries'));
   }
   $('wh-refresh').addEventListener('click', loadDeliveries);
   $('wh-filter-status').addEventListener('change', loadDeliveries);

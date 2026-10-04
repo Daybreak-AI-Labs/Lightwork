@@ -1233,7 +1233,7 @@
       var owner = doc.closest('.settings-all-row');
       var chosen = doc.files[0];
       if (chosen.size > 65536) {
-        say(owner, 'That file is too large to be this kind of document.');
+        say(owner, 'That file is too large to be this kind of document. Choose a file under 64 KB.');
       } else {
         try {
           owner.pendingDocument = await chosen.text();

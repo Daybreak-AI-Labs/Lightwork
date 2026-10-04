@@ -37,7 +37,7 @@ def test_operator_page_renders_full_safe_contract(page_client: TestClient) -> No
     response = page_client.get("/compliance/policy-links")
     assert response.status_code == 200
     page = response.text
-    assert "Policy Links" in page
+    assert "Policy links" in page
     assert "Two other people" in page
     # Policies, links and scheduled changes load as lists with row buttons.
     for host in ("ppl-policies", "ppl-links", "ppl-jobs"):

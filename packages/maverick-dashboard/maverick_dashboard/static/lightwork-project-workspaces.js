@@ -90,7 +90,7 @@
     id('criteria').replaceChildren(); w.criteria.forEach(function (text) { node('li', text, id('criteria')); }); id('labels').textContent = w.labels.length ? 'Labels: ' + w.labels.join(' · ') : 'No labels';
     id('sharing').textContent = w.can_edit ? 'You own this project. Planning members do not gain access to your private tasks.' : 'Shared planning view. Private tasks and fixed reviews keep their separate access rules.';
     id('accepted').replaceChildren(); node('h3', 'Latest accepted deliverable', id('accepted'));
-    if (w.latest_accepted) { node('p', w.latest_accepted.title + ' · Accepted ' + new Date(w.latest_accepted.accepted_at * 1000).toLocaleString(), id('accepted')); var link = node('a', 'Open your authorized review inbox', id('accepted')); link.href = w.latest_accepted.href; }
+    if (w.latest_accepted) { node('p', w.latest_accepted.title + ' · Accepted ' + (window.mvTimeAbsolute ? window.mvTimeAbsolute(w.latest_accepted.accepted_at) : new Date(w.latest_accepted.accepted_at * 1000).toLocaleString()), id('accepted')); var link = node('a', 'Open your authorized review inbox', id('accepted')); link.href = w.latest_accepted.href; }
     else node('p', 'No current accepted review is visible to you for this project. A completed task alone does not count as accepted.', id('accepted'));
     if (!id('view').dataset.chosen) id('view').value = new URLSearchParams(location.search).get('view') || w.default_view;
     if (!['list','board','timeline'].includes(id('view').value)) id('view').value = 'list'; renderMilestones();

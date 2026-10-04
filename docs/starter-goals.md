@@ -16,7 +16,7 @@ as real evidence.
   to run.
 - **Dashboard:** open Get started and use "Run your first task on sample
   data". Pick the team and click Run. If no AI service is connected yet, the
-  page says so and links to Settings.
+  button reads "Connect an AI service first" and opens Settings.
 - **Command line:** copy the command under the team below. No `--model`
   flag is needed; the specialist and your configured models decide.
 
@@ -28,11 +28,11 @@ what a correct result contains, so you can check the answer yourself.
 
 ## 1. Finance: accounts payable three-way match
 
-Specialist: `finance_ap`. Result waits in **Approvals** (a payment batch
-is staged, never released).
+Specialist: `proc_p2p_exceptions` (the three-way match exception clerk).
+Result waits in **Results**; nothing is staged or paid.
 
 ```
-maverick start "Sample: Match this month's invoices to purchase orders and receipts, and list every exception before anything is paid." --domain finance_ap
+maverick start "Sample: Match this month's invoices to purchase orders and receipts, and list every exception before anything is paid." --domain proc_p2p_exceptions
 ```
 
 Sample data: six invoices, five purchase orders, five goods receipts and a
@@ -42,10 +42,11 @@ Services) as a vendor not on the master, and clears the other three.
 
 ## 2. Privacy & compliance: a rights request against the data map
 
-Specialist: `privacy_compliance`. Result waits in **Results**.
+Specialist: `data_pii_scan` (the personal-data inventory specialist).
+Result waits in **Results**.
 
 ```
-maverick start "Sample: Work out which systems hold this customer's data and what we must tell them to answer their rights request." --domain privacy_compliance
+maverick start "Sample: Work out which systems hold this customer's data and what we must tell them to answer their rights request." --domain data_pii_scan
 ```
 
 Sample data: a five-row data map and one customer access-and-objection
@@ -56,11 +57,11 @@ deadline.
 
 ## 3. Security: phishing triage
 
-Specialist: `sec_phishing`. Result waits in **Approvals** (containment
-steps need the on-call person's approval).
+Specialist: `itgrc_incident_response`. Result waits in **Approvals**
+(containment steps need the on-call person's approval).
 
 ```
-maverick start "Sample: Check these reported emails, tell me which ones are phishing and who needs warning, and propose containment steps." --domain sec_phishing
+maverick start "Sample: Check these reported emails, tell me which ones are phishing and who needs warning, and propose containment steps." --domain itgrc_incident_response
 ```
 
 Sample data: a five-message mailbox export and the company's known sender

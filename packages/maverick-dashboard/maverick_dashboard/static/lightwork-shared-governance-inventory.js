@@ -83,7 +83,7 @@
   function when(ts) {
     var n = Number(ts);
     if (!isFinite(n) || n <= 0) { return "—"; }
-    return new Date(n * 1000).toLocaleString();
+    return (window.mvTimeAbsolute ? window.mvTimeAbsolute(n) : new Date(n * 1000).toLocaleString());
   }
   function errorText(failure, action) {
     if (failure && failure.plain) { return failure.message; }

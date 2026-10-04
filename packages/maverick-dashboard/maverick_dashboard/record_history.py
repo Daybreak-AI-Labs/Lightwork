@@ -26,6 +26,7 @@ from maverick.metadata_history import (
 
 from .auth import caller_principal, require_permission, require_suite, suite_allowed
 from .draft_api import context_for
+from .plain_labels import fill_placeholders
 from .record_search import item, link
 
 SOURCES = {
@@ -163,7 +164,8 @@ def _workflows(request, *, after=None, before=None):
         template = load_template(name)
         if not can_read_template(template, owner):
             continue
-        rows.append(dated(item("workflow", name, template.title, href=link("/workflow-builder", "edit", name),
+        # Show template blanks as the Templates page does ("[Team]"), never raw "{{ team }}".
+        rows.append(dated(item("workflow", name, fill_placeholders(template.title), href=link("/workflow-builder", "edit", name),
                          state="Task template", revision=template.generation, source="workflows"), template.path.stat().st_mtime))
     return rows
 

@@ -25,6 +25,9 @@ test('invited employee connects only an approved own account, shares a captured 
   async function accept(value,link){
     const page=await value.newPage();page.on('pageerror',error=>errors.push(error.message));
     await page.goto(link);await expect(page.getByRole('heading',{name:"You're invited"})).toBeVisible();
+    // Accepting sets the colleague's passphrase so they can sign back in later.
+    const passphrase='Synthetic invited colleague passphrase'; // pragma: allowlist secret - disposable synthetic account fixture
+    await page.locator('input[name="password"]').fill(passphrase);await page.locator('input[name="password2"]').fill(passphrase);
     await page.getByRole('button',{name:'Accept invitation',exact:true}).click({timeout:45000});
     await expect(page).not.toHaveURL(/\/auth\/invite\//);
     expect((await value.cookies()).some(cookie=>cookie.name==='mvk_session')).toBe(true);

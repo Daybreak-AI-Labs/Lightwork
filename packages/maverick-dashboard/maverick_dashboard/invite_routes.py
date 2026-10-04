@@ -10,60 +10,78 @@ Security mechanics (see :mod:`maverick_dashboard.invites` for the store):
   invitee has no credential yet — the token in the path is the credential).
 - **SSO mode** (OIDC browser login configured): accepting requires signing in
   first — the page links to ``/auth/login?return_to=<this invite>`` — and the
-  current signed session must assert the invited email before the role is
-  bound to that principal. SAML-only deployments use ``/saml/login``. The
-  session comes from the IdP; the invite never mints one.
-- **Local mode** (no IdP): accepting mints a signed ``mvk_session`` cookie for
-  ``user:<invited email>`` and binds the role. The link is the credential —
-  single-use, expiring, revocable.
+  signed session must assert the invited email before the role is bound to
+  that principal. SAML-only deployments use ``/saml/login``. The session
+  comes from the IdP; the invite never mints one or asks for a passphrase.
+- **Local mode** (no IdP): accepting sets the colleague's passphrase (the
+  owner's rules, hashing and lockout; see :mod:`local_passphrases`), mints a
+  signed ``mvk_session`` cookie for ``user:<invited email>`` and binds the
+  role. The passphrase is saved under the same lock that marks the link used,
+  so a link is never used up without it: after signing out, the colleague
+  signs in again with their email and passphrase.
 
 Every route 404s while ``[dashboard] invites`` is off (fail-closed default).
 """
 from __future__ import annotations
 
-import html
 import logging
-from urllib.parse import quote, urlparse
+from urllib.parse import parse_qs, quote, urlparse
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
+from starlette.concurrency import run_in_threadpool
 
-from . import invites
+from . import invites, local_passphrases
 
 log = logging.getLogger(__name__)
 
 router = APIRouter()
 
-
 class _InviteBindFailed(RuntimeError):
     """The one-time link was redeemed, but the role store refused the grant."""
 
 
-def _page(title: str, body: str, status: int = 200) -> HTMLResponse:
-    """A small self-contained page (no app nav/session context needed)."""
-    return HTMLResponse(f"""<!doctype html>
-<html lang="en"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="robots" content="noindex">
-<title>{html.escape(title)} · Lightwork</title>
-<style>
-  body{{font:15px/1.5 system-ui,sans-serif;display:flex;min-height:100vh;margin:0;
-       align-items:center;justify-content:center;background:#0d1117;color:#e6edf3}}
-  .card{{background:#161b22;border:1px solid #30363d;border-radius:14px;
-        padding:34px 32px;max-width:420px}}
-  h1{{font-size:19px;margin:0 0 10px}} p{{color:#9da7b3;margin:8px 0}}
-  code{{color:#e6edf3}} a{{color:#58a6ff}}
-  button{{background:#d4a72c;color:#3a2a06;border:none;border-radius:8px;
-         padding:10px 18px;font:inherit;font-weight:700;cursor:pointer;margin-top:14px}}
-</style></head><body><div class="card"><h1>{html.escape(title)}</h1>{body}</div>
-</body></html>""", status_code=status)
+# What each built-in role can do, in the words the People page uses.
+ROLE_HELP = {
+    "viewer": "look at dashboards and results but change nothing",
+    "operator": "run work and approve actions",
+    "auditor": "review the activity record and results without changing anything",
+    "admin": "manage people, settings and spending",
+}
 
 
-def _gone() -> HTMLResponse:
-    return _page("Invitation not available",
-                 "<p>This invitation link is invalid, expired, already used, or "
-                 "revoked.</p><p>Ask your administrator to send a new one.</p>",
-                 status=410)
+def _page(request: Request, state: str, *, status: int = 200, inv=None, token: str = "",
+          message: str = "", principal: str = "") -> HTMLResponse:
+    """The invitation page, in the shared public shell (no app nav or session)."""
+    from .app import templates
+
+    invite = None
+    if inv is not None:
+        from maverick.oidc import login_enabled
+        from maverick.tenant.registry import get_tenant
+
+        from .saml import saml_enabled
+
+        login_path = "/auth/login" if login_enabled() else "/saml/login" if saml_enabled() else "/auth/login"
+        workspace = get_tenant(inv.tenant) if inv.tenant else None
+        workspace_name = (workspace.display_name or workspace.id) if workspace else inv.tenant
+        invite = {"email": inv.email, "role": inv.role, "role_help": ROLE_HELP.get(inv.role, ""),
+                  "workspace": workspace_name, "token": token,
+                  "sign_in_href": login_path + "?return_to=" + quote(f"/auth/invite/{token}", safe="/")}
+    response = templates.TemplateResponse(
+        request, "invite_accept.html",
+        {"state": state, "invite": invite, "message": message, "principal": principal,
+         "passphrase_sign_in": local_passphrases.available()},
+        status_code=status)
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["X-Robots-Tag"] = "noindex"
+    # The accept form needs its same-origin Origin header (see local_owner_routes).
+    response.headers["Referrer-Policy"] = "same-origin"
+    return response
+
+
+def _gone(request: Request) -> HTMLResponse:
+    return _page(request, "gone", status=410)
 
 
 def _same_origin(request: Request) -> bool:
@@ -152,7 +170,7 @@ def _global_invite_issuer_allowed(inv) -> bool:
         return False
 
 
-def _consume_and_bind(token: str, principal=None):
+def _consume_and_bind(token: str, principal=None, *, prepared_passphrase: dict | None = None):
     """Redeem under the role-change fence, including the issuing admin check."""
     from maverick.authority_effects import authority_effect_fence
 
@@ -165,7 +183,17 @@ def _consume_and_bind(token: str, principal=None):
                 or not _global_invite_issuer_allowed(pending)
                 or not _workspace_invite_allowed(pending, target)):
             return None
-        consumed = invites.consume_invite(token, used_by=target)
+        def save_passphrase(current):
+            if prepared_passphrase is None:
+                return
+            if prepared_passphrase["email"].casefold() != current.email.casefold():
+                raise HTTPException(409, "This invitation changed. Open the link again.")
+            local_passphrases.store(prepared_passphrase, tenant=current.tenant)
+
+        consumed = invites.consume_invite(
+            token, used_by=target,
+            before_commit=save_passphrase if prepared_passphrase is not None else None,
+        )
         if consumed is None:
             return None
         try:
@@ -188,111 +216,107 @@ def _matches_invited_account(principal, inv) -> bool:
     return bool(asserted) and asserted == inv.email.casefold()
 
 
-def _wrong_account() -> HTMLResponse:
-    return _page("Use the invited account",
-                 "<p>Sign in with the email address on this invitation. Your "
-                 "company sign-in must share that address with Lightwork. "
-                 "The invitation link has not been used.</p>", status=403)
+def _wrong_account(request: Request, inv, token: str) -> HTMLResponse:
+    return _page(request, "wrong_account", status=403, inv=inv, token=token)
 
 
-def _bind_failed() -> HTMLResponse:
-    return _page("Invitation could not be completed",
-                 "<p>Access could not be saved. Ask your workspace administrator "
-                 "for a new invitation link.</p>", status=503)
-
-
-def _scope_label(inv) -> str:
-    if not inv.tenant:
-        return "this Lightwork dashboard"
-    from maverick.tenant.registry import get_tenant
-
-    workspace = get_tenant(inv.tenant)
-    name = (workspace.display_name or workspace.id) if workspace else inv.tenant
-    return f"the {html.escape(name)} workspace"
+def _bind_failed(request: Request) -> HTMLResponse:
+    return _page(request, "bind_failed", status=503)
 
 
 @router.get("/auth/invite/{token}")
 async def invite_confirm(request: Request, token: str):
     """Peek-only confirmation page — inert for mail-scanner prefetches."""
     if not invites.invites_enabled():
-        return _page("Not found", "<p>Nothing here.</p>", status=404)
+        return _page(request, "not_found", status=404)
     inv = invites.peek_invite(token)
     if inv is None:
-        return _gone()
-    email = html.escape(inv.email)
-    scope = _scope_label(inv)
+        return _gone(request)
     if invites.local_login_mode():
-        return _page("You're invited",
-                     f"<p>This invitation signs you in to {scope} "
-                     f"as <code>{email}</code> with the "
-                     f"<code>{html.escape(inv.role)}</code> role.</p>"
-                     f"<form method='post'><button type='submit'>"
-                     f"Accept invitation</button></form>")
+        return _page(request, "local", inv=inv, token=token)
     principal = _session_principal(request)
     if principal is None:
         # SSO mode, not signed in yet: sign in first, then land back here.
-        target = quote(f"/auth/invite/{token}", safe="/")
-        from maverick.oidc import login_enabled
-
-        from .saml import saml_enabled
-
-        login_path = "/auth/login" if login_enabled() else "/saml/login" if saml_enabled() else "/auth/login"
-        return _page("You're invited",
-                     f"<p>This invitation (for <code>{email}</code>) grants the "
-                     f"<code>{html.escape(inv.role)}</code> role in "
-                     f"{scope}.</p>"
-                     f"<p><a href='{login_path}?return_to={target}'>Sign in with "
-                     f"your company account to accept</a></p>")
+        return _page(request, "sso_sign_in", inv=inv, token=token)
     if not _matches_invited_account(principal, inv):
-        return _wrong_account()
-    return _page("Accept invitation",
-                 f"<p>Signed in as <code>{html.escape(principal.sub)}</code>. "
-                 f"Accepting binds this account to the "
-                 f"<code>{html.escape(inv.role)}</code> role "
-                 f"in {scope} (invitation sent to <code>{email}</code>).</p>"
-                 f"<form method='post'><button type='submit'>"
-                 f"Accept invitation</button></form>")
+        return _wrong_account(request, inv, token)
+    return _page(request, "sso_accept", inv=inv, token=token, principal=principal.sub)
+
+
+async def _passphrase_fields(request: Request) -> tuple[str, str]:
+    """The two passphrase boxes from the accept form (bounded, one value each)."""
+    if request.headers.get("content-type", "").split(";", 1)[0] != "application/x-www-form-urlencoded":
+        raise HTTPException(415, "Open the invitation link and submit the form from that page.")
+    body = bytearray()
+    async for chunk in request.stream():
+        body.extend(chunk)
+        if len(body) > 8192:
+            raise HTTPException(413, "The form is larger than this page sends.")
+    data = parse_qs(bytes(body).decode("utf-8"), max_num_fields=3, keep_blank_values=True)
+    if set(data) - {"password", "password2"} or any(len(v) != 1 for v in data.values()):
+        raise HTTPException(422, "Submit one value for each field.")
+    password, password2 = data.get("password", [""])[0], data.get("password2", [""])[0]
+    if password != password2:
+        raise HTTPException(422, "The passphrases do not match. Type the same passphrase in both boxes.")
+    return password, password2
+
+
+async def _accept_locally(request: Request, token: str) -> HTMLResponse | RedirectResponse:
+    """Local mode: set the passphrase, use up the link, sign the browser in."""
+    inv = invites.peek_invite(token)
+    if inv is None:
+        return _gone(request)
+    try:
+        password, _ = await _passphrase_fields(request)
+        # Slow on purpose (scrypt): off the event loop, before the link is used.
+        prepared = await run_in_threadpool(local_passphrases.prepare, inv.email, password)
+    except (UnicodeError, ValueError):
+        return _page(request, "local", status=422, inv=inv, token=token,
+                     message="Check the passphrase and try again.")
+    except HTTPException as exc:
+        return _page(request, "local", status=exc.status_code, inv=inv, token=token,
+                     message=str(exc.detail))
+    try:
+        used = await run_in_threadpool(_consume_and_bind, token, prepared_passphrase=prepared)
+    except HTTPException as exc:
+        return _page(request, "local", status=exc.status_code, inv=inv, token=token,
+                     message=str(exc.detail))
+    except _InviteBindFailed:
+        return _bind_failed(request)
+    if used is None:
+        return _gone(request)
+    log.info("invite accepted (local): %s as %s", used.email, used.role)
+    response = RedirectResponse("/", status_code=303)
+    from .oidc_login import _cookie_secure, _set_cookie
+    _set_cookie(response, "mvk_session", invites.mint_local_session(used.email, request=request),
+                max_age=invites.session_ttl_seconds(),
+                secure=_cookie_secure(request))
+    return response
 
 
 @router.post("/auth/invite/{token}")
 async def invite_accept(request: Request, token: str):
     """Consume the invite: bind the role and (in local mode) sign the browser in."""
     if not invites.invites_enabled():
-        return _page("Not found", "<p>Nothing here.</p>", status=404)
+        return _page(request, "not_found", status=404)
     if not _same_origin(request):
-        return _page("Blocked", "<p>Cross-site request blocked — open the "
-                                "invitation link directly and try again.</p>",
-                     status=400)
+        return _page(request, "blocked", status=400)
     if invites.local_login_mode():
-        try:
-            inv = _consume_and_bind(token)
-        except _InviteBindFailed:
-            return _bind_failed()
-        if inv is None:
-            return _gone()
-        log.info("invite accepted (local): %s as %s", inv.email, inv.role)
-        response = RedirectResponse("/", status_code=303)
-        from .oidc_login import _cookie_secure, _set_cookie
-        _set_cookie(response, "mvk_session", invites.mint_local_session(inv.email, request=request),
-                    max_age=invites.session_ttl_seconds(),
-                    secure=_cookie_secure(request))
-        return response
+        return await _accept_locally(request, token)
     principal = _session_principal(request)
     if principal is None:
-        return _page("Sign in required",
-                     "<p>Sign in with your company account first, then reopen "
-                     "the invitation link.</p>", status=401)
+        return _page(request, "sign_in_required", status=401)
     pending = invites.peek_invite(token)
     if pending is None:
-        return _gone()
+        return _gone(request)
     if not _matches_invited_account(principal, pending):
-        return _wrong_account()
+        return _wrong_account(request, pending, token)
     try:
-        inv = _consume_and_bind(token, principal)
+        inv = await run_in_threadpool(_consume_and_bind, token, principal)
     except _InviteBindFailed:
-        return _bind_failed()
+        return _bind_failed(request)
     if inv is None:
-        return _gone()
+        return _gone(request)
     log.info("invite accepted (sso): %s bound to %s (invite for %s)",
              principal.principal, inv.role, inv.email)
     return RedirectResponse("/", status_code=303)

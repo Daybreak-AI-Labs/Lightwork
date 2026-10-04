@@ -1,13 +1,13 @@
 {% extends "base.html" %}
 {% from "_hero.html" import hero %}
 {% from "_module_gate.html" import module_gate %}
-{% block title %}Trust Center Access · Lightwork{% endblock %}
+{% block title %}Trust center access · Lightwork{% endblock %}
 {% block head_extra %}<link rel="stylesheet" href="/static/lightwork-consent-workbench.css">{% endblock %}
 {% block content %}
 {% set tc_admin = consent_can_admin if consent_can_admin is defined else true %}
 {% set tc_audit = consent_can_audit if consent_can_audit is defined else true %}
 <div class="governance-workbench" id="tca-root" data-enabled="{{ 'true' if consumer_trust_center_authority_enabled else 'false' }}" data-branding="{{ 'true' if trust_center_branding_enabled else 'false' }}" data-can-admin="{{ 'true' if tc_admin else 'false' }}" data-can-audit="{{ 'true' if tc_audit else 'false' }}">
-  {{ hero('Consent review', 'Trust Center Access',
+  {{ hero('Consent review', 'Trust center access',
           lede='Decide what each person can see and do in your public Trust Center: the published notice, their consent history, their profile data and their privacy requests. Every kind of access needs two approvals from people other than the one who asked for it.') }}
   {% include "_consent_nav.html" %}
   {% if not consumer_trust_center_authority_enabled %}

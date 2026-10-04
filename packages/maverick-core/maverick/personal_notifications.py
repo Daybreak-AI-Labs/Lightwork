@@ -12,6 +12,7 @@ import json
 import math
 import re
 import time
+from collections.abc import Mapping
 from datetime import datetime, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -20,6 +21,27 @@ from .crypto_at_rest import seal, unseal
 from .file_lock import atomic_write_bytes, cross_process_lock, ensure_private_directory
 
 EVENTS = frozenset({"needs-decision", "blocked", "failed", "completed", "changed-result", "deadline"})
+#: In-app alerts (the bell) are on unless an administrator turned them off
+#: (``[notifications] personal_alerts = false``). An explicit choice always
+#: stands. Email, Slack and Teams delivery stays off until configured
+#: (``personal_background`` and ``personal_external`` default off).
+PERSONAL_ALERTS_DEFAULT = True
+
+
+def personal_alerts_on(notifications: object) -> bool:
+    """Whether in-app personal alerts are on for this ``[notifications]`` table."""
+    section = notifications if isinstance(notifications, Mapping) else {}
+    return section.get("personal_alerts", PERSONAL_ALERTS_DEFAULT) is True
+
+
+def personal_alerts_enabled() -> bool:
+    """In-app personal alerts are on in the current, readable configuration."""
+    from . import config
+
+    return (not config.config_source_errors(include_tenant=True)
+            and personal_alerts_on(config.load_config().get("notifications")))
+
+
 DEFAULTS = {"mode": "immediate", "timezone": "UTC", "quiet_enabled": False,
             "quiet_start": "22:00", "quiet_end": "08:00", "digest_time": "09:00",
             "critical_exceptions": False, "events": ["needs-decision", "blocked", "failed", "completed"],

@@ -1,8 +1,9 @@
 {% extends "base.html" %}
 {% block title %}Permission requests — Lightwork{% endblock %}
 {% block content %}
-<h1>Permission requests</h1>
-<p>See the policy that blocks an action, then send your business need to the administrator responsible for that policy. These requests never grant access automatically. Private employee content requires its separate <a href="/content-access">content-access review</a>.</p>
+{% from "_hero.html" import hero %}
+{% set permission_lede %}See the policy that blocks an action, then send your business need to the administrator responsible for that policy. These requests never grant access automatically. Private employee content requires its separate <a href="/content-access">content-access review</a>.{% endset %}
+{{ hero('Your account', 'Permission requests', lede=permission_lede, compact=true) }}
 <p id="par-status" role="status" aria-live="polite">Loading current permissions.</p>
 <section class="panel"><h2>Explain an action</h2><form id="par-explain" data-draft-recovery="off"><label>Type <select id="par-kind" class="select"><option value="permission">Dashboard permission</option><option value="tool">Tool</option></select></label><label>Name <input id="par-capability" class="input" required maxlength="80" value="operate" aria-describedby="par-help"></label><p id="par-help">Permission: operate, audit or admin. Tool examples: read_file, write_file or shell. Do not enter file paths, private content or credentials.</p><button class="btn" type="submit">Check current policy</button></form><div id="par-explanation"></div>
 <form id="par-submit" hidden data-draft-recovery="off"><label>Business need, shared with the reviewing administrator <textarea id="par-reason" required minlength="10" maxlength="1000"></textarea></label><p><label><input id="par-confirm" type="checkbox" required> Share this business need with the policy owner. I have not included private task content or secrets.</label></p><button class="btn" type="submit">Request policy review</button></form></section>

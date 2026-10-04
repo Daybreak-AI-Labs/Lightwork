@@ -62,7 +62,7 @@ def test_workbench_is_store_free_closed_and_liquid_glass(client: TestClient) -> 
     ):
         assert directive in csp
     page = response.text
-    assert "App Tracking Checks" in page
+    assert "App tracking checks" in page
     assert 'id="cas-operations" disabled' in page
     assert 'data-copilot-page="/consent/application-scans"' in page
     assert "/static/lightwork-consent-workbench.js" in page

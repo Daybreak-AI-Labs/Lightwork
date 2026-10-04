@@ -331,6 +331,21 @@ def public_verdict(readiness: dict[str, Any]) -> dict[str, Any]:
              "configured_count", "connected_count", "total")}
 
 
+def attention_provider(readiness: dict[str, Any]) -> str | None:
+    """The provider row a person should look at first.
+
+    The routed provider the workspace verdict is about (missing, then blocked,
+    failed, untested -- the order :func:`_verdict` reports them), else the
+    first provider the models use. ``None`` when no model is chosen yet. The
+    "Open AI provider keys" link on a stopped task lands on this row."""
+    routed = [row for row in readiness.get("providers") or [] if row.get("routed")]
+    for status in ("not_set_up", "blocked", "failed", "untested"):
+        for row in routed:
+            if row.get("status") == status:
+                return row["name"]
+    return routed[0]["name"] if routed else None
+
+
 def apply_to_rows(rows: list[dict[str, Any]], readiness: dict[str, Any]) -> list[dict[str, Any]]:
     """Copy the one truth onto Settings/Providers inventory rows (in place)."""
     by_name = {row["name"]: row for row in readiness["providers"]}
@@ -345,6 +360,6 @@ def apply_to_rows(rows: list[dict[str, Any]], readiness: dict[str, Any]) -> list
 
 
 __all__ = [
-    "VERDICT_LABELS", "apply_to_rows", "plain_reason", "provider_labels",
+    "VERDICT_LABELS", "apply_to_rows", "attention_provider", "plain_reason", "provider_labels",
     "public_verdict", "workspace_readiness",
 ]

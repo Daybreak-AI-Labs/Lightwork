@@ -103,6 +103,12 @@
     if (txt != null) e.textContent = txt;
     return e;
   }
+  // Empty cards use the shared compact empty state (lightwork-ui.js).
+  function empty(box, title, body, action) {
+    if (window.mvEmpty) { box.appendChild(window.mvEmpty(title, body, action, { compact: true })); return; }
+    box.appendChild(el('p', 'fb-empty', title + '. ' + body));
+    var next = el('a', 'btn', action.label); next.href = action.href; box.appendChild(next);
+  }
   function fmt(n) { return (n || 0).toLocaleString(); }
   function tile(box, label, value, sub, edge) {
     var t = el('div', 'fb-kpi');
@@ -135,7 +141,7 @@
     if (!r.ok) throw r;
     return r.json();
   }).then(function (d) {
-    $('fb-stamp').textContent = 'Updated ' + new Date().toLocaleTimeString();
+    $('fb-stamp').textContent = 'Updated ' + (window.mvTimeAbsolute ? window.mvTimeAbsolute(Date.now()) : new Date().toLocaleTimeString());
     var k = $('fb-kpis');
     var kp = d.kpis || {};
     tile(k, 'Assessments', fmt(kp.assessments), 'finance assessments', 'var(--brand)');
@@ -179,10 +185,8 @@
     var LB = {overdue: 'Overdue', d0_30: 'Within 30 days', d31_60: 'In 31 to 60 days',
               d61_90: 'In 61 to 90 days', d90_plus: 'More than 90 days'};
     if (!lic.total) {
-      lb.appendChild(el('p', 'fb-empty', 'No licences yet.'));
-      var add = el('a', 'btn btn--primary', 'Add a licence');
-      add.href = '/finance#lic-form';
-      lb.appendChild(add);
+      empty(lb, 'No licences yet', 'Software licences appear here by how soon they renew. Add the first one in the Finance workspace.',
+        { label: 'Add a licence', href: '/finance#lic-form' });
     } else {
       Object.keys(LB).forEach(function (band) {
         gauge(lb, LB[band] + ' · ' + fmt(bands[band] || 0),
@@ -211,10 +215,8 @@
       tb.appendChild(row);
     });
     if (!(d.by_type || []).length) {
-      tb.appendChild(el('p', 'fb-empty', 'No finance assessments yet.'));
-      var start = el('a', 'btn btn--primary', 'Start an assessment');
-      start.href = '/finance';
-      tb.appendChild(start);
+      empty(tb, 'No finance assessments yet', 'Assessments appear here by questionnaire, with how many are still open. Start one in the Finance workspace.',
+        { label: 'Start an assessment', href: '/finance' });
     }
 
     var sb = $('fb-sod');

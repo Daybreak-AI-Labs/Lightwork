@@ -15,7 +15,7 @@
   <div class="panel" data-settings-group="maintenance" data-ops="version" aria-labelledby="ops-version-title">
     <p class="muted settings-lead">Which version of Lightwork is installed, and whether every part of the full release is present and working.</p>
     <p class="settings-row-form">
-      <button type="button" class="btn btn--primary" data-ops-run="version">Show installed version</button>
+      <button type="button" class="btn" data-ops-run="version">Show installed version</button>
       <button type="button" class="btn" data-ops-run="release">Check the release parts</button>
     </p>
     <p class="muted" role="status" aria-live="polite" data-ops-status="version"></p>
@@ -36,7 +36,7 @@
           <option value="0.2">20%</option>
           <option value="0.3">30%</option>
         </select></label>
-      <button type="submit" class="btn btn--primary">Compare with the baseline</button>
+      <button type="submit" class="btn">Compare with the baseline</button>
     </form>
     <p class="muted" role="status" aria-live="polite" data-ops-status="canary"></p>
     <div data-ops-out="canary"></div>
@@ -45,7 +45,7 @@
   <div class="section-head" data-settings-group="maintenance"><h2 id="ops-setup-title">Setup checks</h2></div>
   <div class="panel" data-settings-group="maintenance" data-ops="setup" aria-labelledby="ops-setup-title">
     <p class="muted settings-lead">Checks, without contacting anyone, that this installation is set up to run tasks and to run assurance reviews. The same checks appear on <a href="/start">Get started</a>.</p>
-    <p class="settings-row-form"><button type="button" class="btn btn--primary" data-ops-run="setup">Run setup checks</button></p>
+    <p class="settings-row-form"><button type="button" class="btn" data-ops-run="setup">Run setup checks</button></p>
     <p class="muted" role="status" aria-live="polite" data-ops-status="setup"></p>
     <div data-ops-out="setup"></div>
   </div>
@@ -54,7 +54,7 @@
   <div class="panel" data-settings-group="maintenance" data-ops="config" aria-labelledby="ops-config-title">
     <p class="muted settings-lead">Every setting that differs from the built-in defaults, its current value and where it comes from. Passwords and keys show only whether they are set. Change settings in <a href="/settings/all">All settings</a>.</p>
     <p class="settings-row-form">
-      <button type="button" class="btn btn--primary" data-ops-run="config">Show every setting</button>
+      <button type="button" class="btn" data-ops-run="config">Show every setting</button>
       <button type="button" class="btn" data-ops-run="settings-file">Check the settings file for updates</button>
     </p>
     <p class="muted" role="status" aria-live="polite" data-ops-status="config"></p>
@@ -65,7 +65,7 @@
   <div class="panel" data-settings-group="maintenance" data-ops="database" aria-labelledby="ops-database-title">
     <p class="muted settings-lead">Waiting database updates, and whether a shared database keeps each workspace's records separate.</p>
     <p class="settings-row-form">
-      <button type="button" class="btn btn--primary" data-ops-run="database-updates">Check for waiting updates</button>
+      <button type="button" class="btn" data-ops-run="database-updates">Check for waiting updates</button>
       <button type="button" class="btn" data-ops-run="separation">Check workspace separation</button>
     </p>
     <p class="muted" role="status" aria-live="polite" data-ops-status="database"></p>
@@ -76,7 +76,7 @@
       <label class="settings-field"><span>Workspace</span>
         <select class="select" name="workspace" data-ops-workspaces required><option value="">Loading…</option></select></label>
       <button type="submit" class="btn">See what would be assigned</button>
-      <button type="button" class="btn btn--primary" data-ops-run="older-assign" hidden>Assign them</button>
+      <button type="button" class="btn" data-ops-run="older-assign" hidden>Assign them</button>
     </form>
     <p class="muted" role="status" aria-live="polite" data-ops-status="older-records"></p>
     <div data-ops-out="older-records"></div>
@@ -88,7 +88,7 @@
     <p class="muted">Moves improvements learned on this computer into the shared records so every installation uses them. The old files are kept as backups. Safe while Lightwork is running.</p>
     <p class="settings-row-form">
       <button type="button" class="btn" data-ops-run="learning">Check what is waiting</button>
-      <button type="button" class="btn btn--primary" data-ops-run="learning-move" hidden>Move learned items</button>
+      <button type="button" class="btn" data-ops-run="learning-move" hidden>Move learned items</button>
     </p>
     <p class="muted" role="status" aria-live="polite" data-ops-status="learning"></p>
     <h3 id="ops-tasks-title">Chat-agent task records</h3>
@@ -96,7 +96,7 @@
     <form class="settings-row-form" data-ops-form="task-records" aria-labelledby="ops-tasks-title">
       <label class="settings-field"><span>Workspace</span>
         <select class="select" name="workspace" data-ops-workspaces required><option value="">Loading…</option></select></label>
-      <button type="submit" class="btn btn--primary">Schedule for the next start</button>
+      <button type="submit" class="btn">Schedule for the next start</button>
       <button type="button" class="btn btn--ghost" data-ops-run="task-cancel" hidden>Cancel the scheduled move</button>
     </form>
     <p class="muted" role="status" aria-live="polite" data-ops-status="task-records"></p>
@@ -105,7 +105,7 @@
     <p class="muted">Copies each workspace's consent records from files on this computer into the shared consent database chosen in <a href="/settings/all">All settings</a>. Choosing that database doesn't move anything by itself, so run this after Lightwork restarts. Each part is copied whole or not at all, only where the shared database is still empty, and the files here are kept. Safe while Lightwork is running.</p>
     <p class="settings-row-form">
       <button type="button" class="btn" data-ops-run="consent">See what would be copied</button>
-      <button type="button" class="btn btn--primary" data-ops-run="consent-move" hidden>Copy consent records</button>
+      <button type="button" class="btn" data-ops-run="consent-move" hidden>Copy consent records</button>
     </p>
     <p class="muted" role="status" aria-live="polite" data-ops-status="consent"></p>
     <div data-ops-out="consent"></div>

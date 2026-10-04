@@ -28,8 +28,14 @@ const JSON_CLIENTS = [
 ];
 
 // Pages rebuilt for non-technical readers say the same thing in plain words.
+const UNREADABLE_REPLY = "Lightwork's reply could not be read. Refresh the page and try again.";
 const MALFORMED_MESSAGE = {
   "ekko.html": "Lightwork sent back a reply this page could not read. Try again.",
+  "compliance_scoping.html": UNREADABLE_REPLY,
+  "compliance_scope_actions.html": UNREADABLE_REPLY,
+  "privacy_rights_consumer_delivery.html": UNREADABLE_REPLY,
+  "privacy_notice_governance.html": UNREADABLE_REPLY,
+  "privacy_rights_orchestration.html": UNREADABLE_REPLY,
 };
 
 const TEXT_CLIENTS = [
@@ -217,7 +223,8 @@ for (const [file, functionName, args] of [...JSON_CLIENTS, ...TEXT_CLIENTS]) {
   });
 
   test(`${file} preserves a valid JSON error detail`, async () => {
-    const detail = `Reviewed conflict for ${file}.`;
+    // A readable sentence (pages filter out code-like server text).
+    const detail = `Reviewed conflict for ${file.replace(/[^a-z]+/g, " ").trim()}.`;
     const response = {
       ok: false,
       status: 409,

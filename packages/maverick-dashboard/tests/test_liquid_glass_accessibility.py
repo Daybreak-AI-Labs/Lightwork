@@ -82,3 +82,23 @@ def test_danger_actions_remain_semantic_not_glass_controls() -> None:
     assert "background: var(--danger)" in danger
     assert "border-color: var(--danger)" in danger
     assert "color: var(--danger-fg)" in danger
+
+
+def test_quiet_buttons_stay_quiet_after_the_glass_controls() -> None:
+    """The glass control rule (0,1,1) beat ``.btn--ghost`` (0,1,0), so quiet
+    buttons rendered exactly like default ones. A ghost rule of equal weight
+    after both glass rules (normal and reduced transparency) drops the fill,
+    the blur and the edge highlight and keeps the border."""
+    shared = CSS.read_text(encoding="utf-8")
+    selector = "body:not(.theme-hicontrast) :where(.btn--ghost:not(.btn--primary):not(.btn--danger))"
+    quiet = _rule(shared, selector)
+    assert "background-color: transparent" in quiet
+    assert "-webkit-backdrop-filter: none" in quiet and "backdrop-filter: none" in quiet
+    assert "box-shadow: none" in quiet
+    assert "border" not in quiet
+    glass = [m.start() for m in re.finditer(r":where\(\s*\.btn:not\(\.btn--primary\):not\(\.btn--danger\)", shared)]
+    assert len(glass) == 2
+    assert shared.index(selector) > glass[-1]
+
+    hover = _rule(shared, ".btn--ghost:where(:not(.btn--primary, .btn--danger, :disabled)):hover")
+    assert "background-color: color-mix(in srgb, var(--text) 8%, transparent)" in hover

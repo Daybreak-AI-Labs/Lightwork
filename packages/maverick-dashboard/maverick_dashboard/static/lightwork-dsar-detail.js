@@ -18,6 +18,16 @@
   function fail(failure, action) {
     say(window.mvErrorText ? window.mvErrorText(failure, action) : 'Could not ' + action + '. Please try again.');
   }
+  // A refused change carries a plain sentence saying what is missing; show it.
+  function failPlain(failure, action) {
+    if (!failure || typeof failure.json !== 'function' || (failure.status !== 422 && failure.status !== 409)) {
+      fail(failure, action); return;
+    }
+    failure.json().then(function (body) {
+      var plain = window.mvPlainDetail ? window.mvPlainDetail(body && body.detail) : '';
+      if (plain) say('Could not ' + action + '. ' + plain); else fail(failure, action);
+    }, function () { fail(failure, action); });
+  }
   function ask(message, okText) {
     return window.mvConfirm ? window.mvConfirm(message, { okText: okText }) : Promise.resolve(false);
   }
@@ -35,6 +45,14 @@
   function reloadSoon() { setTimeout(function () { location.reload(); }, 700); }
   function human(v) { return window.mvHuman ? window.mvHuman(v) : String(v); }
   function on(id, handler) { var el = $(id); if (el) el.addEventListener('click', handler); }
+
+  // Where the "Completed" notice's secure link comes from, by page state.
+  var LINK_HELP = {
+    ready: 'Create it under "3. Send them a secure link" below, then paste it here.',
+    unverified: 'Confirm who they are under "Answering the request" below, then create the link there and paste it here.',
+    not_started: 'Press "Start answering" below to create a secure link, or paste a link from another system.',
+    off: 'Paste the link where the requester can download their answer. To create one in Lightwork, turn on answering data requests below.'
+  };
 
   var METHODS = [
     { value: 'email_challenge', label: 'Confirmed by email' },
@@ -89,7 +107,8 @@
         fields.push({ key: 'lawful_basis', label: 'Lawful basis for refusing (goes to the requester)', type: 'text', required: true });
       }
       if (kind === 'completion') {
-        fields.push({ key: 'secure_link', label: 'Secure link (create it in step 3 first)', type: 'text', required: true, placeholder: 'https://…/dsar/response/…' });
+        fields.push({ key: 'secure_link', label: 'Secure link', type: 'text', required: true,
+          placeholder: 'https://…/dsar/response/…', help: LINK_HELP[page.getAttribute('data-fulfillment-state')] || LINK_HELP.off });
         fields.push({ key: 'secure_link_expires', label: 'Link expires on (YYYY-MM-DD)', type: 'text', required: true });
       }
       var ready = fields.length ? form('Send: ' + human(kind), fields, 'Send') : ask('Send the "' + human(kind) + '" notice to the requester now?', 'Send');
@@ -98,7 +117,8 @@
         var body = { kind: kind };
         if (typeof values === 'object') Object.keys(values).forEach(function (k) { body[k] = values[k]; });
         return call('POST', base + encodeURIComponent(requestId) + '/send', body).then(function (out) {
-          say(out.sent ? 'Notice sent.' : 'Notice not sent: ' + out.reason); reloadSoon();
+          say(out.sent ? 'Notice sent.' : ['Notice not sent.', out.problem, out.next_step].filter(Boolean).join(' '));
+          reloadSoon();
         });
       }).catch(function (f) { fail(f, 'send the notice'); });
     });
@@ -210,20 +230,84 @@
     });
   });
 
-  on('dsar-close', function () {
-    var retry = page.getAttribute('data-status') === 'closed';
-    ask(retry ? 'Try removing this request’s saved export again?' :
-        'Close this request? It will no longer count toward the deadline list.',
-        retry ? 'Retry cleanup' : 'Close request').then(function (ok) {
+  // Closing records what happened, so the program report counts a request
+  // as answered only when an answer is on record.
+  var lastErasure = '';
+  function localDay() {
+    var d = new Date();
+    function two(n) { return (n < 10 ? '0' : '') + n; }
+    return d.getFullYear() + '-' + two(d.getMonth() + 1) + '-' + two(d.getDate());
+  }
+  function closeRequest(recordOnly) {
+    var title = recordOnly ? 'Record how it was answered' : 'Close this request';
+    var erasure = page.getAttribute('data-kind') === 'erasure';
+    var hint = page.getAttribute('data-answer-hint') || '';
+    var unconfirmed = page.getAttribute('data-identity') === 'unverified';
+    var chosen = '';
+    return form(title, [
+      { key: 'kind', label: 'What happened?', type: 'select', required: true, default: 'answered',
+        help: unconfirmed ? 'Their identity is not confirmed. Confirm it before sending them their data or deleting it.' : undefined,
+        options: [
+        { value: 'answered', label: erasure ? 'We answered them (data erased, or kept for a lawful reason)' : 'We sent them the answer' },
+        { value: 'refused', label: 'We refused, with a lawful reason' },
+        { value: 'withdrawn', label: 'They withdrew the request' },
+        { value: 'no_response', label: 'Closed without an answer' }
+      ] }
+    ], 'Next').then(function (first) {
+      if (!first) return null;
+      chosen = first.kind || 'answered';
+      var fields = [];
+      if (chosen === 'answered' || chosen === 'refused') {
+        fields.push({ key: 'answered_on', label: 'Date the answer was sent', type: 'date', required: true, default: localDay() });
+        if (chosen === 'answered' && erasure) {
+          fields.push({ key: 'erasure', label: 'What happened to their data?', type: 'select', required: true, default: 'erased', options: [
+            { value: 'erased', label: 'Erased everywhere we found it' },
+            { value: 'not_erased', label: 'Kept, for a lawful reason' }
+          ] });
+          fields.push({ key: 'lawful_basis', label: 'Lawful reason for keeping it (only if kept)', type: 'text' });
+        }
+        if (chosen === 'refused') {
+          fields.push({ key: 'lawful_basis', label: 'Lawful reason for refusing', type: 'text', required: true });
+        }
+        fields.push({ key: 'reference', label: 'Where is the proof kept?', type: 'text', required: true,
+          default: lastErasure || hint, placeholder: 'For example: sent from the privacy inbox, ticket 4521' });
+      } else {
+        fields.push({ key: 'note', label: chosen === 'withdrawn' ? 'How did they withdraw it? (optional)' : 'Why is there no answer? (optional)', type: 'text' });
+      }
+      return form(title, fields, recordOnly ? 'Record' : 'Close request');
+    }).then(function (values) {
+      if (!values) return;
+      var body = { kind: chosen };
+      Object.keys(values).forEach(function (key) { body[key] = values[key]; });
+      if (body.erasure === 'not_erased' && !body.lawful_basis) {
+        say('Add the lawful reason for keeping their data, then try again.');
+        return;
+      }
+      return call('POST', base + encodeURIComponent(requestId) + '/close', body).then(function (result) {
+        var cleanup = result && result.export_cleanup;
+        say(cleanup && cleanup.status === 'failed' ? cleanup.message : (recordOnly ? 'Recorded.' : 'Request closed.'));
+        reloadSoon();
+      });
+    }).catch(function (f) { failPlain(f, recordOnly ? 'record the answer' : 'close the request'); });
+  }
+  // A closed access or portability request whose saved export could not be
+  // removed offers the cleanup again instead of a second close.
+  function retryCleanup() {
+    ask('Try removing this request’s saved export again?', 'Retry cleanup').then(function (ok) {
       if (!ok) return;
       call('POST', base + encodeURIComponent(requestId) + '/close').then(function (result) {
         var cleanup = result && result.export_cleanup;
-        say(cleanup && cleanup.status === 'failed' ? cleanup.message :
-            retry ? 'Saved export cleanup complete.' : 'Request closed.');
+        say(cleanup && cleanup.status === 'failed' ? cleanup.message : 'Saved export cleanup complete.');
         reloadSoon();
-      }).catch(function (f) { fail(f, 'close the request'); });
+      }).catch(function (f) { failPlain(f, 'remove the saved export'); });
     });
+  }
+  on('dsar-close', function () {
+    if (page.getAttribute('data-status') === 'closed') { retryCleanup(); return; }
+    closeRequest(false);
   });
+  on('dsar-record-outcome', function () { closeRequest(true); });
+  if (location.hash === '#close' && $('dsar-close') && page.getAttribute('data-status') !== 'closed') closeRequest(false);
 
   // Erasure: pick the matching person (by their identifier) and erase.
   on('dsar-erase', function () {
@@ -249,6 +333,7 @@
           ' on ' + chosen.channel_label + '? This cannot be undone.', 'Erase').then(function (ok) {
           if (!ok) return null;
           return call('POST', '/api/v1/compliance/people/erase', { channel: chosen.channel, user: chosen.user }).then(function (res) {
+            if (res.clean !== false) lastErasure = 'Lightwork: ' + (res.message || 'erased') + ' (' + localDay() + ')';
             say((res.message || 'Erased.') + (res.clean === false
               ? ' Keep this request open until the erasure is certified.'
               : ' You can now close the request.'));

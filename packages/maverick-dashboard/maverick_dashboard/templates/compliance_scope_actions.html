@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Compliance Tasks · Lightwork{% endblock %}
+{% block title %}Turn scope into tasks · Lightwork{% endblock %}
 {% block content %}
 <style>
   .csa-grid { display:grid; grid-template-columns:minmax(18rem,1fr) minmax(24rem,2fr);
@@ -130,6 +130,20 @@
   function show(value) {
     output.textContent = typeof value === "string" ? value : JSON.stringify(value, null, 2);
   }
+  // Failures read as plain sentences: never "HTTP 403", "Error:" or raw server text.
+  function requestProblem(status, detail) {
+    return window.mvPlainDetail(detail) || window.mvErrorText({status: status, detail: detail}, "complete the request");
+  }
+  function problemText(error) {
+    var kind = error && error.name;
+    if (kind === "SyntaxError") {
+      return "Record references and Action details must be valid JSON. Check the quotes, commas and brackets, then try again.";
+    }
+    if (kind === "TypeError" || kind === "AbortError") {
+      return window.mvErrorText(error, "complete the request");
+    }
+    return error && error.message ? error.message : window.mvErrorText(error, "complete the request");
+  }
   function selectedRoute() {
     return operation.options[operation.selectedIndex];
   }
@@ -148,7 +162,7 @@
     return template.replace(/\{([A-Za-z0-9_]+)\}/g, function (_match, key) {
       var value = values[key];
       if ((typeof value !== "string" && typeof value !== "number") || value === "") {
-        throw new Error("Missing path value: " + key);
+        throw new Error("Add \"" + key + "\" to Record references, then try again.");
       }
       return encodeURIComponent(String(value));
     });
@@ -166,16 +180,16 @@
       if (!responseText) { throw new Error("empty response"); }
       result = JSON.parse(responseText);
     } catch (_error) {
-      throw new Error("Request failed: the server returned an invalid JSON response.");
+      throw new Error("Lightwork's reply could not be read. Refresh the page and try again.");
     }
     if (!response.ok) {
-      throw new Error(result && typeof result.detail === "string" ? result.detail : ("HTTP " + response.status));
+      throw new Error(requestProblem(response.status, result && result.detail));
     }
     show({status: response.status, ok: response.ok, result: result});
   }
 
   document.getElementById("csa-load-status").addEventListener("click", function () {
-    run("GET", "/status", {}).catch(function (error) { show(String(error)); });
+    run("GET", "/status", {}).catch(function (error) { show(problemText(error)); });
   });
   operation.addEventListener("change", updateConfirmation);
   document.getElementById("csa-submit").addEventListener("click", async function () {
@@ -187,11 +201,11 @@
       var pathValues = JSON.parse(paths.value || "{}");
       var payload = JSON.parse(body.value || "{}");
       if (containsForbiddenKey(payload)) {
-        throw new Error("Authority, raw content, secrets, provider targets, and code are never accepted.");
+        throw new Error("Authority, raw content, secrets, provider targets, and code are never accepted. Remove them from Action details, then try again.");
       }
       var path = buildPath(route.dataset.path, pathValues);
       await run(route.dataset.method, path, payload);
-    } catch (error) { show(String(error)); }
+    } catch (error) { show(problemText(error)); }
   });
   updateConfirmation();
 }());

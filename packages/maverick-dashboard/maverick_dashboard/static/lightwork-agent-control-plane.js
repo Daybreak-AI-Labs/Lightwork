@@ -131,7 +131,7 @@
     return Math.round(value / 86400) + " days";
   }
 
-  function plainFailure(status, detail) {
+  function plainFailure(status, detail, headers) {
     if (detail === "control_plane_disabled") {
       return "Agent controls are turned off. Ask an administrator to turn them on.";
     }
@@ -139,7 +139,8 @@
       return "This changed since you last looked. The list has been refreshed; check it and try again.";
     }
     if (typeof window.mvErrorText === "function") {
-      return window.mvErrorText({ status: status }, "finish this");
+      // Headers carry the turned-off reason, so "off" is never read as "no permission".
+      return window.mvErrorText({ status: status, headers: headers }, "finish this");
     }
     if (status === 403) { return "You do not have permission to do this. Ask an administrator."; }
     if (status === 400 || status === 422) { return "Some of the details need fixing. Check them and try again."; }
@@ -241,7 +242,7 @@
     catch (_error) { throw failServer("The reply could not be read."); }
     if (!response.ok) {
       var detail = responseDetail(payload);
-      var responseError = fail(plainFailure(response.status, detail));
+      var responseError = fail(plainFailure(response.status, detail, response.headers));
       responseError.technical = detail;
       responseError.status = response.status;
       responseError.payload = payload;
@@ -825,7 +826,7 @@
     parts.push(row.max_risk ? "Highest risk: " + human(row.max_risk) : "No risk limit");
     parts.push(row.max_dollars === null || row.max_dollars === undefined
       ? "No spending limit"
-      : "Spending limit: $" + row.max_dollars);
+      : "Spending limit: " + (window.mvMoney ? window.mvMoney(row.max_dollars) : "$" + row.max_dollars));
     if (row.deny_tools && row.deny_tools.length) {
       parts.push("Blocked tools: " + row.deny_tools.map(human).join(", "));
     }

@@ -1,13 +1,13 @@
 {% extends "base.html" %}
 {% from "_hero.html" import hero %}
 {% from "_module_gate.html" import module_gate %}
-{% block title %}Third-party Intelligence · Lightwork{% endblock %}
+{% block title %}Third-party intelligence · Lightwork{% endblock %}
 {% block content %}
 <style>
   .tpi-actions { display:flex; gap:.5rem; flex-wrap:wrap; align-items:center; }
   .tpi-field { display:grid; gap:.3rem; }
 </style>
-{{ hero('Third-party management', 'Third-party Intelligence',
+{{ hero('Third-party management', 'Third-party intelligence',
         lede='Check vendors against the risk data you subscribe to, review any possible matches, decide their risk level, and watch for changes. Enhanced due diligence is the deeper review for higher-risk vendors.') }}
 
 {% if not third_party_intelligence_enabled %}

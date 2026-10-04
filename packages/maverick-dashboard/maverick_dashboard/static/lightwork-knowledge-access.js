@@ -181,7 +181,7 @@
         (typeof value.released_by !== "string" || !value.released_by.startsWith("user:") ||
          !SHA.test(value.release_evidence_sha256) ||
          finiteTime(value.released_at, "retention release time", false) < placedAt)) {
-      throw failure("The rights response contained a malformed hold release.");
+      throw failure("The rights response could not be verified. Refresh the page and try again.");
     }
     return {
       schema: value.schema,
@@ -364,7 +364,7 @@
     if (response.status === 409) {
       return "This changed since you loaded it, or current access couldn't be confirmed. Refresh and try again.";
     }
-    if (typeof window.mvErrorText === "function") return window.mvErrorText({status: response.status}, "finish this");
+    if (typeof window.mvErrorText === "function") return window.mvErrorText({status: response.status, headers: response.headers}, "finish this");
     return "Something went wrong. Please try again.";
   }
 
@@ -394,7 +394,7 @@
     var payload;
     try { payload = body ? JSON.parse(body) : {}; }
     catch (_error) {
-      var unreadable = failure("The knowledge response could not be verified.");
+      var unreadable = failure("The knowledge response could not be verified. Refresh the page and try again.");
       unreadable.accessKind = meaning.kind;
       throw unreadable;
     }
@@ -431,7 +431,7 @@
 
   function date(value) {
     if (value === null) { return "Not required"; }
-    try { return new Date(value * 1000).toLocaleString(); }
+    try { return (window.mvTimeAbsolute ? window.mvTimeAbsolute(value) : new Date(value * 1000).toLocaleString()); }
     catch (_error) { return "Unavailable"; }
   }
 
@@ -1048,11 +1048,13 @@
     if (!append || !requests.querySelector(".ka-request")) requests.textContent = "";
     if (!items.length) {
       if (requests.querySelector(".ka-request")) return;
-      requests.appendChild(node("p", "muted", recoveryScan ?
-        "No finished requests in this batch. Scan the next batch if available." : archivedView ?
-        "No finished requests are in the archive yet." : readyView ?
-        "No finished requests are ready to archive. Complete a review or release a legal hold first." :
-        "No correction, exclusion, or deletion requests are available in this view."));
+      var empty = recoveryScan ?
+        ["No finished requests in this batch", "Scan the next batch if one is available."] : archivedView ?
+        ["No finished requests are in the archive yet", "Finished requests appear here once they are archived."] : readyView ?
+        ["No finished requests are ready to archive", "Requests appear here when they can be archived. Complete a review or release a legal hold first."] :
+        ["No correction, exclusion, or deletion requests in this view", "Requests to correct, exclude or delete a source appear here with their status. Open a source with View details, then use the Request a correction or removal section to make one."];
+      requests.appendChild(window.mvEmpty ? window.mvEmpty(empty[0], empty[1], null, { compact: true })
+        : node("p", "muted", empty[0] + ". " + empty[1]));
       return;
     }
     items.forEach(function (record) {
@@ -1295,7 +1297,7 @@
       clean.forEach(function (entry, index) {
         if (!sameReference(entry.reference, expected[index]) ||
             entry.eligibility.requested_action !== "export") {
-          throw failure("The knowledge export did not match the selected source versions.");
+          throw failure("The knowledge export did not match the selected source versions. Choose the sources again, then export.");
         }
       });
       var evidence = payload.authority_evidence;

@@ -184,7 +184,7 @@ test('clipboard and timestamps use interface locale while copied content remains
   const original='Emergency stop العربية';w.mvCopy(original);await tick();
   assert.equal(copied,original);const toast=w.document.querySelector('.mv-toast');
   assert.equal(toast.textContent,'Copié dans le presse-papiers');assert.equal(toast.lang,'fr');
-  assert.equal(w.mvWhen(1760000000),new Intl.DateTimeFormat('fr-CA',{dateStyle:'medium',timeStyle:'short'}).format(new Date(1760000000000)));
+  assert.equal(w.mvWhen(1760000000),new Intl.DateTimeFormat('fr-CA',{day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit',timeZoneName:'short'}).format(new Date(1760000000000)));
   assert.equal(w.mvWhen(NaN),'');assert.equal(w.mvWhen(null),'');
   dom.window.close();
 });

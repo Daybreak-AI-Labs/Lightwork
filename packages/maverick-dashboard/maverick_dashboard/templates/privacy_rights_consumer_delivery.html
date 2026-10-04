@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Send People Their Data · Lightwork{% endblock %}
+{% block title %}Send people their data · Lightwork{% endblock %}
 {% block content %}
 <style>
   .prcd-grid { display:grid; grid-template-columns:minmax(18rem,1fr) minmax(24rem,2fr);
@@ -124,6 +124,20 @@
   function show(value) {
     output.textContent = typeof value === "string" ? value : JSON.stringify(value, null, 2);
   }
+  // Failures read as plain sentences: never "HTTP 403", "Error:" or raw server text.
+  function requestProblem(status, detail) {
+    return window.mvPlainDetail(detail) || window.mvErrorText({status: status, detail: detail}, "complete the request");
+  }
+  function problemText(error) {
+    var kind = error && error.name;
+    if (kind === "SyntaxError") {
+      return "Record references and Action details must be valid JSON. Check the quotes, commas and brackets, then try again.";
+    }
+    if (kind === "TypeError" || kind === "AbortError") {
+      return window.mvErrorText(error, "complete the request");
+    }
+    return error && error.message ? error.message : window.mvErrorText(error, "complete the request");
+  }
   function selectedRoute() {
     return operation.options[operation.selectedIndex];
   }
@@ -135,7 +149,7 @@
   function buildPath(template, values) {
     return template.replace(/\{([A-Za-z0-9_]+)\}/g, function (_match, key) {
       if (typeof values[key] !== "string" || !values[key]) {
-        throw new Error("Missing string path value: " + key);
+        throw new Error("Add \"" + key + "\" to Record references, then try again.");
       }
       return encodeURIComponent(values[key]);
     });
@@ -143,7 +157,7 @@
   function rejectAuthoritySelectors(payload) {
     Object.keys(payload).forEach(function (key) {
       if (forbidden.has(key)) {
-        throw new Error("Server-derived or secret field is never accepted: " + key);
+        throw new Error("Remove \"" + key + "\" from Action details. Lightwork sets that value itself, so it is never accepted here.");
       }
     });
   }
@@ -165,16 +179,16 @@
       if (!responseText) { throw new Error("empty response"); }
       result = JSON.parse(responseText);
     } catch (_error) {
-      throw new Error("Request failed: the server returned an invalid JSON response.");
+      throw new Error("Lightwork's reply could not be read. Refresh the page and try again.");
     }
     if (!response.ok) {
-      throw new Error(result && typeof result.detail === "string" ? result.detail : ("HTTP " + response.status));
+      throw new Error(requestProblem(response.status, result && result.detail));
     }
     show({status: response.status, ok: response.ok, result: result});
   }
 
   document.getElementById("prcd-load-status").addEventListener("click", function () {
-    run("GET", "/status", {}).catch(function (error) { show(String(error)); });
+    run("GET", "/status", {}).catch(function (error) { show(problemText(error)); });
   });
   operation.addEventListener("change", updateConfirmation);
   document.getElementById("prcd-submit").addEventListener("click", async function () {
@@ -188,7 +202,7 @@
       rejectAuthoritySelectors(payload);
       var path = buildPath(route.dataset.path, pathValues);
       await run(route.dataset.method, path, payload);
-    } catch (error) { show(String(error)); }
+    } catch (error) { show(problemText(error)); }
     finally {
       confirmation.checked = false;
       if (operation.value === "delivery-mint") { body.value = "{}"; }

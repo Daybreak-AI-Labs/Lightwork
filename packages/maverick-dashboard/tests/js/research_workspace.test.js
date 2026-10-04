@@ -259,3 +259,17 @@ test('paired consent and dataset-lineage fields become required together', async
   assert.equal(modelForm.elements.dataset_lineage_purpose.required, true);
   ui.dom.window.close();
 });
+
+test('a refused first load replaces both lists\' Loading with what happened', async () => {
+  const dom = new JSDOM(html(), {url:'https://lightwork.test/research', runScripts:'outside-only'});
+  const document = dom.window.document;
+  for (const id of ['research-registry-items', 'research-governed-runs']) document.getElementById(id).innerHTML = '<li>Loading…</li>';
+  dom.window.mvErrorText = (failure, action) => `Could not ${action}. Ask an administrator. (${failure.status})`;
+  dom.window.fetch = async () => ({ok:false, status:403, json:async () => ({detail:'Current research workspace authority is required'})});
+  dom.window.eval(source);
+  await settle();
+  assert.equal(document.getElementById('research-registry-items').textContent, 'Could not load datasets and models. Ask an administrator. (403)');
+  assert.equal(document.getElementById('research-governed-runs').textContent, 'Could not load runs. Ask an administrator. (403)');
+  assert.equal(document.getElementById('research-governed-status').textContent, 'You do not have permission to do this. Ask an administrator.');
+  dom.window.close();
+});

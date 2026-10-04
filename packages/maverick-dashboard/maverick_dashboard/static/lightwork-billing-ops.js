@@ -92,7 +92,7 @@
   function renderReceipt(data) {
     var out = $('stripe-out'); out.textContent = '';
     out.appendChild(el('p', null, data.message));
-    out.appendChild(el('p', 'muted', 'Receipt ' + data.attempt + ' • ' + new Date(data.updated_at * 1000).toLocaleString()));
+    out.appendChild(el('p', 'muted', 'Receipt ' + data.attempt + ' • ' + (window.mvTimeAbsolute ? window.mvTimeAbsolute(data.updated_at) : new Date(data.updated_at * 1000).toLocaleString())));
     out.appendChild(facts(Object.keys(data.stages).map(function (name) {
       return {label: name, value: data.stages[name].state.replace(/_/g, ' ')};
     })));
@@ -127,7 +127,7 @@
       out.appendChild(el('p', null, data.summary));
       out.appendChild(facts([{label: 'Workspace', value: data.workspace}, {label: 'Plan', value: data.plan},
         {label: 'Reviewed content fingerprint', value: data.sha256},
-        {label: 'Review expires', value: new Date(data.review_expires * 1000).toLocaleString()}]));
+        {label: 'Review expires', value: (window.mvTimeAbsolute ? window.mvTimeAbsolute(data.review_expires) : new Date(data.review_expires * 1000).toLocaleString())}]));
       var exact = el('details'); exact.appendChild(el('summary', null, 'Exact reviewed period, rates and line items'));
       exact.appendChild(el('pre', null, JSON.stringify({fields: fields(), snapshot: data.snapshot}, null, 2))); out.appendChild(exact);
       if (data.resume) out.appendChild(el('p', null, 'This resumes the retained attempt with its original rated contents and invoice identity. Confirmed stages are retained; unknown stages use native reconciliation and idempotency protections.'));

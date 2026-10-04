@@ -94,7 +94,7 @@
   .risk-seg button.on{ background: var(--brand); color: var(--brand-fg); font-weight: var(--font-semibold); }
   .model-badge{ display: inline-flex; align-items: center; gap: 6px; padding: 0.22rem 0.6rem;
     border-radius: var(--radius-pill); font-size: var(--text-xs); font-weight: var(--font-semibold);
-    color: var(--accent); background: var(--accent-subtle);
+    color: var(--accent); background: var(--success-subtle);
     border: 1px solid color-mix(in srgb, var(--accent) 42%, transparent); text-decoration: none; }
 
   .advanced{ border: 1px solid var(--glass-border); border-radius: var(--radius-md);
@@ -150,19 +150,24 @@
 </style>
 
   {% from "_hero.html" import hero, state %}
+  {# The main action: a new custom agent. While a specialist is open, saving
+     it is the main action, so the header link steps back to a plain button. #}
+  {% set agents_actions %}<a class="btn{% if not selected %} btn--primary{% endif %}" href="/agents?new=1#agent-form">New custom agent</a>{% endset %}
   {% call hero('Build your workforce', 'Agent Factory',
                subtitle='Hire & tailor specialists',
                lede='Describe a specialist in plain English — its job, the
                      tools it can reach, and its guardrails — and Lightwork
                      tailors it for you. Saving updates only what you change;
                      anything that would weaken the safety limits is
-                     rejected, not saved.') %}
+                     rejected, not saved.',
+               actions=agents_actions if (editable and not creating) else '') %}
     {{ state('Current state', 'Safety limits enforced',
              badge='guarded', badge_class='ok',
              copy='Edits that widen tool access or raise the maximum risk level
                    are rejected at save time — these limits only ever
                    tighten.') }}
   {% endcall %}
+  {% if can_open_page('/roles') %}<p><a href="/roles">See the kinds of agent</a> that share every task and the model each one uses.</p>{% endif %}
 
   <a class="af-ekko" href="/ekko" id="ekko-work-discovery-card">
     <span>
@@ -171,7 +176,7 @@
       <p>Listens to approved work activity and maps recurring processes into evidence-backed first passes
         for Lightwork flows and specialists.</p>
     </span>
-    <span class="btn btn--primary" aria-hidden="true">Open Work Discovery →</span>
+    <span class="btn" aria-hidden="true">Open Work Discovery →</span>
   </a>
 
   {% if not editable %}
@@ -239,7 +244,7 @@
         <label for="jd-file" class="sub">or upload</label>
         <input id="jd-file" type="file" accept=".txt,.md,.pdf,.docx,.doc,.odt">
         <span style="flex: 1;"></span>
-        <button type="button" class="btn btn--primary" id="jd-match">Find matching specialists</button>
+        <button type="button" class="btn" id="jd-match">Find matching specialists</button>
         {% if editable %}
         <button type="button" class="btn" id="jd-draft">Draft a new specialist</button>
         {% endif %}
@@ -267,14 +272,14 @@
           <option value="ai">Draft it with AI (counts toward your spending limits, at most $0.50)</option>
           <option value="plain">Draft it from a standard outline (no AI)</option>
         </select></div>
-      <button type="submit" class="btn btn--primary" id="biz-draft">Draft the specialist</button>
+      <button type="submit" class="btn" id="biz-draft">Draft the specialist</button>
     </form>
     <p id="biz-status" role="status" aria-live="polite" tabindex="-1" class="muted"></p>
     <div id="biz-review" hidden>
       <div id="biz-summary"></div>
       <div class="fld"><label for="biz-docs">Documents it should know (optional, up to 10)</label>
         <input id="biz-docs" type="file" multiple accept=".txt,.md,.pdf,.docx,.doc,.odt,.csv,.png,.jpg,.jpeg"></div>
-      <button type="button" class="btn btn--primary" id="biz-approve">Add this specialist</button>
+      <button type="button" class="btn" id="biz-approve">Add this specialist</button>
       <button type="button" class="btn btn--ghost" id="biz-discard">Discard the draft</button>
     </div>
   </details>
@@ -308,7 +313,7 @@
           <button type="button" class="btn" id="agent-picker-open">Open</button>
           {% if editable %}
           <span class="sub">or</span>
-          <a class="btn{% if creating %} btn--primary{% endif %}" href="/agents?new=1#agent-form" id="btn-new-agent">＋ New custom agent</a>
+          <a class="btn" href="/agents?new=1#agent-form" id="btn-new-agent">＋ New custom agent</a>
           {% endif %}
         </div>
         {% set ready_count = agents | selectattr('readiness.state', 'equalto', 'action_ready') | list | length %}
@@ -316,7 +321,7 @@
         {% set unknown_count = agents | selectattr('readiness.state', 'equalto', 'unknown') | list | length %}
         <p class="sub" style="margin:var(--space-1) 0 0;">{{ ready_count }} can start · {{ setup_count }} {{ 'needs' if setup_count == 1 else 'need' }} setup · {{ unknown_count }} {{ 'needs' if unknown_count == 1 else 'need' }} a setup check. Search any specialist to see what it needs. Live connections, permissions and the AI service are checked when work starts.</p>
         {% elif editable %}
-        <a class="btn btn--primary" href="/agents?new=1#agent-form" id="btn-new-agent">＋ New custom agent</a>
+        <a class="btn" href="/agents?new=1#agent-form" id="btn-new-agent">＋ New custom agent</a>
         {% endif %}
       </div>
 
@@ -335,7 +340,7 @@
         {% endif %}
       </div>
       <div style="display:flex; gap:var(--space-2); align-items:center; margin-bottom:var(--space-3);">
-        <button type="button" class="btn btn--primary" id="btn-jobcard">📋 View job card</button>
+        <button type="button" class="btn" id="btn-jobcard">📋 View job card</button>
         <span class="sub">the specialist's job description, manager scorecard &amp; cost tier</span>
       </div>
       {% endif %}
@@ -952,7 +957,12 @@
           + (d.unknown_specialists ? '; ' + d.unknown_specialists + ' need a setup check' : '');
       }
       function render(list) {
-        if (!list.length) { host.innerHTML = '<p class="muted">No departments yet. Your specialist packs appear here as deployable teams.</p>'; return; }
+        if (!list.length) {
+          var title = 'No departments yet', body = 'Your specialist packs appear here as teams you can deploy. Open Workforce to see what each department covers.';
+          if (window.mvEmpty) host.replaceChildren(window.mvEmpty(title, body, { label: 'Open Workforce', href: '/workforce' }, { compact: true }));
+          else host.textContent = title + '. ' + body;
+          return;
+        }
         host.innerHTML = list.map(function (d) {
           var members = d.members || [];
           var n = members.length || d.headcount || 0;
@@ -961,7 +971,7 @@
           var unavailable = blockedTeam(d);
           var disable = unavailable ? ' disabled title="Set up at least one specialist before deploying this team"' : '';
           var deploy = d.entitled
-            ? '<button type="button" class="btn btn--primary dep-deploy" data-key="' + esc(d.key) + '" aria-label="Deploy ' + esc(d.title) + ' team" style="font-size:var(--text-sm);"' + disable + '>Deploy team</button>'
+            ? '<button type="button" class="btn dep-deploy" data-key="' + esc(d.key) + '" aria-label="Deploy ' + esc(d.title) + ' team" style="font-size:var(--text-sm);"' + disable + '>Deploy team</button>'
             : '<button type="button" class="btn dep-deploy" data-key="' + esc(d.key) + '" aria-label="Deploy ' + esc(d.title) + ' team" style="font-size:var(--text-sm);"' + disable + '>Deploy team</button><span class="dept__addon">paid add-on</span>';
           return '<div class="dept" data-key="' + esc(d.key) + '">'
             + '<div class="dept__head"><span class="dept__avatar">' + esc(initials(d.title)) + '</span>'

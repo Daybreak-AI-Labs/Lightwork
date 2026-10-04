@@ -68,7 +68,7 @@ def test_workbench_is_store_free_closed_and_liquid_glass(client: TestClient) -> 
         "style-src 'self'",
     ):
         assert directive in csp
-    assert "Opt Out Everywhere" in response.text
+    assert "Opt out everywhere" in response.text
     assert "as an opt-out request" in response.text
     assert "keeps only a fingerprint of each request" in response.text
     assert 'id="goo-operations" disabled' in response.text
@@ -177,8 +177,17 @@ def test_turned_off_feature_shows_the_standard_banner(client: TestClient, monkey
     off = client.get(ROUTE).text
     assert 'data-module-gate="consent_preferences.global_opt_out"' in off
     assert "Global opt-out is turned off." in off
+    # The banner is the whole availability story: no check repeats it in red
+    # below and no loader is left saying "Loading".
+    main = off[off.index('id="global-opt-out-shell"'):off.index("<noscript>")]
+    assert 'data-module-enabled="false"' in main
+    assert '<p id="goo-runtime-status" class="muted" role="status" aria-live="polite" hidden></p>' in main
+    assert "Loading" not in main and "Checking" not in main
+    assert "Opt-out set-ups appear here once this is turned on." in main
     monkeypatch.setattr(api, "_module_switch_enabled", lambda _loaded, _section: True)
-    assert "data-module-gate=" not in client.get(ROUTE).text
+    on = client.get(ROUTE).text
+    assert "data-module-gate=" not in on
+    assert 'data-module-enabled="true"' in on and "Loading…" in on
 
 
 def test_global_opt_out_switch_is_registered_and_writable() -> None:

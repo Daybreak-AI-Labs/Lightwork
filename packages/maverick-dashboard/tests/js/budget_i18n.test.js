@@ -8,6 +8,7 @@ const base = path.join(__dirname, '../../maverick_dashboard');
 const rows = JSON.parse(execFileSync(process.env.PYTHON || 'python', ['-c',
   'import ast,json,sys; t=ast.parse(open(sys.argv[1],encoding="utf8").read()); print(json.dumps(ast.literal_eval(next(n.value for n in t.body if isinstance(n,ast.Assign)))))',
   path.join(base, 'i18n_journey_budget.py')], {encoding:'utf8'}));
+const shell = fs.readFileSync(path.join(base, 'static/lightwork-ui.js'), 'utf8');
 const shared = fs.readFileSync(path.join(base, 'static/lightwork-i18n.js'), 'utf8');
 const script = fs.readFileSync(path.join(base, 'static/lightwork-budget-guidance.js'), 'utf8');
 const locales = {fr:'fr-FR', de:'de-DE', ja:'ja-JP', zh:'zh-CN', ar:'ar'};
@@ -39,11 +40,13 @@ function page(language='fr', {launch=false, fail=false}={}) {
   const calls=[],value=preview();
   w.fetch=async(url,options={})=>{
     calls.push({url,options});
-    if (fail) return {ok:false,status:409,json:async()=>({detail:{code:'budget_account_changed',message:'Your account changed. Refresh the budget preview.'}})};
+    if (fail === 'network') throw new TypeError('Failed to fetch');
+    if (fail) return {ok:false,status:409,json:async()=>({detail:{schema:'lightwork.error.v1',code:'budget_account_changed',message:'Your account changed. Refresh the budget preview.'}})};
     const data=url.includes('/preview?') ? value : {context:value.context,admin:true,items:[{id:'BAC-original',revision:3,provider:'Available',period:'2026-09',state:'assigned',assigned_to:'Requested',_audit_pending:true,verification:'Pending installation administrator review; no reservation was released.'}]};
     return {ok:true,status:200,json:async()=>data};
   };
-  w.eval(shared);w.eval(script);return {dom,w,doc,calls,value,catalog};
+  w.matchMedia=()=>({matches:false,addEventListener(){},removeEventListener(){}});
+  w.eval(shell);w.eval(shared);w.eval(script);return {dom,w,doc,calls,value,catalog};
 }
 
 for (const language of ['fr','de','ja','zh']) {
@@ -56,7 +59,7 @@ for (const language of ['fr','de','ja','zh']) {
     const product=[...doc.querySelectorAll('[data-product-copy]')];
     assert.ok(product.length>15);
     assert.ok(product.every(element=>element.lang===language), product.filter(e=>e.lang!==language).map(e=>e.textContent).join('\n'));
-    const amount=new Intl.NumberFormat(locales[language],{style:'currency',currency:'USD',currencyDisplay:'code',minimumFractionDigits:4,maximumFractionDigits:4}).format(1234.5);
+    const amount=new Intl.NumberFormat(locales[language],{style:'currency',currency:'USD',minimumFractionDigits:2,maximumFractionDigits:2}).format(1234.5);
     assert.ok(doc.getElementById('budget-preview').textContent.includes(amount));
     assert.ok(doc.getElementById('budget-preview').textContent.includes(new Intl.NumberFormat(locales[language],{style:'percent'}).format(.95)));
     assert.equal(doc.querySelector('#budget-preview h2[data-user-content]').textContent,'Available');
@@ -86,6 +89,13 @@ test('structured error translates known copy without changing the API code',asyn
   const {dom,doc,catalog}=page('fr',{fail:true});await settle();
   assert.equal(doc.getElementById('budget-status').textContent,catalog['Your account changed. Refresh the budget preview.'].text);
   assert.equal(doc.getElementById('budget-status').lang,'fr');
+  dom.window.close();
+});
+
+test('a dropped connection reads as one plain sentence, never the browser error',async()=>{
+  const {dom,doc,catalog}=page('fr',{fail:'network'});await settle();
+  assert.equal(doc.getElementById('budget-status').textContent,catalog['Budget details could not be refreshed. Try again in a moment.'].text);
+  assert.doesNotMatch(doc.getElementById('budget-status').textContent,/fetch|TypeError/);
   dom.window.close();
 });
 

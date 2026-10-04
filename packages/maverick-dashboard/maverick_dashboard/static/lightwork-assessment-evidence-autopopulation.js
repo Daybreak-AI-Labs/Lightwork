@@ -54,7 +54,7 @@
     catch (_error) { throw failure("Lightwork returned something unexpected. Refresh the page and try again.", "response_invalid_json"); }
     if (!isRecord(payload)) throw failure("Lightwork returned something unexpected. Refresh the page and try again.", "response_invalid");
     if (!response.ok) {
-      var error = failure(friendly(response.status), "request_failed");
+      var error = failure(friendly(response.status, response.headers), "request_failed");
       error.status = response.status;
       error.technical = typeof payload.detail === "string" ? payload.detail : "";
       throw error;
@@ -62,9 +62,10 @@
     return payload;
   }
 
-  function friendly(status) {
+  function friendly(status, headers) {
     if (typeof window !== "undefined" && typeof window.mvErrorText === "function") {
-      return window.mvErrorText({status: status}, "finish this");
+      // Headers carry the turned-off reason, so "off" is never read as "no permission".
+      return window.mvErrorText({status: status, headers: headers}, "finish this");
     }
     if (status === 403) return "You do not have permission to do this. Ask an administrator.";
     if (status === 409) return "This changed since you opened it. Refresh the page and try again.";
@@ -197,7 +198,7 @@
   }
   function when(ts) {
     if (typeof window.mvWhen === "function") return window.mvWhen(ts);
-    return ts ? new Date(ts * 1000).toLocaleString() : "";
+    return ts ? (window.mvTimeAbsolute ? window.mvTimeAbsolute(ts) : new Date(ts * 1000).toLocaleString()) : "";
   }
   function documentName(artifactId) {
     var match = /^(.+)\.[0-9a-f]{8}$/.exec(String(artifactId || ""));

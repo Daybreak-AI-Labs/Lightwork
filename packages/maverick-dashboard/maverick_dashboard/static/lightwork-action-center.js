@@ -139,10 +139,11 @@
     list.replaceChildren(); coverage.replaceChildren();
     summary.textContent = `${model.counts.unread} unread · ${model.counts.overdue} overdue · ${model.counts.snoozed} snoozed`;
     model.coverage.forEach(source => {
-      if (source.status !== "current") coverage.append(node("li", `${labels[source.kind]} ${source.status === "partial" ? "include only the most recent 2,000 source records. Open the full module for older records." : "could not be loaded. Refresh or open that module; this list is incomplete."}`));
+      // A module that is turned off is not a load error.
+      if (source.status !== "current" && source.status !== "disabled") coverage.append(node("li", `${labels[source.kind]} ${source.status === "partial" ? "include only the most recent 2,000 source records. Open the full module for older records." : "could not be loaded. Refresh or open that module; this list is incomplete."}`));
     });
     if (!model.items.length) {
-      const partial = model.coverage.some(source=>source.status !== "current");
+      const partial = model.coverage.some(source=>source.status !== "current" && source.status !== "disabled");
       const empty = node("div", undefined, "mv-empty");
       empty.append(node("p", partial ? "No items are visible in this filter. Some sources are incomplete or unavailable." : "You're all caught up.", "mv-empty__title"));
       const filtered = form.elements.view.value !== "active" || form.elements.kind.value !== "all" || form.elements.assignment.value !== "all";
@@ -185,8 +186,8 @@
         details.append(node("p", reconciliation.resolution.explanation, "muted"));
         article.append(details);
       }
-      if (item.due_at) article.append(node("p", `${item.overdue ? "Overdue" : "Due"}: ${new Date(item.due_at * 1000).toLocaleString()}`, item.overdue ? "badge warn" : "muted"));
-      if (item.snoozed) article.append(node("p", `Snoozed until ${new Date(item.snoozed_until * 1000).toLocaleString()}`, "muted"));
+      if (item.due_at) article.append(node("p", `${item.overdue ? "Overdue" : "Due"}: ${(window.mvTimeAbsolute ? window.mvTimeAbsolute(item.due_at) : new Date(item.due_at * 1000).toLocaleString())}`, item.overdue ? "badge warn" : "muted"));
+      if (item.snoozed) article.append(node("p", `Snoozed until ${(window.mvTimeAbsolute ? window.mvTimeAbsolute(item.snoozed_until) : new Date(item.snoozed_until * 1000).toLocaleString())}`, "muted"));
       const actions = node("div"); actions.style.cssText = "display:flex;flex-wrap:wrap;gap:var(--space-2);align-items:center;";
       if (item.assessment_id) {
         const review = node("button", "Review assessment", "btn btn--primary"); review.type="button";

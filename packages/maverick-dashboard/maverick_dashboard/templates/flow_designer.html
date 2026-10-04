@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Flow designer · Lightwork{% endblock %}
 {% block content %}
+{% from "_back_link.html" import back_link with context %}
 <style>
   /* Mockup layout: a clean header + a hero Draft bar, then a workspace that is
      either the friendly Steps (cards + settings rail) or the full Canvas
@@ -64,7 +65,7 @@
   #fd-canvas { width: 100%; height: 100%; display: block; cursor: grab; touch-action: none; }
   #fd-canvas.panning { cursor: grabbing; }
   .fd__props { border: 1px solid var(--border); border-radius: var(--radius-lg);
-               padding: var(--space-4); overflow-y: auto; background: var(--surface); }
+               padding: var(--space-4); overflow-y: auto; background: var(--surface-1); }
   .fd__props .field { margin-bottom: var(--space-3); }
   .fd__props label { display: block; font-size: var(--text-sm); margin-bottom: var(--space-1); }
   .fd__props textarea { width: 100%; min-height: 60px; font-family: var(--font-mono, monospace); font-size: 12px; }
@@ -77,19 +78,19 @@
   .fd__empty { color: var(--muted); font-size: var(--text-sm); }
   .fd__msg { font-size: var(--text-sm); color: var(--muted); }
   /* node cards (SVG) */
-  .fd-node rect.card { fill: var(--surface); stroke: var(--border); stroke-width: 1.5; rx: 10; }
+  .fd-node rect.card { fill: var(--surface-1); stroke: var(--border); stroke-width: 1.5; rx: 10; }
   .fd-node.selected rect.card { stroke: var(--accent); stroke-width: 2.5; }
   .fd-node:focus { outline: none; }
   .fd-node:focus-visible rect.card { stroke: var(--ring); stroke-width: 3; }
   .fd-node.start rect.card { stroke: var(--success, #16a34a); }
-  .fd-node text { font: 12px var(--font-sans, sans-serif); fill: var(--text); pointer-events: none; }
+  .fd-node text { font: 12px var(--font-sans); fill: var(--text); pointer-events: none; }
   .fd-node text.kind { font-weight: 700; text-transform: uppercase; font-size: 10px; letter-spacing: .04em; }
   .fd-node .swatch { rx: 4; }
-  .fd-node .port { fill: var(--accent); stroke: var(--surface); stroke-width: 2; cursor: crosshair; }
+  .fd-node .port { fill: var(--accent); stroke: var(--surface-1); stroke-width: 2; cursor: crosshair; }
   .fd-edge { fill: none; stroke: var(--muted); stroke-width: 2; marker-end: url(#fd-arrow); }
   .fd-edge.t { stroke: var(--success, #16a34a); }
   .fd-edge.f { stroke: var(--danger, #dc2626); }
-  .fd-edge-label { font: 10px var(--font-sans, sans-serif); fill: var(--muted); }
+  .fd-edge-label { font: 10px var(--font-sans); fill: var(--muted); }
   .k-agent { fill: #6366f1; } .k-action { fill: #0891b2; } .k-branch { fill: #d97706; }
   .k-foreach { fill: #7c3aed; } .k-parallel { fill: #db2777; } .k-approval { fill: #16a34a; }
   .k-delay { fill: #64748b; } .k-subflow { fill: #0d9488; }
@@ -105,12 +106,12 @@
   .fd__legend.on { display: inline-flex; }
   .fd__examples { flex-basis: 100%; display: flex; gap: var(--space-2); flex-wrap: wrap; }
   .fd__chip { font-size: var(--text-sm); padding: 2px 10px; border: 1px solid var(--border);
-              border-radius: 999px; background: var(--surface); cursor: pointer; color: var(--muted); }
+              border-radius: 999px; background: var(--surface-1); cursor: pointer; color: var(--muted); }
   .fd__chip:hover { border-color: var(--accent); color: var(--text); }
   .fd__props .toolhint { font-size: var(--text-sm); color: var(--muted); margin: -4px 0 var(--space-2); }
   /* breadcrumb: shown only while editing a nested sub-flow (foreach body / branch) */
   .fd__crumbs { display: none; position: absolute; top: 8px; inset-inline-start: 8px; z-index: 2;
-                background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+                background: var(--surface-1); border: 1px solid var(--border); border-radius: var(--radius-md);
                 padding: 4px 10px; font-size: var(--text-sm); color: var(--muted); max-width: calc(100% - 16px);
                 overflow-x: auto; white-space: nowrap; }
   .fd__crumbs.on { display: block; }
@@ -130,7 +131,7 @@
                 stroke-width: 1; stroke-dasharray: 4 3; pointer-events: none; }
   /* minimap (bottom-left overview; click to jump) */
   .fd__minimap { position: absolute; inset-inline-start: 8px; bottom: 8px; z-index: 2; width: 160px; height: 110px;
-                 background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+                 background: var(--surface-1); border: 1px solid var(--border); border-radius: var(--radius-md);
                  opacity: .92; cursor: pointer; }
   .fd__minimap rect.mini-node { fill: var(--muted); }
   .fd__minimap rect.mini-view { fill: none; stroke: var(--accent); stroke-width: 1.5; }
@@ -162,7 +163,7 @@
   .fdx-more summary::-webkit-details-marker { display: none; }
   .fdx-more__menu { position: absolute; z-index: 6; right: 0; top: 100%; min-width: 11rem;
     padding: var(--space-2); display: grid; gap: var(--space-1); border: 1px solid var(--border);
-    border-radius: var(--radius-md); background: var(--surface); box-shadow: var(--shadow-md); }
+    border-radius: var(--radius-md); background: var(--surface-1); box-shadow: var(--shadow-md); }
   .fd__chat-form input { flex: 1; min-width: 0; }
   .fd__chat-msg .btn { max-width: 100%; white-space: normal; margin-top: var(--space-2); }
   @media (prefers-reduced-transparency: reduce) { .fd__chat { background: var(--panel); backdrop-filter: none; } }
@@ -256,7 +257,7 @@
 </div>
 
 <div class="fd" data-view="steps" data-flow-engine-on="{{ 'true' if flows_enabled else 'false' }}" data-can-manage-flows="{{ 'true' if can_manage_flows else 'false' }}">
-  <p><a href="/workflows">All saved flows</a></p>
+  <p>{{ back_link('/workflows', 'Workflows') }}</p>
   <p class="muted">{{ ui('Connector credentials belong in Connections. Older flows using secret expressions must be reviewed before they can run; saved definitions and grants are not changed automatically.') }} <a href="/connections">{{ ui('Connections') }}</a></p>
   <!-- Header: name, the Steps/Canvas switch, and the primary actions. -->
   <div class="fdx-head">

@@ -154,6 +154,28 @@ def test_owner_is_enrolled_at_task_creation_and_first_check_catches_fast_outcome
     assert {row["id"] for row in second} == {row["id"] for row in rows}
 
 
+def test_in_app_alerts_are_on_for_a_fresh_install(client_and_actor):
+    """Nothing configured: the bell works for finished work, questions and
+    approvals; email, Slack and Teams stay off until someone sets them up."""
+    from maverick import config
+
+    client, _actor, world, home = client_and_actor
+    (home / "config.toml").write_text("", encoding="utf-8")
+    config.reset_config_cache()
+    page = client.get("/chat")
+    assert 'id="personal-notification-link"' in page.text and 'data-enabled="true"' in page.text
+    assert "turned off" not in client.get("/notifications").text
+    own = world.create_goal("Fresh install task", owner="user:alice")
+    world.set_goal_status(own, "done", result="Private result")
+    waiting = world.create_goal("Needs an answer", owner="user:alice")
+    world.ask("Which quarter?", waiting)
+    inbox = client.get("/api/v1/notifications/personal").json()
+    assert {(row["goal_id"], row["category"]) for row in inbox["items"]} == {
+        (own, "completed"), (waiting, "needs-decision")}
+    assert inbox["background_enabled"] is False
+    assert inbox["preferences"]["external_links"] == []
+
+
 def test_background_observer_records_owner_outcomes_without_an_open_inbox(
     client_and_actor, monkeypatch,
 ):

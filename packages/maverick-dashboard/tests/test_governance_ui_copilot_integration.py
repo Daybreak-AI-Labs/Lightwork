@@ -214,7 +214,10 @@ def test_all_copilot_contexts_have_registered_pages_and_new_role_nav_links(
             expected_default = expected_floors[path]
         assert page["default"] == expected_default
         assert page.get("in_nav", True) is True
-        assert ui_visibility.customer_ready(page) is True
+        if path in ui_visibility.not_ready_paths():
+            assert ui_visibility.customer_ready(page) is False
+        else:
+            assert ui_visibility.customer_ready(page) is True
 
     def nav_paths(role: str) -> set[str]:
         return {link["href"] for group in ui_visibility.nav_groups(role) for link in group["links"]}
@@ -225,8 +228,10 @@ def test_all_copilot_contexts_have_registered_pages_and_new_role_nav_links(
         "/consent/global-opt-out",
     }
     admin_only_paths = {"/administration/document-vault"}
-    assert new_paths - audit_only_paths - admin_only_paths <= nav_paths("operator")
-    assert new_paths <= nav_paths("admin")
+    ready_paths = new_paths - ui_visibility.not_ready_paths()
+    assert ready_paths - audit_only_paths - admin_only_paths <= nav_paths("operator")
+    assert ready_paths <= nav_paths("admin")
+    assert ui_visibility.not_ready_paths().isdisjoint(nav_paths("admin"))
     read_only_workbenches = {
         "/ai-evidence-analysis",
         "/assess/evidence-autopopulation",

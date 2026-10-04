@@ -65,7 +65,7 @@
           body.timetable={repeat:repeat.value,at:at.value,zone:zone.value,every_hours:Number(hours.value),day_of_month:Number(day.value),days:dayFields.filter(f=>f.checked).map(f=>Number(f.value))};
           const result=await request('/api/v1/schedules/preview',{timetable:body.timetable});
           if(captured!==epoch)return;
-          message.textContent='Next future runs: '+result.next_runs.map(value=>new Date(value*1000).toLocaleString(undefined,{timeZone:result.zone})).join('; ')+'.';
+          message.textContent='Next future runs: '+result.next_runs.map(value=>window.mvTimeAbsolute?window.mvTimeAbsolute(value,result.zone):new Date(value*1000).toLocaleString(undefined,{timeZone:result.zone})).join('; ')+'.';
         }else message.textContent='The current timetable is preserved. Only the name or future definition changes.';
         reviewed=body;save.disabled=false;
       }catch(error){message.textContent=error.message;}finally{busy=false;preview.disabled=false;}
@@ -112,8 +112,8 @@
     const {box,message}=panel(row,'Schedule history');
     try{
       const data=await request('/api/v1/schedules/definitions/'+encodeURIComponent(schedule.definition_id)+'/history');
-      data.versions.forEach(v=>box.append(node('p','Revision '+v.revision+' · '+v.state+' · '+new Date(v.created_at*1000).toLocaleString()+' · '+v.rationale)));
-      data.schedule.history.forEach(job=>box.append(node('p','Run '+job.id+' · '+job.status+' · '+new Date(job.scheduled_at*1000).toLocaleString())));
+      data.versions.forEach(v=>box.append(node('p','Revision '+v.revision+' · '+v.state+' · '+(window.mvTimeAbsolute ? window.mvTimeAbsolute(v.created_at) : new Date(v.created_at*1000).toLocaleString())+' · '+v.rationale)));
+      data.schedule.history.forEach(job=>box.append(node('p','Run '+job.id+' · '+job.status+' · '+(window.mvTimeAbsolute ? window.mvTimeAbsolute(job.scheduled_at) : new Date(job.scheduled_at*1000).toLocaleString()))));
       message.textContent=data.schedule.history_total+' retained occurrences; showing the most recent 50. Definition history is retained independently.';
       button(box,'Download audit history',()=>{const url=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}));const a=node('a');a.href=url;a.download='schedule-history.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);});
     }catch(error){message.textContent=error.message;}

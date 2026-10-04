@@ -30,14 +30,19 @@
 </style>
 
 {% from "_hero.html" import hero, state %}
+{% from "_empty_state.html" import empty_state %}
 {% set automation_total = schedule_count + trigger_count + event_trigger_count %}
 {% set channels_on = (1 if scheduling_enabled else 0) + (1 if triggers_enabled else 0) + (1 if event_triggers_enabled else 0) %}
+{# The main action: a new schedule, or turning automations on when all are off. #}
+{% set all_off = not scheduling_enabled and not triggers_enabled and not import_enabled %}
+{% set automation_actions %}{% if scheduling_enabled %}<a class="btn btn--primary" href="#auto-new-sched">Create a schedule</a>{% else %}<a class="btn btn--primary" href="/settings#settings-features">Turn on automations</a>{% endif %}{% endset %}
 {% call hero('Always-on operations', 'Automations',
              subtitle='Schedules, triggers & flows',
              lede='Every way your workflows run without you — on a recurring
                    schedule, when another service sends an update, or when something new
                    appears in a connected source. Create them in the
-                   <a href="/workflow-builder">Workflow Builder</a>.' | safe) %}
+                   <a href="/workflow-builder">Workflow Builder</a>.' | safe,
+             actions=automation_actions if (scheduling_enabled or (all_off and can_admin)) else '') %}
   {{ state('Current state',
            automation_total ~ ' automation' ~ ('' if automation_total == 1 else 's') ~ ' configured',
            badge=(channels_on ~ ' of 3 ways to start are on') if channels_on else 'All turned off',
@@ -61,11 +66,9 @@
     <button class="btn btn--ghost" id="auto-sched-retry" type="button">Refresh schedules</button>
     <a href="/login" id="auto-sched-signin" hidden>Sign in again</a>
     <ul class="auto__list" id="auto-sched-list" aria-label="Schedules"></ul>
-    <div class="mv-empty" id="auto-sched-empty" hidden>
-      <p class="mv-empty__title">No schedules yet</p>
-      <p class="mv-empty__body">Create one below, or put a saved workflow on a schedule from the builder.</p>
-      <a class="btn btn--primary" href="#auto-new-sched">Create a schedule</a>
-    </div>
+    {{ empty_state('No schedules yet',
+                   'Schedules you create appear here with their next run. Create one below, or put a saved workflow on a schedule from the builder.',
+                   action_label='Create a schedule', action_href='#auto-new-sched', id='auto-sched-empty', hidden=true) }}
     <details id="auto-new-sched" class="auto__new">
       <summary><span role="heading" aria-level="3">Create a schedule</span></summary>
       <form id="auto-new-form" novalidate>
@@ -140,7 +143,7 @@
           <input id="auto-new-advanced" class="input" type="text" maxlength="120" autocomplete="off" spellcheck="false">
         </details>
         <p class="auto__hint" id="auto-new-preview" role="status" aria-live="polite"></p>
-        <button class="btn btn--primary" type="submit" id="auto-new-save">Create schedule</button>
+        <button class="btn" type="submit" id="auto-new-save">Create schedule</button>
       </form>
     </details>
   </section>
@@ -155,11 +158,9 @@
     <p class="auto__hint">Start a workflow the moment another system calls in — a form submission, a new ticket, a payment event.</p>
     <div class="auto__warn" id="auto-trig-nosecret" hidden>Incoming requests are not ready yet. Ask your administrator to finish connecting and securing this service.</div>
     <ul class="auto__list" id="auto-trig-list" aria-label="Starts from connected services"></ul>
-    <div class="mv-empty" id="auto-trig-empty" hidden>
-      <p class="mv-empty__title">No triggers yet</p>
-      <p class="mv-empty__body">Connect a saved workflow to another service from the builder.</p>
-      <a class="btn btn--primary" href="/workflows">Open Workflows</a>
-    </div>
+    {{ empty_state('No triggers yet',
+                   'Workflows that start when another service calls in appear here. Connect a saved workflow to another service from the builder.',
+                   action_label='Open Workflows', action_href='/workflows', id='auto-trig-empty', hidden=true) }}
   </section>
   {% endif %}
 
@@ -171,10 +172,9 @@
     </div>
     <p class="auto__hint">Lightwork checks connected sources for new items and starts the matching workflow. Each new item supplies the information the workflow needs.</p>
     <ul class="auto__list" id="auto-event-list" aria-label="Starts when new items arrive"></ul>
-    <div class="mv-empty" id="auto-event-empty" hidden>
-      <p class="mv-empty__title">Nothing watches for new items yet</p>
-      <p class="mv-empty__body">Choose a saved workflow and a source below to get started.</p>
-    </div>
+    {{ empty_state('Nothing watches for new items yet',
+                   'Automations that start when a connected source gets a new item appear here. Choose a saved workflow and a source below to add the first one.',
+                   id='auto-event-empty', hidden=true) }}
     <button class="btn btn--ghost" type="button" id="auto-event-poll">Check now</button>
     <p class="auto__hint" id="auto-event-msg" aria-live="polite"></p>
     <details id="auto-event-setup" style="margin-top: var(--space-4);">
@@ -220,7 +220,7 @@
         </select>
       </div>
       <div class="wf__row" style="display:flex; gap: var(--space-3); align-items:center;">
-        <button class="btn btn--primary" type="submit" id="auto-event-create" disabled>Create automation</button>
+        <button class="btn" type="submit" id="auto-event-create" disabled>Create automation</button>
       </div>
     </form>
     </details>
@@ -231,7 +231,7 @@
       <ul class="auto__list" id="oauth-list" aria-label="Connected accounts"></ul>
       <div class="wf__row" style="display:flex; gap: var(--space-3); align-items:center; flex-wrap: wrap; margin-top: var(--space-3);">
         <select id="oauth-provider" aria-label="Provider to connect"></select>
-        <button class="btn btn--primary" type="button" id="oauth-get-url">Connect account</button>
+        <button class="btn" type="button" id="oauth-get-url">Connect account</button>
       </div>
       <p class="auto__hint">You’ll visit the provider to approve access, then return here to finish automatically.</p>
       <p class="auto__hint" id="oauth-msg" role="status" aria-live="polite"></p>
@@ -249,7 +249,7 @@
           <label for="oauth-code">One-time code from the provider</label>
           <input type="text" id="oauth-code" class="input" autocomplete="off" spellcheck="false" />
         </div>
-        <button class="btn btn--primary" type="button" id="oauth-exchange">Finish connecting</button>
+        <button class="btn" type="button" id="oauth-exchange">Finish connecting</button>
       </div>
       </details>
     </div>
@@ -259,7 +259,7 @@
   <section class="auto__section panel" id="auto-flows-section" aria-labelledby="auto-flows-h" hidden>
     <div class="section-head">
       <h2 id="auto-flows-h" tabindex="-1">Flows</h2>
-      <a class="btn btn--primary" href="/flows/designer" id="fd-new">✨ Design a flow</a>
+      <a class="btn" href="/flows/designer" id="fd-new">Design a flow</a>
     </div>
     <p class="auto__hint">Flows connect tasks and actions into a repeatable process. Describe what should happen, review the steps, and publish when ready. Approval steps pause the run for a human decision. <span class="muted" id="auto-flows-count"></span></p>
     <div class="auto__insights" id="flow-insights" role="status" aria-live="polite" hidden
@@ -268,10 +268,9 @@
       <ul class="auto__list" id="flow-insights-list" aria-label="Flow suggestions"></ul>
     </div>
     <ul class="auto__list" id="auto-flows-list" aria-label="Flows"></ul>
-    <div class="mv-empty" id="auto-flows-empty" hidden>
-      <p class="mv-empty__title">No flows yet</p>
-      <p class="mv-empty__body"><a href="/flows/designer">Describe your first flow</a> to get started.</p>
-    </div>
+    {{ empty_state('No flows yet',
+                   'Flows you publish appear here with their recent runs. Describe your first flow in the designer to get started.',
+                   action_label='Describe your first flow', action_href='/flows/designer', id='auto-flows-empty', hidden=true) }}
     <h3 style="margin-top: var(--space-4);">Recent runs</h3>
     <ul class="auto__list" id="auto-flow-runs" aria-label="Flow runs"></ul>
     <span class="auto__hint" id="auto-flows-msg" aria-live="polite"></span>
@@ -308,23 +307,22 @@
       <div class="field">
         <label><input type="checkbox" id="auto-import-dry"> Preview only — do not import</label>
       </div>
-      <button class="btn btn--primary" type="submit">Import</button>
+      <button class="btn" type="submit">Import</button>
     </form>
     </details>
     <ul class="auto__list" id="auto-import-results" aria-label="Import results"></ul>
   </section>
   {% endif %}
 
-  {% if not scheduling_enabled and not triggers_enabled and not import_enabled %}
-  <div class="mv-empty">
-    <p class="mv-empty__title">Automations are turned off</p>
-    {% if can_admin %}
-    <p class="mv-empty__body">Turn on schedules or starts from other services in Settings to use this page.</p>
-    <a class="btn btn--primary" href="/settings#settings-features">Turn on automations</a>
-    {% else %}
-    <p class="mv-empty__body">An administrator can turn on schedules and starts from other services in Settings.</p>
-    {% endif %}
-  </div>
+  {% if all_off %}
+  {% if can_admin %}
+  {{ empty_state('Automations are turned off',
+                 'Schedules, starts from other services and imports appear here once they are on. Turn them on in Settings to use this page.',
+                 action_label='Turn on automations', action_href='/settings#settings-features') }}
+  {% else %}
+  {{ empty_state('Automations are turned off',
+                 'Schedules, starts from other services and imports appear here once they are on. An administrator can turn them on in Settings.') }}
+  {% endif %}
   {% endif %}
 </div>
 
@@ -389,6 +387,15 @@
   document.addEventListener('lightwork:workspace-changed',forgetSchedules);
   document.addEventListener('lightwork:connection-access-lost',forgetSchedules);
   document.getElementById('auto-sched-retry')?.addEventListener('click',loadSchedules);
+  // "Create a schedule" links (page header, empty state) open the form below.
+  document.addEventListener('click', function (event) {
+    var link = event.target.closest && event.target.closest('a[href="#auto-new-sched"]');
+    var form = document.getElementById('auto-new-sched');
+    if (!link || !form) return;
+    event.preventDefault(); form.open = true;
+    form.scrollIntoView({ block: 'nearest' });
+    var first = form.querySelector('input, select, textarea'); if (first) first.focus();
+  });
   async function loadSchedules() {
     if (!schedList) return;
     var serial=++schedSerial, controller=new AbortController();
@@ -409,11 +416,11 @@
       if (!Array.isArray(data.schedules) || typeof data.context!=='string' || data.schedules.some(function (item) { return !item || typeof item.id!=='number'; })) throw new Error('Unreadable schedules.');
       if (schedContext && schedContext!==data.context) { forgetSchedules(); schedStatus.textContent='Workspace changed. Refresh this page to review current schedules.'; return; }
       schedContext=data.context; schedReady=true; schedLoadedAt=new Date();
-      schedStatus.textContent='Schedules checked at '+schedLoadedAt.toLocaleTimeString()+'.';
+      schedStatus.textContent='Schedules checked at '+(window.mvTimeAbsolute ? window.mvTimeAbsolute(schedLoadedAt.getTime()) : schedLoadedAt.toLocaleTimeString())+'.';
       document.getElementById('auto-sched-signin').hidden=true;
     } catch (error) {
       if (serial!==schedSerial) return;
-      schedStatus.textContent='Schedules are unavailable. '+(schedLoadedAt ? 'Rows below were last checked at '+schedLoadedAt.toLocaleString()+'. ' : '')+'Refresh to try again. No changes can be made until the current list is known.'; return;
+      schedStatus.textContent='Schedules are unavailable. '+(schedLoadedAt ? 'Rows below were last checked at '+(window.mvTimeAbsolute ? window.mvTimeAbsolute(schedLoadedAt.getTime()) : schedLoadedAt.toLocaleString())+'. ' : '')+'Refresh to try again. No changes can be made until the current list is known.'; return;
     } finally { clearTimeout(timer); }
     var items=data.schedules;
     schedList.textContent='';
@@ -910,7 +917,7 @@
                   });
                   heldCard.appendChild(heldFields);
                   heldCard.appendChild(el('p', 'muted', 'Recorded reason: ' + held.reason));
-                  heldCard.appendChild(el('p', 'muted', 'Recorded by ' + held.decided_by + ' on ' + new Date(Number(held.decided_at) * 1000).toLocaleString()));
+                  heldCard.appendChild(el('p', 'muted', 'Recorded by ' + held.decided_by + ' on ' + (window.mvTimeAbsolute ? window.mvTimeAbsolute(Number(held.decided_at)) : new Date(Number(held.decided_at) * 1000).toLocaleString())));
                   var repair = el('button', 'btn btn--ghost', 'Confirm recorded decision');
                   repair.type = 'button'; heldCard.appendChild(repair);
                   var repairStatus = el('span', 'muted'); repairStatus.setAttribute('role', 'status');
@@ -952,7 +959,7 @@
                 result.submissions.forEach(function (submission) {
                   var card = el('div', 'mv-row');
                   var received = new Date(Number(submission.received_at) * 1000);
-                  card.appendChild(el('strong', '', 'Received ' + (isNaN(received.getTime()) ? 'earlier' : received.toLocaleString())));
+                  card.appendChild(el('strong', '', 'Received ' + (isNaN(received.getTime()) ? 'earlier' : window.mvTimeAbsolute ? window.mvTimeAbsolute(received.getTime()) : received.toLocaleString())));
                   var details = document.createElement('dl');
                   Object.entries(submission.fields || {}).forEach(function (pair) {
                     details.appendChild(el('dt', '', mvHuman(pair[0])));
@@ -1269,7 +1276,7 @@
         testBtn.addEventListener('click', function () { testConn(p.name, p.label, testBtn); });
         actions.appendChild(testBtn);
         if (st.expired) {
-          var again = el('button', 'btn btn--primary', 'Reconnect'); again.type = 'button';
+          var again = el('button', 'btn', 'Reconnect'); again.type = 'button';
           again.addEventListener('click', function () { reconnect(p.name); });
           actions.appendChild(again);
         }
@@ -1295,7 +1302,7 @@
         if (r.ok && body.ok) { mvToast(label + ' is connected and working'); loadOAuth(); }
         else if (r.ok || r.status === 401) {
           oMsg.textContent = label + ' needs to be reconnected.';
-          var again = el('button', 'btn btn--primary', 'Reconnect ' + label); again.type = 'button';
+          var again = el('button', 'btn', 'Reconnect ' + label); again.type = 'button';
           again.addEventListener('click', function () { reconnect(name); });
           oMsg.appendChild(document.createTextNode(' ')); oMsg.appendChild(again);
         } else { mvFail(r, 'test ' + label); }
@@ -1454,7 +1461,7 @@
           run.origin.indexOf('event:v2:') === 0
             ? 'Started by ' + mvHuman(run.origin.split(':').slice(4).join(':'))
             : (ORIGIN_WORDS[run.origin] || mvHuman(run.origin)));
-        if (run.cost_dollars) bits.push('$' + Number(run.cost_dollars).toFixed(2));
+        if (run.cost_dollars) bits.push(window.mvMoney ? window.mvMoney(run.cost_dollars) : '$' + Number(run.cost_dollars).toFixed(2));
         if (bits.length) main.appendChild(el('div', 'mv-row__sub', bits.join(' · ')));
         if (run.status === 'paused_approval') {
           var card = run.human && run.human.approval_card;

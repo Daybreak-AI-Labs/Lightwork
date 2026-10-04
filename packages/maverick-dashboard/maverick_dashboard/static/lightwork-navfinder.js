@@ -1,6 +1,6 @@
 /* Accessible, registry-backed navigation finder for the Lightwork shell.
    The server renders every allowed destination into the dialog. This module
-   only filters and activates those links; it never constructs a route. */
+   only filters, ranks and activates those links; it never constructs a route. */
 (function (global) {
   "use strict";
 
@@ -30,6 +30,7 @@
     var activeIndex = -1;
     var returnFocus = null;
     var isOpen = false;
+    var placedOrder = "";
     // The destinations are server-rendered by GET /nav/finder (the same
     // role-filtered registry as the sidebar) and inserted on first open, so
     // every page does not carry the whole list. The list is never built here.
@@ -66,7 +67,59 @@
     }
 
     function normalise(value) {
-      return String(value || "").trim().toLowerCase();
+      return String(value || "").replace(/[\u2018\u2019]/g, "'").replace(/\s+/g, " ").trim().toLowerCase();
+    }
+
+    // How well a page's own names match what was typed, strongest first: the
+    // whole name, its start, the start of each word, then words inside it.
+    // Labels outrank the page heading, which outranks a synonym; a match only
+    // in the group, address or aliases ranks below every named match.
+    var NAME_FIELDS = [["data-label", 3], ["data-heading", 2], ["data-synonyms", 1]];
+
+    function nameTier(name, query, terms) {
+      if (name === query) return 4;
+      if (name.indexOf(query) === 0) return 3;
+      var words = name.split(/[^\p{L}\p{N}']+/u);
+      var starts = terms.every(function (term) {
+        return words.some(function (word) { return word.indexOf(term) === 0; });
+      });
+      if (starts) return 2;
+      return terms.every(function (term) { return name.indexOf(term) !== -1; }) ? 1 : 0;
+    }
+
+    function score(option, query, terms) {
+      var best = 0;
+      NAME_FIELDS.forEach(function (field) {
+        String(option.getAttribute(field[0]) || "").split("|").forEach(function (name) {
+          var tier = name ? nameTier(normalise(name), query, terms) : 0;
+          if (tier) best = Math.max(best, tier * 4 + field[1]);
+        });
+      });
+      if (best) return best;
+      var haystack = normalise(option.getAttribute("data-search"));
+      return terms.every(function (term) { return haystack.indexOf(term) !== -1; }) ? 1 : 0;
+    }
+
+    // Best matches first; equal matches keep the sidebar's registry order.
+    function rankPages(query) {
+      var terms = query.split(" ").filter(Boolean);
+      return pageOptions.map(function (option, index) {
+        return {option: option, index: index, score: terms.length ? score(option, query, terms) : 1};
+      }).sort(function (a, b) { return b.score - a.score || a.index - b.index; });
+    }
+
+    // Keep the listbox in the order people hear and arrow through: ranked
+    // pages first, then records and settings as they arrive.
+    function placePages(ranked) {
+      if (typeof results.insertBefore !== "function") return;
+      var after = null;
+      for (var child = results.firstElementChild; child; child = child.nextElementSibling) {
+        if (!child.querySelector || !child.querySelector("[data-navfinder-target]")) { after = child; break; }
+      }
+      ranked.forEach(function (entry) {
+        var item = entry.option.parentElement;
+        if (item && item.parentElement === results) results.insertBefore(item, after);
+      });
     }
 
     function visibleOptions() {
@@ -98,27 +151,35 @@
     }
 
     function filterResults() {
-      var terms = normalise(input.value).split(/\s+/).filter(Boolean);
-      pageOptions.forEach(function (option) {
-        var haystack = normalise(option.getAttribute("data-search"));
-        var matches = terms.every(function (term) { return haystack.indexOf(term) !== -1; });
-        option.hidden = !matches;
-        if (option.parentElement) option.parentElement.hidden = !matches;
+      var ranked = rankPages(normalise(input.value));
+      ranked.forEach(function (entry) {
+        var hidden = !entry.score;
+        entry.option.hidden = hidden;
+        if (entry.option.parentElement) entry.option.parentElement.hidden = hidden;
       });
+      var order = ranked.map(function (entry) { return entry.index; }).join(",");
+      if (order !== placedOrder) {
+        placePages(ranked);
+        placedOrder = order;
+      }
+      options = ranked.map(function (entry) { return entry.option; }).concat(recordOptions, settingOptions);
 
       var visible = visibleOptions();
       var pages = pageOptions.filter(function (option) { return !option.hidden; }).length;
       if (global.LightworkI18n) {
         var locale = global.LightworkI18n;
         locale.set(count, locale.plural("{count} page", "{count} pages", pages));
-        if (recordOptions.length) {
+        [[recordOptions, "{count} record shown", "{count} records shown"],
+         [settingOptions, "{count} setting shown", "{count} settings shown"]].forEach(function (part) {
+          if (!part[0].length) return;
           count.appendChild(doc.createTextNode(", "));
-          var recordCount = doc.createElement("span");
-          locale.set(recordCount, locale.plural("{count} record shown", "{count} records shown", recordOptions.length));
-          count.appendChild(recordCount);
-        }
+          var partCount = doc.createElement("span");
+          locale.set(partCount, locale.plural(part[1], part[2], part[0].length));
+          count.appendChild(partCount);
+        });
       } else count.textContent = (pages === 1 ? "1 page" : pages + " pages") +
-        (recordOptions.length ? ", " + recordOptions.length + " records shown" : "");
+        (recordOptions.length ? ", " + recordOptions.length + " records shown" : "") +
+        (settingOptions.length ? ", " + settingOptions.length + (settingOptions.length === 1 ? " setting shown" : " settings shown") : "");
       empty.hidden = visible.length !== 0;
       results.hidden = visible.length === 0;
       setActive(visible.length ? 0 : -1, false);

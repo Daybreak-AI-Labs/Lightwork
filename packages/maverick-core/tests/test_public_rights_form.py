@@ -189,10 +189,16 @@ def test_validation_messages_never_mention_whether_an_email_is_known(prop):
         _submit(_payload(relationship="alien"), ip="198.51.100.13")
     with pytest.raises(prf.PublicRightsFormError, match="at most"):
         _submit(_payload(message="x" * 4001), ip="198.51.100.14")
-    # The same acceptance text whether or not anyone with that email exists.
+    # The same acceptance text whether or not anyone with that email exists;
+    # only each request's own reference differs.
     first = _submit(_payload(email="new@example.com"))
     second = _submit(_payload(email="new@example.com"), ip="198.51.100.9")
-    assert first == second
+    assert first["reference"] != second["reference"]
+
+    def without_reference(out):
+        return {**out, "reference": "", "message": out["message"].replace(out["reference"], "")}
+
+    assert without_reference(first) == without_reference(second)
 
 
 def test_verification_link_valid_then_reused_then_expired(prop, _isolate):
@@ -288,3 +294,95 @@ def test_default_sender_without_account_reports_not_sent(monkeypatch):
     monkeypatch.delenv("EMAIL_APP_PASSWORD", raising=False)
     sent, reason = prf._default_sender("a@b.co", "s", "b")
     assert sent is False and "no sending account" in reason
+
+
+_NO_ACCOUNT = "no sending account configured ([email] / EMAIL_USER)"
+
+
+def test_acceptance_gives_a_reference_and_promises_email_only_when_sent(prop, _isolate):
+    out = _submit(_payload())
+    from maverick import privacy_ops
+
+    reference = privacy_ops.list_dsars()[0]["id"]
+    assert out["reference"] == reference and out["email_sent"] is True
+    assert reference in out["message"] and "If that email" in out["message"]
+
+    prf.set_mail_sender(lambda *_: (False, _NO_ACCOUNT))
+    out = _submit(_payload(email="other@example.com"), ip="198.51.100.4")
+    reference = next(r["id"] for r in privacy_ops.list_dsars() if r["subject_id"] == "other@example.com")
+    assert out["email_sent"] is False and out["reference"] == reference
+    assert reference in out["message"]
+    assert "we have sent" not in out["message"].lower()
+    assert "privacy@acme.example" in out["message"]  # who to contact instead
+
+
+def test_honeypot_answers_in_the_same_shape_without_a_record(prop, _isolate):
+    real = _submit(_payload())
+    bot = _submit(_payload(email="bot@example.com", website="http://spam.example"),
+                  ip="198.51.100.9")
+    from maverick import privacy_ops
+
+    assert set(bot) == set(real)
+    assert bot["email_sent"] is real["email_sent"]
+    assert bot["reference"].startswith("DSAR-") and bot["reference"] != real["reference"]
+    assert [r["subject_id"] for r in privacy_ops.list_dsars()] == ["casey@example.com"]
+
+
+def test_notice_log_counts_only_notices_that_were_sent(prop, _isolate):
+    prf.set_mail_sender(lambda *_: (False, _NO_ACCOUNT))
+    _submit(_payload())
+    from maverick import privacy_ops
+
+    record = privacy_ops.list_dsars()[0]
+    log = prf.notice_log(record)
+    assert log["sent"] == 0 and log["not_sent"] == 1
+    item = log["items"][0]
+    assert item["sent"] is False and item["label"] == "Confirm the email address"
+    assert item["problem"] == "Lightwork has no email account to send from."
+    assert "Settings" in item["next_step"] and "another way" in item["next_step"]
+    assert "EMAIL_USER" in item["technical"]
+    assert "EMAIL_USER" not in item["problem"] + item["next_step"]
+    prf.set_mail_sender(lambda *_: (True, ""))
+    prf.send_notice(record["id"], "identity_followup", actor="ops")
+    log = prf.notice_log(privacy_ops.get_dsar(record["id"]))
+    assert log["sent"] == 1 and log["not_sent"] == 1
+
+
+def test_send_result_explains_an_unsent_notice_plainly(prop, _isolate):
+    _submit(_payload())
+    from maverick import privacy_ops
+
+    request_id = privacy_ops.list_dsars()[0]["id"]
+    prf.set_mail_sender(lambda *_: (False, _NO_ACCOUNT))
+    out = prf.send_notice(request_id, "acknowledgement", actor="ops")
+    assert out["sent"] is False
+    assert out["problem"] == "Lightwork has no email account to send from."
+    assert out["next_step"]
+
+
+def test_a_sent_refusal_is_a_recorded_answer_with_its_lawful_reason(prop, _isolate):
+    _submit(_payload())
+    from maverick import privacy_ops
+
+    request_id = privacy_ops.list_dsars()[0]["id"]
+    prf.send_notice(request_id, "refusal", actor="ops",
+                    extra={"lawful_basis": "Manifestly unfounded"})
+    privacy_ops.close_dsar(request_id, closed_by="ops")
+    entry = privacy_ops.get_dsar(request_id)["public_form"]["emails"][-1]
+    assert entry["kind"] == "refusal" and entry["lawful_basis"] == "Manifestly unfounded"
+    dsar = privacy_ops.program_report(assessment_types={"none"})["dsar"]
+    assert dsar["answered"] == 1 and dsar["closed_without_response"] == 0
+
+
+def test_an_unsent_completion_is_not_an_answer(prop, _isolate):
+    _submit(_payload())
+    from maverick import privacy_ops
+
+    request_id = privacy_ops.list_dsars()[0]["id"]
+    prf.set_mail_sender(lambda *_: (False, _NO_ACCOUNT))
+    prf.send_notice(request_id, "completion", actor="ops",
+                    extra={"secure_link": "https://acme.example/dsar/response/abc",
+                           "secure_link_expires": "2026-11-01"})
+    privacy_ops.close_dsar(request_id, closed_by="ops")
+    dsar = privacy_ops.program_report(assessment_types={"none"})["dsar"]
+    assert dsar["answered"] == 0 and dsar["closed_without_response"] == 1

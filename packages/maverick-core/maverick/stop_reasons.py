@@ -21,6 +21,11 @@ from dataclasses import dataclass
 RAW_TEXT_LIMIT = 1000
 _MESSAGE_LIMIT = 600
 
+#: Where AI provider keys live: Settings > Connections > Provider keys, with
+#: the row of the provider that needs attention focused. The Connections page
+#: is for connected accounts (and may be turned off), not AI keys.
+AI_PROVIDER_KEYS_HREF = "/settings?focus=ai-provider#settings-integrations"
+
 _GENERIC_MESSAGE = "The run stopped before finishing."
 _GENERIC_ACTION = "Try again. If it keeps stopping, ask an administrator to check the logs."
 
@@ -87,26 +92,11 @@ _RULES: tuple[tuple[str, re.Pattern[str], str, str, str | None, str | None], ...
         None, None,
     ),
     (
-        "specialist_setup",
-        _rx(r"agent build failed:.*required workflow tools unavailable:.*\bweb_search\b"),
-        "This specialist couldn't start because Web search is unavailable. No work has started.",
-        "Ask an administrator to turn on Web search.",
-        "/settings/all?id=capabilities.web_search", "Review Web search setup",
-    ),
-    (
-        "specialist_setup",
-        _rx(r"agent build failed:.*required workflow tools unavailable:",
-            r"cannot start because its setup needs review"),
-        "This specialist couldn't start because an action it needs is unavailable. No work has started.",
-        "Ask an administrator to review this specialist's setup.",
-        "/agents", "Browse specialists",
-    ),
-    (
         "provider_authentication",
         _rx(r"^provider_error:authentication$", r"\bAuthenticationError\b"),
         "The AI connection needs attention.",
         "Ask an administrator to check the AI account and key, then try again.",
-        "/connections", "Open AI connections",
+        AI_PROVIDER_KEYS_HREF, "Open AI provider keys",
     ),
     (
         "provider_rate_limit",
@@ -121,7 +111,7 @@ _RULES: tuple[tuple[str, re.Pattern[str], str, str, str | None, str | None], ...
         _rx(r"^provider_error:model_not_found$", r"\bNotFoundError\b"),
         "The selected AI model is unavailable.",
         "Ask an administrator to choose an available model, then try again.",
-        "/connections", "Open AI connections",
+        AI_PROVIDER_KEYS_HREF, "Open AI provider keys",
     ),
     (
         "provider_unavailable",
@@ -137,14 +127,14 @@ _RULES: tuple[tuple[str, re.Pattern[str], str, str, str | None, str | None], ...
             r"\bAPITimeoutError\b"),
         "Lightwork couldn't reach the AI service.",
         "Check the AI connection and try again.",
-        "/connections", "Open AI connections",
+        AI_PROVIDER_KEYS_HREF, "Open AI provider keys",
     ),
     (
         "provider_configuration",
         _rx(r"^provider_error:configuration$"),
         "The AI connection could not complete this request.",
         "Ask an administrator to check the AI connection, then try again.",
-        "/connections", "Open AI connections",
+        AI_PROVIDER_KEYS_HREF, "Open AI provider keys",
     ),
     (
         "workspace_paused",
@@ -181,13 +171,39 @@ _RULES: tuple[tuple[str, re.Pattern[str], str, str, str | None, str | None], ...
         "/spending-limits", "Open Spending limits",
     ),
     (
+        # The kernel refuses to build a specialist whose workflow needs a tool
+        # this workspace does not have; no model work has started. Web search
+        # alone is a switch an administrator can turn on.
+        "specialist_needs_web_search",
+        _rx(r"cannot deploy: required workflow tools unavailable:\s*web_search\."),
+        "This specialist couldn't start because Web search is unavailable in this workspace. "
+        "No work was started.",
+        "Ask an administrator to enable Web search, then check setup again before restarting.",
+        "/settings/all?id=capabilities.web_search", "Review Web search setup",
+    ),
+    (
+        "specialist_needs_connection",
+        _rx(r"cannot deploy: required workflow tools unavailable"),
+        "This specialist needs an action that isn't available in this workspace. "
+        "No work was started.",
+        "Ask an administrator to review its required actions and tool connections.",
+        "/mcp", "Open Tool servers",
+    ),
+    (
+        "specialist_setup",
+        _rx(r"cannot start because its setup needs review"),
+        "This specialist couldn't start because its setup needs review. No work was started.",
+        "Ask an administrator to review this specialist's setup.",
+        "/agents", "Browse specialists",
+    ),
+    (
         "provider_not_ready",
         _rx(r"api[_ ]?key", r"provider", r"ConnectError", r"connection (refused|reset|error)",
             r"could not (reach|connect)", r"model route", r"AuthenticationError",
             r"timed out", r"ReadTimeout"),
         "Lightwork couldn't reach the AI service.",
         "Connect an AI service, then try again.",
-        "/connections", "Connect an AI service",
+        AI_PROVIDER_KEYS_HREF, "Connect an AI service",
     ),
     (
         "permission_denied",

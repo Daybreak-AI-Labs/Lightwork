@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Rights request form · Lightwork{% endblock %}
 {% block content %}
+{% from "_back_link.html" import back_link with context %}
 <style>
   .prf-grid { display: grid; gap: var(--space-4); grid-template-columns: minmax(20rem, 1fr) minmax(24rem, 1.4fr); }
   .prf-fields { display: grid; gap: .75rem; }
@@ -14,7 +15,7 @@
   @media (max-width: 900px) { .prf-grid { grid-template-columns: 1fr; } }
 </style>
 <div id="prf-page" data-copilot-page="/privacy/rights-form" data-can-admin="{{ 'yes' if can_admin else 'no' }}">
-  <p class="muted" style="margin-bottom: var(--space-2);"><a href="/privacy">← Back to Privacy</a></p>
+  <p class="muted" style="margin-bottom: var(--space-2);">{{ back_link('/privacy', 'Privacy') }}</p>
   <h1 class="page-title">Rights request form</h1>
   <p class="page-subtitle">Let people submit privacy requests from your website. Each request lands in the
     Data requests list with the deadline the chosen law sets, once the person confirms their email address.</p>

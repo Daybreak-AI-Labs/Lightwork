@@ -1,10 +1,13 @@
 {% extends "base.html" %}
 {% block title %}{{ ut("Project team reviews") }} · Lightwork{% endblock %}
 {% block content %}
+{% from "_back_link.html" import back_link with context %}
 <div id="pr-root" data-context="{{ review_context }}">
-  <p><a href="/projects">{{ ui("← Projects") }}</a></p>
-  <h1>{{ ui("Project team reviews") }}</h1>
-  <p>{{ ui("Share a fixed task result with a named workspace reviewer. Their decision applies to that captured result. The owner remains responsible for any changes, final sign-off, or further work on the task.") }}</p>
+  <p>{{ back_link('/projects', 'Projects') }}</p>
+  {% from "_hero.html" import hero %}
+  {{ hero('', ui("Project team reviews"),
+          lede=ui("Share a fixed task result with a named workspace reviewer. Their decision applies to that captured result. The owner remains responsible for any changes, final sign-off, or further work on the task."),
+          compact=true) }}
   <p id="pr-status" role="status" aria-live="polite">{{ ui("Loading your reviews…") }}</p>
   <button id="pr-refresh" class="btn" type="button">{{ ui("Refresh reviews") }}</button>
   <section class="panel" aria-labelledby="pr-inbox-title">

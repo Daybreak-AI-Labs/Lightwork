@@ -1,8 +1,12 @@
 {% extends "public_base.html" %}
 {% block title %}{{ rf.status_title }}{% endblock %}
+{% block public_label %}{{ rf.page_title }}{% endblock %}
+{% block public_footer %}{{ rf.page_title }}{% endblock %}
 {% block content %}
-<section class="panel" style="max-width: 40rem; margin: 0 auto;">
-  <h1>{{ rf.status_title }}</h1>
+{% from "_hero.html" import hero %}
+<div style="width: 100%; max-width: 40rem; margin: 0 auto;">
+{{ hero('', rf.status_title, compact=true) }}
+<section class="panel">
   {% if view %}
     {% if just_verified %}<p role="status">{{ rf.verify_button }} — done. Thank you.</p>{% endif %}
     <dl>
@@ -20,4 +24,5 @@
     <p role="alert">{{ rf.verify_invalid if invalid == 'verify' else rf.status_invalid }}</p>
   {% endif %}
 </section>
+</div>
 {% endblock %}

@@ -2,9 +2,8 @@
 {% block title %}Spending limits · Lightwork{% endblock %}
 {% block content %}
   {% from "_hero.html" import hero, state %}
-  {% macro money(value) %}${{ '{:,.2f}'.format(value or 0) }}{% endmacro %}
   {% macro who(principal) %}{% set p = principal | identity %}<span title="{{ p.raw }}">{{ p.name }}{% if p.detail %} <span class="muted" style="font-weight: normal;">· {{ p.detail }}</span>{% endif %}</span>{% endmacro %}
-  {% macro describe(limit) %}{% if limit %}{{ money(limit.amount) }} {{ period_labels[limit.period] }}{% else %}No limit{% endif %}{% endmacro %}
+  {% macro describe(limit) %}{% if limit %}{{ limit.amount | money }} {{ period_labels[limit.period] }}{% else %}No limit{% endif %}{% endmacro %}
   {% macro limit_fields(prefix, limit, options) %}
     <fieldset style="border: 0; padding: 0; margin: 0; display: flex; flex-direction: column; gap: var(--space-2);">
       <legend class="muted" style="font-size: var(--text-sm); padding: 0 0 var(--space-1);">Choose one</legend>
@@ -29,17 +28,20 @@
     </fieldset>
   {% endmacro %}
 
+  {% from "_empty_state.html" import empty_state %}
+  {% set limits_actions %}<a class="btn btn--primary" href="#workspace-limit">Set a workspace limit</a>{% endset %}
   {% call hero('Administration', 'Spending limits',
                subtitle='Keep costs predictable',
                lede='By default there is no limit on what people can spend. Set a limit for
                      the whole workspace, a limit for everyone, or a limit for one person.
                      When a limit is reached, new work pauses until the limit resets or you
-                     raise it.') %}
+                     raise it.',
+               actions=limits_actions) %}
     {{ state('This month',
-             money(view.workspace_month) ~ ' spent',
+             (view.workspace_month | money) ~ ' spent',
              badge=('Limited' if view.workspace else 'No limit'),
              badge_class=('warn' if view.workspace else 'ok'),
-             copy=money(view.workspace_today) ~ ' spent today across the workspace.') }}
+             copy=(view.workspace_today | money) ~ ' spent today across the workspace.') }}
   {% endcall %}
 
   {% if saved %}
@@ -55,21 +57,21 @@
   </div>
   {% endif %}
 
-  <div class="section-head"><h2>Whole workspace</h2></div>
+  <div class="section-head"><h2 id="workspace-limit" tabindex="-1">Whole workspace</h2></div>
   <div class="panel">
     <p class="muted" style="margin-top: 0;">
       The most everyone together may spend. Currently: <strong>{{ describe(view.workspace) }}</strong>.
-      {{ money(view.workspace_today) }} spent today, {{ money(view.workspace_month) }} this month.
+      {{ view.workspace_today | money }} spent today, {{ view.workspace_month | money }} this month.
     </p>
     {% if organization_cap %}
-    <p class="muted">This workspace also has a daily limit of <strong>{{ money(organization_cap) }}</strong>,
+    <p class="muted">This workspace also has a daily limit of <strong>{{ organization_cap | money }}</strong>,
       set on the <a href="/tenants">Workspaces</a> page. Whichever limit is reached first applies.</p>
     {% endif %}
     <form method="post" action="/spending-limits/workspace" data-limit-form="the workspace"
           data-limit-amount="{{ view.workspace.amount if view.workspace else '' }}"
           style="display: flex; flex-wrap: wrap; gap: var(--space-4); align-items: flex-end;">
       {{ limit_fields('Workspace limit', view.workspace, workspace_periods) }}
-      <button type="submit" class="btn btn--primary">Save workspace limit</button>
+      <button type="submit" class="btn">Save workspace limit</button>
     </form>
   </div>
 
@@ -85,7 +87,7 @@
           data-limit-amount="{{ view.default.amount if view.default else '' }}"
           style="display: flex; flex-wrap: wrap; gap: var(--space-4); align-items: flex-end;">
       {{ limit_fields('Limit for everyone', view.default, periods) }}
-      <button type="submit" class="btn btn--primary">Save limit for everyone</button>
+      <button type="submit" class="btn">Save limit for everyone</button>
     </form>
   </div>
 
@@ -103,8 +105,8 @@
         <tr>
           <td>{{ who(row.principal) }}</td>
           <td>{% if row.limit %}{{ describe(row.limit) }}{% elif row.uses_default %}{{ describe(view.default) }} <span class="muted">(everyone's limit)</span>{% else %}<span class="muted">No limit</span>{% endif %}</td>
-          <td>{{ money(row.today) }}</td>
-          <td>{{ money(row.month) }}</td>
+          <td>{{ row.today | money }}</td>
+          <td>{{ row.month | money }}</td>
           <td>
             {% if row.limit %}
             <form method="post" action="/spending-limits/person" style="display: inline;"
@@ -148,12 +150,12 @@
           {% endfor %}
         </select>
       </label>
-      <button type="submit" class="btn btn--primary">Save personal limit</button>
+      <button type="submit" class="btn">Save personal limit</button>
     </form>
     {% else %}
-    <p class="muted" style="margin: 0;">Nobody has been added yet. Add people on the
-      <a href="/users">Users</a> page and they will appear here, ready for a personal limit.</p>
-    <p style="margin-bottom: 0;"><a class="btn" href="/users">Go to Users</a></p>
+    {{ empty_state('Nobody has been added yet',
+                   'People with a role appear here with what they spent, ready for a personal limit. Add people on the Users page.',
+                   action_label='Go to Users', action_href='/users', compact=true) }}
     {% endif %}
   </div>
 
@@ -165,7 +167,6 @@
   <script>
   (function () {
     'use strict';
-    function money(v) { return '$' + Number(v).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}); }
     function guard(form, question) {
       form.addEventListener('submit', function (event) {
         if (form.dataset.confirmed === 'true') { delete form.dataset.confirmed; return; }
@@ -191,7 +192,7 @@
         }
         var amount = parseFloat((form.querySelector('input[name="amount"]') || {}).value);
         if (isFinite(amount) && amount > current) {
-          return 'Raise the spending limit for ' + who + ' from ' + money(current) + ' to ' + money(amount) + '?';
+          return 'Raise the spending limit for ' + who + ' from ' + window.mvMoney(current) + ' to ' + window.mvMoney(amount) + '?';
         }
         return '';
       });

@@ -83,3 +83,15 @@ def test_first_observation_delivers_only_completions_after_enrollment(tmp_path, 
     again = inbox.refresh([old, fresh], alerts.validate_preferences({}),
                           now=now + 3, enrolled_at=now)
     assert [item['id'] for item in again['items']] == [item['id'] for item in result['items']]
+
+
+def test_in_app_alerts_are_on_unless_an_administrator_turned_them_off():
+    assert alerts.PERSONAL_ALERTS_DEFAULT is True
+    assert alerts.personal_alerts_on(None) is True and alerts.personal_alerts_on({}) is True
+    assert alerts.personal_alerts_on({"personal_alerts": True}) is True
+    assert alerts.personal_alerts_on({"personal_alerts": False}) is False  # an explicit choice stays
+    assert alerts.personal_alerts_on({"personal_alerts": "yes"}) is False  # only a real yes turns it on
+    # Out of the box a person hears about finished work, questions and
+    # approvals waiting on them; nothing goes to another channel.
+    assert {"completed", "needs-decision"} <= set(alerts.DEFAULTS["events"])
+    assert alerts.DEFAULTS["external_links"] == [] and alerts.DEFAULTS["mode"] == "immediate"

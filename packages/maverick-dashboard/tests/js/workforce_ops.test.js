@@ -188,3 +188,26 @@ test("tasks coming due list overdue first with links and waiting questions", asy
   await ui.settle();
   assert.ok(ui.calls.some((c) => c.url === "/api/v1/workforce-ops/upcoming?days=7"));
 });
+
+test("nothing coming due uses the shared empty state and offers a longer period", async (t) => {
+  const markup = '<div id="mv-toasts"></div><div id="mv-toasts-alert"></div>' + partial("_upcoming_tasks.html");
+  const dom = new JSDOM(markup, { url: "https://lightwork.example/goals", runScripts: "outside-only" });
+  t.after(() => dom.window.close());
+  const { window } = dom;
+  window.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} });
+  window.fetch = async () => new Response(JSON.stringify({ days: 30, tasks: [] }),
+    { status: 200, headers: { "Content-Type": "application/json" } });
+  window.eval(read("lightwork-ui.js"));
+  window.eval(jobs);
+  window.eval(workforce);
+  const settle = async () => { for (let i = 0; i < 60; i++) await new Promise((done) => setImmediate(done)); };
+  await settle();
+  const empty = window.document.querySelector("#wo-up .mv-empty.mv-empty--compact");
+  assert.ok(empty, "the shared empty state is shown");
+  assert.equal(empty.querySelector(".mv-empty__title").textContent, "Nothing is due in the next 30 days");
+  assert.match(empty.querySelector(".mv-empty__body").textContent, /Choose a longer period above/);
+  window.document.getElementById("wo-up-days").value = "90";
+  window.document.getElementById("wo-up-days").dispatchEvent(new window.Event("change"));
+  await settle();
+  assert.doesNotMatch(window.document.getElementById("wo-up").textContent, /longer period/);
+});

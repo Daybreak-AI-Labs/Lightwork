@@ -17,7 +17,7 @@ def overlay(tmp_path, monkeypatch):
 
 def test_page_lists_styles():
     t = client.get("/styles").text
-    assert "Output styles" in t
+    assert "Response styles" in t
     assert "concise" in t and "executive" in t
     assert "Default" in t  # the clear/none option
 

@@ -1,7 +1,8 @@
 {% extends "base.html" %}
 {% block title %}Content access · Lightwork{% endblock %}
 {% block content %}
-<h1>Content access</h1>
+{% from "_hero.html" import hero %}
+{{ hero('Governance', 'Content access', compact=true) }}
 <section class="panel"><p>Employee tasks and chats are private to their owner. Administrators govern policy and audit metadata. A specific task read, subject export or approval-card read needs a stated purpose, approval by a different administrator or the content owner, and an expiry of at most one hour. This never grants changing or publishing the employee's task or opening another task in its conversation.</p>
 <p>A person with permission to operate can request an exact approval-card read. The grant only reveals that reviewed card. Voting still independently requires the current review role, claim and separation-of-duties checks; changing the card invalidates the content grant.</p>
 <p>Shared result packets keep their assigned reviewer access. Existing employee-owned work uses its recorded owner. Unowned legacy tasks require a separate review; no employee ownership is guessed.</p>
@@ -40,7 +41,7 @@
       const card = document.createElement('article'); card.className = 'panel';
       paragraph(card, row.label + ' — ' + row.status + (row.expired ? ' (expired)' : '') + (row.audit_pending ? ' · activity record pending' : ''));
       paragraph(card, 'Requested by ' + row.requester + ' for ' + row.purpose.replaceAll('_', ' ') + '; ' + row.minutes + ' minutes.');
-      if (row.expires_at) paragraph(card, 'Expires ' + new Date(row.expires_at * 1000).toLocaleString());
+      if (row.expires_at) paragraph(card, 'Expires ' + (window.mvTimeAbsolute ? window.mvTimeAbsolute(row.expires_at) : new Date(row.expires_at * 1000).toLocaleString()));
       if (row.status === 'requested' && row.can_review) { button(card, 'Approve this scope', () => decide(row, 'approve')); button(card, 'Deny', () => decide(row, 'deny')); }
       if (row.can_revoke && ['requested', 'approved'].includes(row.status)) button(card, 'Revoke access', () => decide(row, 'revoke'));
       if (row.can_revoke && row.audit_pending) button(card, 'Retry activity recording', () => decide(row, 'retry_audit'));

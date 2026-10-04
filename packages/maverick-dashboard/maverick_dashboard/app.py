@@ -72,6 +72,7 @@ from .api import router as api_router
 from .api_schemas import GOAL_DESCRIPTION_MAX_LENGTH, GOAL_TITLE_MAX_LENGTH
 from .auth import (
     BOARD_SCOPE_DETAIL,
+    PUBLIC_STATIC_PATHS,
     SELF_AUTH_WEBHOOK_PATHS,
     AutomationAuthorizationError,
     assert_goal_access,
@@ -222,13 +223,16 @@ templates.env.bytecode_cache = _template_bytecode_cache()
 
 
 def _format_datetime(ts, mode: str = "relative"):
-    """Jinja filter: epoch seconds -> a ``<time>`` the viewer reads in their zone.
+    """Jinja filter: epoch seconds or ISO 8601 text -> a ``<time>`` the viewer
+    reads in their zone.
 
-    The server text is the full date, time and zone (UTC), so a page without
-    JavaScript still says when; ``lightwork-ui.js`` (``mvFormatTimes``) then
-    rewrites it in the viewer's time zone -- relative with the absolute time on
-    hover (default), or absolute with ``mode="absolute"``. Never a bare
-    ``HH:MM:SS`` and never a raw epoch.
+    The server text is the full date, time and zone ("4 Oct 2026, 14:01 UTC"),
+    so a page without JavaScript still says when; ``lightwork-ui.js``
+    (``mvFormatTimes``) then rewrites it in the viewer's time zone -- relative
+    with the absolute time on hover (default), absolute with
+    ``mode="absolute"``, or the calendar date alone with ``mode="date"`` (a
+    ``YYYY-MM-DD`` value stays that calendar day). Never a bare ``HH:MM:SS``,
+    an ISO string or a raw epoch.
     """
     import datetime as _dt
 
@@ -236,12 +240,24 @@ def _format_datetime(ts, mode: str = "relative"):
 
     if ts is None or ts == "":
         return "-"
+    if mode == "date" and isinstance(ts, str) and re.fullmatch(r"\d{4}-\d{2}-\d{2}", ts.strip()):
+        try:
+            day = _dt.date.fromisoformat(ts.strip())
+        except ValueError:
+            return str(ts)
+        return Markup(f'<time datetime="{day.isoformat()}" data-mv-time="{day.isoformat()}"'
+                      f' data-mv-time-mode="date">{_plain_labels.day_text(day)}</time>')
     try:
-        stamp = float(ts)
-        when = _dt.datetime.fromtimestamp(stamp, tz=_dt.timezone.utc)
+        if isinstance(ts, str) and not re.fullmatch(r"\s*-?\d+(?:\.\d+)?\s*", ts):
+            when = _dt.datetime.fromisoformat(ts.strip().replace("Z", "+00:00"))
+            when = (when if when.tzinfo else when.replace(tzinfo=_dt.timezone.utc)).astimezone(_dt.timezone.utc)
+            stamp = when.timestamp()
+        else:
+            stamp = float(ts)
+            when = _dt.datetime.fromtimestamp(stamp, tz=_dt.timezone.utc)
     except (TypeError, ValueError, OverflowError, OSError):
         return str(ts)
-    text = when.strftime("%d %b %Y, %H:%M UTC")
+    text = _plain_labels.datetime_text(stamp, date_only=mode == "date")
     return Markup(
         f'<time datetime="{when.isoformat()}" data-mv-time="{stamp:.3f}"'
         f' data-mv-time-mode="{escape(mode)}">{text}</time>'
@@ -257,6 +273,15 @@ templates.env.filters["identity"] = _idfmt.humanize_principal
 templates.env.filters["role_label"] = _idfmt.role_label
 templates.env.filters["permission_label"] = _idfmt.permission_label
 templates.env.filters["humanize"] = _idfmt.humanize
+# One run-status vocabulary for the chat badge, composer and recents.
+from maverick.channel_approvals import spending_text as _approval_spending  # noqa: E402
+
+from .run_status import status_label as _run_status_label  # noqa: E402
+
+# The spending line every approval surface shares: a sentence, never a mapping.
+templates.env.filters["approval_spending"] = _approval_spending
+
+templates.env.globals["run_status_label"] = _run_status_label
 # Plain labels for model ids, setting sources and sizes (administration pages).
 from . import plain_labels as _plain_labels  # noqa: E402
 
@@ -498,6 +523,51 @@ def _page_role(request: Request, *, global_scope: bool = False) -> str | None:
         return ""
 
 
+def _switched_off_pages() -> frozenset[str]:
+    """Registry pages whose in-app module switch is off right now: the same
+    effective gate chain as each page's banner (api._module_switch_enabled),
+    with every enable gate read once per render."""
+    from . import ui_visibility
+    from .api import _MODULE_SWITCHES, _load_module_config, _module_path_enabled
+
+    try:
+        loaded = _load_module_config()
+    except Exception:  # unreadable configuration: navigation stays as it is
+        return frozenset()
+    gates: dict[str, bool] = {}
+
+    def gate(path: str) -> bool:
+        if path not in gates:
+            gates[path] = _module_path_enabled(loaded, path)
+        return gates[path]
+
+    return ui_visibility.switched_off_paths(
+        lambda section: all(gate(path) for path in (*_MODULE_SWITCHES[section]["requires"], section))
+    )
+
+def _account_pages_unavailable(request: Request) -> set[str]:
+    """Registered pages whose route also needs a named account (employee
+    activation also needs its switch). Like the companion pages, navigation
+    offers each one only when that route's own check admits the caller."""
+    from . import (
+        device_pairing_api,
+        employee_activation,
+        permission_requests_api,
+        personal_notifications_api,
+    )
+
+    unavailable = set()
+    for path, admit in (("/access-requests", permission_requests_api.authority),
+                        ("/devices", device_pairing_api._principal),
+                        ("/get-started/employee", employee_activation.actor),
+                        ("/notifications", personal_notifications_api.page_authority)):
+        try:
+            admit(request)
+        except Exception:  # a refused or unreadable check hides the link
+            unavailable.add(path)
+    return unavailable
+
+
 def _nav_context(request: Request) -> dict:
     from . import ui_visibility
     from .api import _shared_halt_backend
@@ -529,12 +599,19 @@ def _nav_context(request: Request) -> dict:
             scope = "approvals:decide" if page["path"] == "/approvals" else "tasks:write"
             return key_scopes is not None and ("admin" in key_scopes or scope in key_scopes)
         return True
-
+    unavailable |= _account_pages_unavailable(request)
     for collection in (groups, finder):
         for group in collection:
             group["links"] = [link for link in group["links"]
                               if link["href"] not in unavailable and key_can_open(link)]
         collection[:] = [group for group in collection if group["links"]]
+    finder_hrefs = {link["href"] for group in finder for link in group["links"]}
+
+    def can_open_page(path: str) -> bool:
+        """In-page links to another screen use the finder's own answer, so a
+        link appears only for people that screen admits."""
+        page = ui_visibility.page_for(path.split("#")[0].split("?")[0])
+        return page is not None and page["path"] in finder_hrefs
     # The topbar's Settings gear follows the same policy as the sidebar entry.
     show_settings = any(link["href"] == "/settings" for g in groups for link in g["links"])
     # A deployment-wide halt backend is a global control even when the caller
@@ -568,15 +645,20 @@ def _nav_context(request: Request) -> dict:
         viewer_global_admin = has_global_permission(request, "admin")
     except Exception:  # pragma: no cover -- shell rendering stays fail-closed
         viewer_global_admin = False
+    # A page whose module is switched off only says "...is turned off". Global
+    # administrators, who can turn it on, keep the link marked Off; nobody else
+    # gets a sidebar link into that dead end. Same switch state as the banner.
+    ui_visibility.mark_switched_off(groups, _switched_off_pages(), can_turn_on=viewer_global_admin)
     try:
         from maverick import config as core_config
         from maverick import experience_preferences
+        from maverick.personal_notifications import personal_alerts_on
 
         show_personal_notifications = bool(caller_principal(request)) and has_permission(request, "view")
         personal_notifications_enabled = (
             show_personal_notifications and experience_preferences.enabled()
             and not core_config.config_source_errors(include_tenant=True)
-            and (core_config.load_config().get("notifications") or {}).get("personal_alerts") is True
+            and personal_alerts_on(core_config.load_config().get("notifications"))
         )
     except Exception:  # pragma: no cover -- shell rendering stays fail-closed
         show_personal_notifications = personal_notifications_enabled = False
@@ -584,6 +666,7 @@ def _nav_context(request: Request) -> dict:
         "viewer_global_admin": viewer_global_admin,
         "nav_groups": groups,
         "finder_pages": finder,
+        "can_open_page": can_open_page,
         "show_settings_link": show_settings,
         "can_create_goal": can_create_goal,
         "can_halt": can_halt,
@@ -640,6 +723,7 @@ templates.env.globals.setdefault("docs_learn_more", None)
 # permitted destinations, including full navigation in verified local mode.
 templates.env.globals.setdefault("nav_groups", [])
 templates.env.globals.setdefault("finder_pages", [])
+templates.env.globals.setdefault("can_open_page", lambda path: False)
 
 
 def _set_theme_cookie(response, theme: str) -> None:
@@ -1354,6 +1438,9 @@ app.include_router(project_workspaces_router)
 app.include_router(task_handoffs_router)
 
 app.include_router(my_work_router)
+from .approval_waits import router as approval_waits_router  # noqa: E402
+
+app.include_router(approval_waits_router)
 app.include_router(conversation_organization_router)
 from .first_outcome_api import router as first_outcome_router  # noqa: E402
 from .in_app_routes import router as in_app_router  # noqa: E402
@@ -1993,21 +2080,11 @@ _AUTH_EXEMPT = {
     "/auth/error",
     "/auth/local-owner",
     "/auth/local-login",
-    # The brand logo is a public, non-sensitive image; the public share view
-    # (itself auth-exempt) references it, so an unauthenticated recipient must
-    # be able to load it.
-    "/static/daybreak-logo.jpg",
-    # The brand mark and the self-hosted fonts are public, non-sensitive
-    # assets the login and share pages need before any session exists.
-    "/static/daybreak-mark.png",
-    "/static/fonts/manrope-200.woff2", "/static/fonts/manrope-300.woff2",
-    "/static/fonts/manrope-400.woff2", "/static/fonts/manrope-500.woff2",
-    "/static/fonts/manrope-600.woff2", "/static/fonts/manrope-700.woff2",
-    "/static/fonts/jbm-400.woff2", "/static/fonts/jbm-500.woff2",
-    # The public share page formats its answer with this renderer, and its
-    # recipient has no dashboard sign-in. The file is a public, dependency-free
-    # script that builds DOM from text and carries no data.
-    "/static/lightwork-markdown.js",
+    # The stylesheet, brand images, fonts and share-page renderer the
+    # signed-out pages (sign-in, invitation, public rights form, shared
+    # result) load before any session exists. One reviewed set of exact files,
+    # shared with the global dependency (auth.PUBLIC_STATIC_PATHS).
+    *PUBLIC_STATIC_PATHS,
     # The LLM gateway authenticates every call with its OWN bearer inside
     # maverick.llm_gateway (same rationale as /a2a/v1): callers are foreign
     # agents that hold the gateway credential, never the dashboard bearer.
@@ -2746,16 +2823,35 @@ def _wants_html(request: Request) -> bool:
     return "text/html" in accept
 
 
+def _not_found_page(request: Request):
+    """The browser 404: a plain public page for dead share links, else the app's."""
+    if request.url.path.startswith("/share/"):
+        # A shared-result recipient has no account: an unknown, expired or
+        # revoked link gets a plain public page (no detail), never the app shell.
+        return templates.TemplateResponse(
+            request, "share_unavailable.html", {}, status_code=404,
+            headers={"Cache-Control": "no-store", "X-Robots-Tag": "noindex"},
+        )
+    return templates.TemplateResponse(
+        request,
+        "404.html",
+        {"path": request.url.path},
+        status_code=404,
+    )
+
+
 @app.exception_handler(StarletteHTTPException)
 async def http_exception_handler(request: Request, exc: StarletteHTTPException):
     """Branded, actionable HTML for browser failures; JSON for API callers."""
+    from . import feature_gate
+
+    headers = exc.headers
+    if exc.status_code == 403 and feature_gate.REASON_HEADER not in (headers or {}):
+        # A feature that is turned off is not a missing permission: say which.
+        headers = {**(headers or {}), **feature_gate.refusal_headers(exc.detail)} or headers
+    feature_off = (headers or {}).get(feature_gate.REASON_HEADER) == feature_gate.FEATURE_OFF
     if exc.status_code == 404 and _wants_html(request):
-        return templates.TemplateResponse(
-            request,
-            "404.html",
-            {"path": request.url.path},
-            status_code=404,
-        )
+        return _not_found_page(request)
     if (
         exc.status_code == 409
         and _wants_html(request)
@@ -2793,7 +2889,11 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
                 status_code=302,
             )
         from .local_owner import claimed as local_owner_claimed
-        if local_owner_claimed() and request.url.path not in {"/auth/local-owner", "/auth/local-login"}:
+        from .local_passphrases import available as passphrase_sign_in
+
+        # The owner and invited colleagues both sign in on that page.
+        if ((local_owner_claimed() or passphrase_sign_in())
+                and request.url.path not in {"/auth/local-owner", "/auth/local-login"}):
             return RedirectResponse("/auth/local-login", status_code=302)
     if _wants_html(request):
         status = int(exc.status_code)
@@ -2835,7 +2935,20 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
             message = BOARD_SCOPE_DETAIL
         gate = ""
         reauthenticate = ""
-        if status == 403 and isinstance(exc.detail, str):
+        feature = {}
+        if status == 403 and feature_off:
+            from urllib.parse import unquote
+
+            gate = "off"
+            label = unquote(headers.get(feature_gate.LABEL_HEADER, ""))
+            title = f"{label} is turned off" if label else "This page is turned off"
+            message = (
+                "This feature is turned off for your workspace, or its settings "
+                "could not be read. An administrator can turn it on in Settings."
+            )
+            if label and headers.get(feature_gate.SWITCH_HEADER) == "module":
+                feature = {"section": headers[feature_gate.FEATURE_HEADER], "label": label}
+        elif status == 403 and isinstance(exc.detail, str):
             # Feature switches and named sign-in gates raise 403 with these
             # fixed server phrases; show the real reason instead of the
             # generic role message. The check itself is unchanged.
@@ -2859,13 +2972,6 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
                 gate = "ip"
                 title = "This address isn't allowed"
                 message = exc.detail
-            elif "disabled in Settings" in exc.detail:
-                gate = "off"
-                title = "This page is turned off"
-                message = (
-                    "This feature is turned off for your workspace, or its settings "
-                    "could not be read. An administrator can turn it on in Settings."
-                )
             elif exc.detail.startswith("Sign in with a named account"):
                 gate = "sign_in"
                 title = "Sign in with your own account"
@@ -2883,9 +2989,10 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
                 "path": request.url.path,
                 "gate": gate,
                 "reauthenticate": reauthenticate,
+                "feature": feature,
             },
             status_code=status,
-            headers=exc.headers,
+            headers=headers,
         )
     body: dict = {"detail": exc.detail}
     reauthenticate = getattr(exc, "reauthenticate", "")
@@ -2896,7 +3003,7 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
     return JSONResponse(
         body,
         status_code=exc.status_code,
-        headers=exc.headers,
+        headers=headers,
     )
 
 
@@ -3505,13 +3612,18 @@ def public_demo(request: Request) -> HTMLResponse:
             "</article>"
         )
     body = "".join(cards) or "<p class='empty'>No seeded demo goals are available yet.</p>"
+    # The public proxy serves only this path, so the page cannot load
+    # lightwork.css; it repeats the shared --font-sans token (a test keeps the
+    # two identical).
     return HTMLResponse(
         "<!doctype html>"
         "<html lang='en'><head><meta charset='utf-8'>"
         "<meta name='viewport' content='width=device-width, initial-scale=1'>"
         "<title>Lightwork public demo</title>"
         "<style>"
-        ":root{color-scheme:dark;font-family:Inter,system-ui,sans-serif;"
+        ":root{color-scheme:dark;"
+        "--font-sans:'Manrope',-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;"
+        "font-family:var(--font-sans);"
         "background:#0d1117;color:#e6edf3}"
         "body{margin:0;padding:2rem;max-width:1100px;margin-inline:auto}"
         "header{margin-bottom:2rem}.eyebrow,.status{color:#2ea043;"
@@ -3535,10 +3647,14 @@ def public_demo(request: Request) -> HTMLResponse:
 @app.get("/overview", response_class=HTMLResponse)
 def overview(request: Request) -> HTMLResponse:
     require_unscoped_board(request)
+    from .value_views import value_scope
+
     w = _world()
-    # Use SQL aggregation instead of pulling every goal into Python. Owner-scope
-    # the rollup to the caller (auth-off/admin -> all; see goal_owner_filter).
-    owner = goal_owner_filter(request)
+    # Use SQL aggregation instead of pulling every goal into Python. Count the
+    # caller's own goals; a read-only role counts the whole workspace (totals
+    # only -- see value_views).
+    value_view = value_scope(request)
+    owner = value_view["owner"]
     if owner is None:
         rows = w.query("SELECT status, COUNT(*) FROM goals GROUP BY status")
     else:
@@ -3562,7 +3678,7 @@ def overview(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(
         request,
         "index.html",
-        {"counts": counts, "facts": facts, "skills": skills[:10]},
+        {"counts": counts, "facts": facts, "skills": skills[:10], "value_view": value_view},
     )
 
 
@@ -4205,7 +4321,12 @@ def spend_page(request: Request) -> HTMLResponse:
     # Scope both reads to the caller (matches /api/v1/spend and the on-page
     # charts) so a non-admin never sees the whole tenant's spend/episodes.
     # goal_owner_filter returns None for admins / auth-off, preserving that view.
+    from .value_views import value_scope
+
     owner = goal_owner_filter(request)
+    # The heading total follows the value view (a read-only role sees the
+    # workspace total); the task table always stays the caller's own rows.
+    value_view = value_scope(request)
     w = _world()
     episodes = w.list_episodes(limit=50, owner=owner)
     from maverick.cost_provenance import for_goal, runtime_basis
@@ -4229,8 +4350,9 @@ def spend_page(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(
         request,
         "spend.html",
-        {"episodes": episodes, "total": w.total_spend(owner=owner),
-         "goal_titles": goal_titles, "csv_months": months, "episode_provenance": episode_provenance},
+        {"episodes": episodes, "total": w.total_spend(owner=value_view["owner"]),
+         "goal_titles": goal_titles, "csv_months": months, "episode_provenance": episode_provenance,
+         "value_view": value_view},
     )
 
 
@@ -4367,7 +4489,6 @@ async def privacy_page(request: Request) -> HTMLResponse:
 def _privacy_page_data() -> tuple[dict, dict]:
     """The Privacy workspace's data plane: privacy-ops records plus the
     estate registers (vendors, consent, data map), each its own opt-in."""
-    import time as _time
 
     from maverick import privacy_ops
 
@@ -4386,6 +4507,8 @@ def _privacy_page_data() -> tuple[dict, dict]:
         records["ai"] = privacy_ops.list_ai_systems()
         records["ropa"] = privacy_ops.list_ropa()
         records["dsar"] = privacy_ops.list_dsars()
+        for row in records["dsar"]:
+            row["answer"] = privacy_ops.dsar_answer(row)
         records["incidents"] = privacy_ops.list_incidents()
         records["paper"] = privacy_ops.list_paper_reviews()
         for rows in (
@@ -4398,9 +4521,7 @@ def _privacy_page_data() -> tuple[dict, dict]:
         ):
             for r in rows:
                 created = float(r.get("created_at") or 0)
-                r["created"] = (
-                    _time.strftime("%Y-%m-%d", _time.localtime(created)) if created else "—"
-                )
+                r["created"] = _plain_labels.datetime_text(created, date_only=True) if created else "—"
         records["dsar_open"] = sum(
             1 for r in records["dsar"] if r.get("status") in ("open", "awaiting_erasure")
         )
@@ -4452,13 +4573,11 @@ def _privacy_page_data() -> tuple[dict, dict]:
 
 
 def _date(stamp) -> str:
-    import time as _time
-
     try:
         value = float(stamp or 0)
     except (TypeError, ValueError):
         return "—"
-    return _time.strftime("%Y-%m-%d", _time.localtime(value)) if value else "—"
+    return _plain_labels.datetime_text(value, date_only=True) if value else "—"
 
 
 @app.get("/privacy/vendors/{vendor_id}", response_class=HTMLResponse)
@@ -4554,8 +4673,11 @@ async def dsar_detail_page(request: Request, request_id: str) -> HTMLResponse:
     import time as _time
 
     from maverick import dsar_fulfillment, privacy_ops
+
+    from .feature_gate import feature_off
+
     if not privacy_ops.enabled():
-        raise HTTPException(status_code=403, detail="privacy_ops is not enabled")
+        raise feature_off("privacy_ops", "The privacy register")
     record = privacy_ops.get_dsar(request_id[:64])
     if record is None or "status" not in record:
         raise HTTPException(status_code=404, detail="no such DSAR")
@@ -4563,6 +4685,7 @@ async def dsar_detail_page(request: Request, request_id: str) -> HTMLResponse:
     now = _time.time()
     record.update(privacy_ops.dsar_clock(record, now=now))
     record["created_date"] = _date(record.get("created_at"))
+    record["received_date"] = _date(record.get("received_at") or record.get("created_at"))
     record["due_date"] = _date(record.get("effective_due_at"))
     record["acknowledge_date"] = _date(record.get("acknowledge_by"))
     record["extended_date"] = _date(record.get("extended_until"))
@@ -4578,15 +4701,25 @@ async def dsar_detail_page(request: Request, request_id: str) -> HTMLResponse:
         if fulfillment and fulfillment.get("response"):
             fulfillment["response"]["expires_date"] = _date(
                 fulfillment["response"].get("expires_at"))
+    # Which secure-link step the "Completed" notice can point to.
+    fulfillment_state = (
+        "off" if not fulfillment_enabled else "not_started" if not fulfillment
+        else "ready" if (fulfillment.get("identity") or {}).get("status") == "verified"
+        else "unverified")
+    from maverick import public_rights_form
+
     from .webhooks_api import record_alerts
 
     return templates.TemplateResponse(
         request, "dsar_detail.html",
         {"dsar": record, "fulfillment": fulfillment,
          "fulfillment_enabled": fulfillment_enabled,
+         "fulfillment_state": fulfillment_state,
          "record_alerts": record_alerts("dsar", record["id"]),
          "can_admin": has_permission(request, "admin"),
-         "email_log": (record.get("public_form") or {}).get("emails") or []})
+         "can_manage_email": has_global_permission(request, "admin"),
+         "notices": public_rights_form.notice_log(record),
+         "answer": privacy_ops.dsar_answer(record)})
 
 
 @app.get("/consent", response_class=HTMLResponse)
@@ -5010,14 +5143,13 @@ async def privacy_report_page(request: Request) -> HTMLResponse:
     """The privacy program report: a print-friendly board pack over every
     register. Same operate floor as the workspace it summarizes."""
     require_permission(request, "operate")
-    import time as _time
 
     from maverick import privacy_ops
 
     if not privacy_ops.enabled():
         raise HTTPException(status_code=404, detail="privacy ops are disabled")
     report = privacy_ops.program_report()
-    report["generated"] = _time.strftime("%Y-%m-%d %H:%M", _time.localtime(report["generated_at"]))
+    report["generated"] = _plain_labels.datetime_text(report["generated_at"])
     return templates.TemplateResponse(request, "privacy_report.html", {"r": report})
 
 
@@ -5214,7 +5346,7 @@ async def security_report_page(request: Request) -> HTMLResponse:
     report = security_ops.program_report()
     generated_at = report.get("generated_at")
     if isinstance(generated_at, (int, float)):
-        report["generated"] = time.strftime("%Y-%m-%d %H:%M %Z", time.localtime(generated_at))
+        report["generated"] = _plain_labels.datetime_text(generated_at)
     else:
         report["generated"] = "unknown"
     # The click-through must carry substance: each control with what it does,
@@ -6204,11 +6336,13 @@ def savings_page(request: Request, days: int = 90) -> HTMLResponse:
     from maverick import savings as savings_mod
 
     from .api import _value_assumptions_resolution
+    from .value_views import assumptions_confirmed, value_scope
 
     days = max(1, min(days, 730))
     resolution = _value_assumptions_resolution()
     cfg = resolution["effective_assumptions"]
-    report = savings_mod.compute(_world(), window_days=days, cfg=cfg, owner=goal_owner_filter(request))
+    value_view = value_scope(request)
+    report = savings_mod.compute(_world(), window_days=days, cfg=cfg, owner=value_view["owner"])
     return templates.TemplateResponse(
         request,
         "savings.html",
@@ -6218,6 +6352,8 @@ def savings_page(request: Request, days: int = 90) -> HTMLResponse:
             "report": savings_mod.to_dict(report),
             "value_resolution": resolution,
             "can_manage_assumptions": has_global_permission(request, "operate"),
+            "value_view": value_view,
+            "assumptions_confirmed": assumptions_confirmed(),
         },
     )
 
@@ -6625,14 +6761,13 @@ async def audit_binder_page(request: Request, days: int = 90) -> HTMLResponse:
     and the acceptance-learning KPIs. Audit-gated like /audit; the product
     generates its own workpapers."""
     require_permission(request, "audit")
-    import time as _time
 
     from starlette.concurrency import run_in_threadpool as _rit
 
     from .api import _binder_payload
 
     b = await _rit(_binder_payload, max(1, min(days, 730)))
-    generated = _time.strftime("%Y-%m-%d %H:%M UTC", _time.gmtime(b["generated_at"]))
+    generated = _plain_labels.datetime_text(b["generated_at"])
     from .audit_actions_api import kind_label
 
     return templates.TemplateResponse(
@@ -7328,7 +7463,7 @@ def oversight_page(request: Request) -> HTMLResponse:
     except Exception:
         approvals, pending = [], None
         source_errors.append("Your approval queue is unavailable. Its current size is unknown.")
-    approval_context = _approval_queue_context(approvals)
+    approval_context = _approval_queue_context(approvals, request)
     try:
         active = len(w.list_goals(status="active", owner=owner_filter))
     except Exception:
@@ -8486,7 +8621,19 @@ def _approval_source(provenance: str | None) -> str | None:
     return None
 
 
-def _approval_queue_context(approvals: list) -> dict:
+def _approval_viewer_context(request: Request | None) -> dict:
+    """Who is looking at the queue, so a card can say "your own request"
+    exactly when the enforced rule treats it as one."""
+    if request is None:
+        return {"approval_viewer": "", "self_approval_allowed": False}
+    from maverick.safety.dual_control import allow_self_approval
+
+    from .api import _supervisor
+
+    return {"approval_viewer": _supervisor(request), "self_approval_allowed": allow_self_approval()}
+
+
+def _approval_queue_context(approvals: list, request: Request | None = None) -> dict:
     """Build the exact-operation review context shared by approval surfaces."""
 
     from maverick.approval_cards import ApprovalCardError, decode_approval_detail
@@ -8550,6 +8697,7 @@ def _approval_queue_context(approvals: list) -> dict:
         "approval_actions": approval_actions,
         "approval_scopes": approval_scopes,
         "assessment_ids": assessment_ids,
+        **_approval_viewer_context(request),
     }
 
 
@@ -8569,6 +8717,7 @@ def approvals_page(request: Request) -> HTMLResponse:
     so a view-only caller must not read it via the HTML page either.
     """
     require_permission(request, "operate")
+    from . import content_access
     from .content_access import can_read_approval
     from .flow_approval_inbox import pending_for_request
 
@@ -8584,7 +8733,9 @@ def approvals_page(request: Request) -> HTMLResponse:
             "flow_approvals": flow_approvals["items"],
             "flow_approval_coverage": flow_approvals["coverage"],
             "private_count": len(pending) - len(approvals),
-            **_approval_queue_context(approvals),
+            # Link to Content access only when asking for a card read is on.
+            "content_access_on": content_access.enabled(),
+            **_approval_queue_context(approvals, request),
         },
         headers={"Cache-Control": "private, no-store"},
     )
@@ -9761,6 +9912,8 @@ def _chat_threads(request: Request, w, *, active_root: int | None = None) -> lis
         goals.extend(goal for goal in pinned_roots(request, w) if goal.id not in known)
     except Exception:
         pass  # Current authorized tasks remain readable if organization storage is unavailable.
+    from .run_status import status_label
+
     threads: list[dict] = []
     for g in goals:
         target_id = ChatThreads(w).latest(g.id)
@@ -9772,7 +9925,7 @@ def _chat_threads(request: Request, w, *, active_root: int | None = None) -> lis
         if target.status == "blocked":
             try:
                 stopped = w.goal_stream_state(target_id, include_result=True)
-                stop_kind = (stop_payload(stopped.status, stopped.result) or {}).get("kind", "")
+                stop_kind = (stop_payload(stopped.status, stopped.result) or {}).get("kind", "") if stopped else ""
             except Exception:
                 pass  # A sidebar label must not make a task page unavailable.
         try:
@@ -9784,6 +9937,7 @@ def _chat_threads(request: Request, w, *, active_root: int | None = None) -> lis
         threads.append({
             "id": g.id, "target_id": target_id, "title": metadata["title"] or g.title, "status": target.status,
             "stop_kind": stop_kind,
+            "state_label": status_label(target.status, stop_kind),
             "pinned": metadata["pinned"], "archived": metadata["archived"],
             "active": g.id == active_root, "updated_at": g.updated_at,
         })
@@ -11949,7 +12103,7 @@ def _render_tree_html(node: dict) -> str:
         return _html.escape(str(s), quote=True) if s is not None else ""
 
     def _render(n: dict) -> str:
-        dollars_html = f' <span class="cost">${n["dollars"]:.4f}</span>' if n.get("dollars") else ""
+        dollars_html = f' <span class="cost">{_plain_labels.money(n["dollars"])}</span>' if n.get("dollars") else ""
         node_html = (
             f'<a class="node" href="/chat/goal/{_esc(n["id"])}">'
             f'<span class="badge {_esc(n["status"])}">{_esc(_idfmt.humanize(n["status"]))}</span> '

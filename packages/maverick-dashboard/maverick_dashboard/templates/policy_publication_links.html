@@ -1,11 +1,16 @@
 {% extends "base.html" %}
 {% from "_hero.html" import hero %}
 {% from "_module_gate.html" import module_gate %}
-{% block title %}Policy Links · Lightwork{% endblock %}
+{% block title %}Policy links · Lightwork{% endblock %}
 {% block head_extra %}<link rel="stylesheet" href="/static/lightwork-consent-workbench.css">{% endblock %}
 {% block content %}
+{% from "_back_link.html" import back_link with context %}
 {% set ppl_admin = policy_links_can_admin if policy_links_can_admin is defined else true %}
 {% set ppl_audit = policy_links_can_audit if policy_links_can_audit is defined else true %}
+{#- The title sits outside the disabled workbench so the gate can follow it
+    without its Turn on button being disabled with the rest. -#}
+{{ hero('Tech risk and compliance', 'Policy links',
+        lede='Write a policy, have it approved, and publish it at a web address that stays the same when you publish a new version. Earlier versions are kept for your records.') }}
 {% if not policy_publication_links_enabled %}
 {{ module_gate('tech_risk_compliance.policy_publication_links', 'Policy links',
                detail='Publishes your approved policies at a lasting web address. Decide who looks after storage, backups and old versions before turning it on.',
@@ -13,9 +18,7 @@
 {% endif %}
 <fieldset class="governance-workbench feature-gated-workbench" id="ppl-root" data-feature-enabled="{{ 'true' if policy_publication_links_enabled else 'false' }}" data-can-admin="{{ 'true' if ppl_admin else 'false' }}" data-can-audit="{{ 'true' if ppl_audit else 'false' }}"{% if not policy_publication_links_enabled %} disabled aria-disabled="true"{% endif %}>
   <legend class="sr-only">Policy links</legend>
-  {{ hero('Tech risk and compliance', 'Policy Links',
-          lede='Write a policy, have it approved, and publish it at a web address that stays the same when you publish a new version. Earlier versions are kept for your records.') }}
-  <p><a class="btn btn--ghost" href="/compliance">Back to compliance</a></p>
+  <p>{{ back_link('/compliance', 'Compliance') }}</p>
   <p id="ppl-status" class="muted" role="status" aria-live="polite"></p>
 
   <section class="panel" aria-labelledby="ppl-policies-heading">

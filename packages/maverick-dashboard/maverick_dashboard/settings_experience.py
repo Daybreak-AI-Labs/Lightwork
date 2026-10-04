@@ -10,7 +10,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from . import auth, settings_store
+from . import auth, settings_store, ui_visibility
 from . import settings_all_page as page
 from . import settings_catalog as catalog
 
@@ -219,21 +219,42 @@ def history(request: Request):
                          'coverage': 'Last 100 setting changes in the past 30 days. Secret values are never restorable from history.'}, headers=HEADERS)
 
 
+def _title_rank(title: str, terms: list[str], aliases: str = '') -> int:
+    """0 exact title, 1 title starts with the words, 2 every word starts a title
+    word, 3 words in the title, 4 in the curated search words, 5 elsewhere."""
+    title, phrase = title.lower(), ' '.join(terms)
+    words = title.split()
+    if title == phrase:
+        return 0
+    if title.startswith(phrase):
+        return 1
+    if all(any(word.startswith(term) for word in words) for term in terms):
+        return 2
+    if all(term in title for term in terms):
+        return 3
+    return 4 if all(term in title + ' ' + aliases.lower() for term in terms) else 5
+
+
 @router.get('/api/v1/settings/search')
 def search(request: Request, q: str = Query('', max_length=200)):
     auth.require_permission(request, 'view')
     terms = q.lower().split()[:15]
-    results = []
+    results, catalogue = [], []
     allowed = {link['href'].split('?')[0] for group in page._app()._nav_context(request)['finder_pages'] for link in group['links']}
+    def opens(href):
+        # The registry page that governs the destination, e.g. /settings for /settings/all.
+        governing = ui_visibility.page_for(href.split('?')[0].split('#')[0])
+        return governing is not None and governing['path'] in allowed
     def matches(text):
         return all(word in text.lower() for word in terms)
     def add(title, href, aliases, *, scope='Organization', value='Open this control to review current state', source='Dedicated control', role='Global administrator'):
-        if href.split('?')[0].split('#')[0] in allowed and matches(title + ' ' + aliases):
-            results.append({'title': title, 'href': href, 'group': scope, 'id': href,
-                            'scope': scope, 'required_role': role, 'effective': value, 'source': source})
+        if opens(href) and matches(title + ' ' + aliases):
+            results.append((_title_rank(title, terms, aliases), {'title': title, 'href': href, 'group': scope, 'id': href,
+                            'scope': scope, 'required_role': role, 'effective': value, 'source': source}))
     if auth.has_global_permission(request, 'admin'):
         layers = page._sources()
-        for setting in (catalog.SETTINGS if "/settings/all" in allowed else ()):
+        # A single letter matches most of All settings: wait for a second one.
+        for setting in (catalog.SETTINGS if opens("/settings/all") and len(q.strip()) >= 2 else ()):
             if matches(page._search_text(setting)):
                 state = page._resolve(setting, layers)
                 if setting.secret:
@@ -243,11 +264,12 @@ def search(request: Request, q: str = Query('', max_length=200)):
                 else:
                     value = catalog.display_value(setting, state['value'])
                 anchor = 'sa-' + setting.id.replace('.', '-').replace('*', 'all') + '-label'
-                results.append({'title': setting.label, 'href': '/settings/all?group=' + page._slug(setting.group) + '&id=' + quote(setting.id) + '#' + anchor,
+                catalogue.append((_title_rank(setting.label, terms, setting.aliases), {'title': setting.label, 'href': '/settings/all?group=' + page._slug(setting.group) + '&id=' + quote(setting.id) + '#' + anchor,
                                 'group': setting.group, 'id': setting.id, 'scope': 'Organization', 'required_role': 'Global administrator',
-                                'effective': value if state['known'] else 'Controlled by deployment', 'source': state['source'], 'locked': state['locked']})
+                                'effective': value if state['known'] else 'Controlled by deployment', 'source': state['source'], 'locked': state['locked']}))
+        add('AI provider keys', '/settings#settings-integrations', 'ai service ai provider api key model key credentials')
         for provider in settings_store.state()['providers']:
-            add(provider['label'] + ' provider key', '/settings?focus=provider-key-' + quote(provider['name']), 'api credentials provider key password ' + provider['name'],
+            add(provider['label'] + ' provider key', '/settings?focus=provider-key-' + quote(provider['name']), 'api credentials provider key password ai service model key ' + provider['name'],
                 value='Set' if provider['configured'] else 'Not set', source=provider['api_key_source'])
         add('Default AI model', '/settings?focus=settings-model-default', 'models route provider model choices')
         add('Your colour theme', '/settings?focus=settings-theme', 'appearance theme color display', scope='Personal / device')
@@ -280,5 +302,10 @@ def search(request: Request, q: str = Query('', max_length=200)):
                 add(title, '/preferences#preference-' + key, aliases, scope='Personal', role='Signed-in member',
                     value=str(personal['values'][key]) or 'Inherited', source=personal['sources'][key])
         add('Your notifications', '/notifications#notification-preferences', 'notification alerts digest quiet hours mute', scope='Personal', role='Signed-in member')
-    results.sort(key=lambda item: (item['scope'] != 'Personal', item['title'].casefold()))
+    # Personal first, then the dedicated controls above, then All settings rows;
+    # within each the closest match first (see _title_rank). The 50 shown are
+    # the best ones.
+    def order(pair):
+        return pair[1]['scope'] != 'Personal', pair[0], pair[1]['title'].casefold()
+    results = [item for _rank, item in sorted(results, key=order) + sorted(catalogue, key=order)]
     return JSONResponse({'items': results[:50], 'total': len(results)}, headers=HEADERS)

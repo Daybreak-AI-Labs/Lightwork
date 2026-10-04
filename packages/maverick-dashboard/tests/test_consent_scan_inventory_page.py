@@ -37,7 +37,7 @@ def test_scan_inventory_page_renders_safe_operator_contract(page_client: TestCli
     response = page_client.get("/consent/scan-inventory")
     assert response.status_code == 200
     page = response.text
-    assert "Tracker Scans" in page
+    assert "Tracker scans" in page
     assert "cannot prove a tracker is absent" in page
     assert "Only “Scan now” and “Run due scans now” visit your websites" in page
     # Websites, scans and trackers are lists with row buttons; the worker

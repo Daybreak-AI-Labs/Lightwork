@@ -348,7 +348,7 @@
   function formattedDate(value) {
     if (typeof value !== "number" || !Number.isFinite(value)) return "—";
     var date = new Date(value * 1000);
-    return Number.isNaN(date.getTime()) ? "—" : date.toLocaleDateString();
+    return Number.isNaN(date.getTime()) ? "—" : window.mvDateAbsolute ? window.mvDateAbsolute(value) : date.toLocaleDateString();
   }
   function dateInputValue(value) {
     if (typeof value !== "number" || !Number.isFinite(value)) return "";
@@ -565,17 +565,22 @@
         refreshRetention();
       } else if (payload.enabled !== true) {
         readiness.textContent = "Turned off";
-        readinessDetail.textContent = "AI system tasks are turned off. An administrator can turn them on above.";
+        readinessDetail.textContent = "AI system tasks are turned off. Ask an administrator to turn them on.";
         setMark("Off", "failed");
+        listStatus.textContent = "Tasks appear here once AI system tasks are turned on.";
       } else {
         readiness.textContent = "Setup not finished";
         readinessDetail.textContent = "AI system tasks are turned on, but setup isn't finished. Ask an administrator to complete it.";
         setMark("Not ready", "failed");
+        listStatus.textContent = "Tasks appear here once an administrator finishes the setup.";
       }
     } catch (error) {
       readiness.textContent = "Unavailable";
       readinessDetail.textContent = error && error.message ? error.message : "Couldn't check availability.";
       setMark("Unavailable", "failed");
+      // The list never started; say so instead of "Loading tasks…".
+      listStatus.textContent = typeof window.mvErrorText === "function"
+        ? window.mvErrorText(error, "load the tasks") : "Couldn't load the tasks. Choose Check again.";
     }
   }
   async function refreshRetention() {
@@ -702,5 +707,7 @@
     } catch (error) { fail(error); }
   });
 
-  refreshStatus();
+  // A turned-off module shows its gate instead of this workbench's checks:
+  // nothing is requested, and the page already says when tasks will appear.
+  if (shell.dataset.moduleEnabled !== "false") refreshStatus();
 }());

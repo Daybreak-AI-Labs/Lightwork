@@ -11,7 +11,9 @@ const page = fs.readFileSync(path.join(templates, "flow_run.html"), "utf8");
 const helpers = fs.readFileSync(path.join(templates, "_dash_helpers.js"), "utf8");
 const start = page.indexOf("<script>");
 const end = page.indexOf("</script>", start);
+// The title comes from the shared page header macro; stand in its <h1>.
 const markup = page.slice(page.indexOf("{% block content %}"), start)
+  .replace(/{% call hero\([\s\S]*?%}/, '<h1 id="fr-title">Flow run</h1>')
   .replace(/{%[\s\S]*?%}/g, "").replace(/{{[\s\S]*?}}/g, "x");
 const script = page.slice(start + 8, end)
   .replace('{% include "_dash_helpers.js" %}', helpers)

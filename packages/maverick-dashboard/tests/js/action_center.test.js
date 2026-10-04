@@ -205,3 +205,11 @@ test('removing the final filtered item focuses the empty result status',async()=
   const ui=await setup([value(),{revision:4},value({items:[],total:0})]);ui.button('Mark read').focus();ui.button('Mark read').click();await tick();await tick();
   assert.equal(ui.d.activeElement,ui.d.getElementById('ac-status'));ui.w.close();
 });
+
+test("a module that is turned off is not reported as a load error", async () => {
+  const ui = await setup([value({coverage:[{kind:"assessment",status:"current"},{kind:"connection_attention",status:"disabled"}],
+    items:[], counts:{unread:0,overdue:0,snoozed:0}, total:0})]);
+  assert.equal(ui.d.getElementById("ac-coverage").textContent, "");
+  assert.match(ui.d.getElementById("ac-items").textContent, /all caught up/);
+  ui.dom.window.close();
+});

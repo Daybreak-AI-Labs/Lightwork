@@ -37,15 +37,17 @@ def test_registry_is_well_formed():
         assert path in seen_paths and role == "admin"
 
 
-def test_registry_icons_exist_in_base_template():
+def test_registry_icons_exist_in_the_shared_icon_sprite():
     from pathlib import Path
 
     from maverick_dashboard import ui_visibility
-    base = (
-        Path(ui_visibility.__file__).parent / "templates" / "base.html"
-    ).read_text(encoding="utf-8")
+    templates = Path(ui_visibility.__file__).parent / "templates"
+    sprite = (templates / "_icon_sprite.html").read_text(encoding="utf-8")
     for page in ui_visibility.PAGES:
-        assert f'id="i-{page["icon"]}"' in base, page["path"]
+        assert f'id="i-{page["icon"]}"' in sprite, page["path"]
+    # Both shells render the sidebar's icons from the same sprite.
+    for shell in ("base.html", "chat_base.html"):
+        assert '{% include "_icon_sprite.html" %}' in (templates / shell).read_text(encoding="utf-8")
 
 
 def test_agent_control_plane_read_surface_is_discoverable_to_auditors():
@@ -161,17 +163,20 @@ def test_nav_groups_per_role(monkeypatch, tmp_path):
     # viewer: read-only pages only -- no run/build/admin surfaces, and the
     # groups left empty (Extend, Admin) are dropped whole.
     v = hrefs("viewer")
-    assert {"/goals", "/overview", "/spend", "/safety"} <= v
+    assert {"/goals", "/overview", "/spend"} <= v
+    # Safety's route requires audit permission, so viewers are not offered it.
+    assert "/safety" not in v
     assert "/cortex" not in v and "/knowledge-access" not in v
     assert v.isdisjoint({"/chat", "/ekko", "/automations", "/settings", "/users", "/mcp", "/audit", "/learning", "/benchmarks"})
     # The governance surfaces are split into focused sections (the flat
     # 30-link Govern block read as unorganized); the role still sees no
-    # Extend/Admin group.
+    # Extend/Admin group. My companion lives in Operate (shown as "Work"),
+    # never in a second group that is also titled "Work".
     assert {g["label"] for g in ui_visibility.nav_groups("viewer")} == {
         "Operate", "Observe", "Govern", "Privacy", "Consent",
-        "AI oversight", "Third parties", "Work"}
+        "AI oversight", "Third parties"}
     # auditor: the audit read surfaces, nothing operational. (/replay is folded
-    # out of the sidebar in the moderate declutter; reached from Audit in-page.)
+    # out of the sidebar; the Activity log and a task's Steps page link to it.)
     a = hrefs("auditor")
     assert {"/audit", "/compliance", "/overview", "/agent-control-plane"} <= a
     assert a.isdisjoint({"/chat", "/settings", "/automations", "/replay"})
@@ -456,6 +461,57 @@ def test_nav_and_matrix_groups_are_unique():
     assert len(mlabels) == len(set(mlabels)), f"duplicate matrix groups: {mlabels}"
 
 
+def test_displayed_group_titles_are_unique_for_every_role():
+    """Two raw groups must never render under one title (the companion page once
+    sat in a raw "Work" group while "Operate" is also shown as "Work")."""
+    from maverick_dashboard import rbac, ui_visibility
+    for role in [None, *rbac.ROLES]:
+        for groups in (ui_visibility.nav_groups(role), ui_visibility.finder_pages(role)):
+            titles = [g["title"] for g in groups]
+            assert len(titles) == len(set(titles)), f"duplicate group titles for {role}: {titles}"
+    titles = [g["title"] for g in ui_visibility.matrix()]
+    assert len(titles) == len(set(titles)), f"duplicate matrix group titles: {titles}"
+    work = next(g for g in ui_visibility.nav_groups(None) if g["title"] == "Work")
+    assert {"/companion", "/goals", "/chat"} <= {link["href"] for link in work["links"]}
+
+
+def test_rendered_sidebar_group_titles_are_unique_with_companions_on(monkeypatch, tmp_path):
+    from html.parser import HTMLParser
+
+    from maverick_dashboard import employee_companion_api
+
+    monkeypatch.setattr(employee_companion_api, "navigation_available", lambda request, admin=False: True)
+    c = _client(monkeypatch, tmp_path)
+
+    class Groups(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.titles, self.capture, self.group_hrefs = [], False, {}
+
+        def handle_starttag(self, tag, attrs):
+            values = dict(attrs)
+            if tag == "span" and values.get("class") == "navgrp__label":
+                self.capture = True
+                self.titles.append("")
+            if tag == "a" and self.titles and values.get("href"):
+                self.group_hrefs.setdefault(self.titles[-1], set()).add(values["href"])
+
+        def handle_endtag(self, tag):
+            if tag == "span":
+                self.capture = False
+
+        def handle_data(self, data):
+            if self.capture:
+                self.titles[-1] += data.strip()
+
+    for path in ("/goals", "/chat"):
+        parser = Groups()
+        parser.feed(c.get(path).text)
+        assert len(parser.titles) == len(set(parser.titles)), (path, parser.titles)
+        assert parser.titles.count("Work") == 1, (path, parser.titles)
+        assert "/companion" in parser.group_hrefs["Work"], path
+
+
 def test_approved_self_connect_keeps_page_overrides_and_native_admin_floor(monkeypatch, tmp_path):
     from maverick import connection_oauth
     from maverick_dashboard import ui_visibility
@@ -472,3 +528,100 @@ def test_approved_self_connect_keeps_page_overrides_and_native_admin_floor(monke
     assert not ui_visibility.is_visible(page, "operator")
     assert ui_visibility.is_visible(page, "admin")
     assert not ui_visibility.is_visible(ui_visibility.page_for("/settings"), "operator")
+
+
+# ---------- switched-off modules: no sidebar dead ends ----------
+
+def test_every_page_module_is_an_in_app_switch():
+    from maverick_dashboard import api, ui_visibility
+    modules = [m for page in ui_visibility.PAGES for m in ui_visibility.page_modules(page)]
+    assert modules
+    assert set(modules) <= set(api._MODULE_SWITCHES)
+
+
+def test_switched_off_pages_follow_the_module_switches():
+    from maverick_dashboard import ui_visibility
+    all_off = ui_visibility.switched_off_paths(lambda section: False)
+    assert {"/consent", "/consent/global-opt-out", "/code", "/connections",
+            "/security/governance", "/external-agents"} <= all_off
+    # Workspaces that still work with a section switched off are never dead ends.
+    assert all_off.isdisjoint({"/privacy", "/finance", "/goals", "/approvals"})
+    assert ui_visibility.switched_off_paths(lambda section: True) == frozenset()
+    # A page built from several switches is a dead end only while all are off.
+    one_on = ui_visibility.switched_off_paths(lambda section: section == "ai_literacy")
+    assert "/security/governance" not in one_on and "/consent" in one_on
+
+
+def test_mark_switched_off_marks_for_administrators_and_hides_for_others():
+    from maverick_dashboard import ui_visibility
+
+    def groups():
+        return [{"label": "Consent", "title": "Consent", "links": [{"href": "/consent"}, {"href": "/consent/native"}]},
+                {"label": "Operate", "title": "Work", "links": [{"href": "/goals"}, {"href": "/code"}]}]
+
+    off = frozenset({"/consent", "/consent/native", "/code"})
+    admin = groups()
+    ui_visibility.mark_switched_off(admin, off, can_turn_on=True)
+    assert [[link["off"] for link in g["links"]] for g in admin] == [[True, True], [False, True]]
+    others = groups()
+    ui_visibility.mark_switched_off(others, off, can_turn_on=False)
+    assert others == [{"label": "Operate", "title": "Work", "links": [{"href": "/goals"}]}]
+
+
+def _sidebar_link(body, href):
+    import re
+    match = re.search(r'<aside class="sidebar" id="sidebar">.*?</aside>', body, re.DOTALL)
+    return re.findall(r'<a href="' + re.escape(href) + r'"[^>]*>.*?</a>', match.group(0), re.DOTALL)
+
+
+def test_fresh_install_marks_switched_off_pages_for_administrators(monkeypatch, tmp_path):
+    c = _client(monkeypatch, tmp_path)  # the local owner can turn modules on
+    body = c.get("/goals").text
+    [consent] = _sidebar_link(body, "/consent")
+    assert 'aria-label="Consent &amp; Preferences (turned off)"' in consent
+    assert '<span class="nav-off" aria-hidden="true">' in consent and ">Off</span>" in consent
+    tasks = _sidebar_link(body, "/goals")  # Most used and Work: pages that work stay plain
+    assert len(tasks) == 2 and not any("aria-label" in link or "nav-off" in link for link in tasks)
+
+
+def test_people_who_cannot_turn_a_module_on_get_no_link_to_it(monkeypatch, tmp_path):
+    monkeypatch.setenv("MAVERICK_DASHBOARD_ADMINS", "")
+    c = _client(monkeypatch, tmp_path)
+    from maverick_dashboard import rbac
+    rbac.set_role("user:op", "operator")
+    _as(monkeypatch, "user:op")
+    body = c.get("/goals").text
+    assert _sidebar_link(body, "/consent") == [] and _sidebar_link(body, "/code") == []
+    assert _sidebar_link(body, "/goals") and "nav-off" not in body
+    # The page itself still answers; only the sidebar stops sending people there.
+    assert c.get("/consent").status_code == 200
+    # Once an administrator turns the module on, the plain link comes back.
+    _as(monkeypatch, None)
+    assert c.post("/api/v1/features/modules", json={"section": "consent_preferences", "enabled": True}).status_code == 200
+    _as(monkeypatch, "user:op")
+    [consent] = _sidebar_link(c.get("/goals").text, "/consent")
+    assert "nav-off" not in consent and "aria-label" not in consent
+
+def test_newly_registered_screens_join_the_matrix_like_other_folded_pages(monkeypatch, tmp_path):
+    """Screens that only had their own route checks are now governed pages:
+    folded out of the sidebar, listed in the Settings matrix, and hidden for a
+    role (finder and direct address) when an administrator turns them off."""
+    monkeypatch.setenv("MAVERICK_DASHBOARD_ADMINS", "")
+    c = _client(monkeypatch, tmp_path)
+    from maverick_dashboard import rbac, ui_visibility
+
+    screens = ("/help", "/notifications", "/my-work", "/conversations", "/get-started/employee",
+               "/project-workspaces", "/devices", "/access-requests", "/budget",
+               "/cost-reconciliation", "/provider-spending")
+    rows = {row["path"]: row for group in ui_visibility.matrix() for row in group["pages"]}
+    for path in screens:
+        assert rows[path]["in_nav"] is False
+        assert path not in {ln["href"] for g in ui_visibility.nav_groups(None) for ln in g["links"]}
+    viewer = {cell["role"]: cell for cell in rows["/provider-spending"]["cells"]}["viewer"]
+    assert viewer["eligible"] is False and viewer["visible"] is False
+    rbac.set_role("user:vy", "viewer")
+    _as(monkeypatch, "user:vy")
+    assert c.get("/help").status_code == 200
+    ui_visibility.set_visibility("/help", "viewer", False)
+    assert "/help" not in {ln["href"] for g in ui_visibility.finder_pages("viewer") for ln in g["links"]}
+    assert c.get("/help").status_code == 403

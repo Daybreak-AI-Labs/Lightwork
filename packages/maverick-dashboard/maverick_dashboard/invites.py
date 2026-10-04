@@ -37,7 +37,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 INVITE_TTL_HOURS = 7 * 24          # default link lifetime
-LOCAL_SESSION_DAYS = 30            # no-IdP session lifetime (re-invite to renew)
+LOCAL_SESSION_DAYS = 30            # no-IdP session lifetime (then sign in with the passphrase)
 _MAX_PENDING = 500                 # cap the store; an admin never needs more
 
 _INVITES_LOCK = threading.Lock()
@@ -305,11 +305,16 @@ def peek_invite(token: str) -> Invite | None:
     return None
 
 
-def consume_invite(token: str, *, used_by: str | None = None) -> Invite | None:
+def consume_invite(token: str, *, used_by: str | None = None,
+                   before_commit=None) -> Invite | None:
     """Atomically redeem ``token``: marks it used and returns the invite, or
     None when unknown, expired, or already used (single-use is enforced under
     the store lock, so two racing accepts can't both win). ``used_by`` defaults
-    to the invited email's own principal (the local-login case)."""
+    to the invited email's own principal (the local-login case).
+
+    ``before_commit(invite)`` runs under the same lock just before the link is
+    marked used (it saves the colleague's passphrase). If it raises, the link
+    stays unused and the error propagates."""
     h = _hash(token or "")
     with _locked(store_path()):
         data = _load()
@@ -318,6 +323,8 @@ def consume_invite(token: str, *, used_by: str | None = None) -> Invite | None:
                 inv = _to_invite(rec)
                 if not inv.pending:
                     return None
+                if before_commit is not None:
+                    before_commit(inv)
                 rec["used_at"] = time.time()
                 rec["used_by"] = used_by or f"user:{inv.email}"
                 _write(data)

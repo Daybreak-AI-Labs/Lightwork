@@ -54,10 +54,11 @@ def enroll_task_owner(principal: str) -> None:
     try:
         from . import config, experience_preferences
         from .personal_identity import principal_current
+        from .personal_notifications import personal_alerts_on
 
         if (config.config_source_errors(include_tenant=True)
                 or not experience_preferences.enabled()
-                or (config.load_config().get("notifications") or {}).get("personal_alerts") is not True
+                or not personal_alerts_on(config.load_config().get("notifications"))
                 or not principal_current(principal)):
             return
         enroll(principal)

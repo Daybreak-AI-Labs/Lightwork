@@ -84,7 +84,7 @@ def test_nav_registry_and_copilot_use_the_audit_only_page_context() -> None:
     assert entry["default"] == "audit"
     assert entry["in_nav"] is True
     context = context_for_page(page.PAGE_PATH)
-    assert context.title == "Evolution Ledger"
+    assert context.title == "Learning history"
     assert "cannot start learning" in " ".join(context.boundaries).lower()
     assert "human approval" in " ".join(context.boundaries).lower()
 

@@ -19,6 +19,7 @@ ASSETS = (
     "lightwork-task-diagnostics.js",
     "lightwork-devices.js",
     "lightwork-read-aloud.js",
+    "lightwork-run-status.js",
     "lightwork-theme-preview.js",
     "lightwork-i18n.js",
     "lightwork-model-guidance.js",

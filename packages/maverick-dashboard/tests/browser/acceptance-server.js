@@ -30,7 +30,11 @@ module.exports=async function start(browser,info,{fixed=false}={}){
     context.setDefaultTimeout(15000);context.setDefaultNavigationTimeout(30000);
     const page=await context.newPage(),invite=log.match(/FIXTURE_ADMIN_INVITE=(\S+)/);
     expect(invite,log).toBeTruthy();
-    await page.goto(invite[1]);await page.getByRole('button',{name:'Accept invitation',exact:true}).click();
+    await page.goto(invite[1]);
+    // Accepting sets the administrator's passphrase so they can sign back in later.
+    const passphrase='Synthetic workspace administrator passphrase'; // pragma: allowlist secret - disposable synthetic account fixture
+    await page.locator('input[name="password"]').fill(passphrase);await page.locator('input[name="password2"]').fill(passphrase);
+    await page.getByRole('button',{name:'Accept invitation',exact:true}).click();
     await expect(page).not.toHaveURL(/\/auth\/invite\//);
     expect((await context.cookies()).some(cookie=>cookie.name==='mvk_session')).toBe(true);
     const state=async()=>{const response=await context.request.get('/__workspace_acceptance');expect(response.status(),await response.text()).toBe(200);return response.json();};

@@ -15,7 +15,7 @@
     if (content !== undefined) node.textContent = String(content);
     return node;
   };
-  const date = value => value ? new Date(value * 1000).toLocaleString() : 'Not available';
+  const date = value => value ? (window.mvTimeAbsolute ? window.mvTimeAbsolute(value) : new Date(value * 1000).toLocaleString()) : 'Not available';
   const inputDate = value => {
     const d = new Date(value * 1000), pad = part => String(part).padStart(2, '0');
     return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;

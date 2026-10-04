@@ -496,6 +496,7 @@ def test_approval_card_reads_plainly_with_fingerprints_tucked_away(monkeypatch, 
 def test_empty_queue_offers_owned_decisions(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     text = _client().get("/approvals").text
-    assert "Nothing needs your decision right now." in text
+    assert '<p class="mv-empty__title">Nothing needs your decision right now</p>' in text
+    assert 'class="btn mv-empty__action" href="#request-decision-history"' in text
     assert 'id="request-decision-history"' in text and "Decisions on your requests" in text
     assert 'id="request-decision-more"' in text and "/static/lightwork-approval-history.js" in text

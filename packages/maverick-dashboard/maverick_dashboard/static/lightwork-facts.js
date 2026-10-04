@@ -11,7 +11,7 @@
   var inspector = document.getElementById('fact-inspector'), body = document.getElementById('fact-inspector-body');
   var conflict = document.getElementById('fact-conflict');
   function node(tag, text) { var element = document.createElement(tag); element.textContent = text; return element; }
-  function date(value) { return value ? new Date(value * 1000).toLocaleString() : 'Not recorded'; }
+  function date(value) { return value ? (window.mvTimeAbsolute ? window.mvTimeAbsolute(value) : new Date(value * 1000).toLocaleString()) : 'Not recorded'; }
   function label(value) { return String(value).replace(/_/g, ' ').replace(/^./, function (c) { return c.toUpperCase(); }); }
   function selectFacts(keys) {
     document.dispatchEvent(new CustomEvent('lightwork:copilot-selection', {detail:{selection:keys.length ? {kind:'facts',keys:keys} : {}}}));

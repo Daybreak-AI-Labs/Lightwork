@@ -1070,6 +1070,18 @@ def _approval_from_row(row) -> Approval:
     return Approval(**_row_for(Approval, d))
 
 
+def _single_approver(approval, approvers: list[str]) -> list[str]:
+    """A one-approver request keeps no sign-off rows: its approver is the decider."""
+    if (
+        not approvers
+        and approval.status == "approved"
+        and max(1, int(approval.approvals_required or 1)) <= 1
+        and approval.decided_by
+    ):
+        return [approval.decided_by]
+    return approvers
+
+
 def _approval_audit_event_from_row(row) -> ApprovalAuditEvent:
     return ApprovalAuditEvent(**_row_for(ApprovalAuditEvent, dict(row)))
 
@@ -3904,6 +3916,7 @@ class WorldModel:
             "WHERE approval_id = ? ORDER BY decided_at", (approval_id,),
         )
         approvers = [r["approver"] for r in rows if r["decision"] == "approved"]
+        approvers = _single_approver(appr, approvers)
         audit_pending = int(
             self._read_one(
                 "SELECT COUNT(*) FROM approval_audit_outbox "

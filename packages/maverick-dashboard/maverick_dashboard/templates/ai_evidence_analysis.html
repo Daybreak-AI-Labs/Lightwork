@@ -1,22 +1,23 @@
 {% extends "base.html" %}
 {% from "_hero.html" import hero %}
 {% from "_module_gate.html" import module_gate %}
-{% block title %}AI Evidence Analysis · Lightwork{% endblock %}
+{% block title %}AI evidence analysis · Lightwork{% endblock %}
 {% block head_extra %}
   <link rel="stylesheet" href="/static/lightwork-ai-evidence-analysis.css">
 {% endblock %}
 {% block content %}
-{% if not evidence_module_enabled %}
-{{ module_gate('ai_evidence_analysis', 'AI evidence analysis',
-               detail='Turn this on to have AI check documents against your review criteria. A person still approves every result.',
-               can_activate=evidence_can_activate) }}
-{% endif %}
 <div class="evidence-workbench" id="evidence-shell" data-api-base="{{ api_base }}"
+     data-module-enabled="{{ 'true' if evidence_module_enabled else 'false' }}"
      data-can-operate="{{ 'true' if evidence_can_operate else 'false' }}"
      data-can-audit="{{ 'true' if evidence_can_audit else 'false' }}"
      data-can-admin="{{ 'true' if evidence_can_admin else 'false' }}"
      data-can-register="{{ 'true' if evidence_can_activate else 'false' }}">
   {{ hero('Governance', 'AI evidence analysis', lede='Check a document against your review criteria, then have a second person approve or reject the findings.') }}
+  {% if not evidence_module_enabled %}
+  {{ module_gate('ai_evidence_analysis', 'AI evidence analysis',
+                 detail='Turn this on to have AI check documents against your review criteria. A person still approves every result.',
+                 can_activate=evidence_can_activate) }}
+  {% endif %}
 
 {% if evidence_workspace_missing %}
   <section class="panel" aria-labelledby="workspace-title">
@@ -35,7 +36,7 @@
     </ul>
   </details>
 
-  <section class="panel status-card evidence-status-card" aria-labelledby="status-title">
+  <section class="panel status-card evidence-status-card" aria-labelledby="status-title"{% if not evidence_module_enabled %} hidden{% endif %}>
     <div class="section-head"><h2 id="status-title">Availability</h2><button class="btn btn--ghost" type="button" id="refresh-status">Check again</button></div>
     <p id="runtime-status" class="status" role="status" aria-live="polite">Checking whether analysis is available…</p>
   </section>
@@ -49,12 +50,12 @@
         <fieldset class="permission-fieldset" id="evidence-analyze-controls"{% if not evidence_can_operate %} disabled aria-disabled="true"{% endif %}>
           <legend class="sr-only">Analyze a document</legend>
           <label for="artifact-select">Document</label>
-          <select class="select" id="artifact-select" name="artifact" required><option value="">Loading…</option></select>
+          <select class="select" id="artifact-select" name="artifact" required><option value="">{{ 'Loading…' if evidence_module_enabled else 'Choose a document…' }}</option></select>
           <p class="help" id="artifact-help">Choose a registered document, then pick the same file from your computer. Lightwork checks it is unchanged before reading it.</p>
           <label for="artifact-file">The file on your computer</label>
           <input class="input" id="artifact-file" name="artifact_file" type="file" required>
           <label for="criteria-select">Review criteria</label>
-          <select class="select" id="criteria-select" name="criteria" required><option value="">Loading…</option></select>
+          <select class="select" id="criteria-select" name="criteria" required><option value="">{{ 'Loading…' if evidence_module_enabled else 'Choose review criteria…' }}</option></select>
           <p class="help">Review criteria are set up by an administrator.</p>
           <input type="hidden" id="analyze-operation-id" name="idempotency_key" data-auto-reference>
           <button class="btn btn--primary" type="submit" id="analyze-button">Analyze document</button>
@@ -89,7 +90,7 @@
       </div>
       <div class="evidence-table"><table><caption class="sr-only">Evidence analyses and the actions you can take</caption>
         <thead><tr><th scope="col">Document</th><th scope="col">Criteria</th><th scope="col">Result</th><th scope="col">Status</th><th scope="col">Created</th><th scope="col">Actions</th></tr></thead>
-        <tbody id="analyses-rows"><tr><td colspan="6">Loading…</td></tr></tbody></table></div>
+        <tbody id="analyses-rows"><tr><td colspan="6">{{ 'Loading…' if evidence_module_enabled else 'Analyses appear here once AI evidence analysis is turned on.' }}</td></tr></tbody></table></div>
     </section>
 
     <section class="panel" id="detail-panel" aria-labelledby="detail-title" hidden>

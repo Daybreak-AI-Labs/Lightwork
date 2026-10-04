@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}AI assurance · Lightwork{% endblock %}
 {% block content %}
+{% from "_back_link.html" import back_link with context %}
 <style>
   .assurance-stats {
     display:grid;
@@ -885,7 +886,7 @@
 {% include "_governance_operations.html" %}
 {% include "_ops_ai_governance.html" %}
 
-<p><a class="btn" href="/security">Back to Security &amp; GRC</a></p>
+<p>{{ back_link('/security', 'Security & GRC') }}</p>
 
 <script>
 // Shared helpers for this page: one plain sentence per failure, never a code.
@@ -894,7 +895,12 @@ window.mraPlain = (failure, action) => (typeof window.mvErrorText === "function"
   : (failure instanceof TypeError
     ? "Could not reach the server — check your connection and try again."
     : "Could not " + action + ". Please try again."));
-window.mraFailure = response => { const error = new Error("request failed"); error.status = response.status; return error; };
+// A refusal's body is never read: release it so the request ends instead of
+// staying open (the page never went quiet).
+window.mraFailure = response => {
+  try { if (response.body) response.body.cancel().catch(() => {}); } catch (_) { /* already closed */ }
+  const error = new Error("request failed"); error.status = response.status; return error;
+};
 </script>
 {% if gateway_enabled %}
 <script>
@@ -1356,7 +1362,14 @@ window.mraFailure = response => { const error = new Error("request failed"); err
         portalSubmissions.appendChild(row);
       });
       if (!submissions.length) emptyRow(portalSubmissions, "No answers received yet.", 4);
-    } catch (error) { status("ai-vendor-portal-status", window.mraPlain(error, "load the access codes")); }
+    } catch (error) {
+      // Neither list arrived: say so in both tables instead of "Loading…"; the
+      // line above them says why and what to do.
+      portalInvitations.replaceChildren(); portalSubmissions.replaceChildren();
+      emptyRow(portalInvitations, "Access codes could not be loaded.", 4);
+      emptyRow(portalSubmissions, "Answers could not be loaded.", 4);
+      status("ai-vendor-portal-status", window.mraPlain(error, "load the access codes"));
+    }
   };
   const portalInvite = document.getElementById("ai-vendor-portal-invite");
   if (portalInvite) portalInvite.addEventListener("submit", async event => {

@@ -97,6 +97,7 @@ from .api_schemas import (
     DocDiscoverIn,
     DpaFromDocumentIn,
     DpaReviewIn,
+    DsarCloseIn,
     DsarFromMessageIn,
     DsarIn,
     EventTriggerIn,
@@ -1089,6 +1090,13 @@ def dashboard_board(request: Request, board: str, days: int | None = None) -> di
             require_suite(request, "finance")
     w = _world()
     owner = goal_owner_filter(request)
+    scope = None
+    if board in ("overview", "spend", "savings"):
+        # A read-only role counts the whole workspace, totals only.
+        from .value_views import value_scope
+
+        view = value_scope(request)
+        owner, scope = view["owner"], view["scope"]
     d = _board_days(days)
     if board in ("privacy", "finance", "security"):
         payload = _board_workspace(board)
@@ -1103,6 +1111,12 @@ def dashboard_board(request: Request, board: str, days: int | None = None) -> di
         payload = build(w, owner, d, request=request) if board == "oversight" else build(w, owner, d)
     else:
         raise HTTPException(status_code=404, detail="unknown board")
+    if scope is not None:
+        from .value_views import WORKSPACE, without_task_content
+
+        if scope == WORKSPACE:
+            without_task_content(board, payload)
+        payload["scope"] = scope
     payload.update({"board": board, "days": d, "generated_at": time.time()})
     return payload
 
@@ -2513,10 +2527,10 @@ async def graph_rebuild(request: Request) -> dict:
 def _privacy_ops_or_403():
     from maverick import privacy_ops
 
+    from .feature_gate import feature_off
+
     if not privacy_ops.enabled():
-        raise HTTPException(
-            status_code=403, detail="privacy ops are disabled ([privacy_ops] enable)"
-        )
+        raise feature_off("privacy_ops", "The privacy register")
     return privacy_ops
 
 
@@ -3423,10 +3437,11 @@ async def data_map_masking_sql(request: Request,
 
 def _breach_notification_or_403():
     from maverick import breach_notification
+
+    from .feature_gate import feature_off
+
     if not breach_notification.enabled():
-        raise HTTPException(status_code=403,
-                            detail="the breach planner is disabled "
-                                   "([breach_notification] enable)")
+        raise feature_off("breach_notification", "Breach deadline planner")
     return breach_notification
 
 
@@ -3484,7 +3499,8 @@ async def incident_notification_plan(request: Request, incident_id: str,
         return bn.assess_breach(
             wanted,
             subjects_affected=subjects_affected,
-            discovered_at=float(record.get("created_at") or 0.0) or None,
+            # Awareness, not the moment the record was opened, starts the clocks.
+            discovered_at=float(record.get("aware_at") or record.get("created_at") or 0.0) or None,
         )
 
     return await _estate_call(build, not_found="no such incident")
@@ -3492,10 +3508,11 @@ async def incident_notification_plan(request: Request, incident_id: str,
 
 def _dsar_fulfillment_or_403():
     from maverick import dsar_fulfillment
+
+    from .feature_gate import feature_off
+
     if not dsar_fulfillment.enabled():
-        raise HTTPException(status_code=403,
-                            detail="DSAR fulfillment is disabled "
-                                   "([dsar_fulfillment] enable)")
+        raise feature_off("dsar_fulfillment", "Answering data requests")
     return dsar_fulfillment
 
 
@@ -4557,6 +4574,7 @@ def _binder_payload(days: int = 90) -> dict:
         if not (cutoff <= float(approval.requested_at or 0) <= now):
             continue
         state = w.approval_state(approval.id) or {}
+        approvers = list(state.get("approvers") or [])
         approvals.append(
             {
                 "id": approval.id,
@@ -4569,7 +4587,10 @@ def _binder_payload(days: int = 90) -> dict:
                 "decided_at": approval.decided_at,
                 "approvals_required": approval.approvals_required,
                 "approved_count": int(state.get("approved_count") or 0),
-                "approvers": list(state.get("approvers") or []),
+                "approvers": approvers,
+                # The person who asked approved their own request.
+                "self_approved": bool(approval.status == "approved" and approval.requested_by
+                                      and approval.requested_by in approvers),
                 "audit_pending_count": int(state.get("audit_pending_count") or 0),
                 "effective": bool(state.get("effective")),
             }
@@ -4797,14 +4818,27 @@ async def download_dsar_export(request: Request, request_id: str) -> Response:
 
 
 @router.post("/privacy/dsar/{request_id}/close")
-async def close_dsar_request(request: Request, request_id: str) -> dict:
+async def close_dsar_request(request: Request, request_id: str,
+                             body: DsarCloseIn | None = None) -> dict:
+    """Close a request. With a body, record what happened (the answer and,
+    for a deletion, what happened to the data); a request closed without
+    one can have it recorded later, once. Missing facts are a 422 with a
+    plain sentence; an outcome already on record is a 409."""
     require_permission(request, "operate")
     ops = _privacy_ops_or_403()
-    record = await run_in_threadpool(
-        ops.close_dsar,
-        request_id[:64],
-        closed_by=_request_actor(request),
-    )
+    try:
+        record = await run_in_threadpool(
+            ops.close_dsar,
+            request_id[:64],
+            closed_by=_request_actor(request),
+            outcome=None if body is None else body.model_dump(),
+        )
+    except ops.RecordConflict as exc:
+        raise HTTPException(
+            status_code=409, detail="What happened to this request is already on record."
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     if record is None:
         raise HTTPException(status_code=404, detail="no such request")
     return record
@@ -4833,20 +4867,25 @@ async def list_privacy_incidents(request: Request) -> dict:
 
 @router.post("/privacy/incidents", status_code=201)
 async def open_privacy_incident(request: Request, body: IncidentIn) -> dict:
-    """Open an incident: the Art. 33 clock starts now; the register tracks
-    it and never notifies anyone itself."""
+    """Open an incident: the Art. 33 clock runs from when the organisation
+    became aware (``aware_at``, now when omitted); the register tracks it and
+    never notifies anyone itself."""
     require_permission(request, "operate")
     ops = _privacy_ops_or_403()
-    record = await run_in_threadpool(
-        ops.open_incident,
-        body.title,
-        severity=body.severity,
-        description=body.description,
-        categories=body.categories,
-        affected_estimate=body.affected_estimate,
-        affected_people=body.affected_people,
-        reported_by=_request_actor(request),
-    )
+    try:
+        record = await run_in_threadpool(
+            ops.open_incident,
+            body.title,
+            severity=body.severity,
+            description=body.description,
+            categories=body.categories,
+            affected_estimate=body.affected_estimate,
+            affected_people=body.affected_people,
+            aware_at=body.aware_at,
+            reported_by=_request_actor(request),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     from .incident_attachment_projection import project_incident_record
 
     return await run_in_threadpool(project_incident_record, request, record, "privacy")
@@ -9433,12 +9472,16 @@ async def get_savings(request: Request, days: int = 90) -> dict:
     require_permission(request, "view")
     from maverick import savings as savings_mod
 
+    from .value_views import value_scope
+
     days = max(1, min(int(days), 730))
     resolution = _value_assumptions_resolution()
     cfg = resolution["effective_assumptions"]
-    report = await run_in_threadpool(savings_mod.compute, _world(), window_days=days, cfg=cfg, owner=goal_owner_filter(request))
+    view = value_scope(request)
+    report = await run_in_threadpool(savings_mod.compute, _world(), window_days=days, cfg=cfg, owner=view["owner"])
     return {
         "enabled": cfg["enable"],
+        "scope": view["scope"],
         "report": savings_mod.to_dict(report),
         # Keep ``assumptions`` as the backwards-compatible effective value.
         # The additional fields make precedence explicit when a tenant config
@@ -14997,6 +15040,21 @@ def list_approvals(request: Request, response: Response) -> dict:
             "private_count": len(rows) - len(readable), "content_access_url": "/content-access"}
 
 
+@router.get("/approvals/waiting-count")
+def approvals_waiting_count(request: Request, response: Response) -> dict:
+    """How many decisions the Approvals page shows this person: the sidebar
+    badge. Fetched after the page has loaded, so it never delays a render;
+    the same permission and content-access filtering as the page itself."""
+    require_permission(request, "operate")
+    response.headers["Cache-Control"] = "private, no-store"
+    w = _world()
+    from .content_access import can_read_approval
+    from .flow_approval_inbox import pending_for_request
+
+    readable = sum(1 for a in w.pending_approvals() if can_read_approval(request, a, w))
+    return {"waiting": readable + len(pending_for_request(request)["items"])}
+
+
 def _approval_api_row(approval) -> dict:
     """Project one approval without exposing a malformed structured envelope."""
     from maverick.approval_cards import (
@@ -15217,6 +15275,7 @@ async def deny_approval(request: Request, approval_id: int) -> Response:
         if not audit.audit_event(
             audit.EventKind.CONSENT_RESULT,
             agent=who,
+            actor=who,
             action="approval_rejection_reason",
             approval_id=int(approval_id),
             reason=reason,
@@ -15296,6 +15355,7 @@ async def revise_approval(request: Request, approval_id: int) -> Response:
     recorded = audit.audit_event(
         audit.EventKind.CONSENT_RESULT,
         agent=who,
+        actor=who,
         action="approval_revision_requested",
         approval_id=approval_id,
         superseded_binding_sha256=old_binding,
@@ -15377,7 +15437,16 @@ def approval_state(request: Request, approval_id: int) -> dict:
     st = _world().approval_state(approval_id)
     if st is None:
         raise HTTPException(status_code=404, detail="no such approval")
-    return {**st, "your_approval_recorded": _supervisor(request) in st.get("approvers", [])}
+    from maverick.safety.dual_control import allow_self_approval
+
+    who = _supervisor(request)
+    own = bool(st.get("requested_by")) and st.get("requested_by") == who
+    return {**st, "your_approval_recorded": who in st.get("approvers", []),
+            # What is actually enforced: one approver may be the person who
+            # asked; under two-person approval their vote counts only when
+            # [security] allow_self_approval is on.
+            "requested_by_you": own,
+            "self_approval_counts": int(st.get("approvals_required") or 1) <= 1 or allow_self_approval()}
 
 
 @router.post("/approvals/{approval_id}/claim")

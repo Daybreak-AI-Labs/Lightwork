@@ -1,9 +1,11 @@
 {% extends "base.html" %}
-{% block title %}Task handoffs — Lightwork{% endblock %}
+{% block title %}Task handoffs · Lightwork{% endblock %}
 {% block content %}
 <div id="handoff-root" data-context="{{ handoff_context }}" data-bundle="{{ handoff_bundle }}">
-<h1>Task handoffs</h1>
-<p>Offer a named colleague a separate continuation using only a selected deliverable bundle. They must accept before responsibility changes. Acceptance starts no paid work.</p>
+{% from "_hero.html" import hero %}
+{{ hero('Your work', 'Task handoffs',
+        lede='Offer a named colleague a separate continuation using only a selected deliverable bundle. They must accept before responsibility changes. Acceptance starts no paid work.',
+        compact=true) }}
 <p><a href="/deliverable-bundles">Choose or prepare selected evidence</a></p>
 <p id="handoff-status" role="status" aria-live="polite">Loading your handoffs.</p>
 <button class="btn" id="handoff-refresh" type="button">Refresh handoffs</button>
@@ -15,8 +17,8 @@
 <label for="handoff-commitments">Pending commitments, costs and decisions still outstanding</label><textarea class="input" id="handoff-commitments" name="commitments" maxlength="4000" rows="4" required placeholder="Declare outstanding obligations, or explicitly state that you know of none. This is not an automatic audit of outside services."></textarea>
 <label for="handoff-ceiling">Maximum new task allowance, USD</label><input class="input" id="handoff-ceiling" name="max_dollars" type="number" min="0.01" max="1000000" step="0.01" required>
 <p>Your colleague's current permissions, spending limits and connections remain authoritative. The reviewed ceiling can only lower their available allowance.</p>
-<button class="btn btn-primary" type="submit">Review exact handoff</button></form>
-<div id="handoff-preview" hidden></div><button class="btn btn-primary" id="handoff-offer" type="button" hidden>Confirm offer to named recipient</button>
+<button class="btn btn--primary" type="submit">Review exact handoff</button></form>
+<div id="handoff-preview" hidden></div><button class="btn btn--primary" id="handoff-offer" type="button" hidden>Confirm offer to named recipient</button>
 </section>
 <section class="panel" id="handoff-detail" hidden><h2 id="handoff-detail-title">Handoff</h2><div id="handoff-content"></div><div id="handoff-actions"></div></section>
 </div>

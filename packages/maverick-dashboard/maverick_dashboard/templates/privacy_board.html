@@ -355,6 +355,17 @@
     if (txt != null) e.textContent = txt;
     return e;
   }
+  // Empty cards use the shared compact empty state (lightwork-ui.js): what
+  // fills the card, then where to go next — the filters, or the workspace.
+  function filtered() { return !!(F.range || F.type || F.residual); }
+  function empty(box, title, body, action) {
+    box.appendChild(window.mvEmpty ? window.mvEmpty(title, body, action, { compact: true })
+      : el('p', 'pb-empty', title + '. ' + body));
+  }
+  function emptySlice(box, what) {
+    if (filtered()) empty(box, 'Nothing in this slice', what + ' Clear a filter or choose a longer time range above to see more.');
+    else empty(box, 'No assessments yet', what + ' Start one in the Privacy workspace.');
+  }
   function svg(tag, attrs) {
     var e = document.createElementNS(SVGNS, tag);
     for (var k in (attrs || {})) e.setAttribute(k, attrs[k]);
@@ -607,8 +618,7 @@
     box.textContent = '';
     var rs = rows();
     if (!rs.length) {
-      box.appendChild(el('p', 'pb-empty',
-        'No assessments in this slice yet.'));
+      emptySlice(box, 'Risk before and after safeguards appears here for each assessment.');
       return;
     }
     var inh = {}, res = {};
@@ -834,7 +844,7 @@
       return by[b].total - by[a].total;
     });
     if (!types.length) {
-      box.appendChild(el('p', 'pb-empty', 'No assessments in this slice.'));
+      emptySlice(box, 'Assessments by questionnaire appear here.');
       return;
     }
     var max = by[types[0]].total;
@@ -874,10 +884,8 @@
     box.textContent = '';
     var d = DATA.dsar || { open: 0, bands: {}, by_kind: {} };
     if (!d.open) {
-      box.appendChild(el('p', 'pb-empty',
-        DATA.records_enabled
-          ? 'No open subject requests — the queue is clear.'
-          : 'Privacy records are turned off. An administrator can turn them on in the Privacy workspace.'));
+      if (DATA.records_enabled) empty(box, 'No open subject requests', 'The queue is clear. Requests people make about their data appear here with the time left before each deadline.');
+      else empty(box, 'Privacy records are turned off', 'Subject requests appear here once records are on. An administrator can turn them on in the Privacy workspace.');
       return;
     }
     var kinds = Object.keys(d.by_kind).sort(function (a, b) {
@@ -917,8 +925,7 @@
     box.textContent = '';
     var t = DATA.transfers || { flows: [], total: 0, unsafeguarded: 0 };
     if (!t.total) {
-      box.appendChild(el('p', 'pb-empty',
-        'No cross-border transfers recorded yet.'));
+      empty(box, 'No cross-border transfers recorded yet', 'Transfers appear here once your processing record or a transfer assessment names where personal data goes. Add them in the Privacy workspace.');
       return;
     }
     var okN = t.total - t.unsafeguarded;
@@ -971,8 +978,7 @@
       return n + (tiers[t] || 0);
     }, 0);
     if (!total) {
-      box.appendChild(el('p', 'pb-empty',
-        'No AI systems registered against the AI Act yet.'));
+      empty(box, 'No AI systems registered yet', 'AI systems appear here by EU AI Act risk level. Add them under AI systems in the Privacy workspace.');
     } else {
       var max = Math.max.apply(null, TIERS.map(function (t) {
         return tiers[t] || 0;
@@ -1013,8 +1019,9 @@
       return d || (b.created_at || 0) - (a.created_at || 0);
     });
     if (!rs.length) {
-      box.appendChild(el('p', 'pb-empty',
-        'Nothing matches the current slice — clear a filter above.'));
+      if (filtered()) empty(box, 'Nothing matches the current slice', 'Clear a filter or choose a longer time range above to see more.');
+      else empty(box, 'No assessments yet', 'Assessments appear here, highest risk first. Start one in the Privacy workspace.',
+        { label: 'Open the Privacy workspace', href: '/privacy' });
       return;
     }
     var table = el('table');
@@ -1056,7 +1063,7 @@
       risk.appendChild(pair);
       tr.appendChild(risk);
       tr.appendChild(el('td', 'muted-sm', s.created_at
-        ? new Date(s.created_at * 1000).toLocaleDateString() : '—'));
+        ? (window.mvDateAbsolute ? window.mvDateAbsolute(s.created_at) : new Date(s.created_at * 1000).toLocaleDateString()) : '—'));
       var flags = [];
       if (s.review_due) flags.push(s.review_due_reason ? 'Review due: ' + s.review_due_reason : 'Review due');
       if (s.risk_accepted) flags.push('Risk accepted');
@@ -1083,9 +1090,7 @@
     box.textContent = '';
     var L = DATA.learning || {};
     if (!L.decided) {
-      box.appendChild(el('p', 'pb-empty',
-        'No decided assessments yet — the acceptance trend starts with the '
-        + 'first approval.'));
+      empty(box, 'No decided assessments yet', 'The acceptance trend appears here from the first approval. Decide an assessment in the Privacy workspace to start it.');
       return;
     }
     var hero = el('div');
@@ -1140,8 +1145,7 @@
       d.load_bearing + ' change ratings · ' + d.inert +
       ' never flag anything (could be removed)';
     if (!d.assessed) {
-      box.appendChild(el('p', 'pb-empty',
-        'No saved assessments of this framework yet.'));
+      empty(box, 'No saved assessments of this framework yet', 'Which questions change ratings appears here once assessments of this framework are saved. Choose another framework above.');
       return;
     }
     var table = el('table');
@@ -1202,7 +1206,7 @@
     var types = (DATA.by_type || []).map(function (r) { return r.type; });
     if (!types.length) {
       $('pb-roi').textContent = '';
-      $('pb-roi').appendChild(el('p', 'pb-empty', 'No assessments yet. Start one in the Privacy workspace.'));
+      empty($('pb-roi'), 'No assessments yet', 'Which questions change ratings appears here once assessments are saved. Start one in the Privacy workspace.');
       return;
     }
     if (!roiInit) {
@@ -1236,7 +1240,7 @@
   }
   function stamp() {
     $('pb-stamp').textContent = 'Updated ' +
-      new Date().toLocaleTimeString() + ' · updates every minute';
+      (window.mvTimeAbsolute ? window.mvTimeAbsolute(Date.now()) : new Date().toLocaleTimeString()) + ' · updates every minute';
   }
   function load() {
     fetch(API).then(function (r) {

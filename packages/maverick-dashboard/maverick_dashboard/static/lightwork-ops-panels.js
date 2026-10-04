@@ -22,7 +22,7 @@
   function when(stamp) {
     if (typeof stamp === 'number') return window.mvWhen ? window.mvWhen(stamp) : new Date(stamp * 1000).toLocaleString();
     var d = new Date(stamp);
-    return isNaN(d.getTime()) ? '' : d.toLocaleString();
+    return isNaN(d.getTime()) ? '' : window.mvTimeAbsolute ? window.mvTimeAbsolute(stamp) : d.toLocaleString();
   }
   function errorText(failure, action) {
     return window.mvErrorText ? window.mvErrorText(failure, action) : 'Could not ' + action + '. Please try again.';
@@ -163,7 +163,10 @@
           });
         }
         if (!data.checkpoints.length) {
-          rows.appendChild(el('p', 'muted', 'No checkpoints yet. Choose a day and publish its checkpoint to start.'));
+          var how = daySel ? 'Choose a day above and publish its checkpoint to start.' : 'An administrator publishes them.';
+          rows.appendChild(window.mvEmpty
+            ? window.mvEmpty('No checkpoints yet', 'Published checkpoints appear here, one per day. ' + how, null, { compact: true })
+            : el('p', 'muted', 'No checkpoints yet. ' + how));
           return;
         }
         rows.appendChild(table(['Day', 'Kind', 'Entries covered', 'Published', 'Actions'],
@@ -263,7 +266,13 @@
         say($('ops-ckpt-where'), where);
         var list = $('ops-ckpt-keys');
         list.textContent = '';
-        if (!data.keys.length) list.appendChild(el('li', 'muted', 'No keys are pinned.'));
+        if (!data.keys.length) {
+          var none = el('li');
+          none.appendChild(window.mvEmpty
+            ? window.mvEmpty('No keys pinned', 'Pinned keys appear here. Until you pin one, checkpoints signed by any key this installation trusts are accepted. Pin a key below to accept only the checkpoints it signs.', null, { compact: true })
+            : el('span', 'muted', 'No keys are pinned.'));
+          list.appendChild(none);
+        }
         data.keys.forEach(function (k) {
           var li = el('li');
           li.appendChild(el('span', null, (k.own ? 'This installation\'s key' : 'Key') + ', fingerprint '));
@@ -409,7 +418,7 @@
         out.appendChild(table(['Gap', 'Fix', 'Actions'], data.fixes.map(function (f) {
           var actions = el('span', 'ops-actions');
           if (f.can_apply && canInstall) {
-            var apply = button('Apply this fix', 'btn btn--primary');
+            var apply = button('Apply this fix', 'btn');
             apply.addEventListener('click', busy(apply, async function () {
               if (!(await confirmed('Apply this fix: ' + f.label + '? Lightwork\'s own settings change, the change is recorded in the activity log, and it takes effect after Lightwork restarts.', 'Apply'))) return;
               try {
@@ -735,7 +744,7 @@
         var started = await request('/api/v1/governance-ops/underwriting-pack', {method: 'POST', json: {asset_id: asset || null}});
         waitForDownload('/api/v1/governance-ops/underwriting-pack/' + encodeURIComponent(started.job), function (problem, href) {
           if (problem) { say(out, problem); return; }
-          var a = el('a', 'btn btn--primary', 'Save the pack');
+          var a = el('a', 'btn', 'Save the pack');
           a.href = href; a.setAttribute('download', '');
           link.appendChild(a);
           say(out, 'The pack is ready.');

@@ -1,14 +1,14 @@
 {% extends "base.html" %}
 {% from "_hero.html" import hero %}
 {% from "_module_gate.html" import module_gate %}
-{% block title %}Bulk Consent Changes · Lightwork{% endblock %}
+{% block title %}Bulk consent changes · Lightwork{% endblock %}
 {% block head_extra %}<link rel="stylesheet" href="/static/lightwork-consent-workbench.css">{% endblock %}
 {% block content %}
 <div class="governance-workbench" id="consent-bulk-jobs-shell"
      data-api-base="{{ api_base }}" data-copilot-page="{{ page_path }}"
      data-can-audit="{{ 'true' if bulk_jobs_can_audit else 'false' }}"
      data-can-admin="{{ 'true' if bulk_jobs_can_admin else 'false' }}">
-  {{ hero('Consent operations', 'Bulk Consent Changes',
+  {{ hero('Consent operations', 'Bulk consent changes',
           lede='Export consent records or change many people’s choices at once. Follow each job’s progress, cancel a job that has not finished, and see its history.') }}
   {% include "_consent_nav.html" %}
   {% if bulk_jobs_enabled is defined and not bulk_jobs_enabled %}

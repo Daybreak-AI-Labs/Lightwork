@@ -43,7 +43,7 @@ def test_page_renders_worklist_stats_and_catalog():
     html = resp.text
     # Worklist rows with the risk pair and review triggers.
     assert "Acme CRM" in html and "Globex HRIS" in html
-    assert 'class="btn btn--primary pw-review-btn"' in html
+    assert 'class="btn pw-review-btn"' in html
     # The shared pop-out is on the page.
     assert 'id="arv-dialog"' in html
     # The catalog lists the PRIVACY frameworks — and only those (the finance
@@ -103,7 +103,7 @@ def test_collected_access_export_is_not_presented_as_delivered():
     assert collected["fulfillment"]["export_path"] not in detail.text
     assert "Data collected</span>" in worklist.text
     assert "Completed</span>" not in worklist.text
-    assert "Marked handled or closed by deadline" in report.text
+    assert "Handled requests answered on time" in report.text
     assert "It does not confirm delivery or deletion" in report.text
 
 
@@ -378,3 +378,19 @@ def test_worklist_and_catalog_read_plainly():
     assert "window.prompt" not in html and "window.alert" not in html
     assert "/api/v1/assess/reviewers" in html
     assert "Type (slug)" not in html and "Publish release" not in html
+
+
+def test_program_report_counts_only_recorded_answers():
+    from maverick import privacy_ops
+
+    closed = privacy_ops.open_dsar("j@example.com", "erasure", jurisdiction="eu_gdpr")
+    privacy_ops.close_dsar(closed["id"], closed_by="dpo")
+    waiting = privacy_ops.open_dsar("k@example.com", "erasure")
+    privacy_ops.fulfill_dsar(waiting["id"], fulfilled_by="dpo")
+    html = client.get("/privacy/report").text
+    main = html.split("<main", 1)[-1].split("</main>", 1)[0]
+    assert "0 of 1" in main                        # answered on time, of those closed
+    assert "Closed without a recorded answer" in main
+    assert "Past the 30-day deadline" not in main  # deadlines differ by law
+    api = client.get("/api/v1/privacy/report").json()["dsar"]
+    assert api["open"] == 1 and api["closed_without_response"] == 1

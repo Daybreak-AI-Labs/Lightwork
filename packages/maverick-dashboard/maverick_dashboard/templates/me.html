@@ -14,7 +14,7 @@
              waiting ~ (' thing needs you' if waiting == 1 else ' things need you'),
              badge='Action needed' if waiting else 'All clear',
              badge_class='warn' if waiting else 'ok',
-             copy=d.date_label ~ ' · ' ~ preferences.time_zone) }}
+             copy=d.local_date | datetime('date') ~ ' · ' ~ preferences.time_zone) }}
   {% endcall %}
 
   {% if saved %}
@@ -35,12 +35,13 @@
           <td><span class="badge {{ 'blocked' if a.risk in ('high', 'critical') else 'pending' }}">{{ a.risk_label }}</span></td>
           <td>{{ a.spending }}</td>
           <td>{% if a.decide_by %}{{ a.decide_by | datetime }}{% else %}No deadline{% endif %}{% if a.status == 'expired' %} <span class="badge blocked">Expired</span>{% endif %}</td>
-          <td>{{ 'You' if a.waiting_on == 'you' else 'Someone else' }}</td>
+          <td>{{ {'you': 'You', 'you_own': 'You (your own request)', 'requester': 'The person who asked'}.get(a.waiting_on, 'Other people') }}</td>
         </tr>
       {% endfor %}
       </tbody>
     </table>
     {% if can_decide %}<p class="muted">Decide on the <a href="/approvals">Approvals page</a>, or from Slack with the buttons on the card.</p>{% endif %}
+    {% if d.approvals | selectattr('waiting_on', 'equalto', 'requester') | list %}<p class="muted">“The person who asked” means the request comes from a colleague's private task, so you can't open it here; they can decide their own request.</p>{% endif %}
     {% else %}
     <p class="muted">Nothing is waiting for your decision.</p>
     {% endif %}
@@ -94,7 +95,7 @@
 
   <div class="section-head"><h2>Spending this month</h2></div>
   <div class="panel">
-    <p><strong>${{ '%.2f' | format(d.spending.dollars) }}</strong> spent in {{ d.spending.month_label }} across {{ d.spending.runs }} run{{ '' if d.spending.runs == 1 else 's' }}{% if d.spending.limit_dollars %}, of your <strong>${{ '%.2f' | format(d.spending.limit_dollars) }}</strong> monthly limit{% endif %}.
+    <p><strong>{{ d.spending.dollars | money }}</strong> spent in {{ d.spending.month_label }} across {{ d.spending.runs }} run{{ '' if d.spending.runs == 1 else 's' }}{% if d.spending.limit_dollars %}, of your <strong>{{ d.spending.limit_dollars | money }}</strong> monthly limit{% endif %}.
       {% if d.spending.over_limit %}<span class="badge blocked">Over the limit</span>{% endif %}</p>
     {% if not d.spending.limit_dollars %}<p class="muted">No monthly limit is set. An administrator can set one in Settings.</p>{% endif %}
   </div>

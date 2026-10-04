@@ -25,7 +25,7 @@ from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 
-from .auth import caller_principal, goal_owner_filter, has_permission, require_permission
+from .auth import caller_principal, has_permission, require_permission
 
 router = APIRouter(prefix="/value-proof", tags=["value-proof"])
 
@@ -183,8 +183,11 @@ async def fleet_memory(request: Request) -> dict:
 async def record_stats(request: Request) -> dict:
     require_permission(request, "view")
     from maverick import operating_record as orec
+
+    from .value_views import value_scope
     world = _world()
-    owner = goal_owner_filter(request)
+    # Counts only; a read-only role counts the whole workspace.
+    owner = value_scope(request)["owner"]
     s = await run_in_threadpool(lambda: orec.stats(orec.assemble(world, limit=500, owner=owner)))
     depts = sorted(s.departments.items(), key=lambda kv: -kv[1])[:12]
     return {"records": s.n_records, "tasks": s.n_goals, "approvals": s.n_approvals,

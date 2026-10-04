@@ -8,7 +8,7 @@ const {JSDOM} = require('jsdom');
 
 const template = fs.readFileSync(path.join(__dirname, '../../maverick_dashboard/templates/plan_tree.html'), 'utf8');
 const controller = template.match(/<script>([\s\S]*?)<\/script>/)[1].replace('{{ goal.id }}', '7');
-const snapshot = '<ul><li><a href="/chat/goal/7">Root task - active $1.2500</a><ul><li><a href="/chat/goal/8">Child task - pending $0.5000</a></li></ul></li></ul>';
+const snapshot = '<ul><li><a href="/chat/goal/7">Root task - active $1.25</a><ul><li><a href="/chat/goal/8">Child task - pending $0.50</a></li></ul></li></ul>';
 const tree = {id: 7, title: 'Root task', status: 'active', dollars: 1.25,
   children: [{id: 8, title: 'Child task', status: 'pending', dollars: 0.5, children: []}]};
 const response = value => ({ok: true, status: 200, json: async () => value});
@@ -35,7 +35,7 @@ function fixture(t, {fetch = async () => response(tree), cytoscape, scripts = tr
 test('without scripts the server snapshot remains linked and accurately labelled', t => {
   const ui = fixture(t, {scripts: false});
   assert.equal(ui.list.querySelectorAll('a').length, 2);
-  assert.match(ui.list.textContent, /\$1\.2500/);
+  assert.match(ui.list.textContent, /\$1\.25(?!\d)/);
   assert.equal(ui.status.textContent, 'Plan captured when this page loaded.');
   assert.doesNotMatch(ui.window.document.body.textContent, /This map updates live|Loading/);
 });
@@ -51,9 +51,9 @@ for (const graph of ['CDN unavailable', 'initialization failure', 'layout failur
     const ui = fixture(t, {cytoscape});
     await settle();
     assert.equal(ui.list.querySelector('ul > li > ul > li > a').getAttribute('href'), '/chat/goal/8');
-    assert.equal(ui.list.querySelector('a').textContent, 'Root task \u2014 active  $1.2500');
-    assert.equal(ui.list.querySelectorAll('a')[1].textContent, 'Child task \u2014 pending  $0.5000');
-    if (graph === 'working graph') assert.equal(graphElements[0].data.label, 'Root task  $1.2500');
+    assert.equal(ui.list.querySelector('a').textContent, 'Root task \u2014 active  $1.25');
+    assert.equal(ui.list.querySelectorAll('a')[1].textContent, 'Child task \u2014 pending  $0.50');
+    if (graph === 'working graph') assert.equal(graphElements[0].data.label, 'Root task  $1.25');
     else assert.equal(ui.window.document.getElementById('plan-tree').hidden, true);
     assert.match(ui.status.textContent, /^Live \u2014 active\. Refreshed /);
   });
@@ -78,10 +78,10 @@ test('refreshed text keeps the focused step and reports stale data after a later
   current = {...tree, children: [{...tree.children[0], status: 'done', dollars: 0.75}]};
   ui.refresh(); await settle();
   assert.equal(ui.window.document.activeElement.getAttribute('href'), '/chat/goal/8');
-  assert.match(ui.window.document.activeElement.textContent, /done  \$0\.7500/);
+  assert.match(ui.window.document.activeElement.textContent, /done  \$0\.75(?!\d)/);
   current = null; ui.refresh(); await settle();
   assert.match(ui.status.textContent, /Showing older data from /);
-  assert.match(ui.list.textContent, /\$0\.7500/);
+  assert.match(ui.list.textContent, /\$0\.75(?!\d)/);
 });
 
 for (const status of [401, 403]) {

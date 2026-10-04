@@ -1,9 +1,10 @@
 {% extends "base.html" %}
-{% block title %}Find Personal Data · Lightwork{% endblock %}
+{% block title %}Find personal data · Lightwork{% endblock %}
 {% block head_extra %}
 <link rel="stylesheet" href="/static/lightwork-privacy-data-discovery.css">
 {% endblock %}
 {% block content %}
+{% from "_back_link.html" import back_link with context %}
 <div class="pdd-shell" id="pdd-root"
      data-api-base="{{ privacy_data_discovery_api_base }}"
      data-copilot-page="{{ privacy_data_discovery_page_path }}"
@@ -16,7 +17,7 @@
           subtitle='Scan your storage and systems for personal data',
           lede='Connect a storage service or system, scan it, and check what was found. A second
                 person approves each finding before it is added to your data map.') }}
-  <p><a class="btn btn--ghost" href="/privacy">Back to Privacy</a></p>
+  <p>{{ back_link('/privacy', 'Privacy') }}</p>
 
   <details class="panel">
     <summary>About this page&rsquo;s safeguards</summary>

@@ -70,7 +70,7 @@ def test_workbench_is_store_free_closed_and_copilot_enabled(client: TestClient) 
     ):
         assert directive in csp
     assert "style-src 'self' 'nonce-" in csp
-    assert "Contracts and Engagements" in response.text
+    assert "Contracts and engagements" in response.text
     assert 'id="tpc-operations" disabled' in response.text
     assert "Checking that contracts are available" in response.text
     assert "Record the key facts here, not the full contract text." in response.text
@@ -282,3 +282,24 @@ def test_contract_client_parses_as_strict_javascript() -> None:
         timeout=30,
     )
     assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize("enabled", (False, True))
+def test_turned_off_module_shows_its_gate_instead_of_loaders(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, enabled: bool,
+) -> None:
+    from maverick_dashboard import api
+
+    monkeypatch.setattr(api, "module_activation_enabled", lambda _section: enabled)
+    text = client.get(ROUTE).text
+    main = text[text.index('<div id="third-party-contracts-shell"'):text.index('<script src="/static/lightwork-record-workflows.js"')]
+    assert f'data-module-enabled="{"true" if enabled else "false"}"' in main
+    if enabled:
+        assert "data-module-gate" not in main and "Loading…" in main
+        return
+    # The gate follows the title; the availability box is hidden (the banner
+    # already says it is off) and no loader says "Loading".
+    assert main.index('class="page-title hero-title"') < main.index("data-module-gate")
+    assert '<div class="hero-statebox" aria-live="polite" hidden>' in main
+    assert "Loading" not in main
+    assert "Contracts and engagements appear here once this is turned on." in main

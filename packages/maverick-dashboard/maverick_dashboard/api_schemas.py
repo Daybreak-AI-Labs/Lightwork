@@ -1102,16 +1102,31 @@ class DsarIn(BaseModel):
     jurisdiction: str = Field("", max_length=32)
 
 
+class DsarCloseIn(BaseModel):
+    """What happened to a request, recorded when it is closed. ``answered``
+    and ``refused`` need the date the answer was sent and where the proof is
+    kept; a refusal (or keeping a person's data after a deletion request)
+    needs its lawful reason; a deletion request needs its erasure result."""
+    kind: str = Field(..., pattern="^(answered|refused|withdrawn|no_response)$")
+    answered_on: str = Field("", max_length=10)
+    reference: str = Field("", max_length=512)
+    erasure: str = Field("", pattern="^(|erased|not_erased)$")
+    lawful_basis: str = Field("", max_length=2000)
+    note: str = Field("", max_length=2000)
+
+
 class IncidentIn(BaseModel):
-    """Open a privacy-incident record; the Art. 33 72-hour clock starts at
-    discovery. Whether it is a notifiable breach stays a separate, human
-    decision."""
+    """Open a privacy-incident record; the Art. 33 72-hour clock runs from
+    when the organisation became aware (``aware_at``, epoch seconds; now
+    when omitted). Whether it is a notifiable breach stays a separate,
+    human decision."""
     title: str = Field(..., min_length=1, max_length=200)
     severity: str = Field("medium", pattern="^(low|medium|high)$")
     description: str = Field("", max_length=4000)
     categories: str = Field("", max_length=500)
     affected_estimate: str = Field("", max_length=100)
     affected_people: int | None = Field(None, ge=0)
+    aware_at: float | None = Field(None, gt=0)
 
 
 class IncidentAffectedPeopleIn(BaseModel):

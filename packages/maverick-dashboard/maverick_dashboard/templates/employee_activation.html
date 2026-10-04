@@ -1,8 +1,11 @@
 {% extends "base.html" %}
 {% block title %}Your first useful result - Lightwork{% endblock %}
 {% block content %}
+{% from "_hero.html" import hero %}
+{{ hero('', ui("Your first useful result"),
+        lede=ui("Choose a job, select evidence and decide how you will judge the result. Job choices never grant a role or access. Practice examples remain distinct from real work."),
+        compact=true) }}
 <section class="panel" id="employee-activation">
-<h1>{{ ui("Your first useful result") }}</h1><p>{{ ui("Choose a job, select evidence and decide how you will judge the result. Job choices never grant a role or access. Practice examples remain distinct from real work.") }}</p>
 <p><a href="/start">{{ ui("Installation checklist") }}</a> · <a href="/budget">{{ ui("Check your current budget") }}</a></p>
 {% if not activation.readiness.can_start %}<p role="status">{{ ui("Your account can read this guidance. An operator can create and run a private draft.") }}</p>{% endif %}
 {% if not activation.readiness.provider_ready %}<p role="status">{{ ui("The configured task routes are not ready. Your private draft can be saved now; ask your administrator to repair the current provider setup before starting.") }}</p>{% endif %}

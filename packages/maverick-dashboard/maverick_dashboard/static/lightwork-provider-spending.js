@@ -7,15 +7,19 @@
   const base = '/api/v1/recovery/provider-spending';
   let state = null, review = null, imported = null, holds = [], totals = [], busy = false, offset = 0, openReviews = [];
   const message = text => { el('spend-status').textContent = text; };
-  const dollars = value => new Intl.NumberFormat(undefined, {style: 'currency', currency: 'USD', minimumFractionDigits: 2,
-    maximumFractionDigits: value > 0 && value < 0.01 ? 4 : 2}).format(value);
+  // The shared money format ("$1,234.56", "under $0.01"); this recovery-shell
+  // page loads without lightwork-ui.js, so mvMoney is not available here.
+  const dollars = value => value > 0 && value < 0.005 ? 'under $0.01'
+    : new Intl.NumberFormat('en-US', {style: 'currency', currency: 'USD'}).format(value);
   const labels = {};
   try { JSON.parse(root.dataset.providers || '[]').forEach(p => { labels[p.name] = p.label; }); } catch (_) { /* unrendered template */ }
   const providerLabel = name => labels[name] || (window.mvHuman ? window.mvHuman(name) : String(name));
-  const when = seconds => { try { return new Date(seconds * 1000).toLocaleString(); } catch (_) { return ''; } };
+  // The shared date format through LightworkI18n (this page has no lightwork-ui.js).
+  const i18n = window.LightworkI18n;
+  const when = seconds => { try { return i18n ? i18n.formatDate(seconds) : new Date(seconds * 1000).toLocaleString(); } catch (_) { return ''; } };
   const periodLabel = value => {
-    if (/^\d{4}-\d{2}$/.test(value || '')) return new Date(value + '-01T00:00:00').toLocaleDateString(undefined, {year: 'numeric', month: 'long'});
-    if (/^\d{4}-\d{2}-\d{2}$/.test(value || '')) return new Date(value + 'T00:00:00').toLocaleDateString();
+    if (/^\d{4}-\d{2}$/.test(value || '')) return i18n ? i18n.formatDate(value + '-01', {year: 'numeric', month: 'long'}) : new Date(value + '-01T00:00:00').toLocaleDateString(undefined, {year: 'numeric', month: 'long'});
+    if (/^\d{4}-\d{2}-\d{2}$/.test(value || '')) return i18n ? i18n.formatDate(value) : new Date(value + 'T00:00:00').toLocaleDateString();
     return value || '';
   };
   function providerOptions(select, chosen, withAll) {
@@ -109,7 +113,7 @@
     state = await response.json();
     providerOptions(el('spend-provider'), provider, true);
     const health = state.ledger_health || {};
-    el('spend-health').textContent = (health.message || 'Spending record health could not be checked.')
+    el('spend-health').textContent = (health.message || 'Spending record health could not be checked. Refresh the page to check again.')
       + (Number.isInteger(health.receipt_count) ? ` ${health.receipt_count.toLocaleString()} provider requests recorded.` : '')
       + (Number.isInteger(health.unresolved_count) && health.unresolved_count
         ? ` ${health.unresolved_count.toLocaleString()} request${health.unresolved_count === 1 ? '' : 's'} still need a final cost.` : '')

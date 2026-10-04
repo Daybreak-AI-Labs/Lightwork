@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% from "_hero.html" import hero %}
 {% from "_module_gate.html" import module_gate %}
-{% block title %}Document Vault · Lightwork{% endblock %}
+{% block title %}Document vault · Lightwork{% endblock %}
 {% block head_extra %}
 <style nonce="{{ csp_style_nonce }}">
   .document-vault-shell { display:grid; gap:var(--space-5); }
@@ -19,11 +19,6 @@
 </style>
 {% endblock %}
 {% block content %}
-{% if not document_vault_module_enabled %}
-{{ module_gate('governed_document_vault', 'Document vault',
-               detail='Turn this on to keep approved documents encrypted in your workspace and share them through one-time downloads.',
-               can_activate=document_vault_can_activate) }}
-{% endif %}
 <div class="document-vault-shell" id="document-vault-shell"
       data-vault-api-base="{{ vault_api_base }}" data-access-api-base="{{ access_api_base }}"
       data-can-admin="{{ 'true' if document_vault_can_admin else 'false' }}"
@@ -31,6 +26,11 @@
       data-can-audit="{{ 'true' if document_vault_can_audit else 'false' }}"
       data-copilot-page="/administration/document-vault">
   {{ hero('Administration', 'Document vault', lede='Keep approved documents encrypted in your workspace and share them through downloads that work once and expire quickly.') }}
+  {% if not document_vault_module_enabled %}
+  {{ module_gate('governed_document_vault', 'Document vault',
+                 detail='Turn this on to keep approved documents encrypted in your workspace and share them through one-time downloads.',
+                 can_activate=document_vault_can_activate) }}
+  {% endif %}
 {% if document_vault_workspace_missing %}
   <section class="panel" aria-labelledby="document-vault-workspace-title">
     <h2 id="document-vault-workspace-title">Choose a workspace first</h2>

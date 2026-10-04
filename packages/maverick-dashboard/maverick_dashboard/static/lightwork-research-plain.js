@@ -192,6 +192,7 @@
     try {
       const response = await fetch('/api/v1/code/heads', {credentials: 'same-origin'});
       if (response.ok) repos = (await response.json()).repos || [];
+      else await release(response);
     } catch (_) { repos = []; }
     select.replaceChildren(new Option(repos.length ? 'Choose a code project' : 'No code projects yet (add one on the Code page)', ''));
     repos.forEach(repo => select.appendChild(new Option(`${repo.name} (latest version)`, repo.head)));
@@ -210,10 +211,16 @@
     }
   }
 
+  // A refusal's body is never read here; release it so the request ends
+  // instead of staying open (the page never went quiet).
+  async function release(response) {
+    try { await response.body?.cancel(); } catch (_) { /* already closed */ }
+  }
+
   async function loadRegistry() {
     try {
       const response = await fetch('/api/v1/research', {credentials: 'same-origin', cache: 'no-store', headers: {Accept: 'application/json'}});
-      if (!response.ok) return;
+      if (!response.ok) { await release(response); return; }
       const value = await response.json();
       registry = {datasets: value.registry?.datasets || [], models: value.registry?.models || [], runs: value.governed_runs || []};
       renderPurposes();

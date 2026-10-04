@@ -17,6 +17,7 @@
                   activity record.') }}
   {% endcall %}
   <p class="muted">This page shows audit metadata. Employee prompts, tool payloads and detailed reasons remain private.</p>
+  {% if can_open_page('/simulate') %}<p>Want to know whether an action would be stopped? <a href="/simulate">Test a safety rule</a> before anyone runs it.</p>{% endif %}
 
   <div class="section-head"><h2>Which day</h2></div>
   <div class="panel">

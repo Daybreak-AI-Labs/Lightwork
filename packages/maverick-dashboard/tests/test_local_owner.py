@@ -192,7 +192,9 @@ def test_named_owner_invite_workspace_and_captured_review(monkeypatch, tmp_path)
         assert token, invitation.text
         reviewer = TestClient(dashboard.app, **options)
         try:
-            joined = reviewer.post("/auth/invite/" + token[1])
+            joined = reviewer.post("/auth/invite/" + token[1], data={
+                "password": "a long reviewer fixture phrase",  # pragma: allowlist secret
+                "password2": "a long reviewer fixture phrase"})  # pragma: allowlist secret
             assert joined.status_code == 303, joined.text
             assert rbac.get_stored_role("user:reviewer@example.com") == "operator"
             assert reviewer.put("/api/v1/workspace/active-tenant", json={"tenant_id": "customer-workspace"}).status_code in {403, 404}

@@ -140,4 +140,9 @@ ROWS = [
     ('Print conversation', 'Imprimer la conversation', 'Unterhaltung drucken', '会話を印刷', '打印对话'),
     ('Saved answer text to copy', 'Texte de la réponse enregistrée à copier', 'Gespeicherter Antworttext zum Kopieren', 'コピーする保存済み回答のテキスト', '要复制的已保存回答文本'),
     ('Share', 'Partager', 'Teilen', '共有', '分享'),
+    ('Runs on made-up sample files. Everything it produces is marked as sample data.',
+     'S’exécute sur des fichiers d’exemple fictifs. Tout ce qu’elle produit est marqué comme données d’exemple.',
+     'Läuft mit erfundenen Beispieldateien. Alles, was dabei entsteht, wird als Beispieldaten gekennzeichnet.',
+     '架空のサンプルファイルで実行します。作成されるものはすべてサンプルデータとして示されます。',
+     '使用虚构的示例文件运行。生成的所有内容都会标记为示例数据。'),
 ]

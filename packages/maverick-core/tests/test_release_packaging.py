@@ -1242,13 +1242,13 @@ def test_ci_posture_tools_are_exactly_pinned_and_secret_scan_uses_module():
     constraints = _ci_constraints()
     expected = {
         "bandit": "1.9.4",
-        "cyclonedx-bom": "7.4.0",
+        "cyclonedx-bom": "7.5.0",
         "detect-secrets": "1.5.0",
         "pip-audit": "2.10.1",
-        "psycopg": "3.3.5",
-        "psycopg-binary": "3.3.5",
-        "psycopg-pool": "3.3.1",
-        "ruff": "0.16.7",
+        "psycopg": "3.3.6",
+        "psycopg-binary": "3.3.6",
+        "psycopg-pool": "3.3.3",
+        "ruff": "0.16.9",
         "vulture": "2.16",
     }
     assert {name: constraints.get(name) for name in expected} == expected

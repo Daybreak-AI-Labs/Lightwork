@@ -204,6 +204,24 @@ def _is_long_running(cmd: str) -> bool:
     return any(p.search(cmd) for p in _LONG_RUN_TEST_PATTERNS)
 
 
+def _time_limit_words(timeout: float | None) -> str:
+    if timeout is None:
+        return "Time limit: the sandbox's usual limit."
+    if timeout >= 60 and timeout % 60 == 0:
+        minutes = int(timeout // 60)
+        return f"Time limit: {minutes} minute{'s' if minutes != 1 else ''}."
+    return f"Time limit: {timeout:g} seconds."
+
+
+def _shown_command(cmd: str) -> str:
+    """The command as the person deciding reads it (secrets are masked on the
+    card). A very long one is shortened for reading; the approval still binds
+    to exactly what will run."""
+    if len(cmd) <= 3800:
+        return cmd
+    return cmd[:3800] + "\n… (shortened here; the approval covers the full command)"
+
+
 def shell(sandbox) -> Tool:
     def _sandbox_target() -> dict[str, str]:
         backend = type(sandbox)
@@ -311,22 +329,24 @@ def shell(sandbox) -> Tool:
                 "shell",
                 risk="high",
                 scope=f"sandbox:{_sandbox_target()['workdir']}",
-                detail=f"Run one {len(cmd)}-character command in the sandbox.",
+                detail="Run a command in the sandbox.",
                 provenance="shell",
                 target=_sandbox_target(),
                 parameters=parameters,
                 parameter_summary=[
-                    "Execute the exact command committed by SHA-256 with the reviewed timeout."
+                    "Runs this exact command once; nothing else is approved.",
+                    _time_limit_words(timeout_override),
                 ],
                 known_effects=[
-                    "Runs one command inside the reviewed sandbox workspace."
+                    "The command runs in the sandbox folder and can change files there."
                 ],
                 unresolved_assumptions=[
                     "The command may modify files or contact services allowed by the sandbox."
                 ],
-                before="The reviewed command has not run.",
-                after="The reviewed command has run once and its effects may persist.",
+                before="The command has not run.",
+                after="The command has run once; its changes stay.",
                 irreversible=True,
+                display_command=_shown_command(cmd),
                 target_provider=_sandbox_target,
                 parameters_provider=lambda: {
                     "command": cmd,

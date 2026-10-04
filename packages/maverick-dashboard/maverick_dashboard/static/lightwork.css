@@ -28,8 +28,11 @@
       --text-xs: 0.75rem;  --text-sm: 0.8125rem; --text-base: 0.875rem;
       --text-md: 1rem;     --text-lg: 1.125rem;  --text-xl: 1.375rem;
       --text-2xl: 1.75rem; --text-3xl: 2.25rem;
-      --font-normal: 400; --font-medium: 500; --font-semibold: 600;
+      --font-normal: 400; --font-medium: 500; --font-semibold: 600; --font-bold: 700;
       --leading-tight: 1.25; --leading: 1.55;
+      /* The product face (Manrope, self-hosted below) with the system stack
+         it falls back to. */
+      --font-sans: "Manrope", -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
       /* Serif display face for greetings/headlines (system serif — New York on
          Apple, Georgia elsewhere — no webfont, stays offline-first). */
       --font-serif: ui-serif, Georgia, "Iowan Old Style", "Palatino Linotype", "Times New Roman", serif;
@@ -118,6 +121,13 @@
     body.font-dyslexic { line-height: 1.8; }
 
     * { box-sizing: border-box; }
+    /* Controls use the product face. Browsers give buttons, fields and menus
+       their own system font, so <button class="btn"> rendered in Arial while
+       <a class="btn"> used Manrope. Zero specificity: any class that sets a
+       font still wins. Chips also take their size and line height from their
+       surroundings unless their page sets one. */
+    :where(button, input, select, textarea) { font-family: inherit; }
+    :where(.chip, .fd__chip) { font: inherit; }
     /* The hidden attribute must always win. Shared classes such as .btn, .section-head
        and .grid set an author-level display, which beats the UA [hidden] rule and left
        "hidden" controls rendered (Settings tab headings, the Ekko buttons, the copilot
@@ -313,6 +323,16 @@
     [dir="rtl"] .navgrp__toggle[aria-expanded="false"] .navgrp__caret { transform: rotate(90deg); }
     .navgrp__toggle[aria-expanded="false"] + .navgrp__items { display: none; }
     .navgrp__items { list-style: none; margin: 0; padding: 0; }
+    /* Sidebar badges, in text rather than colour alone: how many approvals
+       are waiting, and "Off" on a page whose module is switched off. */
+    .nav-count, .nav-off {
+      flex: none; margin-inline-start: auto; padding: 0 0.45rem;
+      border-radius: var(--radius-pill); text-align: center;
+      font-size: var(--text-xs); line-height: 1.5;
+    }
+    .nav-count { min-width: 1.5em; font-weight: var(--font-semibold); color: var(--brand-fg); background: var(--brand); }
+    .nav-count[hidden] { display: none; }
+    .nav-off { font-weight: var(--font-medium); color: var(--muted); border: 1px solid var(--border); }
 
     /* Registry-backed page finder / command palette. The trigger belongs to
        the sidebar, while the dialog lives at shell level so it remains usable
@@ -396,10 +416,12 @@
       color: var(--brand); background: var(--brand-subtle);
       border-color: color-mix(in srgb, var(--brand) 26%, transparent);
     }
-    .navfinder__label { font-weight: var(--font-medium); }
+    .navfinder__label { flex: 1 1 10rem; min-width: 0; font-weight: var(--font-medium); }
+    /* Long setting and record details wrap beside the name instead of
+       squeezing it to one letter per line. */
     .navfinder__group {
-      flex: none; color: var(--muted); font-size: var(--text-xs);
-      white-space: nowrap;
+      flex: 0 1 auto; min-width: 0; max-width: 55%; color: var(--muted);
+      font-size: var(--text-xs); text-align: end;
     }
     .navfinder__empty {
       margin: 0; padding: var(--space-6) var(--space-4) var(--space-7);
@@ -445,9 +467,11 @@
       letter-spacing: -0.012em; line-height: 1.14; color: var(--text); margin: 0 0 var(--space-2);
     }
     .page-subtitle { color: var(--muted); margin: 0 0 var(--space-5); }
-    /* Section label (the established uppercase "eyebrow" used across pages). */
+    /* Section title. A bare <h2> is a panel's title, the same job as the
+       h2 in .section-head, so both use one size (it used to be a 12px
+       eyebrow here and 18px there). Small labels use their own classes. */
     h2 {
-      margin: 0 0 var(--space-3); font-size: var(--text-xs); color: var(--muted);
+      margin: 0 0 var(--space-3); font-size: var(--text-lg); color: var(--muted);
       text-transform: uppercase; letter-spacing: 0.08em; font-weight: var(--font-semibold);
     }
 
@@ -535,20 +559,19 @@
     }
     .btn:hover { border-color: var(--border-strong); text-decoration: none; }
     .btn:active { transform: translateY(1px); }
-    /* Primary action: brand fill + a soft brand-tinted lift so it reads as
-       the tactile, glass-era button used across the redesigned screens. */
+    /* Primary action, high contrast theme: brand fill with a soft lift. Every
+       other theme uses the text-coloured primary under "controls" at the end
+       of this sheet; those two rules are the only primary-button looks. */
     .btn--primary { background: var(--brand); border-color: transparent; color: var(--brand-fg);
       box-shadow: 0 2px 10px color-mix(in srgb, var(--brand) 32%, transparent); }
     .btn--primary:hover { background: var(--brand-hi); border-color: transparent;
       box-shadow: 0 4px 14px color-mix(in srgb, var(--brand) 40%, transparent); }
     .btn--ghost { background: transparent; }
+    /* Quiet buttons: transparent until hovered, then a faint fill. */
+    .btn--ghost:where(:not(.btn--primary, .btn--danger, :disabled)):hover {
+      background-color: color-mix(in srgb, var(--text) 8%, transparent);
+    }
     .btn--danger { background: var(--danger); border-color: var(--danger); color: var(--danger-fg); }
-    /* Class names some pages used that never existed; they render as the
-       real primary button instead of an unstyled one. */
-    .btn-primary, .btn.primary { background: var(--brand); border-color: transparent; color: var(--brand-fg);
-      box-shadow: 0 2px 10px color-mix(in srgb, var(--brand) 32%, transparent); }
-    .btn-primary:hover, .btn.primary:hover { background: var(--brand-hi); border-color: transparent; }
-    .btn-danger, .btn.danger { background: var(--danger); border-color: var(--danger); color: var(--danger-fg); }
     /* A plain <button> in page content gets the standard button look rather
        than the browser default. */
     #content button:not([class]) {
@@ -626,6 +649,16 @@
     .task-tabs__list a { display: inline-block; padding: var(--space-2) var(--space-3); color: var(--muted); border-bottom: 2px solid transparent; margin-bottom: -1px; }
     .task-tabs__list a:hover { color: var(--text); text-decoration: none; }
     .task-tabs__list a.task-tabs__on { color: var(--text); border-bottom-color: var(--brand); font-weight: var(--font-semibold); }
+    /* Tabs and filter toggles in the same look. The selected item shows a
+       selected state (aria-selected, aria-pressed or aria-current), never
+       btn--primary: the primary style is kept for the view's main action. */
+    .mv-tabs { display: flex; flex-wrap: wrap; gap: var(--space-1); margin: 0 0 var(--space-3); padding: 0; border-bottom: 1px solid var(--border); }
+    .mv-tab { appearance: none; background: none; border: 0; border-bottom: 2px solid transparent; border-radius: 0; margin-bottom: -1px; padding: var(--space-2) var(--space-3); color: var(--muted); font: inherit; cursor: pointer; }
+    .mv-tab:hover { color: var(--text); }
+    .mv-tab[aria-selected="true"], .mv-tab[aria-pressed="true"], .mv-tab[aria-current="page"] { color: var(--text); border-bottom-color: var(--brand); font-weight: var(--font-semibold); }
+    @media (forced-colors: active) {
+      .mv-tab[aria-selected="true"], .mv-tab[aria-pressed="true"], .mv-tab[aria-current="page"] { border-bottom-color: Highlight; }
+    }
     .navquick-list { list-style: none; margin: 0 0 var(--space-3); padding: 0 0 var(--space-3); border-bottom: 1px solid var(--border); }
     .halt-pill.armed .dot { background: currentColor; animation: pulse 1.2s ease-in-out infinite; }
     @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
@@ -742,6 +775,11 @@
     .mv-form__field input.input, .mv-form__field select { width: 100%; }
     .mv-form__check { display: flex; align-items: center; gap: var(--space-2); }
     .mv-form__help { color: var(--muted); font-size: var(--text-xs); margin-top: 2px; }
+    /* "Required" beside the label of a [required] field (added by lightwork-ui.js). */
+    .mv-required {
+      margin-inline-start: 0.5em; color: var(--muted); font-size: var(--text-xs);
+      font-weight: var(--font-medium); letter-spacing: normal; text-transform: none; white-space: nowrap;
+    }
     .mv-form__err { color: var(--danger, #dc2626); font-size: var(--text-sm); min-height: 1em; margin: 0 0 var(--space-2); }
     /* Shared list-row: an icon/title + muted subline + trailing actions. */
     .mv-row { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-3) var(--space-4); border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface-1); transition: border-color .12s ease; animation: mv-rise 180ms ease-out both; }
@@ -751,10 +789,19 @@
     .mv-row__sub { color: var(--muted); font-size: var(--text-sm); margin-top: 2px; word-break: break-word; }
     .mv-row__actions { display: flex; gap: var(--space-2); flex-wrap: wrap; flex: none; }
     .btn--icon { flex: none; padding: 0.3rem 0.55rem; font-size: var(--text-sm); line-height: 1; }
-    /* Shared empty / get-started state: centered title + body + a CTA. */
+    /* Shared empty / get-started state: centered title + body + one next
+       step. Markup: templates/_empty_state.html or window.mvEmpty(). */
     .mv-empty { text-align: center; padding: var(--space-6) var(--space-4); border: 1px dashed var(--border); border-radius: var(--radius-lg); background: var(--surface-1); color: var(--muted); }
     .mv-empty__title { color: var(--text); font-weight: var(--font-semibold); font-size: var(--text-md); margin: 0 0 var(--space-1); }
     .mv-empty__body { margin: 0 auto var(--space-3); max-width: 38rem; }
+    .mv-empty__body:last-child { margin-bottom: 0; }
+    .mv-empty__title + .mv-empty__action { margin-top: var(--space-2); }
+    /* Compact: inside panels, tiles and charts. */
+    .mv-empty--compact { text-align: start; padding: var(--space-3) var(--space-4); font-size: var(--text-sm); }
+    .mv-empty--compact:not(:last-child) { margin-bottom: var(--space-3); }
+    .mv-empty--compact .mv-empty__title { font-size: var(--text-sm); }
+    .mv-empty--compact .mv-empty__body { margin: 0 0 var(--space-2); max-width: none; }
+    .mv-empty--compact .mv-empty__body:last-child { margin-bottom: 0; }
     /* Shared card + responsive card grid. */
     .card { background: var(--surface-1); border: 1px solid var(--border); border-radius: var(--radius-md); padding: var(--space-4); display: flex; flex-direction: column; transition: border-color .12s ease, box-shadow .12s ease; animation: mv-rise 200ms ease-out both; }
     .card:hover { border-color: var(--border-strong); box-shadow: var(--shadow-sm); }
@@ -884,17 +931,6 @@
         border-color: color-mix(in srgb, var(--text) 24%, transparent);
         box-shadow: var(--shadow-md), var(--glass-edge);
       }
-      /* Primary action: a glass-era button — subtle vertical gradient with a
-         specular top edge, so it reads as a lit key, not a flat rectangle. */
-      body:not(.theme-hicontrast) .btn--primary {
-        background: linear-gradient(180deg, var(--brand-hi), var(--brand));
-        box-shadow: 0 2px 14px color-mix(in srgb, var(--brand) 38%, transparent),
-          inset 0 1px 0 0 color-mix(in srgb, #ffffff 22%, transparent);
-      }
-      body:not(.theme-hicontrast) .btn--primary:hover {
-        background: linear-gradient(180deg,
-          color-mix(in srgb, var(--brand-hi) 86%, #ffffff 14%), var(--brand-hi));
-      }
       body:not(.theme-hicontrast) :where(
         .btn:not(.btn--primary):not(.btn--danger), .ctl, .iconbtn, .halt-pill,
         .input, .select, .textarea, input:not([type="checkbox"]):not([type="radio"]),
@@ -957,9 +993,6 @@
         background: var(--scrim);
         -webkit-backdrop-filter: blur(3px);
         backdrop-filter: blur(3px);
-      }
-      body:not(.theme-hicontrast) .btn--primary {
-        box-shadow: 0 2px 14px color-mix(in srgb, var(--brand) 38%, transparent);
       }
       @media (prefers-reduced-transparency: reduce) {
         body:not(.theme-hicontrast) {
@@ -1029,6 +1062,15 @@
           backdrop-filter: none;
         }
       }
+      /* Quiet (ghost) buttons are not glass controls. Same weight as the two
+         control rules above and later, so it wins over both: no fill, no
+         blur, no edge highlight; the border stays. */
+      body:not(.theme-hicontrast) :where(.btn--ghost:not(.btn--primary):not(.btn--danger)) {
+        background-color: transparent;
+        -webkit-backdrop-filter: none;
+        backdrop-filter: none;
+        box-shadow: none;
+      }
     }
 
 /* --- Page hero (shared; the Ekko treatment generalized) ------------------ */
@@ -1063,6 +1105,21 @@
   flex-wrap: wrap; gap: var(--space-3); margin: var(--space-2) 0; }
 .hero-statebox__copy { color: var(--muted); font-size: var(--text-sm);
   min-height: 2.5em; margin: 0; }
+/* A lede straight under the title (no subtitle) still gets breathing room. */
+.hero-title + .hero-lede { margin-top: var(--space-3); }
+/* The page's main action lives in the header: one btn--primary per view. */
+.hero-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2);
+  margin-top: var(--space-4); }
+/* Compact header for working pages: smaller title and padding, and the
+   actions beside the text instead of under it. */
+.hero--compact { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
+  gap: var(--space-3) var(--space-5); padding: var(--space-4) var(--space-5); margin-bottom: var(--space-4); }
+.hero--compact > :first-child { flex: 1 1 20rem; }
+.hero--compact .hero-title { font-size: clamp(1.5rem, 3vw, 2.1rem); }
+.hero--compact .hero-subtitle { margin-bottom: var(--space-1); }
+.hero--compact .hero-lede { font-size: var(--text-sm); margin-top: var(--space-1); }
+.hero--compact .hero-actions { margin-top: 0; }
+.hero--compact .hero-statebox { padding: var(--space-3); }
 @media (max-width: 920px) {
   .hero { grid-template-columns: 1fr; }
 }
@@ -1453,7 +1510,7 @@ body[data-global-admin="1"] .mg-banner .mg-nonadmin-note { display: none; }
   --warn: #FFB547; --danger: #FF6B6B;
 }
 body.theme-dark { --brand: #3D8BFF; --brand-hi: #79ACFF; --brand-fg: #000000; --info: #37D7FF; }
-body:not(.font-dyslexic) { font-family: "Manrope", -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; }
+body:not(.font-dyslexic) { font-family: var(--font-sans); }
 .mono, code, pre, kbd { font-family: var(--font-mono); }
 
 /* shell */
@@ -1508,6 +1565,7 @@ th, .stat .label, .hero-statebox__label { font-family: var(--font-mono); letter-
 
 /* controls */
 .btn { border-radius: 8px; font-weight: 600; }
+/* Primary action in every theme except high contrast (see .btn--primary). */
 body:not(.theme-hicontrast) .btn--primary { background: var(--text); border-color: transparent; color: var(--bg); box-shadow: none; }
 body:not(.theme-hicontrast) .btn--primary:hover { background: color-mix(in srgb, var(--text) 88%, var(--bg)); border-color: transparent; box-shadow: none; }
 .input, .select, .textarea { background: var(--bg); border-radius: 8px; }

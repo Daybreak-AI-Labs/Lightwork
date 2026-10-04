@@ -46,12 +46,28 @@ def _tasks(request, world, principal, since):
             "coverage": "Current owned work, up to 100 tasks per state; cards show the latest 20." + (" More records exist; open Tasks for the full list." if not complete else "")}
 
 
+_DECISION_SOURCES = {"approval": "Approvals", "flow_approval": "Flow approvals", "signoff": "Sign-offs",
+                     "assessment": "Assessments", "project_review": "Project reviews",
+                     "vendor_reconciliation": "Vendor checks"}
+
+
 def _decisions(request):
     from .action_center_api import _model, require_enabled
     require_enabled(request)
     value = _model(request)
     rows = [row for row in value["items"] if row["kind"] in {"approval", "signoff", "assessment", "project_review", "vendor_reconciliation"}]
-    return {"items": rows[:20], "count": len(rows), "coverage": value["coverage"], "observed_at": value["generated_at"]}
+    # Today is personal: it lists what waits on this person. Work anyone on the
+    # team may pick up (an unassigned assessment, an unclaimed approval) stays
+    # in Action Center and is only counted here, so nobody reads other
+    # people's queues by default.
+    mine = [row for row in rows if row["assignment"] == "mine"]
+    # Report only real problems with the decision sources: a module that is
+    # turned off, or a source that loaded fine, is not a load error.
+    problems = [{**source, "label": _DECISION_SOURCES[source["kind"]]}
+                for source in value["coverage"]
+                if source["kind"] in _DECISION_SOURCES and source["status"] in ("partial", "unavailable")]
+    return {"items": mine[:20], "count": len(mine), "available": len(rows) - len(mine),
+            "coverage": problems, "observed_at": value["generated_at"]}
 
 
 def _schedules(principal, until):

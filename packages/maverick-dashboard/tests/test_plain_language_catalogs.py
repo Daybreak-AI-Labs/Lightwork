@@ -237,7 +237,7 @@ def test_action_center_turned_off_shows_the_turned_off_page(monkeypatch):
 
 def test_sidebar_uses_a_plain_name_for_app_consent():
     page = _client().get("/tools", headers=HTML)
-    assert "Consent in Your Apps" in page.text
+    assert "Mobile app consent" in page.text
     assert "Native Consent SDK" not in page.text
 
 

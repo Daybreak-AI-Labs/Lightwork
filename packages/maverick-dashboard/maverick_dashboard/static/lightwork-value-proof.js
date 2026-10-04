@@ -19,10 +19,14 @@
     return node;
   }
   function fill(id, node) { var box = $(id); if (!box) return; box.textContent = ''; if (node) box.appendChild(node); }
+  // An empty card: the shared compact empty state when the page has it.
+  function empty(id, title, body, action) {
+    fill(id, window.mvEmpty ? window.mvEmpty(title, body, action, { compact: true }) : el('p', title + '. ' + body, 'muted'));
+  }
   function say(id, text) { var box = $(id); if (box) box.textContent = String(text || ''); }
   function money(n) {
     var v = Number(n) || 0;
-    return '$' + (v < 1 && v > 0 ? v.toFixed(4) : v.toFixed(2));
+    return window.mvMoney ? window.mvMoney(v) : '$' + v.toFixed(2);
   }
   function plural(n, one, many) { return n + ' ' + (n === 1 ? one : many); }
   function errorText(failure, action) {
@@ -85,7 +89,10 @@
     var top = $('vp-retro-top');
     return get('/cost-retro' + (top ? '?top=' + encodeURIComponent(top.value) : '')).then(function (d) {
       if (!d.tasks) {
-        say('vp-retro-summary', 'No task costs recorded yet. This fills in as tasks finish.');
+        var start = spend && spend.getAttribute('data-can-start') === 'true';
+        empty('vp-retro-summary', 'No task costs recorded yet',
+          'Where spend went, and what to change, appears here as tasks finish.' + (start ? ' Start a task to see its cost.' : ''),
+          start ? { label: 'Start a task', href: '/chat' } : null);
         return;
       }
       var line = money(d.total) + ' spent across ' + plural(d.tasks, 'task', 'tasks') + '.';
@@ -120,8 +127,9 @@
       '&min_samples=' + encodeURIComponent(min.value) : '')).then(function (d) {
       var share = { 75: 'three in four', 90: 'nine in ten', 95: '19 in 20' }[d.percentile || 90];
       if (!d.suggestions.length) {
-        fill('vp-cap', el('p', 'Not enough finished tasks with costs yet. A suggestion appears after ' +
-          d.minimum_tasks + ' tasks.', 'muted'));
+        var lower = min && min.options.length && min.value !== min.options[0].value;
+        empty('vp-cap', 'No suggestion yet', 'A suggested cap appears here after ' + d.minimum_tasks +
+          ' finished tasks with costs.' + (lower ? ' Choose a smaller number under “Only suggest after” to see one sooner.' : ''));
         return;
       }
       fill('vp-cap', table(['For', 'Suggested cap', 'Based on'], d.suggestions.map(function (s) {
@@ -132,8 +140,8 @@
   function loadFailures() {
     return get('/failures').then(function (d) {
       if (!d.total) {
-        fill('vp-fail', el('p', d.recording ? 'No failed tasks recorded. Good news.'
-          : 'Failure reasons are not being recorded. Turn on failure recording on the Learning page.', 'muted'));
+        if (d.recording) empty('vp-fail', 'No failed tasks recorded', 'Good news. Reasons tasks fail appear here, most common first.');
+        else empty('vp-fail', 'Failure reasons are not being recorded', 'Reasons tasks fail appear here once recording is on. Turn on failure recording on the Learning page.');
         return;
       }
       var top = Math.max.apply(null, d.reasons.map(function (r) { return r.count; }));

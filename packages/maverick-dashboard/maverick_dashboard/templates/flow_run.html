@@ -1,9 +1,9 @@
 {% extends "base.html" %}
 {% block title %}Flow run · Lightwork{% endblock %}
 {% block content %}
+{% from "_back_link.html" import back_link with context %}
 <style>
   .fr { max-width: 900px; }
-  .fr__head { display: flex; align-items: baseline; gap: var(--space-3); flex-wrap: wrap; margin-bottom: var(--space-3); }
   .fr__status { font-weight: var(--font-semibold); }
   .fr__status.completed { color: var(--success, #16a34a); }
   .fr__status.failed, .fr__status.rejected { color: var(--danger, #dc2626); }
@@ -28,7 +28,7 @@
   .fr__data { margin-top: var(--space-4); }
   .fr__data table { width: 100%; }
   .fr__data td { overflow-wrap: anywhere; }
-  .fr__data pre { background: var(--surface-sunken); border: 1px solid var(--border); border-radius: var(--radius);
+  .fr__data pre { background: var(--surface-sunken); border: 1px solid var(--border); border-radius: var(--radius-md);
                   padding: var(--space-3); font-size: 12px; overflow-x: auto; max-height: 320px; }
   .fr__allow { display: flex; gap: var(--space-2); align-items: flex-end; flex-wrap: wrap; flex: 1 0 100%; }
   .fr__example { margin: var(--space-4) 0; }
@@ -41,17 +41,17 @@
 </style>
 
 <div class="fr">
-  <div class="fr__head">
-    <h1 style="margin:0;" id="fr-title">Flow run</h1>
+  {% from "_hero.html" import hero %}
+  {% call hero('Flows', 'Flow run', title_id='fr-title', compact=true) %}
     <span class="badge" id="fr-status" role="status">Loading…</span>
-  </div>
+  {% endcall %}
   <p class="fr__msg" id="fr-meta"></p>
   <p id="fr-owner-links" hidden>
     <a class="btn btn--ghost" id="fr-designer-link" href="/flows/designer/{{ flow_id }}">Open the flow</a>
     <a class="btn btn--ghost" href="/flows/{{ flow_id | urlencode }}/teach#teach-recipe">Learn from reviewed runs</a>
     <a class="btn btn--ghost" href="/automations">All automations</a>
   </p>
-  <p id="fr-review-links" hidden><a class="btn btn--ghost" href="/approvals">Back to Approvals</a></p>
+  <p id="fr-review-links" hidden>{{ back_link('/approvals', 'Approvals') }}</p>
   <div class="fr__error" id="fr-error" role="alert" hidden></div>
   <div class="fr__actions" id="fr-actions"></div>
   <span class="fr__msg" id="fr-msg" role="status" aria-live="polite"></span>
@@ -265,7 +265,7 @@
       parent.appendChild(ul);
     }
     function money(budget) {
-      if (budget && typeof budget.maximum === 'number') return 'Up to $' + budget.maximum.toFixed(2);
+      if (budget && typeof budget.maximum === 'number') return 'Up to ' + (window.mvMoney ? window.mvMoney(budget.maximum) : '$' + budget.maximum.toFixed(2));
       if (budget && budget.state) return 'Checked again when it runs';
       return 'Within your workspace limits';
     }
@@ -431,14 +431,14 @@
       var allowWrap = document.createElement('div'); allowWrap.className = 'fr__allow';
       var allowField = document.createElement('div'); allowField.className = 'field';
       var allowLabel = document.createElement('label'); allowLabel.htmlFor = 'fr-allowance';
-      allowLabel.textContent = 'New spending limit for this run ($) — currently $' + current.toFixed(2);
+      allowLabel.textContent = 'New spending limit for this run ($) — currently ' + (window.mvMoney ? window.mvMoney(current) : '$' + current.toFixed(2));
       var allowance = document.createElement('input'); allowance.id = 'fr-allowance'; allowance.className = 'input';
       allowance.type = 'number'; allowance.min = String(current);
       allowance.step = '0.01'; allowance.value = (current + 5).toFixed(2);
       allowField.appendChild(allowLabel); allowField.appendChild(allowance); allowWrap.appendChild(allowField);
       [5, 20].forEach(function (extra) {
         var quick = document.createElement('button'); quick.type = 'button'; quick.className = 'btn btn--ghost';
-        quick.textContent = '+$' + extra; quick.setAttribute('aria-label', 'Set the limit to $' + (current + extra).toFixed(2));
+        quick.textContent = '+$' + extra; quick.setAttribute('aria-label', 'Set the limit to ' + (window.mvMoney ? window.mvMoney(current + extra) : '$' + (current + extra).toFixed(2)));
         quick.addEventListener('click', function () { allowance.value = (current + extra).toFixed(2); });
         allowWrap.appendChild(quick);
       });
@@ -545,7 +545,7 @@
           ? 'Started by ' + human(run.origin.split(':').slice(4).join(':'))
           : (ORIGIN[run.origin] || human(run.origin)));
       else bits.push('Started by hand');
-      if (run.cost_dollars) bits.push('cost $' + Number(run.cost_dollars).toFixed(2));
+      if (run.cost_dollars) bits.push('cost ' + (window.mvMoney ? window.mvMoney(run.cost_dollars) : '$' + Number(run.cost_dollars).toFixed(2)));
       meta.textContent = bits.join(' · ');
     }
     var err = document.getElementById('fr-error');
@@ -582,9 +582,11 @@
       st.textContent = pendingAction.reviewOnly ? 'Decision recorded'
         : (pendingAction.kind === 'retry' ? 'Trying again' : 'Decision recorded');
       if (pendingAction.reviewOnly) {
-        var back = document.createElement('a');
-        back.className = 'btn btn--ghost'; back.href = '/approvals';
-        back.textContent = 'Back to Approvals'; actions.appendChild(back);
+        // Same markup as the back_link macro: the arrow is decoration.
+        var back = document.createElement('a'), arrow = document.createElement('span');
+        back.className = 'back-link'; back.href = '/approvals';
+        arrow.setAttribute('aria-hidden', 'true'); arrow.textContent = '\u2190 ';
+        back.append(arrow, 'Back to Approvals'); actions.appendChild(back);
       } else if (pendingAction.exhausted) {
         var check = document.createElement('button');
         check.type = 'button'; check.className = 'btn btn--ghost';

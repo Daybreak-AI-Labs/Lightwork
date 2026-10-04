@@ -1,9 +1,10 @@
 {% extends "base.html" %}
 {% block title %}Your devices - Lightwork{% endblock %}
 {% block content %}
+{% from "_hero.html" import hero %}
+{% set devices_lede %}Connect a companion to your own tasks and costs in this workspace. Your account's current access still applies. Device credentials cannot open general dashboard controls.{% endset %}
+{{ hero('Your account', 'Your paired devices', lede=devices_lede, compact=true) }}
 <section class="panel">
-  <h1>Your paired devices</h1>
-  <p>Connect a companion to your own tasks and costs in this workspace. Your account's current access still applies. Device credentials cannot open general dashboard controls.</p>
   <p><a href="/account">Your account</a> · <a href="/preferences">Preferences</a></p>
   <p id="device-status" role="status" aria-live="polite"></p>
   <p id="device-error" role="alert" hidden></p>

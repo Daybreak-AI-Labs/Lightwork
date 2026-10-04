@@ -239,7 +239,7 @@ def test_page_renders_stacked_cards_with_confirmation_and_decided_area(tmp_path)
     assert "High risk" in text and "Decide by" in text and "Requested by" in text
     assert "What it will do" in text and "Can&#39;t be undone" in text or "Can't be undone" in text
     assert 'id="approval-confirm"' in text and "Type APPROVE to confirm" in text
-    assert "Decided just now" in text and 'class="btn btn--primary approval-undo"' in text
+    assert "Decided just now" in text and 'class="btn approval-undo"' in text
     source = TEMPLATE.read_text(encoding="utf-8")
     assert "window.confirm" not in source and "mvConfirm" not in source
     assert "mvToast" in text
@@ -268,3 +268,16 @@ def test_oversight_console_shares_the_card_queue(tmp_path):
     r = _client().get("/oversight")
     assert r.status_code == 200
     assert f'<article class="approval-item" data-id="{aid}"' in r.text
+
+
+def test_link_to_an_approval_no_longer_waiting_has_a_note_and_a_way_on(tmp_path):
+    world = _world(tmp_path)
+    waiting, _binding = _queue(world)
+    page = _client().get("/approvals")
+    assert page.status_code == 200
+    assert f'id="approval-{waiting}"' in page.text
+    # The note is in the page, hidden until the address names a missing card.
+    assert '<p class="panel" id="approval-missing" role="status" hidden>' in page.text
+    assert "This approval was already decided or no longer exists." in page.text
+    assert 'href="#request-decision-history"' in page.text
+    assert 'href="/audit">find it in the Activity log' in page.text

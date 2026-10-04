@@ -1,11 +1,12 @@
 {% extends "base.html" %}
 {% block title %}Learning examples · Lightwork{% endblock %}
 {% block content %}
+{% from "_back_link.html" import back_link with context %}
 {% from "_hero.html" import hero %}
 <div class="lex">
   {% call hero('Workflows', 'Learning examples',
       lede='Find recent runs kept as examples. Open one to review what happened, allow learning, or stop future use. Copilot can help with the selected example on its run page.') %}{% endcall %}
-  <p><a class="btn btn--ghost" href="/workflows">Back to workflows</a></p>
+  <p>{{ back_link('/workflows', 'Workflows') }}</p>
   <section class="panel" aria-labelledby="lex-title">
     <div class="section-head"><h2 id="lex-title">Your recent examples</h2></div>
     <p id="lex-status" role="status" aria-live="polite">Checking your examples…</p>

@@ -58,6 +58,14 @@ def _invitee(client):
     return TestClient(client.app, headers={"Origin": "http://testserver"})
 
 
+PASSPHRASE_FORM = {"password": "synthetic workspace invite passphrase",  # pragma: allowlist secret
+                   "password2": "synthetic workspace invite passphrase"}  # pragma: allowlist secret
+
+
+def _accept(client, path, *, follow_redirects=True):
+    return client.post(path, data=PASSPHRASE_FORM, follow_redirects=follow_redirects)
+
+
 def test_global_admin_can_invite_first_member_of_existing_workspace(monkeypatch, tmp_path):
     client = _client(monkeypatch, tmp_path)
     from maverick.tenant import registry
@@ -73,7 +81,7 @@ def test_global_admin_can_invite_first_member_of_existing_workspace(monkeypatch,
     assert minted.status_code == 200, minted.text
     path = _invitation_path(minted)
     assert "Acme workspace" in client.get(path).text
-    accepted = client.post(path, follow_redirects=False)
+    accepted = _accept(client, path, follow_redirects=False)
     assert accepted.status_code == 303
     assert rbac.get_tenant_role("acme", "user:first@example.com") == "admin"
     assert rbac.get_stored_role("user:first@example.com") is None
@@ -114,7 +122,7 @@ def test_scoped_admin_invites_only_in_managed_workspace_and_can_cancel(monkeypat
     },
                           follow_redirects=False)
     assert revoked.status_code == 303
-    assert _invitee(client).post(path).status_code == 410
+    assert _accept(_invitee(client), path).status_code == 410
 
 
 def test_scoped_invite_rechecks_issuer_and_workspace_on_accept(monkeypatch, tmp_path):
@@ -130,7 +138,7 @@ def test_scoped_invite_rechecks_issuer_and_workspace_on_accept(monkeypatch, tmp_
     assert minted.status_code == 200, minted.text
     path = _invitation_path(minted)
     rbac.remove_tenant_role("acme", principal)
-    assert _invitee(client).post(path).status_code == 410
+    assert _accept(_invitee(client), path).status_code == 410
     assert invites.peek_invite(path.rsplit("/", 1)[1]) is not None
     assert rbac.get_tenant_role("acme", "user:new@example.com") is None
 
@@ -140,7 +148,7 @@ def test_scoped_invite_rechecks_issuer_and_workspace_on_accept(monkeypatch, tmp_
     })
     path = _invitation_path(minted)
     registry.suspend_tenant("acme")
-    assert _invitee(client).post(path).status_code == 410
+    assert _accept(_invitee(client), path).status_code == 410
     assert rbac.get_tenant_role("acme", "user:other@example.com") is None
 
 
@@ -155,7 +163,7 @@ def test_scoped_invite_cannot_remove_last_admin_on_accept(monkeypatch, tmp_path)
         "_expected_tenant": "acme", "tenant": "acme", "email": "alice@example.com", "role": "viewer",
     })
     assert minted.status_code == 200, minted.text
-    assert _invitee(client).post(_invitation_path(minted)).status_code == 410
+    assert _accept(_invitee(client), _invitation_path(minted)).status_code == 410
     assert rbac.get_tenant_role("acme", principal) == "admin"
 
 
@@ -199,7 +207,7 @@ def test_scoped_invite_cannot_outlive_a_role_ceiling_change(monkeypatch, tmp_pat
     assert minted.status_code == 200
     rbac.set_custom_role("member-admin", ["view", "admin"])
     rbac.set_tenant_role("acme", principal, "member-admin")
-    assert _invitee(client).post(_invitation_path(minted)).status_code == 410
+    assert _accept(_invitee(client), _invitation_path(minted)).status_code == 410
     assert rbac.get_tenant_role("acme", "user:new@example.com") is None
 
 
@@ -248,7 +256,7 @@ def test_bind_failure_explains_a_replacement_link_is_needed(monkeypatch, tmp_pat
     _, token = invites.create_invite("new@example.com", "viewer",
                                      created_by="owner", tenant="acme")
     monkeypatch.setattr(invite_routes, "_bind_role", lambda *_: (_ for _ in ()).throw(ValueError("store failed")))
-    response = client.post(f"/auth/invite/{token}")
+    response = _accept(client, f"/auth/invite/{token}")
     assert response.status_code == 503
     assert "new invitation link" in response.text
     assert invites.peek_invite(token) is None
@@ -275,11 +283,11 @@ def test_named_global_issuer_must_still_administer_at_acceptance(monkeypatch, tm
     assert pending.created_by == issuer and pending.tenant == ""
     rbac.set_role("user:recovery@example.com", "admin")
     rbac.set_role(issuer, "viewer")
-    assert _invitee(client).post(path).status_code == 410
+    assert _accept(_invitee(client), path).status_code == 410
     assert invites.peek_invite(path.rsplit("/", 1)[1]) is not None
     assert rbac.get_stored_role("user:new@example.com") is None
     rbac.set_role(issuer, "admin")
-    assert _invitee(client).post(path, follow_redirects=False).status_code == 303
+    assert _accept(_invitee(client), path, follow_redirects=False).status_code == 303
     assert rbac.get_stored_role("user:new@example.com") == "operator"
 
 
@@ -298,11 +306,11 @@ def test_first_member_invite_requires_current_global_issuer_authority(monkeypatc
     assert pending is not None and pending.created_by == issuer and pending.tenant == workspace
     rbac.set_role("user:recovery@example.com", "admin")
     rbac.set_role(issuer, "viewer")
-    assert _invitee(client).post(f"/auth/invite/{token}").status_code == 410
+    assert _accept(_invitee(client), f"/auth/invite/{token}").status_code == 410
     assert invites.peek_invite(token) is not None
     assert rbac.get_tenant_role(workspace, "user:first@example.com") is None
     rbac.set_role(issuer, "admin")
-    assert _invitee(client).post(f"/auth/invite/{token}", follow_redirects=False).status_code == 303
+    assert _accept(_invitee(client), f"/auth/invite/{token}", follow_redirects=False).status_code == 303
     assert rbac.get_tenant_role(workspace, "user:first@example.com") == "admin"
 
 
@@ -311,5 +319,5 @@ def test_principal_less_and_legacy_invites_keep_their_existing_contract(monkeypa
     from maverick_dashboard import invites, rbac
 
     _legacy, token = invites.create_invite("legacy@example.com", "viewer", created_by="local-admin")
-    assert _invitee(client).post(f"/auth/invite/{token}", follow_redirects=False).status_code == 303
+    assert _accept(_invitee(client), f"/auth/invite/{token}", follow_redirects=False).status_code == 303
     assert rbac.get_stored_role("user:legacy@example.com") == "viewer"

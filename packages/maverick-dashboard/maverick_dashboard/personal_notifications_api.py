@@ -20,13 +20,14 @@ def _app():
 
 
 def _identity(request):
-    from maverick import config, experience_preferences
+    from maverick import experience_preferences
+    from maverick.personal_notifications import personal_alerts_enabled
 
     from .preferences_api import _principal
     principal = _principal(request)
     if not experience_preferences.enabled():
         raise HTTPException(403, "Personal preferences are turned off. An administrator can enable them in All settings.")
-    if config.config_source_errors(include_tenant=True) or (config.load_config().get("notifications") or {}).get("personal_alerts", False) is not True:
+    if not personal_alerts_enabled():
         raise HTTPException(403, "Personal alerts are turned off. An administrator can enable them in All settings.")
     return principal
 
@@ -158,18 +159,24 @@ def _state_locked(request, *, seen_id=None):
             "background": enrollment, "private_delivery": delivery_status(actor)}
 
 
-@router.get("/notifications")
-def page(request: Request):
-    from maverick import config, experience_preferences
-
+def page_authority(request):
+    """The page's own admission; navigation offers the page only when it passes."""
     auth.require_permission(request, "view")
     if not auth.caller_principal(request):
         raise HTTPException(403, "Sign in with your own account to see personal notifications.")
+
+
+@router.get("/notifications")
+def page(request: Request):
+    from maverick import config, experience_preferences
+    from maverick.personal_notifications import personal_alerts_on
+
+    page_authority(request)
     if config.config_source_errors(include_tenant=True):
         unavailable = "Notification settings could not be read. Ask an administrator to check All settings."
     elif not experience_preferences.enabled():
         unavailable = "Personal preferences are turned off. An administrator can enable them in All settings."
-    elif (config.load_config().get("notifications") or {}).get("personal_alerts") is not True:
+    elif not personal_alerts_on(config.load_config().get("notifications")):
         unavailable = "Personal task alerts are turned off. An administrator can enable them in All settings."
     else:
         unavailable = ""

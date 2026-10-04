@@ -214,7 +214,9 @@ def test_one_step_setup_invites_a_workspace_administrator_not_an_installation_on
     workspace = made.json()["workspace"]["id"]
     path = "/auth/invite/" + made.json()["invite_link"].rsplit("/auth/invite/", 1)[1]
     del client.headers["Authorization"]
-    accepted = client.post(path, follow_redirects=False)
+    accepted = client.post(path, data={"password": "synthetic workspace admin phrase",  # pragma: allowlist secret
+                                       "password2": "synthetic workspace admin phrase"},  # pragma: allowlist secret
+                           follow_redirects=False)
     assert accepted.status_code == 303, accepted.text
     from maverick_dashboard import auth, rbac
     who = "user:owner@acme.example"

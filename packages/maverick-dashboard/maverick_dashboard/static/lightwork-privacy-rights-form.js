@@ -14,6 +14,8 @@
   function $(id) { return doc.getElementById(id); }
   function text(el, value) { if (el) el.textContent = value; }
   function fail(el, failure, action) {
+    // Turned off is not "no permission": offer Turn on in place when allowed.
+    if (window.mvShowFeatureOff && window.mvShowFeatureOff(el, failure, action)) return;
     text(el, window.mvErrorText ? window.mvErrorText(failure, action) : 'Could not ' + action + '. Please try again.');
   }
   function call(method, url, body) {

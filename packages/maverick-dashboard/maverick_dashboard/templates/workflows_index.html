@@ -4,7 +4,6 @@
 <style>
   .wfx { max-width: 880px; margin-inline: auto; }
   .wfx :focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; border-radius: var(--radius-sm); }
-  .wfx__head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); flex-wrap: wrap; margin-bottom: var(--space-5); }
   .wfx__section { margin-bottom: var(--space-7); }
   .wfx__section h2 { font-size: var(--text-lg); margin: 0 0 var(--space-3); }
   .wfx__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-2); }
@@ -13,17 +12,24 @@
   .wfx__more summary::-webkit-details-marker { display: none; }
   .wfx__menu { position: absolute; z-index: 4; right: 0; top: 100%; min-width: 11rem;
     padding: var(--space-2); display: grid; gap: var(--space-1); border: 1px solid var(--border);
-    border-radius: var(--radius-md); background: var(--surface); box-shadow: var(--shadow-md); }
+    border-radius: var(--radius-md); background: var(--surface-1); box-shadow: var(--shadow-md); }
 </style>
 
 <div class="wfx">
   {% from "_hero.html" import hero, state %}
+  {% from "_empty_state.html" import empty_state %}
+  {% set workflow_actions %}
+    <a class="btn btn--primary" href="/workflow-builder">New workflow</a>
+    {% if flows_enabled %}<a class="btn" href="/flows/designer">New flow</a>{% endif %}
+    {% if flows_enabled %}<a class="btn btn--ghost" href="/learning/examples">Learning examples</a>{% endif %}
+  {% endset %}
   {% call hero('Your AI workforce', 'Workflows',
                subtitle='Save a process and use it again',
                lede='Workflows, templates, and specialist instructions you\'ve built
                      — schedule them, trigger them from events, or run them on
                      demand. Browse the full catalog on
-                     <a href="/templates">Templates</a>.' | safe) %}
+                     <a href="/templates">Templates</a>.' | safe,
+               actions=workflow_actions if can_operate_workflows else '') %}
     {{ state('Current state',
              ((flows | length ~ ' flows · ') if flows_enabled else '')
                ~ templates | length ~ ' templates · '
@@ -36,15 +42,6 @@
   {% endcall %}
   {% if not can_operate_workflows %}
   <p class="panel">You can review saved work here. Ask someone with workflow access to create or edit it, or to review flow results.</p>
-  {% endif %}
-  {% if can_operate_workflows %}
-  <div class="wfx__head">
-    <span style="display:flex;gap:var(--space-2);margin-inline-start:auto;flex-wrap:wrap;">
-      {% if flows_enabled %}<a class="btn btn--ghost" href="/learning/examples">Learning examples</a>{% endif %}
-      {% if flows_enabled %}<a class="btn" href="/flows/designer">New flow</a>{% endif %}
-      <a class="btn btn--primary" href="/workflow-builder">New workflow</a>
-    </span>
-  </div>
   {% endif %}
 
   {% if flows_enabled %}
@@ -73,9 +70,12 @@
       </li>
       {% endfor %}
     </ul>
+    {% elif can_operate_workflows %}
+    {{ empty_state('No flows yet',
+                   'Flows you build appear here. Build your first flow in the visual designer. Copilot can explain the steps while you work.',
+                   action_label='Open the flow designer', action_href='/flows/designer') }}
     {% else %}
-    <div class="mv-empty"><p class="mv-empty__title">No flows yet</p>
-      {% if can_operate_workflows %}<p class="mv-empty__sub">Build your first flow in the visual designer. Copilot can explain the steps while you work.</p><a class="btn btn--primary" href="/flows/designer">Open the flow designer</a>{% endif %}</div>
+    {{ empty_state('No flows yet', 'Flows that people in your workspace build appear here.') }}
     {% endif %}
   </section>
   {% else %}
@@ -83,7 +83,7 @@
     <h2 id="wfx-flow-off-h">Flows are turned off</h2>
     {% if can_manage_flows %}
     <p>Turn them on before creating or running a flow.</p>
-    <a class="btn btn--primary" href="/learning#lrn-flows-on">Turn on workflows</a>
+    <a class="btn" href="/learning#lrn-flows-on">Turn on workflows</a>
     {% else %}
     <p>Ask an administrator to turn on workflows.</p>
     {% endif %}
@@ -110,12 +110,12 @@
       </li>
       {% endfor %}
     </ul>
+    {% elif can_operate_workflows %}
+    {{ empty_state('No templates yet',
+                   'Reusable workflows you save appear here, ready to run, schedule or trigger. Draft the first one in the builder.',
+                   action_label='New workflow', action_href='/workflow-builder') }}
     {% else %}
-    <div class="mv-empty">
-      <p class="mv-empty__title">No templates yet</p>
-      <p class="mv-empty__body">Draft a reusable workflow in the builder, then schedule or trigger it.</p>
-      {% if can_operate_workflows %}<a class="btn btn--primary" href="/workflow-builder">New workflow</a>{% endif %}
-    </div>
+    {{ empty_state('No templates yet', 'Reusable workflows that people in your workspace save appear here.') }}
     {% endif %}
   </section>
 
@@ -136,12 +136,12 @@
       </li>
       {% endfor %}
     </ul>
+    {% elif can_operate_workflows %}
+    {{ empty_state('No agent playbooks yet',
+                   'Governed specialist agents you build appear here. In the builder, choose “Agent playbook” to build the first one.',
+                   action_label='Open the builder', action_href='/workflow-builder') }}
     {% else %}
-    <div class="mv-empty">
-      <p class="mv-empty__title">No agent playbooks yet</p>
-      <p class="mv-empty__body">Build a governed specialist agent in the builder — choose “Agent playbook”.</p>
-      {% if can_operate_workflows %}<a class="btn btn--primary" href="/workflow-builder">New workflow</a>{% endif %}
-    </div>
+    {{ empty_state('No agent playbooks yet', 'Governed specialist agents that people in your workspace build appear here.') }}
     {% endif %}
   </section>
 </div>

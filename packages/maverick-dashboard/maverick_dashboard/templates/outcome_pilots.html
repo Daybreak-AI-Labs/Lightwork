@@ -1,9 +1,11 @@
 {% extends "base.html" %}
 {% block title %}Workflow pilots · Lightwork{% endblock %}
 {% block content %}
-<h1>Workflow pilots</h1>
-<p>Compare the same cases with and without AI. Plan the cases and acceptance criteria before work starts,
-  then record observed effort, corrections, cost evidence, and the current reviewed outcome.</p>
+{% from "_hero.html" import hero %}
+{{ hero('Your AI workforce', 'Workflow pilots',
+        lede='Compare the same cases with and without AI. Plan the cases and acceptance criteria before work starts,
+              then record observed effort, corrections, cost evidence, and the current reviewed outcome.',
+        compact=true) }}
 <p>These are your recorded observations. Provider invoice accuracy, customer acceptance of the pilot itself,
   and isolation from model training require separate evidence. <a href="/savings">View savings estimates</a>.</p>
 <style>
@@ -83,7 +85,7 @@
         </div>
         <label>Evidence details<textarea class="input" name="evidence_note" required maxlength="4000" rows="3"></textarea></label>
         <label>Correction explanation<textarea class="input" name="correction_reason" maxlength="2000" rows="2" placeholder="Required when replacing the current baseline"></textarea></label>
-        <button type="submit" class="btn primary">Save baseline evidence</button>
+        <button type="submit" class="btn btn--primary">Save baseline evidence</button>
       </form>
     </details>
 
@@ -126,7 +128,7 @@
           </div>
         </fieldset>
         <label><input type="checkbox" name="complete_coverage"> Mark complete only after every cost family above is Included or Confirmed zero.</label>
-        <button type="submit" class="btn primary">Save delivered cost</button>
+        <button type="submit" class="btn btn--primary">Save delivered cost</button>
       </form>
     </details>
 
@@ -145,7 +147,7 @@
         </div>
         <label>Evidence details<textarea class="input" name="note" required maxlength="4000" rows="3"></textarea></label>
         <label>Correction explanation<textarea class="input" name="correction_reason" maxlength="2000" rows="2" placeholder="Required when replacing the same source entry"></textarea></label>
-        <button type="submit" class="btn primary">Save commercial evidence</button>
+        <button type="submit" class="btn btn--primary">Save commercial evidence</button>
       </form>
     </details>
   </section>
@@ -202,7 +204,7 @@
       <p>The exclusion mode requires a named account and task cases only. It prevents automatic local capture, donation and learning replay for the fixed evaluation group. It does not undo prior learning, control provider training or cover manually copied/relabelled data. State what was checked; do not assume new task IDs prove new content.</p>
       <div id="op-planned-cases"></div>
       <button type="button" class="btn" id="op-add-case">Add a case</button>
-      <button type="submit" class="btn primary">Save and freeze plan</button>
+      <button type="submit" class="btn btn--primary">Save and freeze plan</button>
     </form>
   </details>
   <details class="panel" id="op-review-panel"><summary>Independently review a pilot’s local learning policy</summary>

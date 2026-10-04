@@ -29,6 +29,11 @@ FOLDED = (
 )
 # Live routes linked from security.html / get_started.html; now registered.
 NEWLY_GOVERNED = ("/security/report", "/security/assurance")
+# Screens with their own routes that the registry now governs (they were
+# missing from the finder). The first four also need a named account.
+NAMED_ACCOUNT_SCREENS = ("/notifications", "/access-requests", "/devices", "/get-started/employee")
+OPEN_SCREENS = ("/help", "/budget", "/my-work", "/conversations", "/cost-reconciliation",
+                "/project-workspaces", "/provider-spending")
 
 
 def _hrefs(groups: list[dict]) -> list[str]:
@@ -173,7 +178,8 @@ def test_rendered_finder_indexes_folded_pages_and_sidebar_does_not(monkeypatch, 
     # Companion destinations also require an available configured assignment.
     # Model that gate explicitly; every other authorized registry link stays exact.
     monkeypatch.setattr(employee_companion_api, "navigation_available", lambda request, *, admin: False)
-    unavailable = {"/companion", "/companion/admin"}
+    # The local owner has no named account, which these screens' routes require.
+    unavailable = {"/companion", "/companion/admin", *NAMED_ACCOUNT_SCREENS}
 
     client = _client(monkeypatch, tmp_path)
     response = client.get("/overview")
@@ -197,3 +203,47 @@ def test_rendered_finder_indexes_folded_pages_and_sidebar_does_not(monkeypatch, 
     assert unavailable.isdisjoint(markup.finder_hrefs)
     assert markup.finder_hrefs == [href for href in _hrefs(ui_visibility.finder_pages(None)) if href not in unavailable]
     assert markup.sidebar_hrefs == [href for href in _hrefs(ui_visibility.nav_groups(None)) if href not in unavailable]
+
+
+def test_registered_screens_stay_out_of_the_sidebar_and_mirror_their_route_floor():
+    from maverick_dashboard import ui_visibility
+
+    for path in NAMED_ACCOUNT_SCREENS + OPEN_SCREENS:
+        page = ui_visibility.page_for(path)
+        assert page["path"] == path and page["in_nav"] is False
+        assert ui_visibility.customer_ready(page)
+        expected = ("admin", "admin") if path == "/provider-spending" else ("view", "view")
+        assert (page["floor"], page["default"]) == expected, path
+    assert ui_visibility.page_for("/provider-spending")["scope"] == "global"
+    # Record detail pages under these screens follow their parent.
+    assert ui_visibility.page_for("/project-workspaces/7")["path"] == "/project-workspaces"
+
+
+def test_named_account_screens_are_not_offered_without_a_named_account(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    finder = client.get("/nav/finder").text
+    for path in NAMED_ACCOUNT_SCREENS:
+        assert f'href="{path}"' not in finder
+        assert client.get(path).status_code == 403
+    for path in OPEN_SCREENS:
+        assert f'href="{path}"' in finder
+
+
+def test_named_account_screens_follow_their_own_route_checks(monkeypatch, tmp_path):
+    from fastapi import Request
+    from maverick import config
+    from maverick_dashboard import app as dashboard_app
+    from maverick_dashboard import auth
+
+    client = _client(monkeypatch, tmp_path)
+    monkeypatch.setattr(auth, "caller_principal", lambda request: "user:member")
+    finder = client.get("/nav/finder").text
+    for path in NAMED_ACCOUNT_SCREENS:
+        assert f'href="{path}"' in finder and client.get(path).status_code == 200, path
+    # Employee activation also needs its switch: turned off, it is withheld.
+    features = config.get_features
+    monkeypatch.setattr(config, "get_features", lambda: {**features(), "employee_activation": False})
+    assert 'href="/get-started/employee"' not in client.get("/nav/finder").text
+    assert client.get("/get-started/employee").status_code == 403
+    assert "/get-started/employee" in dashboard_app._account_pages_unavailable(
+        Request({"type": "http", "headers": []}))
