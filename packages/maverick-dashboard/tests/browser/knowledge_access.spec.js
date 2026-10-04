@@ -279,9 +279,9 @@ test('authenticated browser uses the real APP10 API for search, detail, and rete
   await expect(page.locator('#ka-requests')).toContainText('Preserve, then process');
 
   const holdBox = page.locator('.ka-review', {hasText: 'Preservation hold'});
-  await holdBox.getByLabel('Name of the legal matter', {exact: true}).fill('browser-matter-2026');
-  await holdBox.getByLabel('Legal or preservation basis', {exact: true}).fill('Synthetic preservation duty.');
-  await holdBox.getByLabel('Hold expires', {exact: true}).fill('2099-01-01T00:00');
+  await holdBox.getByLabel(/^Name of the legal matter/).fill('browser-matter-2026');
+  await holdBox.getByLabel(/^Legal or preservation basis/).fill('Synthetic preservation duty.');
+  await holdBox.getByLabel(/^Hold expires/).fill('2099-01-01T00:00');
   await holdBox.getByText('I checked the matter, the reason and the end date.').click();
   await holdBox.getByRole('button', {name: 'Place a legal hold on this deletion request'}).click();
   await expect(page.locator('#ka-requests')).toContainText('browser-matter-2026 is active');

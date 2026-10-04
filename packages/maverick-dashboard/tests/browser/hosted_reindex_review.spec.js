@@ -35,19 +35,21 @@ test('hosted rebuild shows a positive small admission ceiling and never retries 
   await page.goto('/knowledge-access');
   await page.getByRole('button',{name:'Rebuild the search index for Browser hosted',exact:true}).click();
   const confirm=page.locator('#mv-confirm');await expect(confirm).toBeVisible();
-  await expect(confirm).toContainText('Provider admission ceiling: $0.000125');
+  // A tiny positive ceiling reads as "under $0.01" in the shared money format, never $0.00.
+  await expect(confirm).toContainText('Provider admission ceiling: under $0.01');
   await expect(confirm).toContainText('Captured synthetic standard rate, 2026-10-01');
   await expect(confirm).toContainText('not a provider invoice');
   expect(writes).toEqual([]);
   await confirm.getByRole('button',{name:'Start rebuild',exact:true}).click();
   const jobs=page.getByRole('region',{name:'Search index rebuild jobs',exact:true});
   await expect(jobs).toContainText('Unconfirmed');
-  await expect(jobs).toContainText('$0.000005');await expect(jobs).toContainText('$0.000120');
+  // Sub-cent amounts read as "under $0.01"; the exact figures stay on the receipt.
+  await expect(jobs).toContainText('Observed provider usage at reviewed rates: under $0.01');await expect(jobs).toContainText('Unresolved reservation: under $0.01');
   await expect(jobs.getByRole('button',{name:/Continue|Resume|Cancel/})).toHaveCount(0);
   expect(writes).toHaveLength(1);
   expect(writes[0].body).toEqual({context:binding,job_id:expect.stringMatching(/^[a-f0-9]{32}$/),review,confirmed:true});
   await jobs.getByRole('button',{name:'Refresh rebuild progress',exact:true}).click();
-  await expect(jobs).toContainText('$0.000120');expect(writes).toHaveLength(1);
+  await expect(jobs).toContainText('Unresolved reservation: under $0.01');expect(writes).toHaveLength(1);
   await info.attach('uncertain-hosted-cost',{body:await page.screenshot(),contentType:'image/png'});
   await jobs.getByRole('button',{name:'Archive finished rebuild',exact:true}).click();
   await expect(confirm).toContainText('Its operation receipt remains recorded');

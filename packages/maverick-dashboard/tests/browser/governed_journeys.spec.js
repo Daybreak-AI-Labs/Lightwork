@@ -366,7 +366,7 @@ test('pilot preparation freezes four unrun tasks and preserves an observation af
   await costs.locator('input[type="number"]').nth(0).fill('25');await costs.locator('input[type="number"]').nth(1).fill('75');
   await costs.locator('textarea').fill('Synthetic internal attribution only; not provider invoice acceptance.');await costs.locator('input[type="checkbox"]').check();
   const confirmLabel=costs.locator('label:has(input[type="checkbox"])');
-  const checkboxBox=await confirmLabel.locator('input').boundingBox(),captionBox=await confirmLabel.locator('span').boundingBox();
+  const checkboxBox=await confirmLabel.locator('input').boundingBox(),captionBox=await confirmLabel.locator('span:not(.mv-required)').boundingBox();
   expect(checkboxBox.x+checkboxBox.width).toBeLessThanOrEqual(captionBox.x);
   await costs.getByRole('button',{name:'Save reviewed allocation'}).click();
   await expect(page.locator('#op-provider-costs')).toContainText('Current allocated provider cost: USD 10.000000001');
