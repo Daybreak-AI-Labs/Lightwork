@@ -3,15 +3,19 @@
 {% block content %}
   {% from "_hero.html" import hero, state %}
   {% from "_integration_readiness.html" import provider_status %}
+  {# The main action is the AI-service setup step the workspace still needs;
+     each section's own Save stays a plain button. #}
+  {% set settings_actions %}{% if workspace.next_action %}<a class="btn" href="{{ workspace.next_action.href }}">{{ workspace.next_action.label }}</a>{% endif %}{% endset %}
   {% call hero('Administration', 'Settings',
                subtitle='Set up Lightwork',
                lede='Appearance, AI models, spending, connections and features.
-                     Each section saves on its own and applies to the next task.') %}
+                     Each section saves on its own and applies to the next task.',
+               actions=settings_actions if workspace.next_action else '') %}
     {{ state('Current state',
              'AI services: ' ~ workspace.summary,
              badge=workspace.verdict_label,
              badge_class=workspace.badge_class,
-             copy=(workspace.reason | e) ~ ((' <a href="' ~ workspace.next_action.href ~ '">' ~ workspace.next_action.label ~ '</a>') | safe if workspace.next_action else '') ~ ' Keys are stored securely and never shown again.') }}
+             copy=workspace.reason ~ ' Keys are stored securely and never shown again.') }}
   {% endcall %}
 
   {% if saved %}
@@ -37,13 +41,13 @@
       <input class="input" id="settings-search" type="search" maxlength="100"
              placeholder="Provider, budget, visibility…" aria-controls="settings-sections">
     </label>
-    <div class="settings-tabs" role="tablist" aria-label="Settings sections">
-      <button class="btn" type="button" role="tab" data-settings-tab="general">General</button>
-      <button class="btn" type="button" role="tab" data-settings-tab="models">Models</button>
-      <button class="btn" type="button" role="tab" data-settings-tab="integrations">Connections</button>
-      <button class="btn" type="button" role="tab" data-settings-tab="controls">Features</button>
-      <button class="btn" type="button" role="tab" data-settings-tab="access">Access</button>
-      <button class="btn" type="button" role="tab" data-settings-tab="maintenance">Maintenance</button>
+    <div class="mv-tabs settings-tabs" role="tablist" aria-label="Settings sections">
+      <button class="mv-tab" type="button" role="tab" data-settings-tab="general">General</button>
+      <button class="mv-tab" type="button" role="tab" data-settings-tab="models">Models</button>
+      <button class="mv-tab" type="button" role="tab" data-settings-tab="integrations">Connections</button>
+      <button class="mv-tab" type="button" role="tab" data-settings-tab="controls">Features</button>
+      <button class="mv-tab" type="button" role="tab" data-settings-tab="access">Access</button>
+      <button class="mv-tab" type="button" role="tab" data-settings-tab="maintenance">Maintenance</button>
     </div>
     <p class="muted" id="settings-filter-status" role="status" aria-live="polite"></p>
     <p class="settings-all-link">
@@ -85,7 +89,7 @@
           <option value="dyslexic" {% if font == 'dyslexic' %}selected{% endif %}>{{ t('font.dyslexic') }}</option>
         </select>
       </label>
-      <button type="submit" class="btn btn--primary">Apply</button>
+      <button type="submit" class="btn">Apply</button>
     </form>
   </div>
 
@@ -105,7 +109,7 @@
       <div class="stat"><span class="num">{{ offered_specs|length }}</span><span class="muted">model{{ '' if offered_specs|length == 1 else 's' }} available</span></div>
       <div class="stat"><span class="num">{{ live_count }}</span><span class="muted">up-to-date list{{ '' if live_count == 1 else 's' }}{% if last_refresh_ago %} · refreshed {{ last_refresh_ago }}{% endif %}</span></div>
       <form method="post" action="/settings/models/discover" class="models-overview-action">
-        <button type="submit" class="btn btn--primary"{% if not discovery_enabled or not configured_count %} disabled aria-disabled="true"{% endif %}>Refresh model lists</button>
+        <button type="submit" class="btn"{% if not discovery_enabled or not configured_count %} disabled aria-disabled="true"{% endif %}>Refresh model lists</button>
       </form>
     </div>
     {% if not discovery_enabled %}
@@ -116,7 +120,7 @@
       {% else %}
       <form method="post" action="/settings/models/discovery">
         <input type="hidden" name="enabled" value="on" />
-        <button type="submit" class="btn btn--primary">Turn on automatic model lists</button>
+        <button type="submit" class="btn">Turn on automatic model lists</button>
       </form>
       {% endif %}
     </div>
@@ -200,7 +204,7 @@
       <label class="settings-field"><input type="checkbox" name="confirm" required>
         I checked this model's own USD rate and used a ceiling high enough for our agreement.
       </label>
-      <button class="btn btn--primary" type="submit">Save spending ceiling</button>
+      <button class="btn" type="submit">Save spending ceiling</button>
     </form>
     {% if operator_rates %}
     <h4>Saved company rates</h4>
@@ -270,7 +274,7 @@
         <span>Model name, exactly as your provider lists it</span>
         <input class="input" type="text" name="model_custom" value="{{ pinned_model if pinned_typed else '' }}" aria-label="Default model name" />
       </label>
-      <button type="submit" class="btn btn--primary">Save default</button>
+      <button type="submit" class="btn">Save default</button>
     </form>
     <p class="muted settings-foot" id="settings-current-default">Current default: <strong>{{ pinned_model|model_label if pinned_model else "Lightwork's recommended model" }}</strong>.{% if pinned_model %} Choose "Lightwork's recommended model" and save to go back.{% endif %}</p>
   </div>
@@ -315,7 +319,7 @@
           {% endfor %}
         </tbody>
       </table>
-      <button type="submit" class="btn btn--primary settings-submit">Save role models</button>
+      <button type="submit" class="btn settings-submit">Save role models</button>
     </form>
   </div>
 
@@ -351,7 +355,7 @@
       </details>
       {% endfor %}
       <p class="settings-foot">
-        <button type="submit" class="btn btn--primary">Save approved models</button>
+        <button type="submit" class="btn">Save approved models</button>
         {% if allowed_models %}<span class="muted">{{ allowed_models|length }} model(s) approved. Untick all and save to allow every model.</span>{% endif %}
       </p>
     </form>
@@ -367,7 +371,7 @@
     <p id="voice-setup-readiness" class="muted"></p>
     <label class="voice-setup-confirm" for="voice-setup-confirm"><input id="voice-setup-confirm" type="checkbox" aria-describedby="voice-setup-model-details" disabled>{{ ui('I agree to check the voice model already on this computer, or download it from the source shown, using the disk space shown.') }}</label>
     <div class="voice-setup-actions">
-      <button class="btn btn--primary" id="voice-setup-start" type="button" disabled>{{ ui('Check or download voice model') }}</button>
+      <button class="btn" id="voice-setup-start" type="button" disabled>{{ ui('Check or download voice model') }}</button>
       <button class="btn" id="voice-setup-cancel" type="button" disabled>{{ ui('Stop download') }}</button>
       <button class="btn" id="voice-setup-refresh" type="button">{{ ui('Refresh status') }}</button>
     </div>
@@ -404,7 +408,7 @@
         Turning the limit off keeps your saved amount for later. Workspace spending limits,
         cancelling a task and the safety checks on each action still apply.
       </p>
-      <p class="settings-foot"><button type="submit" class="btn btn--primary">Save task limit</button></p>
+      <p class="settings-foot"><button type="submit" class="btn">Save task limit</button></p>
     </form>
     <p class="muted settings-foot" role="note">Right now:
       {% if limit_mode == 'off' %}tasks have no spending limit of their own.
@@ -460,7 +464,7 @@
                    placeholder="Paste your key" autocomplete="off"
                    {% if not p.dashboard_can_set_api_key %}disabled{% endif %} />
           </label>
-          <button type="submit" class="btn btn--primary"
+          <button type="submit" class="btn"
                   {% if (not p.dashboard_can_set_api_key) and ((not p.base_url_field) or (not p.dashboard_can_set_base_url)) %}disabled aria-disabled="true"{% endif %}>Save</button>
         </form>
         <div class="settings-row-form">
@@ -503,7 +507,7 @@
       <p id="wh-help">Use a long, random value. Lightwork encrypts it and never displays it again.</p>
       <p id="wh-consequence"></p>
       <label style="display:flex;gap:var(--space-2);align-items:flex-start"><input type="checkbox" id="wh-confirm" disabled> I reviewed this change and want to apply it to this installation.</label>
-      <div style="display:flex;gap:var(--space-2);flex-wrap:wrap;margin-top:var(--space-3)"><button type="submit" class="btn btn--primary" id="wh-save" disabled>Apply change</button><button type="button" class="btn" id="wh-cancel">Cancel</button></div>
+      <div style="display:flex;gap:var(--space-2);flex-wrap:wrap;margin-top:var(--space-3)"><button type="submit" class="btn" id="wh-save" disabled>Apply change</button><button type="button" class="btn" id="wh-cancel">Cancel</button></div>
     </form>
     <noscript>Enable browser scripting to check the active secret and review a change safely.</noscript>
     <p style="margin-top:var(--space-3)"><a class="btn" href="/settings/webhooks/manage">Manage webhook subscriptions and deliveries</a></p>
@@ -522,7 +526,7 @@
         <input type="checkbox" name="{{ c.name }}"{% if c.enabled %} checked{% endif %} />
       </label>
       {% endfor %}
-      <p class="settings-foot"><button type="submit" class="btn btn--primary">Save abilities</button></p>
+      <p class="settings-foot"><button type="submit" class="btn">Save abilities</button></p>
     </form>
   </div>
 
@@ -537,7 +541,7 @@
         <input type="checkbox" name="{{ f.name }}"{% if f.enabled %} checked{% endif %} />
       </label>
       {% endfor %}
-      <p class="settings-foot"><button type="submit" class="btn btn--primary">Save features</button></p>
+      <p class="settings-foot"><button type="submit" class="btn">Save features</button></p>
     </form>
   </div>
 
@@ -608,7 +612,7 @@
         </tbody>
       </table>
       <p class="settings-foot">
-        <button type="submit" class="btn btn--primary">Save page visibility</button>
+        <button type="submit" class="btn">Save page visibility</button>
       </p>
     </form>
     <form method="post" action="/settings/ui-visibility/reset" class="settings-inline-form"
@@ -624,7 +628,7 @@
   <div class="section-head" data-settings-group="maintenance" id="settings-maintenance"><h2>Ready to go live?</h2></div>
   <div class="panel" data-settings-group="maintenance" data-maintenance="readiness">
     <p class="muted settings-lead">Checks the switches that should be on before your whole team relies on Lightwork.</p>
-    <p class="settings-row-form"><button type="button" class="btn btn--primary" data-maintenance-run="readiness">Check readiness</button></p>
+    <p class="settings-row-form"><button type="button" class="btn" data-maintenance-run="readiness">Check readiness</button></p>
     <p class="muted" role="status" aria-live="polite" data-maintenance-status="readiness"></p>
     <ul class="maintenance-list" data-maintenance-out="readiness"></ul>
   </div>
@@ -632,7 +636,7 @@
   <div class="section-head" data-settings-group="maintenance"><h2>Installation health check</h2></div>
   <div class="panel" data-settings-group="maintenance" data-maintenance="health">
     <p class="muted settings-lead">Checks that Lightwork is installed correctly and can reach the services it needs. It may contact your AI provider.</p>
-    <p class="settings-row-form"><button type="button" class="btn btn--primary" data-maintenance-run="health">Run health check</button></p>
+    <p class="settings-row-form"><button type="button" class="btn" data-maintenance-run="health">Run health check</button></p>
     <p class="muted" role="status" aria-live="polite" data-maintenance-status="health"></p>
     <details class="settings-details" data-maintenance-details="health" hidden><summary>Technical details (for your IT team)</summary><ul class="maintenance-list" data-maintenance-out="health"></ul></details>
   </div>
@@ -640,7 +644,7 @@
   <div class="section-head" data-settings-group="maintenance"><h2>Installation settings check</h2></div>
   <div class="panel" data-settings-group="maintenance" data-maintenance="settings">
     <p class="muted settings-lead">Looks for mistakes in the settings chosen when Lightwork was installed.</p>
-    <p class="settings-row-form"><button type="button" class="btn btn--primary" data-maintenance-run="settings">Check installation settings</button></p>
+    <p class="settings-row-form"><button type="button" class="btn" data-maintenance-run="settings">Check installation settings</button></p>
     <p class="muted" role="status" aria-live="polite" data-maintenance-status="settings"></p>
     <details class="settings-details" data-maintenance-details="settings" hidden><summary>Technical details (for your IT team)</summary><ul class="maintenance-list" data-maintenance-out="settings"></ul></details>
   </div>
@@ -648,7 +652,7 @@
   <div class="section-head" data-settings-group="maintenance"><h2 id="maintenance-license">License</h2></div>
   <div class="panel" data-settings-group="maintenance" data-maintenance="license">
     <p class="muted settings-lead">Your plan and the paid features it includes.</p>
-    <p class="settings-row-form"><button type="button" class="btn btn--primary" data-maintenance-run="license">Show license</button>
+    <p class="settings-row-form"><button type="button" class="btn" data-maintenance-run="license">Show license</button>
       <a class="btn" href="/settings/license">Install or change the license</a></p>
     <p class="muted" role="status" aria-live="polite" data-maintenance-status="license"></p>
     <div data-maintenance-out="license"></div>
@@ -657,7 +661,7 @@
   <div class="section-head" data-settings-group="maintenance"><h2>Background work</h2></div>
   <div class="panel" data-settings-group="maintenance" data-maintenance="queue">
     <p class="muted settings-lead">Scheduled and background jobs, and any that stopped because of a problem.</p>
-    <p class="settings-row-form"><button type="button" class="btn btn--primary" data-maintenance-run="queue">Show background work</button></p>
+    <p class="settings-row-form"><button type="button" class="btn" data-maintenance-run="queue">Show background work</button></p>
     <p class="muted" role="status" aria-live="polite" data-maintenance-status="queue"></p>
     <div data-maintenance-out="queue"></div>
   </div>
@@ -665,7 +669,7 @@
   <div class="section-head" data-settings-group="maintenance"><h2 id="maintenance-encryption">Encryption</h2></div>
   <div class="panel" data-settings-group="maintenance" data-maintenance="encryption">
     <p class="muted settings-lead">Whether saved records are encrypted on this computer, and tools to keep them protected.</p>
-    <p class="settings-row-form"><button type="button" class="btn btn--primary" data-maintenance-run="encryption">Check encryption</button></p>
+    <p class="settings-row-form"><button type="button" class="btn" data-maintenance-run="encryption">Check encryption</button></p>
     <p class="muted" role="status" aria-live="polite" data-maintenance-status="encryption"></p>
     <div data-maintenance-out="encryption"></div>
   </div>
@@ -673,7 +677,7 @@
   <div class="section-head" data-settings-group="maintenance"><h2>Live service status</h2></div>
   <div class="panel" data-settings-group="maintenance" data-maintenance="diagnostics">
     <p class="muted settings-lead">Which AI services Lightwork is calling right now, and any it has paused after repeated errors.</p>
-    <p class="settings-row-form"><button type="button" class="btn btn--primary" data-maintenance-run="diagnostics">Check services</button>
+    <p class="settings-row-form"><button type="button" class="btn" data-maintenance-run="diagnostics">Check services</button>
       <a class="btn btn--ghost" href="/help">Prepare a support report</a></p>
     <p class="muted" role="status" aria-live="polite" data-maintenance-status="diagnostics"></p>
     <div data-maintenance-out="diagnostics"></div>
@@ -721,7 +725,7 @@
   <div class="section-head" data-settings-group="maintenance"><h2 id="maintenance-client">Your organisation's data</h2></div>
   <div class="panel" data-settings-group="maintenance" data-maintenance="client">
     <p class="muted settings-lead">Download everything this installation holds, for example when someone asks for a copy of their data, or erase it all when an organisation leaves.</p>
-    <p class="settings-row-form"><button type="button" class="btn btn--primary" data-maintenance-run="client">Show data status</button></p>
+    <p class="settings-row-form"><button type="button" class="btn" data-maintenance-run="client">Show data status</button></p>
     <p class="muted" role="status" aria-live="polite" data-maintenance-status="client"></p>
     <div data-maintenance-out="client"></div>
     <details class="settings-details" data-maintenance-details="client" hidden><summary>Technical details (for your IT team)</summary><ul class="maintenance-list" data-maintenance-technical="client"></ul></details>
@@ -748,7 +752,7 @@
           <option value="180">180 days</option>
           <option value="365">365 days</option>
         </select></label>
-      <button type="submit" class="btn btn--primary">See what would be removed</button>
+      <button type="submit" class="btn">See what would be removed</button>
     </form>
     <p class="muted" role="status" aria-live="polite" data-maintenance-status="cleanup"></p>
     <div data-maintenance-out="cleanup"></div>
@@ -825,8 +829,7 @@
     .settings-index > * { min-width: 0; }
     .settings-index h2, .settings-index p { margin: 0; }
     .settings-index label { display: grid; gap: var(--space-1); }
-    .settings-tabs { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: var(--space-2); }
-    .settings-tabs [aria-selected="true"] { background: var(--brand); color: var(--on-brand, white); border-color: var(--brand); }
+    .settings-tabs { grid-column: 1 / -1; }
     #settings-filter-status { grid-column: 1 / -1; min-height: 1.3em; }
     .settings-all-link { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
     @media (max-width: 720px) { .settings-index { grid-template-columns: 1fr; } }
