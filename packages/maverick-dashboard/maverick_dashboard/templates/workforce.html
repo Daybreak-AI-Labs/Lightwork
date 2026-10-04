@@ -2,10 +2,12 @@
 {% block title %}Workforce · Lightwork{% endblock %}
 {% block content %}
   {% from "_hero.html" import hero, state %}
+  {% set workforce_actions %}<a class="btn btn--primary" href="#departments">Deploy a team</a>{% endset %}
   {% call hero('Build your workforce', 'Workforce',
                subtitle='Departments & specialists',
                lede='Your AI departments — each team\'s specialists, what
-                     they\'ve delivered, and their performance reviews.') %}
+                     they\'ve delivered, and their performance reviews.',
+               actions=workforce_actions if (can_create_goal and departments) else '') %}
     {{ state('Deployment state',
              deployed_specialists ~ ' specialists deployed',
              badge=departments | length ~ ' departments', badge_class='ok',
@@ -81,7 +83,7 @@
     <ul id="conn-results" class="muted"></ul>
   </div>
 
-  <div class="panel">
+  <div class="panel" id="departments" tabindex="-1">
     <div class="section-head"><h2>Departments</h2></div>
     <div class="card-grid" id="dept-grid">
       {% for d in departments %}
@@ -98,9 +100,9 @@
           <button type="button" class="btn btn--ghost" data-key="{{ d.key }}" data-act="team" aria-label="View {{ d.title }} team">View team</button>
           <button type="button" class="btn btn--ghost" data-key="{{ d.key }}" data-act="review" aria-label="Review {{ d.title }} performance">Performance review</button>
           {% if entitlements.get(d.key) %}
-          <button type="button" class="btn btn--primary" data-key="{{ d.key }}" data-act="deploy" aria-label="Deploy {{ d.title }} team">Deploy team</button>
+          <button type="button" class="btn" data-key="{{ d.key }}" data-act="deploy" aria-label="Deploy {{ d.title }} team">Deploy team</button>
           {% else %}
-          <button type="button" class="btn btn--primary" data-key="{{ d.key }}" data-act="deploy" aria-label="Deploy {{ d.title }} team" aria-describedby="addon-note-{{ d.key }}">Deploy team</button>
+          <button type="button" class="btn" data-key="{{ d.key }}" data-act="deploy" aria-label="Deploy {{ d.title }} team" aria-describedby="addon-note-{{ d.key }}">Deploy team</button>
           <span id="addon-note-{{ d.key }}" class="muted">paid add-on</span>
           {% endif %}
         </p>
@@ -131,6 +133,9 @@
   (function () {
     'use strict';
     var B = window.LWBoard;
+    // Only people who may deploy a team are told to deploy one.
+    var DEPLOY = {{ 'true' if (can_create_goal and departments) else 'false' }}
+      ? { label: 'Deploy a team', href: '#departments' } : null;
 
     function render(D) {
       var k = document.getElementById('bd-kpis');
@@ -164,9 +169,10 @@
                      pct: r.spend / smax * 100 };
           }), 'Agent spend by department.');
       } else {
-        B.empty(document.getElementById('bd-depts'),
-          'No departmental work on record yet — deploy a team to start it.');
-        B.empty(document.getElementById('bd-dept-spend'), 'No spend on record yet.');
+        B.empty(document.getElementById('bd-depts'), 'No departmental work yet',
+          'Tasks each department finishes and takes on appear here once a deployed team starts work.', DEPLOY);
+        B.empty(document.getElementById('bd-dept-spend'), 'No spend yet',
+          'Agent spend by department appears here as deployed teams finish tasks.' + (DEPLOY ? ' Deploy a team below to start.' : ''));
       }
 
       B.donut(document.getElementById('bd-completion'), {
@@ -211,7 +217,8 @@
         });
         lbox.appendChild(ul);
       } else {
-        B.empty(lbox, 'No work recorded yet — deploy a department to start the record.');
+        B.empty(lbox, 'No work recorded yet',
+          'The specialists with the best delivery appear here once a deployed team finishes tasks.' + (DEPLOY ? ' Deploy a team below to start.' : ''));
       }
     }
 

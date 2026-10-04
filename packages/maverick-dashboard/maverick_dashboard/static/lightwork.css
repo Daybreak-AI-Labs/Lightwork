@@ -626,6 +626,16 @@
     .task-tabs__list a { display: inline-block; padding: var(--space-2) var(--space-3); color: var(--muted); border-bottom: 2px solid transparent; margin-bottom: -1px; }
     .task-tabs__list a:hover { color: var(--text); text-decoration: none; }
     .task-tabs__list a.task-tabs__on { color: var(--text); border-bottom-color: var(--brand); font-weight: var(--font-semibold); }
+    /* Tabs and filter toggles in the same look. The selected item shows a
+       selected state (aria-selected, aria-pressed or aria-current), never
+       btn--primary: the primary style is kept for the view's main action. */
+    .mv-tabs { display: flex; flex-wrap: wrap; gap: var(--space-1); margin: 0 0 var(--space-3); padding: 0; border-bottom: 1px solid var(--border); }
+    .mv-tab { appearance: none; background: none; border: 0; border-bottom: 2px solid transparent; border-radius: 0; margin-bottom: -1px; padding: var(--space-2) var(--space-3); color: var(--muted); font: inherit; cursor: pointer; }
+    .mv-tab:hover { color: var(--text); }
+    .mv-tab[aria-selected="true"], .mv-tab[aria-pressed="true"], .mv-tab[aria-current="page"] { color: var(--text); border-bottom-color: var(--brand); font-weight: var(--font-semibold); }
+    @media (forced-colors: active) {
+      .mv-tab[aria-selected="true"], .mv-tab[aria-pressed="true"], .mv-tab[aria-current="page"] { border-bottom-color: Highlight; }
+    }
     .navquick-list { list-style: none; margin: 0 0 var(--space-3); padding: 0 0 var(--space-3); border-bottom: 1px solid var(--border); }
     .halt-pill.armed .dot { background: currentColor; animation: pulse 1.2s ease-in-out infinite; }
     @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
@@ -756,10 +766,19 @@
     .mv-row__sub { color: var(--muted); font-size: var(--text-sm); margin-top: 2px; word-break: break-word; }
     .mv-row__actions { display: flex; gap: var(--space-2); flex-wrap: wrap; flex: none; }
     .btn--icon { flex: none; padding: 0.3rem 0.55rem; font-size: var(--text-sm); line-height: 1; }
-    /* Shared empty / get-started state: centered title + body + a CTA. */
+    /* Shared empty / get-started state: centered title + body + one next
+       step. Markup: templates/_empty_state.html or window.mvEmpty(). */
     .mv-empty { text-align: center; padding: var(--space-6) var(--space-4); border: 1px dashed var(--border); border-radius: var(--radius-lg); background: var(--surface-1); color: var(--muted); }
     .mv-empty__title { color: var(--text); font-weight: var(--font-semibold); font-size: var(--text-md); margin: 0 0 var(--space-1); }
     .mv-empty__body { margin: 0 auto var(--space-3); max-width: 38rem; }
+    .mv-empty__body:last-child { margin-bottom: 0; }
+    .mv-empty__title + .mv-empty__action { margin-top: var(--space-2); }
+    /* Compact: inside panels, tiles and charts. */
+    .mv-empty--compact { text-align: start; padding: var(--space-3) var(--space-4); font-size: var(--text-sm); }
+    .mv-empty--compact:not(:last-child) { margin-bottom: var(--space-3); }
+    .mv-empty--compact .mv-empty__title { font-size: var(--text-sm); }
+    .mv-empty--compact .mv-empty__body { margin: 0 0 var(--space-2); max-width: none; }
+    .mv-empty--compact .mv-empty__body:last-child { margin-bottom: 0; }
     /* Shared card + responsive card grid. */
     .card { background: var(--surface-1); border: 1px solid var(--border); border-radius: var(--radius-md); padding: var(--space-4); display: flex; flex-direction: column; transition: border-color .12s ease, box-shadow .12s ease; animation: mv-rise 200ms ease-out both; }
     .card:hover { border-color: var(--border-strong); box-shadow: var(--shadow-sm); }
@@ -1068,6 +1087,21 @@
   flex-wrap: wrap; gap: var(--space-3); margin: var(--space-2) 0; }
 .hero-statebox__copy { color: var(--muted); font-size: var(--text-sm);
   min-height: 2.5em; margin: 0; }
+/* A lede straight under the title (no subtitle) still gets breathing room. */
+.hero-title + .hero-lede { margin-top: var(--space-3); }
+/* The page's main action lives in the header: one btn--primary per view. */
+.hero-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2);
+  margin-top: var(--space-4); }
+/* Compact header for working pages: smaller title and padding, and the
+   actions beside the text instead of under it. */
+.hero--compact { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
+  gap: var(--space-3) var(--space-5); padding: var(--space-4) var(--space-5); margin-bottom: var(--space-4); }
+.hero--compact > :first-child { flex: 1 1 20rem; }
+.hero--compact .hero-title { font-size: clamp(1.5rem, 3vw, 2.1rem); }
+.hero--compact .hero-subtitle { margin-bottom: var(--space-1); }
+.hero--compact .hero-lede { font-size: var(--text-sm); margin-top: var(--space-1); }
+.hero--compact .hero-actions { margin-top: 0; }
+.hero--compact .hero-statebox { padding: var(--space-3); }
 @media (max-width: 920px) {
   .hero { grid-template-columns: 1fr; }
 }

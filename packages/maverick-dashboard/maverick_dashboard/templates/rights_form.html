@@ -2,7 +2,7 @@
 {% block title %}{{ rf.page_title }} · {{ form.property.organisation }}{% endblock %}
 {% block content %}
 <style{% if csp_style_nonce is defined %} nonce="{{ csp_style_nonce }}"{% endif %}>
-  .rf-wrap { max-width: 44rem; margin: 0 auto; }
+  .rf-page { width: 100%; max-width: 44rem; margin: 0 auto; }
   .rf-field { display: flex; flex-direction: column; gap: var(--space-1); padding: var(--space-3) 0;
               border-bottom: 1px solid var(--border); }
   .rf-field label, .rf-field legend { font-weight: var(--font-medium); }
@@ -14,12 +14,14 @@
   .rf-hp { position: absolute; left: -10000px; top: auto; width: 1px; height: 1px; overflow: hidden; }
   .rf-note { color: var(--muted); font-size: var(--text-xs); margin-top: var(--space-4); }
 </style>
+{% from "_hero.html" import hero %}
+<div class="rf-page">
+{{ hero('', rf.heading.replace('{organisation}', form.property.organisation),
+        lede=rf.intro.replace('{organisation}', form.property.organisation), compact=true) }}
 <section class="panel rf-wrap"
          data-slug="{{ slug }}"
          data-api="/api/v1/public/rights/{{ slug }}/requests"
          data-form="/api/v1/public/rights/{{ slug }}/form">
-  <h1>{{ rf.heading.replace('{organisation}', form.property.organisation) }}</h1>
-  <p class="muted">{{ rf.intro.replace('{organisation}', form.property.organisation) }}</p>
   <form id="rf-form" novalidate>
     <div class="rf-field">
       <label for="rf-jurisdiction">{{ rf.jurisdiction_label }}</label>
@@ -88,6 +90,7 @@
     {{ rf.non_legal_advice }}
   </p>
 </section>
+</div>
 <script{% if csp_script_nonce is defined %} nonce="{{ csp_script_nonce }}"{% endif %}>
   (function () {
     'use strict';

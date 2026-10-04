@@ -2,8 +2,10 @@
 {% block title %}Selected deliverable bundles · Lightwork{% endblock %}
 {% block content %}
 <div id="bundle-root" data-context="{{ bundle_context }}" data-goal="{{ bundle_goal }}">
-  <h1>Selected deliverable bundles</h1>
-  <p>Share the specific result versions and evidence files a colleague needs. Their acceptance applies to that captured bundle. Sharing does not grant access to your conversation or let them run your task.</p>
+  {% from "_hero.html" import hero %}
+  {{ hero('Your work', 'Selected deliverable bundles',
+          lede='Share the specific result versions and evidence files a colleague needs. Their acceptance applies to that captured bundle. Sharing does not grant access to your conversation or let them run your task.',
+          compact=true) }}
   <p id="bundle-status" role="status" aria-live="polite">Loading your bundles.</p>
   <button class="btn" id="bundle-refresh" type="button">Refresh bundles</button>
   <section class="panel" aria-labelledby="bundle-inbox-title"><h2 id="bundle-inbox-title">Your shared bundles</h2><div id="bundle-inbox"></div></section>

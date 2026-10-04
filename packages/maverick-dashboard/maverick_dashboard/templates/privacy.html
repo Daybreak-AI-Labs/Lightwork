@@ -40,13 +40,16 @@
 </style>
 
   {% from "_hero.html" import hero, state %}
+  {% from "_empty_state.html" import empty_state %}
+  {% set privacy_actions %}<a class="btn btn--primary" href="#pw-start">Start an assessment</a>{% endset %}
   {% call hero('Governed workspaces', 'Privacy',
                subtitle='Program of record',
                lede='The privacy team\'s workspace: every assessment Lightwork
                      has run — privacy impact assessments (PIAs), AI risk,
                      vendor risk and framework readiness — with risk
                      ratings, aging and open follow-ups. Review and send
-                     questions back without leaving this screen.') %}
+                     questions back without leaving this screen.',
+               actions=privacy_actions) %}
     {{ state('Current state',
              stats.total ~ ' assessment' ~ ('' if stats.total == 1 else 's') ~ ' on record',
              badge=(stats.pending ~ ' to review') if stats.pending else 'clear',
@@ -109,7 +112,6 @@
     .pv-flow { display: flex; align-items: center; gap: var(--space-2); padding: 8px 0; border-bottom: 1px solid var(--border); font-size: var(--text-sm); }
     .pv-flow .arr { color: var(--muted); }
     .pv-flow .dest { font-weight: var(--font-medium); }
-    .pv-empty { color: var(--muted); font-size: var(--text-sm); padding: var(--space-3) 0; }
   </style>
   <div class="section-head"><h2>Program insights</h2></div>
   <div class="pv-grid">
@@ -150,7 +152,13 @@
       fetch('/api/v1/privacy/transfer-map').then(okJson).then(function (d) {
         const box = document.getElementById('pv-transfer');
         const flows = d.flows || [];
-        if (!flows.length) { box.innerHTML = '<p class="pv-empty">No cross-border transfers recorded yet.</p>'; return; }
+        if (!flows.length) {
+          const title = 'No cross-border transfers recorded yet';
+          const body = 'Transfers appear here once your processing record or a transfer assessment names where personal data goes. Add them through the processing record (RoPA) or a transfer assessment.';
+          if (window.mvEmpty) box.replaceChildren(window.mvEmpty(title, body, null, { compact: true }));
+          else box.textContent = title + '. ' + body;
+          return;
+        }
         box.innerHTML = '';
         flows.slice(0, 12).forEach(function (f) {
           const row = document.createElement('div'); row.className = 'pv-flow';
@@ -183,7 +191,7 @@
       <button class="btn" id="pv-bulk-add" type="button">Add a vendor</button>
       <label class="btn" for="pv-bulk-file">Load a CSV file<input id="pv-bulk-file" type="file" accept=".csv,text/csv" hidden></label>
       <button class="btn" id="pv-bulk-template" type="button">Download a blank CSV</button>
-      <button class="btn btn--primary" id="pv-bulk-go" type="button">Queue assessments</button>
+      <button class="btn" id="pv-bulk-go" type="button">Queue assessments</button>
       <span class="muted" id="pv-bulk-msg" role="status" aria-live="polite" style="font-size: var(--text-sm);"></span>
     </div>
   </div>
@@ -288,17 +296,17 @@
 
   <div class="section-head"><h2>Privacy records</h2></div>
   <div class="panel">
-    <div class="pw-filters" role="group" aria-label="Record types">
-      <button class="btn btn--primary" data-tab="dpa" type="button">Vendor data agreements (DPA) ({{ records.dpa | length }})</button>
-      <button class="btn" data-tab="ai" type="button">AI systems ({{ records.ai | length }})</button>
-      <button class="btn" data-tab="ropa" type="button">Processing record (RoPA) ({{ records.ropa | length }})</button>
-      <button class="btn" data-tab="dsar" type="button">Data requests (DSAR) ({{ records.dsar | length }})</button>
-      <button class="btn" data-tab="paper" type="button">Vendor contracts ({{ records.paper | length }})</button>
-      <button class="btn" data-tab="lineage" type="button">Vendor history</button>
-      <button class="btn" data-tab="incidents" type="button">Incidents ({{ records.incidents | length }}){% if records.incidents_breached %} <span class="badge blocked">{{ records.incidents_breached }} past 72h</span>{% endif %}</button>
+    <div class="mv-tabs" role="tablist" aria-label="Record types">
+      <button class="mv-tab" id="pw-tabbtn-dpa" role="tab" aria-selected="true" aria-controls="pw-tab-dpa" tabindex="0" data-tab="dpa" type="button">Vendor data agreements (DPA) ({{ records.dpa | length }})</button>
+      <button class="mv-tab" id="pw-tabbtn-ai" role="tab" aria-selected="false" aria-controls="pw-tab-ai" tabindex="-1" data-tab="ai" type="button">AI systems ({{ records.ai | length }})</button>
+      <button class="mv-tab" id="pw-tabbtn-ropa" role="tab" aria-selected="false" aria-controls="pw-tab-ropa" tabindex="-1" data-tab="ropa" type="button">Processing record (RoPA) ({{ records.ropa | length }})</button>
+      <button class="mv-tab" id="pw-tabbtn-dsar" role="tab" aria-selected="false" aria-controls="pw-tab-dsar" tabindex="-1" data-tab="dsar" type="button">Data requests (DSAR) ({{ records.dsar | length }})</button>
+      <button class="mv-tab" id="pw-tabbtn-paper" role="tab" aria-selected="false" aria-controls="pw-tab-paper" tabindex="-1" data-tab="paper" type="button">Vendor contracts ({{ records.paper | length }})</button>
+      <button class="mv-tab" id="pw-tabbtn-lineage" role="tab" aria-selected="false" aria-controls="pw-tab-lineage" tabindex="-1" data-tab="lineage" type="button">Vendor history</button>
+      <button class="mv-tab" id="pw-tabbtn-incidents" role="tab" aria-selected="false" aria-controls="pw-tab-incidents" tabindex="-1" data-tab="incidents" type="button">Incidents ({{ records.incidents | length }}){% if records.incidents_breached %} <span class="badge blocked">{{ records.incidents_breached }} past 72h</span>{% endif %}</button>
     </div>
 
-    <div class="pw-tab" id="pw-tab-lineage" hidden>
+    <div class="pw-tab" id="pw-tab-lineage" role="tabpanel" aria-labelledby="pw-tabbtn-lineage" hidden>
       <p class="muted" style="font-size:var(--text-sm);margin-bottom:var(--sp-3);">
         Answer the questions a regulator asks about a vendor: its full history,
         why it was approved, and what else depends on a clause or document
@@ -314,7 +322,7 @@
             <input class="input" id="pw-lin-asof" type="date"></label>
         </div>
         <div class="pw-form-actions">
-          <button class="btn btn--primary" id="pw-lin-dossier" type="button">Show vendor history</button>
+          <button class="btn" id="pw-lin-dossier" type="button">Show vendor history</button>
           <button class="btn" id="pw-lin-why" type="button">Why was it approved?</button>
           <span class="pw-form-err" id="pw-lin-err" role="alert"></span>
         </div>
@@ -353,7 +361,7 @@
       </datalist>
     </div>
 
-    <div class="pw-tab" id="pw-tab-paper" hidden>
+    <div class="pw-tab" id="pw-tab-paper" role="tabpanel" aria-labelledby="pw-tabbtn-paper" hidden>
       <p class="muted" style="font-size:var(--text-sm);margin-bottom:var(--sp-3);">
         When the vendor insists on <strong>their</strong> paper. Upload it and
         Lightwork works out whether it is a DPA or a privacy addendum, compares
@@ -378,7 +386,7 @@
           <input class="input" type="file" id="pw-paper-file" required
                  accept=".docx,.pdf,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"></label>
         <div class="pw-form-actions">
-          <button class="btn btn--primary" type="submit" id="pw-paper-go">Review their paper</button>
+          <button class="btn" type="submit" id="pw-paper-go">Review their paper</button>
           <span class="pw-form-err" id="pw-paper-err" role="alert"></span>
         </div>
       </form>
@@ -406,7 +414,7 @@
         </p>
         <div id="pw-playbook-rows"></div>
         <div class="pw-form-actions">
-          <button class="btn btn--primary" id="pw-playbook-save" type="button" disabled>Save playbook</button>
+          <button class="btn" id="pw-playbook-save" type="button" disabled>Save playbook</button>
           <button class="btn" id="pw-playbook-retry" type="button" hidden>Retry loading playbook</button>
           <span class="muted" id="pw-playbook-path" style="font-size:var(--text-xs);"></span>
           <span class="pw-form-err" id="pw-playbook-err" role="alert"></span>
@@ -443,7 +451,7 @@
       {% endif %}
     </div>
 
-    <div class="pw-tab" id="pw-tab-dpa">
+    <div class="pw-tab" id="pw-tab-dpa" role="tabpanel" aria-labelledby="pw-tabbtn-dpa">
       <form class="pw-form" data-endpoint="/api/v1/privacy/dpa-reviews">
         <div class="pw-form-row">
           <label><span>Vendor</span>
@@ -457,7 +465,7 @@
           <textarea class="textarea" id="pw-dpa-text" name="text" rows="5" required
             placeholder="Paste the agreement text. Each clause the GDPR requires in a processor agreement is checked, and every verdict quotes the wording it relied on."></textarea></label>
         <div class="pw-form-actions">
-          <button class="btn btn--primary" type="submit">Check the agreement</button>
+          <button class="btn" type="submit">Check the agreement</button>
           <span class="pw-form-err" role="alert"></span>
         </div>
       </form>
@@ -500,12 +508,13 @@
       </table>
       </div>
       {% else %}
-        <p class="muted">No agreements checked yet. Paste or load a vendor's data processing
-          agreement above; the clause-by-clause results appear here with the wording they relied on.</p>
+        {{ empty_state('No agreements checked yet',
+                       'Checked agreements appear here clause by clause, with the wording each result relied on. Paste or load a vendor\'s data processing agreement above to check the first one.',
+                       compact=true) }}
       {% endif %}
     </div>
 
-    <div class="pw-tab" id="pw-tab-ai" hidden>
+    <div class="pw-tab" id="pw-tab-ai" role="tabpanel" aria-labelledby="pw-tabbtn-ai" hidden>
       <form class="pw-form" data-endpoint="/api/v1/privacy/ai-systems">
         <div class="pw-form-row">
           <label><span>System name</span>
@@ -519,7 +528,7 @@
           <textarea class="textarea" name="purpose" rows="2" required
             placeholder="Describe what the system is used for. Lightwork sorts it into the EU AI Act's risk levels when you save."></textarea></label>
         <div class="pw-form-actions">
-          <button class="btn btn--primary" type="submit">Add and check risk level</button>
+          <button class="btn" type="submit">Add and check risk level</button>
           <span class="pw-form-err" role="alert"></span>
         </div>
       </form>
@@ -563,12 +572,13 @@
       <p class="muted" style="font-size:var(--text-xs);">Automated screening against the
         EU AI Act's category tests — a triage aid, not legal advice.</p>
       {% else %}
-        <p class="muted">No AI systems added yet. Add one above: Lightwork checks it against the
-          EU AI Act's tests for banned uses, high-risk areas and transparency, and lists what the law requires for its risk level.</p>
+        {{ empty_state('No AI systems added yet',
+                       'AI systems you add appear here with their EU AI Act risk level and what the law requires for it. Add the first one above.',
+                       compact=true) }}
       {% endif %}
     </div>
 
-    <div class="pw-tab" id="pw-tab-ropa" hidden>
+    <div class="pw-tab" id="pw-tab-ropa" role="tabpanel" aria-labelledby="pw-tabbtn-ropa" hidden>
       <div class="pw-form">
         <div class="pw-form-actions">
           <label style="flex:1;"><span>Draft a processing record entry from a completed assessment</span>
@@ -576,7 +586,7 @@
               {% for s in sessions[:50] %}<option value="{{ s.id }}">{{ s.subject }}{% for t in templates %}{% if t.type == s.type %} · {{ t.title }}{% endif %}{% endfor %}{% if s.age_days is not none %} · {{ s.age_days }} day{{ '' if s.age_days == 1 else 's' }} old{% endif %}</option>{% endfor %}
               {% if not sessions %}<option value="">No assessments yet</option>{% endif %}
             </select></label>
-          <button class="btn btn--primary" id="pw-ropa-draft" type="button" {% if not sessions %}disabled{% endif %}>Draft entry</button>
+          <button class="btn" id="pw-ropa-draft" type="button" {% if not sessions %}disabled{% endif %}>Draft entry</button>
           <button class="btn" id="pw-ropa-new" type="button">Add an entry</button>
           <a class="btn" href="/api/v1/privacy/ropa/export.csv">Download as CSV</a>
           <span class="pw-form-err" id="pw-ropa-err" role="alert"></span>
@@ -621,7 +631,7 @@
       {% endif %}
     </div>
 
-    <div class="pw-tab" id="pw-tab-dsar" hidden>
+    <div class="pw-tab" id="pw-tab-dsar" role="tabpanel" aria-labelledby="pw-tabbtn-dsar" hidden>
       <form class="pw-form" data-endpoint="/api/v1/privacy/dsar">
         <div class="pw-form-row">
           <label><span>Person making the request (email or ID)</span>
@@ -668,7 +678,7 @@
             </select></label>
         </div>
         <div class="pw-form-actions">
-          <button class="btn btn--primary" type="submit">Open request (the deadline starts now)</button>
+          <button class="btn" type="submit">Open request (the deadline starts now)</button>
           <span class="pw-form-err" role="alert"></span>
         </div>
       </form>
@@ -741,11 +751,12 @@
         prepared here and confirmed on the request&rsquo;s own page. &ldquo;Where to search&rdquo;
         lists the systems, vendors and documents outside Lightwork that may also hold their data.</p>
       {% else %}
-        <p class="muted">No requests yet. Open one above; Lightwork tracks the 30-day legal deadline
-          and helps you gather or delete the person&rsquo;s data.</p>
+        {{ empty_state('No requests yet',
+                       'Requests from people about their data appear here with their 30-day legal deadline. Open the first one above; Lightwork helps you gather or delete the person’s data.',
+                       compact=true) }}
       {% endif %}
     </div>
-    <div class="pw-tab" id="pw-tab-incidents" hidden>
+    <div class="pw-tab" id="pw-tab-incidents" role="tabpanel" aria-labelledby="pw-tabbtn-incidents" hidden>
       <form class="pw-form" data-endpoint="/api/v1/privacy/incidents">
         <div class="pw-form-row">
           <label><span>What happened</span>
@@ -775,7 +786,7 @@
           <textarea class="textarea" name="description" rows="2"
             placeholder="What is known so far."></textarea></label>
         <div class="pw-form-actions">
-          <button class="btn btn--primary" type="submit">Open incident</button>
+          <button class="btn" type="submit">Open incident</button>
           <span class="pw-form-err" role="alert"></span>
         </div>
       </form>
@@ -817,9 +828,9 @@
         your decision either way, with the reason. It never contacts a regulator itself. &ldquo;Who must we tell?&rdquo;
         lists each law&rsquo;s deadlines from checked rules: support for your lawyers, not legal advice.</p>
       {% else %}
-        <p class="muted">No incidents recorded. When you open one, Lightwork tracks the 72-hour deadline to tell the
-          regulator from when you became aware of the breach; whether you must tell them stays a decision a person
-          records, with the reason.</p>
+        {{ empty_state('No incidents recorded',
+                       'Incidents you open appear here with their deadline to tell the regulator: 72 hours from when you became aware of the breach. Whether you must tell them stays a decision a person records, with the reason.',
+                       compact=true) }}
       {% endif %}
     </div>
   </div>
@@ -831,13 +842,13 @@
       records: who processes your data (vendors), what people agreed to
       (consent), and where personal data actually lives (the data map). Each
       one is turned on separately; turned-off registers show a button to turn them on.</p>
-    <div class="pw-filters" role="group" aria-label="Estate registers">
-      <button class="btn btn--primary" data-pane="vendors" type="button">Vendors ({{ estate.vendors | length }})</button>
-      <button class="btn" data-pane="consent" type="button">Consent{% if estate.consent_enabled %} ({{ estate.consent_posture.records }}){% endif %}</button>
-      <button class="btn" data-pane="datamap" type="button">Data map ({{ estate.assets | length }})</button>
+    <div class="mv-tabs" role="tablist" aria-label="Estate registers">
+      <button class="mv-tab" id="pe-tabbtn-vendors" role="tab" aria-selected="true" aria-controls="pe-tab-vendors" tabindex="0" data-pane="vendors" type="button">Vendors ({{ estate.vendors | length }})</button>
+      <button class="mv-tab" id="pe-tabbtn-consent" role="tab" aria-selected="false" aria-controls="pe-tab-consent" tabindex="-1" data-pane="consent" type="button">Consent{% if estate.consent_enabled %} ({{ estate.consent_posture.records }}){% endif %}</button>
+      <button class="mv-tab" id="pe-tabbtn-datamap" role="tab" aria-selected="false" aria-controls="pe-tab-datamap" tabindex="-1" data-pane="datamap" type="button">Data map ({{ estate.assets | length }})</button>
     </div>
 
-    <div class="pe-tab" id="pe-tab-vendors">
+    <div class="pe-tab" id="pe-tab-vendors" role="tabpanel" aria-labelledby="pe-tabbtn-vendors">
       {% if estate.vendors_enabled %}
       <p class="muted" style="font-size:var(--text-sm);margin-bottom:var(--sp-3);">
         One governed row per vendor: criticality, lifecycle, questionnaires the
@@ -876,7 +887,7 @@
                    placeholder="Name, email or team"></label>
         </div>
         <div class="pw-form-actions">
-          <button class="btn btn--primary" type="submit">Register vendor</button>
+          <button class="btn" type="submit">Register vendor</button>
           <span class="pw-form-err" role="alert"></span>
         </div>
       </form>
@@ -918,7 +929,9 @@
       </table>
       </div>
       {% else %}
-      <p class="muted">No vendors yet. Add one above or import your OneTrust export below.</p>
+      {{ empty_state('No vendors yet',
+                     'Vendors you register appear here, one governed row each. Add one above or import your OneTrust export below.',
+                     compact=true) }}
       {% endif %}
       <div class="panel" id="pe-vendor-link" role="status" aria-live="polite" hidden></div>
       <div class="pw-form">
@@ -983,7 +996,7 @@
       {% endif %}
     </div>
 
-    <div class="pe-tab" id="pe-tab-consent" hidden>
+    <div class="pe-tab" id="pe-tab-consent" role="tabpanel" aria-labelledby="pe-tabbtn-consent" hidden>
       {% if estate.consent_enabled %}
       <p class="muted" style="font-size:var(--text-sm);margin-bottom:var(--sp-3);">
         A lasting record of what each person agreed to, kept behind your consent
@@ -1021,7 +1034,7 @@
             </select></label>
         </div>
         <div class="pw-form-actions">
-          <button class="btn btn--primary" type="submit">Record their choice</button>
+          <button class="btn" type="submit">Record their choice</button>
           <span class="pw-form-err" role="alert"></span>
         </div>
       </form>
@@ -1113,7 +1126,7 @@
       {% endif %}
     </div>
 
-    <div class="pe-tab" id="pe-tab-datamap" hidden>
+    <div class="pe-tab" id="pe-tab-datamap" role="tabpanel" aria-labelledby="pe-tabbtn-datamap" hidden>
       {% if estate.data_map_enabled %}
       <p class="muted" style="font-size:var(--text-sm);margin-bottom:var(--sp-3);">
         Where personal data actually lives. Import your database&rsquo;s column list or list your
@@ -1146,7 +1159,7 @@
         <details><summary>Or paste the column list instead</summary>
           <textarea class="textarea" id="pe-dm-csv" rows="4" aria-label="Database column list CSV"></textarea></details>
         <div class="pw-form-actions">
-          <button class="btn btn--primary" id="pe-dm-import" type="button">Import columns</button>
+          <button class="btn" id="pe-dm-import" type="button">Import columns</button>
           <button class="btn" id="pe-dm-template" type="button">Download a blank column list</button>
           <button class="btn" id="pe-dm-register" type="button">Add a place by hand</button>
           <a class="btn" href="/api/v1/data-map/masking-sql" download="masking-rules.sql">Download masking rules (Snowflake)</a>
@@ -1190,8 +1203,9 @@
       </table>
       </div>
       {% else %}
-      <p class="muted">No places recorded yet. Import a column list, list your SharePoint sites,
-        or add a place by hand above.</p>
+      {{ empty_state('No places recorded yet',
+                     'Places where personal data lives appear here. Import a column list, list your SharePoint sites, or add a place by hand above.',
+                     compact=true) }}
       {% endif %}
       {% else %}
       {{ module_gate('data_map', 'Data map',
@@ -1207,14 +1221,24 @@
     (function () {
       'use strict';
       var panes = document.querySelectorAll('.pe-tab');
-      var buttons = document.querySelectorAll('button[data-pane]');
-      buttons.forEach(function (tb) {
-        tb.addEventListener('click', function () {
-          buttons.forEach(function (b) { b.classList.remove('btn--primary'); });
-          tb.classList.add('btn--primary');
-          panes.forEach(function (p) {
-            p.hidden = p.id !== 'pe-tab-' + tb.dataset.pane;
-          });
+      var buttons = Array.prototype.slice.call(document.querySelectorAll('button[data-pane]'));
+      function showPane(tb, focus) {
+        buttons.forEach(function (b) {
+          b.setAttribute('aria-selected', b === tb ? 'true' : 'false');
+          b.tabIndex = b === tb ? 0 : -1;
+        });
+        panes.forEach(function (p) {
+          p.hidden = p.id !== 'pe-tab-' + tb.dataset.pane;
+        });
+        if (focus) tb.focus();
+      }
+      buttons.forEach(function (tb, i) {
+        tb.addEventListener('click', function () { showPane(tb, false); });
+        tb.addEventListener('keydown', function (event) {
+          var next = event.key === 'ArrowRight' ? buttons[(i + 1) % buttons.length]
+            : event.key === 'ArrowLeft' ? buttons[(i - 1 + buttons.length) % buttons.length]
+            : event.key === 'Home' ? buttons[0] : event.key === 'End' ? buttons[buttons.length - 1] : null;
+          if (next) { event.preventDefault(); showPane(next, true); }
         });
       });
 
@@ -1266,7 +1290,7 @@
         var row = document.createElement('div'); row.className = 'pw-form-actions';
         var field = document.createElement('input'); field.className = 'input'; field.readOnly = true; field.value = link;
         field.setAttribute('aria-label', title); field.style.flex = '1';
-        var copy = document.createElement('button'); copy.type = 'button'; copy.className = 'btn btn--primary'; copy.textContent = 'Copy link';
+        var copy = document.createElement('button'); copy.type = 'button'; copy.className = 'btn'; copy.textContent = 'Copy link';
         copy.addEventListener('click', function () { if (window.mvCopy) mvCopy(link); else { field.select(); } });
         row.append(field, copy);
         if (mailSubject) {
@@ -1625,15 +1649,25 @@
 <script>
 (function () {
   'use strict';
-  // Record-type tabs.
-  var tabs = document.querySelectorAll('.pw-filters button[data-tab]');
-  tabs.forEach(function (tb) {
-    tb.addEventListener('click', function () {
-      tabs.forEach(function (b) { b.classList.remove('btn--primary'); });
-      tb.classList.add('btn--primary');
-      document.querySelectorAll('.pw-tab').forEach(function (p) {
-        p.hidden = p.id !== 'pw-tab-' + tb.dataset.tab;
-      });
+  // Record-type tabs: a selected state and arrow keys, never btn--primary.
+  var tabs = Array.prototype.slice.call(document.querySelectorAll('[role="tablist"] button[data-tab]'));
+  function showTab(tb, focus) {
+    tabs.forEach(function (b) {
+      b.setAttribute('aria-selected', b === tb ? 'true' : 'false');
+      b.tabIndex = b === tb ? 0 : -1;
+    });
+    document.querySelectorAll('.pw-tab').forEach(function (p) {
+      p.hidden = p.id !== 'pw-tab-' + tb.dataset.tab;
+    });
+    if (focus) tb.focus();
+  }
+  tabs.forEach(function (tb, i) {
+    tb.addEventListener('click', function () { showTab(tb, false); });
+    tb.addEventListener('keydown', function (event) {
+      var next = event.key === 'ArrowRight' ? tabs[(i + 1) % tabs.length]
+        : event.key === 'ArrowLeft' ? tabs[(i - 1 + tabs.length) % tabs.length]
+        : event.key === 'Home' ? tabs[0] : event.key === 'End' ? tabs[tabs.length - 1] : null;
+      if (next) { event.preventDefault(); showTab(next, true); }
     });
   });
 
@@ -1756,7 +1790,7 @@
                 'safely — the memo explains each one.</p>' : '') +
             '<p><a class="btn" href="/api/v1/privacy/paper-reviews/' + rec.id +
             '/memo" target="_blank">Read the memo</a> ' +
-            '<a class="btn btn--primary" href="/api/v1/privacy/paper-reviews/' +
+            '<a class="btn" href="/api/v1/privacy/paper-reviews/' +
             rec.id + '/redline">Download the tracked-changes document</a></p>' +
             '</div>';
         })
@@ -2324,7 +2358,7 @@
               var row = document.createElement('div'); row.className = 'pw-form-actions';
               var field = document.createElement('input'); field.className = 'input'; field.readOnly = true; field.value = url;
               field.style.flex = '1'; field.setAttribute('aria-label', 'Download link for the person');
-              var copy = document.createElement('button'); copy.type = 'button'; copy.className = 'btn btn--primary'; copy.textContent = 'Copy link';
+              var copy = document.createElement('button'); copy.type = 'button'; copy.className = 'btn'; copy.textContent = 'Copy link';
               copy.addEventListener('click', function () { if (window.mvCopy) { mvCopy(url); } else { field.select(); } });
               row.append(field, copy);
               out.append(p, row);
@@ -2434,7 +2468,11 @@
 (function () {
   'use strict';
   var B = window.LWBoard;
-  var EMPTY = 'No assessments on this record yet — start one from the worklist below.';
+  // Empty charts say what fills them and point at the worklist's start form.
+  function empty(id) {
+    B.empty(document.getElementById(id), 'No assessments yet',
+      'Assessments appear here once they are on record. Start one from the worklist below.');
+  }
 
   function render(D) {
     var k = document.getElementById('bd-kpis');
@@ -2469,8 +2507,8 @@
               ' medium, ' + D.risk.low + ' low, ' + D.risk.minimal +
               ' minimal, ' + D.risk.unrated + ' unrated.' });
     } else {
-      B.empty(document.getElementById('bd-flow'), EMPTY);
-      B.empty(document.getElementById('bd-risk'), EMPTY);
+      empty('bd-flow');
+      empty('bd-risk');
     }
 
     var tmax = 1;
@@ -2483,7 +2521,7 @@
                    title: r.label + ' — ' + r.approved + ' approved of ' + r.total };
         }), 'Assessments by framework: approved against total volume.');
     } else {
-      B.empty(document.getElementById('bd-types'), EMPTY);
+      empty('bd-types');
     }
   }
 

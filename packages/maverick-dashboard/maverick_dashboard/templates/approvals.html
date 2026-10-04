@@ -29,7 +29,7 @@
         <p>Before: {{ item.approval_card.preview.before }}</p><p>After: {{ item.approval_card.preview.after }}</p>
         <p>Decide by: {{ item.approval_card.expires_at | datetime }}</p>
       </section>{% else %}<p class="muted">The approval details need to be checked again before a decision can be made.</p>{% endif %}
-      <div class="approval-actions"><a class="btn btn--primary" href="{{ item.href }}">Review and decide</a></div>
+      <div class="approval-actions"><a class="btn" href="{{ item.href }}">Review and decide</a></div>
     </article>{% endfor %}
     </div>
   </section>{% endif %}

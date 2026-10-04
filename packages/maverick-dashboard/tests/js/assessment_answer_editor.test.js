@@ -19,7 +19,8 @@ function fixture() {
     focus() { this.focused = true; }
   }
   const get = id => nodes[id] || (nodes[id] = new Element());
-  const context = { document: { getElementById: get }, currentId: "record", currentRevision: 1, viewGeneration: 1, answerBusy: false, answerDirty: false, selectedQuestion: "", decidedInDialog: false,
+  const documentListeners = {};
+  const context = { document: { getElementById: get, listeners: documentListeners, addEventListener: (type, fn) => { documentListeners[type] = fn; } }, currentId: "record", currentRevision: 1, viewGeneration: 1, answerBusy: false, answerDirty: false, selectedQuestion: "", decidedInDialog: false,
     body: new Element(), statusEl: new Element(), mvConfirm: async () => false,
     fetch: async (url, options) => { calls.push({ url, options }); throw new Error("No response configured"); },
     render: record => renders.push(record), reload: async () => {},
@@ -110,6 +111,19 @@ test("intake quotes a single subject safely and opens only a verified created as
   await ui.get("pw-start-form").listeners.submit(event());
   assert.equal(JSON.parse(ui.calls[0].options.body).csv, 'subject,type\n"Acme, ""North""\nOffice","pia"');
   assert.deepEqual(opened, ["new-record"]); assert.equal(ui.get("pw-start-subject").value, "");
+});
+
+test("the page header's Start an assessment opens the intake form", () => {
+  const ui = fixture();
+  const source = fs.readFileSync(path.join(templates, "_workspace_worklist.html"), "utf8");
+  vm.runInContext(source.slice(source.indexOf("  (function assessmentIntake()"), source.lastIndexOf("  </script>")), ui.context);
+  let prevented = false;
+  const header = { target: { closest: selector => (selector === 'a[href="#pw-start"]' ? {} : null) }, preventDefault() { prevented = true; } };
+  ui.context.document.listeners.click(header);
+  assert.equal(prevented, true); assert.equal(ui.get("pw-start").open, true); assert.equal(ui.get("pw-start-type").focused, true);
+  const elsewhere = { target: { closest: () => null }, preventDefault() { throw new Error("other clicks are left alone"); } };
+  ui.get("pw-start").open = false; ui.context.document.listeners.click(elsewhere);
+  assert.equal(ui.get("pw-start").open, false);
 });
 
 test("risk summary distinguishes empty, unresolved and complete questionnaires without claiming zero risks are controlled", () => {

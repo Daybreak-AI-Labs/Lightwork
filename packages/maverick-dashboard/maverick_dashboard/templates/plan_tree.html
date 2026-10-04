@@ -24,8 +24,9 @@
   .tree .cost { color: var(--muted); font-size: 0.85em; margin-left: 0.5rem; }
 </style>
 {% from "_task_tabs.html" import task_tabs %}
+{% from "_hero.html" import hero %}
 {{ task_tabs(goal, 'plan') }}
-<div class="section-head"><h2>Plan for: {{ goal.title }}</h2></div>
+{{ hero('Task', 'Plan for: ' ~ goal.title, compact=true) }}
 <div class="panel">
   <div class="legend">
     <span><span class="badge active">In progress</span></span>

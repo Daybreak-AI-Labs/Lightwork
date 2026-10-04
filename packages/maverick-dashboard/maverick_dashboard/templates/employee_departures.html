@@ -1,7 +1,8 @@
 {% extends "base.html" %}
 {% block title %}Employee departures · Lightwork{% endblock %}
 {% block content %}
-<h1>Employee departures</h1>
+{% from "_hero.html" import hero %}
+{{ hero('Administration', 'Employee departures', compact=true) }}
 <section class="panel"><p>Review an employee's access and work across this installation before deactivating their named account. Existing data and preservation holds are retained. A handoff owner becomes responsible for retained work; this does not grant access to private employee content.</p>
 <p>Deactivation revokes Lightwork sessions and prevents new sign-ins for this exact identity. This workflow can remove reviewed local connection credentials and retire reviewed recurring schedules and cancel pending owned jobs across job kinds. Running work, other module queues, external identity accounts and provider-side consent still require explicit handoff. A case stays open until each reviewed item and external obligation has an active named owner. Closure preserves unresolved external outcomes as retained obligations; it does not verify provider revocation.</p>
 <p id="ed-status" role="status" aria-live="polite">Loading departure controls.</p><button type="button" class="btn" id="ed-refresh">Refresh saved cases</button></section>

@@ -28,12 +28,15 @@
     </fieldset>
   {% endmacro %}
 
+  {% from "_empty_state.html" import empty_state %}
+  {% set limits_actions %}<a class="btn btn--primary" href="#workspace-limit">Set a workspace limit</a>{% endset %}
   {% call hero('Administration', 'Spending limits',
                subtitle='Keep costs predictable',
                lede='By default there is no limit on what people can spend. Set a limit for
                      the whole workspace, a limit for everyone, or a limit for one person.
                      When a limit is reached, new work pauses until the limit resets or you
-                     raise it.') %}
+                     raise it.',
+               actions=limits_actions) %}
     {{ state('This month',
              (view.workspace_month | money) ~ ' spent',
              badge=('Limited' if view.workspace else 'No limit'),
@@ -54,7 +57,7 @@
   </div>
   {% endif %}
 
-  <div class="section-head"><h2>Whole workspace</h2></div>
+  <div class="section-head"><h2 id="workspace-limit" tabindex="-1">Whole workspace</h2></div>
   <div class="panel">
     <p class="muted" style="margin-top: 0;">
       The most everyone together may spend. Currently: <strong>{{ describe(view.workspace) }}</strong>.
@@ -68,7 +71,7 @@
           data-limit-amount="{{ view.workspace.amount if view.workspace else '' }}"
           style="display: flex; flex-wrap: wrap; gap: var(--space-4); align-items: flex-end;">
       {{ limit_fields('Workspace limit', view.workspace, workspace_periods) }}
-      <button type="submit" class="btn btn--primary">Save workspace limit</button>
+      <button type="submit" class="btn">Save workspace limit</button>
     </form>
   </div>
 
@@ -84,7 +87,7 @@
           data-limit-amount="{{ view.default.amount if view.default else '' }}"
           style="display: flex; flex-wrap: wrap; gap: var(--space-4); align-items: flex-end;">
       {{ limit_fields('Limit for everyone', view.default, periods) }}
-      <button type="submit" class="btn btn--primary">Save limit for everyone</button>
+      <button type="submit" class="btn">Save limit for everyone</button>
     </form>
   </div>
 
@@ -147,12 +150,12 @@
           {% endfor %}
         </select>
       </label>
-      <button type="submit" class="btn btn--primary">Save personal limit</button>
+      <button type="submit" class="btn">Save personal limit</button>
     </form>
     {% else %}
-    <p class="muted" style="margin: 0;">Nobody has been added yet. Add people on the
-      <a href="/users">Users</a> page and they will appear here, ready for a personal limit.</p>
-    <p style="margin-bottom: 0;"><a class="btn" href="/users">Go to Users</a></p>
+    {{ empty_state('Nobody has been added yet',
+                   'People with a role appear here with what they spent, ready for a personal limit. Add people on the Users page.',
+                   action_label='Go to Users', action_href='/users', compact=true) }}
     {% endif %}
   </div>
 

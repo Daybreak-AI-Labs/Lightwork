@@ -41,8 +41,9 @@
   'status': 'Update', 'question': 'Question', 'answer': 'Answer', 'result': 'Result',
 } %}
 {% from "_task_tabs.html" import task_tabs %}
+{% from "_hero.html" import hero %}
 {{ task_tabs(goal, 'steps') }}
-<div class="section-head"><h2>Step-by-step history: {{ goal.title }}</h2></div>
+{{ hero('Task', 'Step-by-step history: ' ~ goal.title, compact=true) }}
 <div class="panel goal-export" id="goal-export" data-goal="{{ goal.id }}" data-can-share="{{ '1' if can_operate else '0' }}">
   <a class="btn btn--ghost" href="/api/v1/goals/{{ goal.id }}/export.json" download="task-{{ goal.id }}.json">Download technical archive</a>
   <a class="btn btn--ghost" href="/api/v1/goals/{{ goal.id }}/handoff.html">Download readable handoff</a>

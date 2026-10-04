@@ -22,6 +22,7 @@
   </style>
 
   {% from "_hero.html" import hero, state %}
+  {% from "_empty_state.html" import empty_state %}
   {% call hero('Governance', 'Activity log',
                subtitle='Everything that happened, in order',
                lede='Everything Lightwork and its assistants did, in the order it happened. Filter by date,
@@ -152,21 +153,17 @@
         </tbody>
       </table>
     {% else %}
-      <p class="muted">
-        {% if kind %}
-        No events match the selected kind in the loaded tail. Other events may
-        exist for this day; clear the kind filter or search the day.
-        {% elif audit_read_report and audit_read_report.failures %}
-        No readable events are available in this tail. The audit read is
-        incomplete; this does not establish that no activity was recorded.
-        {% else %}
-        Nothing was recorded for these dates and filters. An empty list does not
-        prove that nothing happened; check what is recorded, and how it is kept,
-        in the audit binder before relying on it being complete.
-        {% endif %}
-      </p>
-      <p class="aud-links"><button type="button" class="btn btn--ghost" id="aud-pick">Pick other dates</button>
-        <a class="btn btn--ghost" href="/audit/binder">Open the audit binder</a></p>
+      {% if kind %}
+        {% set audit_empty = ('No events of this kind', 'No events match the selected kind in the loaded tail. Other events may exist for this day; clear the kind filter or search the day.') %}
+      {% elif audit_read_report and audit_read_report.failures %}
+        {% set audit_empty = ('Some activity could not be read', 'No readable events are available in this tail. The audit read is incomplete; this does not establish that no activity was recorded. Pick other dates, or check the log below.') %}
+      {% else %}
+        {% set audit_empty = ('Nothing was recorded for these dates and filters', 'Activity appears here as Lightwork and its assistants work. An empty list does not prove that nothing happened; check what is recorded, and how it is kept, in the audit binder before relying on it being complete.') %}
+      {% endif %}
+      {% call empty_state(audit_empty[0], audit_empty[1]) %}
+        <p class="aud-links"><button type="button" class="btn" id="aud-pick">Pick other dates</button>
+          <a class="btn btn--ghost" href="/audit/binder">Open the audit binder</a></p>
+      {% endcall %}
     {% endif %}
   </div>
 
@@ -185,7 +182,9 @@
       </tbody>
     </table>
     {% else %}
-    <p class="muted">No readable recent deployment events are shown. This does not establish that none were recorded.</p>
+    {{ empty_state('No recent deployment activity shown',
+                   'Deployment-wide events appear here as they are recorded. An empty view does not establish that none were recorded; the audit binder shows what is recorded and how it is kept.',
+                   action_label='Open the audit binder', action_href='/audit/binder', compact=true) }}
     {% endif %}
   </section>
   {% endif %}

@@ -53,7 +53,8 @@ test('hosted rebuild shows a positive small admission ceiling and never retries 
   await expect(confirm).toContainText('Its operation receipt remains recorded');
   expect(writes).toHaveLength(1);
   await confirm.getByRole('button',{name:'Archive',exact:true}).click();
-  await expect(jobs).toContainText('No rebuild jobs to show. Archived operation receipts remain recorded.');
+  await expect(jobs.locator('.mv-empty__title')).toHaveText('No rebuild jobs to show');
+  await expect(jobs.locator('.mv-empty__body')).toContainText('Archived operation receipts remain recorded.');
   expect(writes).toHaveLength(2);
   expect(writes[1]).toEqual({path:'/api/v1/knowledge/library/reindex-jobs/'+writes[0].body.job_id+'/archive',
     body:{context:binding,confirmed:true}});

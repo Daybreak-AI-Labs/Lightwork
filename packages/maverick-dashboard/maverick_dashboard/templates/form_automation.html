@@ -4,17 +4,18 @@
 {% block public_footer %}Form submission{% endblock %}
 {% block content %}
 <style{% if csp_style_nonce is defined %} nonce="{{ csp_style_nonce }}"{% endif %}>
-  .af-wrap { max-width: 42rem; margin: auto; }
-  .af-wrap h1 { margin-bottom: var(--space-2); }
+  .af-page { width: 100%; max-width: 42rem; margin: auto; }
   .af-field { margin-top: var(--space-4); }
   .af-field label { display: block; font-weight: var(--font-medium); margin-bottom: var(--space-1); }
   .af-field .input, .af-field .select, .af-field .textarea { width: 100%; box-sizing: border-box; }
   .af-actions { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-3); margin-top: var(--space-5); }
   @media (max-width: 480px) { .af-actions .btn { width: 100%; } }
 </style>
+{% from "_hero.html" import hero %}
+<div class="af-page">
+{{ hero('', form.title, title_id='af-title', compact=true,
+        lede='Enter the details below. Lightwork records your submission, then the saved automation checks it. Submitting does not mean the work is finished.') }}
 <section class="panel af-wrap" aria-labelledby="af-title">
-  <h1 id="af-title">{{ form.title }}</h1>
-  <p class="muted">Enter the details below. Lightwork records your submission, then the saved automation checks it. Submitting does not mean the work is finished.</p>
   <form id="af-form" method="post" action="{{ request.url.path }}">
     {% for field in form.fields %}
     <div class="af-field">
@@ -38,6 +39,7 @@
     </div>
   </form>
 </section>
+</div>
 <script{% if csp_script_nonce is defined %} nonce="{{ csp_script_nonce }}"{% endif %}>
   (function () {
     'use strict';

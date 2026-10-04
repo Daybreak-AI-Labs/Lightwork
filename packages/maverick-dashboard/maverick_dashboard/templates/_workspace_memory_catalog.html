@@ -290,8 +290,7 @@
   var buttons = document.querySelectorAll('.pw-filters button[data-filter]');
   buttons.forEach(function (fb) {
     fb.addEventListener('click', function () {
-      buttons.forEach(function (b) { b.classList.remove('btn--primary'); });
-      fb.classList.add('btn--primary');
+      buttons.forEach(function (b) { b.setAttribute('aria-pressed', b === fb ? 'true' : 'false'); });
       var f = fb.dataset.filter;
       document.querySelectorAll('#pw-table tbody tr').forEach(function (tr) {
         var show = f === 'all' ||

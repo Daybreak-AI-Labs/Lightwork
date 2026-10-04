@@ -2,10 +2,13 @@
 {% block title %}Results · Lightwork{% endblock %}
 {% block content %}
   {% from "_hero.html" import hero, state %}
+  {% from "_empty_state.html" import empty_state %}
+  {% set results_actions %}<a class="btn btn--primary" href="/chat">Start a task</a>{% endset %}
   {% if not browse %}
   {% call hero('Your work', 'Results',
                subtitle='The work Lightwork finished for you',
-               lede='Open a result to read, share, print, or download the saved answer. <a href="/goals">Tasks</a> shows work that is still running or needs attention.' | safe) %}
+               lede='Open a result to read, share, print, or download the saved answer. <a href="/goals">Tasks</a> shows work that is still running or needs attention.' | safe,
+               actions=results_actions if can_create_goal else '') %}
     {{ state('Current state',
              (recent_results | length ~ ' finished task' ~ ('' if recent_results | length == 1 else 's') ~ ' on this page') if recent_results else 'No results yet',
              badge='Ready to use' if recent_results else 'Nothing finished yet',
@@ -20,7 +23,7 @@
             <div class="mv-row__title">{{ r.deliverable }}</div>
             <div class="mv-row__sub muted">{{ r.title }} · needs {{ r.gate | humanize | lower }}</div>
           </div>
-          <div class="mv-row__actions"><a class="btn btn--primary" href="/chat/goal/{{ r.id }}">Review</a></div>
+          <div class="mv-row__actions"><a class="btn" href="/chat/goal/{{ r.id }}">Review</a></div>
         </div>
       {% endfor %}
     </div>
@@ -48,12 +51,13 @@
         {% if results_more %}<a class="btn" href="/deliverables?page={{ results_page + 1 }}" rel="next">Next</a>{% endif %}
       </nav>
     {% endif %}
+  {% elif can_create_goal %}
+    {{ empty_state('No results yet',
+                   'Finished tasks with a saved answer appear here, ready to read, share or download. Start a task to get the first one.',
+                   action_label='Start a task', action_href='/chat') }}
   {% else %}
-    <div class="mv-empty">
-      <p class="mv-empty__title">No results yet</p>
-      <p class="mv-empty__body">Finished tasks with a saved answer appear here.</p>
-      {% if can_create_goal %}<p><a class="btn btn--primary" href="/chat">Start a task</a></p>{% endif %}
-    </div>
+    {{ empty_state('No results yet',
+                   'Finished tasks you can view appear here, ready to read, share or download.') }}
   {% endif %}
   {% else %}
   {% set produced = items | selectattr('latest') | list %}
@@ -63,7 +67,8 @@
                lede='The work your AI teams produce, organized by deliverable
                      and by who it\'s for — your forecasts, reports, and items
                      awaiting your sign-off (the full
-                     <a href="/goals">run history</a> is separate).' | safe) %}
+                     <a href="/goals">run history</a> is separate).' | safe,
+               actions=results_actions if can_create_goal else '') %}
     {{ state('Current state',
              (produced | length ~ ' result' ~ ('' if produced | length == 1 else 's') ~ ' produced') if has_results else 'No results yet',
              badge=(awaiting | length ~ ' awaiting sign-off') if awaiting else ('clear' if has_results else 'Nothing run yet'),
@@ -80,12 +85,14 @@
   {% endif %}
 
   {% if not has_results and not role and not showing_all and not showing_mine %}
-    <div class="mv-empty">
-      <p class="mv-empty__title">No results yet — start a task</p>
-      <p class="mv-empty__body">When a task finishes, its result shows up here, filed by what it is and who it is for.
-        To see which specialists are available, open <a href="/agents">Agent Factory</a>.</p>
-      {% if can_create_goal %}<p><a class="btn btn--primary" href="/chat">Start a task</a></p>{% endif %}
-    </div>
+    {% if can_create_goal %}
+    {{ empty_state('No results yet',
+                   'When a task finishes, its result shows up here, filed by what it is and who it is for. Start a task to get the first one.',
+                   action_label='Start a task', action_href='/chat') }}
+    {% else %}
+    {{ empty_state('No results yet',
+                   'When a task you can view finishes, its result shows up here, filed by what it is and who it is for.') }}
+    {% endif %}
   {% else %}
   {% if items or role or showing_mine or active_roles %}
     <div class="dlv-filter" role="group" aria-label="Filter by role">
@@ -130,7 +137,7 @@
             </div>
           </div>
           <div class="mv-row__actions">
-            <a class="btn btn--primary" href="/chat/goal/{{ r.id }}">Review</a>
+            <a class="btn" href="/chat/goal/{{ r.id }}">Review</a>
           </div>
         </div>
       {% endfor %}
@@ -181,25 +188,14 @@
         </nav>
       {% endif %}
     </div>
-  {% elif has_results or role or showing_mine %}
-    <div class="mv-empty">
-      <p class="mv-empty__title">
-        {%- if role %}No results for {{ role|humanize }}
-        {%- elif showing_mine %}Nothing for your role{{ 's' if mine|length > 1 else '' }} yet
-        {%- else %}No deliverables declared yet{% endif %}
-      </p>
-      <p class="mv-empty__body">
-        {% if showing_mine %}
-          No deliverables are routed to <strong>{{ mine|map('humanize')|join(', ') }}</strong> yet —
-          <a href="/deliverables?role=all">see all deliverables</a>.
-        {% else %}
-          Deliverables appear here as soon as your teams start producing
-          them — each one names what it is, who it's for, and whether it
-          needs a sign-off. See <a href="/compartments">Compartments</a>
-          for the teams set up in this workspace.
-        {% endif %}
-      </p>
-    </div>
+  {% elif showing_mine %}
+    {{ empty_state('Nothing for your role' ~ ('s' if mine|length > 1 else '') ~ ' yet',
+                   'Deliverables routed to ' ~ (mine|map('humanize')|join(', ')) ~ ' appear here once a team produces them. See every deliverable meanwhile.',
+                   action_label='See all deliverables', action_href='/deliverables?role=all') }}
+  {% elif has_results or role %}
+    {{ empty_state(('No results for ' ~ (role|humanize)) if role else 'No deliverables declared yet',
+                   'Deliverables appear here as soon as your teams start producing them — each one names what it is, who it\'s for, and whether it needs a sign-off. Check which teams are set up in this workspace.',
+                   action_label='Open Compartments', action_href='/compartments') }}
   {% endif %}
   {% endif %}
   {% endif %}

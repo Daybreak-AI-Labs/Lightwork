@@ -38,7 +38,10 @@
   }
   function render() {
     list.replaceChildren();
-    if (!state.views.length) { var empty=document.createElement('p'); empty.textContent='No saved task views yet.'; list.appendChild(empty); }
+    if (!state.views.length) {
+      if (window.mvEmpty) list.appendChild(window.mvEmpty('No saved task views yet', 'Views you save appear here. Search or filter your tasks, then name the view below to save it.', null, {compact:true}));
+      else { var empty=document.createElement('p'); empty.textContent='No saved task views yet.'; list.appendChild(empty); }
+    }
     state.views.forEach(function (view) {
       var row=document.createElement('p'), link=document.createElement('a'), remove=document.createElement('button');
       // Derive the destination from typed values; stored URLs are never trusted.

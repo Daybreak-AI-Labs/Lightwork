@@ -389,9 +389,13 @@ window.LWBoard = (function () {
     box.appendChild(wrap);
   }
 
-  function empty(box, msg) {
+  // An empty chart or list: the shared compact empty state (window.mvEmpty
+  // from lightwork-ui.js) — what will appear here, then (body) how to get the
+  // first one, plus an optional {label, href} next step.
+  function empty(box, msg, body, action) {
     box.textContent = '';
-    box.appendChild(el('p', 'bd-empty muted', msg));
+    if (window.mvEmpty) { box.appendChild(window.mvEmpty(msg, body, action, { compact: true })); return; }
+    box.appendChild(el('p', 'bd-empty muted', body ? msg + '. ' + body : msg));
   }
 
   // Fold a daily series into 7-day buckets (sums) — long windows read as a

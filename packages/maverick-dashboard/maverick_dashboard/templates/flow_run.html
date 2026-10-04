@@ -3,7 +3,6 @@
 {% block content %}
 <style>
   .fr { max-width: 900px; }
-  .fr__head { display: flex; align-items: baseline; gap: var(--space-3); flex-wrap: wrap; margin-bottom: var(--space-3); }
   .fr__status { font-weight: var(--font-semibold); }
   .fr__status.completed { color: var(--success, #16a34a); }
   .fr__status.failed, .fr__status.rejected { color: var(--danger, #dc2626); }
@@ -41,10 +40,10 @@
 </style>
 
 <div class="fr">
-  <div class="fr__head">
-    <h1 style="margin:0;" id="fr-title">Flow run</h1>
+  {% from "_hero.html" import hero %}
+  {% call hero('Flows', 'Flow run', title_id='fr-title', compact=true) %}
     <span class="badge" id="fr-status" role="status">Loading…</span>
-  </div>
+  {% endcall %}
   <p class="fr__msg" id="fr-meta"></p>
   <p id="fr-owner-links" hidden>
     <a class="btn btn--ghost" id="fr-designer-link" href="/flows/designer/{{ flow_id }}">Open the flow</a>

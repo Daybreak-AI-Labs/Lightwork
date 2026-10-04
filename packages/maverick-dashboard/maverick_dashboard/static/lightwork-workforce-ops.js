@@ -113,7 +113,11 @@
     var days = $('wo-up-days').value;
     J.request(API + '/upcoming?days=' + encodeURIComponent(days)).then(function (d) {
       if (!d.tasks.length) {
-        fill('wo-up', el('p', 'Nothing is due in the next ' + plural(Number(days), 'day') + '. Tasks with a due date appear here.', 'muted'));
+        var period = 'the next ' + plural(Number(days), 'day');
+        var further = $('wo-up-days').options[$('wo-up-days').options.length - 1].value !== String(days);
+        var body = 'Tasks with a due date appear here, overdue ones first.' + (further ? ' Choose a longer period above to look further ahead.' : '');
+        fill('wo-up', window.mvEmpty ? window.mvEmpty('Nothing is due in ' + period, body, null, {compact: true})
+          : el('p', 'Nothing is due in ' + period + '. ' + body, 'muted'));
         return;
       }
       fill('wo-up', J.table(['Task', 'Due', 'Department', 'Waiting on you'], d.tasks.map(function (t) {

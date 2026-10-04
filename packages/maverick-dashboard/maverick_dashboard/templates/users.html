@@ -35,9 +35,12 @@
     allowed to do. A new person who signs in starts as
     <strong>{{ default_role | role_label }}</strong> until you change it here.
   {% endset %}
+  {% from "_empty_state.html" import empty_state %}
+  {% set users_actions %}<a class="btn btn--primary" href="#invite-email">Invite someone</a>{% endset %}
   {% call hero('Administration', 'Users & roles',
                subtitle='Who can use Lightwork',
-               lede=users_lede) %}
+               lede=users_lede,
+               actions=users_actions if (global_admin and invites_on) else '') %}
     {{ state('Current state',
              users | length ~ ' ' ~ ('person has' if users | length == 1 else 'people have') ~ ' a role',
              badge='Company sign-in on' if auth_on else 'Sign-in off',
@@ -98,7 +101,7 @@
             </form>
           </td>
           <td class="users-actions">
-            <button type="submit" form="role-form-{{ loop.index }}" class="btn btn--primary" aria-label="Save role for {{ name_of(principal) }}">Save role</button>
+            <button type="submit" form="role-form-{{ loop.index }}" class="btn" aria-label="Save role for {{ name_of(principal) }}">Save role</button>
             <form method="post" action="/users/remove" class="users-inline"
                   data-users-confirm="Use {{ standard_roles[principal].label }} from {{ standard_roles[principal].source }} for {{ name_of(principal) }}? Powers: {{ standard_roles[principal].permissions | join(', ') or 'none' }}. This may add permissions and does not deactivate their account." data-users-ok="Use standard role">
               {{ workspace_binding() }}
@@ -115,7 +118,7 @@
     {% else %}
     <p class="muted">No one has a specific role yet. People who sign in start as
       <strong>{{ default_role | role_label }}</strong>.
-      {% if invites_on %}<a class="btn btn--primary" href="#invite-email">Invite someone</a>{% endif %}</p>
+      {% if invites_on %}<a class="btn" href="#invite-email">Invite someone</a>{% endif %}</p>
     {% endif %}
 
     {% set unassigned = people | rejectattr('role') | list %}
@@ -137,7 +140,7 @@
           {% for r in roles %}<option value="{{ r }}">{{ r | role_label }}</option>{% endfor %}
         </select>
       </label>
-      <button type="submit" class="btn btn--primary">Give role</button>
+      <button type="submit" class="btn">Give role</button>
     </form>
     <p class="muted users-help">The list shows everyone who has signed in or accepted an invite.</p>
     {% else %}
@@ -176,7 +179,9 @@
       </tbody>
     </table>
     {% else %}
-    <p class="muted">No chat accounts are linked yet.</p>
+    {{ empty_state('No chat accounts linked yet',
+                   'Linked Slack, Teams and email accounts appear here, so approvals and questions from chat count as that person\'s. Link the first one with the form below.',
+                   compact=true) }}
     {% endif %}
     <h3 class="users-subhead">Link a chat account</h3>
     <form method="post" action="/users/channels/link" class="users-row-form">
@@ -200,7 +205,7 @@
         <span>Account id (Slack member id such as U01ABCDEF, Teams user id, or email address)</span>
         <input class="input" type="text" name="external_id" required placeholder="U01ABCDEF" />
       </label>
-      <button type="submit" class="btn btn--primary">Link account</button>
+      <button type="submit" class="btn">Link account</button>
     </form>
   </div>
 
@@ -240,7 +245,7 @@
           {% for r in roles %}<option value="{{ r }}"{% if r == 'viewer' %} selected{% endif %}>{{ r | role_label }}</option>{% endfor %}
         </select>
       </label>
-      <button type="submit" class="btn btn--primary">Create invite link</button>
+      <button type="submit" class="btn">Create invite link</button>
     </form>
     <p class="muted users-help" id="invite-role-help">The invite starts as <strong>{{ 'viewer' | role_label }}</strong> (can look at dashboards and results but change nothing), the safest choice for someone new. Pick <strong>{{ 'operator' | role_label }}</strong> for people who will run work and approve actions, or <strong>{{ 'admin' | role_label }}</strong> for someone who will manage people and settings. You can change it later on this page.</p>
     <p class="muted users-help">
@@ -302,12 +307,20 @@
       <label class="users-field" for="wm-role">Role in this workspace
         <select id="wm-role" class="select" required><option value="" disabled selected>Choose a role</option>{% for r in roles %}<option value="{{ r }}">{{ r | role_label }}</option>{% endfor %}</select>
       </label>
-      <button type="submit" class="btn btn--primary">Save workspace member</button>
+      <button type="submit" class="btn">Save workspace member</button>
       <button id="wm-refresh" type="button" class="btn btn--ghost">Refresh</button>
     </form>
     <p class="muted users-help">Removing someone here puts them back on their normal role. To limit them, give them the Viewer role instead.</p>
     {% else %}
-    <p class="muted">No workspace yet. <a class="btn btn--primary" href="/tenants">Create a workspace</a></p>
+    {% if global_admin %}
+    {{ empty_state('No workspace yet',
+                   'Workspaces you create appear here, each with its own members and roles. Create the first one to give people a role inside it.',
+                   action_label='Create a workspace', action_href='/tenants', compact=true) }}
+    {% else %}
+    {{ empty_state('No workspace yet',
+                   'Workspaces you manage appear here, each with its own members and roles. An installation administrator creates them.',
+                   compact=true) }}
+    {% endif %}
     {% endif %}
   </section>
 
@@ -328,7 +341,7 @@
         {{ workspace_binding() }}
         <input type="hidden" name="principal" value="{{ principal }}" />
         {{ department_boxes('grant-' ~ loop.index, suites) }}
-        <p class="users-row-form"><button type="submit" class="btn btn--primary" aria-label="Save departments for {{ name_of(principal) }}">Save departments</button></p>
+        <p class="users-row-form"><button type="submit" class="btn" aria-label="Save departments for {{ name_of(principal) }}">Save departments</button></p>
       </form>
       <form method="post" action="/users/suites/remove" class="users-inline">
         {{ workspace_binding() }}
@@ -355,7 +368,7 @@
         </select>
       </label>
       {{ department_boxes('new-grant', []) }}
-      <p class="users-row-form"><button type="submit" class="btn btn--primary">Save departments</button></p>
+      <p class="users-row-form"><button type="submit" class="btn">Save departments</button></p>
     </form>
     {% else %}
     <p class="muted">No one has signed in yet. People appear here after they sign in or accept an invite.</p>
@@ -437,7 +450,7 @@
         <span>Description (optional)</span>
         <input class="input" name="description" maxlength="200" />
       </label>
-      <button type="submit" class="btn btn--primary">Save role</button>
+      <button type="submit" class="btn">Save role</button>
     </form>
   </div>
 
