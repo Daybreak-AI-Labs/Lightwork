@@ -50,7 +50,6 @@ ASSETS = (
     "lightwork-task-changes.js",
     "lightwork-viewpoints.js",
 )
-STYLES: tuple[str, ...] = ("lightwork-i18n.css",)
 
 
 @router.get("/static/lightwork-i18n-catalog/{language}/{revision}.js", include_in_schema=False)
@@ -81,15 +80,5 @@ def _route(name: str):
     return serve
 
 
-def _style_route(name: str):
-    async def serve() -> FileResponse:
-        return FileResponse(_STATIC / name, media_type="text/css; charset=utf-8",
-                            headers={"Cache-Control": "public, max-age=300"})
-    serve.__name__ = "asset_" + name.replace("-", "_").replace(".", "_")
-    return serve
-
-
 for _name in ASSETS:
     router.add_api_route("/static/" + _name, _route(_name), methods=["GET"], include_in_schema=False)
-for _name in STYLES:
-    router.add_api_route("/static/" + _name, _style_route(_name), methods=["GET"], include_in_schema=False)

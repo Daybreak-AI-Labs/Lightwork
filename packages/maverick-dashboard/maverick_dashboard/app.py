@@ -12385,7 +12385,6 @@ async def shell_copilot_js() -> FileResponse:
 @app.get("/static/lightwork-task-handoffs.js")
 @app.get("/static/lightwork-thread-history.js")
 @app.get("/static/lightwork-employee-companion.css")
-@app.get("/static/lightwork-preferences.css")
 @app.get("/static/lightwork-product-operations.js")
 @app.get("/static/lightwork-settings-search.js")
 @app.get("/static/lightwork-task-resume.js")

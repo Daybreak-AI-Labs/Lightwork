@@ -10,7 +10,6 @@
   <meta name="lightwork-preference-revision" content="{{ display_preference_revision }}">
   <meta name="lightwork-preference-account" content="{{ '1' if display_signed_in else '0' }}">
   <meta name="lightwork-text-size" content="{{ display_text_size or 'standard' }}">
-  <link rel="stylesheet" href="{{ asset('lightwork-preferences.css') }}">
   <meta name="theme-color" content="#0e1320" />
   {% if draft_recovery_context %}<meta name="lightwork-draft-context" content="{{ draft_recovery_context }}">{% endif %}
   {% if workspace_tenant_selection %}
@@ -18,7 +17,10 @@
   {% endif %}
   {% if record_search_context %}<meta name="lightwork-search-context" content="{{ record_search_context }}">{% endif %}
   <title>{% block title %}Lightwork{% endblock %}</title>
+  {#- One shell stylesheet; the Copilot scripts deferred first (see base.html). -#}
   <link rel="stylesheet" href="{{ asset('lightwork.css') }}" />
+  <script src="{{ asset('lightwork-product-operations.js') }}" defer></script>
+  <script src="{{ asset('lightwork-copilot.js') }}" defer></script>
   {% if custom_theme_css %}
   <style{% if csp_style_nonce is defined %} nonce="{{ csp_style_nonce }}"{% endif %}>
 {{ custom_theme_css }}
@@ -457,8 +459,6 @@
   <script src="{{ asset('lightwork-draft-recovery.js') }}" defer></script>
   <script src="{{ asset('lightwork-chat-drafts.js') }}" defer></script>
   {% endif %}
-  <script src="{{ asset('lightwork-product-operations.js') }}"></script>
-  <script src="{{ asset('lightwork-copilot.js') }}"></script>
   {% if show_personal_notifications %}<script src="{{ asset('lightwork-notification-badge.js') }}" defer></script>{% endif %}
   {% block scripts_extra %}{% endblock %}
 </body>

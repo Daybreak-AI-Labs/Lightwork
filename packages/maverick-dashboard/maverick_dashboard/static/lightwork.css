@@ -1,7 +1,25 @@
 /* Lightwork dashboard stylesheet. Extracted from templates/base.html so the
    shell template stays markup; served by GET /static/lightwork.css. Custom
    operator themes ([dashboard] themes) remain inlined by base.html because
-   they are rendered per-request from config. */
+   they are rendered per-request from config.
+   The shell links this one stylesheet: a phone pays one round trip before
+   the first paint, not three. The account-preference rules come first and
+   the translation rules last, in the order the three files used to load. */
+/* --- Account-scoped experience choices (shared responsive controls) ----- */
+.preference-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 19rem), 1fr)); gap: var(--space-4); }
+.preference-field { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; }
+.preference-field textarea, .preference-field select, .preference-field input { max-width: 100%; }
+.preference-source { color: var(--muted); font-size: var(--text-sm); }
+.today-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 22rem), 1fr)); gap: var(--space-4); }
+.prefs__panel { max-height: min(80dvh, 40rem); overflow-y: auto; }
+
+.settings-review { max-width: min(54rem, 95vw); max-height: 90vh; overflow: auto; }
+.settings-review pre, #settings-tools pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+
+.cs-account .prefs__panel { bottom: 100%; top: auto; left: 0; right: auto; }
+
+.active-workspace-banner { margin: .5rem 1rem; }
+
     /* =====================================================================
        Lightwork design system. All visual decisions live in CSS variables so
        the 4 built-in themes + operator custom themes ([dashboard] themes in
@@ -1691,3 +1709,11 @@ body:not(.theme-hicontrast) .btn--primary:hover { background: color-mix(in srgb,
 .chats__dot.blocked { background: var(--warn); opacity: 1; }
 .chats__dot.failed, .chats__dot.error { background: var(--danger); opacity: 1; }
 .chats__empty { color: var(--muted); font-size: var(--text-xs); padding: var(--space-1) var(--space-3); }
+
+/* --- Translation coverage and bidirectional text (every shell page) ---- */
+.locale-coverage{padding:var(--space-2,.5rem) var(--space-4,1rem);font-size:var(--text-sm,.875rem);color:var(--muted);overflow-wrap:anywhere}
+[data-product-copy]{unicode-bidi:isolate} [data-user-content]{unicode-bidi:plaintext;overflow-wrap:anywhere}
+[dir="rtl"] dialog,[dir="rtl"] [role="dialog"],[dir="rtl"] table{direction:rtl;text-align:start}
+[dir="rtl"] dialog button,[dir="rtl"] [role="dialog"] button{white-space:normal}
+[data-user-content][dir="auto"],.prose[dir="auto"]{unicode-bidi:plaintext}
+[dir="rtl"] pre[lang="en"],[dir="rtl"] code[lang="en"]{direction:ltr;text-align:start;unicode-bidi:isolate}
