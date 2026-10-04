@@ -113,7 +113,7 @@
             <td class="muted aud-nowrap">{{ ev.get('ts') | datetime('absolute') }}</td>
             <td>{{ event_label(ev) }}{% if ev.get('scope') == 'deployment' %} <span class="badge idle" title="Recorded in the deployment-wide log, which covers every workspace">Deployment</span>{% endif %}</td>
             <td>{{ event_who(ev) }}</td>
-            <td>{% if ev.goal_id is not none %}<a href="/chat/goal/{{ ev.goal_id }}">Task {{ ev.goal_id }}</a>{% else %}—{% endif %}</td>
+            <td>{% if ev.get('goal_id') is not none and ev.get('goal_id') != '' %}<a href="/chat/goal/{{ ev.goal_id }}">Task {{ ev.goal_id }}</a>{% else %}—{% endif %}</td>
             <td>
               {% set rows = event_details(ev) | rejectattr(0, 'equalto', 'scope') | list %}
               {% set tech = event_technical(ev) %}

@@ -85,8 +85,11 @@ def test_activity_log_and_download_name_the_person_who_decided(env, monkeypatch)
     assert decided[-1][2] == "dana.admin@northwind.example"
     assert "Lightwork" not in {row[2] for row in decided}
 
-    page = _visible(client.get("/audit").text)
+    html = client.get("/audit").text
+    page = _visible(html)
     assert re.search(r"Approval decided\s+dana\.admin@northwind\.example", page), page[:2000]
+    # A decision row names no task, so it shows a dash, not a link to nowhere.
+    assert 'href="/chat/goal/"' not in html
 
 
 def test_an_undo_is_on_the_record_with_who_undid_it(env, monkeypatch):
