@@ -170,6 +170,11 @@ def _my_work(request: Request, principal: str) -> dict:
 def me_page(request: Request, saved: str = "") -> HTMLResponse:
     # Connection codes must only reach this page from the authenticated POST
     # that issued them. A GET URL can be supplied by someone else.
+    from .navigation_api import areas_redirect
+
+    moved = areas_redirect(request)  # areas mode: Home's My work section
+    if moved is not None:
+        return moved
     return _render_me_page(request, saved=saved)
 
 

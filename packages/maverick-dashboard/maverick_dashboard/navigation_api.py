@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import hmac
 from typing import Literal
+from urllib.parse import parse_qsl, urlencode
 
 from fastapi import APIRouter, Form, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, RedirectResponse
@@ -81,7 +82,9 @@ def _personal_view(request: Request, role, finder_pages, off_pages, can_turn_on)
     offered = {href: {**link, "off": href in off_pages} for href, link in _links(finder_pages).items()
                if can_turn_on or href not in off_pages}
     pins, preset = pin_hrefs(state, offered, role)
-    path = request.url.path
+    # A merged view (/home?section=my-work) is pinned and remembered as the
+    # page it shows (/me), which forwards there.
+    path = forwarded_from(request.url.path, request.query_params) or request.url.path
     current = path if path in offered else ""
     return {
         "pins": [offered[href] for href in pins],
@@ -331,7 +334,13 @@ def area_context(request: Request, role, finder_pages, off_pages, can_turn_on) -
             section["href"] = redirect_target(section["href"]) or section["href"]
             for link in section["links"]:
                 link["href"] = redirect_target(link["href"]) or link["href"]
-    page = page_for("/today" if request.url.path == "/home" else request.url.path)
+            # A page merged into another (Project workspaces into Projects)
+            # leaves one link to their shared address.
+            seen: set[str] = set()
+            section["links"] = [link for link in section["links"]
+                                if not (link["href"] in seen or seen.add(link["href"]))]
+    # A merged view (/home?section=my-work) sits where its old page sat.
+    page = page_for(forwarded_from(request.url.path, request.query_params) or request.url.path)
     spot = place(page["path"]) if page else None
     area = nav["by_title"].get(spot[0]) if spot else None
     if area is not None:
@@ -351,20 +360,21 @@ def area_context(request: Request, role, finder_pages, off_pages, can_turn_on) -
 # why it waits). In classic mode none fires. A redirect fires in areas mode
 # only once its new address holds the old page's job; until the merge it
 # depends on is built, sending people there would hide the old page's
-# content, so it waits. Two more need a decision first and are not listed:
-# /goal-builder (compose-form field parity) and /flows/designer (product
-# decision). A held redirect also needs areas_redirect() called in its old
-# page's handler when it is switched on.
+# content, so it waits. /flows/designer needs a product decision first and is
+# not listed. A ready redirect's old page calls areas_redirect() at the top of
+# its handler; its new address checks the old page's own access (see
+# app.require_page_visible), so a forward never shows anyone more or less than before.
 REDIRECTS: tuple[tuple[str, str, bool, str], ...] = (
     ("/today", "/home", True, ""),
-    ("/me", "/home", False, "Home does not yet show My work's questions, spending and chat accounts."),
-    ("/overview", "/home", False, "Home does not yet show the Overview's activity and statistics."),
-    ("/action-center", "/approvals?view=all", False, "Approvals does not yet hold the Action Center's other kinds."),
-    ("/my-work", "/goals?owner=me&include=background", False, "Tasks does not yet list background work."),
+    ("/me", "/home?section=my-work", True, ""),
+    ("/overview", "/home?section=overview", True, ""),
+    ("/action-center", "/approvals?view=all", True, ""),
+    ("/my-work", "/goals?owner=me&include=background", True, ""),
     ("/plan-tree-3d", "/graph-editor?view=3d", False, "The task map has no 3D view yet."),
     ("/tasks/{id}/diagnostics", "/goals/{id}/diagnostics", True, ""),
-    ("/project-workspaces", "/projects", False, "Projects does not yet hold project workspaces."),
-    ("/project-workspaces/{id}", "/projects/{id}?tab=plan", False, "A project has no Plan tab yet."),
+    ("/project-workspaces", "/projects", True, ""),
+    ("/project-workspaces/{id}", "/projects/{id}?tab=plan", True, ""),
+    ("/goal-builder", "/chat?compose=form", True, ""),
     ("/run-tree", "/replay?tab=branches", False, "Task replay has no Branches tab yet."),
     ("/walkthroughs", "/replay?tab=video", False, "Task replay has no Video tab yet."),
     ("/trust", "/external-agents?tab=access", False, "Outside agents has no Access tab yet."),
@@ -392,6 +402,41 @@ def redirect_target(path: str) -> str | None:
     return None
 
 
+def forwarded_from(path: str, query) -> str | None:
+    """The old address whose content ``path`` with ``query`` now shows (the
+    reverse of a ready redirect), or None. A redirect whose new address names
+    no view (``/projects``) matches only an address that is no page of its
+    own (``/home``), so a page's plain address is never mistaken for an old one."""
+    from .ui_visibility import page_for
+
+    best, best_size = None, -1
+    for old, new, ready, _why in REDIRECTS:
+        new_path, _, new_query = new.partition("?")
+        wanted = parse_qsl(new_query)
+        if not ready or "{id}" in old or new_path != path:
+            continue
+        if not all(query.get(key) == value for key, value in wanted):
+            continue
+        if not wanted and page_for(path) is not None:
+            continue
+        if len(wanted) > best_size:
+            best, best_size = old, len(wanted)
+    return best
+
+
+def _with_query(target: str, query: str) -> str:
+    """``target`` keeping the request's own query values (a saved-message
+    flag, a chosen view) that the new address does not set itself."""
+    if not query:
+        return target
+    path, _, own = target.partition("?")
+    fixed = parse_qsl(own)
+    keys = {key for key, _value in fixed}
+    kept = [(key, value) for key, value in parse_qsl(query, keep_blank_values=True) if key not in keys]
+    merged = urlencode([*fixed, *kept])
+    return f"{path}?{merged}" if merged else path
+
+
 def areas_on(request: Request) -> bool:
     try:
         return navigation_choice(request)[0] == "areas"
@@ -401,11 +446,16 @@ def areas_on(request: Request) -> bool:
 
 def areas_redirect(request: Request) -> RedirectResponse | None:
     """In areas mode, the redirect from an old address to its new one; in
-    classic mode (the default) always None, so old addresses stay as they are."""
+    classic mode (the default) always None, so old addresses stay as they are.
+    Someone the new address's own page would refuse (an administrator hid it
+    for their role) keeps the old page, which they may open."""
     target = redirect_target(request.url.path)
     if target is None or not areas_on(request):
         return None
-    return RedirectResponse(target, status_code=303)
+    new_path = target.split("?", 1)[0]
+    if not _app().page_visible(request, "/today" if new_path == "/home" else new_path):
+        return None
+    return RedirectResponse(_with_query(target, request.url.query), status_code=303)
 
 
 def preset_start(request: Request) -> str | None:

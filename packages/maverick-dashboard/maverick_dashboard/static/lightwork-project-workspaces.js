@@ -107,7 +107,7 @@
       var data = await call(project ? '/' + project : ''); if (started !== generation) return;
       if (project) { model = data; render(); } else {
         id('list').replaceChildren(); if (!data.projects.length) node('p', 'No active owned or explicitly shared project workspaces. Create a project from Projects to start.', id('list'));
-        data.projects.forEach(function (item) { var card = node('section', undefined, id('list')); card.className = 'panel'; var link = node('a', item.name, card); link.href = '/project-workspaces/' + item.project_id; node('p', item.outcome || 'Outcome not defined yet', card); node('p', item.owned ? 'Your project' : 'Shared planning', card); });
+        data.projects.forEach(function (item) { var card = node('section', undefined, id('list')); card.className = 'panel'; var link = node('a', item.name, card); link.href = root.dataset.planHref ? root.dataset.planHref.replace('{id}', encodeURIComponent(item.project_id)) : '/project-workspaces/' + item.project_id; node('p', item.outcome || 'Outcome not defined yet', card); node('p', item.owned ? 'Your project' : 'Shared planning', card); });
       }
       status(dirty.size ? 'Current status refreshed. Your unsaved editor values are kept; review them against the current workspace.' : 'Current workspace and source access checked.'); id('remedy').hidden = true;
       return true;

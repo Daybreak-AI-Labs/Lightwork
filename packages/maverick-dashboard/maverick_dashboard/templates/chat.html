@@ -26,12 +26,23 @@
 {% endblock %}
 
 {% block chat %}
+{% if compose_form %}
+{# The task builder's form, as Chat's form mode (/chat?compose=form): the
+   same fields, checks and "create and start" as the Task builder page. #}
+<section class="cs-compose-form" aria-labelledby="compose-form-title" style="width:100%;max-width:64rem;margin-inline:auto;">
+  <h1 class="page-title" id="compose-form-title">{{ ui('Task builder') }}</h1>
+  <p class="page-subtitle">{{ ui('Describe the steps, spending limit, and where you want updates, then start the work.') }}</p>
+  <p><a href="/chat">{{ ui('Write a message instead') }}</a></p>
+  {% include "_goal_builder_form.html" %}
+</section>
+{% else %}
 <div class="cs-empty-state cs-anim">
   <div class="cs-mark" aria-hidden="true">
     <svg viewBox="0 0 48 48"><path d="M14 30c-4 0-7-3-7-7s3-7 7-7c1-5 5-8 10-8s9 3 10 8c4 0 7 3 7 7s-3 7-7 7z"/><path d="M19 22l4 4 6-8"/></svg>
   </div>
   <h1 class="sr-only">{{ ui('Chat') }}</h1>
   <p class="cs-greet">{{ ui('What should Lightwork take on?') }}</p>
+  {% if nav_mode == 'areas' and compose_form_available and can_create_goal %}<p><a href="/chat?compose=form">{{ ui('Use a step-by-step form instead') }}</a></p>{% endif %}
   {% if can_create_goal and model_route_ready and chat_examples and chat_examples.examples %}
   <section class="cs-examples" id="chat-examples" aria-labelledby="chat-examples-title">
     <h2 class="cs-examples__title" id="chat-examples-title">{% if chat_examples.department %}{{ ui('Try one of these, picked for {department}', department=chat_examples.department) }}{% else %}{{ ui('Try one of these') }}{% endif %}</h2>
@@ -92,6 +103,7 @@
   {% endif %}
   {% endif %}
 </div>
+{% endif %}
 {% endblock %}
 
 {% block dock %}
@@ -110,7 +122,7 @@
     placeholder="{{ ut('Message Lightwork…') }}"
     aria-label="{{ ut('Describe a task for Lightwork to do') }}"
     required
-    autofocus
+    {% if not compose_form %}autofocus{% endif %}
   >{{ prefill_title or '' }}</textarea>
   <details{% if prefill_description %} open{% endif %}>
     <summary>{{ ui('Add details') }}</summary>

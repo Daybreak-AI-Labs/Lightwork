@@ -227,8 +227,13 @@ token = "${MAVERICK_DASHBOARD_TOKEN}"
 # every page in one of nine job-named areas (Home, Work, Agents, Rules &
 # safety, Privacy, Risk & compliance, Evidence & audit, Costs & value,
 # Settings) with local tabs and an "Area › Section" breadcrumb, and starts
-# each role from its own layout. Who may open a page never changes. Run the
-# tree test in docs/research/tree-test/ before switching everyone.
+# each role from its own layout. Who may open a page never changes. In areas
+# mode merged pages' old addresses forward to their new homes, each still
+# checked as the old page was: /today, /me and /overview to Home's views,
+# /action-center to Approvals' "All decisions", /my-work to Tasks with
+# background work, /project-workspaces to Projects (one project's to its Plan
+# tab) and /goal-builder to Chat's form. Run the tree test in
+# docs/research/tree-test/ before switching everyone.
 # navigation_personal = true lets each person choose for themselves in Your
 # preferences. Settings > All settings and the setup wizard set both.
 # navigation = "classic"

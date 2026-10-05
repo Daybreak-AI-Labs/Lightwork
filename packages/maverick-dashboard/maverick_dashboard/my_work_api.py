@@ -149,7 +149,11 @@ def my_work(request: Request, response: Response):
 @router.get("/my-work")
 def my_work_page(request: Request):
     from .app import templates
+    from .navigation_api import areas_redirect
 
+    moved = areas_redirect(request)  # areas mode: Tasks with background work
+    if moved is not None:
+        return moved
     require_permission(request, "view")
     return templates.TemplateResponse(request, "my_work.html", {"work_context": context_for(request)},
                                       headers={"Cache-Control": "private, no-store"})

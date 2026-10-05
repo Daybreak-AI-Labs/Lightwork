@@ -1671,16 +1671,21 @@ _AREA_BY_TITLE = {title: (hub, sections) for title, hub, sections in AREAS}
 
 # Starting layouts per role (report section 5): the order of the sidebar's
 # areas, which areas start open, the start page, and sections moved to the
-# front of an area. Defaults only -- floors still decide what anyone sees,
+# front of an area, and the order of Home's views (its page tabs: Today, My
+# work, Overview) -- the workforce snapshot comes before personal work for an
+# administrator. Defaults only -- floors still decide what anyone sees,
 # and each person can reorder, hide and pin. Areas a preset does not name
 # follow in the standard order.
+_HOME_PERSONAL = ("/today", "/me", "/overview")
 AREA_PRESETS: dict[str, dict] = {
-    "employee": {"order": ("Home", "Work", "Agents"), "open": ("Work",), "start": "/home"},
+    "employee": {"order": ("Home", "Work", "Agents"), "open": ("Work",), "start": "/home",
+                 "home": _HOME_PERSONAL},
     "approver": {"order": ("Home", "Work", "Rules & safety", "Evidence & audit"), "open": ("Work",),
-                 "start": "/approvals", "first": {"Work": ("Approvals",)}},
+                 "start": "/approvals", "first": {"Work": ("Approvals",)}, "home": _HOME_PERSONAL},
     "privacy-officer": {"order": ("Home", "Work", "Privacy", "Risk & compliance", "Evidence & audit"),
-                        "open": ("Privacy",), "start": "/privacy"},
-    "admin": {"order": SIDEBAR_AREAS, "open": ("Work", "Settings"), "start": "/home"},
+                        "open": ("Privacy",), "start": "/privacy", "home": _HOME_PERSONAL},
+    "admin": {"order": SIDEBAR_AREAS, "open": ("Work", "Settings"), "start": "/home",
+              "home": ("/today", "/overview", "/me")},
 }
 _AREA_PRESET_BY_PERMISSION = (("admin", "admin"), ("operate", "employee"), ("audit", "approver"),
                               ("view", "employee"))
@@ -1721,7 +1726,7 @@ def section_lead(hub: str, section: str):
     return key
 
 
-def _area_sections(title: str, pages: list[dict], first: tuple[str, ...]) -> list[dict]:
+def _area_sections(title: str, pages: list[dict], first: tuple[str, ...], lead: tuple[str, ...] = ()) -> list[dict]:
     hub, order = _AREA_BY_TITLE[title]
     order = (*first, *(name for name in order if name not in first))
     sections: dict[str, list[dict]] = {name: [] for name in order}
@@ -1732,6 +1737,8 @@ def _area_sections(title: str, pages: list[dict], first: tuple[str, ...]) -> lis
         if not links:
             continue
         links.sort(key=section_lead(hub, name))
+        # The preset's own order for these pages comes first (Home's views).
+        links.sort(key=lambda link: lead.index(link["href"]) if link["href"] in lead else len(lead))
         result.append({"title": name, "href": links[0]["href"], "links": links,
                        "off": all(link.get("off") for link in links)})
     return result
@@ -1761,7 +1768,8 @@ def area_nav(
     for title, hub, _sections in AREAS:
         if title not in by_area:
             continue
-        sections = _area_sections(title, by_area[title], preset.get("first", {}).get(title, ()))
+        sections = _area_sections(title, by_area[title], preset.get("first", {}).get(title, ()),
+                                  preset["home"] if title == "Home" else ())
         hrefs = [link["href"] for section in sections for link in section["links"]]
         areas.append({"title": title, "hub": hub, "href": hub if hub in hrefs else hrefs[0],
                       "open": title in preset["open"], "sections": sections,
