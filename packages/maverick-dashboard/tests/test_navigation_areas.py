@@ -449,3 +449,24 @@ def test_a_chosen_start_page_still_wins_in_areas_mode(monkeypatch, tmp_path):
                                 expected_revision=state["revision"])
     root = client.get("/", follow_redirects=False)
     assert (root.status_code, root.headers["location"]) == (303, "/goals")
+
+
+# Words the areas sidebar, tabs and breadcrumb show besides page names.
+_AREA_CHROME = ("Areas", "{area} sections", "Arrange areas", "Move {area} up", "Move {area} down",
+                "Hide {area}", "Show {area}", "Up", "Down", "Hide", "Show", "hidden",
+                "Use the layout for my role", "Breadcrumb", "Pages in {section}", "All pages in {area}")
+
+
+def test_every_area_and_section_name_has_its_four_translations():
+    from maverick_dashboard import i18n_journeys, ui_visibility
+
+    names = {title for title, _hub, _sections in ui_visibility.AREAS}
+    names |= {section for _title, _hub, sections in ui_visibility.AREAS for section in sections}
+    names |= {name for spot in ui_visibility.PAGE_AREAS.values() for name in spot}
+    rows = {row[0]: row[1:] for row in i18n_journeys.ROWS}
+    missing = sorted(name for name in names | set(_AREA_CHROME) if name not in rows)
+    assert not missing, missing
+    for name in names | set(_AREA_CHROME):
+        for lang in i18n_journeys.TRANSLATION_LANGS:
+            translated, actual = i18n_journeys.entry(name, lang)
+            assert actual == lang and translated.strip(), (name, lang)
