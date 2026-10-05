@@ -29,27 +29,14 @@
   }
   async function failText(failure, action) {
     // A server sentence written for people is shown as is.
-    try {
-      if (failure && typeof failure.clone === 'function') {
-        var body = await failure.clone().json();
-        var plain = window.mvPlainDetail ? window.mvPlainDetail(body && body.detail) : '';
-        if (plain) return plain;
-      }
-    } catch (ignored) { /* not a readable body */ }
+    var plain = window.mvPlainDetail ? window.mvPlainDetail(failure && failure.detail) : '';
+    if (plain) return plain;
     return errorText(failure, action);
   }
   async function request(url, options) {
     options = options || {};
-    var init = {method: options.method || 'GET', credentials: 'same-origin', cache: 'no-store',
-      headers: {Accept: 'application/json'}};
-    if (options.json !== undefined) {
-      init.headers['Content-Type'] = 'application/json';
-      init.body = JSON.stringify(options.json);
-    }
-    var response = await window.fetch(url, init);
-    if (!response.ok) throw response;
-    return response.json();
-  }
+    return window.mvFetchJSON(url, {method: options.method || 'GET', cache: 'no-store', body: options.json});
+}
   async function confirmed(message, okText) {
     return window.mvConfirm ? window.mvConfirm(message, {okText: okText}) : false;
   }

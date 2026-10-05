@@ -120,20 +120,10 @@
     pending(false);
   }
   async function request(url, options) {
-    let response;
-    try {
-      response = await fetch(url, {credentials:"same-origin", cache:"no-store", ...options,
-        headers:{"X-Lightwork-Action-Context":root.dataset.context, ...(options && options.headers)}});
-    } catch (_) { throw new Error("Lightwork could not be reached. Check your connection and try again."); }
-    if ([401,403].includes(response.status)) {
-      invalidate(); throw new Error("Your sign-in or access changed. Sign in again and reload Action Center.");
-    }
-    let value;
-    try { value = await response.json(); } catch (_) { throw new Error("The result could not be read. Refresh the list before trying again."); }
-    if (!response.ok) throw new Error(response.status === 409
-      ? "This changed since the list loaded. Refresh the list and try again."
-      : "Could not load your actions. Refresh the list.");
-    return value;
+    const writing = !!(options && options.method);
+    return window.mvFetchJSON(url, {cache:"no-store", ...options,
+      headers:{"X-Lightwork-Action-Context":root.dataset.context, ...(options && options.headers)},
+      onAccess:invalidate}, writing ? "save your choice" : "load your actions");
   }
   function render() {
     list.replaceChildren(); coverage.replaceChildren();

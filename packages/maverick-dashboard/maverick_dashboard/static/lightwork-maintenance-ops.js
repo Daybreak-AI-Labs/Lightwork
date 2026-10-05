@@ -19,23 +19,13 @@
   function when(ts) { return window.mvWhen ? window.mvWhen(ts) : ''; }
   function plural(n, word) { return n + ' ' + word + (n === 1 ? '' : 's'); }
   async function failText(failure, action) {
-    try {
-      if (failure && typeof failure.clone === 'function') {
-        var body = await failure.clone().json();
-        var plain = window.mvPlainDetail ? window.mvPlainDetail(body && body.detail) : '';
-        if (plain) return plain;
-      }
-    } catch (ignored) { /* not a readable body */ }
+    var plain = window.mvPlainDetail ? window.mvPlainDetail(failure && failure.detail) : '';
+    if (plain) return plain;
     return window.mvErrorText ? window.mvErrorText(failure, action) : 'Could not ' + action + '. Please try again.';
   }
   async function call(path, method, body) {
-    var init = {method: method || 'GET', cache: 'no-store', credentials: 'same-origin',
-      headers: {Accept: 'application/json'}};
-    if (body !== undefined) { init.headers['Content-Type'] = 'application/json'; init.body = JSON.stringify(body); }
-    var response = await window.fetch(path, init);
-    if (!response.ok) throw response;
-    return response.json();
-  }
+    return window.mvFetchJSON(path, {method: method || 'GET', cache: 'no-store', body: body});
+}
   async function confirmed(message, okText) {
     return window.mvConfirm ? window.mvConfirm(message, {okText: okText}) : false;
   }

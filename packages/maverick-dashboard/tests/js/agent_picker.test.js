@@ -6,6 +6,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const {shell} = require('./_shell');
 const {JSDOM, VirtualConsole} = require('jsdom');
 
 const source = fs.readFileSync(path.join(__dirname, '../../maverick_dashboard/static/lightwork-agent-picker.js'), 'utf8');
@@ -22,6 +23,7 @@ function page(answer) {
   const console = new VirtualConsole();
   console.on('jsdomError', error => { if (/navigation/.test(error.message)) navigations.push(error.message); });
   const dom = new JSDOM(MARKUP, {url: 'http://localhost/agents', runScripts: 'outside-only', pretendToBeVisual: true, virtualConsole: console});
+  shell(dom.window);
   const requests = [], toasts = [];
   dom.window.fetch = async url => {
     requests.push(String(url));

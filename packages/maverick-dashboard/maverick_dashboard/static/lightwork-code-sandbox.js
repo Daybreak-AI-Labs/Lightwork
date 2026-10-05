@@ -16,27 +16,14 @@
   function say(node, text) { if (node) node.textContent = text || ''; }
   function button(label, cls) { var b = el('button', 'btn ' + (cls || 'btn--ghost'), label); b.type = 'button'; return b; }
   async function failText(failure, action) {
-    try {
-      if (failure && typeof failure.clone === 'function') {
-        var body = await failure.clone().json();
-        var plain = window.mvPlainDetail ? window.mvPlainDetail(body && body.detail) : '';
-        if (plain) return plain;
-      }
-    } catch (ignored) { /* not a readable body */ }
+    var plain = window.mvPlainDetail ? window.mvPlainDetail(failure && failure.detail) : '';
+    if (plain) return plain;
     return window.mvErrorText ? window.mvErrorText(failure, action) : 'Could not ' + action + '. Please try again.';
   }
   async function request(url, options) {
     options = options || {};
-    var init = {method: options.method || 'GET', cache: 'no-store', credentials: 'same-origin',
-      headers: {Accept: 'application/json'}};
-    if (options.json !== undefined) {
-      init.headers['Content-Type'] = 'application/json';
-      init.body = JSON.stringify(options.json);
-    }
-    var response = await window.fetch(url, init);
-    if (!response.ok) throw response;
-    return response.json();
-  }
+    return window.mvFetchJSON(url, {method: options.method || 'GET', cache: 'no-store', body: options.json});
+}
   function firstLine(text) { return String(text || '').split('\n')[0].slice(0, 120); }
 
   function start() {

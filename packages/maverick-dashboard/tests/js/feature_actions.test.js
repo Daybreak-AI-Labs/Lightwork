@@ -1,6 +1,7 @@
 'use strict';
 const {test} = require('node:test'), assert = require('node:assert/strict');
 const fs = require('node:fs'), path = require('node:path'), {JSDOM} = require('jsdom');
+const {shell} = require('./_shell');
 const folder = path.resolve(__dirname, '../../maverick_dashboard');
 const script = fs.readFileSync(path.join(folder, 'static/lightwork-feature-actions.js'), 'utf8');
 
@@ -30,6 +31,7 @@ const ME = {name: 'Ada', role: 'Administrator', departments: [], all_departments
 async function fixture(markup, route, {confirm = true} = {}) {
   const dom = new JSDOM('<!doctype html><body>' + markup + '</body>', {url: 'https://lightwork.example/', runScripts: 'outside-only'});
   const {window} = dom, calls = [], confirms = [];
+  shell(window);
   window.fetch = async (url, options = {}) => {
     calls.push({url, options});
     if (url === '/api/v1/account/me') return response(ME);

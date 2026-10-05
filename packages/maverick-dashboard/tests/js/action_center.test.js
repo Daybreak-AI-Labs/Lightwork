@@ -3,6 +3,7 @@ const {test} = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs"), path = require("node:path");
 const {JSDOM} = require("jsdom");
+const {shell} = require("./_shell");
 const script = fs.readFileSync(path.resolve(__dirname,"../../maverick_dashboard/static/lightwork-action-center.js"),"utf8");
 const tick = () => new Promise(resolve=>setImmediate(resolve));
 function value(extra={}) {
@@ -38,7 +39,7 @@ async function setup(replies) {
     if (typeof result === "function") return result();
     return {ok:true, status:200, json:async()=>result};
   };
-  w.eval(script); await tick();
+  shell(w); w.eval(script); await tick();
   return {dom,w,d,calls,button:text=>[...d.querySelectorAll("button")].find(el=>el.textContent===text)};
 }
 
@@ -156,7 +157,7 @@ test("read preference is an explicit context/version-bound action and repeated c
 });
 
 test("lost preference acknowledgement keeps the action visible and never retries automatically", async () => {
-  const ui = await setup([value(),new Error("Connection lost; refresh before retrying.")]);
+  const ui = await setup([value(),new TypeError("Failed to fetch")]);  // how a browser reports a lost connection
   ui.button("Snooze for one day").click(); await tick();
   assert.equal(ui.calls.length,2);
   assert.match(ui.d.getElementById("ac-status").textContent,/could not be reached/);
@@ -192,7 +193,7 @@ for (const code of [401,403]) test(`HTML ${code} clears private actions before p
   assert.equal(parsed,false);assert.equal(ui.d.getElementById('ac-items').textContent,'');
   assert.equal(ui.d.getElementById('ac-summary').textContent,'');assert.equal(ui.button('Refresh').disabled,true);
   ui.d.getElementById('ac-filters').dispatchEvent(new ui.w.Event('submit',{cancelable:true}));await tick();assert.equal(ui.calls.length,2);
-  assert.match(ui.d.getElementById('ac-status').textContent,/sign in|access.*changed/i);ui.w.close();
+  assert.match(ui.d.getElementById('ac-status').textContent,/sign in|access.*changed|permission/i);ui.w.close();
 });
 
 test('keyboard position follows the acknowledged updated preference control',async()=>{

@@ -3,6 +3,7 @@
 // terminal. Each panel is loaded from its real partial template.
 const {test} = require('node:test'), assert = require('node:assert/strict');
 const fs = require('node:fs'), path = require('node:path'), {JSDOM} = require('jsdom');
+const {shell} = require('./_shell');
 const folder = path.resolve(__dirname, '../../maverick_dashboard');
 const script = fs.readFileSync(path.join(folder, 'static/lightwork-ops-panels.js'), 'utf8');
 
@@ -23,6 +24,7 @@ const ME = {can: {view: true, operate: true, audit: true, admin: true, installat
 async function fixture(markup, route, {confirm = true, form = null} = {}) {
   const dom = new JSDOM('<!doctype html><body>' + markup + '</body>', {url: 'https://lightwork.example/', runScripts: 'outside-only'});
   const {window} = dom, calls = [], confirms = [], forms = [];
+  shell(window);
   window.fetch = async (url, options = {}) => {
     calls.push({url, options, body: options.body ? JSON.parse(options.body) : null});
     if (url === '/api/v1/account/me') return response(ME);

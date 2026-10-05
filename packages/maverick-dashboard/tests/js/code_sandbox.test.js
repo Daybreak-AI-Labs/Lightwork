@@ -1,6 +1,7 @@
 'use strict';
 const {test} = require('node:test'), assert = require('node:assert/strict');
 const fs = require('node:fs'), path = require('node:path'), {JSDOM} = require('jsdom');
+const {shell} = require('./_shell');
 const folder = path.resolve(__dirname, '../../maverick_dashboard');
 const script = fs.readFileSync(path.join(folder, 'static/lightwork-code-sandbox.js'), 'utf8');
 
@@ -19,6 +20,7 @@ const LIMITS = {code_characters: 20000, output_characters: 8000, steps_per_sessi
 async function fixture(route, {confirm = true} = {}) {
   const dom = new JSDOM('<!doctype html><body>' + panel() + '</body>', {url: 'https://lightwork.example/', runScripts: 'outside-only'});
   const {window} = dom, calls = [], confirms = [];
+  shell(window);
   window.fetch = async (url, options = {}) => {
     calls.push({url, method: options.method || 'GET', body: options.body ? JSON.parse(options.body) : undefined});
     return route(url, options);

@@ -10,25 +10,12 @@
     return node;
   }
   async function failText(failure, action) {
-    try {
-      if (failure && typeof failure.clone === 'function') {
-        var body = await failure.clone().json();
-        var plain = window.mvPlainDetail ? window.mvPlainDetail(body && body.detail) : '';
-        if (plain) return plain;
-      }
-    } catch (ignored) { /* not a readable body */ }
+    var plain = window.mvPlainDetail ? window.mvPlainDetail(failure && failure.detail) : '';
+    if (plain) return plain;
     return window.mvErrorText ? window.mvErrorText(failure, action) : 'Could not ' + action + '. Please try again.';
   }
   async function call(path, method, body) {
-    var init = {method: method || 'GET', credentials: 'same-origin', cache: 'no-store', headers: {Accept: 'application/json'}};
-    if (body !== undefined) { init.headers['Content-Type'] = 'application/json'; init.body = JSON.stringify(body); }
-    var controller = new AbortController(), timeout = setTimeout(function () { controller.abort(); }, 30000);
-    init.signal = controller.signal;
-    try {
-      var response = await window.fetch(path, init);
-      if (!response.ok) throw response;
-      return await response.json();
-    } finally { clearTimeout(timeout); }
+    return window.mvFetchJSON(path, {method: method || 'GET', cache: 'no-store', body: body, timeout: 30000});
   }
   function facts(rows) {
     var dl = el('dl');

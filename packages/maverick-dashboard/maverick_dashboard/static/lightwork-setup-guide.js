@@ -16,29 +16,20 @@
     return node;
   }
   async function failText(failure, action) {
-    try {
-      if (failure && typeof failure.clone === 'function') {
-        var body = await failure.clone().json();
-        var plain = window.mvPlainDetail ? window.mvPlainDetail(body && body.detail) : '';
-        if (plain) return plain;
-      }
-    } catch (ignored) { /* not a readable body */ }
+    var plain = window.mvPlainDetail ? window.mvPlainDetail(failure && failure.detail) : '';
+    if (plain) return plain;
     return window.mvErrorText ? window.mvErrorText(failure, action) : 'Could not ' + action + '. Please try again.';
   }
   async function send(path, file) {
-    var response = await window.fetch(path, {method: 'POST', credentials: 'same-origin',
-      headers: {'Content-Type': 'application/octet-stream'}, body: file});
-    if (!response.ok) throw response;
-    return response.json();
-  }
+    return window.mvFetchJSON(path, {method: 'POST', headers: {'Content-Type': 'application/octet-stream'}, body: file});
+}
   function recoveryActions(token) {
     var check = el('button', 'btn btn--ghost', 'Check installation result'); check.type = 'button';
     check.addEventListener('click', async function () {
       check.disabled = true;
       try {
-        var response = await fetch('/api/v1/setup/settings-file/result/' + encodeURIComponent(token), {cache:'no-store'});
-        if (!response.ok) throw response;
-        var result = await response.json(); status.textContent = result.summary;
+        var result = await window.mvFetchJSON('/api/v1/setup/settings-file/result/' + encodeURIComponent(token), {cache:'no-store'});
+        status.textContent = result.summary;
         if (result.matches_review && result.audit_pending) {
           var reconcile = el('button','btn btn--ghost','Record confirmed current file'); reconcile.type = 'button';
           reconcile.addEventListener('click', async function () {

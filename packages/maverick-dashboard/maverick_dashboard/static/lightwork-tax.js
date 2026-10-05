@@ -30,30 +30,19 @@
   }
   function stateName(code) { return STATE_NAMES[code] || code; }
   async function failText(failure, action) {
-    try {
-      if (failure && typeof failure.clone === 'function') {
-        var body = await failure.clone().json();
-        var plain = window.mvPlainDetail ? window.mvPlainDetail(body && body.detail) : '';
-        if (plain) return plain;
-      }
-    } catch (ignored) { /* not a readable body */ }
+    var plain = window.mvPlainDetail ? window.mvPlainDetail(failure && failure.detail) : '';
+    if (plain) return plain;
     return window.mvErrorText ? window.mvErrorText(failure, action) : 'Could not ' + action + '. Please try again.';
   }
   async function request(path, options) {
     options = options || {};
-    var init = {method: options.method || 'GET', cache: 'no-store', credentials: 'same-origin',
-      headers: {Accept: 'application/json'}};
-    if (options.json !== undefined) {
-      init.headers['Content-Type'] = 'application/json';
-      init.body = JSON.stringify(options.json);
-    } else if (options.body !== undefined) {
-      init.headers['Content-Type'] = options.type || 'application/octet-stream';
+    var init = {method: options.method || 'GET', cache: 'no-store', body: options.json};
+    if (options.json === undefined && options.body !== undefined) {
+      init.headers = {'Content-Type': options.type || 'application/octet-stream'};
       init.body = options.body;
     }
-    var response = await window.fetch(API + path, init);
-    if (!response.ok) throw response;
-    return response.json();
-  }
+    return window.mvFetchJSON(API + path, init);
+}
   function readFile(file, asText) {
     return new Promise(function (resolve, reject) {
       var reader = new FileReader();

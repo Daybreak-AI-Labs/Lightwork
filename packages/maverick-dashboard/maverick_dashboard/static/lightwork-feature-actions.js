@@ -18,30 +18,19 @@
   // A plain server sentence is shown as is; anything else gets the shared
   // plain message.
   async function failText(failure, action) {
-    try {
-      if (failure && typeof failure.clone === 'function') {
-        var body = await failure.clone().json();
-        var plain = window.mvPlainDetail ? window.mvPlainDetail(body && body.detail) : '';
-        if (plain) return plain;
-      }
-    } catch (ignored) { /* not a readable body */ }
+    var plain = window.mvPlainDetail ? window.mvPlainDetail(failure && failure.detail) : '';
+    if (plain) return plain;
     return errorText(failure, action);
   }
   async function request(url, options) {
     options = options || {};
-    var init = {method: options.method || 'GET', cache: 'no-store', credentials: 'same-origin',
-      headers: {Accept: 'application/json'}};
-    if (options.json !== undefined) {
-      init.headers['Content-Type'] = 'application/json';
-      init.body = JSON.stringify(options.json);
-    } else if (options.body !== undefined) {
-      init.headers['Content-Type'] = options.type || 'application/octet-stream';
+    var init = {method: options.method || 'GET', cache: 'no-store', raw: !!options.raw, body: options.json};
+    if (options.json === undefined && options.body !== undefined) {
+      init.headers = {'Content-Type': options.type || 'application/octet-stream'};
       init.body = options.body;
     }
-    var response = await window.fetch(url, init);
-    if (!response.ok) throw response;
-    return options.raw ? response : response.json();
-  }
+    return window.mvFetchJSON(url, init);
+}
   function say(node, text) { if (node) node.textContent = text || ''; }
   function badge(ok, yes, no) { return el('span', 'badge ' + (ok ? 'ok' : 'warn'), ok ? yes : no); }
   function money(value) {

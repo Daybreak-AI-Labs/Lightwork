@@ -82,9 +82,7 @@
   async function fetchMatches(query) {
     var params = new URLSearchParams({q: query});
     if (withSetup()) params.set('setup', '1');
-    var response = await fetch(source + '?' + params.toString(), {credentials: 'same-origin', headers: {Accept: 'application/json'}});
-    if (!response.ok) throw response;
-    var data = await response.json();
+    var data = await window.mvFetchJSON(source + '?' + params.toString(), {}, 'search the specialists');
     if (!data || !Array.isArray(data.items)) throw new Error('unreadable');
     return data;
   }
