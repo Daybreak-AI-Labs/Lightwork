@@ -123,7 +123,10 @@
     const writing = !!(options && options.method);
     return window.mvFetchJSON(url, {cache:"no-store", ...options,
       headers:{"X-Lightwork-Action-Context":root.dataset.context, ...(options && options.headers)},
-      onAccess:invalidate}, writing ? "save your choice" : "load your actions");
+      onAccess:invalidate, messages:{
+        401:"Your sign-in or access changed. Sign in again and reload Action Center.",
+        403:"Your sign-in or access changed. Sign in again and reload Action Center.",
+        409:"This changed since the list loaded. Refresh the list and try again."}}, writing ? "save your choice" : "load your actions");
   }
   function render() {
     list.replaceChildren(); coverage.replaceChildren();

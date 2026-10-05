@@ -17,7 +17,7 @@
     if (text != null) node.textContent = text;
     return node;
   }
-  function say(text) { $('status').textContent = text; }
+  function say(text) { window.mvStatus($('status'), text); }
   try {
     const added = sessionStorage.getItem(addedKey);
     if (added) {
@@ -40,9 +40,7 @@
   async function wait(id, step) {
     for (let tries = 0; tries < 900; tries += 1) {
       await new Promise(resolve => setTimeout(resolve, tries ? 2000 : 500));
-      const poll = await fetch(base + '/' + id + '?step=' + step, { credentials: 'same-origin', cache: 'no-store' });
-      if (!poll.ok) throw poll;
-      const data = await poll.json();
+      const data = await window.mvFetchJSON(base + '/' + id + '?step=' + step, { cache: 'no-store' });
       if (data && data.state === 'running') continue;
       return data || {};
     }
@@ -84,17 +82,15 @@
     lock(true); $('review').hidden = true; job = null;
     say('Drafting the specialist. Nothing is saved yet…');
     try {
-      const response = await fetch(base + '/draft', {
-        method: 'POST', credentials: 'same-origin', cache: 'no-store', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: name, description: $('what').value.trim(), industry: $('industry').value.trim(), use_ai: $('ai').value === 'ai' })
-      });
-      if (!response.ok) {
-        const conflict = response.status === 409 ? await response.json().catch(() => ({})) : null;
-        say(conflict && typeof conflict.detail === 'string' ? conflict.detail : failText(response, 'draft the specialist'));
-        if (conflict) $('name').focus();
+      let started;
+      try {
+        started = await window.mvFetchJSON(base + '/draft', { method: 'POST', cache: 'no-store', plainDetail: true,
+          body: { name: name, description: $('what').value.trim(), industry: $('industry').value.trim(), use_ai: $('ai').value === 'ai' } }, 'draft the specialist');
+      } catch (error) {
+        say(error.message);
+        if (error.status === 409) $('name').focus();
         return;
       }
-      const started = await response.json();
       if (!started || !/^[a-f0-9]{32}$/.test(String(started.job))) { say('The draft couldn’t be checked.'); return; }
       const data = await wait(started.job, 'draft');
       const result = data.result || {};
@@ -119,9 +115,7 @@
       const form = new FormData();
       form.append('confirm', 'true');
       files.forEach(file => form.append('documents', file));
-      const response = await fetch(base + '/' + job + '/approve', { method: 'POST', credentials: 'same-origin', cache: 'no-store', body: form });
-      if (!response.ok) { say(failText(response, 'add the specialist')); return; }
-      const started = await response.json();
+      const started = await window.mvFetchJSON(base + '/' + job + '/approve', { method: 'POST', cache: 'no-store', body: form }, 'add the specialist');
       const data = await wait(started.job, 'approve');
       const result = data.result || {};
       if (result.saved !== true) { say(result.message || 'The specialist wasn’t added.'); return; }

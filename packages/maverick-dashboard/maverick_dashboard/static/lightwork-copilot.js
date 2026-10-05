@@ -268,12 +268,8 @@
     var started = generation;
     renderContext(fallback);
     try {
-      var response = await fetch(
-        "/api/v1/copilot/context?page=" + encodeURIComponent(window.location.pathname),
-        {headers: {Accept: "application/json"}, credentials: "same-origin", cache: "no-store"}
-      );
-      if (!response.ok) throw new Error("context unavailable");
-      var payload = await response.json();
+      var payload = await window.mvFetchJSON(
+        "/api/v1/copilot/context?page=" + encodeURIComponent(window.location.pathname), {cache: "no-store"});
       if (started !== generation || panel.hidden) return;
       renderContext(payload);
       renderProviderSetup(payload);
@@ -313,13 +309,12 @@
     return value && selected && value.kind === 'flow_run' && value.flow_id === selected.flow_id && value.run_id === selected.run_id;
   }
   async function operationRequest(path, options) {
-    var response = await fetch(operationPath + path, Object.assign({
-      headers: {'Content-Type': 'application/json', Accept: 'application/json'},
-      credentials: 'same-origin', cache: 'no-store'
-    }, options));
-    var body = null;
-    try { body = await response.json(); } catch (_) { /* Raw errors stay out of the UI. */ }
-    return {ok: response.ok, status: response.status, body: body};
+    // A refusal's body can still be the current catalog (an audit-pending
+    // record), so it is handed back with the status; raw errors stay out of the UI.
+    var opts = Object.assign({cache: 'no-store'}, options);
+    opts.headers = Object.assign({'Content-Type': 'application/json'}, options && options.headers);
+    try { return {ok: true, status: 200, body: await window.mvFetchJSON(operationPath + path, opts)}; }
+    catch (error) { return {ok: false, status: error.status, body: error.payload || null}; }
   }
   function validCatalog(body) {
     var current = controller();

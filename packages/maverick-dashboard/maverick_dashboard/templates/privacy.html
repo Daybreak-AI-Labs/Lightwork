@@ -1231,26 +1231,8 @@
     (function () {
       'use strict';
       function post(url, body) {
-        return fetch(url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body)
-        }).then(function (r) {
-          // Read text first: an error body from a proxy or crash page is
-          // often not JSON, and r.json() would mask the status with a
-          // SyntaxError.
-          return r.text().then(function (t) {
-            var d = null;
-            try { d = JSON.parse(t); } catch (e) { d = null; }
-            if (!r.ok) {
-              var failure = new Error('request failed');
-              failure.status = r.status;
-              failure.headers = r.headers;  // carries the turned-off reason
-              throw failure;
-            }
-            return d;
-          });
-        });
+        // A refusal keeps its status and the turned-off reason for errText.
+        return window.mvFetchJSON(url, { method: 'POST', body: body });
       }
       function errText(e, action) {
         return window.mvErrorText ? window.mvErrorText(e, action) : 'Could not ' + action + '. Please try again.';
@@ -1816,10 +1798,7 @@
     function ask(url) {
       err.textContent = '';
       out.innerHTML = '';
-      fetch(url).then(function (r) {
-        if (!r.ok) { throw failed(r); }
-        return r.json();
-      }).then(render).catch(function (e) { err.textContent = errText(e, 'answer that question'); });
+      window.mvFetchJSON(url).then(render).catch(function (e) { err.textContent = errText(e, 'answer that question'); });
     }
     function render(data) {
       if (data.found === false) {

@@ -889,11 +889,9 @@
       return t;
     }
     async function postTemplate(payload) {
-      var resp = await fetch('/api/v1/workflows', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      return { resp: resp, data: await resp.json().catch(function () { return {}; }) };
+      // A refusal's status and body drive the conflict and name messages below.
+      try { return { resp: { ok: true, status: 200 }, data: (await window.mvFetchJSON('/api/v1/workflows', { method: 'POST', body: payload })) || {} }; }
+      catch (error) { if (!error.status) throw error; return { resp: { ok: false, status: error.status }, data: error.payload || {} }; }
     }
 
     saveBtn.addEventListener('click', async function () {
@@ -1086,8 +1084,7 @@
     async function loadSchedules() {
       if (!schedList) return;
       try {
-        var resp = await fetch('/api/v1/schedules');
-        var data = await resp.json().catch(function () { return {}; });
+        var data = (await window.mvFetchJSON('/api/v1/schedules').catch(function () { return {}; })) || {};
         renderSchedList(data.schedules || []);
       } catch (e) { /* the list is best-effort */ }
     }
@@ -1164,12 +1161,14 @@
       trigBtn.disabled = true;
       productText(trigMsg,'Creating…');
       try {
-        var resp = await fetch('/api/v1/triggers', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ template: trigTpl.name, params: params, name: trigName.value.trim() || null }),
-        });
-        var data = await resp.json().catch(function () { return {}; });
-        if (!resp.ok) { productText(trigMsg,plainErr(resp, 'set that up')); mvFail(resp, 'set that up'); return; }
+        var data;
+        try {
+          data = (await window.mvFetchJSON('/api/v1/triggers', { method: 'POST',
+            body: { template: trigTpl.name, params: params, name: trigName.value.trim() || null } }, 'set that up')) || {};
+        } catch (refused) {
+          if (!refused.status) throw refused;
+          productText(trigMsg,plainErr(refused, 'set that up')); mvFail(refused, 'set that up'); return;
+        }
         productText(trigMsg,'Ready.');
         mvToast(translated('{name} can now be started by another app',{name:data.name}));
         showHowto(data);
@@ -1192,8 +1191,7 @@
     async function loadTriggers() {
       if (!trigList) return;
       try {
-        var resp = await fetch('/api/v1/triggers');
-        var data = await resp.json().catch(function () { return {}; });
+        var data = (await window.mvFetchJSON('/api/v1/triggers').catch(function () { return {}; })) || {};
         renderTrigList(data.triggers || []);
       } catch (e) { /* the list is best-effort */ }
     }
@@ -1390,8 +1388,7 @@
       if (existingNames) return;
       existingNames = new Set();
       try {
-        var resp = await fetch('/api/v1/agents');
-        var data = await resp.json().catch(function () { return {}; });
+        var data = (await window.mvFetchJSON('/api/v1/agents').catch(function () { return {}; })) || {};
         (data.agents || []).forEach(function (a) { if (a && a.name) existingNames.add(a.name); });
       } catch (e) { /* the collision hint is best-effort */ }
     }
@@ -1433,12 +1430,10 @@
       if (!name) { renderLint(null); return; }
       await loadRoster();
       try {
-        var resp = await fetch('/api/v1/agents/' + encodeURIComponent(name) + '/validate', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(playbookPayload()),
-        });
-        var data = await resp.json().catch(function () { return null; });
-        renderLint(resp.ok ? data : null, name);
+        var data = await window.mvFetchJSON('/api/v1/agents/' + encodeURIComponent(name) + '/validate', {
+          method: 'POST', body: playbookPayload(),
+        }).catch(function () { return null; });
+        renderLint(data, name);
       } catch (e) { renderLint(null); }
     }
     function schedulePbLint() { clearTimeout(pbLintTimer); pbLintTimer = setTimeout(pbLint, 500); }
@@ -1482,8 +1477,7 @@
     async function loadTools() {
       if (toolCatalog) return;
       try {
-        var resp = await fetch('/api/v1/tools');
-        var data = await resp.json().catch(function () { return {}; });
+        var data = (await window.mvFetchJSON('/api/v1/tools').catch(function () { return {}; })) || {};
         toolCatalog = (data.tools || []).filter(function (t) { return t && t.name; });
       } catch (e) { toolCatalog = []; }
     }
@@ -1747,5 +1741,5 @@
     document.querySelector('.wf').addEventListener('click', function (event) { if (recovery && !event.target.closest('.draft-recovery')) recovery.changed(); });
   })();
   </script>
-  <script src="/static/lightwork-workflow-versions.js"></script>
+  <script src="/static/lightwork-workflow-versions.js" defer></script>
 {% endblock %}

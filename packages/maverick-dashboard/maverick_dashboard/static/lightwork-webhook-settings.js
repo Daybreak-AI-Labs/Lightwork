@@ -63,10 +63,10 @@
     say('Your administrator access changed. Sign in with an installation administrator account and refresh status.', true);
   }
   async function read() {
-    var response = await fetch('/settings/webhooks', { credentials: 'same-origin', cache: 'no-store' });
-    if (response.status === 401 || response.status === 403) { denied(); return false; }
-    if (!response.ok) throw new Error('status unavailable');
-    return display(await response.json()) ? 'context' : 'ok';
+    var lost = false, data;
+    try { data = await window.mvFetchJSON('/settings/webhooks', {cache: 'no-store', onAccess: function () { lost = true; denied(); }}, 'check the webhook secret'); }
+    catch (error) { if (lost) return false; throw error; }
+    return display(data) ? 'context' : 'ok';
   }
   async function refresh(focus) {
     if (busy) return;

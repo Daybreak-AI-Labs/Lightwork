@@ -49,23 +49,19 @@
         btns.forEach(function (b) { if (b) b.disabled = true; });
         msg.style.color = 'var(--muted)';
         say(msg, 'Recording…');
-        fetch('/api/v1/goals/' + goalId + '/signoff', {
-          method: 'POST', headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({
+        window.mvFetchJSON('/api/v1/goals/' + goalId + '/signoff', {
+          method: 'POST',
+          body: {
             decision: decision,
             expected_updated_at: reviewedUpdatedAt,
             note: (note && note.value.trim()) || null,
-          }),
-        }).then(function (r) {
-          if (r.ok) { panel.querySelector('#signoff-note').value = ''; window.mvRefreshAnswerPanel(); return; }
-          return r.json().catch(function () { return {}; }).then(function (j) {
-            msg.style.color = 'var(--danger)';
-            window.mvRenderError(msg, r, 'record the sign-off', j);
-            btns.forEach(function (b) { if (b) b.disabled = false; });
-          });
+          },
+        }, 'record the sign-off').then(function () {
+          panel.querySelector('#signoff-note').value = ''; window.mvRefreshAnswerPanel();
         }).catch(function (e) {
           msg.style.color = 'var(--danger)';
-          say(msg, cgErr(e, 'record the sign-off'));
+          if (e.status) window.mvRenderError(msg, e, 'record the sign-off', e.payload || {});
+          else say(msg, cgErr(e, 'record the sign-off'));
           btns.forEach(function (b) { if (b) b.disabled = false; });
         });
       }
@@ -130,29 +126,21 @@
         [up, down].forEach(function (b) { if (b) b.disabled = true; });
         msg.style.color = 'var(--muted)';
         say(msg, 'Recording…');
-        fetch('/api/v1/goals/' + goalId + '/feedback', {
-          method: 'POST', headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify(Object.assign({rating: rating}, extra || {})),
-        }).then(function (r) {
+        window.mvFetchJSON('/api/v1/goals/' + goalId + '/feedback', {
+          method: 'POST', body: Object.assign({rating: rating}, extra || {}),
+        }, 'save your feedback').then(function (j) {
           [up, down].forEach(function (b) { if (b) b.disabled = false; });
-          if (r.ok) {
-            return r.json().catch(function () { return {}; }).then(function (j) {
-              show(rating);
-              say(msg, (j && typeof j.acknowledgement === 'string' && j.acknowledgement) ||
-                "Thanks. Your workspace's learning policy decides whether this is used to improve this agent.");
-              if (explaining) { if (note) note.value = ''; closeReasons(); if (down) down.focus(); }
-              else if (rating === 'down') openReasons(j && j.follow_up);
-              else closeReasons();
-            });
-          }
-          return r.json().catch(function () { return {}; }).then(function (j) {
-            msg.style.color = 'var(--danger)';
-            window.mvRenderError(msg, r, 'save your feedback', j);
-          });
+          show(rating);
+          say(msg, (j && typeof j.acknowledgement === 'string' && j.acknowledgement) ||
+            "Thanks. Your workspace's learning policy decides whether this is used to improve this agent.");
+          if (explaining) { if (note) note.value = ''; closeReasons(); if (down) down.focus(); }
+          else if (rating === 'down') openReasons(j && j.follow_up);
+          else closeReasons();
         }).catch(function (e) {
           [up, down].forEach(function (b) { if (b) b.disabled = false; });
           msg.style.color = 'var(--danger)';
-          say(msg, cgErr(e, 'save your feedback'));
+          if (e.status) window.mvRenderError(msg, e, 'save your feedback', e.payload || {});
+          else say(msg, cgErr(e, 'save your feedback'));
         });
       }
       if (up) up.addEventListener('click', function () { submit('up'); });

@@ -117,7 +117,7 @@
 
   function post(path, body) {
     return window.mvFetchJSON(api + path, { method: 'POST', body: body || {} });
-}
+  }
 
   async function cancel(row, button) {
     var ok = await window.mvConfirm(

@@ -30,7 +30,7 @@
       init.body = options.body;
     }
     return window.mvFetchJSON(url, init);
-}
+  }
   function say(node, text) { if (node) node.textContent = text || ''; }
   function badge(ok, yes, no) { return el('span', 'badge ' + (ok ? 'ok' : 'warn'), ok ? yes : no); }
   function money(value) {

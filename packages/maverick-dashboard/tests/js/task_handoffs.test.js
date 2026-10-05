@@ -4,6 +4,7 @@ const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const path=require('node:path');
 const {JSDOM}=require('jsdom');
+const {shell} = require('./_shell');
 const root=path.resolve(__dirname,'../../maverick_dashboard');
 const script=fs.readFileSync(path.join(root,'static/lightwork-task-handoffs.js'),'utf8');
 const template=fs.readFileSync(path.join(root,'templates/task_handoffs.html'),'utf8');
@@ -15,6 +16,7 @@ function page(bundle='',query='') {
  const calls=[];let handler=async()=>({ok:true,status:200,json:async()=>({context:'context',items:[{id:row.id,title:'Next',state:'offered'}]})});
  dom.window.fetch=async(url,opts)=>{calls.push({url,opts,body:opts.body?JSON.parse(opts.body):null});return handler(url,opts);};
  dom.window.mvBusinessError=value=>value.detail||null;
+ shell(dom.window);
  dom.window.eval(script);
  return {dom,doc:dom.window.document,calls,set(fn){handler=fn;},json(body){return {ok:true,status:200,json:async()=>({context:'context',...body})};}};
 }

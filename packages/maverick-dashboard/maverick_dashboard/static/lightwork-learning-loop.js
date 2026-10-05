@@ -32,10 +32,10 @@
   }
   function get(path) {
     return window.mvFetchJSON(API + path);
-}
+  }
   function post(path, body) {
     return window.mvFetchJSON(API + path, {method: 'POST', body: body || {}});
-}
+  }
   function technical(pairs) {
     var box = el('details');
     box.appendChild(el('summary', null, 'Technical details'));

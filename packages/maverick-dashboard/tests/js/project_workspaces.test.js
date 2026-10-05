@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const {JSDOM} = require('jsdom');
+const {shell} = require('./_shell');
 const script = fs.readFileSync(path.resolve(__dirname, '../../maverick_dashboard/static/lightwork-project-workspaces.js'), 'utf8');
 const template = fs.readFileSync(path.resolve(__dirname, '../../maverick_dashboard/templates/project_workspaces.html'), 'utf8');
 const settle = async () => { for (let i = 0; i < 15; i++) await new Promise(resolve => setImmediate(resolve)); };
@@ -26,6 +27,7 @@ function page() {
     if (url.endsWith('/receipt')) return {ok:true,status:200,json:async () => ({confirmed:receipt})};
     return {ok:true,status:200,json:async () => structuredClone(state)};
   };
+  shell(dom.window);
   dom.window.eval(script);
   const doc = dom.window.document;
   function edit(value) { const input = doc.getElementById('pw-outcome-input'); input.value = value; input.dispatchEvent(new dom.window.Event('input', {bubbles:true})); }

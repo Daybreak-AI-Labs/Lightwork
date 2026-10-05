@@ -204,8 +204,10 @@
   // Allowed actions: one row per action with your risk rating.
   var toolList = null;
   function tools() {
-    if (!toolList) toolList = fetch("/api/v1/tools").then(function (r) { return r.ok ? r.json() : { tools: [] }; })
-      .then(function (j) { return (j.tools || []).map(function (t) { return { name: t.name, label: window.mvHuman ? window.mvHuman(t.name) : t.name }; })
+    // The shell's helpers (lightwork-ui.js) load after the page content.
+    var ready = window.mvFetchJSON ? Promise.resolve() : new Promise(function (done) { document.addEventListener("DOMContentLoaded", done); });
+    if (!toolList) toolList = ready.then(function () { return window.mvFetchJSON("/api/v1/tools"); })
+      .then(function (j) { j = j || {}; return (j.tools || []).map(function (t) { return { name: t.name, label: window.mvHuman ? window.mvHuman(t.name) : t.name }; })
         .sort(function (a, b) { return a.label.localeCompare(b.label); }); })
       .catch(function () { return []; });
     return toolList;

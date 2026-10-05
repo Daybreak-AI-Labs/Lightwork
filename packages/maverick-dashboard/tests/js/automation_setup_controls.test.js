@@ -4,6 +4,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
+const { fetchHelpers } = require('./_shell');
 const { webcrypto } = require("node:crypto");
 const source = fs.readFileSync(path.resolve(__dirname, "../../maverick_dashboard/templates/automations.html"), "utf8").replace(/\r\n/g, "\n");
 
@@ -43,6 +44,7 @@ function fixture() {
       history: { replaceState(_, __, url) { this.cleaned = url; } }, crypto: webcrypto,
       sessionStorage: { getItem: key => storage.get(key) || null, setItem: (key, value) => storage.set(key, value), removeItem: key => storage.delete(key) } } };
   context.el = (tag, cls, text = "") => { const e = new Element(tag); e.className = cls; e.textContent = text; return e; };
+  context.window.mvFetchJSON = fetchHelpers(() => context.fetch).mvFetchJSON;  // the shell's helper, through this fetch
   vm.createContext(context);
   return { context, get, nodes, calls, events, storage, providers, reply };
 }

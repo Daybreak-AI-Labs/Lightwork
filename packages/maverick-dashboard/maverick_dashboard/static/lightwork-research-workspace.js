@@ -31,25 +31,11 @@
   }
 
   async function api(path, method, body) {
-    const options = {method: method || 'GET', cache: 'no-store', headers: {'Accept': 'application/json'}};
-    if (body !== undefined) {
-      options.headers['Content-Type'] = 'application/json';
-      options.body = JSON.stringify(body);
-    }
-    const response = await fetch('/api/v1/research' + path, options);
-    let value = null;
-    try { value = await response.json(); } catch (_) { value = null; }
-    if (!response.ok) {
-      const detail = value && typeof value.detail === 'string' && value.detail.length <= 512 ? value.detail : '';
-      const plain = detail && !/[_{}\[\]]|sha|revision|manifest/i.test(detail) ? detail : '';
-      const error = new Error(response.status === 409 ? (plain || 'Someone changed this. Refresh and check it again.') :
-        response.status === 403 ? 'You do not have permission to do this. Ask an administrator.' :
-        response.status === 422 ? (plain || 'Some details need fixing. Check what you entered and try again.') :
-        response.status === 404 ? 'That item is not available in this workspace.' :
-        'The research lab is not available right now. Try again in a minute.');
-      error.status = response.status;
-      throw error;
-    }
+    const value = await window.mvFetchJSON('/api/v1/research' + path, {method: method || 'GET', cache: 'no-store', body, plainDetail: true, messages: {
+      409: 'Someone changed this. Refresh and check it again.',
+      403: 'You do not have permission to do this. Ask an administrator.',
+      422: 'Some details need fixing. Check what you entered and try again.',
+      404: 'That item is not available in this workspace.'}});
     if (value && value.context && value.context !== context) {
       throw new Error('You switched account or workspace. Reload this page.');
     }
@@ -179,9 +165,8 @@
       const chosen = file.files && file.files[0];
       if (!chosen) return;
       state.textContent = `Reading ${chosen.name}…`;
-      holder.pending = fetch('/api/v1/research-files/fingerprint', {method:'POST', credentials:'same-origin',
-        headers:{'Content-Type':'application/octet-stream'}, body:chosen})
-        .then(response => { if (!response.ok) throw response; return response.json(); })
+      holder.pending = window.mvFetchJSON('/api/v1/research-files/fingerprint', {method:'POST',
+        headers:{'Content-Type':'application/octet-stream'}, body:chosen}, 'read the file')
         .then(body => { holder.value = body.fingerprint; state.textContent = `Ready: ${chosen.name}`; })
         .catch(error => { state.textContent = window.mvErrorText ? window.mvErrorText(error, 'read the file') : 'Could not read the file.'; });
     });
@@ -465,13 +450,8 @@
   }
 
   async function downloadRun(runId) {
-    const response = await fetch(`/api/v1/research/governed-runs/${encodeURIComponent(runId)}/export`,
-      {method:'GET', cache:'no-store', headers:{'Accept':'application/json'}});
-    if (!response.ok) {
-      let detail = '';
-      try { detail = (await response.json()).detail || ''; } catch (_) { detail = ''; }
-      throw new Error('The run record is not available right now.');
-    }
+    const response = await window.mvFetchJSON(`/api/v1/research/governed-runs/${encodeURIComponent(runId)}/export`,
+      {cache:'no-store', raw:true}, 'download the run record');
     const bytes = await boundedBytes(response, 2200000);
     let evidence;
     try { evidence = JSON.parse(new TextDecoder().decode(bytes)); }

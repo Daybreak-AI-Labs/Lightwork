@@ -55,7 +55,7 @@
   var sequence = 0;
   var schemaRequest;
   function loadDefinitions() {
-    if (!schemaRequest) schemaRequest = fetch('/openapi.json', {cache:'no-store'}).then(function (response) { if (!response.ok) throw new Error('Definitions unavailable'); return response.json(); });
+    if (!schemaRequest) schemaRequest = window.mvFetchJSON('/openapi.json', {cache:'no-store'});
     return schemaRequest;
   }
   function element(tag, text, className) {

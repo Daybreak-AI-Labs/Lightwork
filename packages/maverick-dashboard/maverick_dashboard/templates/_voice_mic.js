@@ -51,19 +51,19 @@ function lwVoiceUpload(blob, opts) {
   function post(body, filename) {
     var fd = new FormData();
     fd.append('file', body, filename);
-    return fetch('/api/v1/voice/transcribe', { method: 'POST', body: fd })
-      .then(function (r) {
-        if (r.status === 503 && r.headers.get('Retry-After') && attempts < 3) {
+    return window.mvFetchJSON('/api/v1/voice/transcribe', { method: 'POST', body: fd })
+      .then(function (d) { if (d && opts.onResult) opts.onResult(d.text); }, function (failure) {
+        var later = failure.headers && typeof failure.headers.get === 'function' && failure.headers.get('Retry-After');
+        if (failure.status === 503 && later && attempts < 3) {
           attempts += 1;
           if (opts.onStatus) opts.onStatus(window.LightworkI18n ? window.LightworkI18n.text('Setting up voice (first use)…') : 'Setting up voice (first use)…');
           return new Promise(function (res) { setTimeout(res, 4000); })
             .then(function () { return post(body, filename); });
         }
-        if (r.status === 503) { if (opts.onFallback) opts.onFallback(); return null; }
-        if (!r.ok) throw new Error('We couldn\u2019t turn your recording into text. Try again, or type your message.');
-        return r.json();
-      })
-      .then(function (d) { if (d && opts.onResult) opts.onResult(d.text); });
+        if (failure.status === 503) { if (opts.onFallback) opts.onFallback(); return null; }
+        if (!failure.status) throw failure;
+        throw new Error('We couldn\u2019t turn your recording into text. Try again, or type your message.');
+      });
   }
   return lwVoiceToWav16k(blob).then(function (encoded) {
     var name = encoded === blob

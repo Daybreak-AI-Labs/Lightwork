@@ -6,6 +6,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const {JSDOM} = require("jsdom");
+const {shell} = require('./_shell');
 
 const base = path.join(__dirname, "../../maverick_dashboard");
 const D = "d".repeat(64);
@@ -55,6 +56,7 @@ async function fixture(t, routes = {}) {
     if (value instanceof Response) return value;
     return new Response(JSON.stringify(value), {status: 200, headers: {"Content-Type": "application/json"}});
   };
+  shell(w);
   w.eval(fs.readFileSync(path.join(base, "static/lightwork-assurance-forms.js"), "utf8"));
   w.eval(inline);
   const settle = async () => { for (let i = 0; i < 30; i += 1) await new Promise(resolve => setImmediate(resolve)); };
@@ -483,6 +485,7 @@ test("refused sections release their responses and leave no table or list at Loa
   w.mvErrorText = (failure, action) => `Could not ${action}. (${failure.status})`;
   // Every section is refused, as on a fresh install where these modules are off.
   w.fetch = async () => ({ok: false, status: 403, body: {cancel: async () => { released += 1; }}, json: async () => ({})});
+  shell(w);
   w.eval(fs.readFileSync(path.join(base, "static/lightwork-assurance-forms.js"), "utf8"));
   w.eval(inline);
   for (let i = 0; i < 60; i += 1) await new Promise(resolve => setImmediate(resolve));

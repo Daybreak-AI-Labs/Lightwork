@@ -25,7 +25,7 @@
   function say(text) { $('status').textContent = text; }
   async function api(path, body) {
     return window.mvFetchJSON(base + path, {method: body === undefined ? 'GET' : 'POST', cache: 'no-store', body: body});
-}
+  }
   function isoDay(epoch) { const d = new Date(epoch * 1000); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
   function endOfDay(value) { const t = Date.parse(value + 'T23:59:00'); return Number.isFinite(t) ? t / 1000 : NaN; }
   function show(section) { ['enroll', 'review', 'grant'].forEach(name => { $(name).hidden = name !== section; }); $('next').hidden = true; }

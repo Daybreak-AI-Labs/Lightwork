@@ -16,7 +16,7 @@
   }
   async function call(path, method, body) {
     return window.mvFetchJSON(path, {method: method || 'GET', cache: 'no-store', body: body});
-}
+  }
 
   // ---- one-step client setup (the create form's optional invitation) -----
   var roles = document.querySelector('[data-onboard-roles]');

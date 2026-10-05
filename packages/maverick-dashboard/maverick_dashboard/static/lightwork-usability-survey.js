@@ -27,10 +27,10 @@
   }
   async function send(path, body) {
     return window.mvFetchJSON(API + path, {method: 'POST', body: body});
-}
+  }
   async function state(task) {
     return window.mvFetchJSON(API + (task ? '?task=' + encodeURIComponent(task) : ''));
-}
+  }
   function panel(id, title) {
     var box = el('section', 'panel mv-survey');
     box.id = id;

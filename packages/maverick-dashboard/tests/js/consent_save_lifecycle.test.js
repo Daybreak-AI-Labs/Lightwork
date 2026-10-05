@@ -4,6 +4,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs"), path = require("node:path");
 const {webcrypto} = require("node:crypto");
 const {JSDOM} = require("jsdom");
+const {shell} = require('./_shell');
 const root = path.resolve(__dirname, "../../maverick_dashboard");
 const read = name => fs.readFileSync(path.join(root, name), "utf8");
 // The SDK hashes with WebCrypto, which settles on the thread pool, not the
@@ -33,6 +34,7 @@ async function sdkFixture(initialGranted) {
     }
     return response(200,{profile_revision:state.revision,preferences:[{purpose_id:"analytics",granted:state.granted}]});
   };
+  shell(w);
   w.eval(read("static/lightwork-consent-sdk.js"));
   const sdk=new w.LightworkConsent({endpoint:"https://api.example.test/consent",clientCredential:"synthetic-client",autoPrivacySignals:false});
   sdk.profileCredential="synthetic-profile";
@@ -99,6 +101,7 @@ async function policyFixture(initial) {
     if(url.endsWith("/notices"))return response(200,{notices:[{version:"2026-01",text_sha256:"a".repeat(64),published_at:1800000000}]});
     return response(200,url.includes("profiles?")?{profiles:[]}:url.includes("trackers?")?{trackers:[]}:{});
   };
+  shell(w);
   w.eval(read("static/lightwork-consent-workbench.js"));
   w.eval(read("static/lightwork-consent-policy-editor.js"));
   w.eval([...source.matchAll(/<script>([\s\S]*?)<\/script>/g)].at(-1)[1]);

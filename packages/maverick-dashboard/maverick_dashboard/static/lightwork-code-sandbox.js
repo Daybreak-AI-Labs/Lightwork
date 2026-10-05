@@ -23,7 +23,7 @@
   async function request(url, options) {
     options = options || {};
     return window.mvFetchJSON(url, {method: options.method || 'GET', cache: 'no-store', body: options.json});
-}
+  }
   function firstLine(text) { return String(text || '').split('\n')[0].slice(0, 120); }
 
   function start() {

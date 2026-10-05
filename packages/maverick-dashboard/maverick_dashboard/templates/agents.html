@@ -607,7 +607,7 @@
     var afToolList = null;
     function toolChoices() {
       if (!afToolList) {
-        afToolList = fetch('/api/v1/tools').then(function (r) { return r.ok ? r.json() : { tools: [] }; })
+        afToolList = window.mvFetchJSON('/api/v1/tools').catch(function () { return { tools: [] }; })
           .then(function (j) {
             return (j.tools || []).map(function (t) { return { value: t.name, label: humanName(t.name) }; })
               .sort(function (a, b) { return a.label.localeCompare(b.label); });
@@ -1299,23 +1299,17 @@
         button.disabled = false;
       }
       async function call(method, path, body) {
-        const opts = { method, headers: {} };
-        if (body !== undefined) { opts.headers['Content-Type'] = 'application/json'; opts.body = JSON.stringify(body); }
-        let r;
-        try { r = await fetch(path, opts); }
-        catch (error) { throw new Error(plainError(error, 'reach Lightwork')); }
-        if (!r.ok) {
-          var body = await r.json().catch(function () { return {}; });
-          var problem = r.status === 422 ? saveProblem(body.detail)
-            : { field: '', text: plainError({ status: r.status, detail: body.detail }, 'save these settings') };
-          var failure = new Error(problem.text);
-          failure.field = problem.field;
-          throw failure;
-        }
         let data;
-        try { data = await r.json(); }
-        catch (e) { throw new Error('The result could not be confirmed. Refresh the page to check.'); }
-        return { status: r.status, data };
+        try { data = await window.mvFetchJSON(path, { method, body }, 'save these settings'); }
+        catch (failure) {
+          if (failure.unreadable) throw new Error('The result could not be confirmed. Refresh the page to check.');
+          var problem = failure.status === 422 ? saveProblem(failure.detail)
+            : { field: '', text: failure.status ? plainError({ status: failure.status, detail: failure.detail }, 'save these settings') : plainError(failure, 'reach Lightwork') };
+          var refused = new Error(problem.text);
+          refused.field = problem.field;
+          throw refused;
+        }
+        return { status: 200, data };
       }
       document.getElementById('btn-validate').addEventListener('click', async () => {
         try {
@@ -1534,8 +1528,7 @@
     function open(){
       dlg.showModal();
       el('jc-name').textContent='Loading…';
-      fetch('/api/v1/agents/'+encodeURIComponent(NAME)+'/jobcard')
-        .then(function(r){ return r.json(); }).then(render)
+      window.mvFetchJSON('/api/v1/agents/'+encodeURIComponent(NAME)+'/jobcard').then(render)
         .catch(function(){ el('jc-name').textContent='Could not load the job card. Close it and try again.'; });
     }
     var btn=el('btn-jobcard'); if(btn) btn.addEventListener('click', open);

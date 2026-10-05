@@ -575,12 +575,23 @@
       //   plainDetail   use the server's explanation when it is a plain
       //                 sentence written for people (mvPlainDetail).
       //   raw           resolve to the response itself (a download), unread.
-      var OWN_OPTIONS = ['timeout', 'onAccess', 'accessStatuses', 'plainDetail', 'raw'];
+      //   messages      the page's own sentence for a status it knows more
+      //                 about ({409: 'This changed since the list loaded…'},
+      //                 or timeout: for the deadline); every other failure
+      //                 gets mvErrorText's words.
+      var OWN_OPTIONS = ['timeout', 'onAccess', 'accessStatuses', 'plainDetail', 'raw', 'messages'];
       function fetchFailure(failure, action, opts) {
         var plain = opts.plainDetail && typeof window.mvPlainDetail === 'function' ? window.mvPlainDetail(failure.detail) : '';
-        var error = new Error(plain || window.mvErrorText(failure, action));
+        var own = opts.messages && Object.prototype.hasOwnProperty.call(opts.messages, failure.status) ? opts.messages[failure.status] : '';
+        var error = new Error(plain || own || window.mvErrorText(failure, action));
         error.status = failure.status; error.detail = failure.detail; error.headers = failure.headers; error.payload = failure.payload;
         return error;
+      }
+      // A body that is not read is released, so the request ends and the page
+      // can go quiet.
+      function release(response) {
+        try { if (response.body && typeof response.body.cancel === 'function' && !response.bodyUsed) response.body.cancel().catch(function () {}); }
+        catch (_) { /* already closed */ }
       }
       // The body as JSON; an empty body (No Content) is null.
       async function readJSON(response) {
@@ -589,7 +600,9 @@
           catch (error) { if (response.status === 204) return null; throw error; }
         }
         var text = await response.text();
-        return text ? JSON.parse(text) : null;
+        if (text) return JSON.parse(text);
+        // An empty body is null; a stand-in response may only answer json().
+        try { return typeof response.json === 'function' ? await response.json() : null; } catch (_) { return null; }
       }
       window.mvFetchJSON = async function (url, opts, action) {
         var own = opts || {};
@@ -597,7 +610,8 @@
         OWN_OPTIONS.forEach(function (name) { delete options[name]; });
         var headers = Object.assign({ Accept: 'application/json' }, options.headers || {});
         var body = options.body;
-        var raw = body == null || typeof body === 'string' || (typeof FormData !== 'undefined' && body instanceof FormData) ||
+        var declared = headers['Content-Type'] || headers['content-type'];
+        var raw = body == null || typeof body === 'string' || (declared && !/json/i.test(declared)) || (typeof FormData !== 'undefined' && body instanceof FormData) ||
           (typeof Blob !== 'undefined' && body instanceof Blob) || (typeof URLSearchParams !== 'undefined' && body instanceof URLSearchParams) ||
           (typeof ArrayBuffer !== 'undefined' && body instanceof ArrayBuffer);
         if (!raw) {
@@ -605,21 +619,28 @@
           if (!headers['Content-Type']) headers['Content-Type'] = 'application/json';
         }
         options.headers = headers;
-        var timer = null, timedOut = false;
+        var timer = null, timedOut = false, expired = null;
         if (own.timeout > 0) {
           var controller = new AbortController(), outer = own.signal;
           if (outer) {
             if (outer.aborted) controller.abort();
             else outer.addEventListener('abort', function () { controller.abort(); });
           }
-          timer = setTimeout(function () { timedOut = true; controller.abort(); }, own.timeout);
+          // The wait ends at the deadline even if the request ignores the abort.
+          var expired = new Promise(function (_, reject) {
+            timer = setTimeout(function () {
+              timedOut = true; controller.abort();
+              var late = new Error('The operation timed out.'); late.name = 'AbortError'; reject(late);
+            }, own.timeout);
+          });
           options.signal = controller.signal;
         }
         var response;
-        try { response = await fetch(url, options); }
+        try { response = await (expired ? Promise.race([fetch(url, options), expired]) : fetch(url, options)); }
         catch (cause) {
           clearTimeout(timer);
-          var offline = new Error(window.mvErrorText(cause, action));
+          var waited = timedOut && own.messages && own.messages.timeout;
+          var offline = new Error(waited || window.mvErrorText(cause, action));
           // Same name as the cause (TypeError, AbortError), so passing this
           // error to mvErrorText or mvFieldErrors.fail gives the same words.
           offline.status = 0; offline.cause = cause; offline.name = (cause && cause.name) || 'Error';
@@ -632,7 +653,7 @@
           // The page clears what it showed privately before anything else,
           // and the refusal's body (often a sign-in page) is never read. A
           // redirect lands on the sign-in page: say so, as for a 401.
-          clearTimeout(timer);
+          clearTimeout(timer); release(response);
           var gone = fetchFailure({ status: response.ok ? 401 : response.status, headers: response.headers }, action, own);
           gone.status = response.status; gone.accessChanged = true;
           own.onAccess(gone);
@@ -643,6 +664,7 @@
         try { payload = await readJSON(response); } catch (_) { payload = null; unreadable = true; }
         finally { clearTimeout(timer); }
         if (response.ok && !unreadable) return payload;
+        if (!response.ok || unreadable) release(response);  // a refusal's or unreadable body is never left open
         if (response.ok) {
           // Malformed success never counts as success, and is never shown.
           var bad = new Error(window.mvErrorText({ name: 'SyntaxError' }, action));
@@ -652,8 +674,8 @@
         throw fetchFailure({ status: response.status, detail: payload && payload.detail, headers: response.headers, payload: payload }, action, own);
       };
       // Two page-wide live regions (polite, and assertive for errors) that
-      // exist before any message: base.html renders them, and they are made
-      // here once if a page lacks them. A region that appears, or gets its
+      // exist before any message: base.html renders them, and a page without
+      // them gets them made here, before the words are written into them. A region that appears, or gets its
       // role, in the same moment as its first words is often not read out,
       // so status lines speak through these instead of becoming regions
       // themselves. Each message clears both, then writes a moment later, so
@@ -674,8 +696,6 @@
       function announcers() {
         return { polite: announcer('mv-announce', 'polite'), alert: announcer('mv-announce-alert', 'assertive') };
       }
-      if (document.body) announcers();
-      else document.addEventListener('DOMContentLoaded', announcers);
       window.mvAnnounce = function (text, opts) {
         var regions = announcers(), words = text == null ? '' : String(text);
         var target = opts && opts.error ? regions.alert : regions.polite;

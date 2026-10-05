@@ -6,6 +6,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const { JSDOM } = require("jsdom");
+const {shell} = require('./_shell');
 
 const SCRIPT = fs.readFileSync(path.resolve(__dirname, "../../maverick_dashboard/static/lightwork-navfinder.js"), "utf8");
 
@@ -71,6 +72,7 @@ function menu({ people = true, records = true, composer = false, armed = false, 
   window.setTimeout = (callback) => { timers.push(callback); return timers.length; };
   window.clearTimeout = () => {};
   const events = [];
+  shell(window);
   window.eval(SCRIPT);
   const doc = window.document;
   doc.getElementById("navfinder-dialog").addEventListener("lightwork:finder-query", (event) => events.push(event.detail));

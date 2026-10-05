@@ -6,6 +6,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const crypto = require("node:crypto");
 const { JSDOM } = require("jsdom");
+const {shell} = require('./_shell');
 
 const root = path.resolve(__dirname, "../../maverick_dashboard");
 const read = (name) => fs.readFileSync(path.join(root, name), "utf8");
@@ -49,6 +50,7 @@ async function page() {
     if (url.endsWith("/authorize")) return reply(200, { decision_id: "DUD-1", outcome: "deny", asset_id: "customers", field_ids: ["email"], controls: [{ field_id: "email", effect: "deny" }], reasons: ["missing_context:consent,regulatory", "contexts_not_independently_sourced"], matched_policy_ids: [], decision_sha256: "a".repeat(64) });
     return reply(200, {});
   };
+  shell(w);
   w.eval(read("static/lightwork-consent-workbench.js"));
   const inline = [...read("templates/data_use_governance.html").matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]);
   inline.forEach((source) => w.eval(source));

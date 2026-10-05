@@ -193,7 +193,7 @@ for (const code of [401,403]) test(`HTML ${code} clears private actions before p
   assert.equal(parsed,false);assert.equal(ui.d.getElementById('ac-items').textContent,'');
   assert.equal(ui.d.getElementById('ac-summary').textContent,'');assert.equal(ui.button('Refresh').disabled,true);
   ui.d.getElementById('ac-filters').dispatchEvent(new ui.w.Event('submit',{cancelable:true}));await tick();assert.equal(ui.calls.length,2);
-  assert.match(ui.d.getElementById('ac-status').textContent,/sign in|access.*changed|permission/i);ui.w.close();
+  assert.match(ui.d.getElementById('ac-status').textContent,/sign in|access.*changed/i);ui.w.close();
 });
 
 test('keyboard position follows the acknowledged updated preference control',async()=>{

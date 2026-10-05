@@ -404,13 +404,13 @@
       if (box.contains(document.activeElement) && document.activeElement !== box) return;
       box.setAttribute('aria-busy', 'true');
       try {
-        var r = await fetch('/api/v1/oversight/active', { credentials: 'same-origin' });
-        if (!r.ok) return;
-        render((await r.json()).goals || []);
-      } catch (e) { /* keep the last list on a passing network error */ }
+        var data = await window.mvFetchJSON('/api/v1/oversight/active');
+        render((data && data.goals) || []);
+      } catch (e) { /* keep the last list after a refusal or a passing network error */ }
       finally { box.removeAttribute('aria-busy'); }
     }
-    tick();
+    // The shell's helpers (lightwork-ui.js) load after the page content.
+    if (window.mvFetchJSON) tick(); else document.addEventListener('DOMContentLoaded', tick);
     setInterval(tick, 5000);
     document.addEventListener('visibilitychange', function () { if (!document.hidden) tick(); });
 

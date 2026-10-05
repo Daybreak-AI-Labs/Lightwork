@@ -25,7 +25,7 @@
   }
   async function call(path, method, body) {
     return window.mvFetchJSON(path, {method: method || 'GET', cache: 'no-store', body: body});
-}
+  }
   async function confirmed(message, okText) {
     return window.mvConfirm ? window.mvConfirm(message, {okText: okText}) : false;
   }

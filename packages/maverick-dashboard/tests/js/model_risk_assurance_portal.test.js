@@ -8,6 +8,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const {JSDOM} = require("jsdom");
+const {shell} = require('./_shell');
 
 const template = fs.readFileSync(path.join(__dirname, "../../maverick_dashboard/templates/model_risk_assurance.html"), "utf8");
 const scripts = [...template.matchAll(/<script>([\s\S]*?)<\/script>/g)].map(match => match[1]);
@@ -26,6 +27,7 @@ function page(t, answer) {
   const w = dom.window, released = [];
   w.mvErrorText = (failure, action) => `Could not ${action}. Ask an administrator. (${failure.status})`;
   w.fetch = async url => answer(String(url), released);
+  shell(w);
   w.eval(helpers);
   w.eval(supplier);
   const settle = async () => { for (let i = 0; i < 20; i += 1) await new Promise(resolve => setImmediate(resolve)); };

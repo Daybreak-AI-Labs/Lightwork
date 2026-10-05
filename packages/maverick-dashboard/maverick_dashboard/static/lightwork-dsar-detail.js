@@ -25,7 +25,7 @@
     }
     var plain = window.mvPlainDetail ? window.mvPlainDetail(failure.detail) : '';
     if (plain) say('Could not ' + action + '. ' + plain); else fail(failure, action);
-}
+  }
   function ask(message, okText) {
     return window.mvConfirm ? window.mvConfirm(message, { okText: okText }) : Promise.resolve(false);
   }
@@ -34,7 +34,7 @@
   }
   function call(method, url, body) {
     return window.mvFetchJSON(url, {method: method, body: body});
-}
+  }
   function reloadSoon() { setTimeout(function () { location.reload(); }, 700); }
   function human(v) { return window.mvHuman ? window.mvHuman(v) : String(v); }
   function on(id, handler) { var el = $(id); if (el) el.addEventListener('click', handler); }

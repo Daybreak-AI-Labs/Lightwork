@@ -4,6 +4,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const {JSDOM} = require("jsdom");
+const {shell} = require('./_shell');
 const base = path.resolve(__dirname, "../../maverick_dashboard");
 const read = name => fs.readFileSync(path.join(base, name), "utf8");
 const tick = async () => { await new Promise(r => setImmediate(r)); await new Promise(r => setImmediate(r)); };
@@ -32,6 +33,7 @@ async function harness() {
       conversation_token:"server-sealed-guide-token"});
     throw Error("Unexpected request "+url);
   };
+  shell(w);
   w.eval(read("static/lightwork-copilot.js"));w.eval(read("static/lightwork-learning-example.js"));await tick();
   const get=id=>d.getElementById(id);
   return {dom,w,d,calls,state,envelope,get,

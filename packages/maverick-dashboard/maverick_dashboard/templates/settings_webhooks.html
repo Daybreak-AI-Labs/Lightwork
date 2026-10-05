@@ -89,11 +89,7 @@
     return function (e) { say((e.status === 400 || e.status === 422) && window.mvPlainDetail(e.detail) || window.mvErrorText(e, action)); };
   };
   function req(method, url, body) {
-    return fetch(url, { method: method, headers: { 'Content-Type': 'application/json' },
-      body: body === undefined ? undefined : JSON.stringify(body) })
-      .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) {
-        if (!r.ok) { var failure = new Error('request failed'); failure.status = r.status; failure.detail = j && j.detail; throw failure; }
-        return j; }); });
+    return window.mvFetchJSON(url, { method: method, body: body }).then(function (j) { return j || {}; });
   }
   function cell(tr, text, cls) { var td = document.createElement('td'); td.textContent = text; if (cls) td.className = cls; tr.appendChild(td); return td; }
   function button(label, onClick) { var b = document.createElement('button'); b.type = 'button'; b.className = 'btn'; b.textContent = label; b.addEventListener('click', onClick); return b; }

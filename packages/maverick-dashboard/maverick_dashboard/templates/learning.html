@@ -464,18 +464,12 @@
       lines.forEach(function (t, i) { var p = document.createElement(i ? 'p' : 'p'); p.textContent = t; box.appendChild(p); });
     }
     async function call(method, url, body, action, target) {
-      try {
-        var r = await fetch(url, { method: method, headers: { 'Content-Type': 'application/json' },
-          body: body ? JSON.stringify(body) : undefined });
-        var j = await r.json().catch(function () { return {}; });
-        if (!r.ok) {
-          var text = ([404, 409, 422, 503].indexOf(r.status) >= 0 && window.mvPlainDetail(j.detail))
-            || window.mvErrorText(r, action);
-          if (target) show(target, [text]); else window.mvToast(text, { error: true });
-          return null;
-        }
-        return j;
-      } catch (e) { var t = window.mvErrorText(e, action); if (target) show(target, [t]); else window.mvToast(t, { error: true }); return null; }
+      try { return (await window.mvFetchJSON(url, { method: method, body: body || undefined }, action)) || {}; }
+      catch (e) {
+        var text = ([404, 409, 422, 503].indexOf(e.status) >= 0 && window.mvPlainDetail(e.detail)) || e.message;
+        if (target) show(target, [text]); else window.mvToast(text, { error: true });
+        return null;
+      }
     }
     function plural(n, one, many) { return n + ' ' + (n === 1 ? one : many); }
     function dreamLines(d) {
@@ -594,7 +588,8 @@
           'This comparison does not establish that learning caused the difference.']);
       } finally { ev.target.disabled = false; }
     });
-    loadSnapshots();
+    // The shell's helpers (lightwork-ui.js) load after the page content.
+    if (window.mvFetchJSON) loadSnapshots(); else document.addEventListener('DOMContentLoaded', loadSnapshots);
   })();
   </script>
   {% endif %}

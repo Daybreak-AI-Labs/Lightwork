@@ -33,26 +33,8 @@
   }
 
   async function api(path, method = 'GET', body, action = 'load candidate promotions') {
-    let response;
-    try {
-      response = await fetch(BASE + path, {
-        method,
-        cache: 'no-store',
-        headers: body ? {'Accept':'application/json', 'Content-Type':'application/json'} : {'Accept':'application/json'},
-        body: body ? JSON.stringify(body) : undefined,
-      });
-    } catch (_) {
-      throw new Error('Lightwork is not responding. Check your connection and try again.');
-    }
     // Plain sentences only: never the server's own error text.
-    if (!response.ok) {
-      throw new Error(typeof window.mvErrorText === 'function'
-        ? window.mvErrorText(response, action)
-        : 'Could not ' + action + '. Please try again.');
-    }
-    try { return await response.json(); } catch (_) {
-      throw new Error('The candidate list could not be read. Refresh and try again.');
-    }
+    return window.mvFetchJSON(BASE + path, {method, cache: 'no-store', body}, action);
   }
 
   // The shared in-page dialog; the browser's own box only when it is missing.

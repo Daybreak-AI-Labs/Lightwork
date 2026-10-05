@@ -29,21 +29,16 @@
   document.addEventListener('lightwork:connection-saved', function () { if (!accessLost) load(); });
   window.addEventListener('pagehide', clearAccess);
   async function request(url, options) {
-    var controller = new AbortController(), timer;
-    try {
-      return await Promise.race([(async function () {
-        var response = await fetch(url, Object.assign({headers:{'Content-Type':'application/json'}, cache:'no-store', signal:controller.signal}, options || {}));
-        if (response.status === 401 || response.status === 403) {
-          var denied = await response.json().catch(function () { return {}; });
-          clearAccess();
-          if (denied.detail && denied.detail.code === 'connections_disabled') inventoryStatus.textContent = 'Connections are turned off. An administrator can enable them in Settings.';
-          throw Object.assign(new Error('Connection access is unavailable.'), {status:response.status});
-        }
-        var data = await response.json().catch(function () { throw new Error('Unreadable response.'); });
-        if (!response.ok) throw Object.assign(new Error('Request refused.'), {status:response.status});
-        return data;
-      })(), new Promise(function (_, reject) { timer = setTimeout(function () { controller.abort(); reject(new Error('Request not confirmed.')); }, 25000); })]);
-    } finally { clearTimeout(timer); }
+    var opts = Object.assign({cache: 'no-store', timeout: 25000, accessStatuses: [401], onAccess: clearAccess}, options || {});
+    opts.headers = Object.assign({'Content-Type': 'application/json'}, options && options.headers);
+    try { return await window.mvFetchJSON(url, opts, 'complete this connection action'); }
+    catch (error) {
+      if (error.status === 403) {
+        clearAccess();
+        if (error.detail && error.detail.code === 'connections_disabled') inventoryStatus.textContent = 'Connections are turned off. An administrator can enable them in Settings.';
+      }
+      throw error;
+    }
   }
   var PRESETS = [
     { id: 'slack',      label: 'Slack',       connector: 'slack',      base: 'https://slack.com/api', keyHelp: 'https://api.slack.com/apps' },

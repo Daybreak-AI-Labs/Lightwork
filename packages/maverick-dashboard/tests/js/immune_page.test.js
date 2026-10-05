@@ -4,6 +4,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const { JSDOM } = require("jsdom");
+const {shell} = require('./_shell');
 
 const source = fs.readFileSync(path.resolve(__dirname, "../../maverick_dashboard/static/lightwork-immune-console.js"), "utf8");
 const html = `<div id="ic-root" data-console="immune" data-api-url="/api/v1/immune/summary" data-can-admin="true" data-can-global-admin="true">
@@ -47,6 +48,7 @@ async function fixture({ confirm = true } = {}) {
     return json({});
   };
   const settle = async () => { for (let i = 0; i < 20; i++) await new Promise((done) => setImmediate(done)); };
+  shell(window);
   window.eval(source);
   await settle();
   return { window, doc: window.document, calls, confirms, settle };

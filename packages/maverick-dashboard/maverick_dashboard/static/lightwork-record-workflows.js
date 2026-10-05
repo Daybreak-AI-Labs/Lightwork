@@ -35,7 +35,7 @@
   function call(method, url, body) {
     return global.mvFetchJSON(url, { method: method || 'GET', body: body === null ? undefined : body })
       .then(function (data) { return data || {}; });
-}
+  }
 
   function randomPart(length) {
     var alphabet = 'abcdefghijklmnopqrstuvwxyz0123456789';
@@ -156,7 +156,7 @@
     return global.mvFetchJSON('/api/v1/compliance/fingerprint', {
       method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: file,
     });
-}
+  }
 
   // Ask for a file with a hidden picker; resolves to the File or null.
   function pickFile(accept) {

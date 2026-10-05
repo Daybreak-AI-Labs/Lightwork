@@ -6,6 +6,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
+const { fetchHelpers } = require('./_shell');
 
 function record(id, overrides = {}) {
   return {
@@ -203,6 +204,7 @@ function fixture(records = [], intercept = null, search = "", returning = null, 
   vm.runInNewContext(fs.readFileSync(path.resolve(__dirname, '../../maverick_dashboard/static/lightwork-access-state.js'), 'utf8') + "\n" + fs.readFileSync(
     path.resolve(__dirname, "../../maverick_dashboard/static/lightwork-vendor-onboarding.js"), "utf8",
   ), { document, fetch, Blob, window: {location, history, localStorage, sessionStorage, URL:urlApi,
+    mvFetchJSON: fetchHelpers(() => fetch).mvFetchJSON,
     mvErrorText: (failure, action) => "Could not " + action + ". " + ({404: "That item no longer exists.", 503: "This is temporarily unavailable."}[failure.status] || "Please try again.")}, URL, URLSearchParams, performance: { now: () => now }, setTimeout, clearTimeout, requestAnimationFrame: handler => setTimeout(handler, 0) });
   async function settle() {
     for (let turn = 0; turn < 20; turn += 1) {

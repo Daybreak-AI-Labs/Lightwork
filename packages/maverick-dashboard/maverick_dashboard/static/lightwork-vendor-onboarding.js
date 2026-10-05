@@ -69,9 +69,7 @@
   };
   async function loadPeople() {
     try {
-      const result = await fetch("/api/v1/choices/people", {method: "GET", credentials: "same-origin", headers: {"Accept": "application/json"}});
-      if (!result.ok) return;
-      const data = await result.json();
+      const data = await window.mvFetchJSON("/api/v1/choices/people");
       for (const row of data?.people || []) if (typeof row?.value === "string" && typeof row?.label === "string") people.set(row.value, row.label);
     } catch (_) { /* names fall back to sign-in handles */ }
   }

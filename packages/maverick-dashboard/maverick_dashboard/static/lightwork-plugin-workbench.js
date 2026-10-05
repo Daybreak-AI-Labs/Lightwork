@@ -7,11 +7,8 @@
   const clear=()=>{lost=true;serial++;list.replaceChildren();status.textContent='Access changed. Reload Plugins in the current workspace.';};
   document.addEventListener('lightwork:workspace-changed',clear);
   async function call(path,body){
-    const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),55000);
-    try{const response=await fetch('/api/v1/plugins/workbench'+path,{method:body?'POST':'GET',headers:{'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined,cache:'no-store',signal:controller.signal});
-      const value=await response.json().catch(()=>({}));if([401,403].includes(response.status)){clear();throw new Error(typeof value.detail==='string'?value.detail:'Permission is unavailable.');}
-      if(!response.ok)throw new Error(typeof value.detail==='string'?value.detail:'The workbench is unavailable.');return value;
-    }finally{clearTimeout(timer);}
+    return window.mvFetchJSON('/api/v1/plugins/workbench'+path,{method:body?'POST':'GET',body,cache:'no-store',timeout:55000,plainDetail:true,onAccess:clear},
+      body?'finish the workbench step':'load the workbench');
   }
   function button(label,fn){const item=node('button',label);item.type='button';item.className='btn';item.addEventListener('click',fn);return item;}
   async function mutate(control,path,body,question){

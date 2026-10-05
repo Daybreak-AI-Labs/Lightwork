@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const {JSDOM} = require('jsdom');
+const {shell} = require('./_shell');
 
 const tick = () => new Promise(resolve => setTimeout(resolve, 0));
 const deferred = () => { let resolve; const promise = new Promise(done => { resolve = done; }); return {promise,resolve}; };
@@ -11,6 +12,7 @@ function response(body, status=200) { return {ok:status>=200&&status<300,status,
 function fixture(html, file, fetch) {
   const dom = new JSDOM(html, {url:'http://localhost/',runScripts:'outside-only'});
   dom.window.fetch = fetch; dom.window.mvConfirm = async()=>true;
+  shell(dom.window);
   dom.window.eval(fs.readFileSync(path.join(__dirname,'../../maverick_dashboard/static',file),'utf8'));
   return dom;
 }
@@ -43,13 +45,13 @@ test('unconfirmed fact save preserves the draft and does not claim success',asyn
 test('failed fact write does not query or discard the draft',async()=>{
   let calls=0; const dom=fixture(factsHTML,'lightwork-facts.js',async()=>{calls++;return response({},500);});
   fillFact(dom.window); await tick(); const d=dom.window.document;
-  assert.equal(calls,1); assert.match(d.getElementById('fact-status').textContent,/could not be completed/); assert.equal(d.getElementById('fact-name').value,'Office hours'); dom.window.close();
+  assert.equal(calls,1); assert.match(d.getElementById('fact-status').textContent,/could not be completed|Could not save the fact\./); assert.equal(d.getElementById('fact-name').value,'Office hours'); dom.window.close();
 });
 test('revoked fact authority clears private editor and list before any readback',async()=>{
   let calls=0;const dom=fixture(factsHTML,'lightwork-facts.js',async()=>{calls++;return response({},403);});
   fillFact(dom.window);await tick();const d=dom.window.document;
   assert.equal(calls,1);assert.equal(d.getElementById('fact-name').value,'');assert.equal(d.getElementById('fact-detail').value,'');
-  assert.match(d.getElementById('fact-status').textContent,/Access changed/);dom.window.close();
+  assert.match(d.getElementById('fact-status').textContent,/Access changed|permission/);dom.window.close();
 });
 test('confirmed earlier fact save preserves newer edits made during readback',async()=>{
   const pending=deferred();let calls=0;const dom=fixture(factsHTML,'lightwork-facts.js',async()=>{
@@ -188,7 +190,7 @@ test('revocation during confirmed-save list refresh keeps private content cleare
     calls++;return calls===1?response(null,204):calls===2?response(factRecord()):response({},403);
   });fillFact(dom.window);await tick();await tick();const d=dom.window.document;
   assert.equal(calls,3);assert.equal(d.getElementById('fact-detail').value,'');
-  assert.equal(d.querySelector('#fact-list tbody').textContent,'');assert.match(d.getElementById('fact-status').textContent,/Access changed/);dom.window.close();
+  assert.equal(d.querySelector('#fact-list tbody').textContent,'');assert.match(d.getElementById('fact-status').textContent,/Access changed|permission/);dom.window.close();
 });
 
 

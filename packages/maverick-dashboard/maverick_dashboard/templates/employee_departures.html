@@ -13,9 +13,9 @@
 (function () {
   'use strict';
   const byId = id => document.getElementById(id); let model, reviewed, busy = false;
-  function say(text) { byId('ed-status').textContent = text; }
+  function say(text) { window.mvStatus(byId('ed-status'), text); }
   function node(tag, text) { const n = document.createElement(tag); if (text !== undefined) n.textContent = text; return n; }
-  async function call(path, body) { const r = await fetch('/api/v1/employee-departures' + path, {method: body ? 'POST' : 'GET', headers: {'Content-Type':'application/json'}, body: body ? JSON.stringify(body) : undefined}); const d = await r.json(); if (!r.ok) throw new Error(typeof d.detail === 'string' ? d.detail : 'This action could not be confirmed. Refresh the saved case.'); return d; }
+  async function call(path, body) { return window.mvFetchJSON('/api/v1/employee-departures' + path, {method: body ? 'POST' : 'GET', body, plainDetail: true}, body ? 'save the departure step' : 'load the departure'); }
   function choose(select, rows) { select.replaceChildren(new Option('Choose a person', '')); rows.forEach(p => select.appendChild(new Option(p.label, p.principal))); }
   function inventory(parent, data) { parent.replaceChildren(); parent.appendChild(node('p', data.coverage)); const list = node('ul'); data.items.forEach(item => list.appendChild(node('li', (item.tenant || 'Main workspace') + ': ' + item.kind.replaceAll('_', ' ') + ' ' + item.id + ' — ' + item.status))); parent.appendChild(list); if (data.truncated) parent.appendChild(node('p', 'The preview is incomplete. Deactivation is blocked until the full inventory can be reviewed.')); }
   async function load() {
@@ -49,7 +49,10 @@
   byId('ed-person').onchange = () => { reviewed = null; byId('ed-begin').hidden = true; byId('ed-inventory').replaceChildren(); };
   byId('ed-preview').onsubmit = async event => { event.preventDefault(); if (busy) return; busy = true; try { reviewed = await call('/preview', {principal: byId('ed-person').value}); inventory(byId('ed-inventory'), reviewed); byId('ed-begin').hidden = reviewed.truncated; byId('ed-preserve').checked = false; } catch (error) { reviewed = null; byId('ed-begin').hidden = true; say(error.message); } finally { busy = false; } };
   byId('ed-begin').onsubmit = event => { event.preventDefault(); if (!reviewed || !byId('ed-preserve').checked) return; act(async () => { await call('', {principal: reviewed.principal, snapshot: reviewed.snapshot, custodian: byId('ed-custodian').value, confirm_preservation: true}); reviewed = null; byId('ed-begin').hidden = true; }); };
-  byId('ed-refresh').onclick = () => load().catch(error => say(error.message)); load().catch(error => say(error.message));
+  byId('ed-refresh').onclick = () => load().catch(error => say(error.message));
+  // The shell's shared helpers (lightwork-ui.js) load after the page content.
+  const start = () => load().catch(error => say(error.message));
+  if (window.mvFetchJSON) start(); else document.addEventListener('DOMContentLoaded', start);
 })();
 </script>
 {% endblock %}

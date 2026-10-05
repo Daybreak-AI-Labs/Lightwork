@@ -42,7 +42,7 @@
       init.body = options.body;
     }
     return window.mvFetchJSON(API + path, init);
-}
+  }
   function readFile(file, asText) {
     return new Promise(function (resolve, reject) {
       var reader = new FileReader();

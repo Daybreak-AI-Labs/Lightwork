@@ -14,11 +14,11 @@
   function say(el, text) { if (el) el.textContent = text; }
   function getJSON(url) {
     return window.mvFetchJSON(url);
-}
+  }
   function post(url, body) {
     // The response itself: some answers are files (an export).
     return window.mvFetchJSON(url, {method: 'POST', body: body || {}, raw: true});
-}
+  }
   function human(days) {
     if (days % 365 === 0) { var y = days / 365; return y + (y === 1 ? ' year' : ' years'); }
     return days + ' days';

@@ -4,6 +4,7 @@ const {test} = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
+const {fetchHelpers} = require('./_shell');
 const vm = require("node:vm");
 
 const script = fs.readFileSync(path.resolve(__dirname,
@@ -16,7 +17,7 @@ function fixture(forms, changing = false) {
     published: true, inferred_tool: "web_search", tool: "web_search", approval_added: true,
     fields: [{name: "query", label: "Query", type: "string", required: true}],
     sources: [{key: "customer", label: "Customer name", origin: "input"}]};
-  const context = {window: {}, encodeURIComponent, Number, Error,
+  const context = {window: {mvFetchJSON: fetchHelpers(() => context.fetch).mvFetchJSON}, encodeURIComponent, Number, Error,
     async fetch(url, options = {}) {
       calls.push([url, options]);
       let body;

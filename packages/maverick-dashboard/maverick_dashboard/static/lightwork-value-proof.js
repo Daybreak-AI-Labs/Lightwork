@@ -34,10 +34,10 @@
   }
   function get(path) {
     return window.mvFetchJSON(API + path);
-}
+  }
   function post(path, body) {
     return window.mvFetchJSON(API + path, {method: 'POST', body: body || {}});
-}
+  }
   async function planError(failure, action) {
     var plain = failure && (failure.status === 409 || failure.status === 422) && window.mvPlainDetail ? window.mvPlainDetail(failure.detail) : '';
     if (plain) return plain;

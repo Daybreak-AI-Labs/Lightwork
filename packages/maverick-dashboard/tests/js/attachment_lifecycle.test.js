@@ -3,6 +3,7 @@ const {test} = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const {shell} = require('./_shell');
 const {JSDOM} = require('jsdom');
 const source = fs.readFileSync(path.resolve(__dirname, '../../maverick_dashboard/templates/chat_goal.html'), 'utf8');
 const start = source.indexOf('// Attachments panel:');
@@ -15,7 +16,7 @@ function page(handler){
   w.setInterval=(fn)=>{intervals.set(++next,fn);return next;};w.clearInterval=id=>intervals.delete(id);
   w.setTimeout=(fn,ms)=>{deadlines.set(++next,{fn,ms});return next;};w.clearTimeout=id=>deadlines.delete(id);
   w.cgNumber=String;w.cgText=String;w.cgCopy=(node,text,values={})=>{node.textContent=text.replace(/\{(\w+)\}/g,(_,key)=>String(values[key]));};w.cgErr=()=> 'Files unavailable';
-  w.fetch=handler;w.eval(script);
+  shell(w);w.fetch=handler;w.eval(script);
   return {dom,w,doc:w.document,intervals,deadlines,files(names){const input=w.document.getElementById('attach-add');Object.defineProperty(input,'files',{configurable:true,value:names.map(name=>new w.File(['sample'],name))});input.dispatchEvent(new w.Event('change'));},stop(){w.dispatchEvent(new w.Event('pagehide'));dom.window.close();}};
 }
 test('late completion refreshes attachment list after the initial companion polling window',async()=>{

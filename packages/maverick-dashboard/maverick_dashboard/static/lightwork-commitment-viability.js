@@ -73,24 +73,12 @@
     lock(false);
   }
   async function request(path, method='GET', body) {
-    let response;
-    try {
-      response = await fetch('/api/v1/commitment-reviews' + path, {method, cache:'no-store',
-        headers:{'Content-Type':'application/json','X-Lightwork-Commitment-Context':context},
-        ...(body ? {body:JSON.stringify(body)} : {})});
-    } catch (_) { throw new Error('The connection was interrupted. Refresh saved reviews before trying again.'); }
     let data;
-    try { data = await response.json(); } catch (_) {
-      throw new Error('The current saved result could not be read. Refresh before trying again.');
-    }
-    if ([401,403].includes(response.status)) forget();
-    if (!response.ok) {
-      const detail = typeof data.detail === 'string' ? data.detail : '';
-      if (response.status === 409 && detail.includes('account or workspace')) forget();
-      const error = new Error(detail && detail.length < 400 ? detail :
-        response.status === 422 ? 'Check the entered values and try again.' :
-          'This could not be completed. Refresh the saved review before trying again.');
-      error.status = response.status;
+    try {
+      data = await window.mvFetchJSON('/api/v1/commitment-reviews' + path, {method, cache:'no-store', body, plainDetail:true,
+        headers:{'Content-Type':'application/json','X-Lightwork-Commitment-Context':context}, onAccess:forget, messages:{422:'Check the entered values and try again.'}}, method === 'GET' ? 'load the saved reviews' : 'save the review');
+    } catch (error) {
+      if (error.status === 409 && typeof error.detail === 'string' && error.detail.includes('account or workspace')) forget();
       throw error;
     }
     if (data.context !== context) { forget(); throw new Error('The account or workspace changed. Reload this page.'); }

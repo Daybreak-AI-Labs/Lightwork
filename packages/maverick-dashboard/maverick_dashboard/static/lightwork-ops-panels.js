@@ -36,7 +36,7 @@
   async function request(url, options) {
     options = options || {};
     return window.mvFetchJSON(url, {method: options.method || 'GET', cache: 'no-store', body: options.json});
-}
+  }
   async function confirmed(message, okText) {
     return window.mvConfirm ? window.mvConfirm(message, {okText: okText}) : false;
   }

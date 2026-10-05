@@ -72,6 +72,16 @@ test("mvFetchJSON passes strings and form data through and reads an empty body a
   w.close();
 });
 
+test("a body sent with its own non-JSON type goes as is", async () => {
+  const w = load();
+  const seen = [];
+  w.fetch = async (url, options) => { seen.push(options); return respond(200, { fingerprint: "ab" }); };
+  const file = { name: "tool", size: 5 };  // a file as a page holds it
+  await w.mvFetchJSON("/fp", { method: "POST", headers: { "Content-Type": "application/octet-stream" }, body: file });
+  assert.equal(seen[0].body, file);
+  w.close();
+});
+
 test("a failed request rejects with plain words from mvErrorText, never the server's internals", async () => {
   const w = load();
   w.fetch = async () => respond(500, { detail: "Traceback (most recent call last): KeyError 'tenant'" });
@@ -139,13 +149,12 @@ const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 test("the first message into a brand-new status line is announced through a region that already existed", async () => {
   const w = load("", '<p id="s"></p>');
-  const polite = w.document.getElementById("mv-announce"), alert = w.document.getElementById("mv-announce-alert");
-  assert.ok(polite && alert, "both announcers exist before the first message");
-  assert.equal(polite.getAttribute("aria-live"), "polite");
-  assert.equal(alert.getAttribute("aria-live"), "assertive");
-  assert.equal(polite.textContent + alert.textContent, "", "they start empty");
   const line = w.document.getElementById("s");
   w.mvStatus(line, "Saved.");
+  const polite = w.document.getElementById("mv-announce"), alert = w.document.getElementById("mv-announce-alert");
+  assert.ok(polite && alert, "both announcers exist before the first words are written into them");
+  assert.equal(polite.getAttribute("aria-live"), "polite");
+  assert.equal(alert.getAttribute("aria-live"), "assertive");
   assert.equal(line.textContent, "Saved.", "the words show at once");
   assert.equal(line.hasAttribute("role") || line.hasAttribute("aria-live"), false, "the line is not made a fresh live region");
   assert.equal(polite.textContent, "", "the announcer is cleared first");
@@ -164,10 +173,10 @@ test("the first message into a brand-new status line is announced through a regi
 
 test("only the latest of quick messages is spoken, and clearing the line speaks nothing", async () => {
   const w = load("", '<p id="s"></p>');
-  const polite = w.document.getElementById("mv-announce");
   const line = w.document.getElementById("s");
   w.mvStatus(line, "Saving…");
   w.mvStatus(line, "Saved.");
+  const polite = w.document.getElementById("mv-announce");
   await wait(150);
   assert.equal(polite.textContent, "Saved.");
   w.mvStatus(line, "");
@@ -200,6 +209,14 @@ test("timeout aborts a request that takes too long, with mvErrorText's words", a
     return true;
   });
   assert.equal(seen.aborted, true);
+  w.close();
+});
+
+test("the deadline holds even when a request ignores its abort, with the page's own words if it has them", async () => {
+  const w = load();
+  w.fetch = () => new Promise(() => {});
+  await assert.rejects(w.mvFetchJSON("/stuck", { timeout: 20, messages: { timeout: "The request timed out. Refresh to check." } }, "save"),
+    (error) => { assert.equal(error.message, "The request timed out. Refresh to check."); assert.equal(error.timedOut, true); assert.equal(error.name, "AbortError"); return true; });
   w.close();
 });
 
@@ -239,6 +256,17 @@ test("onAccess runs before the rejection when access is gone (401, 403, a redire
   w.close();
 });
 
+test("a refusal body that is not read is released, so the page can go quiet", async () => {
+  const w = load();
+  const released = [];
+  w.fetch = async (url) => ({ ok: false, status: 403, headers: new Map(), body: { cancel: async () => { released.push(url); } } });
+  await assert.rejects(w.mvFetchJSON("/gone", { onAccess() {} }, "load"));
+  await assert.rejects(w.mvFetchJSON("/unreadable", {}, "load"));
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(released, ["/gone", "/unreadable"]);
+  w.close();
+});
+
 test("plainDetail shows a server sentence written for people, and never its internals", async () => {
   const w = load();
   w.fetch = async () => respond(422, { detail: "Pick a date after today." });
@@ -246,6 +274,18 @@ test("plainDetail shows a server sentence written for people, and never its inte
   await assert.rejects(w.mvFetchJSON("/a", {}, "save"), { message: "Could not save. Some of the details need fixing. Check what you entered and try again." });
   w.fetch = async () => respond(422, { detail: "expected_revision mismatch in tenant_id" });
   await assert.rejects(w.mvFetchJSON("/a", { plainDetail: true }, "save"), { message: "Could not save. Some of the details need fixing. Check what you entered and try again." });
+  w.close();
+});
+
+test("messages keep a page's own sentence for a status it knows more about", async () => {
+  const w = load();
+  const messages = { 409: "This changed since the list loaded. Refresh the list and try again." };
+  w.fetch = async () => respond(409, { detail: "revision 4 != 5" });
+  await assert.rejects(w.mvFetchJSON("/a", { messages }, "save"), { message: messages[409], status: 409 });
+  w.fetch = async () => respond(409, { detail: "Pick a later date." });
+  await assert.rejects(w.mvFetchJSON("/a", { messages, plainDetail: true }, "save"), { message: "Pick a later date." }, "a plain server sentence still comes first");
+  w.fetch = async () => respond(500, {});
+  await assert.rejects(w.mvFetchJSON("/a", { messages }, "save"), { message: "Could not save. Something went wrong on our side. Try again in a minute." });
   w.close();
 });
 

@@ -927,18 +927,14 @@
     const query = requestedCursor
       ? '?limit=' + MAX_PAGE + '&cursor=' + encodeURIComponent(requestedCursor)
       : '?limit=' + MAX_PAGE;
-    let response;
-    try {
-      response = await fetch('/api/v1/outcome-accounting' + query, {
-        cache: 'no-store', credentials: 'same-origin',
-        headers: {'X-Lightwork-Pilot-Context': context},
-      });
-    } catch (_) {
-      fail('Outcome accounting is unavailable. Refresh the page to try again.');
-    }
-    if (!response.ok) fail('Outcome accounting is unavailable. Refresh the page to try again.');
     let data;
-    try { data = await response.json(); } catch (_) { fail('Outcome accounting could not be read.'); }
+    try {
+      data = await window.mvFetchJSON('/api/v1/outcome-accounting' + query, {
+        cache: 'no-store', headers: {'X-Lightwork-Pilot-Context': context},
+      }, 'load outcome accounting');
+    } catch (error) {
+      fail(error.unreadable ? 'Outcome accounting could not be read.' : error.message);
+    }
     if (requestNumber !== pageRequest) return false;
     render(data, requestedCursor);
     host.setAttribute('aria-busy', 'false');

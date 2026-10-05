@@ -145,8 +145,7 @@
   }
 
   function load(check) {
-    fetch('/api/v1/partner/fleet' + (check === true ? '?check=1' : ''))
-      .then(function (r) { if (!r.ok) throw r; return r.json(); })
+    window.mvFetchJSON('/api/v1/partner/fleet' + (check === true ? '?check=1' : ''))
       .then(render)
       .catch(function (r) {
         $('pf-msg').textContent = r && r.status ? problem(r, 'load your clients') : offline('load your clients');
@@ -188,7 +187,8 @@
     }).catch(function () { $('pf-msg').textContent = offline('add the client'); });
   });
 
-  load();
+  // The shell's helpers (lightwork-ui.js) load after the page content.
+  if (window.mvFetchJSON) load(); else document.addEventListener('DOMContentLoaded', function () { load(); });
 })();
 </script>
 {% endblock %}

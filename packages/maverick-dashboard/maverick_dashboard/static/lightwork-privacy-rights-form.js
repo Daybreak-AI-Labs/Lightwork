@@ -20,7 +20,7 @@
   }
   function call(method, url, body) {
     return window.mvFetchJSON(url, { method: method, body: body });
-}
+  }
   function el(tag, attrs, children) {
     var node = doc.createElement(tag);
     Object.keys(attrs || {}).forEach(function (k) {

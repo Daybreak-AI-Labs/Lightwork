@@ -12,7 +12,8 @@ function fixture(inventory) {
   const nodes = {}, el = id => nodes[id] || (nodes[id] = new Node("div"));
   el("pd-bootstrap").textContent = JSON.stringify({context:"c",identity:{channels:[],links:[],challenges:[]},scopes:[],sharing:{},policy:{},can_review_deletion:false});
   vm.runInNewContext(source, {document:{getElementById:el,createElement:tag=>new Node(tag),createTextNode:text=>Object.assign(new Node("text"),{textContent:text})}, Option: function(label,value){this.textContent=label;this.value=value;},
-    window:{confirm:()=>true}, fetch:async()=>({ok:true,json:async()=>inventory}), Date, console});
+    // The shell's mvFetchJSON, reduced to its success path for this DOM-less fixture.
+    window:{confirm:()=>true, mvFetchJSON:async()=>inventory}, fetch:async()=>({ok:true,json:async()=>inventory}), Date, console});
   return {el, async click(id) { el(id).events.click(); await new Promise(resolve=>setImmediate(resolve)); }};
 }
 function content(node) { return node.textContent + node.children.map(content).join(" "); }

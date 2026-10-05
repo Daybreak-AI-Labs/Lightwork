@@ -5,6 +5,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const { JSDOM } = require("jsdom");
+const {shell} = require('./_shell');
 
 const source = fs.readFileSync(path.join(__dirname, "../../maverick_dashboard/static/lightwork-business-agent.js"), "utf8");
 
@@ -25,6 +26,7 @@ test("a matching specialist name is explained before any draft is shown", async 
     calls.push({ url, options });
     return { ok: false, status: 409, json: async () => ({ detail }) };
   };
+  shell(w);
   w.eval(source);
   w.document.getElementById("biz-form").dispatchEvent(new w.Event("submit", { cancelable: true }));
   for (let i = 0; i < 6; i += 1) await new Promise(resolve => setImmediate(resolve));

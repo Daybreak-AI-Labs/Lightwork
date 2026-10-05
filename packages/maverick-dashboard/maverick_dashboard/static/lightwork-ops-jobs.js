@@ -36,7 +36,7 @@
       init.body = opts.body;
     }
     return window.mvFetchJSON(url, init);
-}
+  }
 
   function saveBlob(blob, name) {
     var link = document.createElement('a');

@@ -53,19 +53,21 @@
     return true;
   }
   async function request(path, body, signal) {
-    var response = await window.fetch(base + path, {method:body ? 'POST' : 'GET', cache:'no-store',
-      headers:{'Content-Type':'application/json', ...(context ? {'X-Lightwork-Voice-Context':context} : {})},
-      ...(body ? {body:JSON.stringify(body)} : {}), ...(signal ? {signal:signal} : {})});
-    if (response.status === 401 || response.status === 403) {
-      clearPrivate('Voice setup access is no longer available. Sign in with an administrator account and reload this page.');
-      throw new Error('Access changed');
+    var data;
+    try {
+      data = await window.mvFetchJSON(base + path, {method: body ? 'POST' : 'GET', cache: 'no-store', body: body || undefined, signal: signal || undefined,
+        headers: context ? {'X-Lightwork-Voice-Context': context} : {},
+        onAccess: function () { clearPrivate('Voice setup access is no longer available. Sign in with an administrator account and reload this page.'); }},
+        'confirm this voice setup request');
+    } catch (error) {
+      if (error.accessChanged) throw new Error('Access changed');
+      if (error.status === 409) {
+        clearPrivate('The account, workspace or voice setup changed. Please reload this page and review its current status.');
+        throw new Error('Setup changed');
+      }
+      error.plain = error.status > 0 || error.unreadable === true;
+      throw error;
     }
-    if (response.status === 409) {
-      clearPrivate('The account, workspace or voice setup changed. Please reload this page and review its current status.');
-      throw new Error('Setup changed');
-    }
-    var data; try { data = await response.json(); } catch (_error) { throw plainError('Voice setup returned an unreadable response.'); }
-    if (!response.ok) throw plainError(window.mvErrorText ? window.mvErrorText(response, 'confirm this voice setup request') : 'Voice setup could not confirm this request.');
     if (!valid(data)) throw plainError('Voice setup information could not be verified.');
     if (context && context !== data.context) {
       clearPrivate('The account, workspace or voice configuration changed. Please reload this page before continuing.');

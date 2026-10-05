@@ -34,12 +34,8 @@
     if (busy) return;
     setBusy(true); errors.hidden = true;
     try {
-      const response = await fetch(url, {method: body ? 'POST':'GET', credentials:'same-origin', headers:body ? {'Content-Type':'application/json'}:{}, body:body ? JSON.stringify(body):undefined});
-      let result; try { result = await response.json(); } catch (_) { throw new Error('The delivery result could not be read. Refresh status before sending again.'); }
-      if (!response.ok) {
-        if (response.status === 401 || response.status === 403) { enabled = false; list.replaceChildren(); }
-        throw new Error(typeof result.detail === 'string' ? result.detail : 'Delivery status is unavailable. Refresh before sending again.');
-      }
+      const result = await window.mvFetchJSON(url, {method: body ? 'POST' : 'GET', body, plainDetail: true,
+        onAccess: () => { enabled = false; list.replaceChildren(); }}, body ? 'send the test message' : 'check delivery');
       render(result);
       // A lost response keeps the same request ID for safe recovery.
       if (body && body.request_id) requestId = null;

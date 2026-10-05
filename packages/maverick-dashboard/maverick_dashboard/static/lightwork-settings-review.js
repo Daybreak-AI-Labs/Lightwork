@@ -2,14 +2,12 @@
 (function () {
   'use strict';
   async function call(path, body) {
-    var response = await fetch(path, {method: body ? 'POST' : 'GET', cache:'no-store',
-      headers:{'Content-Type':'application/json'}, body:body ? JSON.stringify(body) : undefined});
-    var data = await response.json();
-    if (!response.ok) {
-      var error = new Error(typeof data.message === 'string' ? data.message : typeof data.detail === 'string' ? data.detail : 'This change could not be reviewed. Your draft is kept.');
-      error.data = data; error.status = response.status; throw error;
+    try {
+      return await window.mvFetchJSON(path, {method: body ? 'POST' : 'GET', cache: 'no-store', body: body, plainDetail: true}, 'review this change');
+    } catch (error) {
+      error.data = error.payload || {};  // a conflict lists what changed
+      throw error;
     }
-    return data;
   }
   function shown(value) { return typeof value === 'string' ? value : JSON.stringify(value); }
   function pickReview(plan, changes) {

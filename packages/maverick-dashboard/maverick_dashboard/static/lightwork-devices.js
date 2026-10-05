@@ -7,15 +7,10 @@
   var review = null, context = '', busy = false, controller = null;
   async function request(path, body) {
     controller = new AbortController();
-    var timer = setTimeout(function () { controller.abort(); }, 15000);
     try {
-      var response = await fetch(path, {method: body ? 'POST' : 'GET', credentials: 'same-origin',
-        headers: {'Content-Type': 'application/json'}, body: body ? JSON.stringify(body) : undefined, signal: controller.signal});
-      if (response.status === 401 || response.status === 403) { list.replaceChildren(); panel.hidden = true; review = null; }
-      var value = await response.json();
-      if (!response.ok) throw new Error(typeof value.detail === 'string' ? value.detail : 'The device change could not be confirmed. Refresh before trying again.');
-      return value;
-    } finally { clearTimeout(timer); controller = null; }
+      return await window.mvFetchJSON(path, {method: body ? 'POST' : 'GET', body: body, signal: controller.signal, timeout: 15000, plainDetail: true,
+        onAccess: function () { list.replaceChildren(); panel.hidden = true; review = null; }}, body ? 'change the device' : 'load the devices');
+    } finally { controller = null; }
   }
   async function run(action) {
     if (busy) return;

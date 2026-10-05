@@ -21,16 +21,13 @@
   function lock(value) { busy = value; root.querySelectorAll('[data-pw-action],#pw-confirm,#pw-refresh').forEach(function (el) { el.disabled = value || uncertain; }); id('check').disabled = value; id('retry-exact').disabled = value; id('cancel').hidden = !value; }
   async function call(path, body) {
     var controller = new AbortController(); controllers.add(controller);
-    var timer = setTimeout(function () { controller.abort(); }, 20000);
     try {
-      var response = await fetch(base + path, {method:body ? 'POST' : 'GET', credentials:'same-origin', cache:'no-store', signal:controller.signal,
-        headers:{'Content-Type':'application/json', 'X-Lightwork-Project-Context':context}, ...(body ? {body:JSON.stringify(body)} : {})});
-      var data = null; try { data = await response.json(); } catch (_) { /* Never display raw responses. */ }
-      if (!response.ok) { var error = new Error(data && typeof data.detail === 'string' ? data.detail : 'This project operation could not be confirmed. Your draft is kept.'); error.status = response.status; if (response.status === 401 || response.status === 403) { closePrivateView(); status(error.message); } throw error; }
+      var data = await window.mvFetchJSON(base + path, {method: body ? 'POST' : 'GET', cache: 'no-store', signal: controller.signal, timeout: 20000,
+        headers: {'X-Lightwork-Project-Context': context}, body: body, plainDetail: true,
+        onAccess: function (error) { closePrivateView(); status(error.message); }}, body ? 'save the project change' : 'load the project');
       if (!data || typeof data !== 'object' || (data.context && data.context !== context)) { closePrivateView(); status('The current account or workspace changed. Reload before continuing.'); var changed = new Error('The current account or workspace could not be confirmed. Reload before continuing.'); changed.status = 409; throw changed; }
       return data;
-    } catch (error) { if (controller.signal.aborted && !error.status) throw new Error('The wait ended before a result was confirmed. Your draft is kept.'); throw error; }
-    finally { clearTimeout(timer); controllers.delete(controller); }
+    } finally { controllers.delete(controller); }
   }
   function select(name, choices, empty, selected) {
     var el = id(name), current = selected === undefined ? Array.from(el.selectedOptions, function (option) { return option.value; }) : selected;

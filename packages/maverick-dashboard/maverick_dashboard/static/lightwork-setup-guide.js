@@ -22,7 +22,7 @@
   }
   async function send(path, file) {
     return window.mvFetchJSON(path, {method: 'POST', headers: {'Content-Type': 'application/octet-stream'}, body: file});
-}
+  }
   function recoveryActions(token) {
     var check = el('button', 'btn btn--ghost', 'Check installation result'); check.type = 'button';
     check.addEventListener('click', async function () {

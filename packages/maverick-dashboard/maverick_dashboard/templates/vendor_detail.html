@@ -136,8 +136,7 @@
   var base = '/api/v1/vendors/' + encodeURIComponent(vendor);
 
   function post(path, body) {
-    return fetch(base + path, { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify(body) })
-      .then(function (r) { if (!r.ok) throw r; return r.json(); });
+    return window.mvFetchJSON(base + path, { method: 'POST', body: body });
   }
   function done() { msg.textContent = 'Saved. Updating the page…'; window.location.reload(); }
   function fail(action) { return function (f) { msg.textContent = window.mvErrorText(f, action); }; }
@@ -155,10 +154,7 @@
     revision = d.revision || revision;
   }
   function getQuestionnaires() {
-    return fetch(base + '/questionnaires', { headers: { Accept: 'application/json' } }).then(function (r) {
-      if (!r.ok) throw r;
-      return r.json();
-    });
+    return window.mvFetchJSON(base + '/questionnaires');
   }
   function appendReplies(box, title, group, questions) {
     var heading = document.createElement('h3');
