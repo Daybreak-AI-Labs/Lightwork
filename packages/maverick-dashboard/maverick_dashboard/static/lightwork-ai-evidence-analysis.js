@@ -47,7 +47,7 @@ const REVOKE_REASONS = [
 const state = { artifacts: [], criteria: [], analyses: [] };
 
 function setStatus(element, message, failed = false) {
-  element.textContent = message;
+  window.mvStatus(element, message, {error: !!failed});
   element.dataset.state = failed ? "failed" : "ready";
 }
 

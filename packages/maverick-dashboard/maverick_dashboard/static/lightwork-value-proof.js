@@ -23,7 +23,7 @@
   function empty(id, title, body, action) {
     fill(id, window.mvEmpty ? window.mvEmpty(title, body, action, { compact: true }) : el('p', 'muted', title + '. ' + body));
   }
-  function say(id, text) { var box = $(id); if (box) box.textContent = String(text || ''); }
+  function say(id, text) { window.mvStatus($(id), String(text || '')); }
   function money(n) {
     var v = Number(n) || 0;
     return window.mvMoney ? window.mvMoney(v) : '$' + v.toFixed(2);

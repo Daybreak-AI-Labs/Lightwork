@@ -3,7 +3,7 @@
   const el = id => document.getElementById(id);
   let state = JSON.parse(el('pd-bootstrap').textContent), busy = false, dirty = false, locked = false;
   const expectedContext = state.context;
-  function say(message) { el('pd-status').textContent = message; }
+  function say(message) { window.mvStatus(el('pd-status'), message); }
   function text(parent, value, tag = 'p') { const node = document.createElement(tag); node.textContent = value; parent.appendChild(node); return node; }
   function button(parent, label, handler) { const node = text(parent, label, 'button'); node.type = 'button'; node.className = 'btn'; node.addEventListener('click', handler); return node; }
   function lock() {

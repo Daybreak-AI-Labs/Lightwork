@@ -22,7 +22,7 @@
   var KIND = { collect: 'Collect', refresh: 'Refresh', review: 'Review' };
   var ROLE = { first_line: 'Business owner', second_line: 'Risk and compliance owner', control_owner: 'Control owner', evidence_owner: 'Evidence owner' };
 
-  function say(text) { statusEl.textContent = text; }
+  function say(text) { window.mvStatus(statusEl, text); }
   function fail(f, action) { say(R.errorText(f, action)); }
   function label(ref) {
     return R.human(String(ref || '').replace(/^(ref|evidence):/, '').replace(/^(question|framework|control|overlap|evidence|catalog|mapping)[-_]/, ''));

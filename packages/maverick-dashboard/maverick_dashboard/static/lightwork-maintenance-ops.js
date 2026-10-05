@@ -15,7 +15,7 @@
   }
   function q(sel) { return document.querySelector(sel); }
   function out(name) { return q('[data-ops-out="' + name + '"]'); }
-  function say(name, text) { var node = q('[data-ops-status="' + name + '"]'); if (node) node.textContent = text || ''; }
+  function say(name, text) { window.mvStatus(q('[data-ops-status="' + name + '"]'), text || ''); }
   function when(ts) { return window.mvWhen ? window.mvWhen(ts) : ''; }
   function plural(n, word) { return n + ' ' + word + (n === 1 ? '' : 's'); }
   async function failText(failure, action) {

@@ -27,7 +27,7 @@
     return e;
   }
   function human(v) { return window.mvHuman ? window.mvHuman(v) : String(v || ""); }
-  function say(text) { if (statusEl) { statusEl.textContent = text; } }
+  function say(text) { window.mvStatus(statusEl, text); }
   function fail(text) { if (errorEl) { errorEl.textContent = text; } if (window.mvToast) { window.mvToast(text, { error: true }); } }
   function clear(node) { while (node.firstChild) { node.removeChild(node.firstChild); } }
   function text(id, value) {

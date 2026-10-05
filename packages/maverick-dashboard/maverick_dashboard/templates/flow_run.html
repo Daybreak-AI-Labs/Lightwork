@@ -181,7 +181,7 @@
     });
   }
 
-  function say(t) { msg.textContent = t || ''; }
+  function say(t) { if (window.mvStatus) window.mvStatus(msg, t || ''); else msg.textContent = t || ''; }
   {% include "_dash_helpers.js" %}
 
   function orderNodes(flow) {

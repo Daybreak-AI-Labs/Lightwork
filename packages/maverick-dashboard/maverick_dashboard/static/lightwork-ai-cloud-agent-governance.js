@@ -117,7 +117,9 @@
   }
 
   function say(message, technical) {
-    result.textContent = message;
+    // Like its error sentences, the page also runs without the shell's helpers.
+    if (typeof window.mvStatus === "function") window.mvStatus(result, message);
+    else result.textContent = message;
     output.textContent = technical === undefined ? "" :
       (typeof technical === "string" ? technical : JSON.stringify(technical, null, 2));
   }

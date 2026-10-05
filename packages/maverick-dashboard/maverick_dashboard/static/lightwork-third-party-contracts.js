@@ -40,7 +40,7 @@
   var OPERATORS = [["add", "Add up"], ["subtract", "Subtract"], ["multiply", "Multiply"], ["divide", "Divide"], ["minimum", "Smallest of"], ["maximum", "Largest of"], ["count", "Count filled in"]];
 
   function F(name) { return form.elements.namedItem(name); }
-  function say(el, text) { if (el) { el.textContent = text; } }
+  function say(el, text) { window.mvStatus(el, text); }
   function fail(el, action) { return function (f) { say(el, f && f.plain ? f.plain : R.errorText(f, action)); }; }
   function plain(text) { var e = new Error("plain"); e.plain = text; return e; }
   // Same-origin, uncached, redirect-refusing requests whose answers are read

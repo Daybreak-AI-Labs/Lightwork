@@ -6,7 +6,7 @@
   var canManage = form.dataset.canManage === 'true';
   var busy = false, uncertain = false, conflict = false, unknownBinding = false, loadSerial = 0;
   function el(tag, cls, text) { var node = document.createElement(tag); node.className = cls || ''; if (text != null) node.textContent = text; return node; }
-  function say(text, error) { msg.textContent = text || ''; msg.style.color = error ? 'var(--danger)' : 'var(--muted)'; }
+  function say(text, error) { window.mvStatus(msg, text || '', {error: !!error}); msg.style.color = error ? 'var(--danger)' : 'var(--muted)'; }
   function controls() {
     form.querySelectorAll('button').forEach(function (button) { button.disabled = !canManage || !inventoryReady || busy || uncertain || conflict || unknownBinding || accessLost; });
     list.querySelectorAll('button').forEach(function (button) { button.disabled = (!canManage && !button.dataset.connectionImpact) || !inventoryReady || busy || uncertain || accessLost; });

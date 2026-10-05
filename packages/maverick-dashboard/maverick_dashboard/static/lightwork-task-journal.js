@@ -17,7 +17,7 @@
     if (text != null) node.textContent = text;
     return node;
   }
-  function say(text) { $('status').textContent = text; }
+  function say(text) { window.mvStatus($('status'), text); }
   function failText(failure, what) {
     return typeof window.mvErrorText === 'function' ? window.mvErrorText(failure, what)
       : 'Could not ' + what + '. Please try again.';

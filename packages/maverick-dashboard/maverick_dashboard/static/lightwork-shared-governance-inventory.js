@@ -92,11 +92,11 @@
 
   // The raw answer is kept only inside the collapsed "Technical details".
   function show(message, payload) {
-    operationState.textContent = message;
+    window.mvStatus(operationState, message);
     output.textContent = JSON.stringify(payload === undefined ? {} : payload, null, 2);
   }
   function showError(action) {
-    return function (failure) { operationState.textContent = errorText(failure, action); };
+    return function (failure) { window.mvStatus(operationState, errorText(failure, action), {error: true}); };
   }
 
   function newOperationId() {

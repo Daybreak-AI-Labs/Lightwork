@@ -81,7 +81,7 @@
 (function () {
   'use strict';
   var $ = function (id) { return document.getElementById(id); };
-  var say = function (text) { $('wh-msg').textContent = text; };
+  var say = function (text) { window.mvStatus($('wh-msg'), text); };
   var esc = function (s) { return String(s == null ? '' : s); };
   var when = function (t) { return window.mvTimeAbsolute(t) || '—'; };
   // Failures read as plain sentences; a validation reply that is already one is kept.

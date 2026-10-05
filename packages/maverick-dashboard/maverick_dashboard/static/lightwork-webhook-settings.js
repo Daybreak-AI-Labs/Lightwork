@@ -19,7 +19,7 @@
       value.can_remove === (value.storage_writable && value.app_copy_present) &&
       typeof value.expected_generation === 'string' && value.expected_generation.startsWith('MVKAR1:') && value.expected_generation.length <= 4096;
   }
-  function say(text, focus) { get('state').textContent = text; if (focus) get('state').focus(); }
+  function say(text, focus) { window.mvStatus(get('state'), text); if (focus) get('state').focus(); }
   function controls() {
     var remove = get('action').value === 'remove';
     var permitted = current && (remove ? current.can_remove : current.can_set);

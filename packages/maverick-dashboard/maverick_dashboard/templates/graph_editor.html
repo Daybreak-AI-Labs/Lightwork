@@ -365,7 +365,7 @@
     });
   }
 
-  function setStatus(msg) { statusEl.textContent = msg; }
+  function setStatus(msg) { if (window.mvStatus) window.mvStatus(statusEl, msg); else statusEl.textContent = msg; }
   function showError(msg) {
     errEl.textContent = msg; errEl.style.display = msg ? "block" : "none";
   }

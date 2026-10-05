@@ -24,7 +24,7 @@
     if (text != null) node.textContent = text;
     return node;
   }
-  function say(id, text) { var node = $(id); if (node) node.textContent = text || ''; }
+  function say(id, text) { window.mvStatus($(id), text || ''); }
   function money(value) {
     return window.mvMoney ? window.mvMoney(Number(value) || 0) : (Number(value) || 0).toLocaleString(undefined, {style: 'currency', currency: 'USD'});
   }

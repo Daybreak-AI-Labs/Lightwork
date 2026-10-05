@@ -9,7 +9,7 @@
   function node(tag, text, parent) { var el = document.createElement(tag); if (text !== undefined) el.textContent = String(text); if (parent) parent.appendChild(el); return el; }
   function button(text, parent, handler) { var el = node('button', text, parent); el.type = 'button'; el.className = 'btn btn--ghost'; el.dataset.pwAction = ''; el.onclick = handler; return el; }
   function uid() { return crypto.randomUUID().replace(/-/g, ''); }
-  function status(message) { id('status').textContent = message; }
+  function status(message) { window.mvStatus(id('status'), message); }
   function closePrivateView() {
     generation++; model = null; source = null; pending = null; uncertain = true;
     controllers.forEach(function (controller) { controller.abort(); });

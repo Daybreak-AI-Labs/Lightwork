@@ -4,6 +4,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const { JSDOM } = require("jsdom");
+const {shell: loadShell} = require("./_shell");
 
 const dir = path.resolve(__dirname, "../../maverick_dashboard");
 const source = fs.readFileSync(path.join(dir, "static/lightwork-regulatory-obligations.js"), "utf8");
@@ -36,6 +37,7 @@ async function fixture(canAdmin, reply) {
     if (url.includes("ai-regulatory-feed")) return new Response("{}", { status: 403 });
     return json({});
   };
+  loadShell(window);
   window.eval(source);
   const settle = async () => { for (let i = 0; i < 25; i++) await new Promise((d) => setImmediate(d)); };
   await settle();

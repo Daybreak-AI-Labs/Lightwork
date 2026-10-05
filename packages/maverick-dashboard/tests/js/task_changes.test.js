@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const { JSDOM } = require('jsdom');
+const {shell: loadShell} = require("./_shell");
 
 const folder = path.resolve(__dirname, '../../maverick_dashboard');
 const html = fs.readFileSync(path.join(folder, 'templates/task_file_recovery.html'), 'utf8')
@@ -24,6 +25,7 @@ async function fixture(reply) {
   const w = dom.window, calls = [];
   w.mvErrorText = (failure, action) => 'Could not ' + action + '. Plain message.';
   w.fetch = async (url, options) => { calls.push({ url, options }); const out = await reply(url, options); return out instanceof Response ? out : new Response(JSON.stringify(out)); };
+  loadShell(w);
   w.eval(script);
   const settle = async () => { for (let i = 0; i < 8; i++) await new Promise(r => setImmediate(r)); };
   return { w, calls, settle, el: id => w.document.getElementById('tc-' + id) };

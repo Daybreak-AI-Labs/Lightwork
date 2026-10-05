@@ -19,7 +19,7 @@
   var BASE = '/api/v1/support/issue-report';
   var next = null, task = null, approved = null, busy = false, generation = 0;
   var selected = new URLSearchParams(window.location.search).get('task');
-  function say(text) { status.textContent = text || ''; }
+  function say(text) { window.mvStatus(status, text || ''); }
   function clear() { task = null; approved = null; title.value = ''; body.value = ''; confirm.checked = false; panel.hidden = true; }
   function ready() { return approved && confirm.checked && approved.task === task && approved.title === title.value && approved.body === body.value; }
   function controls() {

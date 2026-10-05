@@ -124,7 +124,7 @@
       const roleName = form.dataset.roleName || 'this role';
       const msg = document.getElementById('role-msg');
 
-      function show(text) { msg.textContent = text; }
+      function show(text) { if (window.mvStatus) window.mvStatus(msg, text); else msg.textContent = text; }
 
       async function call(method, path, body) {
         const opts = { method, headers: {} };

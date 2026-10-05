@@ -14,7 +14,7 @@
   function human(value) { return window.mvHuman ? window.mvHuman(value) : String(value == null ? '' : value); }
   function when(ts) { return ts && window.mvWhen ? window.mvWhen(ts) : (ts ? new Date(ts * 1000).toLocaleString() : ''); }
   function plural(n, one, many) { return n + ' ' + (n === 1 ? one : (many || one + 's')); }
-  function say(node, text) { if (node) node.textContent = text || ''; }
+  function say(node, text) { window.mvStatus(node, text || ''); }
   function errorText(failure, action) {
     return window.mvErrorText ? window.mvErrorText(failure, action) : 'Could not ' + action + '. Please try again.';
   }

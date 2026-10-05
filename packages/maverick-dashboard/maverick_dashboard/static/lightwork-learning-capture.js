@@ -22,7 +22,7 @@
     return node;
   }
   function human(value) { return typeof window.mvHuman === 'function' ? window.mvHuman(String(value)) : String(value).replace(/[_.-]+/g, ' '); }
-  function say(text) { $('status').textContent = text; }
+  function say(text) { window.mvStatus($('status'), text); }
   async function api(path, body) {
     return window.mvFetchJSON(base + path, {method: body === undefined ? 'GET' : 'POST', cache: 'no-store', body: body});
   }

@@ -37,7 +37,7 @@
   }
 
   function hidden(form, name) { return form.elements[name]; }
-  function say(text) { const s = document.getElementById('research-governed-status'); if (s) s.textContent = text; }
+  function say(text) { window.mvStatus(document.getElementById('research-governed-status'), text); }
 
   // Names -> identifiers (and the next free version for datasets and models).
   function syncSlug(input) {

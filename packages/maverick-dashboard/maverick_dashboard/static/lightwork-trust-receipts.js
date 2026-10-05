@@ -46,7 +46,7 @@
     return window.mvErrorText ? window.mvErrorText(failure, action) : "Could not " + action + ". Please try again.";
   }
   function problem(message) { var e = new Error(message); e.plain = true; return e; }
-  function say(id, text) { var el = document.getElementById(id); if (el) { el.textContent = text; } }
+  function say(id, text) { window.mvStatus(document.getElementById(id), text); }
   function explain(id, action) {
     return function (failure) { say(id, failure && failure.plain ? failure.message : errorText(failure, action)); };
   }

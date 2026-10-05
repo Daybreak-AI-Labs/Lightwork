@@ -47,7 +47,7 @@
     return match ? match.label : words(refValue);
   }
   function days(n) { return Number(n) * 86400; }
-  function say(text) { statusLine.textContent = text; }
+  function say(text) { window.mvStatus(statusLine, text); }
   function fail(action) { return function (f) { say(R.errorText(f, action)); if (window.mvToast) { window.mvToast(R.errorText(f, action), { error: true }); } }; }
   function api(method, path, body) { return R.call(method, API + path, body); }
   function el(tag, cls, text) { return R.el(tag, cls, text); }

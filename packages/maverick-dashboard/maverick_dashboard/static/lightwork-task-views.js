@@ -7,7 +7,7 @@
   var confirm = document.getElementById('task-view-confirm'), dismiss = document.getElementById('task-view-dismiss');
   var refresh = document.getElementById('task-views-refresh'), state = null, pending = null, uncertain = null;
   var busy = false, expired = false, generation = 0, controller = null;
-  function say(message) { status.textContent = message; }
+  function say(message) { window.mvStatus(status, message); }
   function lock(value) {
     busy = value; root.setAttribute('aria-busy', String(value));
     root.querySelectorAll('button,input').forEach(function (node) { node.disabled = value || expired; });

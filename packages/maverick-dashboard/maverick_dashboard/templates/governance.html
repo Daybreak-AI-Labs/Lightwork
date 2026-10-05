@@ -650,7 +650,7 @@
   const IFU_ITEMS = {{ ifu_items|tojson }};
   const ASSET_NAMES = {{ ASSET_NAMES|tojson }};
   const nameOf = assetId => ASSET_NAMES[assetId] || "this AI system";
-  const status = (id, text) => { const el = document.getElementById(id); if (el) el.textContent = text; };
+  const status = (id, text) => { const el = document.getElementById(id); if (el && window.mvStatus) window.mvStatus(el, text); else if (el) el.textContent = text; };
   const say = (id, error, action) => status(id, "Could not " + action + ". " + ((error && error.message) || "Please try again."));
   // Requests go through the shell's mvFetchJSON (lightwork-ui.js), which loads
   // after the page content; a failure is one plain sentence without the action.

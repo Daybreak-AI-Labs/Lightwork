@@ -14,7 +14,7 @@
   var base = '/api/v1/privacy/dsar/';
 
   function $(id) { return doc.getElementById(id); }
-  function say(text) { if (statusEl) statusEl.textContent = text; }
+  function say(text) { window.mvStatus(statusEl, text); }
   function fail(failure, action) {
     say(window.mvErrorText ? window.mvErrorText(failure, action) : 'Could not ' + action + '. Please try again.');
   }

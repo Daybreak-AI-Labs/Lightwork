@@ -10,7 +10,7 @@
   function put(object,path,value){const parts=path.split('.');if(parts.length===1)object[path]=value;else{if(!Object.hasOwn(object,parts[0]))object[parts[0]]={};object[parts[0]][parts[1]]=value;}}
   const statusLabel=value=>({draft:'Draft',submitting:'Submitting',pending_review:'Awaiting review'}[value]||(window.mvHuman?window.mvHuman(value):String(value)));
   function readFile(file){if(typeof file.text==='function')return file.text();return new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(String(reader.result||''));reader.onerror=()=>reject(new Error('That file could not be read. Nothing was imported.'));reader.readAsText(file);});}
-  function say(message){el('status').textContent=message;}
+  function say(message){window.mvStatus(el('status'),message);}
   function lock(){expired=true;current=null;contract=null;controls.clear();references.clear();savedAnswers='{}';el('fields').replaceChildren();el('drafts').replaceChildren();el('missing').replaceChildren();for(const id of ['current','progress','validation','list-status'])el(id).textContent='';el('import').value='';update();}
   function update(){const unavailable=busy||expired||!contract;root.setAttribute('aria-busy',String(busy));root.querySelectorAll('button,input,select,textarea').forEach(item=>item.disabled=unavailable);
     el('refresh').disabled=busy||expired;el('refresh').textContent=contract?'Refresh workspace drafts':'Retry loading intake questions';

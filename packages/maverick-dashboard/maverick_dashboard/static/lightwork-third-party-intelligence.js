@@ -35,7 +35,7 @@
   function label(list, value) { var m = list.filter(function (p) { return p[0] === value; })[0]; return m ? m[1] : R.human(value); }
   function opts(list) { return list.map(function (p) { return { value: p[0], label: p[1] }; }); }
   function badge(value) { var s = STATE[value] || [R.human(value), "idle"]; return R.badge(s[0], s[1]); }
-  function say(text) { statusLine.textContent = text; }
+  function say(text) { window.mvStatus(statusLine, text); }
   function fail(action) { return function (f) { var t = f && f.plain ? f.plain : R.errorText(f, action); say(t); if (window.mvToast) { window.mvToast(t, { error: true }); } }; }
   function plain(text) { var e = new Error("plain"); e.plain = text; return e; }
   function api(method, path, body) { return R.call(method, API + path, body); }

@@ -138,7 +138,7 @@
   var COMPLETENESS = { complete: "Fully checked", partial: "Partly checked", truncated: "Stopped at a limit", failed: "Could not finish" };
   var DECISION = { confirmed: "Correct", reclassified: "Different kind of data", false_positive: "Not personal data" };
 
-  function say(text) { statusEl.textContent = text; }
+  function say(text) { window.mvStatus(statusEl, text); }
   function fail(f, action) { say(R.errorText(f, action)); }
   function badge(map, v) { var s = map[v] || [R.human(v), "info"]; return R.badge(s[0], s[1]); }
   function provider(name) { return PROVIDERS[name] || R.human(name); }

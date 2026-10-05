@@ -296,7 +296,7 @@
       typeof value === "string" ? value : JSON.stringify(value, null, 2);
   }
   function say(message, failed, details) {
-    operationStatus.textContent = message;
+    window.mvStatus(operationStatus, message, {error: !!failed});
     operationStatus.dataset.state = failed ? "failed" : "ready";
     technical(details);
   }

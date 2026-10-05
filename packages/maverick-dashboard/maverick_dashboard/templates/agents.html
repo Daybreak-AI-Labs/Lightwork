@@ -682,7 +682,7 @@
         });
       }
       function say(text, ok) {
-        if (jdMsg) { jdMsg.textContent = text; jdMsg.style.color = ok ? 'var(--accent)' : 'var(--danger)'; }
+        if (jdMsg) { if (window.mvStatus) window.mvStatus(jdMsg, text, {error: !ok}); else jdMsg.textContent = text; jdMsg.style.color = ok ? 'var(--accent)' : 'var(--danger)'; }
       }
 
       // --- prefill the editor from a drafted pack (set BEFORE initializers run) ---
@@ -1176,7 +1176,7 @@
         return (idInput ? idInput.value : '').trim().toLowerCase().replace(/[^a-z0-9_]+/g, '_').replace(/^_+|_+$/g, '');
       }
       const words = (s) => s.split(/\s+/).filter(Boolean);
-      function show(text, ok) { msg.textContent = text; msg.style.color = ok ? 'var(--accent)' : 'var(--danger)'; }
+      function show(text, ok) { if (window.mvStatus) window.mvStatus(msg, text, {error: !ok}); else msg.textContent = text; msg.style.color = ok ? 'var(--accent)' : 'var(--danger)'; }
       function fieldMessage(field, text) {
         ['agent-actions-error', 'agent-risk-error'].forEach(function (id) {
           var note = document.getElementById(id);

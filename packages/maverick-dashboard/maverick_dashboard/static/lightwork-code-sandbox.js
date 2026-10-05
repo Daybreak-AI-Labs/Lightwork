@@ -13,7 +13,7 @@
   }
   function when(ts) { return ts && window.mvWhen ? window.mvWhen(ts) : (ts ? new Date(ts * 1000).toLocaleString() : ''); }
   function plural(n, one, many) { return n + ' ' + (n === 1 ? one : (many || one + 's')); }
-  function say(node, text) { if (node) node.textContent = text || ''; }
+  function say(node, text) { window.mvStatus(node, text || ''); }
   function button(label, cls) { var b = el('button', 'btn ' + (cls || 'btn--ghost'), label); b.type = 'button'; return b; }
   async function failText(failure, action) {
     var plain = window.mvPlainDetail ? window.mvPlainDetail(failure && failure.detail) : '';

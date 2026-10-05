@@ -127,7 +127,7 @@
     return body;
   }
   function say(message, details) {
-    result.textContent = message;
+    window.mvStatus(result, message);
     output.textContent = details === undefined ? "" : typeof details === "string" ? details : JSON.stringify(details, null, 2);
   }
   function failed(error) {

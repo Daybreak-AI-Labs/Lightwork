@@ -19,7 +19,7 @@
   } catch (e) { /* names stay generic */ }
   var columns = admin ? 7 : 6;
 
-  function say(el, text) { if (el) el.textContent = String(text || ''); }
+  function say(el, text) { window.mvStatus(el, String(text || '')); }
   function errorText(failure, action) {
     if (typeof window.mvErrorText === 'function') return window.mvErrorText(failure, action);
     return 'Could not ' + action + '. Please try again.';

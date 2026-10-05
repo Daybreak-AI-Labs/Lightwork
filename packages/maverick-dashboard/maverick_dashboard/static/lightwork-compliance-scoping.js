@@ -26,7 +26,7 @@
     ['control_owner', 'Control owner'], ['evidence_owner', 'Evidence owner'],
   ];
 
-  function say(text) { statusEl.textContent = text; }
+  function say(text) { window.mvStatus(statusEl, text); }
   function fail(failure, action) { say(R.errorText(failure, action)); }
   function statusBadge(value) {
     var s = STATUS[value] || [R.human(value), 'info'];

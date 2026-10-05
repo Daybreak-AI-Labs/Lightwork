@@ -11,7 +11,7 @@
   function confirmAction(message, okText) {
     return window.mvConfirm ? window.mvConfirm(message, { okText: okText }) : Promise.resolve(false);
   }
-  function say(el, text) { if (el) el.textContent = text; }
+  function say(el, text) { window.mvStatus(el, text); }
   function getJSON(url) {
     return window.mvFetchJSON(url);
   }

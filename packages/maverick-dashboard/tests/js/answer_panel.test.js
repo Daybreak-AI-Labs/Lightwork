@@ -5,6 +5,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const {JSDOM} = require('jsdom');
+const {shell} = require('./_shell');
 const script = fs.readFileSync(path.resolve(__dirname, '../../maverick_dashboard/static/lightwork-answer-panel.js'), 'utf8');
 const settle = async () => { for (let i=0;i<12;i++) await new Promise(resolve=>setImmediate(resolve)); };
 function fragment(version, content='', status='done', operate='1') { return `<section id="answer-panel" data-goal="4" data-context="scope" data-updated-at="1" data-version="${version}" data-status="${status}" data-operate="${operate}">${content}</section>`; }
@@ -16,6 +17,7 @@ function page(content='', status='done') {
   dom.window.mvErrorText = ()=>'Refresh unavailable.';
   dom.window.mvRenderError = node=>{node.textContent='Refresh unavailable.';};
   dom.window.mvConfirm = async()=>true;
+  shell(dom.window);
   dom.window.eval(script);
   return {dom, doc:dom.window.document, setAnswer(value){answer=value;}, update(html){answer={ok:true,status:200,headers:{get:()=> 'scope'},text:async()=>html};return dom.window.mvRefreshAnswerPanel();}};
 }

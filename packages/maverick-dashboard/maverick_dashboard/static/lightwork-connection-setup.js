@@ -42,7 +42,7 @@
       else{expectedContext=stored.context;pending={state:stored.state,code:values.code[0],context:stored.context};}
     }
   }catch(_){eraseStored();pending=null;callbackMessage='The provider return could not be read safely. Start a new connection.';}
-  function say(message){el('status').textContent=message;}
+  function say(message){if(window.mvStatus)window.mvStatus(el('status'),message);else el('status').textContent=message;}
   function rememberRetirement(attempt){pendingRetirement={state:attempt.state,context:attempt.context,return_profile:attempt.return_profile||'browser',created_at:Date.now()};try{sessionStorage.setItem(retirementKey,JSON.stringify(pendingRetirement));}catch(_){}}
   function clearRetirement(){pendingRetirement=null;removeStored(retirementKey);}
   function clearConsent(){desktopAuthorization=null;el('native-enable-confirm').checked=false;el('authorize-confirm').checked=false;el('app-confirm').checked=false;el('enable-confirm').checked=false;el('disable-confirm').checked=false;el('native-disable-confirm').checked=false;el('finish-confirm').checked=false;el('departure').hidden=true;el('provider-link').removeAttribute('href');}

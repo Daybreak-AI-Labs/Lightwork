@@ -31,7 +31,7 @@
     }
     return window.mvFetchJSON(url, init);
   }
-  function say(node, text) { if (node) node.textContent = text || ''; }
+  function say(node, text) { window.mvStatus(node, text || ''); }
   function badge(ok, yes, no) { return el('span', 'badge ' + (ok ? 'ok' : 'warn'), ok ? yes : no); }
   function money(value) {
     var n = Number(value) || 0;

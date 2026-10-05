@@ -9,7 +9,7 @@
   var API = '/api/v1/learning-loop';
   var admin = root.getAttribute('data-admin') === '1';
   function $(id) { return document.getElementById(id); }
-  function say(id, text) { var el = $(id); if (el) el.textContent = String(text || ''); }
+  function say(id, text) { window.mvStatus($(id), String(text || '')); }
   function el(tag, cls, text) {
     var node = document.createElement(tag);
     if (cls) node.className = cls;

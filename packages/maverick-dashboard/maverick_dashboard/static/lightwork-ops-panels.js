@@ -16,7 +16,7 @@
     if (text != null) node.textContent = String(text);
     return node;
   }
-  function say(node, text) { if (node) node.textContent = String(text || ''); }
+  function say(node, text) { window.mvStatus(node, String(text || '')); }
   function plural(n, one, many) { return n + ' ' + (n === 1 ? one : (many || one + 's')); }
   function human(value) { return window.mvHuman ? window.mvHuman(value) : String(value || ''); }
   function when(stamp) {

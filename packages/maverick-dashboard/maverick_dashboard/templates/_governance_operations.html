@@ -1185,7 +1185,8 @@
   const byId = id => document.getElementById(id);
   const setStatus = (id, message) => {
     const target = byId(id);
-    if (target) target.textContent = String(message || "").slice(0, 320);
+    if (target && window.mvStatus) window.mvStatus(target, String(message || "").slice(0, 320));
+    else if (target) target.textContent = String(message || "").slice(0, 320);
   };
   const asText = value => value === null || value === undefined || value === "" ? "—" : String(value);
   const splitTokens = value => String(value || "").split(",").map(item => item.trim()).filter(Boolean);

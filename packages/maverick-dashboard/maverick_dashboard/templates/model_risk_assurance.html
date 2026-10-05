@@ -1250,7 +1250,8 @@ window.mraFailure = response => {
   const when = ts => (typeof window.mvWhen === "function" ? window.mvWhen(ts) : "");
   const status = (id, message) => {
     const element = document.getElementById(id);
-    if (element) element.textContent = String(message || "").slice(0, 280);
+    if (element && window.mvStatus) window.mvStatus(element, String(message || "").slice(0, 280));
+    else if (element) element.textContent = String(message || "").slice(0, 280);
   };
   const call = (path, options) => window.mvFetchJSON(prefix + path, options || {});
   const post = (path, body) => call(path, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});

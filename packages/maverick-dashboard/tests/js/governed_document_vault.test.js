@@ -5,6 +5,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const { JSDOM } = require("jsdom");
+const {shell: loadShell} = require("./_shell");
 
 const base = path.join(__dirname, "../../maverick_dashboard");
 const template = fs.readFileSync(path.join(base, "templates/governed_document_vault.html"), "utf8");
@@ -39,6 +40,7 @@ function fixture(t, { confirm = true } = {}) {
     if (key.endsWith("/delivery")) return new Response("abc", { status: 200, headers: { "content-length": "3" } });
     return json({ detail: "document_vault_conflict" }, 409);
   };
+  loadShell(w);
   w.eval(source);
   const settle = async () => { for (let i = 0; i < 40; i += 1) await new Promise((r) => setImmediate(r)); };
   return { w, calls, settle, $: (id) => w.document.getElementById(id) };

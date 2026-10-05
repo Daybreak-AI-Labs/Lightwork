@@ -17,7 +17,7 @@
     if (text != null) node.textContent = text;
     return node;
   }
-  function say(id, text) { var box = $(id); if (box) box.textContent = text || ''; }
+  function say(id, text) { window.mvStatus($(id), text || ''); }
   function when(isoDate) {
     if (!isoDate) return '';
     var parsed = new Date(isoDate + 'T00:00:00');

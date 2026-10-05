@@ -39,7 +39,7 @@
   }
   function plural(n, one, many) { return n + " " + (n === 1 ? one : many); }
   function when(ts) { return window.mvWhen ? window.mvWhen(ts) : ""; }
-  function say(text) { var s = $("hunt-status"); if (s) { s.textContent = text; } }
+  function say(text) { window.mvStatus($("hunt-status"), text); }
   function fail(text) {
     var e = $("hunt-error");
     if (e) { e.textContent = text; }
