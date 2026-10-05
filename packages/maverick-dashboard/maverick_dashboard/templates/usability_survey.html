@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}Ease-of-use results · Lightwork{% endblock %}
+{% block content %}
+  {% from "_hero.html" import hero %}
+  {% from "_empty_state.html" import empty_state %}
+  {% set survey_actions %}{% if not enabled and can_open_page('/settings/all') %}<a class="btn btn--primary" href="/settings/all?q=usability_survey">Turn on the survey</a>{% endif %}{% endset %}
+  {% call hero('People', 'Ease-of-use results',
+               subtitle='What people say about using Lightwork, by role and by task',
+               lede='Answers from the optional ease-of-use survey for ' ~ report.quarter ~ '. Each answer carries only the role the person chose, never their name. Answers stay on this server.',
+               actions=survey_actions) %}{% endcall %}
+
+  {% if not enabled %}
+  <div class="panel" role="status">
+    <strong>The survey is turned off.</strong> Nobody is asked. Results already collected are still shown below.
+  </div>
+  {% endif %}
+
+  <div class="section-head"><h2 id="sus-results">Ease of use by role (System Usability Scale, 0 to 100)</h2></div>
+  <div class="panel">
+    <p class="muted">The average score of 500 published studies is 68; a score above 80.3 is in the top 10% of products (MeasuringU). The range is the 95% confidence interval. A role needs at least {{ report.minimum }} answers before its score is shown.</p>
+    {% if report.sus_total.n == 0 %}
+      {{ empty_state('No answers this quarter yet', 'When the survey is on, each signed-in person is asked at most once a quarter. Their answers appear here by role.', compact=true) }}
+    {% else %}
+    <table>
+      <thead><tr><th scope="col">Role</th><th scope="col">Answers</th><th scope="col">Average score</th><th scope="col">95% range</th></tr></thead>
+      <tbody>
+      {% for row in report.sus %}
+        <tr>
+          <th scope="row">{{ row.label }}</th>
+          <td>{{ row.n }}</td>
+          {% if row.enough %}
+          <td>{{ row.mean }}</td><td>{{ row.low }} to {{ row.high }}</td>
+          {% else %}
+          <td colspan="2" class="muted">Not enough answers yet</td>
+          {% endif %}
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+  </div>
+
+  <div class="section-head"><h2 id="seq-results">Ease of common tasks (1 = very difficult, 7 = very easy)</h2></div>
+  <div class="panel">
+    <p class="muted">Asked once after a person finishes the task. The average across published tasks is about 5.5. A task needs at least {{ report.minimum }} answers before its score is shown.</p>
+    <table>
+      <thead><tr><th scope="col">Task</th><th scope="col">Answers</th><th scope="col">Average</th><th scope="col">95% range</th></tr></thead>
+      <tbody>
+      {% for row in report.seq %}
+        <tr>
+          <th scope="row">{{ row.label | capitalize }}</th>
+          <td>{{ row.n }}</td>
+          {% if row.enough %}
+          <td>{{ row.mean }}</td><td>{{ row.low }} to {{ row.high }}</td>
+          {% else %}
+          <td colspan="2" class="muted">Not enough answers yet</td>
+          {% endif %}
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="muted">How to run moderated sessions and score them the same way each quarter: the usability research guide in the documentation (docs/usability-research.md).</p>
+{% endblock %}
