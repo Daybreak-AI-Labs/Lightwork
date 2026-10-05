@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% from "_hero.html" import hero, state %}
-{% block title %}Agent Trust · Lightwork{% endblock %}
+{% block title %}{{ 'Access · Outside agents' if tab_host else 'Agent Trust' }} · Lightwork{% endblock %}
 {% block head_extra %}
 <style{% if csp_style_nonce is defined %} nonce="{{ csp_style_nonce }}"{% endif %}>
   .tr-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr)); gap: var(--space-3); }
@@ -14,6 +14,13 @@
 {% block content %}
 {% set risk_word = {'low': 'Low-risk only', 'medium': 'Up to medium risk', 'high': 'Any risk', 'unbounded': 'Any risk'} %}
 {% set direction_word = {'inbound': 'It may contact us', 'outbound': 'We may contact it', 'both': 'Both ways'} %}
+{% if tab_host %}
+{% from "_tabs.html" import host_header, panel_attrs %}{{ host_header(tab_host) }}
+<div {{ panel_attrs(tab_host.selected) }}>
+<h2>Agent Trust</h2>
+<p><strong>Blocking unlisted agents: {{ 'On' if enforced else 'Off' }}.</strong>
+  <span class="badge {{ 'ok' if enforced else 'warn' }}">{{ 'Agents not on the list are turned away' if enforced else 'The list is kept but not enforced' }}</span></p>
+{% else %}
 {% call hero('Security', 'Agent Trust',
              lede='Choose which outside AI agents may work with Lightwork, and what each one may do, see and spend.') %}
   {{ state('Blocking unlisted agents',
@@ -21,6 +28,7 @@
            badge='Agents not on the list are turned away' if enforced else 'The list is kept but not enforced',
            badge_class='ok' if enforced else 'warn') }}
 {% endcall %}
+{% endif %}
 
 <div class="panel" aria-labelledby="tr-enforce-title">
   <h2 id="tr-enforce-title" style="margin-top:0">Blocking</h2>
@@ -212,6 +220,7 @@
   </div>
   <details style="margin-top:var(--space-2)"><summary>Show the key</summary><p class="tr-key" id="tr-key-text">Open to load the key.</p></details>
 </div>
+{% if tab_host %}</div>{% endif %}
 
 <script>
 (function () {

@@ -21,6 +21,7 @@
       <span>Being allowed to search, use or download a source does not mean it may be used to train AI models.</span>
     </div>
   </header>
+  {% if knowledge_tabs %}{% from "_tabs.html" import tab_bar, panel_attrs %}{{ tab_bar('Knowledge views', knowledge_tabs, '') }}<div {{ panel_attrs('') }}>{% endif %}
 
   <p class="ka-status" id="ka-status" role="status" aria-live="polite" tabindex="-1">
     Choose what you'll use the information for, then search.
@@ -163,6 +164,7 @@
   </section>
 
   <noscript><p class="panel">JavaScript is required to revalidate and display governed knowledge sources.</p></noscript>
+  {% if knowledge_tabs %}</div>{% endif %}
 </section>
 {% endblock %}
 {% block scripts_extra %}<script src="/static/lightwork-access-state.js" defer></script><script src="/static/lightwork-knowledge-access.js" defer></script><script src="/static/lightwork-knowledge-library.js" defer></script><script src="/static/lightwork-source-analysis.js" defer></script>{% endblock %}

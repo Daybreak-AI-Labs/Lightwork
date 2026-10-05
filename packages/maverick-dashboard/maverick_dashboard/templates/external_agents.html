@@ -5,6 +5,7 @@
   {% set _LIFECYCLE = {'active': 'Active', 'suspended': 'Paused', 'revoked': 'Access blocked', 'contained': 'Blocked for rule breaks', 'expired': 'Access expired'} %}
   <h1 class="page-title">Outside agents</h1>
   <p class="page-subtitle">Agents built on other platforms — Salesforce Agentforce, AWS Bedrock, Copilot Studio or your own — keep running where they are, but follow your rules here: access keys, spending limits, checks before risky actions, and a record of every run.</p>
+  {% if outside_agent_tabs %}{% from "_tabs.html" import tab_bar, panel_attrs %}{{ tab_bar('Outside agents views', outside_agent_tabs, '') }}<div {{ panel_attrs('') }}>{% endif %}
   {% if not enabled %}
   {{ module_gate('external_agents', 'Outside agents',
                  detail='Lets AI agents from other products (Salesforce, AWS, Microsoft and others) work under your rules and budgets.',
@@ -166,6 +167,7 @@
       Adding an agent with a name that already exists updates its limits and keeps its history.
     </p>
   </div>
+  {% if outside_agent_tabs %}</div>{% endif %}
 
 <script>
 (function () {

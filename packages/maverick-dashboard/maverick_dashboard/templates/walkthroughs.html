@@ -1,7 +1,15 @@
 {% extends "base.html" %}
-{% block title %}Video walkthroughs · Lightwork{% endblock %}
+{% block title %}{{ 'Video · Task replay' if tab_host else 'Video walkthroughs' }} · Lightwork{% endblock %}
 {% block content %}
 {% from "_hero.html" import hero, state %}
+{% if tab_host %}
+{% from "_tabs.html" import host_header, panel_attrs %}{{ host_header(tab_host) }}
+<div {{ panel_attrs(tab_host.selected) }}>
+<h2>Video walkthroughs</h2>
+<p class="muted">Turn any finished task into a video with captions. Watch exactly what was done, step by step, and
+  share it with your team. Videos are made and kept on your own Lightwork server. Nothing is uploaded anywhere else.
+  {{ items | length }} video{{ '' if items | length == 1 else 's' }}.</p>
+{% else %}
 {% call hero('Proof of work', 'Video walkthroughs',
              subtitle='Watch what was done',
              lede='Turn any finished task into a video with captions. Watch
@@ -13,6 +21,7 @@
            copy='Videos are made and kept on your own Lightwork server.
                  Nothing is uploaded anywhere else.') }}
 {% endcall %}
+{% endif %}
 <div class="panel">
   <h2 class="wt-flush">Make a Video</h2>
   {% if runs %}
@@ -69,6 +78,7 @@
   </div>
 {% endif %}
 
+{% if tab_host %}</div>{% endif %}
 <style>
   .wt-flush { margin-top: 0; }
   .wt-small { font-size: var(--text-sm); }
