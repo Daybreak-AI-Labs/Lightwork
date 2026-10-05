@@ -268,7 +268,7 @@ def entries():
         Adapter("tasks.current_status", "Read this task's status and saved result", "tasks", "/chat", TASK_PAGES,
                 EmptyInput, task_snapshot, task_preview),
         Adapter("clarifications.answer", "Answer a task question", "clarifications", "/chat", TASK_PAGES,
-                AnswerInput, answer_snapshot, answer_preview, answer_execute, answer_recover),
+                AnswerInput, answer_snapshot, answer_preview, answer_execute, answer_recover, read_recovery=answer_recover),
         Adapter("artifacts.edit_saved_result", "Revise the saved result", "artifacts", "/chat", TASK_PAGES,
                 EditInput, edit_snapshot, edit_preview, edit_execute, edit_recover),
         Adapter("reviews.respond", "Respond to a project review", "reviews", "/project-reviews",

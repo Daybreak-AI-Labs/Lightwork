@@ -66,6 +66,11 @@ _KEPT_WRAPPERS = {
     ("lightwork-instruction-capture.js", "request"),
     ("lightwork-dsar-handoff.js", "call"),
     ("flow_designer_action_fields.js", "task"),
+    # Also from #2529 (local AI runtime, retention maintenance): each shows the
+    # server's own detail and checks the workspace context of the reply
+    # before it counts, in the page's own words.
+    ("lightwork-local-runtime.js", "call"),
+    ("lightwork-retention-maintenance.js", "call"),
 }
 
 # Status-line setters that still write the text themselves, each named with

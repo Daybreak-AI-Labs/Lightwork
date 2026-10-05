@@ -1,9 +1,10 @@
 """Installed release adapter for bounded rule-only taught workflows.
 
-Native completed practice proves execution readiness for that exact definition,
+Native completed practice proves execution readiness for that exact bundle,
 not accuracy, generalization or improvement. Independent release approval stays
-in CandidatePromotions. No tools, AI fallback, subflows or outside effects are
-admitted: restoring publication therefore cannot claim to undo business actions.
+in CandidatePromotions. Included workflows must use bounded owned rules. No
+tools, AI fallback or outside effects are admitted: restoring publication
+therefore cannot claim to undo business actions.
 """
 from __future__ import annotations
 
@@ -90,20 +91,105 @@ def _owner_authority(tenant, owner):
     return _sha([tenant, owner, role, generation, revocation_epoch(owner.removeprefix("user:"))])
 
 
-def _pure(flow, *, permit_fallback=False):
+def _pure_definition(flow, *, permit_fallback=False):
+    from .api import _require_learned_flow_evidence
+
     if flow.learned_recipe is not None or not flow.nodes or len(flow.nodes) > 64:
         raise CandidatePromotionDenied("This release path supports bounded taught rules only.")
+    _require_learned_flow_evidence(flow)
     taught = 0
     for node in flow.nodes.values():
-        if node.body is not None or node.branches or node.kind not in {"agent", "setvar", "branch", "switch"}:
-            raise CandidatePromotionDenied("Connected actions, nested workflows and waiting steps need a separate release connection.")
+        if node.body is not None or node.branches or node.kind not in {"agent", "setvar", "branch", "switch", "subflow"}:
+            raise CandidatePromotionDenied("Connected actions and waiting steps need a separate release connection.")
         if node.kind == "agent":
             validate_learned_operator(node)
             if node.learned_operator is None or not permit_fallback and node.learned_fallback is not False:
                 raise CandidatePromotionDenied("Turn on Use learned rules only, save, and complete a new practice run first.")
             taught += 1
-    if not taught or flow.validate() or flow.reachability_errors():
+    if flow.validate() or flow.reachability_errors():
         raise CandidatePromotionDenied("The saved workflow needs valid taught rules and complete routes.")
+    return taught
+
+
+def qualified_bundle(flow, *, permit_fallback=False, retained_manifest=None,
+                     require_current_versions=True):
+    """Qualify one finite, owner-contained complete execution bundle.
+
+    Retained publication arms use their own immutable child map. Newer drafts
+    do not rewrite those arms, but deletion, owner/generation replacement and
+    current evidence withdrawal still refuse their use.
+    """
+    from maverick.paths import current_tenant_id_strict
+
+    tenant = current_tenant_id_strict()
+    _owner_authority(tenant, flow.owner)
+    if not require_current_versions and retained_manifest is None:
+        raise CandidatePromotionDenied("Choose the exact retained included versions before reviewing old rules.")
+    if retained_manifest is not None and (not isinstance(retained_manifest, dict)
+            or len(retained_manifest) > 16
+            or any(not isinstance(key, str) or not isinstance(value, str)
+                   or re.fullmatch(r"[a-f0-9]{64}", value) is None
+                   for key, value in retained_manifest.items())):
+        raise CandidatePromotionDenied("The retained included workflows cannot be verified.")
+    with store._definitions_lock():
+        visiting, visited, definitions, heights = set(), set(), [], {}
+        node_count, taught = 0, 0
+
+        def visit(current, depth):
+            nonlocal node_count, taught
+            if depth > 8 or current.id in visiting:
+                raise CandidatePromotionDenied("Included workflows must finish without calling themselves, within eight levels.")
+            if current.id in visited:
+                if depth + heights[current.id] > 8:
+                    raise CandidatePromotionDenied("Included workflows must stay within eight levels on every route.")
+                return heights[current.id]
+            if len(definitions) >= 17:
+                raise CandidatePromotionDenied("Choose at most sixteen included workflows for this release.")
+            live = store.load_flow(current.id)
+            if (live is None or current.owner != flow.owner or live.owner != flow.owner
+                    or live.revision != current.revision
+                    or require_current_versions and live.to_dict() != current.to_dict()):
+                raise CandidatePromotionDenied("An included workflow was removed, changed or is no longer owned by this account. Review current saved versions.")
+            node_count += len(current.nodes)
+            if node_count > 64:
+                raise CandidatePromotionDenied("Use at most sixty-four total steps across this release.")
+            taught += _pure_definition(current, permit_fallback=permit_fallback)
+            definitions.append(current)
+            visiting.add(current.id)
+            height = 0
+            for node in current.nodes.values():
+                if node.kind != "subflow":
+                    continue
+                if retained_manifest is None:
+                    child = store.load_flow(node.flow_ref)
+                else:
+                    digest = retained_manifest.get(node.flow_ref)
+                    child = store.load_flow_snapshot(digest) if digest else None
+                if child is None or child.id != node.flow_ref:
+                    raise CandidatePromotionDenied("An included workflow is unavailable. Open the saved workflow and choose it again.")
+                height = max(height, 1 + visit(child, depth + 1))
+            visiting.remove(current.id)
+            visited.add(current.id)
+            heights[current.id] = height
+            return height
+
+        visit(flow, 0)
+        if not taught:
+            raise CandidatePromotionDenied("Include at least one step with valid taught rules.")
+        if retained_manifest is None:
+            root, _version, children = store.snapshot_flow_bundle(flow)
+        else:
+            root = hashlib.sha256(store._canonical_flow_bytes(flow.to_dict())).hexdigest()
+            children = dict(retained_manifest)
+        store.validate_snapshot_bundle_owners(flow, children)
+        material = {"schema": "maverick.flow.release.v1", "definition_digest": root, "subflow_digests": children}
+        return {"root": root, "manifest": children, "flows": definitions,
+                "bundle_sha": store.release_digest_for(root, children), "size": len(_bytes(material)),
+                "taught_count": taught}
+
+
+def _pure(flow, *, permit_fallback=False):
+    qualified_bundle(flow, permit_fallback=permit_fallback)
 
 
 def _current(tenant, owner, flow_id):
@@ -115,11 +201,8 @@ def _current(tenant, owner, flow_id):
 
 
 def _bundle(flow):
-    root, _version, children = store.snapshot_flow_bundle(flow)
-    if children:
-        raise CandidatePromotionDenied("This local release path cannot include another workflow.")
-    material = {"schema": "maverick.flow.release.v1", "definition_digest": root, "subflow_digests": {}}
-    return root, _sha(material), len(_bytes(material))
+    value = qualified_bundle(flow)
+    return value["root"], value["bundle_sha"], value["size"]
 
 
 def _practice(record):
@@ -128,26 +211,24 @@ def _practice(record):
     flags = get_flows()
     if not enabled() or flags.get("learned_operators") is not True:
         raise CandidatePromotionDenied("Workflows and learned rules must be enabled before release review.")
+    _learning_allowed()
     flow = _current(record["tenant"], record["owner"], record["flow_id"])
-    _pure(flow)
+    bundle = qualified_bundle(flow)
     from maverick.flow.operator_artifacts import COMPOSED_SCHEMA
     if flags.get("composed_operators") is not True and any(
             node.learned_operator and node.learned_operator["artifact"].get("schema") == COMPOSED_SCHEMA
-            for node in flow.nodes.values()):
+            for included in bundle["flows"] for node in included.nodes.values()):
         raise CandidatePromotionDenied("Composed learned rules must be enabled before this release review.")
-    root, bundle_sha, size = _bundle(flow)
+    root, bundle_sha, size = bundle["root"], bundle["bundle_sha"], bundle["size"]
     if root != record["root"] or bundle_sha != record["bundle_sha"]:
         raise CandidatePromotionConflict("The workflow changed after its practice check. Prepare a new release review.")
     run = store.load_run(record["practice_run"], owner=record["owner"])
     if (run is None or run.flow_id != flow.id or run.dry_run is not True
-            or run.status != runner.STATUS_COMPLETED or run.error or run.definition_digest != root
+            or not _successful_execution(run) or run.definition_digest != root
             or run.definition_version != flow.version or run.definition_revision != flow.revision
-            or run.subflow_digests or not run.nodes
-            or any(row.get("outcome") not in (None, 0) or row.get("status") == "failed"
-                   for row in run.nodes.values())):
+            or run.subflow_digests != bundle["manifest"]):
         raise CandidatePromotionDenied("A successful practice run of this exact saved rule-only version is required.")
-    result = _sha([run.run_id, run.definition_digest, run.status, run.updated,
-                   sorted((key, row.get("status"), row.get("outcome")) for key, row in run.nodes.items())])
+    result = _practice_result(run)
     if result != record["practice_result"]:
         raise CandidatePromotionConflict("The recorded practice result changed. Prepare a new review.")
     if record.get("comparison_id"):
@@ -156,6 +237,37 @@ def _practice(record):
         if comparison["binding"] != record.get("comparison_binding"):
             raise CandidatePromotionConflict("The known-case comparison changed. Prepare a new release review.")
     return flow, root, bundle_sha, size, result
+
+
+def _practice_result(run):
+    return _sha([run.run_id, run.definition_digest, run.subflow_digests, run.status, run.updated,
+                 sorted((key, row.get("status"), row.get("outcome")) for key, row in run.nodes.items())])
+
+
+def _successful_execution(run):
+    # Native taught agents report agreement with no correctness outcome;
+    # included workflows report successful completion as 1.0, failure as 0.0.
+    return (run.status == runner.STATUS_COMPLETED and not run.error and bool(run.nodes)
+            and all(row.get("status") == "done" and row.get("outcome") in (None, 1.0)
+                    for row in run.nodes.values()))
+
+
+def _learning_allowed():
+    from maverick.learning_guard import Halted, check_learning_halt
+    try:
+        check_learning_halt("flow_rule_release", "review")
+    except Halted as exc:
+        raise CandidatePromotionDenied("Learning is paused. Review the emergency stop before preparing or publishing new rules.") from exc
+
+
+def _retained_bundle(flow, release):
+    if flow is None:
+        raise CandidatePromotionDenied("The retained workflow is unavailable. Restoration cannot continue.")
+    bundle = qualified_bundle(flow, retained_manifest=release.get("subflow_digests", {}),
+                              require_current_versions=False)
+    if bundle["root"] != release.get("definition_digest") or bundle["bundle_sha"] != release.get("release_digest"):
+        raise CandidatePromotionDenied("The retained included workflows changed. Review the current publication.")
+    return bundle
 
 
 def _target_record(run_id=None):
@@ -232,6 +344,8 @@ def release_status(manifest, *, review=False):
     """A release-only projection; private input/output data is never included."""
     record = _bound(manifest)
     root = store.load_flow_snapshot(record["root"])
+    bundle = _retained_bundle(root, {"definition_digest": record["root"], "release_digest": record["bundle_sha"],
+                                    "subflow_digests": record.get("subflow_digests", {})})
     active = store.load_published_bundle(record["flow_id"])
     effect = _effects().get(_effect_id(manifest))
     activation = effect.get("activation_id") if effect else ""
@@ -240,10 +354,11 @@ def release_status(manifest, *, review=False):
     current = active is not None and activation and active[1]["release_id"] == activation
     result = {"kind": "rule_only_workflow", "name": root.name, "version": root.version,
               "baseline_version": record["baseline"]["definition_version"],
+              "included_workflows": [{"name": flow.name, "version": flow.version} for flow in bundle["flows"][1:]],
               "observed_runs": len(rows), "can_assess": bool(current and rows),
               "current_release": "candidate" if current else "previous" if active and active[1]["release_digest"] == record["baseline"]["release_digest"] else "other",
               "evidence": "Exact-version practice is readiness evidence. The latest 1,000 retained runs are checked for this activation's failures, not correctness or business improvement.",
-              "rollback": "Restores the previous published rules with a fresh authorization. Waiting work from either old release stays revoked. Your saved draft is kept."}
+              "rollback": "Restores the previous published rules and their exact included versions with a fresh authorization, if their original owners and sources remain available. Waiting work from either old release stays revoked. Saved drafts are kept."}
     if record.get("comparison_id"):
         from .local_flow_comparisons import summary, validate_release
         try:
@@ -260,19 +375,25 @@ def release_status(manifest, *, review=False):
         except (CandidatePromotionConflict, CandidatePromotionDenied):
             result["known_case_comparison"] = {"scope": "The original cases are no longer available or their exact binding changed. No current agreement result is claimed."}
     if review:
-        names = {key: node.label or "Step " + str(index + 1) for index, (key, node) in enumerate(root.nodes.items())}
-        result["steps"] = [{"label": node.label or "Step " + str(index + 1), "kind": node.kind,
-                            "instructions": node.brief if node.kind == "agent" else "",
+        result["steps"] = []
+        flow_names = {flow.id: flow.name for flow in bundle["flows"]}
+        for included in bundle["flows"]:
+            names = {key: node.label or "Step " + str(index + 1) for index, (key, node) in enumerate(included.nodes.items())}
+            prefix = included.name + " · version " + str(included.version) + " · " if len(bundle["flows"]) > 1 else ""
+            result["steps"].extend([{"label": prefix + (node.label or "Step " + str(index + 1)), "kind": node.kind,
+                            "instructions": node.brief if node.kind == "agent" else
+                                "Run included workflow: " + flow_names[node.flow_ref] if node.kind == "subflow" else "",
                             "questions": node.learned_operator["artifact"].get("spec", {}).get("inputs", {}) if node.learned_operator else {},
                             "examples": node.learned_operator["artifact"].get("examples", []) if node.learned_operator else [],
                             "output": node.output, "fallback": "Stops when the rules do not agree" if node.kind == "agent" else "",
-                            "condition": node.condition, "assignments": node.assignments,
+                            "included_workflow": flow_names.get(node.flow_ref, "") if node.kind == "subflow" else "",
+                            "condition": node.condition, "assignments": node.subflow_inputs if node.kind == "subflow" else node.assignments,
                             "cases": [{"condition": node.condition + " equals " + str(case.get("value")),
                                        "next": names.get(case.get("to") or node.next, "Finish")}
                                       for case in node.cases],
                             "next": names.get(node.next, ""),
                             "if_true": names.get(node.if_true, ""), "if_false": names.get(node.if_false, "")}
-                           for index, node in enumerate(root.nodes.values())]
+                           for index, node in enumerate(included.nodes.values())])
     return result
 
 
@@ -332,7 +453,7 @@ class LocalFlowDeployment:
             active = store.load_published_bundle(flow.id)
             if active is None or active[0].owner != flow.owner or active[0].revision != flow.revision:
                 raise CandidatePromotionConflict("The selected workflow has no current compatible publication.")
-            _pure(active[0])
+            _retained_bundle(*active)
             release = active[1]
             pending = [(run.run_id, run.status, run.release_id) for run in store.list_runs(flow_id=flow.id)
                        if run.status in runner.ACTIVE_STATUSES]
@@ -365,7 +486,8 @@ class LocalFlowDeployment:
         if stage_receipt.get("operation_id") != _receipt(record, effect, "stage").operation_id:
             raise CandidatePromotionConflict("The staged release changed.")
         release = store.publish_flow(flow.id, expected_version=flow.version, expected_revision=flow.revision,
-            expected_release_id=record["baseline"]["release_id"], activation_id=effect["activation_id"])
+            expected_release_id=record["baseline"]["release_id"], activation_id=effect["activation_id"],
+            expected_bundle_digest=record["bundle_sha"])
         effect = _effects().update(effect["id"], lambda row: row.update(activate_release=release),
             expected_revision=effect["revision"], action="flow.release.activate", actor=actor)
         return _receipt(record, effect, "activate")
@@ -381,8 +503,7 @@ class LocalFlowDeployment:
                 if not run.dry_run and run.release_id == effect["activation_id"] and run.status in _TERMINAL]
         if not rows:
             raise CandidatePromotionUnavailable("Complete a real run of this release before assessing its observed failure rate.")
-        failed = sum(run.status != runner.STATUS_COMPLETED or bool(run.error)
-                     or any(value.get("outcome") not in (None, 0) for value in run.nodes.values()) for run in rows)
+        failed = sum(not _successful_execution(run) for run in rows)
         return CanaryObservation(record["tenant"], TARGET, observed.active_artifact_sha256,
             (("error_rate", failed / len(rows)),), _sha([(run.run_id, run.status, run.updated) for run in rows]))
 
@@ -392,13 +513,17 @@ class LocalFlowDeployment:
         effect = self._effect(manifest)
         if rollback_handle != record["binding"]:
             raise CandidatePromotionConflict("The retained release does not match this review.")
-        draft = store.load_flow(record["flow_id"])
-        if draft is None or draft.owner != record["owner"] or draft.revision != record["flow_revision"]:
-            raise CandidatePromotionConflict("The workflow owner or generation changed. Restoration is blocked.")
-        prior = store.load_flow_snapshot(record["baseline"]["definition_digest"])
-        _pure(prior)
-        release = store.restore_published_flow(draft.id, record["baseline"], expected_release_id=effect["activation_id"],
-            expected_version=draft.version, expected_revision=draft.revision, activation_id=effect["restore_id"])
+        # Match native lock order. Qualification and restoration share one
+        # definition critical section, so a child cannot disappear or change
+        # original ownership/generation between those decisions.
+        with store._activation_lock(record["flow_id"]), store._definitions_lock():
+            draft = store.load_flow(record["flow_id"])
+            if draft is None or draft.owner != record["owner"] or draft.revision != record["flow_revision"]:
+                raise CandidatePromotionConflict("The workflow owner or generation changed. Restoration is blocked.")
+            prior = store.load_flow_snapshot(record["baseline"]["definition_digest"])
+            _retained_bundle(prior, record["baseline"])
+            release = store.restore_published_flow(draft.id, record["baseline"], expected_release_id=effect["activation_id"],
+                expected_version=draft.version, expected_revision=draft.revision, activation_id=effect["restore_id"])
         effect = _effects().update(effect["id"], lambda row: row.update(rollback_release=release),
             expected_revision=effect["revision"], action="flow.release.restore", actor=actor)
         return _receipt(record, effect, "rollback")
@@ -411,7 +536,7 @@ class LocalFlowDeployment:
         active = store.load_published_bundle(record["flow_id"])
         if active is None or active[0].owner != record["owner"] or active[0].revision != record["flow_revision"]:
             raise CandidatePromotionConflict("The current workflow release cannot be reconciled.")
-        _pure(active[0])
+        _retained_bundle(*active)
         release = active[1]
         restored = release["release_id"] in {record["baseline"]["release_id"], effect["restore_id"] if effect else ""}
         if release["release_id"] not in {record["baseline"]["release_id"], effect["activation_id"] if effect else "", effect["restore_id"] if effect else ""}:
@@ -447,6 +572,7 @@ class Selection(BaseModel):
     revision: str = Field(min_length=1, max_length=128)
     practice_run: str = Field(default="", max_length=128)
     comparison_id: str = Field(default="", pattern=r"^(?:FCP-[a-f0-9]{32})?$")
+    bundle_sha: str = Field(default="", pattern=r"^(?:[a-f0-9]{64})?$")
 
 
 def choices(request):
@@ -461,18 +587,27 @@ def choices(request):
         if flow.owner != actor:
             continue
         try:
-            _pure(flow, permit_fallback=True)
-        except (ValueError, CandidatePromotionDenied):
+            bundle = qualified_bundle(flow, permit_fallback=True)
+        except (ValueError, CandidatePromotionDenied, HTTPException):
             continue
-        root, _bundle_sha, _size = _bundle(flow)
+        root = bundle["root"]
         runs = [run for run in store.list_runs(flow_id=flow.id, owner=actor)
-                if run.dry_run and run.status == runner.STATUS_COMPLETED and run.definition_digest == root]
+                if run.dry_run and _successful_execution(run)
+                and run.definition_digest == root and run.definition_version == flow.version
+                and run.definition_revision == flow.revision and run.subflow_digests == bundle["manifest"]]
         published = store.load_published_bundle(flow.id)
         checks = [{"id": row["id"], "when": row["created_at"], "cases": len(row["cases"])}
                   for row in comparison_rows if row.get("flow_id") == flow.id and row.get("owner") == actor
-                  and row.get("root") == root and row.get("state") == "done" and published and row.get("baseline") == published[1]]
+                  and row.get("root") == root and row.get("bundle_sha") == bundle["bundle_sha"]
+                  and row.get("state") == "done" and published and row.get("baseline") == published[1]]
+        included = [{"name": child.name, "version": child.version, "href": "/flows/designer/" + child.id,
+                     "rules_only": all(node.learned_fallback is False for node in child.nodes.values() if node.kind == "agent")}
+                    for child in bundle["flows"][1:]]
         flows.append({"id": flow.id, "name": flow.name, "version": flow.version, "revision": flow.revision,
-                      "rules_only": all(node.learned_fallback is False for node in flow.nodes.values() if node.kind == "agent"),
+                      "bundle_sha": bundle["bundle_sha"], "included_workflows": included,
+                      "root_rules_only": all(node.learned_fallback is False for node in flow.nodes.values() if node.kind == "agent"),
+                      "rules_only": all(node.learned_fallback is False for child in bundle["flows"]
+                                        for node in child.nodes.values() if node.kind == "agent"),
                       "published": published is not None, "practice_runs": [{"id": run.run_id, "created": run.created} for run in runs[:50]],
                       "baseline_version": published[0].version if published else None,
                       "comparisons": checks[-50:],
@@ -483,7 +618,8 @@ def choices(request):
         if record["tenant"] == tenant and record["owner"] == actor:
             _practice(record)
             prepared = {"flow_id": record["flow_id"], "version": record["version"],
-                        "practice_run": record["practice_run"], "comparison_id": record.get("comparison_id", "")}
+                        "bundle_sha": record["bundle_sha"], "practice_run": record["practice_run"],
+                        "comparison_id": record.get("comparison_id", "")}
     except (CandidatePromotionUnavailable, CandidatePromotionConflict, CandidatePromotionDenied):
         pass
     return {"context": context, "enabled": candidate_promotion_enabled(), "flows": flows, "prepared": prepared,
@@ -506,29 +642,38 @@ def prepare_local_release(request, payload, *, rules_only=False):
         _require_learned_flow_evidence(flow)
         if flow.version != payload.version or flow.revision != payload.revision:
             raise HTTPException(409, "The saved workflow changed. Refresh and review again.")
-        _pure(flow, permit_fallback=rules_only)
+        bundle = qualified_bundle(flow, permit_fallback=rules_only)
+        if (payload.bundle_sha and payload.bundle_sha != bundle["bundle_sha"]
+                or bundle["manifest"] and not payload.bundle_sha):
+            raise HTTPException(409, "An included workflow changed or was not reviewed. Refresh the complete saved versions before continuing.")
         if rules_only:
-            updated = flow.copy()
-            for node in updated.nodes.values():
-                if node.kind == "agent":
-                    node.learned_fallback = False
-            saved = store.save_flow(updated, expected_version=flow.version, expected_revision=flow.revision)
+            _learning_allowed()
+            with store._definitions_lock():
+                current = _current(tenant, actor, flow.id)
+                current_bundle = qualified_bundle(current, permit_fallback=True)
+                if (current.version != flow.version or current.revision != flow.revision
+                        or current_bundle["bundle_sha"] != bundle["bundle_sha"]):
+                    raise HTTPException(409, "The saved or included workflows changed. Refresh and review again.")
+                updated = current.copy()
+                for node in updated.nodes.values():
+                    if node.kind == "agent":
+                        node.learned_fallback = False
+                saved = store.save_flow(updated, expected_version=flow.version, expected_revision=flow.revision)
             return {"flow_id": saved.id, "version": saved.version, "detail": "Rule-only draft saved. Publish a baseline, then practice each changed version before preparing its release review."}
         baseline = store.load_published_bundle(flow.id)
         if baseline is None or baseline[0].owner != actor or baseline[0].revision != flow.revision:
             raise HTTPException(409, "Publish a compatible rule-only baseline first.")
-        _pure(baseline[0])
-        root, bundle_sha, _size = _bundle(flow)
+        _retained_bundle(*baseline)
+        root, bundle_sha = bundle["root"], bundle["bundle_sha"]
         if bundle_sha == baseline[1]["release_digest"]:
             raise HTTPException(409, "The saved draft is already published. Change its learned rules and practice the new version first.")
         run = store.load_run(payload.practice_run, owner=actor)
         if run is None:
             raise HTTPException(409, "Choose a completed practice run for this saved version.")
-        result = _sha([run.run_id, run.definition_digest, run.status, run.updated,
-                      sorted((key, row.get("status"), row.get("outcome")) for key, row in run.nodes.items())])
+        result = _practice_result(run)
         material = {"tenant": tenant, "owner": actor, "flow_id": flow.id, "root": root, "bundle_sha": bundle_sha,
                     "version": flow.version, "flow_revision": flow.revision, "baseline": baseline[1],
-                    "practice_run": run.run_id, "practice_result": result}
+                    "practice_run": run.run_id, "practice_result": result, "subflow_digests": bundle["manifest"]}
         if payload.comparison_id:
             from .local_flow_comparisons import validate_release
             comparison = validate_release(payload.comparison_id, material)

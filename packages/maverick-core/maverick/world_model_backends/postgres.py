@@ -5714,7 +5714,7 @@ class PostgresWorldModel:
     # ----- pruning -----
 
     def purge_episodes_before(
-        self, cutoff_ts: float, *, dry_run: bool = False,
+        self, cutoff_ts: float, *, dry_run: bool = False, review_binding: dict | None = None,
     ) -> int:
         """Count or delete old completed episodes in the active tenant."""
         tenant = _required_retention_tenant("episode retention")
@@ -5725,6 +5725,12 @@ class PostgresWorldModel:
         params: list = [float(cutoff_ts), tenant]
         verb = "SELECT COUNT(*) FROM" if dry_run else "DELETE FROM"
         with self._tx() as cur:
+            if review_binding is not None:
+                from ..retention_review_bindings import guard_sql
+
+                guard_sql(cur, "episodes", predicate, tuple(params), review_binding, dry_run=dry_run, postgres=True)
+                if dry_run:
+                    return int(review_binding["count"])
             cur.execute(f"{verb} episodes WHERE {predicate}", tuple(params))
             if dry_run:
                 row = cur.fetchone()
@@ -5732,7 +5738,7 @@ class PostgresWorldModel:
             return int(cur.rowcount or 0)
 
     def purge_goal_events_before(
-        self, cutoff_ts: float, *, dry_run: bool = False,
+        self, cutoff_ts: float, *, dry_run: bool = False, review_binding: dict | None = None,
     ) -> int:
         """Count or delete old goal events in the active tenant."""
         tenant = _required_retention_tenant("goal-event retention")
@@ -5743,6 +5749,12 @@ class PostgresWorldModel:
         params: list = [float(cutoff_ts), tenant]
         verb = "SELECT COUNT(*) FROM" if dry_run else "DELETE FROM"
         with self._tx() as cur:
+            if review_binding is not None:
+                from ..retention_review_bindings import guard_sql
+
+                guard_sql(cur, "goal_events", predicate, tuple(params), review_binding, dry_run=dry_run, postgres=True)
+                if dry_run:
+                    return int(review_binding["count"])
             cur.execute(f"{verb} goal_events WHERE {predicate}", tuple(params))
             if dry_run:
                 row = cur.fetchone()
@@ -5750,7 +5762,7 @@ class PostgresWorldModel:
             return int(cur.rowcount or 0)
 
     def purge_messages_before(
-        self, cutoff_ts: float, *, dry_run: bool = False,
+        self, cutoff_ts: float, *, dry_run: bool = False, review_binding: dict | None = None,
     ) -> int:
         """Count or delete old conversation messages in the active tenant.
 
@@ -5765,6 +5777,12 @@ class PostgresWorldModel:
         params: list = [float(cutoff_ts), tenant]
         verb = "SELECT COUNT(*) FROM" if dry_run else "DELETE FROM"
         with self._tx() as cur:
+            if review_binding is not None:
+                from ..retention_review_bindings import guard_sql
+
+                guard_sql(cur, "messages", predicate, tuple(params), review_binding, dry_run=dry_run, postgres=True)
+                if dry_run:
+                    return int(review_binding["count"])
             cur.execute(f"{verb} messages WHERE {predicate}", tuple(params))
             if dry_run:
                 row = cur.fetchone()

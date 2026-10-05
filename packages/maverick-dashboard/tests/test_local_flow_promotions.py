@@ -97,7 +97,7 @@ def test_native_rule_only_practice_independent_copilot_release_canary_and_restor
     assert original.status_code == 200, original.text
     compare_body = {"context": checked["context"], "confirm": True, "authorize_case_use": True,
         "operation": "a" * 32, "flow_id": source.id, "version": candidate.version, "revision": candidate.revision,
-        "baseline_release": checked["baseline_release"], "output": "total",
+        "baseline_release": checked["baseline_release"], "bundle": checked["bundle"], "output": "total",
         "cases": [{"run_id": original_case.run_id, "source_version": original.json()["version"], "expected": "6"}]}
     refusal = harness.client.post(comparisons, json={**compare_body, "authorize_case_use": False})
     assert refusal.status_code == 409, refusal.text

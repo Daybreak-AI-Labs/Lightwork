@@ -758,7 +758,67 @@ def _resolve_key_by_id(keyid: bytes) -> bytes:
     )
 
 
-def rotate_at_rest_key() -> str:
+def _rotation_intent(operation_id: str) -> Path:
+    if not isinstance(operation_id, str) or re.fullmatch(r"[a-f0-9]{32,64}", operation_id) is None:
+        raise EncryptionUnavailable("the key change request is invalid")
+    return _key_path().parent / (".rotation-" + operation_id + ".intent")
+
+
+def rotation_receipt(operation_id: str) -> str | None:
+    """Read this exact additive change; never generate or install another key."""
+    intent = _rotation_intent(operation_id)
+    if not intent.exists():
+        return None
+    try:
+        file_lock.ensure_private_file(intent)
+        key = file_lock.atomic_read_bytes(intent)
+        if len(key) != _KEY_BYTES:
+            raise ValueError("invalid intent")
+        keyid = _key_fingerprint(key).hex()
+        destination = _keyring_dir() / (keyid + ".key")
+        if not destination.exists():
+            return None
+        if not hmac.compare_digest(_read_keyring_key(destination), key):
+            raise ValueError("key changed")
+        return keyid
+    except (OSError, ValueError) as exc:
+        raise EncryptionUnavailable("the original key change could not be verified") from exc
+
+
+def key_rotation_version() -> str:
+    """Opaque local key-history metadata for a reviewed additive change."""
+    entries = sorted(_keyring_dir().glob("*.key"))
+    if len(entries) > 4096:
+        raise EncryptionUnavailable("the local key history exceeds the maintenance allowance")
+    legacy = _key_path()
+    if legacy.exists():
+        entries.append(legacy)
+    source = "|".join(f"{item.name}:{item.stat().st_mtime_ns}:{item.stat().st_size}" for item in entries)
+    return hashlib.sha256(source.encode()).hexdigest()
+
+
+def rotate_at_rest_key(*, operation_id: str | None = None, expected_version: str | None = None) -> str:
+    """Serialize rotation and, when named, retain its exact private key intent.
+
+    A repeated named request uses the same additive key. A process exit between
+    key creation and dashboard receipt publication can be read back without
+    performing another rotation. Raw intent material stays in the private key
+    directory and is never returned, audited or stored in customer records.
+    """
+    if shared_authority_key_identity_required():
+        raise EncryptionUnavailable("shared authority deployments require externally coordinated key rotation; a local key cannot replace them")
+    _secure_key_dir()
+    with file_lock.cross_process_lock(_key_path().parent / "rotation.lock", strict=True):
+        if operation_id is not None:
+            original = rotation_receipt(operation_id)
+            if original:
+                return original
+        if expected_version is not None and not hmac.compare_digest(key_rotation_version(), expected_version):
+            raise EncryptionUnavailable("the local key history changed after review")
+        return _rotate_at_rest_key(operation_id=operation_id)
+
+
+def _rotate_at_rest_key(*, operation_id: str | None = None) -> str:
     """Mint a new active at-rest key in the rotation keyring and return its id.
 
     Safe and additive: new seals immediately use the new key (v2 header), while
@@ -781,13 +841,23 @@ def rotate_at_rest_key() -> str:
         file_lock.ensure_private_directory(d)
     except OSError as e:
         raise EncryptionUnavailable(f"cannot secure keyring dir {d}: {e}") from e
-    key = secrets.token_bytes(_KEY_BYTES)
+    if operation_id is not None:
+        intent = _rotation_intent(operation_id)
+        if not intent.exists():
+            file_lock.atomic_create_bytes(intent, secrets.token_bytes(_KEY_BYTES))
+        file_lock.ensure_private_file(intent)
+        key = file_lock.atomic_read_bytes(intent)
+        if len(key) != _KEY_BYTES:
+            raise EncryptionUnavailable("the original key change material could not be verified")
+    else:
+        key = secrets.token_bytes(_KEY_BYTES)
     keyid = _key_fingerprint(key)
     path = d / (keyid.hex() + ".key")
     try:
         file_lock.atomic_create_text(path, key.hex())
-    except FileExistsError:  # astronomically unlikely id collision; caller retries
-        raise EncryptionUnavailable("key-id collision; retry rotation") from None
+    except FileExistsError:  # a named request may have committed before its reply
+        if operation_id is None or not hmac.compare_digest(_read_keyring_key(path), key):
+            raise EncryptionUnavailable("key-id collision; retry rotation") from None
     except OSError as e:
         raise EncryptionUnavailable(f"cannot write keyring key {path}: {e}") from e
     return keyid.hex()

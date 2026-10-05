@@ -48,12 +48,14 @@ test('exact native result review supports direct lost-response recovery and ordi
   await context.route('**'+base+'/execute',async route=>{await route.fetch();await route.abort('connectionfailed');});
   await form.getByRole('button',{name:'Apply reviewed change',exact:true}).click();await expect(form).toContainText('result could not be confirmed');await context.unroute('**'+base+'/execute');
   const recorded=await state(id);expect(recorded.review.decision).toBe('rejected');expect(recorded.learning).toHaveLength(1);expect(recorded.handoff).toEqual([]);
+  await form.getByRole('button',{name:'Check original outcome',exact:true}).click();
+  await expect(form).toContainText('Your original rejection was recorded');expect(await state(id)).toEqual(recorded);
   const replay=await request.post(base+'/execute',{data:{token:material.token,confirmed:true}});expect(replay.ok(),await replay.text()).toBeTruthy();expect((await replay.json()).status).toBe('replayed');expect(await state(id)).toEqual(recorded);
   // Saved-result replacement refuses the prior review and leaves no decision or receipt.
   row=await setup();id=row.goal_id;const stale=await prepare(id,'reviews.result_approve',{acknowledged:true,note:''});expect(stale.ok(),await stale.text()).toBeTruthy();const token=(await stale.json()).token;
   await request.post(fixture+'/change/'+id);expect((await request.post(base+'/execute',{data:{token,confirmed:true}})).status()).toBe(409);expect((await state(id)).review).toBeNull();expect((await state(id)).receipts).toEqual([]);
   // Historical original receipts remain truthful after a result changes and never repeat follow-through.
   const historicalId=recorded.review.goal_id;await request.post(fixture+'/change/'+historicalId);
-  const history=await request.post(base+'/execute',{data:{token:material.token,confirmed:true}});expect(history.ok(),await history.text()).toBeTruthy();expect((await history.json()).message).toContain('historical receipt');expect((await state(historicalId)).learning).toHaveLength(1);
+  const history=await request.post(base+'/recover',{data:{token:material.token}});expect(history.ok(),await history.text()).toBeTruthy();expect((await history.json()).message).toContain('historical receipt');expect((await state(historicalId)).learning).toHaveLength(1);
   expect(errors).toEqual([]);
 });

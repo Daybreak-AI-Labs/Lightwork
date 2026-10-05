@@ -71,6 +71,7 @@ class Adapter:
     execute: Callable[[Request, dict, dict, dict, str], Outcome] | None = None
     recover: Callable[[Request, dict, dict, dict, str], Outcome | None] | None = None
     aliases: tuple[str, ...] = ()
+    read_recovery: Callable[[Request, dict, dict, dict, str], Outcome | None] | None = None
 
 
 class StrictInput(BaseModel):
@@ -93,8 +94,11 @@ class PrepareInput(ContextInput):
     arguments: dict[str, Any] = Field(default_factory=dict, max_length=30)
 
 
-class ExecuteInput(StrictInput):
+class RecoveryInput(StrictInput):
     token: str = Field(min_length=1, max_length=64000)
+
+
+class ExecuteInput(RecoveryInput):
     confirmed: bool
 
 
@@ -147,9 +151,10 @@ def _writes_enabled(request) -> bool:
 
 
 def _context(request):
+    suites = auth.caller_suites(request)
     return digest({"context": context_for(request), "role": auth.caller_role(request),
                    "global_admin": auth.has_global_permission(request, "admin"),
-                   "suites": sorted(auth.caller_suites(request) or []),
+                   "suites": sorted(suites) if suites is not None else None,
                    "families": sorted(enabled_families())})
 
 
@@ -160,17 +165,21 @@ def _adapter_modules():
         product_operations_activation,
         product_operations_approval_challenges,
         product_operations_approvals,
+        product_operations_audit_checkpoints,
         product_operations_budget,
         product_operations_commitments,
         product_operations_companion,
         product_operations_companion_admin,
         product_operations_companion_conversation,
+        product_operations_compliance_mappings,
         product_operations_connections,
         product_operations_consent_jobs,
         product_operations_conversation,
+        product_operations_department_boards,
         product_operations_devices,
         product_operations_diagnostics,
         product_operations_dsar_handoff,
+        product_operations_encryption,
         product_operations_external_agents,
         product_operations_facts,
         product_operations_flow_approval_recovery,
@@ -178,11 +187,13 @@ def _adapter_modules():
         product_operations_flow_releases,
         product_operations_form_recovery,
         product_operations_identity,
+        product_operations_installation_security,
         product_operations_instruction_capture,
         product_operations_knowledge,
         product_operations_learning_history,
         product_operations_learning_lessons,
         product_operations_learning_program,
+        product_operations_local_runtime,
         product_operations_models,
         product_operations_notifications,
         product_operations_outcome_pilots,
@@ -191,6 +202,7 @@ def _adapter_modules():
         product_operations_preferences,
         product_operations_projects,
         product_operations_record_history,
+        product_operations_retention,
         product_operations_skills,
         product_operations_specialist_tests,
         product_operations_stop,
@@ -208,10 +220,12 @@ def _adapter_modules():
         product_operations_approvals,
         product_operations_approval_challenges,
         product_operations_preferences,
+        product_operations_audit_checkpoints,
         product_operations_companion,
         product_operations_companion_admin,
         product_operations_companion_conversation,
         product_operations_commitments,
+        product_operations_compliance_mappings,
         product_operations_tasks,
         product_operations_task_launch,
         product_operations_task_map,
@@ -219,11 +233,13 @@ def _adapter_modules():
         product_operations_connections,
         product_operations_consent_jobs,
         product_operations_notifications,
+        product_operations_department_boards,
         product_operations_outcome_pilots,
         product_operations_budget,
         product_operations_models,
         product_operations_diagnostics,
         product_operations_dsar_handoff,
+        product_operations_encryption,
         product_operations_external_agents,
         product_operations_facts,
         product_operations_flow_approval_recovery,
@@ -233,8 +249,10 @@ def _adapter_modules():
         product_operations_knowledge,
         product_operations_learning_history,
         product_operations_instruction_capture,
+        product_operations_installation_security,
         product_operations_learning_lessons,
         product_operations_learning_program,
+        product_operations_local_runtime,
         product_operations_today,
         product_operations_activation,
         product_operations_devices,
@@ -243,6 +261,7 @@ def _adapter_modules():
         product_operations_stop,
         product_operations_identity,
         product_operations_record_history,
+        product_operations_retention,
         product_operations_skills,
         product_operations_specialist_tests,
         product_operations_task_signoff,
@@ -317,6 +336,8 @@ def catalog(request: Request, body: ContextInput):
     _read_gate(request)
     writes = _writes_enabled(request)
     page, selection = _page(body.page), _selection(body.selection)
+    original_context = _context(request)
+    families = enabled_families()
     items = []
     for adapter in adapters().values():
         if not any(fnmatchcase(page, path) for path in adapter.pages):
@@ -333,15 +354,18 @@ def catalog(request: Request, body: ContextInput):
                           "direct_ui": adapter.direct_ui})
             continue
         blocked = state.blocked
-        if adapter.family not in enabled_families():
+        if adapter.family not in families:
             blocked = "An administrator must enable this Copilot action family. Native controls remain available."
         items.append({"id": adapter.id, "label": adapter.label, "family": adapter.family,
                       "direct_ui": adapter.direct_ui, "available": not blocked,
                       "blocked": blocked, "revision": state.revision, "source": state.source,
                       "summary": state.summary, "details": state.details, "fields": state.fields,
                       "confirmation_required": adapter.execute is not None})
+    _gate(request)
+    if original_context != _context(request):
+        raise HTTPException(409, "Your account, workspace or access changed while these controls were read. Reopen Copilot to check current controls.")
     return _response({"schema": 1, "page": page, "selection": selection,
-                      "context": _context(request), "checked_at": time.time(), "operations": items})
+                      "context": original_context, "checked_at": time.time(), "operations": items})
 
 
 def _arguments(adapter, raw):
@@ -386,6 +410,7 @@ def prepare(request: Request, body: PrepareInput):
     if again.revision != state.revision or _context(request) != body.context or again.blocked:
         raise HTTPException(409, "The source changed while preparing this review. Refresh and review again.")
     return _response({"read_only": False, "operation": adapter.id, "token": token,
+                      "recovery_available": adapter.read_recovery is not None,
                       "expires_at": material["expires_at"], "summary": preview.summary,
                       "changes": preview.changes, "source": state.source,
                       "checked_at": time.time(), "direct_ui": adapter.direct_ui})
@@ -404,6 +429,30 @@ def _open(token):
         return material
     except Exception as exc:
         raise HTTPException(409, "This review expired or changed. Refresh and prepare it again.") from exc
+
+
+@router.post("/recover")
+def recover(request: Request, body: RecoveryInput):
+    """Read the original native outcome; absent evidence never dispatches work."""
+    _same_origin(request)
+    material = _open(body.token)
+    from maverick.authority_effects import authority_effect_fence
+    with authority_effect_fence():
+        adapter, _current = _adapter(request, material["page"], material["selection"], material["operation"])
+        if adapter.execute is None or material["context"] != _context(request):
+            raise HTTPException(409, "Your account, workspace or access changed. Open the native page to check the original result.")
+        arguments = _arguments(adapter, material["arguments"])
+        outcome = adapter.read_recovery(request, material["selection"], arguments, material["native"], material["operation_id"]) if adapter.read_recovery else None
+        _gate(request)
+        if material["context"] != _context(request):
+            raise HTTPException(409, "Access changed while reading this result. Reopen the native page.")
+    if outcome is None:
+        outcome = Outcome("unconfirmed", "The original result is not confirmed. No action was repeated. Check the native page before another attempt.")
+    if not isinstance(outcome, Outcome) or outcome.status not in {"confirmed", "replayed", "queued", "unconfirmed"}:
+        raise HTTPException(503, "The original result could not be confirmed. Check native status; no action was repeated.")
+    return _response({"operation": adapter.id, "status": outcome.status, "message": outcome.message,
+                      "details": outcome.details, "operation_id": material["operation_id"],
+                      "checked_at": time.time(), "direct_ui": adapter.direct_ui})
 
 
 @router.post("/execute")

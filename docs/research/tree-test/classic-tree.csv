@@ -1,4 +1,17 @@
 Level 1,Level 2,Level 3,Address
+Administration,AI on this computer,,/settings/local-ai
+Administration,Sign-in and work protection,,/settings/security-installation
+Administration,Permissions,,/permissions
+Administration,Connections,,/connections
+Administration,Document vault,,/administration/document-vault
+Administration,Workspace recovery,,/workspace/recovery
+Administration,Settings,,/settings
+Administration,Employee companions,,/companion/admin
+Administration,Users,,/users
+Administration,Sessions,,/settings/sessions
+Administration,Spending limits,,/spending-limits
+Administration,Workspaces,,/tenants
+Administration,Choose a workspace,,/workspace/tenant
 Insights,Approval challenges,,/learning/approval-challenges
 Insights,Instructions used in real work,,/learning/instructions
 Insights,Content access,,/content-access
@@ -78,6 +91,7 @@ Governance,No-code GRC studio,,/compliance/grc-studio
 Governance,Policy links,,/compliance/policy-links
 Governance,Find which controls apply,,/compliance/scoping
 Governance,Turn scope into tasks,,/compliance/scope-actions
+Governance,Build a task mapping,,/compliance/scope-actions/mapping
 Governance,Continuous evidence,,/compliance/continuous-evidence
 Governance,Regulations and rules,,/compliance/obligations
 Governance,Compartments,,/compartments
@@ -124,17 +138,6 @@ Third parties,Third-party intelligence,,/third-party/intelligence
 Third parties,Third-party lifecycle,,/third-party/lifecycle
 Third parties,Third-party collaboration,,/third-party/collaboration
 Third parties,Partner fleet,,/partner
-Administration,Permissions,,/permissions
-Administration,Connections,,/connections
-Administration,Document vault,,/administration/document-vault
-Administration,Workspace recovery,,/workspace/recovery
-Administration,Settings,,/settings
-Administration,Employee companions,,/companion/admin
-Administration,Users,,/users
-Administration,Sessions,,/settings/sessions
-Administration,Spending limits,,/spending-limits
-Administration,Workspaces,,/tenants
-Administration,Choose a workspace,,/workspace/tenant
 Library,Skills,,/skills
 Library,Skill store,,/store
 Library,Templates,,/templates

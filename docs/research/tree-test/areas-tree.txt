@@ -127,6 +127,7 @@ Risk & compliance
 		Policy links
 		Find which controls apply
 		Turn scope into tasks
+		Build a task mapping
 	Assessments
 		Assessments
 		AI evidence analysis
@@ -176,6 +177,7 @@ Settings
 	Setup
 		Workflow readiness
 	AI providers
+		AI on this computer
 		Providers
 	Connections
 	Chat apps
@@ -190,6 +192,7 @@ Settings
 		Workspace recovery
 	Partner fleet
 	Advanced
+		Sign-in and work protection
 		Benchmarks
 		Performance diagnostics
 		Cache

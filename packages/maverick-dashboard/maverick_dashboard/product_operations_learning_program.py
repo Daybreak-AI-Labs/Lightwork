@@ -115,7 +115,7 @@ def decision_recover(request, _selection, arguments, prepared, _operation, *, un
             item.get("proposal_id") == row["id"] and item.get("digest") == row["digest"] for item in current)
     if not confirmed:
         return None
-    return Outcome("replayed", "The reviewed instruction result is already present. No change was repeated.",
+    return Outcome("unconfirmed", "Current instructions match this reviewed change. This does not establish which request applied or restored them. No change was repeated; review current instructions before continuing.",
                    {"current_instructions": {"href": "/learned", "label": "Review current instructions"}})
 
 

@@ -57,4 +57,4 @@ def execute(request, selection, args, prepared, operation_id):
 
 def entries():
     return (Adapter("tasks.resume", "Review and restart this task", "tasks", "/chat", ("/chat/goal/*", "/goals/*"),
-                    RestartInput, snapshot, prepare, execute, recover),)
+                    RestartInput, snapshot, prepare, execute, recover, read_recovery=recover),)

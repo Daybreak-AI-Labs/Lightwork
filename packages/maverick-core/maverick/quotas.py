@@ -332,7 +332,7 @@ class UsageLedger:
         return out
 
     def prune(self, keep_days: int, *, now: float | None = None,
-              dry_run: bool = False) -> dict:
+              dry_run: bool = False, review_binding: dict | None = None) -> dict:
         """Drop ``(principal, day)`` buckets older than ``keep_days`` days.
 
         The ledger accrues a row per ``(principal, UTC day)`` forever; this is
@@ -352,6 +352,18 @@ class UsageLedger:
         removed_principals = 0
         with _RECORD_LOCK, _cross_process_lock(self.path):
             data, receipts = self._load_state()
+            if review_binding is not None:
+                from .retention_review_bindings import check, seal
+
+                candidates = ([principal, day, data[principal][day]]
+                    for principal in sorted(data)
+                    for day in sorted(data[principal]) if isinstance(day, str) and day <= cutoff_day)
+                bucket_seal = seal(candidates)
+                charges = ([identity, day, receipts[identity]["charges"][day]]
+                    for identity in sorted(receipts)
+                    for day in sorted(receipts[identity]["charges"]) if day <= cutoff_day)
+                charge_seal = seal(charges)
+                check(review_binding, {"buckets": bucket_seal, "charges": charge_seal}, dry_run=dry_run)
             for principal in list(data.keys()):
                 days = data.get(principal) or {}
                 expired = [d for d in days if isinstance(d, str) and d <= cutoff_day]

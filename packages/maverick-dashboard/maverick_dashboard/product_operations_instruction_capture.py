@@ -108,7 +108,7 @@ def recover(request, _selection, arguments, _prepared, operation, *, action):
         auth.require_global_permission(request, "admin")
         if native.source.enabled() != arguments["enabled"]:
             return None
-        return Outcome("replayed", "The current recording setting matches this review. No setting change was repeated.")
+        return Outcome("unconfirmed", "The current recording setting matches this review. The original change is not confirmed. No setting change was repeated.")
     identity = "ISC-" + operation if action == "start" else arguments["record"]
     row = native.source.records().get(identity)
     if not row or row.get("owner") != actor or action == "start" and row.get("goal_id") != arguments["task"]:
@@ -119,6 +119,10 @@ def recover(request, _selection, arguments, _prepared, operation, *, action):
         native.source.visible(world, identity, actor)
     except ValueError:
         return None
+    if action in {"withdraw", "finish"}:
+        return Outcome("unconfirmed", native._plain(row)["status"] +
+            ". This is current status; it does not identify which request changed the record. No action was repeated.",
+            {"open": {"label": "Review current instruction record", "href": _PAGE + "?record=" + identity}})
     description = "The original request is recorded but needs completion on the instruction records page." if row["state"] == "prepared" else native._plain(row)["status"]
     return Outcome("replayed", description + " No action was repeated.", {"open": {"label": "Review current instruction record", "href": _PAGE + "?record=" + identity}})
 

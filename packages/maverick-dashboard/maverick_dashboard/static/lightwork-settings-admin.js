@@ -14,8 +14,9 @@
   function badge(ok, yes, no) {
     return el('span', 'badge ' + (ok ? 'active' : 'blocked'), ok ? yes : no);
   }
-  async function call(path, method) {
-    return window.mvFetchJSON(path, {method: method || 'GET', cache: 'no-store'});
+  async function call(path, method, body) {
+    return window.mvFetchJSON(path, {method: method || 'GET', cache: 'no-store',
+      body: body == null ? undefined : body, timeout: 30000});
   }
 
   // Forms marked data-confirm ask first (remove a key, reset visibility...).
@@ -36,6 +37,7 @@
 
   // ---- Maintenance tab -------------------------------------------------------
   var base = '/api/v1/admin/system';
+  var runs = {}, encryptionContext = null;
   function out(name) { return document.querySelector('[data-maintenance-out="' + name + '"]'); }
   function say(name, text) {
     window.mvStatus(document.querySelector('[data-maintenance-status="' + name + '"]'), text);
@@ -135,23 +137,9 @@
         tr.appendChild(el('td', null, when(job.when)));
         var action = el('td');
         if (job.needs_decision) {
-          var button = el('button', 'btn btn--primary', 'Resume schedule');
-          button.type = 'button';
-          button.addEventListener('click', async function () {
-            var ok = await window.mvConfirm('Let this schedule run again from its next time? The run that could not be confirmed will not be repeated.', {okText: 'Resume schedule'});
-            if (!ok) return;
-            button.disabled = true;
-            try {
-              await window.mvFetchJSON(base + '/queue/' + encodeURIComponent(job.id) + '/resume',
-                {method: 'POST', body: {attempts: job.attempts}});
-              say('queue', 'The schedule will run again at its next time.');
-              run('queue');
-            } catch (failure) {
-              say('queue', errorText(failure, 'resume the schedule'));
-              button.disabled = false;
-            }
-          });
-          action.appendChild(button);
+          var review = el('a', 'btn btn--primary', 'Review this schedule');
+          review.href = '/automations?recover_schedule=' + encodeURIComponent(job.id);
+          action.appendChild(review);
         } else {
           action.appendChild(el('span', 'muted', 'Nothing to do. It will not run again.'));
         }
@@ -169,41 +157,103 @@
       return data.stopped.length + ' job' + (data.stopped.length === 1 ? '' : 's') + ' stopped.';
     },
     encryption: function (data) {
+      encryptionContext = data.context;
       var box = out('encryption'); box.textContent = '';
       var p = el('p');
-      p.appendChild(badge(data.enabled, 'Encrypted', 'Not encrypted'));
+      p.appendChild(badge(data.enabled, 'New records protected', 'Protection is off'));
       p.appendChild(document.createTextNode(' ' + (data.enabled
-        ? 'Saved records are encrypted on this computer.'
+        ? 'Stored-data protection is on. Older records are checked separately below.'
         : 'Saved records are not encrypted. Whoever installed Lightwork can turn encryption on.')));
       box.appendChild(p);
+      if (data.blocked) box.appendChild(el('p', 'muted', data.blocked));
       if (!data.enabled) return '';
       var actions = el('p', 'settings-row-form');
+      var pendingKey = 'lightwork.encryption.action.' + data.context;
+      var pending;
+      try { pending = JSON.parse(window.sessionStorage.getItem(pendingKey) || 'null'); } catch (_) { pending = null; }
+      async function readOriginal() {
+        if (!pending) return;
+        say('encryption', 'Reading the original result…');
+        try {
+          var saved = await call(base + '/encryption/actions/' + pending.operation);
+          if (encryptionContext !== data.context || (saved.receipt && saved.receipt.context !== data.context)) return;
+          if (saved.receipt && saved.receipt.state === 'confirmed') {
+            window.sessionStorage.removeItem(pendingKey); pending = null;
+            await run('encryption'); if (encryptionContext === data.context) say('encryption', saved.receipt.message);
+          } else {
+            say('encryption', saved.receipt && saved.receipt.message ? saved.receipt.message : 'The original result is unconfirmed. It has not been repeated. Read it again, or keep this result and review a separate action.');
+          }
+        } catch (failure) { if (encryptionContext === data.context) say('encryption', await plainFailure(failure, 'read the original result')); }
+      }
+      var busy = false;
+      async function reviewedAction(action) {
+        if (busy || pending) return;
+        busy = true;
+        actions.querySelectorAll('button').forEach(function (button) { button.disabled = true; });
+        try {
+          var review = await call(base + '/encryption/review', 'POST', {action: action});
+          if (encryptionContext !== data.context) return;
+          if (review.context !== data.context) throw new Error('Your account or workspace changed. Refresh before continuing.');
+          if (!await window.mvConfirm(review.summary, {okText: action === 'rotate' ? 'Create key' : 'Protect records'})) return;
+          if (encryptionContext !== data.context) return;
+          var bytes = new Uint8Array(16); window.crypto.getRandomValues(bytes);
+          var operation = Array.from(bytes, function (value) { return value.toString(16).padStart(2, '0'); }).join('');
+          pending = {operation: operation, action: action};
+          window.sessionStorage.setItem(pendingKey, JSON.stringify(pending));
+          say('encryption', 'Applying this reviewed action…');
+          var result = await call(base + (action === 'rotate' ? '/encryption/new-key' : '/encryption/protect-older'), 'POST',
+            {context: data.context, review: review.token, operation: operation, confirm: true});
+          if (encryptionContext !== data.context || result.context !== data.context) return;
+          if (result.state === 'confirmed') {
+            window.sessionStorage.removeItem(pendingKey); pending = null;
+            await run('encryption'); if (encryptionContext === data.context) say('encryption', result.message);
+          } else { await run('encryption'); await readOriginal(); }
+        } catch (failure) {
+          if (encryptionContext !== data.context) return;
+          if (pending) { await run('encryption'); await readOriginal(); }
+          else say('encryption', await plainFailure(failure, 'prepare this encryption change'));
+        } finally {
+          busy = false;
+          actions.querySelectorAll('button').forEach(function (button) { button.disabled = Boolean(pending); });
+        }
+      }
+      if (pending) {
+        var read = el('button', 'btn', 'Read original result'); read.type = 'button';
+        read.addEventListener('click', readOriginal); box.appendChild(read);
+        var keep = el('button', 'btn btn--ghost', 'Keep result and check again'); keep.type = 'button';
+        keep.addEventListener('click', async function () {
+          if (!await window.mvConfirm('The original result stays unconfirmed in the activity history. Keep it and check current protection before reviewing a separate action?', {okText: 'Keep and check'})) return;
+          window.sessionStorage.removeItem(pendingKey); pending = null; await run('encryption');
+        }); box.appendChild(keep);
+        box.appendChild(el('p', 'muted', 'An earlier action needs readback. No action will repeat automatically.'));
+      }
       if (data.older_unprotected) {
         box.appendChild(el('p', null, data.older_unprotected + ' older record' + (data.older_unprotected === 1 ? ' was' : 's were') + ' saved before encryption was turned on.'));
         var protect = el('button', 'btn btn--primary', 'Encrypt older records');
         protect.type = 'button';
         protect.addEventListener('click', function () {
-          mutate('encryption', '/encryption/protect-older',
-            'Encrypt the older records now? This can take a few minutes. Keep a backup of your encryption key first.',
-            'Encrypt records', function (res) { return res.protected + ' record' + (res.protected === 1 ? '' : 's') + ' encrypted.'; });
+          reviewedAction('protect');
         });
+        protect.disabled = Boolean(pending) || !data.can_protect;
         actions.appendChild(protect);
       } else if (data.older_note) {
         // Records kept in a shared database cannot be checked from here:
         // say so instead of claiming they are encrypted.
         box.appendChild(el('p', 'muted', data.older_note));
       } else if (data.older_unprotected === 0) {
-        box.appendChild(el('p', 'muted', 'All older records are encrypted.'));
+        box.appendChild(el('p', 'muted', 'No unprotected fields were found among the supported older records in this workspace.'));
       }
       var rotate = el('button', 'btn', 'Make a new encryption key');
       rotate.type = 'button';
       rotate.addEventListener('click', function () {
-        mutate('encryption', '/encryption/new-key',
-          'Make a new encryption key? New records use it straight away. Older keys are kept so existing records stay readable.',
-          'Make new key', function () { return 'New encryption key in use.'; });
+        reviewedAction('rotate');
       });
+      rotate.disabled = Boolean(pending) || !data.can_rotate;
+      if (!data.can_rotate) box.appendChild(el('p', 'muted', 'Workspace keys and keys held by another key service need their own coordinated change. A local key cannot replace them.'));
       actions.appendChild(rotate);
       box.appendChild(actions);
+      var backup = el('a', 'btn btn--ghost', 'Keep a separate key backup'); backup.href = '/workspace/recovery';
+      box.appendChild(backup);
       return '';
     },
     diagnostics: function (data) {
@@ -433,16 +483,18 @@
   }
 
   async function run(name) {
+    var sequence = runs[name] = (runs[name] || 0) + 1;
     var button = document.querySelector('[data-maintenance-run="' + name + '"]');
     if (button) button.disabled = true;
     say(name, 'Checking…');
     try {
       var data = await call(base + paths[name][0], paths[name][1]);
+      if (runs[name] !== sequence) return;
       say(name, renderers[name](data) || '');
     } catch (failure) {
-      say(name, errorText(failure, actions[name]));
+      if (runs[name] === sequence) say(name, errorText(failure, actions[name]));
     } finally {
-      if (button) button.disabled = false;
+      if (button && runs[name] === sequence) button.disabled = false;
     }
   }
   async function mutate(name, path, question, okText, done) {

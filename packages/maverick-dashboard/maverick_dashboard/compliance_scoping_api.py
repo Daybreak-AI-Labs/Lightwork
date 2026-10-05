@@ -265,6 +265,43 @@ class ComplianceScopingDependencies:
         self.store_for = store_for
 
 
+def authority(request: Request, dependencies: ComplianceScopingDependencies | None = None):
+    """Shared native tenant/principal and injected-store boundary."""
+    deps = dependencies or ComplianceScopingDependencies()
+    scoping = _scoping()
+    tenant = _tenant_id()
+    principal = _principal(request, tenant)
+    factory = getattr(request.app.state, "compliance_scoping_store_factory", None)
+
+    def resolver() -> str:
+        return principal
+
+    try:
+        store = (
+            factory(
+                tenant_id=tenant,
+                principal_ref=principal,
+                principal_resolver=resolver,
+                request=request,
+            )
+            if callable(factory)
+            else deps.store_for(tenant, principal)
+        )
+    except scoping.ComplianceScopingConfigError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except (scoping.ComplianceScopingError, OSError) as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="compliance-scoping store is unavailable",
+        ) from exc
+    if store is None:
+        raise HTTPException(
+            status_code=503,
+            detail="compliance-scoping store is unavailable",
+        )
+    return scoping, tenant, store
+
+
 def create_compliance_scoping_router(  # noqa: C901, PLR0915
     dependencies: ComplianceScopingDependencies | None = None,
 ) -> APIRouter:
@@ -274,39 +311,8 @@ def create_compliance_scoping_router(  # noqa: C901, PLR0915
         tags=["compliance-scoping"],
     )
 
-    def authority(request: Request):
-        scoping = _scoping()
-        tenant = _tenant_id()
-        principal = _principal(request, tenant)
-        factory = getattr(request.app.state, "compliance_scoping_store_factory", None)
-
-        def resolver() -> str:
-            return principal
-
-        try:
-            store = (
-                factory(
-                    tenant_id=tenant,
-                    principal_ref=principal,
-                    principal_resolver=resolver,
-                    request=request,
-                )
-                if callable(factory)
-                else deps.store_for(tenant, principal)
-            )
-        except scoping.ComplianceScopingConfigError as exc:
-            raise HTTPException(status_code=403, detail=str(exc)) from exc
-        except (scoping.ComplianceScopingError, OSError) as exc:
-            raise HTTPException(
-                status_code=503,
-                detail="compliance-scoping store is unavailable",
-            ) from exc
-        if store is None:
-            raise HTTPException(
-                status_code=503,
-                detail="compliance-scoping store is unavailable",
-            )
-        return scoping, tenant, store
+    def bound_authority(request: Request):
+        return authority(request, deps)
 
     async def call(scoping, function, *args, **kwargs):
         try:
@@ -363,7 +369,7 @@ def create_compliance_scoping_router(  # noqa: C901, PLR0915
         workspace, newest first, for the page's record lists."""
 
         require_permission(request, "view")
-        scoping, tenant, store = authority(request)
+        scoping, tenant, store = bound_authority(request)
         listed = await call(scoping, store.list_records, tenant, limit=limit)
         return {
             "questionnaires": [
@@ -423,7 +429,7 @@ def create_compliance_scoping_router(  # noqa: C901, PLR0915
         signing key (the page never asks for a key reference)."""
 
         require_permission(request, "operate")
-        scoping, tenant, store = authority(request)
+        scoping, tenant, store = bound_authority(request)
         scope = await call(scoping, store.get_scope, tenant, scope_id)
         export_id = "report-" + hashlib.sha256(
             f"{scope_id}:{body.idempotency_key}".encode()
@@ -448,7 +454,7 @@ def create_compliance_scoping_router(  # noqa: C901, PLR0915
         body: QuestionnaireVersionIn,
     ):
         require_permission(request, "operate")
-        scoping, tenant, store = authority(request)
+        scoping, tenant, store = bound_authority(request)
         payload = body.model_dump()
         payload["questions"] = [item.model_dump() for item in body.questions]
         payload["rules"] = [item.model_dump() for item in body.rules]
@@ -469,7 +475,7 @@ def create_compliance_scoping_router(  # noqa: C901, PLR0915
         version: VersionPath,
     ):
         require_permission(request, "view")
-        scoping, tenant, store = authority(request)
+        scoping, tenant, store = bound_authority(request)
         return _jsonable(
             await call(scoping, store.get_questionnaire, tenant, questionnaire_id, version)
         )
@@ -482,7 +488,7 @@ def create_compliance_scoping_router(  # noqa: C901, PLR0915
         body: RevisionIn,
     ):
         require_global_permission(request, "admin")
-        scoping, tenant, store = authority(request)
+        scoping, tenant, store = bound_authority(request)
         return _jsonable(
             await call(
                 scoping,
@@ -501,7 +507,7 @@ def create_compliance_scoping_router(  # noqa: C901, PLR0915
         body: AssessmentIn,
     ):
         require_permission(request, "operate")
-        scoping, tenant, store = authority(request)
+        scoping, tenant, store = bound_authority(request)
         return _jsonable(
             await call(
                 scoping,
@@ -515,7 +521,7 @@ def create_compliance_scoping_router(  # noqa: C901, PLR0915
     @router.get("/assessments/{assessment_id}")
     async def get_assessment(request: Request, assessment_id: ObjectPath):
         require_permission(request, "view")
-        scoping, tenant, store = authority(request)
+        scoping, tenant, store = bound_authority(request)
         return _jsonable(await call(scoping, store.get_assessment, tenant, assessment_id))
 
     @router.get("/assessments/{assessment_id}/required-questions")
@@ -525,7 +531,7 @@ def create_compliance_scoping_router(  # noqa: C901, PLR0915
         limit: int = Query(default=100, ge=1, le=1_000),
     ):
         require_permission(request, "view")
-        scoping, tenant, store = authority(request)
+        scoping, tenant, store = bound_authority(request)
         items = await call(
             scoping,
             store.next_required_questions,
@@ -543,7 +549,7 @@ def create_compliance_scoping_router(  # noqa: C901, PLR0915
         body: ResponseIn,
     ):
         require_permission(request, "operate")
-        scoping, tenant, store = authority(request)
+        scoping, tenant, store = bound_authority(request)
         return _jsonable(
             await call(
                 scoping,
@@ -563,7 +569,7 @@ def create_compliance_scoping_router(  # noqa: C901, PLR0915
         body: ComputeScopeIn,
     ):
         require_permission(request, "operate")
-        scoping, tenant, store = authority(request)
+        scoping, tenant, store = bound_authority(request)
         payload = body.model_dump()
         payload["responsibility_assignments"] = body.responsibility_assignments.model_dump()
         return _jsonable(
@@ -580,12 +586,12 @@ def create_compliance_scoping_router(  # noqa: C901, PLR0915
     @router.get("/scopes/{scope_id}")
     async def get_scope(request: Request, scope_id: ObjectPath):
         require_permission(request, "view")
-        scoping, tenant, store = authority(request)
+        scoping, tenant, store = bound_authority(request)
         return _jsonable(await call(scoping, store.get_scope, tenant, scope_id))
 
     async def scope_projection(request: Request, scope_id: str, field: str):
         require_permission(request, "view")
-        scoping, tenant, store = authority(request)
+        scoping, tenant, store = bound_authority(request)
         scope = await call(scoping, store.get_scope, tenant, scope_id)
         return _jsonable(getattr(scope, field))
 
@@ -606,7 +612,7 @@ def create_compliance_scoping_router(  # noqa: C901, PLR0915
     @router.post("/scopes/{scope_id}/approve")
     async def approve_scope(request: Request, scope_id: ObjectPath, body: RevisionIn):
         require_global_permission(request, "admin")
-        scoping, tenant, store = authority(request)
+        scoping, tenant, store = bound_authority(request)
         return _jsonable(
             await call(
                 scoping,
@@ -620,7 +626,7 @@ def create_compliance_scoping_router(  # noqa: C901, PLR0915
     @router.post("/scopes/{scope_id}/finalize")
     async def finalize_scope(request: Request, scope_id: ObjectPath, body: RevisionIn):
         require_permission(request, "operate")
-        scoping, tenant, store = authority(request)
+        scoping, tenant, store = bound_authority(request)
         return _jsonable(
             await call(
                 scoping,
@@ -639,7 +645,7 @@ def create_compliance_scoping_router(  # noqa: C901, PLR0915
         body: ExportScopeIn,
     ):
         require_permission(request, "operate")
-        scoping, tenant, store = authority(request)
+        scoping, tenant, store = bound_authority(request)
         return _jsonable(
             await call(
                 scoping,
@@ -654,19 +660,19 @@ def create_compliance_scoping_router(  # noqa: C901, PLR0915
     @router.get("/exports/{export_id}")
     async def get_export(request: Request, export_id: ObjectPath):
         require_permission(request, "view")
-        scoping, tenant, store = authority(request)
+        scoping, tenant, store = bound_authority(request)
         return _jsonable(await call(scoping, store.get_export, tenant, export_id))
 
     @router.post("/retention/purge")
     async def purge(request: Request, body: PurgeIn):
         require_global_permission(request, "admin")
-        scoping, tenant, store = authority(request)
+        scoping, tenant, store = bound_authority(request)
         return _jsonable(await call(scoping, store.purge_expired, tenant, **body.model_dump()))
 
     @router.get("/integrity")
     async def integrity(request: Request):
         require_global_permission(request, "audit")
-        scoping, tenant, store = authority(request)
+        scoping, tenant, store = bound_authority(request)
         result = _jsonable(await call(scoping, store.verify_integrity, tenant))
         result["valid"] = True
         return result

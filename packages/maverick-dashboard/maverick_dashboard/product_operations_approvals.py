@@ -118,7 +118,9 @@ def entries():
                     EmptyInput, snapshot, read_prepare, aliases=("read this approval", "check this decision")),
             Adapter("reviews.approval_approve", "Approve the selected request", "reviews", "/approvals", pages,
                     ApproveInput, partial(snapshot, status="approved"), partial(prepare, status="approved"),
-                    partial(execute, status="approved"), partial(recover, status="approved"), aliases=("approve this request",)),
+                    partial(execute, status="approved"), partial(recover, status="approved"), aliases=("approve this request",),
+                    read_recovery=partial(recover, status="approved")),
             Adapter("reviews.approval_reject", "Reject the selected request", "reviews", "/approvals", pages,
                     RejectInput, partial(snapshot, status="denied"), partial(prepare, status="denied"),
-                    partial(execute, status="denied"), partial(recover, status="denied"), aliases=("reject this request", "deny this request")))
+                    partial(execute, status="denied"), partial(recover, status="denied"), aliases=("reject this request", "deny this request"),
+                    read_recovery=partial(recover, status="denied")))

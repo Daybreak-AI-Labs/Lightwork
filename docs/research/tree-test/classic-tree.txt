@@ -1,3 +1,17 @@
+Administration
+	AI on this computer
+	Sign-in and work protection
+	Permissions
+	Connections
+	Document vault
+	Workspace recovery
+	Settings
+	Employee companions
+	Users
+	Sessions
+	Spending limits
+	Workspaces
+	Choose a workspace
 Insights
 	Approval challenges
 	Instructions used in real work
@@ -80,6 +94,7 @@ Governance
 	Policy links
 	Find which controls apply
 	Turn scope into tasks
+	Build a task mapping
 	Continuous evidence
 	Regulations and rules
 	Compartments
@@ -130,18 +145,6 @@ Third parties
 	Third-party lifecycle
 	Third-party collaboration
 	Partner fleet
-Administration
-	Permissions
-	Connections
-	Document vault
-	Workspace recovery
-	Settings
-	Employee companions
-	Users
-	Sessions
-	Spending limits
-	Workspaces
-	Choose a workspace
 Library
 	Skills
 	Skill store

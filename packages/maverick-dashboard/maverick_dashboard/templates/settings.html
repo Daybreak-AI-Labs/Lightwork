@@ -791,7 +791,7 @@
 
   <div class="section-head" data-settings-group="maintenance"><h2>Background work</h2></div>
   <div class="panel" data-settings-group="maintenance" data-maintenance="queue">
-    <p class="muted settings-lead">Scheduled and background tasks, and any that stopped because of a problem.</p>
+    <p class="muted settings-lead">Scheduled and background work, including anything that stopped. Open a stopped schedule to review what happened and choose its next step.</p>
     <p class="settings-row-form"><button type="button" class="btn" data-maintenance-run="queue">Show background work</button></p>
     <p class="muted" role="status" aria-live="polite" data-maintenance-status="queue"></p>
     <div data-maintenance-out="queue"></div>
@@ -800,6 +800,8 @@
   <div class="section-head" data-settings-group="maintenance"><h2 id="maintenance-encryption">Encryption</h2></div>
   <div class="panel" data-settings-group="maintenance" data-maintenance="encryption">
     <p class="muted settings-lead">Whether saved records are encrypted on this computer, and tools to keep them protected.</p>
+    <p class="settings-row-form"><a class="btn btn--ghost" href="/settings/security-installation">Manage sign-in and work protection</a>
+      <a class="btn btn--ghost" href="/settings/local-ai">Manage AI on this computer</a></p>
     <p class="settings-row-form"><button type="button" class="btn" data-maintenance-run="encryption">Check encryption</button></p>
     <p class="muted" role="status" aria-live="polite" data-maintenance-status="encryption"></p>
     <div data-maintenance-out="encryption"></div>

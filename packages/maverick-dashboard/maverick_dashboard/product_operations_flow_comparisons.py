@@ -37,6 +37,7 @@ def prepare(request, selection, arguments):
     return Preview("Review original values and freeze expected answers in the native form. Nothing ran from this status check and no case-use permission was granted.",
         native={"workflow": value["name"], "saved_version": value["version"], "published_baseline": value["baseline_version"],
                 "available_real_cases": len(value["cases"]), "scope": value["scope"],
+                "included_workflows": value["included_workflows"],
                 "open": {"label": "Choose real cases and compare saved rules",
                          "href": native.PAGE + "?workflow=" + arguments["flow"]}})
 
@@ -59,11 +60,12 @@ def result_prepare(request, _selection, arguments):
     details["recorded"] = datetime.fromtimestamp(details.pop("when"), timezone.utc).strftime("%d %b %Y, %H:%M UTC")
     return Preview(value["detail"], native={"workflow": value["name"], "saved_version": value["version"],
         "current_saved_version": value["current"], "complete_results": value["state"] == "done", **details,
+        "included_workflows": value["included_workflows"],
         "open": {"label": "Review protected original cases and recorded results", "href": native.PAGE + "?workflow=" + value["flow_id"]}})
 
 
 def entries():
-    pages = (native.PAGE, "/research", "/flows/designer/{id}")
+    pages = (native.PAGE, "/research", "/flows/designer/*")
     return (Adapter("learning.flow_case_compare", "Compare saved rules on real cases", "learning", native.PAGE, pages,
                     Workflow, snapshot, prepare, aliases=("compare real workflow cases",)),
             Adapter("learning.flow_case_results", "Review retained rule comparison results", "learning", native.PAGE, pages,

@@ -376,6 +376,9 @@ async def retention_settings(request: Request) -> dict:
 @router.post("/retention")
 async def save_retention(request: Request, body: RetentionIn) -> dict:
     require_global_permission(request, "admin")
+    from .retention_maintenance import authorize
+
+    authorize(request, request.headers.get("X-Lightwork-Retention-Context"))
     updates = {
         ("retention", key): 0 if value is None else value
         for key, value in body.model_dump(exclude_unset=True).items()
@@ -435,24 +438,43 @@ class RetentionApplyIn(BaseModel):
     review_id: str = Field(pattern=r"^[a-f0-9]{32}$")
     confirm_no_holds: bool = False
     retry: bool = False
+    context: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
+    expected_revision: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
+    operation_id: str | None = Field(default=None, pattern=r"^[a-f0-9]{32}$")
+
+
+def _retention_response(value):
+    from fastapi.responses import JSONResponse
+
+    return JSONResponse(value, headers={"Cache-Control": "private, no-store"})
 
 
 @router.post("/retention/preview")
 async def preview_retention(request: Request) -> dict:
     require_global_permission(request, "admin")
-    from . import retention_runs
-    from .auth import caller_principal
+    from . import retention_maintenance
 
-    return await run_in_threadpool(retention_runs.preview, caller_principal(request) or "local administrator")
+    operation = request.headers.get("X-Lightwork-Retention-Operation")
+    if operation is not None and not re.fullmatch(r"[a-f0-9]{32}", operation):
+        raise HTTPException(422, "The preview reference is invalid. Reopen retention.")
+    value = await run_in_threadpool(retention_maintenance.preview, request,
+                                   request.headers.get("X-Lightwork-Retention-Context"), operation_id=operation)
+    return _retention_response(value)
+
+
+@router.get("/retention/reviews")
+async def retention_reviews(request: Request):
+    from . import retention_maintenance
+
+    return _retention_response(await run_in_threadpool(retention_maintenance.history, request))
 
 
 @router.get("/retention/runs/{run_id}")
 async def retention_receipt(request: Request, run_id: str) -> dict:
     require_global_permission(request, "admin")
-    from . import retention_runs
-    from .auth import caller_principal
+    from . import retention_maintenance
 
-    return await run_in_threadpool(retention_runs.read, run_id, caller_principal(request) or "local administrator")
+    return _retention_response(await run_in_threadpool(retention_maintenance.read, request, run_id))
 
 
 @router.post("/retention/apply")
@@ -461,18 +483,20 @@ async def apply_retention(request: Request, body: RetentionApplyIn) -> dict:
     require_global_permission(request, "admin")
     from maverick.audit import AuditRefused
 
-    from . import retention_runs
-    from .auth import caller_principal
+    from . import retention_maintenance
 
+    if body.retry:
+        raise HTTPException(409, "Read the original result. A new deletion needs a fresh preview and separate confirmation.")
     try:
         receipt = await run_in_threadpool(
-            retention_runs.apply, body.review_id, caller_principal(request) or "local administrator",
-            confirm_holds=body.confirm_no_holds, retry=body.retry,
-            authorize=lambda: require_global_permission(request, "admin"),
+            retention_maintenance.apply, request, body.review_id,
+            confirm_holds=body.confirm_no_holds, expected_context=body.context,
+            expected_revision=body.expected_revision, operation_id=body.operation_id,
         )
     except AuditRefused as exc:
         raise HTTPException(503, "The deletion approval could not be recorded; no new store was started.") from exc
-    return {**_summarize_retention(receipt), "receipt": receipt}
+    return _retention_response({"applied": receipt["status"] == "completed", "removed": receipt["removed"],
+                               "unresolved": receipt["unresolved"], "message": receipt["message"], "receipt": receipt})
 
 
 # ---- People: export / erase ---------------------------------------------

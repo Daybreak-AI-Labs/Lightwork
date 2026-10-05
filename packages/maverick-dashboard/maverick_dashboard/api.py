@@ -1083,6 +1083,13 @@ def _board_oversight(w, owner, days: int, request=None) -> dict:
 def dashboard_board(request: Request, board: str, days: int | None = None) -> dict:
     """Executive-board payload for the Overview / Spend / Workforce pages."""
     require_permission(request, "view")
+    from . import department_boards
+
+    # A browser opened under an earlier account/grant must never receive the
+    # newly broader board after its department restriction changes.
+    department_boards.check_context(request)
+    if board in department_boards.SCOPED_BOARDS and department_boards.scoped(request):
+        return department_boards.build(request, board, days)
     if board in ("overview", "spend", "workforce", "savings", "oversight"):
         require_unscoped_board(request)
     if board in ("privacy", "finance", "security"):
@@ -9437,13 +9444,19 @@ async def review_harness_corpus(request: Request, payload: dict) -> dict:
 
 @router.get("/spend")
 def get_spend(request: Request) -> dict:
-    """Spend + recent run costs, scoped to the caller's own runs.
+    """Owned run costs, with native department projection for scoped callers.
 
-    ``goal_owner_filter`` returns the caller's principal (so each user sees
-    only their own spend/episodes) or ``None`` for an admin / auth-off caller
-    (the deployment-wide view). Previously this returned every user's runs and
-    total spend to any authenticated caller.
+    Missing or unsupported scoped prices are counted separately from known
+    runtime prices. The existing unscoped response contract is preserved.
     """
+    from . import department_boards
+
+    department_boards.check_context(request)
+    if department_boards.scoped(request):
+        projection = department_boards.build(request, "spend")
+        return {"total": projection["all_time"], "episodes": projection["episodes"],
+                "scope": projection["scope"], "scope_notice": projection["scope_notice"],
+                "cost_notice": projection["cost_notice"], "context": projection["context"]}
     owner = goal_owner_filter(request)
     w = _world()
     total = w.total_spend(owner=owner)
@@ -9480,7 +9493,12 @@ async def get_savings(request: Request, days: int = 90) -> dict:
     require_permission(request, "view")
     from maverick import savings as savings_mod
 
+    from . import department_boards
     from .value_views import value_scope
+
+    department_boards.check_context(request)
+    if department_boards.scoped(request):
+        return department_boards.build(request, "savings", days)
 
     days = max(1, min(int(days), 730))
     resolution = _value_assumptions_resolution()
@@ -15555,6 +15573,13 @@ def oversight_active(request: Request) -> dict:
     fleet work without a full-page reload. Fail-soft per goal: a goal whose
     event tail can't be read still lists with an empty activity.
     """
+    from . import department_boards
+    department_boards.check_context(request)
+    if department_boards.scoped(request):
+        projection = department_boards.build(request, "oversight")
+        return {"goals": projection["active_goals"][:50], "scope": projection["scope"],
+                "scope_notice": projection["scope_notice"], "context": projection["context"]}
+    require_permission(request, "operate")
     w = _world()
     goals = w.list_goals(
         status="active",

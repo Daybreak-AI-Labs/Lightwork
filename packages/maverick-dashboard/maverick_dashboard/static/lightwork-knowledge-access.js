@@ -35,8 +35,10 @@
   var archivedView = false;
   var readyView = false;
   var archiveAvailable = true;
-  var overfilled = false;
   var recoveryCursor = null;
+  var requestPageCursor = "";
+  var batchNote = document.getElementById("ka-batch-note");
+  var batchCopilot = document.getElementById("ka-batch-copilot");
   var currentItems = [];
   var selectedReference = null;
   var pending = false;
@@ -62,13 +64,14 @@
   nextButton.type = "button";
   nextButton.hidden = true;
   searchNote.after(nextButton);
-  var recoveryMore = canReview ? node("button", "btn", "Scan next batch of requests") : null;
+  var recoveryMore = node("button", "btn", "Next batch");
   if (recoveryMore) {
     recoveryMore.id = "ka-recovery-more";
     recoveryMore.type = "button";
     recoveryMore.hidden = true;
     requests.after(recoveryMore);
   }
+  refreshRequests.textContent = "Start over";
 
   // A reply this page could not verify is shown as one plain sentence; the
   // precise reason stays on the error for the technical record. Messages
@@ -466,6 +469,7 @@
     nextButton.disabled = value || !nextCursor;
     refreshRequests.disabled = value;
     if (recoveryMore) recoveryMore.disabled = value || !recoveryCursor;
+    if (batchCopilot) batchCopilot.disabled = value;
     if (showArchived) showArchived.disabled = value;
     if (showReady) showReady.disabled = value || !archiveAvailable;
     if (findArchived) findArchived.querySelector("button").disabled = value;
@@ -518,6 +522,8 @@
     detailPanel.hidden = true;
     requests.textContent = "";
     recoveryCursor = null;
+    requestPageCursor = "";
+    if (batchNote) batchNote.textContent = "";
     if (recoveryMore) recoveryMore.hidden = true;
     exportButton.disabled = true;
     clearRequestInputs();
@@ -737,7 +743,7 @@
   function validateRequests(payload) {
     if (payload.schema !== "lightwork.knowledge-rights-requests.v1" ||
         !Array.isArray(payload.items) || payload.items.length > 250 ||
-        typeof payload.can_review !== "boolean") {
+        payload.can_review !== canReview) {
       throw failure("The rights-request list could not be checked. Refresh the page and try again.");
     }
     var clean = payload.items.map(canReview ? rightsRequest : feedback);
@@ -759,7 +765,7 @@
       }
       var canArchive = payload.capacity.archive_available !== false;
       archiveAvailable = canArchive;
-      overfilled = used > maximum;
+      var overfilled = used > maximum;
       if (showReady) {
         showReady.disabled = !canArchive;
         showReady.title = canArchive ? "" : "Finished-request archiving is unavailable on shared storage. Ask your administrator if you need it.";
@@ -1049,7 +1055,7 @@
     if (!items.length) {
       if (requests.querySelector(".ka-request")) return;
       var empty = recoveryScan ?
-        ["No finished requests in this batch", "Scan the next batch if one is available."] : archivedView ?
+        ["No matching requests in this batch", "Continue to the next batch if one is available."] : archivedView ?
         ["No finished requests are in the archive yet", "Finished requests appear here once they are archived."] : readyView ?
         ["No finished requests are ready to archive", "Requests appear here when they can be archived. Complete a review or release a legal hold first."] :
         ["No correction, exclusion, or deletion requests in this view", "Requests to correct, exclude or delete a source appear here with their status. Open a source with View details, then use the Request a correction or removal section to make one."];
@@ -1058,7 +1064,11 @@
       return;
     }
     items.forEach(function (record) {
-      var card = node("article", "ka-request");
+      var card = node(canReview ? "details" : "article", "ka-request");
+      if (canReview) {
+        card.appendChild(node("summary", "", friendly(record.request_type) + " request · " +
+          friendly(record.status) + " · " + record.reason.slice(0, 120)));
+      }
       if (record.schema === "lightwork.knowledge-feedback.v1") {
         card.appendChild(node("h3", "", friendly(record.request_type) + " request · " + friendly(record.status)));
         card.appendChild(node("p", "muted", "Request reference: " + record.id));
@@ -1170,31 +1180,78 @@
     });
   }
 
-  async function loadRequests(append) {
+  function requestView() { return archivedView ? "archive" : readyView ? "ready" : "active"; }
+
+  async function loadRequests(advance, explicitCursor) {
     var token = access.capture();
-    var recoveryScan = canReview && readyView && overfilled;
-    var path = recoveryScan ?
-      "/requests/recovery?limit=100&cursor=" + encodeURIComponent(append ? recoveryCursor || "" : "") :
-      "/requests?limit=100&archived=" + (archivedView ? "true" : "false") +
-      "&ready_to_archive=" + (readyView ? "true" : "false");
+    var chosenCursor = explicitCursor === undefined ? (advance ? recoveryCursor || "" : "") : explicitCursor;
+    var path = "/request-batches?limit=25&view=" + requestView() + "&cursor=" + encodeURIComponent(chosenCursor);
     var response = await fetch(apiBase + path, {
       method: "GET",
       credentials: "same-origin",
       headers: {Accept: "application/json"}
     });
-    var payload = await readJson(response, token, recoveryScan ? "/requests/recovery" : "/requests", true);
+    var payload = await readJson(response, token, "/request-batches", true);
     var items = validateRequests(payload);
-    if (recoveryScan) {
+    {
       if (payload.next_cursor !== null &&
-          (typeof payload.next_cursor !== "string" || payload.next_cursor.length > 128 || !payload.next_cursor)) {
-        throw failure("The next page of the recovery scan could not be checked. Refresh the page and try again.");
+          (typeof payload.next_cursor !== "string" || payload.next_cursor.length > 2048 ||
+           !/^[A-Za-z0-9_-]+$/.test(payload.next_cursor))) {
+        throw failure("The next page of requests could not be checked. Refresh the page and try again.");
       }
+      if (payload.view !== requestView() || typeof payload.complete !== "boolean" ||
+          payload.complete !== (payload.next_cursor === null) ||
+          !Number.isInteger(payload.scanned) || payload.scanned < items.length || payload.scanned > 25 ||
+          typeof payload.notice !== "string" || payload.notice.length > 1000) {
+        throw failure("The current request batch could not be verified.");
+      }
+      requestPageCursor = chosenCursor;
       recoveryCursor = payload.next_cursor;
-    } else recoveryCursor = null;
-    renderRequests(items, recoveryScan && append, recoveryScan);
-    if (recoveryMore) recoveryMore.hidden = !recoveryScan || !recoveryCursor;
+      if (batchNote) batchNote.textContent = "Showing " + items.length + " matching request" +
+        (items.length === 1 ? "" : "s") + " in this batch. " +
+        (payload.complete ? "End of this view. " : "More records can be checked with Next batch. ") + payload.notice;
+    }
+    renderRequests(items, false, chosenCursor !== "" || !payload.complete);
+    if (recoveryMore) recoveryMore.hidden = !recoveryCursor;
     unconfirmedPaths.clear();
   }
+
+  async function openRequestBatch(view, cursor) {
+    if (pending || access.blocked || !["active", "archive", "ready"].includes(view) || (!canReview && view === "ready") ||
+        typeof cursor !== "string" || cursor.length > 2048 || (cursor && !/^[A-Za-z0-9_-]+$/.test(cursor))) return false;
+    var previousArchived = archivedView, previousReady = readyView;
+    archivedView = view === "archive";
+    readyView = view === "ready";
+    setBusy(true);
+    try {
+      await loadRequests(false, cursor);
+      if (showArchived) {
+        showArchived.setAttribute("aria-pressed", archivedView ? "true" : "false");
+        showArchived.textContent = archivedView ? "View active requests" : "View finished archive";
+      }
+      if (showReady) showReady.setAttribute("aria-pressed", readyView ? "true" : "false");
+      announce("This request batch was checked against current access and source restrictions.", false);
+      var heading = document.getElementById("ka-requests-heading");
+      heading.tabIndex = -1;
+      heading.focus({preventScroll: true});
+      heading.scrollIntoView({block: "start"});
+      return true;
+    } catch (error) {
+      archivedView = previousArchived; readyView = previousReady;
+      announce(error.message || "Could not open this batch. Start this view again.", true, error);
+      return false;
+    } finally { setBusy(false); }
+  }
+  window.LightworkKnowledgeRequests = {openBatch: openRequestBatch};
+  if (batchCopilot) batchCopilot.addEventListener("click", function () {
+    if (pending || access.blocked) return;
+    document.dispatchEvent(new CustomEvent("lightwork:copilot-selection", {
+      detail: {selection: {kind: "knowledge_request_batch", view: requestView(), cursor: requestPageCursor}}
+    }));
+    var panel = document.getElementById("mv-copilot"), open = document.getElementById("mv-copilot-fab");
+    if (panel && panel.hidden && open) open.click();
+    announce("Copilot is focused on this request batch.", false);
+  });
 
   function updateCorrectionField() {
     if (!requestType || !correctionField || !correction) { return; }
@@ -1425,7 +1482,7 @@
     setBusy(true);
     try {
       await loadRequests(true);
-      announce(recoveryCursor ? "More requests can be scanned." : "This recovery scan reached the end of the active requests.", false);
+      announce(recoveryCursor ? "Showing the next batch. More records remain to check." : "This view reached its last batch.", false);
     } catch (error) {
       announce(error.message || "Could not scan the next batch. Try again.", true, error);
     } finally { setBusy(false); }
@@ -1511,12 +1568,20 @@
     } finally { setBusy(false); }
   });
 
-  loadRequests().catch(function (error) {
-    requests.textContent = "";
-    var note = node("p", "muted", error.message || "Requests are not available right now. Try again in a minute.");
-    if (error && error.technical) { note.dataset.technical = error.technical; }
-    requests.appendChild(note);
-  });
+  var initialPage = new URLSearchParams(window.location.search);
+  if (initialPage.has("requests_view")) {
+    openRequestBatch(initialPage.get("requests_view"), initialPage.get("requests_page") || "").then(function (opened) {
+      if (!opened) requests.textContent = "This request page could not be opened. Choose a view or use Start over to check current requests.";
+    });
+  } else {
+    setBusy(true);
+    loadRequests().catch(function (error) {
+      requests.textContent = "";
+      var note = node("p", "muted", error.message || "Requests are not available right now. Try again in a minute.");
+      if (error && error.technical) { note.dataset.technical = error.technical; }
+      requests.appendChild(note);
+    }).finally(function () { setBusy(false); });
+  }
   var purposePicker = document.getElementById("ka-purpose");
   var retryPurposes = document.getElementById("ka-retry-purposes");
   if (root.dataset.purposeState === "unavailable") {

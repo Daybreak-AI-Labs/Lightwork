@@ -34,6 +34,7 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path / "mvhome"))
+    monkeypatch.setenv("MAVERICK_CLIENT_ID", "maintenance-test")
     for name in ("MAVERICK_WEBHOOK_SECRET", "MAVERICK_DASHBOARD_TOKEN", "MAVERICK_MODEL_DISCOVERY",
                  "OPENAI_API_KEY", "ANTHROPIC_API_KEY"):
         monkeypatch.delenv(name, raising=False)
@@ -184,7 +185,7 @@ def test_health_check_collects_rows_without_printing(client, monkeypatch):
     assert health._row is not None and health._row.__name__ == "_row"
 
 
-def test_queue_lists_stopped_jobs_and_resumes_a_paused_schedule(client, monkeypatch, tmp_path):
+def test_queue_lists_stopped_jobs_and_refuses_the_old_resume_shortcut(client, monkeypatch, tmp_path):
     from maverick import job_queue
     queue = job_queue.JobQueue(tmp_path / "jobs.db")
     monkeypatch.setattr(job_queue, "_default_db", lambda: tmp_path / "jobs.db")
@@ -206,8 +207,8 @@ def test_encryption_status_and_new_key_when_off(client, monkeypatch):
     monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "0")
     data = client.get("/api/v1/admin/system/encryption").json()
     assert data["enabled"] is False
-    r = client.post("/api/v1/admin/system/encryption/new-key")
-    assert r.status_code in (200, 503)
+    r = client.post("/api/v1/admin/system/encryption/review", json={"action": "rotate"})
+    assert r.status_code == 409
 
 
 def test_diagnostics_shape(client):
@@ -228,23 +229,39 @@ def audit_rows(monkeypatch):
         return True
 
     monkeypatch.setattr(audit, "audit_event", capture)
+    monkeypatch.setattr(audit, "record_global", capture)
     return rows
 
 
-def test_resuming_a_schedule_is_recorded_with_who_did_it(client, monkeypatch, tmp_path, audit_rows):
+def _reviewed_encryption(client, monkeypatch, action):
+    from maverick_dashboard import auth, rbac
+    rbac.set_role("user:ada", "admin")
+    monkeypatch.setattr(auth, "caller_principal", lambda request: "user:ada")
+    review = client.post("/api/v1/admin/system/encryption/review", json={"action": action})
+    if review.status_code != 200:
+        return review
+    value = review.json()
+    path = "new-key" if action == "rotate" else "protect-older"
+    return client.post("/api/v1/admin/system/encryption/" + path, json={
+        "context": value["context"], "review": value["token"], "operation": "b" * 32, "confirm": True})
+
+
+def test_legacy_resume_cannot_bypass_native_review_or_change_work(client, monkeypatch, tmp_path, audit_rows):
     from maverick import job_queue
     from maverick_dashboard import auth
     monkeypatch.setattr(job_queue, "_default_db", lambda: tmp_path / "jobs.db")
-    monkeypatch.setattr(job_queue.JobQueue, "reconcile_recurrence",
-                        lambda self, job_id, **kw: 77)
+    def forbidden(*args, **kwargs):
+        raise AssertionError("The legacy shortcut must not change the native queue")
+
+    monkeypatch.setattr(job_queue.JobQueue, "reconcile_recurrence", forbidden)
     monkeypatch.setattr(auth, "caller_principal", lambda request: "user:ada")
     from maverick_dashboard import rbac
     rbac.set_role("user:ada", "admin")
     r = client.post("/api/v1/admin/system/queue/5/resume", json={"attempts": 2})
-    assert r.status_code == 200, r.text
+    assert r.status_code == 409, r.text
+    assert r.json()["detail"]["href"] == "/automations?recover_schedule=5"
     rows = [row for row in audit_rows if row.get("verb") == "queue_resume"]
-    assert len(rows) == 1
-    assert rows[0]["actor"] == "user:ada" and rows[0]["job_id"] == 5
+    assert rows == []
 
 
 def test_stopped_job_errors_are_redacted_like_the_action_center(client, monkeypatch, tmp_path):
@@ -283,11 +300,12 @@ def test_encryption_maintenance_uses_the_workspace_world(client, monkeypatch, tm
     monkeypatch.setattr(sc, "_world_db", lambda: tmp_path / "chosen.db")
     (tmp_path / "chosen.db").write_bytes(b"")
     assert client.get("/api/v1/admin/system/encryption").json()["older_unprotected"] == 3
-    r = client.post("/api/v1/admin/system/encryption/protect-older")
+    r = _reviewed_encryption(client, monkeypatch, "protect")
     assert r.status_code == 200 and r.json()["protected"] == 3
-    assert seen == [str(tmp_path / "chosen.db")] * 2
-    rows = [row for row in audit_rows if row.get("verb") == "encryption_protect_older"]
-    assert len(rows) == 1 and rows[0]["records"] == 3 and rows[0]["actor"]
+    assert seen and all(path == str(tmp_path / "chosen.db") for path in seen)
+    rows = [row for row in audit_rows if row.get("record_type") == "encryption_maintenance"]
+    assert [row["action"] for row in rows] == ["maintenance_authorized", "maintenance_completed"]
+    assert all(row["actor"] == "user:ada" for row in rows)
 
 
 def test_encryption_maintenance_says_plainly_when_the_database_is_shared(
@@ -306,22 +324,59 @@ def test_encryption_maintenance_says_plainly_when_the_database_is_shared(
     data = client.get("/api/v1/admin/system/encryption").json()
     assert data["older_unprotected"] is None
     assert data["older_note"] and "cannot" in data["older_note"]
-    r = client.post("/api/v1/admin/system/encryption/protect-older")
+    r = _reviewed_encryption(client, monkeypatch, "protect")
     assert r.status_code == 409
     assert "protected" not in r.json()
-    assert audit_rows == []
+    assert not [row for row in audit_rows if row.get("record_type") == "encryption_maintenance"]
 
 
 def test_new_encryption_key_is_recorded(client, monkeypatch, audit_rows):
     from maverick import crypto_at_rest
-    monkeypatch.setattr(crypto_at_rest, "rotate_at_rest_key", lambda: None)
-    r = client.post("/api/v1/admin/system/encryption/new-key")
-    assert r.status_code == 200
-    rows = [row for row in audit_rows if row.get("verb") == "encryption_new_key"]
-    assert len(rows) == 1 and rows[0]["actor"]
+    monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "1")
+    monkeypatch.setattr(crypto_at_rest, "rotate_at_rest_key", lambda **kwargs: None)
+    r = _reviewed_encryption(client, monkeypatch, "rotate")
+    assert r.status_code == 200, r.text
+    rows = [row for row in audit_rows if row.get("record_type") == "encryption_maintenance"]
+    assert [row["action"] for row in rows] == ["maintenance_authorized", "maintenance_completed"]
+    assert all(row["actor"] == "user:ada" for row in rows)
 
 
 # ---- one-button checks, the organisation's data, tidying up ----------------
+
+
+def test_key_completion_waits_for_original_audit_without_repeating_rotation(client, monkeypatch):
+    import maverick.audit as audit
+    from maverick import crypto_at_rest
+
+    monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "1")
+    monkeypatch.setattr(audit, "record_global", lambda kind, **value: value.get("action") != "maintenance_completed")
+    result = _reviewed_encryption(client, monkeypatch, "rotate")
+    assert result.status_code == 200, result.text
+    assert result.json()["state"] == "receipt_pending"
+    assert "completed" in result.json()["message"]
+    assert len(list(crypto_at_rest._keyring_dir().glob("*.key"))) == 1
+    path = "/api/v1/admin/system/encryption/actions/" + "b" * 32
+    assert client.get(path).json()["receipt"]["state"] == "receipt_pending"
+    monkeypatch.setattr(audit, "record_global", lambda kind, **value: True)
+    assert client.get(path).json()["receipt"]["state"] == "confirmed"
+    assert len(list(crypto_at_rest._keyring_dir().glob("*.key"))) == 1
+
+
+def test_key_review_requires_fresh_authentication_before_rotation(client, monkeypatch):
+    from fastapi import HTTPException
+    from maverick import crypto_at_rest
+    from maverick_dashboard import step_up
+
+    monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "1")
+
+    def refuse(request, operation):
+        assert operation == "rotate_keys"
+        raise HTTPException(403, "Sign in with your authenticator again.")
+
+    monkeypatch.setattr(step_up, "require_recent_mfa", refuse)
+    response = client.post("/api/v1/admin/system/encryption/review", json={"action": "rotate"})
+    assert response.status_code == 403
+    assert not list(crypto_at_rest._keyring_dir().glob("*.key"))
 
 def _as(monkeypatch, role: str, who: str):
     from maverick_dashboard import auth, rbac

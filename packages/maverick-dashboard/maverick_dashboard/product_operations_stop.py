@@ -42,4 +42,4 @@ def recover(request, selection, _arguments, prepared, operation_id):
 
 def entries():
     return (Adapter("tasks.stop", "Request Stop on this task", "tasks", "/chat", ("/chat/goal/*", "/goals/*"),
-                    EmptyInput, snapshot, prepare, execute, recover),)
+                    EmptyInput, snapshot, prepare, execute, recover, read_recovery=recover),)

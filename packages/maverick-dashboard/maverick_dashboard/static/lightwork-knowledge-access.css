@@ -76,10 +76,13 @@
 }
 
 .ka-status:focus-visible,
+.ka-shell #ka-requests-heading:focus-visible,
 .ka-detail-panel h2:focus-visible {
   outline: 2px solid var(--ring);
   outline-offset: 3px;
 }
+
+.ka-shell #ka-requests-heading { scroll-margin-block-start: 8rem; }
 
 .ka-form {
   display: grid;
@@ -141,6 +144,20 @@
   border-radius: var(--radius-md);
   background: var(--surface-2);
 }
+
+details.ka-request { display: block; }
+details.ka-request > summary {
+  cursor: pointer;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+details.ka-request > summary::marker { color: var(--brand); }
+details.ka-request > summary:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 4px;
+  border-radius: var(--radius-sm);
+}
+details.ka-request[open] > * + * { margin-block-start: var(--space-2); }
 
 .ka-result__head,
 .ka-request__head,

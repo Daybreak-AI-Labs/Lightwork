@@ -600,6 +600,22 @@ def test_rotation_keeps_old_data_readable(monkeypatch):
     assert car.unseal(new_blob) == b"post-rotation secret"
 
 
+@requires_crypto
+def test_named_rotation_recovers_original_key_without_another_change():
+    old = car.seal(b"existing private work")
+    reviewed = car.key_rotation_version()
+    operation = "a" * 64
+    identity = car.rotate_at_rest_key(operation_id=operation, expected_version=reviewed)
+    assert car.rotation_receipt(operation) == identity
+    assert car.rotate_at_rest_key(operation_id=operation, expected_version=reviewed) == identity
+    assert len(list(car._keyring_dir().glob("*.key"))) == 1
+    assert car.unseal(old) == b"existing private work"
+    assert file_lock.private_path_is_restricted(car._rotation_intent(operation))
+    with pytest.raises(car.EncryptionUnavailable, match="changed after review"):
+        car.rotate_at_rest_key(operation_id="b" * 64, expected_version=reviewed)
+    assert not car._rotation_intent("b" * 64).exists()
+
+
 def test_explicit_postgres_refuses_node_local_key_rotation(monkeypatch):
     monkeypatch.setenv("MAVERICK_GOVERNED_RECORDS_BACKEND", "postgres")
     monkeypatch.setenv("MAVERICK_REPLICA_COUNT", "1")

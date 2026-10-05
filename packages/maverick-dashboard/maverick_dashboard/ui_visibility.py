@@ -53,6 +53,10 @@ from . import rbac
 # not in the Settings visibility matrix. Flip it back to ready when the page
 # speaks to a non-technical user.
 PAGES: tuple[dict, ...] = (
+    {"path": "/settings/local-ai", "scope": "global", "label": "AI on this computer", "group": "Admin",
+     "icon": "settings", "floor": "admin", "default": "admin", "in_nav": False},
+    {"path": "/settings/security-installation", "scope": "global", "label": "Sign-in and work protection", "group": "Admin",
+     "icon": "settings", "floor": "admin", "default": "admin", "in_nav": False},
     {"path": "/learning/approval-challenges", "label": "Approval challenges", "group": "Observe",
      "icon": "learned", "floor": "operate", "default": "operate", "in_nav": False},
     {"path": "/learning/instructions", "label": "Instructions used in real work", "group": "Observe",
@@ -1029,6 +1033,16 @@ PAGES: tuple[dict, ...] = (
         "in_nav": False,
     },
     {
+        "path": "/compliance/scope-actions/mapping",
+        "label": "Build a task mapping",
+        "group": "Govern",
+        "icon": "compliance",
+        "floor": "operate",
+        "default": "operate",
+        "module": ("tech_risk_compliance.scoping", "tech_risk_compliance.scope_actions"),
+        "in_nav": False,
+    },
+    {
         "path": "/compliance/continuous-evidence",
         "label": "Continuous evidence",
         "group": "Govern",
@@ -1443,6 +1457,8 @@ PAGE_AREAS: dict[str, tuple[str, str]] = {
     "/shoring": ("Work", "Hand over a team's work"),
     "/billing": ("Costs & value", "Billing"),
     "/providers": ("Settings", "AI providers"),
+    "/settings/local-ai": ("Settings", "AI providers"),
+    "/settings/security-installation": ("Settings", "Advanced"),
     "/benchmarks": ("Settings", "Advanced"),
     "/perf": ("Settings", "Advanced"),
     "/flows/analytics": ("Work", "Workflows"),
@@ -1512,6 +1528,7 @@ PAGE_AREAS: dict[str, tuple[str, str]] = {
     "/compliance/policy-links": ("Risk & compliance", "Compliance"),
     "/compliance/scoping": ("Risk & compliance", "Compliance"),
     "/compliance/scope-actions": ("Risk & compliance", "Compliance"),
+    "/compliance/scope-actions/mapping": ("Risk & compliance", "Compliance"),
     "/compliance/continuous-evidence": ("Risk & compliance", "Compliance"),
     "/compliance/obligations": ("Rules & safety", "Regulations and rules"),
     "/compartments": ("Rules & safety", "What Lightwork can do"),

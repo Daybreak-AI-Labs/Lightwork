@@ -2,7 +2,8 @@
 
 Each step is one store in one workspace with a frozen cutoff. A receipt is
 written before dispatch, so an interrupted step is unknown, never successful.
-Retries revisit unresolved steps only and keep the original cutoff.
+Legacy retries keep the original cutoff. Reviewed UI/Copilot executions never
+repeat an uncertain store; native writer locks bind the reviewed candidates.
 """
 from __future__ import annotations
 
@@ -45,7 +46,7 @@ def _write(receipt: dict) -> None:
     atomic_write_text(_path(receipt["id"]), json.dumps(receipt, sort_keys=True))
 
 
-def read(run_id: str, actor: str) -> dict:
+def read(run_id: str, actor: str, *, context: str | None = None) -> dict:
     from maverick.file_lock import atomic_read_text, ensure_private_file
 
     path = _path(run_id)
@@ -54,7 +55,7 @@ def read(run_id: str, actor: str) -> dict:
         receipt = json.loads(atomic_read_text(path))
     except FileNotFoundError as exc:
         raise HTTPException(404, "Retention review was not found.") from exc
-    if receipt.get("actor") != actor:
+    if receipt.get("actor") != actor or (context is not None and receipt.get("context") != context):
         raise HTTPException(404, "Retention review was not found.")
     return receipt
 
@@ -106,6 +107,8 @@ def _fingerprint(selected: str | None, targets: list[dict]) -> str:
 
 
 def _count(report: dict) -> int:
+    if "removed_buckets" in report:
+        return int(report["removed_buckets"])
     total = 0
     for key, value in report.items():
         if key.startswith(("deleted", "removed")):
@@ -113,44 +116,71 @@ def _count(report: dict) -> int:
     return total
 
 
-def preview(actor: str) -> dict:
+def revision(receipt: dict) -> str:
+    public = {**receipt, "steps": [{key: value for key, value in step.items() if key != "review_binding"} for step in receipt["steps"]]}
+    return hashlib.sha256(json.dumps(public, sort_keys=True).encode()).hexdigest()
+
+
+def preview(actor: str, *, context: str | None = None, run_id: str | None = None) -> dict:
     from maverick.audit.retention import enforce
     from maverick.paths import tenant_scope
 
     selected, targets = _scope()
     now = time.time()
-    receipt = {"id": secrets.token_hex(16), "actor": actor, "created_at": now, "cutoff_time": now,
+    receipt = {"id": run_id or secrets.token_hex(16), "actor": actor, "created_at": now, "cutoff_time": now,
                "scope": selected, "policy_revision": _fingerprint(selected, targets),
                "targets": targets, "status": "review", "steps": [],
                "holds": "Recorded privacy-rights holds block broad workspace deletion. External holds require separate confirmation with your records owner.",
                "blocked_by_hold": any(target.get("preservation", {}).get("blocked") for target in targets),
                "dependencies": "Task-history deletion removes provenance links from retained facts. Completed deletions cannot be undone."}
+    if context is not None:
+        receipt["context"] = context
     for target in targets:
         with tenant_scope(tenant=target["tenant"]):
             for key, days in target["policy"].items():
                 if not days:
                     continue
                 store, label = STORES[key]
-                result = enforce(config={key: days}, dry_run=True, now=now, _fleet_child=True)
+                binding = {}
+                result = enforce(config={key: days}, dry_run=True, now=now, _fleet_child=True, _review_binding=binding)
                 report = result.get(store, {})
                 receipt["steps"].append({"tenant": target["tenant"], "workspace": target["name"],
                                          "key": key, "store": store, "label": label, "days": days,
-                                         "eligible": _count(report), "status": "pending"})
+                                         "eligible": _count(report), "status": "pending", "review_binding": binding})
     _write(receipt)
     return receipt
 
 
-def apply(run_id: str, actor: str, *, confirm_holds: bool, retry: bool, authorize) -> dict:
+def _require_bound_steps(receipt):
+    if any(not isinstance(step.get("review_binding"), dict) or not step["review_binding"] for step in receipt["steps"]):
+        raise HTTPException(409, "This older review cannot bind the exact records. Preview again before deleting.")
+
+
+def apply(run_id: str, actor: str, *, confirm_holds: bool, retry: bool, authorize,
+          context: str | None = None, expected_revision: str | None = None,
+          operation_id: str | None = None) -> dict:
     from maverick.audit import audit_event
     from maverick.audit.retention import enforce
     from maverick.authority_effects import authority_effect_fence
     from maverick.file_lock import cross_process_lock
     from maverick.paths import tenant_scope
+    from maverick.retention_review_bindings import RetentionReviewChanged
 
     if not confirm_holds:
         raise HTTPException(422, "Confirm with the records owner that no preservation hold applies before deleting.")
     with cross_process_lock(_path(run_id), strict=True):
-        receipt = read(run_id, actor)
+        receipt = read(run_id, actor, context=context)
+        authorize()
+        if operation_id is not None:
+            # A consumed review is read-only, including an interrupted native
+            # step. Never repeat destructive work to recover an HTTP response.
+            if receipt.get("execution_id"):
+                return receipt
+            if receipt["status"] != "review" or retry:
+                raise HTTPException(409, "Read the original result. A new deletion needs a fresh preview and separate confirmation.")
+            _require_bound_steps(receipt)
+        if expected_revision is not None and revision(receipt) != expected_revision:
+            raise HTTPException(409, "This retention review changed. Read its current result before deciding again.")
         selected, targets = _scope()
         if _fingerprint(selected, targets) != receipt["policy_revision"]:
             raise HTTPException(409, "Workspace, preservation holds or effective retention policy changed. Review a new preview.")
@@ -170,6 +200,8 @@ def apply(run_id: str, actor: str, *, confirm_holds: bool, retry: bool, authoriz
             raise HTTPException(503, "The review could not be recorded. No deletion was started.")
         receipt["status"] = "running"
         receipt["holds_confirmed_by"] = actor
+        if operation_id is not None:
+            receipt["execution_id"] = operation_id
         _write(receipt)
         for step in receipt["steps"]:
             if step["status"] == "completed":
@@ -196,13 +228,20 @@ def apply(run_id: str, actor: str, *, confirm_holds: bool, retry: bool, authoriz
                         _write(receipt)
                         raise HTTPException(409, "Policy or preservation holds changed before deletion. Review again.")
                     with tenant_scope(tenant=step["tenant"]):
-                        report = enforce(config={step["key"]: step["days"]}, now=receipt["cutoff_time"], _fleet_child=True)
+                        report = enforce(config={step["key"]: step["days"]}, now=receipt["cutoff_time"], _fleet_child=True,
+                            **({"_review_binding": step["review_binding"]} if operation_id is not None else {}))
                 outcome = report.get(step["store"], {})
                 step["removed"] = prior + _count(outcome)
                 step["skipped"] = len(outcome.get("skipped", []))
                 step["uncertain_prior"] = uncertain_prior
                 step["audit_record"] = "unconfirmed" if audit_unconfirmed else "recorded" if report.get("marker") else "not_needed" if not _count(outcome) else "unconfirmed"
                 step["status"] = "partial" if uncertain_prior or step["skipped"] or outcome.get("purge_marker") == "failed" or step["audit_record"] == "unconfirmed" else "completed"
+            except RetentionReviewChanged as exc:
+                step["status"] = "blocked"
+                step["note"] = str(exc)
+                receipt["status"] = "partial"
+                _write(receipt)
+                raise HTTPException(409, str(exc)) from exc
             except HTTPException:
                 step["status"] = "blocked"
                 receipt["status"] = "partial"

@@ -91,6 +91,7 @@ Risk & compliance,Compliance,Continuous evidence,/compliance/continuous-evidence
 Risk & compliance,Compliance,Policy links,/compliance/policy-links
 Risk & compliance,Compliance,Find which controls apply,/compliance/scoping
 Risk & compliance,Compliance,Turn scope into tasks,/compliance/scope-actions
+Risk & compliance,Compliance,Build a task mapping,/compliance/scope-actions/mapping
 Risk & compliance,Assessments,Assessments,/assessments
 Risk & compliance,Assessments,AI evidence analysis,/ai-evidence-analysis
 Risk & compliance,Assessments,Suggested assessment answers,/assess/evidence-autopopulation
@@ -127,6 +128,7 @@ Costs & value,Compare cost records,,/cost-reconciliation
 Costs & value,Spending limits,,/spending-limits
 Settings,General,Settings,/settings
 Settings,Setup,Workflow readiness,/workflow-readiness
+Settings,AI providers,AI on this computer,/settings/local-ai
 Settings,AI providers,Providers,/providers
 Settings,Connections,,/connections
 Settings,Chat apps,Channels,/channels
@@ -136,6 +138,7 @@ Settings,Workspaces,Workspaces,/tenants
 Settings,Workspaces,Choose a workspace,/workspace/tenant
 Settings,Backup & recovery,Workspace recovery,/workspace/recovery
 Settings,Partner fleet,,/partner
+Settings,Advanced,Sign-in and work protection,/settings/security-installation
 Settings,Advanced,Benchmarks,/benchmarks
 Settings,Advanced,Performance diagnostics,/perf
 Settings,Advanced,Cache,/cache

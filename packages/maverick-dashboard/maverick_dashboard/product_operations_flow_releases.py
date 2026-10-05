@@ -56,7 +56,7 @@ def _result_details(row):
 
 def setup_snapshot(request, _selection, *, rules_only):
     value = _call(lambda: local.choices(request))
-    flows = [row for row in value["flows"] if not row["rules_only"]] if rules_only else [
+    flows = [row for row in value["flows"] if not row["root_rules_only"]] if rules_only else [
         row for row in value["flows"] if row["rules_only"] and row["published"] and row["practice_runs"]]
     fields = [{"name": "flow", "label": "Saved taught workflow", "kind": "select", "required": True,
                "choices": [{"value": row["id"], "label": row["name"] + " · version " + str(row["version"])} for row in flows]}]
@@ -76,14 +76,19 @@ def setup_snapshot(request, _selection, *, rules_only):
                     "Save a draft that stops when learned rules cannot answer." if rules_only else
                     "Prepare exact-version execution-readiness evidence for independent approval. This does not establish accuracy or improvement.",
                     details={"saved_versions": [{"workflow": row["name"], "version": row["version"],
-                                                  "published_baseline": row.get("baseline_version")} for row in flows]},
+                                                  "published_baseline": row.get("baseline_version"),
+                                                  "included_workflows": [{"workflow": child["name"], "version": child["version"],
+                                                                           "uses_rules_only": child["rules_only"]}
+                                                                          for child in row["included_workflows"]]} for row in flows]},
                     fields=fields, blocked=blocked)
 
 
 def setup_prepare(request, selection, arguments, *, rules_only):
     setup_snapshot(request, selection, rules_only=rules_only)
     row = next((flow for flow in _call(lambda: local.choices(request))["flows"] if flow["id"] == arguments["flow"]), None)
-    if row is None or not rules_only and arguments["practice"] not in {run["id"] for run in row["practice_runs"]}:
+    if (row is None or rules_only and row["root_rules_only"]
+            or not rules_only and (not row["rules_only"] or not row["published"]
+                                  or arguments["practice"] not in {run["id"] for run in row["practice_runs"]})):
         raise HTTPException(409, "Choose a current saved workflow and its own completed practice.")
     if arguments.get("comparison") and arguments["comparison"] not in {check["id"] for check in row.get("comparisons", [])}:
         raise HTTPException(409, "Choose a current known-case comparison for these exact saved and published rules.")
@@ -91,8 +96,12 @@ def setup_prepare(request, selection, arguments, *, rules_only):
                    "Authorize a current independent release administrator to publish only this exact reviewed version and restore its retained baseline. Share its instructions, teaching examples and any selected real-case inputs, expected answers and paired results for that exact review. No release is activated.",
                    changes=[{"label": "Workflow", "after": row["name"]},
                             {"label": "Saved version", "after": row["version"]},
-                            {"label": "AI fallback", "after": "Stops when rules do not agree"}],
+                            {"label": "AI fallback", "after": "Stops when rules do not agree"},
+                            *[{"label": "Included workflow", "after": child["name"] + " · version " + str(child["version"])
+                               + (" · uses rules only" if child["rules_only"] else " · prepare its rules-only draft before release")}
+                              for child in row["included_workflows"]]],
                    native={"flow": row["id"], "version": row["version"], "revision": row["revision"],
+                           "bundle_sha": row["bundle_sha"],
                            "practice": arguments["practice"], "comparison": arguments.get("comparison", "")})
 
 
@@ -102,7 +111,7 @@ def setup_execute(request, _selection, arguments, prepared, _operation, *, rules
         raise HTTPException(409, "The selected workflow or practice changed. Review again.")
     body = local.Selection(context=context_for(request), confirm=True, flow_id=arguments["flow"],
                            version=prepared["version"], revision=prepared["revision"], practice_run=arguments["practice"],
-                           comparison_id=arguments.get("comparison", ""))
+                           comparison_id=arguments.get("comparison", ""), bundle_sha=prepared["bundle_sha"])
     result = _call(lambda: local.prepare_local_release(request, body, rules_only=rules_only))
     return Outcome("confirmed", result["detail"], {"open": {"label": "Open saved release controls", "href": "/research#local-flow-release"}})
 
@@ -115,6 +124,7 @@ def setup_recover(request, _selection, arguments, prepared, _operation, *, rules
             if (record["tenant"] != tenant or record["owner"] != actor or record["flow_id"] != arguments["flow"]
                     or record["version"] != prepared["version"] or record["flow_revision"] != prepared["revision"]
                     or record["practice_run"] != arguments["practice"]
+                    or record["bundle_sha"] != prepared["bundle_sha"]
                     or record.get("comparison_id", "") != arguments.get("comparison", "")):
                 return None
             local._practice(record)
@@ -126,10 +136,12 @@ def setup_recover(request, _selection, arguments, prepared, _operation, *, rules
     if flow.version != prepared["version"] + 1 or flow.revision != prepared["revision"]:
         return None
     try:
-        local._pure(flow)
+        local.qualified_bundle(flow, permit_fallback=True)
+        if any(node.learned_fallback is not False for node in flow.nodes.values() if node.kind == "agent"):
+            return None
     except Exception:
         return None
-    return Outcome("replayed", "The reviewed rule-only draft is present. It was not saved again. Publish a baseline and complete practice before release review.",
+    return Outcome("unconfirmed", "The current draft uses learned rules only. The original save reply remains unconfirmed; no action was repeated. Check the saved workflow before continuing.",
                    {"open": {"label": "Open saved workflow", "href": "/flows/designer/" + flow.id}})
 
 
@@ -287,7 +299,7 @@ def decision_recover(request, _selection, arguments, prepared, _operation, *, ac
     events = row["events"][prepared["event_count"]:]
     if not any(event.get("actor") == actor and event.get("state") in states[action] for event in events):
         if row["state"] == "uncertain":
-            return Outcome("uncertain", "The release outcome needs reconciliation. Inspect release decisions; no action was repeated.",
+            return Outcome("unconfirmed", "The release outcome needs reconciliation. Inspect release decisions; no action was repeated.",
                            {"open": {"label": "Open release decisions", "href": "/research#research-promotions"}})
         return None
     return Outcome("replayed", "The reviewed release decision is already recorded. Its actual current result was refreshed; no action was repeated.",

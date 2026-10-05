@@ -28,6 +28,12 @@
     <button class="btn" type="button" id="cbj-check-submission">Check submitted job</button>
   </section>
 
+  <section class="panel" id="cbj-allowance-recovery" hidden aria-labelledby="cbj-allowance-title">
+    <h2 id="cbj-allowance-title">Check your allowance change</h2>
+    <p id="cbj-allowance-note" role="status">The original reply was not confirmed. Checking this result never adds records again.</p>
+    <button class="btn" type="button" id="cbj-check-allowance">Check allowance change</button>
+  </section>
+
   <fieldset class="feature-gated-workbench" id="cbj-operations" disabled>
     <legend class="sr-only">Bulk consent changes</legend>
 
@@ -41,6 +47,7 @@
               <option value="succeeded">Finished</option><option value="failed">Failed</option><option value="cancelled">Cancelled</option>
             </select>
           </label>
+          <button class="btn btn--ghost" type="button" data-copilot-toggle>Prepare with Copilot</button>
           <button class="btn btn--primary" type="button" id="cbj-new"{% if not bulk_jobs_can_admin %} disabled{% endif %}>Start a bulk change</button>
         </div>
       </div>

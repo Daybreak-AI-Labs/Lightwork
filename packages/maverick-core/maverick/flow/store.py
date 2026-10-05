@@ -643,6 +643,7 @@ def publish_flow(
     expected_revision: str,
     expected_release_id: str | None = None,
     activation_id: str | None = None,
+    expected_bundle_digest: str | None = None,
 ) -> dict:
     """Activate a coherent immutable release under the dispatch lock."""
     with _activation_lock(flow_id):
@@ -655,6 +656,7 @@ def publish_flow(
             expected_version=expected_version,
             expected_revision=expected_revision,
             activation_id=activation_id,
+            expected_bundle_digest=expected_bundle_digest,
         )
 
 
@@ -764,6 +766,7 @@ def _publish_flow_under_activation(
     expected_version: int,
     expected_revision: str,
     activation_id: str | None = None,
+    expected_bundle_digest: str | None = None,
 ) -> dict:
     """Atomically activate the exact current draft as an immutable release.
 
@@ -796,6 +799,8 @@ def _publish_flow_under_activation(
         import secrets
 
         release_digest = release_digest_for(digest, subflows)
+        if expected_bundle_digest is not None and release_digest != expected_bundle_digest:
+            raise FlowSnapshotError("An included workflow changed after review. Prepare a new release review.")
         if activation_id is not None and not _valid_release_token(activation_id):
             raise FlowSnapshotError("The new activation identity is invalid.")
         release = {

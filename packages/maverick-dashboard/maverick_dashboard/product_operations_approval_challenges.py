@@ -115,7 +115,7 @@ def recover(request, _selection, arguments, prepared, operation, *, action):
         native._bound(request)
         auth.require_global_permission(request, "admin")
         if native.source.enabled() == arguments["enabled"]:
-            return Outcome("replayed", "The current challenge setting matches this review. No change was repeated.")
+            return Outcome("unconfirmed", "The current practice setting matches this review. The original change is not confirmed. No change was repeated.")
         return None
     identity = "ACP-" + operation if action == "generate" else arguments["record"]
     if action == "remove":

@@ -14,6 +14,7 @@ router = APIRouter()
 _STATIC = Path(__file__).parent / "static"
 ASSETS = (
     "lightwork-today.js",
+    "lightwork-department-board.js",
     "lightwork-employee-activation.js",
     "lightwork-budget-guidance.js",
     "lightwork-task-diagnostics.js",
@@ -34,6 +35,7 @@ ASSETS = (
     "lightwork-tenants.js",
     "lightwork-typeahead.js",
     "lightwork-compliance.js",
+    "lightwork-retention-maintenance.js",
     "lightwork-compliance-scoping.js",
     "lightwork-compliance-scope-actions.js",
     "lightwork-dsar-detail.js",
@@ -54,6 +56,9 @@ ASSETS = (
     "lightwork-viewpoints.js",
     "lightwork-usability-survey.js",
 )
+# Page stylesheets served next to their scripts (the shell itself is one
+# stylesheet, lightwork.css; its translation rules live there).
+STYLES: tuple[str, ...] = ("lightwork-schedule-management.css",)
 
 
 @router.get("/static/lightwork-i18n-catalog/{language}/{revision}.js", include_in_schema=False)
@@ -86,3 +91,15 @@ def _route(name: str):
 
 for _name in ASSETS:
     router.add_api_route("/static/" + _name, _route(_name), methods=["GET"], include_in_schema=False)
+
+
+def _style_route(name: str):
+    async def serve() -> FileResponse:
+        return FileResponse(_STATIC / name, media_type="text/css; charset=utf-8",
+                            headers={"Cache-Control": "public, max-age=300"})
+    serve.__name__ = "asset_" + name.replace("-", "_").replace(".", "_")
+    return serve
+
+
+for _name in STYLES:
+    router.add_api_route("/static/" + _name, _style_route(_name), methods=["GET"], include_in_schema=False)

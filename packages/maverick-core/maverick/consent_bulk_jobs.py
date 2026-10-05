@@ -577,6 +577,7 @@ class ConsentBulkJobStore:
         *,
         expected_revision: int,
         idempotency_key: str,
+        actor_sha256: str | None = None,
     ) -> dict[str, Any]:
         """Explicitly grant credits with CAS and idempotency."""
 
@@ -584,7 +585,10 @@ class ConsentBulkJobStore:
         granted = _integer(amount, "amount", 1, 1_000_000_000)
         revision = _integer(expected_revision, "expected_revision", 1, 2**31 - 1)
         key_sha = self._idempotency(idempotency_key)
+        actor = _digest(actor_sha256, "actor_sha256") if actor_sha256 is not None else None
         request = {"amount": granted, "expected_revision": revision}
+        if actor is not None:
+            request["actor_sha256"] = actor
         request_sha = _sha256(request)
         now = self._now()
         with self._connect() as connection:
@@ -599,7 +603,7 @@ class ConsentBulkJobStore:
                 )
                 if replay is not None:
                     connection.execute("COMMIT")
-                    return replay
+                    return {key: value for key, value in replay.items() if key != "actor_sha256"}
                 updated = connection.execute(
                     "UPDATE consent_bulk_credits SET available = available + ?, "
                     "revision = revision + 1, updated_at = ? WHERE tenant = ? "
@@ -609,13 +613,15 @@ class ConsentBulkJobStore:
                 if updated.rowcount != 1:
                     raise ConsentBulkJobConflict("credit account revision changed")
                 result = self._credit_row(connection, tenant)
+                if actor is not None:
+                    result["added"] = granted
                 self._save_replay(
                     connection,
                     tenant=tenant,
                     namespace="credits.grant",
                     key_sha256=key_sha,
                     request_sha256=request_sha,
-                    result=result,
+                    result={**result, **({"actor_sha256": actor} if actor is not None else {})},
                     now=now,
                 )
                 connection.execute("COMMIT")
@@ -624,6 +630,26 @@ class ConsentBulkJobStore:
                 if connection.in_transaction:
                     connection.execute("ROLLBACK")
                 raise
+
+    def granted_credit_for_request(
+        self, tenant_id: str, *, idempotency_key: str, actor_sha256: str,
+    ) -> dict[str, Any] | None:
+        """Read the original actor's accepted allowance, never grant it again."""
+        tenant = _tenant(tenant_id)
+        key, actor = self._idempotency(idempotency_key), _digest(actor_sha256, "actor_sha256")
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT result_json FROM consent_bulk_idempotency WHERE tenant = ? "
+                "AND namespace = 'credits.grant' AND key_sha256 = ?", (tenant, key),
+            ).fetchone()
+            if row is None:
+                return None
+            result = _loads(row["result_json"], "idempotency result")
+            if not isinstance(result, dict):
+                raise ConsentBulkJobError("stored allowance result is invalid")
+            if not hmac.compare_digest(str(result.get("actor_sha256", "")), actor):
+                return None
+            return {key: value for key, value in result.items() if key != "actor_sha256"}
 
     @staticmethod
     def _credit_row(connection: sqlite3.Connection, tenant: str) -> dict[str, Any]:
