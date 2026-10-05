@@ -336,12 +336,12 @@ def build(
             "title": "Choose a workflow or agent",
             "done": built,
             "body": (
-                "Choose an existing specialist or workflow, or create one in the builder. "
-                "Using an existing specialist also completes this step."
+                "Choose an existing agent, specialist or workflow, or create one in the builder. "
+                "Using an existing agent or specialist also completes this step."
             ),
             "status": "complete" if built else "incomplete",
             "cta": "/agents",
-            "cta_label": "Choose a specialist",
+            "cta_label": "Choose an agent or specialist",
             "allowed": bool(can_operate),
             "readonly_label": "An operator can choose or build the first workflow or agent.",
             "command": "",
@@ -356,7 +356,7 @@ def build(
             ),
             "status": "complete" if activated else "incomplete",
             "cta": "/chat",
-            "cta_label": "Start a goal",
+            "cta_label": "Start a task",
             "allowed": bool(can_operate),
             "readonly_label": "An operator can start or automate the first run.",
             "command": "",

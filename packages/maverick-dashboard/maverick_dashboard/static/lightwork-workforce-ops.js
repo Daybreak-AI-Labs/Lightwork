@@ -7,6 +7,8 @@
   window.LWWorkforceOps = true;
   var J = window.LWJobs;
   var el = J.el, plural = J.plural;
+  // The roster mixes Lightwork's built-in specialists with agents built here.
+  function members(n) { return plural(n, 'agent or specialist', 'agents and specialists'); }
   var API = '/api/v1/workforce-ops';
   function $(id) { return document.getElementById(id); }
   function fill(id, nodes) {
@@ -74,7 +76,7 @@
     var list = [];
     if (!testCases.length) list.push(el('p', 'muted', 'No answer checks yet. Add one below.'));
     else {
-      list.push(el('p', null, plural(testCases.length, 'saved check') + ' for this specialist. Choose up to 5 for the next run.'));
+      list.push(el('p', null, plural(testCases.length, 'saved check') + ' for this one. Choose up to 5 for the next run.'));
       var rows = testCases.map(function (c) {
         var choose = el('input'); choose.type = 'checkbox'; choose.className = 'wo-test-choice';
         choose.value = c.id; choose.checked = testCases.length <= 5;
@@ -124,7 +126,7 @@
       box.appendChild(el('summary', null, J.when(r.started_at) + ' · ' + state));
       if (r.message) box.appendChild(el('p', null, r.message));
       box.appendChild(el('p', 'muted', 'Model: ' + r.model + '. Recorded cost: ' + J.money(r.spent_dollars) +
-        '. Each check used the specialist instructions shown by this version; no actions or company knowledge were used.'));
+        '. Each check used the instructions shown by this version; no actions or company knowledge were used.'));
       if (r.results.length) box.appendChild(J.table(['Question', 'Answer', 'Result'], r.results.map(function (answer) {
         return [answer.task, answer.answer, answer.passed ? 'Passed' : 'Needs review'];
       })));
@@ -135,7 +137,7 @@
     var specialist = $('wo-test-specialist').value;
     clearTestEditor();
     if (!specialist) {
-      fill('wo-tests-list', el('p', 'muted', 'Choose a specialist to see its answer checks.'));
+      fill('wo-tests-list', el('p', 'muted', 'Choose an agent or specialist to see its answer checks.'));
       fill('wo-test-history', null);
       document.querySelectorAll('#wo-my-tests .wo-test-admin').forEach(function (n) { n.hidden = true; });
       return;
@@ -166,7 +168,7 @@
       var requested = new URLSearchParams(location.search).get('specialist');
       if (requested && (data.specialists || []).some(function (s) { return s.value === requested; })) select.value = requested;
       await loadCustomerTests();
-    } catch (failure) { $('wo-test-status').textContent = await J.problem(failure, 'list the specialists'); }
+    } catch (failure) { $('wo-test-status').textContent = await J.problem(failure, 'list the agents and specialists'); }
   }
 
   // ---- what each specialist can do -------------------------------------------------
@@ -180,30 +182,30 @@
         suitesLoaded = true;
       }
       var facts = [
-        plural(d.specialists, 'specialist') + ' in ' + plural(d.departments, 'department') + ', including ' + plural(d.builders, 'builder') + '.',
+        members(d.specialists) + ' in ' + plural(d.departments, 'department') + ', including ' + plural(d.builders, 'builder') + '.',
         d.can_change_things_while_drafting
-          ? plural(d.can_change_things_while_drafting, 'specialist') + ' that should only draft can reach tools that change things. Review these below.'
-          : 'No specialist that only drafts can reach tools that change things.',
-        plural(d.sign_off_enforced, 'specialist') + ' must have a person sign off their work' +
+          ? plural(d.can_change_things_while_drafting, 'agent or specialist', 'agents and specialists') + ' that should only draft can reach tools that change things. Review these below.'
+          : 'No agent or specialist that only drafts can reach tools that change things.',
+        members(d.sign_off_enforced) + ' must have a person sign off their work' +
           (d.sign_off_only_asked ? '; ' + plural(d.sign_off_only_asked, 'more') + ' only ask for it in their instructions.' : '.'),
-        plural(d.extra_refusals, 'specialist') + ' refuse extra kinds of requests for their field; ' +
-          plural(d.with_deliverable, 'specialist') + ' produce a defined piece of work.',
+        members(d.extra_refusals) + ' refuse extra kinds of requests for their field; ' +
+          members(d.with_deliverable) + ' produce a defined piece of work.',
         d.levels_enabled === false
-          ? 'Independence levels are turned off, so every specialist follows the same approval rules.'
+          ? 'Independence levels are turned off, so every agent and specialist follows the same approval rules.'
           : 'Independence: ' + Object.keys(RUNGS).map(function (r) { return RUNGS[r] + ' ' + ((d.independence || {})[r] || 0); }).join(', ') +
-            '. ' + plural(d.still_supervised, 'specialist') + ' still supervised while new.'
+            '. ' + members(d.still_supervised) + ' still supervised while new.'
       ];
       var nodes = [el('ul')];
       facts.forEach(function (f) { nodes[0].appendChild(el('li', null, f)); });
       if (d.flagged.length) {
-        nodes.push(el('h3', null, 'Specialists to review'));
-        nodes.push(J.table(['Specialist', 'Can reach'], d.flagged.map(function (f) {
+        nodes.push(el('h3', null, 'Agents and specialists to review'));
+        nodes.push(J.table(['Name', 'Can reach'], d.flagged.map(function (f) {
           return [f.specialist, f.can_reach.map(window.mvHuman || String).join(', ')];
         })));
       }
       fill('wo-inv', nodes);
     }).catch(async function (failure) {
-      fill('wo-inv', el('p', null, await J.problem(failure, 'load the specialist inventory')));
+      fill('wo-inv', el('p', null, await J.problem(failure, 'load the list of agents and specialists')));
     });
   }
 
@@ -231,15 +233,15 @@
 
     J.wire($('wo-lint-run'), async function () {
       return { url: API + '/setup-check', init: { method: 'POST', json: {} } };
-    }, { status: $('wo-lint-status'), out: $('wo-lint-out'), action: 'check the specialists', render: function (d) {
-      var head = el('p', null, 'Checked ' + plural(d.specialists, 'specialist') + ': ' + plural(d.must_fix, 'problem') + ' to fix and ' +
+    }, { status: $('wo-lint-status'), out: $('wo-lint-out'), action: 'check the agents and specialists', render: function (d) {
+      var head = el('p', null, 'Checked ' + members(d.specialists) + ': ' + plural(d.must_fix, 'problem') + ' to fix and ' +
         plural(d.could_improve, 'thing') + ' that could be better.');
       if (!d.findings.length) return head;
       var rows = d.findings.map(function (f) {
         return [f.specialist, f.must_fix.join(' ') || '—', f.could_improve.join(' ') || '—'];
       });
-      var nodes = [head, J.table(['Specialist', 'Must fix', 'Could be better'], rows)];
-      if (d.more) nodes.push(el('p', 'muted', plural(d.more, 'more specialist') + ' not shown.'));
+      var nodes = [head, J.table(['Name', 'Must fix', 'Could be better'], rows)];
+      if (d.more) nodes.push(el('p', 'muted', plural(d.more, 'more agent or specialist', 'more agents and specialists') + ' not shown.'));
       nodes.push(J.technical(d.findings.slice(0, 50).map(function (f) { return f.specialist + ': ' + f.technical.join(' | '); })));
       return nodes;
     } });

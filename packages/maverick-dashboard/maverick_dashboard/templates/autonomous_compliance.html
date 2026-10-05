@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}{{ 'Overview · Compliance' if tab_host else 'Autonomous Compliance' }} · Lightwork{% endblock %}
+{% block title %}{{ 'Overview · Compliance' if tab_host else 'Autonomous compliance' }} · Lightwork{% endblock %}
 {% block content %}
 <style>
   .acm-shell { max-width: 1180px; margin: 0 auto; padding: 1.25rem; }
@@ -28,7 +28,7 @@
     {{ module_count }} tools in {{ suites | length }} areas. The labels are explained at the bottom of the page.</p>
   {% else %}
   {% from "_hero.html" import hero %}
-  {% call hero('Compliance, run by governed agents', 'Autonomous Compliance',
+  {% call hero('Compliance, run by governed agents', 'Autonomous compliance',
                subtitle='One product, six suites, one workforce',
                lede='Everything you need to run your compliance program, in six areas.
                      Pick a card to open that part of Lightwork. Each card says whether

@@ -156,7 +156,7 @@
       </button>
       <button type="button" id="wf-form-playbook" class="seg__opt" aria-pressed="false">
         {{ ui("Agent playbook") }}
-        <span class="seg__sub">{{ ui("draft a specialist’s instructions and allowed actions") }}</span>
+        <span class="seg__sub">{{ ui("draft an agent’s instructions and allowed actions") }}</span>
       </button>
     </div>
 
@@ -247,7 +247,7 @@
       <div class="wf-grid">
         <div class="wf__field" style="flex: 1 1 16rem;">
           <label for="pb-name">{{ ui("Short name (filled in from the description)") }}</label>
-          <input type="text" id="pb-name" class="input" aria-label="{{ ut('Specialist short name') }}" lang="{{ ul('Specialist short name') }}">
+          <input type="text" id="pb-name" class="input" aria-label="{{ ut('Agent short name') }}" lang="{{ ul('Agent short name') }}">
         </div>
         <div class="wf__field wf__field--sm">
           <label for="pb-risk">{{ ui("Riskiest action allowed") }}</label>
@@ -298,7 +298,7 @@
         <div class="pb-flow">
           <div class="pb-flow__node pb-flow__start"><span class="dot" aria-hidden="true"></span>{{ ui("Start here") }}</div>
           <div id="pb-steps"></div>
-          <div class="pb-flow__node pb-flow__end" id="pb-flow-end" hidden><span class="dot" aria-hidden="true"></span>{{ ui("Goal complete") }}</div>
+          <div class="pb-flow__node pb-flow__end" id="pb-flow-end" hidden><span class="dot" aria-hidden="true"></span>{{ ui("Task complete") }}</div>
         </div>
         <button type="button" id="pb-add-step" class="btn btn--ghost" style="margin-top: var(--space-4);">{{ ui("Add a step") }}</button>
       </div>
@@ -319,7 +319,7 @@
       </div>
       <div class="wf__row">
         <button type="button" id="pb-save-btn" class="btn btn--primary"{% if not pack_editing_allowed %} disabled title="{{ ut('An administrator must check and save this draft') }}"{% endif %} lang="{{ ul('An administrator must check and save this draft') }}">{{ ui("Save playbook") }}</button>
-        <span class="wf__hint">{% if pack_editing_allowed %}{{ ui("Saved playbooks become specialists on Agents.") }} <a href="/agents">{{ ui("Agents") }}</a>.{% else %}This draft stays unsaved until an administrator checks and saves it. <button type="button" class="btn btn--ghost" id="pb-copy-draft">{{ ui("Copy the draft to send to an administrator") }}</button>{% endif %}</span>
+        <span class="wf__hint">{% if pack_editing_allowed %}{{ ui("Saved playbooks become agents on Agents.") }} <a href="/agents">{{ ui("Agents") }}</a>.{% else %}This draft stays unsaved until an administrator checks and saves it. <button type="button" class="btn btn--ghost" id="pb-copy-draft">{{ ui("Copy the draft to send to an administrator") }}</button>{% endif %}</span>
       </div>
     </div>
 
@@ -650,7 +650,7 @@
       ],
       playbook: [
         'An accounts-payable clerk that reads, three-way-matches, and pays invoices',
-        'A support-triage specialist that tags incoming tickets and routes them',
+        'A support-triage agent that tags incoming tickets and routes them',
         'A contract-review agent that flags risky clauses and drafts redlines',
       ],
     };
@@ -798,7 +798,7 @@
     var copyDraft = document.getElementById('pb-copy-draft');
     if (copyDraft) copyDraft.addEventListener('click', function () {
       var pb = collectPlaybook();
-      var lines = ['Specialist: ' + (pbName.value.trim() || '(no name yet)'), 'Description: ' + pb.description, '',
+      var lines = ['Agent: ' + (pbName.value.trim() || '(no name yet)'), 'Description: ' + pb.description, '',
         'Role and instructions:', pb.persona, '', 'Riskiest action allowed: ' + pb.max_risk,
         'Allowed actions: ' + (pb.allow_tools.join(', ') || 'none'), 'Blocked actions: ' + (pb.deny_tools.join(', ') || 'none'), '', 'Steps:'];
       pb.workflow.forEach(function (st, i) { lines.push((i + 1) + '. ' + st.name + (st.instruction ? ' — ' + st.instruction : '') + (st.gate ? ' (' + (GATE_LABEL[st.gate] || st.gate) + ')' : '')); });
@@ -1268,7 +1268,7 @@
       steps.forEach(function (row, i) {
         row.querySelector('.pb-step__num').textContent = localizedNumber(i+1);
       });
-      pbFlowEnd.hidden = !steps.length;   // the "Goal complete" node appears once there are steps
+      pbFlowEnd.hidden = !steps.length;   // the "Task complete" node appears once there are steps
     }
     function moveStep(row, dir) {
       if (dir < 0 && row.previousElementSibling) pbSteps.insertBefore(row, row.previousElementSibling);
@@ -1451,7 +1451,7 @@
         return;
       }
       var name = pbName.value.trim();
-      if (!name) { setStatus('Give the specialist a short name.', true); return; }
+      if (!name) { setStatus('Give the agent a short name.', true); return; }
       pbSaveBtn.disabled = true;
       setStatus('Saving the playbook…');
       try {

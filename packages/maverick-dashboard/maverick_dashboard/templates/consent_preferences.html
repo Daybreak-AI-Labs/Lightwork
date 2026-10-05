@@ -1,14 +1,14 @@
 {% extends "base.html" %}
 {% from "_hero.html" import hero %}
 {% from "_module_gate.html" import module_gate %}
-{% block title %}Consent & Preferences · Lightwork{% endblock %}
+{% block title %}Consent and preferences · Lightwork{% endblock %}
 {% block head_extra %}<link rel="stylesheet" href="/static/lightwork-consent-workbench.css">{% endblock %}
 {% block content %}
 {% set cp_on = consent_preferences_enabled %}
 {% set cp_admin = consent_can_admin if consent_can_admin is defined else true %}
 {% set cr_on = consent_registry_enabled if consent_registry_enabled is defined else true %}
 <div class="governance-workbench" id="cp-root" data-can-admin="{{ 'true' if cp_admin else 'false' }}" data-feature-enabled="{{ 'true' if cp_on else 'false' }}" data-registry-enabled="{{ 'true' if cr_on else 'false' }}">
-  {{ hero('Consent management', 'Consent & Preferences',
+  {{ hero('Consent management', 'Consent and preferences',
           lede='Set the consent policies people agree to, record and check each person’s choices, and control which trackers may run.') }}
   {% include "_consent_nav.html" %}
   {% if not cp_on %}
@@ -248,7 +248,7 @@
     if(opts.json!==undefined){opts.body=JSON.stringify(opts.json);opts.headers={"Content-Type":"application/json"};delete opts.json;}
     var response=await fetch(API+path,opts);
     var body;try{body=await response.json();}catch(_error){var bad=new Error("Request failed: the server returned an invalid JSON response.");bad.status=response.ok?0:response.status;throw bad;}
-    if(!response.ok){var failure=new Error(body&&typeof body.detail==="string"?body.detail:"Request failed.");failure.status=response.status;throw failure;}
+    if(!response.ok){var failure=new Error(body&&typeof body.detail==="string"?body.detail:"That didn't work. Refresh the page and try again.");failure.status=response.status;throw failure;}
     return body;
   }
   if(CW)start();

@@ -75,7 +75,7 @@
     }
     snapshot = state;
     form.hidden = false;
-    const delivery = state.private_delivery || {note:'Private delivery is unavailable.', channels:[]};
+    const delivery = state.private_delivery || {note:'Private delivery is unavailable. Refresh the page and try again.', channels:[]};
     document.getElementById('personal-external-status').textContent = delivery.note + ' Service acceptance does not mean a message was seen.';
     const selected = dirty && !reset ? Array.from(form.querySelectorAll('[name="external_link"]:checked')).map(function (node) { return node.value; }) : (state.preferences.external_links || []);
     const destinations = document.getElementById('personal-external-links'), receipts = document.getElementById('personal-delivery-receipts');

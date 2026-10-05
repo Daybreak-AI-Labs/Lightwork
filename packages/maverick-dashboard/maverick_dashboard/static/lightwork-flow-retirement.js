@@ -91,9 +91,9 @@
     if (!labels.length) return;
     try {
       var response = await fetch('/api/v1/flows', {cache: 'no-store'});
-      if (!response.ok) throw new Error('Flow status is unavailable.');
+      if (!response.ok) throw new Error('Flow status is unavailable. Refresh the page and try again.');
       var data = await response.json();
-      if (!data || !Array.isArray(data.flows)) throw new Error('Flow status is unavailable.');
+      if (!data || !Array.isArray(data.flows)) throw new Error('Flow status is unavailable. Refresh the page and try again.');
       var byId = new Map(data.flows.map(function (flow) { return [flow.id, flow]; }));
       labels.forEach(function (label) {
         var flow = byId.get(label.dataset.flowStatus);

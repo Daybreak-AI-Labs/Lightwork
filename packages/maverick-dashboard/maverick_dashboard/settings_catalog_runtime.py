@@ -805,13 +805,13 @@ def _tools(S, C) -> tuple:
           "Keep the long list of business-system connectors out of each request until an "
           "agent searches for one.", "toggle", "Performance", True, "maverick.agent",
           subgroup="Reusing tool results", env=("MAVERICK_DEFERRED_TOOLS",)),
-        S("capabilities", "web_search", "Let specialists search the web",
-          "Allow specialists whose work calls for current web information to use Web search. "
+        S("capabilities", "web_search", "Let agents and specialists search the web",
+          "Allow agents and specialists whose work calls for current web information to use Web search. "
           "Lightwork uses a connected search service when available, with a public-search "
           "fallback; whether a search succeeds is checked when it runs.",
           "toggle", "Integrations", False, "maverick.agent",
           subgroup="Web research", restart=True, weaker=True,
-          warning="Specialists will be allowed to send search terms to the web search service."),
+          warning="Agents and specialists will be allowed to send search terms to the web search service."),
         S("limits", "file_write_quota_mb", "Most a task may write to files",
           "The most data one task may write to the work area. Leave empty for no limit.",
           "number", "Spending & limits", None, "maverick.file_quota", minimum=1,

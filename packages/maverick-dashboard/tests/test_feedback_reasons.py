@@ -108,7 +108,7 @@ def test_administrators_see_the_summary_on_the_learning_page(world):
     section = body.split('id="agent-feedback"', 1)[1].split("</section>", 1)[0]
     assert "PO Confirmation Chaser" in section and "Wrong or inaccurate" in section
     assert "Private comment" not in section
-    assert "What people said about each specialist and agent" in body
+    assert "What people said about each agent and specialist" in body
 
 
 def test_the_learning_page_stays_closed_to_people_who_are_not_administrators(world, monkeypatch):

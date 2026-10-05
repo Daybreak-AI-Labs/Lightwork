@@ -68,7 +68,7 @@
 <div class="prcd-grid">
   <section class="panel prcd-stack">
     <h2>Choose an action</h2>
-    <p>Tenant and principal come only from authenticated server context. The
+    <p>The workspace and the person acting come only from your sign-in. The
       consumer binding comes only from a trusted runtime resolver. Unknown
       fields are rejected.</p>
     <label>Operation
@@ -79,7 +79,7 @@
         <option value="export-create" data-method="PUT" data-path="/deliveries/{delivery_id}/exports/{export_id}">Evidence: create signed metadata export</option>
         <option value="export-get" data-method="GET" data-path="/exports/{export_id}">Evidence: get signed metadata export</option>
         <option value="retention-purge" data-method="POST" data-path="/retention/purge">Retention: purge expired state</option>
-        <option value="integrity" data-method="GET" data-path="/integrity">Integrity: verify tenant state</option>
+        <option value="integrity" data-method="GET" data-path="/integrity">Integrity: check this workspace’s records</option>
       </select>
     </label>
     <label>Record references (JSON)

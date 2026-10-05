@@ -487,9 +487,9 @@ def entries(S, C, Column) -> tuple:  # noqa: ARG001 -- Column is C
           aliases="tax signed updates public key publisher"),
 
         # --------------------------------------------------------- chat apps
-        S("channels.routing", "rules", "Send chat messages to a specialist",
+        S("channels.routing", "rules", "Send chat messages to an agent or specialist",
           "Rules are checked in order for every message that arrives through a chat app; "
-          "the first one that matches decides which specialist handles it. Messages that "
+          "the first one that matches decides which agent or specialist handles it. Messages that "
           "match no rule go to the general assistant, as they do with no rules at all.",
           "rules", "Chat channels", [], "maverick.channel_autorouting",
           subgroup="Message routing",
@@ -505,9 +505,9 @@ def entries(S, C, Column) -> tuple:  # noqa: ARG001 -- Column is C
           ),
           item_label="Rule", add_label="Add a rule",
           empty_text="Every chat message goes to the general assistant.", weaker="change",
-          warning="Matching chat messages will be handled by the chosen specialist, with that "
-                  "specialist's tools and permissions.",
-          aliases="routing rules specialist department triage"),
+          warning="Matching chat messages will be handled by the chosen agent or specialist, "
+                  "with its tools and permissions.",
+          aliases="routing rules agent specialist department triage"),
         S("channels", "rich_render", "Show formulas and diagrams as a page",
           "When a reply contains formulas or diagrams, also send a page that shows them "
           "properly. The page is saved on this server.",

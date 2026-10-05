@@ -96,7 +96,7 @@
     try {
       var fresh = await request('/catalog', payload());
       if (!active(started)) return null;
-      if (fresh.schema !== 1 || !Array.isArray(fresh.operations) || JSON.stringify(fresh.selection) !== JSON.stringify(context())) throw new Error('The current record could not be confirmed.');
+      if (fresh.schema !== 1 || !Array.isArray(fresh.operations) || JSON.stringify(fresh.selection) !== JSON.stringify(context())) throw new Error('The current record could not be confirmed. Refresh the page and try again.');
       if (previous && previous.context !== fresh.context) {
         clear(formHost); selected = null;
         document.dispatchEvent(new CustomEvent('lightwork:copilot-context-changed'));

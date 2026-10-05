@@ -505,7 +505,7 @@
 {% endif %}
 
 <section class="panel">
-  <h2>Model Risk &amp; AI Assurance Officer</h2>
+  <h2>Model risk &amp; AI assurance officer</h2>
   {% if not model_risk_enabled %}
     {{ module_gate('model_risk_assurance', 'Model risk tracking',
                    detail='Tracks your AI systems, their test results and current findings here.',
@@ -1398,7 +1398,7 @@ window.mraFailure = response => {
     if (!file) { reject(Object.assign(new Error("Choose a CSV file."), {plain: true})); return; }
     if (file.size > 5 * 1024 * 1024) { reject(Object.assign(new Error("That file is too large. Use a file under 5 MB."), {plain: true})); return; }
     const reader = new FileReader();
-    reader.onerror = () => reject(Object.assign(new Error("That file could not be read."), {plain: true}));
+    reader.onerror = () => reject(Object.assign(new Error("That file could not be read. Choose it again, or try a different file."), {plain: true}));
     reader.onload = () => {
       const lines = String(reader.result || "").split(/\r?\n/).filter(line => line.trim());
       const header = (lines.shift() || "").split(",").map(name => slug(name).replace(/-/g, "_"));

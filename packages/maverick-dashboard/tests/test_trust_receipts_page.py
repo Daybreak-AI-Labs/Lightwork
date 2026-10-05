@@ -41,7 +41,7 @@ def test_page_is_wired_and_hardened(monkeypatch) -> None:
     csp = response.headers["content-security-policy"]
     assert "'unsafe-inline'" not in csp and "style-src 'self' 'nonce-" in csp
     body = response.text
-    assert "Trust Receipts" in body
+    assert "Trust receipts" in body
     assert f'data-copilot-page="{page.PAGE_PATH}"' in body
     assert f'data-api-base="{page.API_BASE}"' in body
     assert page.ASSET_PATH in body

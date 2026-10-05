@@ -147,8 +147,8 @@
       <thead>
         <tr>
           <th scope="col">Department</th><th scope="col">Finished</th>
-          <th scope="col">Hourly Cost</th><th scope="col">Hours Per Task</th>
-          <th scope="col">Cost For People</th><th scope="col">Lightwork Cost</th>
+          <th scope="col">Hourly cost</th><th scope="col">Hours per task</th>
+          <th scope="col">Cost for people</th><th scope="col">Lightwork cost</th>
           <th scope="col">Saved</th>
         </tr>
       </thead>
@@ -263,7 +263,7 @@
 
   function render(D) {
     var rep = D.report;
-    if (!rep.available) throw new Error(rep.unavailable_reason || 'Savings history is unavailable.');
+    if (!rep.available) throw new Error(rep.unavailable_reason || 'Savings history is unavailable. Refresh the page and try again.');
     var k = document.getElementById('bd-kpis');
     k.textContent = '';
     // Show the assumptions next to the estimate; never a bare cost multiple.

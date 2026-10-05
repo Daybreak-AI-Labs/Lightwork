@@ -85,10 +85,10 @@
       if (response.status === 401 || response.status === 403) throw new Error('Your access changed. Sign in again before managing recovery storage.');
       var data; try { data = await response.json(); } catch (_error) { throw new Error('Recovery storage could not confirm this request. Refresh the summary before trying again.'); }
       if (!response.ok) throw new Error(failText(response, body ? 'free the recovery space' : 'load the recovery storage summary',
-        response.status === 409 ? 'Recovery storage changed. Refresh the summary before trying again.' : 'Recovery storage is unavailable.'));
+        response.status === 409 ? 'Recovery storage changed. Refresh the summary before trying again.' : 'Recovery storage is unavailable. Refresh the page and try again.'));
       if (!data || data.context !== context || !/^[0-9a-f]{64}$/.test(data.version) ||
           !['capacity','saved','discarded','available'].every(function (key) { return Number.isInteger(data[key]) && data[key] >= 0; }) ||
-          data.saved + data.discarded + data.available !== data.capacity) throw new Error('The recovery storage summary could not be verified.');
+          data.saved + data.discarded + data.available !== data.capacity) throw new Error('The recovery storage summary could not be verified. Refresh the page and try again.');
       return data;
     }
     function showStorage(data, prefix) {

@@ -5825,7 +5825,7 @@ async def _policy_pack_page_data(module: Any) -> dict[str, Any]:
         else:
             channels = channel_result
         if isinstance(subscription_result, Exception):
-            error = error or "Select a tenant to view policy-pack subscriptions."
+            error = error or "Select a workspace to view policy-pack subscriptions."
         else:
             subscriptions = subscription_result
     return {
@@ -7352,6 +7352,8 @@ async def agents_page(request: Request) -> HTMLResponse:
             view = resolved_view(name)
             if view and (allowed is None or set(view["suites"]) <= allowed):
                 selected = view
+                selected["plain_errors"] = _plain_findings(view.get("errors") or [])
+                selected["plain_warnings"] = _plain_findings(view.get("warnings") or [])
                 selected["picker_label"] = next(
                     (agent["picker_label"] for agent in agents if agent["name"] == name),
                     f"{view.get('description') or _idfmt.humanize(name)} · {_idfmt.humanize(name)}",
@@ -7394,6 +7396,14 @@ async def agents_page(request: Request) -> HTMLResponse:
          "show_change_authors": has_global_permission(request, "admin"),
          "access": access, "typical_cost": typical},
     )
+
+
+def _plain_findings(findings: list) -> list[str]:
+    """Setup-check findings in plain words, each said once; the raw lint text
+    stays under Technical details."""
+    from .workforce_ops_api import _finding
+
+    return list(dict.fromkeys(_finding(str(item)) for item in findings))
 
 
 def _assign_picker_labels(agents: list[dict]) -> None:
@@ -7453,7 +7463,7 @@ async def agents_picker(request: Request, q: str = "", setup: bool = False, limi
     try:
         roster = list_agents()
     except Exception as exc:  # noqa: BLE001 - the page says the list is unavailable
-        raise HTTPException(status_code=503, detail="The specialist list is unavailable. Try again.") from exc
+        raise HTTPException(status_code=503, detail="The list of agents and specialists is unavailable. Try again.") from exc
     visible = [agent for agent in roster if allowed is None or set(agent["suites"]) <= allowed]
     _assign_picker_labels(visible)
     ranked = []
@@ -7513,7 +7523,7 @@ def assessments_page(request: Request) -> HTMLResponse:
                 getattr(prof, "persona", ""),
                 getattr(prof, "description", ""),
             )
-            a["group"] = department_title(a["suite"]) if a.get("suite") else "Other agents"
+            a["group"] = department_title(a["suite"]) if a.get("suite") else "Other agents and specialists"
         agents.sort(key=lambda a: (a["group"].casefold(), a["label"].casefold(), a["name"]))
     except Exception:  # never 500 the page if the factory layer is unavailable
         agents = []
@@ -9414,7 +9424,7 @@ def fleets_page(request: Request) -> HTMLResponse:
                 profile = catalog.get(domain)
                 if profile is None:
                     specialist_readiness[domain] = {
-                        "state": "needs_setup", "label": "Specialist no longer available",
+                        "state": "needs_setup", "label": "No longer available",
                         "fix_url": "/agents", "missing_tools": [],
                     }
                 else:
@@ -10693,7 +10703,7 @@ async def chat_send(
         if len(title) > GOAL_TITLE_MAX_LENGTH:
             raise HTTPException(
                 status_code=422,
-                detail=f"Shorten the goal to {GOAL_TITLE_MAX_LENGTH:,} characters or fewer. Move additional instructions to Add details.",
+                detail=f"Shorten the task to {GOAL_TITLE_MAX_LENGTH:,} characters or fewer. Move additional instructions to Add details.",
             )
         if len(description) > GOAL_DESCRIPTION_MAX_LENGTH:
             raise HTTPException(
@@ -11301,7 +11311,7 @@ def _load_paused_approval_run(token: str):
 
             assert_tenant_active(tenant)
         except Exception:
-            return None, "That tenant is not active.", tenant, ""
+            return None, "That workspace is not active.", tenant, ""
         from maverick.paths import set_tenant
 
         tenant_token = set_tenant(tenant)

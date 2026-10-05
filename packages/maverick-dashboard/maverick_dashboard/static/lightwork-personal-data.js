@@ -18,7 +18,7 @@
     ['pd-command', 'pd-links', 'pd-proofs', 'pd-ceiling', 'pd-memory', 'pd-policy',
       'pd-stores', 'pd-tasks', 'pd-delete-preview', 'pd-delete-requests', 'pd-source-text',
       'pd-export-link'].forEach(id => { if (el(id)) el(id).replaceChildren(); });
-    return new Error('Your sign-in, permissions or workspace changed. Private data was cleared. Reload My Data to continue.');
+    return new Error('Your sign-in, permissions or workspace changed. Private data was cleared. Reload My data to continue.');
   }
   async function call(path, data) {
     if (locked) throw lock();

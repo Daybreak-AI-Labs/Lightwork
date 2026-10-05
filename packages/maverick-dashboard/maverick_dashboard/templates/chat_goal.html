@@ -555,7 +555,7 @@
         <a id="halt-action-link" href="{{ stop.link if stop and stop.link else '#' }}"{% if not (stop and stop.link and (show_technical_details or not stop.link.startswith(('/settings', '/mcp')))) %} hidden{% endif %}>{{ stop.link_label if stop and stop.link_label else '' }}</a>
       </p>
       <p id="halt-specialist-alternative" class="muted"{% if not specialist_setup %} hidden{% endif %}>
-        {{ ui('Need another route?') }} <a href="/agents">{{ ui('Browse specialists') }}</a> {{ ui('or') }} <a href="/chat">{{ ui('start a different task') }}</a>. {{ ui("This task won't switch specialists on its own.") }}
+        {{ ui('Need another route?') }} <a href="/agents">{{ ui('Browse agents and specialists') }}</a> {{ ui('or') }} <a href="/chat">{{ ui('start a different task') }}</a>. {{ ui("This task won't switch to another agent or specialist on its own.") }}
       </p>
       {% if show_technical_details %}
       <details class="halt-card__technical" id="halt-technical"{% if not (stop and stop.technical) %} hidden{% endif %}>

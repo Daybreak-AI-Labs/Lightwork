@@ -1304,7 +1304,7 @@ def test_generic_evidence_route_refuses_unverified_training_run():
 def test_model_risk_assurance_page_is_available():
     response = client.get("/security/assurance")
     assert response.status_code == 200
-    assert "Model Risk &amp; AI Assurance Officer" in response.text
+    assert "Model risk &amp; AI assurance officer" in response.text
 
 
 def test_ai_literacy_http_lifecycle_is_tenant_bound(monkeypatch):

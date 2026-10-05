@@ -75,7 +75,7 @@ MIGRATED_HEADERS = {
     "employee_activation.html": 'ui("Your first useful result")',
     "employee_departures.html": "'Employee departures'", "my_work.html": "'My background work'",
     "notification_health.html": "'Notification delivery'", "outcome_pilots.html": "'Workflow pilots'",
-    "permission_requests.html": "'Permission requests'", "personal_data.html": "'My Data'",
+    "permission_requests.html": "'Permission requests'", "personal_data.html": "'My data'",
     "personal_notifications.html": "'Your notifications'",
     "project_reviews.html": 'ui("Project team reviews")', "project_workspaces.html": "'Project workspaces'",
     "task_diagnostics.html": "'Review a safe task diagnostic report'", "task_handoffs.html": "'Task handoffs'",

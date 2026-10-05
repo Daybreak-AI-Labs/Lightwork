@@ -79,9 +79,9 @@
     suggest.disabled = true; status.textContent = 'Finding suggestions.';
     try {
       var response = await fetch('/api/v1/templates/suggested', {cache:'no-store'});
-      if (!response.ok) throw plain('Suggestions are unavailable.');
+      if (!response.ok) throw plain('Suggestions are unavailable. Refresh the page and try again.');
       var result = await response.json();
-      if (!Array.isArray(result.suggested)) throw plain('Suggestions could not be read.');
+      if (!Array.isArray(result.suggested)) throw plain('Suggestions could not be read. Refresh the page and try again.');
       if (request !== filter.request) return;
       filter.names = result.suggested.map(function (item) { return item.name; });
       filter.mode = filter.names.length ? 'suggested' : 'all';

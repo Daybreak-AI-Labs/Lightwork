@@ -25,7 +25,7 @@
   {% endset %}
   {% call hero('Your AI workforce', 'Workflows',
                subtitle='Save a process and use it again',
-               lede='Workflows, templates, and specialist instructions you\'ve built
+               lede='Workflows, templates, and agent playbooks you\'ve built
                      — schedule them, trigger them from events, or run them on
                      demand. Browse the full catalog on
                      <a href="/templates">Templates</a>.' | safe,
@@ -138,10 +138,10 @@
     </ul>
     {% elif can_operate_workflows %}
     {{ empty_state('No agent playbooks yet',
-                   'Governed specialist agents you build appear here. In the builder, choose “Agent playbook” to build the first one.',
+                   'Governed agents you build appear here. In the builder, choose “Agent playbook” to build the first one.',
                    action_label='Open the builder', action_href='/workflow-builder') }}
     {% else %}
-    {{ empty_state('No agent playbooks yet', 'Governed specialist agents that people in your workspace build appear here.') }}
+    {{ empty_state('No agent playbooks yet', 'Governed agents that people in your workspace build appear here.') }}
     {% endif %}
   </section>
 </div>

@@ -41,11 +41,11 @@ def test_pack_changes_are_described_in_plain_words():
 
 def test_entries_are_newest_first_and_include_workspace_wide_changes():
     changelog.record("proc_po_chaser", ["Changed its instructions"], by="user:alice")
-    changelog.record(changelog.EVERY_AGENT, ["Changed the default AI model for every specialist and agent"], by="user:bob")
+    changelog.record(changelog.EVERY_AGENT, ["Changed the default AI model for every agent and specialist"], by="user:bob")
     changelog.record("legal_nda_desk", ["Changed its instructions"], by="user:carol")
     rows = changelog.entries("proc_po_chaser")
     assert [row["changes"][0] for row in rows] == [
-        "Changed the default AI model for every specialist and agent", "Changed its instructions"]
+        "Changed the default AI model for every agent and specialist", "Changed its instructions"]
     assert rows[1]["by"] == "user:alice"
     assert changelog.record("proc_po_chaser", [], by="user:alice") is None
 
@@ -99,11 +99,11 @@ def test_role_and_default_model_changes_are_recorded_for_every_agent(monkeypatch
                     json={"system_addendum": "Always answer in British English."})
     assert r.status_code == 200, r.text
     rows = changelog.entries(changelog.EVERY_AGENT)
-    assert rows[0]["changes"] == ["Changed the instructions the Planner follows for every specialist and agent"]
+    assert rows[0]["changes"] == ["Changed the instructions the Planner follows for every agent and specialist"]
     r = client.post("/settings/models", data={"model": "anthropic:claude-sonnet-4-6"}, follow_redirects=False)
     assert r.status_code == 303, r.text
     newest = changelog.entries(changelog.EVERY_AGENT)[0]["changes"][0]
-    assert newest.startswith("Changed the default AI model for every specialist and agent")
+    assert newest.startswith("Changed the default AI model for every agent and specialist")
 
 
 def test_the_agent_editor_shows_who_changed_it_when_and_what(monkeypatch):

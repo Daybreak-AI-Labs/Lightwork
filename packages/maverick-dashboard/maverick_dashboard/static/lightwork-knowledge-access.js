@@ -755,7 +755,7 @@
       var maximum = payload.capacity.active_limit;
       if (!Number.isInteger(used) || !Number.isInteger(maximum) ||
           used < 0 || maximum < 1 || used > maximum + 1) {
-        throw failure("The request capacity could not be verified.");
+        throw failure("The request capacity could not be verified. Refresh the page and try again.");
       }
       var canArchive = payload.capacity.archive_available !== false;
       archiveAvailable = canArchive;
@@ -1157,7 +1157,7 @@
             var saved = await api(archive.dataset.accessPath, {
               context: context, confirm: true, expected_revision: record.revision
             });
-            if (rightsRequest(saved).archived_at === null) throw failure("The archive could not be verified.");
+            if (rightsRequest(saved).archived_at === null) throw failure("The archive could not be verified. Refresh the page and try again.");
             await loadRequests();
             announce("The finished request is retained in the archive. Its source restrictions remain in force.", true);
           } catch (error) {
@@ -1491,7 +1491,7 @@
     try {
       var result = await api("/requests/" + encodeURIComponent(requestId), undefined, "GET");
       if (result.schema !== "lightwork.knowledge-rights-request-detail.v1") {
-        throw failure("The retained request could not be verified.");
+        throw failure("The retained request could not be verified. Refresh the page and try again.");
       }
       var record = (canReview ? rightsRequest : feedback)(result.item);
       if (record.id !== requestId || record.archived_at === null) {

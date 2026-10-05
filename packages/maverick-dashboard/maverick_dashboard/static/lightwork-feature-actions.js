@@ -326,8 +326,8 @@
     try {
       var data = await request('/api/v1/workforce/posture');
       box.textContent = '';
-      say(status, data.levels_enabled ? 'Each specialist has its own level of independence.' :
-        'Independence levels are turned off, so every specialist follows the same approval rules.');
+      say(status, data.levels_enabled ? 'Each agent and specialist has its own level of independence.' :
+        'Independence levels are turned off, so every agent and specialist follows the same approval rules.');
       // With levels off the per-level split is not applied to anything, so it
       // is not shown: the line above already says every specialist is treated alike.
       if (data.levels_enabled) {
@@ -348,11 +348,11 @@
       }
       var cands = data.graduation_candidates || [];
       if (!cands.length) {
-        box.appendChild(el('p', 'muted', 'No specialist has earned more independence yet. They qualify after a run of approved work.'));
+        box.appendChild(el('p', 'muted', 'No agent or specialist has earned more independence yet. They qualify after a run of approved work.'));
         return;
       }
       box.appendChild(el('h3', null, 'Ready for more independence'));
-      box.appendChild(table(['Specialist', 'Approved work', 'Approval rate', 'Next step'], cands.map(function (c) {
+      box.appendChild(table(['Name', 'Approved work', 'Approval rate', 'Next step'], cands.map(function (c) {
         var link = el('a', null, window.mvHuman ? window.mvHuman(c.name) : c.name);
         link.href = '/agents?name=' + encodeURIComponent(c.name) + '#agent-autonomy';
         var action = el('span');
@@ -520,7 +520,7 @@
       try {
         var response = await request('/api/v1/customizations/export', {raw: true});
         saveBlob(await response.blob(), 'Lightwork-customizations.zip');
-        say(status, 'Downloaded ' + plural(Number(response.headers.get('X-Lightwork-Specialists') || 0), 'specialist change') +
+        say(status, 'Downloaded ' + plural(Number(response.headers.get('X-Lightwork-Specialists') || 0), 'agent or specialist change', 'agent and specialist changes') +
           ' and ' + plural(Number(response.headers.get('X-Lightwork-Roles') || 0), 'role change') + '.');
       } catch (failure) {
         say(status, await failText(failure, 'download customizations'));
@@ -545,13 +545,13 @@
         var load = el('button', 'btn btn--primary', 'Load these customizations');
         load.type = 'button';
         load.addEventListener('click', async function () {
-          var ok = await window.mvConfirm('Load ' + plural(preview.usable, 'customization') + '? Matching specialists and roles in this workspace are replaced by the ones in the file.', {okText: 'Load'});
+          var ok = await window.mvConfirm('Load ' + plural(preview.usable, 'customization') + '? Matching agents, specialists and roles in this workspace are replaced by the ones in the file.', {okText: 'Load'});
           if (!ok) return;
           load.disabled = true;
           try {
             var result = await request('/api/v1/customizations/load', {method: 'POST', body: raw, type: 'application/zip'});
             out.textContent = '';
-            say(status, 'Loaded ' + plural(result.specialists, 'specialist change') + ' and ' + plural(result.roles, 'role change') +
+            say(status, 'Loaded ' + plural(result.specialists, 'agent or specialist change', 'agent and specialist changes') + ' and ' + plural(result.roles, 'role change') +
               (result.skipped ? '; ' + result.skipped + ' skipped.' : '.'));
             technical(out, result.technical);
           } catch (failure) {

@@ -36,7 +36,7 @@ def test_consent_page_is_explicit_about_default_off_and_product_boundary():
 
     assert response.status_code == 200
     page = response.text
-    assert "Consent &amp; Preferences" in page or "Consent & Preferences" in page
+    assert "Consent and preferences" in page
     # Default-off is explicit, and the gate is switchable IN-APP: the shared
     # module-gate banner with a Turn on control, no config keys in the UI.
     assert 'data-module-gate="consent_preferences"' in page

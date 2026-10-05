@@ -10,9 +10,9 @@ const {JSDOM, VirtualConsole} = require('jsdom');
 
 const source = fs.readFileSync(path.join(__dirname, '../../maverick_dashboard/static/lightwork-agent-picker.js'), 'utf8');
 const MARKUP = '<div class="af-combo"><input id="agent-picker" type="text" role="combobox" aria-autocomplete="list" ' +
-  'aria-expanded="false" aria-controls="agent-picker-list" aria-label="Choose a specialist to tailor" data-picker-src="/agents/picker">' +
+  'aria-expanded="false" aria-controls="agent-picker-list" aria-label="Choose an agent or specialist to tailor" data-picker-src="/agents/picker">' +
   '<ul id="agent-picker-list" role="listbox" hidden></ul></div><button type="button" id="agent-picker-open">Open</button>' +
-  '<p id="agent-picker-status" role="status"></p><label><input id="agent-show-needs-setup" type="checkbox"> Show specialists that need setup</label>';
+  '<p id="agent-picker-status" role="status"></p><label><input id="agent-show-needs-setup" type="checkbox"> Show those that need setup</label>';
 const FORECAST = {name: 'fin_forecasting', label: 'Forecasting specialist', ready: true, readiness: 'Can start'};
 const FORMS = {name: 'ops_forms', label: 'Form intake', ready: true, readiness: 'Can start'};
 const tick = (ms = 0) => new Promise(resolve => setTimeout(resolve, ms));
@@ -59,7 +59,7 @@ test('typing searches the server and shows the matches as a listbox', async () =
   assert.equal(options[0].textContent, 'Forecasting specialistCan start');
   assert.equal(ui.list.hidden, false);
   assert.equal(ui.input.getAttribute('aria-expanded'), 'true');
-  assert.equal(ui.status.textContent, '2 of 37 matching specialists. Keep typing to narrow the list.');
+  assert.equal(ui.status.textContent, '2 of 37 matches. Keep typing to narrow the list.');
   assert.equal(ui.doc.activeElement, ui.input, 'focus stays in the field');
   ui.dom.window.close();
 });
@@ -135,7 +135,7 @@ test('Open and Enter open only an exact name, otherwise they explain', async () 
   ui.doc.getElementById('agent-picker-open').click();
   await tick();
   assert.equal(ui.navigations.length, 2);
-  assert.equal(ui.toasts.at(-1)[0], 'Choose a specialist from the list, or show those needing setup.');
+  assert.equal(ui.toasts.at(-1)[0], 'Choose an agent or specialist from the list, or show those needing setup.');
   assert.equal(ui.toasts.at(-1)[1].error, true);
   ui.input.value = '';
   ui.doc.getElementById('agent-picker-open').click();
@@ -150,14 +150,14 @@ test('specialists that need setup are asked for only when shown', async () => {
   ui.input.value = 'payable';
   ui.key('ArrowDown');
   await tick();
-  assert.equal(ui.status.textContent, 'No ready specialists match. Choose "Show specialists that need setup" to include the rest.');
+  assert.equal(ui.status.textContent, 'No ready agents or specialists match. Choose "Show those that need setup" to include the rest.');
   assert.equal(ui.list.hidden, true);
   const box = ui.doc.getElementById('agent-show-needs-setup');
   box.checked = true;
   box.dispatchEvent(new ui.dom.window.Event('change', {bubbles: true}));
   await tick();
   assert.equal(ui.requests.at(-1), '/agents/picker?q=payable&setup=1');
-  assert.equal(ui.status.textContent, '1 matching specialist.');
+  assert.equal(ui.status.textContent, '1 match.');
   ui.dom.window.close();
 });
 
@@ -195,7 +195,7 @@ test('clearing the field closes the list; Down shows the first specialists', asy
   await tick();
   assert.equal(ui.requests.at(-1), '/agents/picker?q=');
   assert.equal(ui.list.children.length, 2);
-  assert.equal(ui.status.textContent, '2 of 1066 matching specialists. Keep typing to narrow the list.');
+  assert.equal(ui.status.textContent, '2 of 1066 matches. Keep typing to narrow the list.');
   ui.dom.window.close();
 });
 
@@ -206,7 +206,7 @@ test('a failed search says so and closes the list', async () => {
   ui.input.value = 'for';
   ui.key('ArrowDown');
   await tick();
-  assert.equal(ui.status.textContent, 'Could not search the specialists.');
+  assert.equal(ui.status.textContent, 'Could not search the agents and specialists.');
   assert.equal(ui.list.hidden, true);
   assert.equal(ui.input.getAttribute('aria-expanded'), 'false');
   ui.dom.window.close();

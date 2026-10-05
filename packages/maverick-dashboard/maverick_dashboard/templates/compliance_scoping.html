@@ -78,7 +78,7 @@
 <div class="cs-grid">
   <section class="panel cs-stack">
     <h2>Choose an action</h2>
-    <p>Tenant and actor come only from the authenticated request. Unknown fields,
+    <p>The workspace and the person acting come only from your sign-in. Unknown fields,
       free-text framework or evidence content, and key values are rejected.</p>
     <label>Operation
       <select id="cs-operation" data-guided-api="/api/v1/compliance/scoping">
@@ -99,7 +99,7 @@
         <option value="scope-export" data-method="PUT" data-path="/scopes/{scope_id}/exports/{export_id}">Scope: create signed local export</option>
         <option value="export-get" data-method="GET" data-path="/exports/{export_id}">Export: get and verify signature</option>
         <option value="retention-purge" data-method="POST" data-path="/retention/purge">Retention: purge expired state</option>
-        <option value="integrity" data-method="GET" data-path="/integrity">Integrity: verify tenant state</option>
+        <option value="integrity" data-method="GET" data-path="/integrity">Integrity: check this workspace’s records</option>
       </select>
     </label>
     <label>Record references (JSON)
@@ -215,7 +215,7 @@
       var pathValues = JSON.parse(paths.value || "{}");
       var payload = JSON.parse(body.value || "{}");
       if (containsForbiddenKey(payload)) {
-        throw new Error("Tenant, actor, raw text, evidence, and key values are never accepted. Remove them from Action details, then try again.");
+        throw new Error("Workspace, person acting, raw text, evidence, and key values are never accepted. Remove them from Action details, then try again.");
       }
       var path = buildPath(route.dataset.path, pathValues);
       await run(route.dataset.method, path, payload);

@@ -29,14 +29,14 @@
   <button id="wrec-refresh" type="button" class="btn btn--ghost">Refresh</button>
   <p id="wrec-identity"></p>
   <p id="wrec-last-restore" role="status" aria-live="polite"></p>
-  <section class="panel"><h2>What This Protects</h2><ul id="wrec-coverage"></ul><details><summary>What needs its own recovery plan</summary><ul id="wrec-excluded"></ul></details><ul id="wrec-blockers"></ul></section>
-  <section class="panel"><h2>Recovery Key</h2><p>You need this key to check and restore your copies. Keep it somewhere safe, away from the copies themselves. This computer keeps a private copy, but if the computer is lost you need yours.</p>
+  <section class="panel"><h2>What this protects</h2><ul id="wrec-coverage"></ul><details><summary>What needs its own recovery plan</summary><ul id="wrec-excluded"></ul></details><ul id="wrec-blockers"></ul></section>
+  <section class="panel"><h2>Recovery key</h2><p>You need this key to check and restore your copies. Keep it somewhere safe, away from the copies themselves. This computer keeps a private copy, but if the computer is lost you need yours.</p>
     <p id="wrec-key-status"></p>
     <div class="wrec-actions"><button id="wrec-key-create" type="button" class="btn btn--primary" disabled>Create and download key</button><button id="wrec-key-download" type="button" class="btn" disabled>Download existing key</button></div>
     <details><summary>Use a recovery key you already have</summary><label for="wrec-key-input">Recovery key</label><input id="wrec-key-input" class="input" type="password" autocomplete="off" maxlength="128"><button id="wrec-key-import" type="button" class="btn" disabled>Use this key</button><p class="muted">You can only do this before a key has been set up here.</p></details>
   </section>
-  <section class="panel"><h2>Encryption Keys</h2><p id="wrec-encryption-status"></p><details><summary>Keep a separate copy of this computer's encryption keys</summary><p>This download holds unprotected keys that may unlock several workspaces. Keep it offline or in your company's password vault, away from your copies. Keys held by an outside key service stay with whoever manages them. A workspace restore never replaces shared keys.</p><label class="wrec-confirm"><input id="wrec-encryption-confirm" type="checkbox">I understand these keys may unlock several workspaces and will keep them separately.</label><button id="wrec-encryption-download" type="button" class="btn" disabled>Download encryption keys</button></details></section>
-  <section class="panel"><h2>Saved Copies</h2><p>A saved copy (snapshot) holds sensitive workspace data and may include encryption keys. Keep downloaded copies somewhere safe, off this computer.</p>
+  <section class="panel"><h2>Encryption keys</h2><p id="wrec-encryption-status"></p><details><summary>Keep a separate copy of this computer's encryption keys</summary><p>This download holds unprotected keys that may unlock several workspaces. Keep it offline or in your company's password vault, away from your copies. Keys held by an outside key service stay with whoever manages them. A workspace restore never replaces shared keys.</p><label class="wrec-confirm"><input id="wrec-encryption-confirm" type="checkbox">I understand these keys may unlock several workspaces and will keep them separately.</label><button id="wrec-encryption-download" type="button" class="btn" disabled>Download encryption keys</button></details></section>
+  <section class="panel"><h2>Saved copies</h2><p>A saved copy (snapshot) holds sensitive workspace data and may include encryption keys. Keep downloaded copies somewhere safe, off this computer.</p>
     <button id="wrec-create" type="button" class="btn btn--primary" disabled>Create snapshot</button>
     <label for="wrec-snapshot">Saved snapshot</label><select id="wrec-snapshot" class="select" disabled><option value="">Choose a snapshot</option></select>
     <div class="wrec-actions"><button id="wrec-inspect" type="button" class="btn" disabled>Check snapshot</button><button id="wrec-download" type="button" class="btn" disabled>Download snapshot</button><button id="wrec-drill" type="button" class="btn" disabled>Test restore safely</button></div>
@@ -52,13 +52,13 @@
     <details><summary>Delete a saved snapshot from this computer</summary><p>If you must keep it, download and check a copy first. Only the chosen snapshot on this computer is deleted. Snapshots needed for a current or recent restore can't be deleted.</p><label class="wrec-confirm"><input id="wrec-retire-confirm" type="checkbox">I checked how long records must be kept and want to delete this snapshot from this computer.</label><button id="wrec-retire" type="button" class="btn btn--danger" disabled>Delete selected snapshot</button></details>
     <details><summary>Bring in a snapshot you downloaded earlier</summary><label for="wrec-file">Lightwork snapshot file</label><input id="wrec-file" class="input" type="file" accept=".tgz,.gz,application/gzip"><button id="wrec-import" type="button" class="btn" disabled>Bring in and check</button><p class="muted">Up to 256 MB (1 GB once unpacked). Only a snapshot made for this workspace with this recovery key can be brought in.</p></details>
   </section>
-  <section class="panel"><h2>Restore Onto a New Computer</h2>
+  <section class="panel"><h2>Restore onto a new computer</h2>
     <p>Use this only in recovery mode on a fresh, empty installation. Shut down the old installation first so two copies can't act for the same workspace. Restored requests and any work that may have reached outside services stay on hold until you review them here.</p>
     <p id="wrec-bootstrap-status" role="status" aria-live="polite"></p>
     <label class="wrec-confirm"><input id="wrec-bootstrap-source-offline" type="checkbox">I confirmed the old installation is shut down and this workspace is empty.</label>
     <div class="wrec-actions"><button id="wrec-bootstrap-prepare" type="button" class="btn btn--primary" disabled>Prepare this empty installation</button><button id="wrec-bootstrap-resume" type="button" class="btn" disabled>Finish an interrupted restore</button></div>
   </section>
-  <section class="panel"><h2>Test Your Saved Encryption Keys</h2>
+  <section class="panel"><h2>Test your saved encryption keys</h2>
     <p>Choose a snapshot above, then the encryption-key file you saved earlier. Lightwork checks, in a temporary space, that the keys open the snapshot's encrypted data. Nothing is installed, the live workspace is not changed and no restore starts.</p>
     <label for="wrec-custody-file">Saved encryption-key file (.zip)</label><input id="wrec-custody-file" class="input" type="file" accept=".zip,application/zip" aria-describedby="wrec-custody-help" data-draft-recovery="off">
     <p id="wrec-custody-help" class="muted">Up to 4 MB. This file holds sensitive keys that may unlock several workspaces; it is used only for this test. Keys held by an outside key service need their own procedure.</p>
@@ -74,14 +74,14 @@
       <button id="wrec-custody-report-download" type="button" class="btn" disabled>Download signed key test result</button>
     </div>
     <div id="wrec-custody-install-panel" hidden>
-      <h3>Install the Tested Keys</h3>
+      <h3>Install the tested keys</h3>
       <p>Choose the same key file you just tested. Lightwork makes sure it is exactly that file before installing any key. If installing is interrupted, it can only continue with the same file.</p>
       <label for="wrec-custody-install-file">The key file you tested (.zip)</label><input id="wrec-custody-install-file" class="input" type="file" accept=".zip,application/zip" data-draft-recovery="off">
       <label class="wrec-confirm"><input id="wrec-custody-install-confirm" type="checkbox">I allow installing this exact tested key file on this empty recovery installation.</label>
       <button id="wrec-custody-install" type="button" class="btn btn--primary" disabled>Install the tested keys</button>
     </div>
   </section>
-  <section class="panel"><h2>See What Changed</h2>
+  <section class="panel"><h2>See what changed</h2>
     <p>Compare the chosen snapshot with the workspace as it is now. This shows why a restore might be refused. Nothing is changed and no restore starts.</p>
     <button id="wrec-compare" type="button" class="btn" disabled>Compare with the current workspace</button>
     <p id="wrec-comparison-status" role="status" aria-live="polite"></p>
@@ -94,7 +94,7 @@
       <ul id="wrec-comparison-items"></ul>
     </div>
   </section>
-  <section class="panel"><h2>Restore This Workspace</h2><p>Restoring puts the workspace back exactly as it was in the chosen snapshot and removes anything made afterwards. A checked safety copy of the current workspace is saved first. Other workspaces, shared settings and outside services are not affected. The snapshot must come from this exact version of Lightwork.</p>
+  <section class="panel"><h2>Restore this workspace</h2><p>Restoring puts the workspace back exactly as it was in the chosen snapshot and removes anything made afterwards. A checked safety copy of the current workspace is saved first. Other workspaces, shared settings and outside services are not affected. The snapshot must come from this exact version of Lightwork.</p>
     <p class="muted">A restore is refused if spending records, budget holds, records of actions in outside services, or database files differ from the snapshot. An administrator must sort that out first. You can still download the snapshot and test it safely.</p>
     <button id="wrec-prepare" type="button" class="btn btn--primary" disabled>Prepare restore and safety copy</button>
     <div id="wrec-review" hidden><p id="wrec-review-text"></p><label class="wrec-confirm"><input id="wrec-confirm" type="checkbox"><span id="wrec-confirm-text">I reviewed the workspace and snapshot, and understand that newer local work will be replaced.</span></label><button id="wrec-restore" type="button" class="btn btn--danger" disabled>Restore reviewed snapshot</button></div>

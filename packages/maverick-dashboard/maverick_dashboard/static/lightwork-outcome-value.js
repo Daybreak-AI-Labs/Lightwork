@@ -659,7 +659,7 @@
         cache: 'no-store', credentials: 'same-origin',
         headers: {'X-Lightwork-Pilot-Context': context},
       });
-      if (!response.ok) fail('The cohort value report is unavailable.');
+      if (!response.ok) fail('The cohort value report is unavailable. Refresh the page and try again.');
       let payload;
       try { payload = await response.json(); } catch (_) { fail('The cohort value report could not be read. Refresh the page to try again.'); }
       const validated = validateCohort(payload, 'lightwork.outcome-value-cohort.v1');
@@ -673,7 +673,7 @@
       selector.replaceChildren(node('option', 'Choose an admitted case'));
       selector.firstChild.value = '';
       host.replaceChildren(node(
-        'p', error instanceof ProjectionError ? error.message : 'The cohort value report could not be verified.',
+        'p', error instanceof ProjectionError ? error.message : 'The cohort value report could not be verified. Refresh the page and try again.',
       ));
       statusHost.textContent = 'No cohort totals or ROI were displayed.';
       return false;
@@ -746,9 +746,9 @@
         cache: 'no-store', credentials: 'same-origin',
         headers: {'X-Lightwork-Pilot-Context': context},
       });
-      if (!response.ok) fail('Pilot cohorts are unavailable.');
+      if (!response.ok) fail('Pilot cohorts are unavailable. Refresh the page and try again.');
       let raw;
-      try { raw = await response.json(); } catch (_) { fail('The pilot list could not be read.'); }
+      try { raw = await response.json(); } catch (_) { fail('The pilot list could not be read. Refresh the page and try again.'); }
       const page = validatePilotPage(raw, cursor);
       appendPilotOptions(page.items, !append);
       pilotCursor = page.nextCursor;
@@ -766,11 +766,11 @@
       loadMoreButton.hidden = true;
       if (append) {
         statusHost.textContent = error instanceof ProjectionError
-          ? error.message : 'More pilot cohorts could not be verified.';
+          ? error.message : 'More pilot cohorts could not be verified. Refresh the page and try again.';
       } else {
         cohort = null;
         host.replaceChildren(node('p', error instanceof ProjectionError
-          ? error.message : 'Pilot cohorts could not be verified.'));
+          ? error.message : 'Pilot cohorts could not be verified. Refresh the page and try again.'));
         statusHost.textContent = 'No cohort totals or ROI were displayed.';
       }
       return false;
@@ -825,7 +825,7 @@
           ? 'The record changed. Refresh and review the latest evidence before saving.'
           : response.status === 422
             ? 'The evidence is incomplete or conflicts with the current record. Check every field and correction explanation.'
-            : 'The evidence could not be saved.';
+            : 'The evidence could not be saved. Try again.';
         throw new ProjectionError(message);
       }
       const verified = await load();
@@ -1022,7 +1022,7 @@
         cache: 'no-store', credentials: 'same-origin',
         headers: {'X-Lightwork-Pilot-Context': context},
       });
-      if (!response.ok) fail('The complete report is unavailable.');
+      if (!response.ok) fail('The complete report is unavailable. Refresh the page and try again.');
       const payload = await response.json();
       validateCohort(payload, 'lightwork.outcome-value-export.v1');
       await verifyExportEnvelope(payload);

@@ -146,7 +146,7 @@
           const states = {awaiting_review:'waiting for independent approval', authorized:'approved for staging', staged:'staged',
             canary:'in monitored rollout', active:'active', rolled_back:'rolled back', uncertain:'outcome uncertain',
             denied:'denied', blocked:'blocked', not_advancing:'not advancing', unavailable:'unavailable'};
-          feedback.replaceChildren(node('span', (deployed[result.deployment_state] || 'Release status is unavailable.') +
+          feedback.replaceChildren(node('span', (deployed[result.deployment_state] || 'Release status is unavailable. Refresh the page and try again.') +
             ' Promotion is ' + (states[result.promotion_state] || 'under review') + '. Case release exposure and causal lift remain unverified. '));
           const link = node('a', 'Open candidate approval, promotion and rollback'); link.href = '/research#research-promotions'; feedback.append(link);
         } catch (error) { feedback.textContent = error.message + ' Recheck the candidate in Research before continuing.'; }
@@ -380,7 +380,7 @@
     const data = await request('/sources');
     sources = data.items; $('op-source-coverage').textContent = data.coverage.map(c => (c.kind === 'goal' ? 'Pending tasks' : 'Vendor intake') + ': ' + c.status).join(' · ');
     if ($('op-specialist')) {
-      const selected = $('op-specialist').value; $('op-specialist').replaceChildren(new Option('Choose a specialist',''));
+      const selected = $('op-specialist').value; $('op-specialist').replaceChildren(new Option('Choose an agent or specialist',''));
       (data.specialists || []).forEach(s => $('op-specialist').append(new Option(s.label,s.domain))); $('op-specialist').value = selected;
     }
     $('op-planned-cases').querySelectorAll('select').forEach(select => {

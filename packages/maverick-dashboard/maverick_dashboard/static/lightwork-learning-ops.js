@@ -75,7 +75,7 @@
         ? plural(d.corrections.length, 'problem keeps', 'problems keep') + ' showing up. Nothing was changed.'
         : 'No problem shows up often enough yet. Nothing would change.';
       if (d.corrections.length) fill('lo-fa-out', J.table(['Suggested guidance', 'Seen in', 'Area'], d.corrections.map(function (c) {
-        return [c.guidance, plural(c.seen_in, 'specialist'), window.mvHuman ? window.mvHuman(c.area) : c.area];
+        return [c.guidance, plural(c.seen_in, 'agent'), window.mvHuman ? window.mvHuman(c.area) : c.area];
       })));
     } catch (failure) {
       $('lo-fa-status').textContent = await J.problem(failure, 'look for repeated problems');
@@ -85,7 +85,7 @@
   if (faAdopt) faAdopt.addEventListener('click', async function () {
     var body = await fileBody($('lo-fa-file'), 'Choose the results file first.');
     if (!body) return;
-    if (!(await window.mvConfirm('Adopt the guidance this results file proves helps? New specialists are built with it from now on. Guidance that the file does not prove is left out.',
+    if (!(await window.mvConfirm('Adopt the guidance this results file proves helps? New agents are built with it from now on. Guidance that the file does not prove is left out.',
       { okText: 'Adopt guidance' }))) return;
     faAdopt.disabled = true;
     $('lo-fa-status').textContent = 'Checking the results file…';

@@ -200,7 +200,7 @@
         }
       });
       if (box && !box.children.length) box.textContent = "No departments are set up yet.";
-    }).catch(function () { var box = document.getElementById("xa-scopes"); if (box) box.textContent = "Departments could not be loaded."; });
+    }).catch(function () { var box = document.getElementById("xa-scopes"); if (box) box.textContent = "Departments could not be loaded. Refresh the page and try again."; });
   // Allowed actions: one row per action with your risk rating.
   var toolList = null;
   function tools() {

@@ -237,10 +237,10 @@ def _plugins(S, C) -> tuple:  # noqa: N803
 def _workforce(S, C) -> tuple:  # noqa: N803
     return (
         S("workforce", "agents", "Independence of each agent",
-          "Choose how much a hired agent may do by itself at each risk level. Needs "
-          "per-agent independence levels on. An agent that is still being supervised acts "
+          "Choose how much an agent or specialist may do by itself at each risk level. Needs "
+          "per-agent independence levels on. One that is still being supervised acts "
           "one step more carefully.", "rules", "Safety", [], "maverick.config",
-          columns=(C("name", "Agent", "pick", choices_from="specialists", required=True,
+          columns=(C("name", "Agent or specialist", "pick", choices_from="specialists", required=True,
                      unique=True),
                    C("default", "Usually", "select", choices=_LEVEL, default=""),
                    C("low", "Low risk", "select", choices=_LEVEL, default=""),

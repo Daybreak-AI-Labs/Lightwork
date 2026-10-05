@@ -90,4 +90,4 @@ def test_the_team_task_form_shows_each_agents_past_runs(env):
     assert ('data-typical="Past runs usually cost $1.00 to $1.00, $1.00 in the middle '
             '(based on 10 finished tasks in this workspace).') in page
     assert 'data-typical="Not enough past runs to estimate yet: 1 of the 10' in page
-    assert "Choose an agent to see what its past runs usually cost." in page
+    assert "Choose an agent or specialist to see what its past runs usually cost." in page

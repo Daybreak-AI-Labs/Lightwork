@@ -53,7 +53,7 @@
   {% if memory_preferences.available %}<p>{{ ui(memory_preferences.sharing) }}.</p>
   <dl>{% for scope in memory_preferences.scopes %}<dt>{% if scope.channel_label and scope.account_number %}{{ ui('Verified {channel} account {number}',channel=scope.channel_label,number=scope.account_number) }}{% else %}{{ ui(scope.label) }}{% endif %}</dt><dd>{{ ui(scope.choice) }}. {{ ui('Effective recall: {state}',state=ut(scope.effective)) }}. {{ ui('Source: {source}',source=ut(scope.source)) }}</dd>{% endfor %}</dl>
   {% endif %}
-  <p><a class="btn btn--ghost" href="/my-data#pd-memory">{{ ui("Review memory choices and sources in My Data") }}</a></p>
+  <p><a class="btn btn--ghost" href="/my-data#pd-memory">{{ ui("Review memory choices and sources in My data") }}</a></p>
 </section>
 {% endif %}
 <script id="preference-data" type="application/json">{{ preference_state|tojson }}</script>

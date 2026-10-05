@@ -48,11 +48,11 @@
   function describe(data) {
     var shown = data.items.length;
     if (!shown) {
-      return withSetup() ? 'No specialists match. Try another word.'
-        : 'No ready specialists match. Choose "Show specialists that need setup" to include the rest.';
+      return withSetup() ? 'No agents or specialists match. Try another word.'
+        : 'No ready agents or specialists match. Choose "Show those that need setup" to include the rest.';
     }
-    if (data.total > shown) return shown + ' of ' + plural(data.total, 'matching specialist', 'matching specialists') + '. Keep typing to narrow the list.';
-    return plural(shown, 'matching specialist', 'matching specialists') + '.';
+    if (data.total > shown) return shown + ' of ' + plural(data.total, 'match', 'matches') + '. Keep typing to narrow the list.';
+    return plural(shown, 'match', 'matches') + '.';
   }
   function render(data, query) {
     items = data.items;
@@ -97,7 +97,7 @@
     } catch (failure) {
       if (ticket === latest) {
         items = []; setOpen(false);
-        say(window.mvErrorText ? window.mvErrorText(failure, 'search the specialists') : 'Specialists could not be searched. Try again.');
+        say(window.mvErrorText ? window.mvErrorText(failure, 'search the agents and specialists') : 'Agents and specialists could not be searched. Try again.');
       }
       return null;
     }
@@ -120,7 +120,7 @@
       match = data ? exact(data.items, text) : null;
     }
     if (match) choose(match);
-    else toast('Choose a specialist from the list, or show those needing setup.');
+    else toast('Choose an agent or specialist from the list, or show those needing setup.');
   }
 
   input.addEventListener('input', function () {

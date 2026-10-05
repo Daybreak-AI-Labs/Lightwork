@@ -27,9 +27,9 @@ def _actor(request):
     auth.require_permission(request, "view")
     principal = auth.caller_principal(request)
     if not principal or not personal_identity.principal_current(principal):
-        raise HTTPException(403, "Use a named account with current workspace membership for My Data.")
+        raise HTTPException(403, "Use a named account with current workspace membership for My data.")
     if not personal_identity.enabled():
-        raise HTTPException(403, "My Data controls are disabled. Ask your administrator to enable Personal data controls in Settings.")
+        raise HTTPException(403, "My data controls are disabled. Ask your administrator to enable Personal data controls in Settings.")
     return principal
 
 

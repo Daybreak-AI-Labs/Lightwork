@@ -105,7 +105,7 @@ ROWS = [('Interface language', 'Langue de l’interface', 'Sprache der Oberfläc
  ('Upcoming occurrences', 'Prochaines exécutions', 'Anstehende Ausführungen', '今後の実行予定', '即将执行'),
  ('Pinned templates', 'Modèles épinglés', 'Angeheftete Vorlagen', '固定したテンプレート', '固定模板'),
  ('Your personal memory', 'Votre mémoire personnelle', 'Ihr persönlicher Speicher', '個人の記憶', '个人记忆'),
- ('Review memory choices and sources in My Data',
+ ('Review memory choices and sources in My data',
   'Vérifier les choix de mémoire et les sources dans Mes données',
   'Speicherauswahl und Quellen unter Meine Daten prüfen',
   '「マイデータ」で記憶の設定と情報源を確認',

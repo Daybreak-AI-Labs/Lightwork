@@ -54,7 +54,7 @@ def test_page_has_a_search_box_not_the_whole_roster(client):
     assert re.search(r'<ul id="agent-picker-list"[^>]*role="listbox"', page)
     assert 'id="agent-picker-status" role="status"' in page
     assert "/static/lightwork-agent-picker.js" in page
-    assert re.search(r"search [\d,]+ prebuilt specialists", page)
+    assert re.search(r"search [\d,]+ agents and specialists", page)
     assert len(page.encode()) < 250_000  # it was 568 KB
 
 

@@ -106,15 +106,15 @@ TASKS: dict[str, tuple[CopilotTask, ...]] = {
                     ("decisions on my requests", "my requests", "decision history", "was it approved")),
     ),
     "/learning": (
-        CopilotTask("See what people said about each specialist and agent",
-                    "What people said about each specialist and agent counts thumbs up and down for each one "
+        CopilotTask("See what people said about each agent and specialist",
+                    "What people said about each agent and specialist counts thumbs up and down for each one "
                     "and the reasons people picked. Written comments stay with each person's task.",
                     "/learning", "Open answer feedback", "agent-feedback",
                     ("feedback", "what people said", "ratings", "thumbs"), "admin"),
     ),
     "/agents": (
-        CopilotTask("Change what a specialist may do",
-                    "Pick the specialist, change its allowed actions or instructions, then press Save specialist. "
+        CopilotTask("Change what an agent or specialist may do",
+                    "Pick the agent or specialist, change its allowed actions or instructions, then press Save. "
                     "Its change history records who changed it and when.",
                     "/agents", "Open Agent Factory", "",
                     ("allowed actions", "what a specialist may do", "what an agent may do", "agent tools",
@@ -124,8 +124,8 @@ TASKS: dict[str, tuple[CopilotTask, ...]] = {
                     "press Create custom agent.",
                     "/agents?new=1", "Start a custom agent", "agent-form",
                     ("custom agent", "new agent", "create an agent"), "admin"),
-        CopilotTask("See what changed in a specialist or agent",
-                    "Open a specialist or agent; Change history lists who changed it, when, and what changed.",
+        CopilotTask("See what changed in an agent or specialist",
+                    "Open an agent or specialist; Change history lists who changed it, when, and what changed.",
                     "/agents", "Open Agent Factory", "",
                     ("change history", "who changed", "what changed"), "view"),
     ),

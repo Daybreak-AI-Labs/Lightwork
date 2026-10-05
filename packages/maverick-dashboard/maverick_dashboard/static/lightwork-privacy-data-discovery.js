@@ -62,7 +62,7 @@
       throw problem("Server response exceeded the 2 MiB safety limit.", "response_too_large", response.status);
     }
     if (!response.body || typeof response.body.getReader !== "function") {
-      throw problem("Server response stream is unavailable.", "response_stream_unavailable", response.status);
+      throw problem("The reply could not be read. Refresh the page and try again.", "response_stream_unavailable", response.status);
     }
     var reader = response.body.getReader();
     var chunks = [];

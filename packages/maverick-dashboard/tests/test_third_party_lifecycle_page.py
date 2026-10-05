@@ -36,7 +36,7 @@ def test_page_is_a_list_workflow_in_plain_words(page_client) -> None:
     response = page_client.get("/third-party/lifecycle")
     assert response.status_code == 200
     page = response.text
-    assert "Third-Party Lifecycle" in page
+    assert "Third-party lifecycle" in page
     assert "doesn't contact vendors" in unescape(page)
     assert "/api/v1/third-party/lifecycle" in page
     # Lists load on open, with a button to start each kind of record.

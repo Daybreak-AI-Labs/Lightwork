@@ -70,7 +70,7 @@ Open **Workflows** (`/workflows`) to see three different kinds of saved work:
 | --- | --- | --- |
 | A reusable task instruction | **New workflow** | Build a template, then use it from Chat or arrange a schedule or trigger when those features are available. |
 | Connected steps with decisions or repetition | **New flow** | Use the visual designer, review each step and its required inputs, then inspect the run. A flow approval step pauses for a person. |
-| Instructions for a specialist | An **agent playbook** | It guides the specialist; a sentence telling it to seek review does **not** create a flow approval gate. |
+| Instructions for an agent you build | An **agent playbook** | It guides the agent; a sentence telling it to seek review does **not** create a flow approval gate. |
 
 The **Workflows** list shows saved flows, templates, and playbooks. **Edit** opens
 the relevant builder; **Use** starts a template in Chat. A flow can be turned
@@ -78,15 +78,20 @@ off or deleted from **More** after review. If flows are turned off, the page
 shows who can enable them. Ask Copilot to explain the steps while you are in
 the designer, but check the saved definition and the run before relying on it.
 
-## Choose or create a specialist
+## Choose a specialist or create an agent
 
-**Agent Factory** (`/agents`) shows the available specialists and their job
-cards. Choose an existing specialist first when its remit fits the work. You
-can use **Hire from a job description** to find a match, **Set up a specialist
-for your business** to review a draft, or **New custom agent** to create one.
-The specialist's instructions, model, and allowed actions determine what it
-can attempt; workspace permissions, spending limits, and approvals still
-apply. Saving a specialist does not prove that it can reach every external
+A **specialist** is one of Lightwork's own built-in job specialists. Anything
+else, such as an agent built in your workspace or an outside agent you connect,
+is an **agent**. A specialist you have tailored is still a specialist, marked
+**Customized**.
+
+**Agent Factory** (`/agents`) shows the available agents and specialists and
+their job cards. Choose an existing specialist first when its remit fits the
+work. You can use **Hire from a job description** to find a match, **Set up an
+agent for your business** to review a draft, or **New custom agent** to create
+one. The instructions, model, and allowed actions of an agent or specialist
+determine what it can attempt; workspace permissions, spending limits, and
+approvals still apply. Saving an agent or specialist does not prove that it can reach every external
 system or that its output is correct. Run a bounded real task and review the
 result before making it part of a repeatable process.
 

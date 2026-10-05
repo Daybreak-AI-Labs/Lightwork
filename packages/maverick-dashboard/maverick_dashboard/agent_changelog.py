@@ -104,24 +104,24 @@ def describe_role_change(role: str, before: dict | None, after: dict | None) -> 
     title = _role_words(role)
     changes = []
     if before.get("system_addendum", "") != after.get("system_addendum", ""):
-        changes.append(f"Changed the instructions the {title} follows for every specialist and agent")
+        changes.append(f"Changed the instructions the {title} follows for every agent and specialist")
     if before.get("model") != after.get("model"):
-        changes.append(f"Changed the AI model the {title} uses for every specialist and agent: "
+        changes.append(f"Changed the AI model the {title} uses for every agent and specialist: "
                        f"{_model_words(before.get('model'))} to {_model_words(after.get('model'))}")
     if before.get("effort") != after.get("effort"):
-        changes.append(f"Changed how much effort the {title} puts into answers for every specialist and agent")
+        changes.append(f"Changed how much effort the {title} puts into answers for every agent and specialist")
     return changes
 
 
 def describe_default_model(before: object, after: object) -> list[str]:
     if before == after:
         return []
-    return [f"Changed the default AI model for every specialist and agent: {_model_words(before)} to {_model_words(after)}"]
+    return [f"Changed the default AI model for every agent and specialist: {_model_words(before)} to {_model_words(after)}"]
 
 
 def describe_role_models(before: dict, after: dict) -> list[str]:
     old, new = dict(before or {}), dict(after or {})
-    return [f"Changed the AI model the {_role_words(role)} uses for every specialist and agent: "
+    return [f"Changed the AI model the {_role_words(role)} uses for every agent and specialist: "
             f"{_model_words(old.get(role))} to {_model_words(new.get(role))}"
             for role in sorted(set(old) | set(new)) if old.get(role) != new.get(role)]
 

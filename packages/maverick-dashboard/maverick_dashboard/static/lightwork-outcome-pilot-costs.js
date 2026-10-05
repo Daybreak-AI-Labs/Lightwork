@@ -22,7 +22,7 @@
     const panel = node('section'); panel.className = 'panel'; panel.id = 'op-provider-costs';
     panel.append(node('h2', 'Admitted provider costs'));
     const costs = data.provider_costs;
-    if (!costs || !['current','partial'].includes(costs.status)) { panel.append(node('p', costs && costs.reason || 'Provider billing is unavailable.')); host.append(panel); return; }
+    if (!costs || !['current','partial'].includes(costs.status)) { panel.append(node('p', costs && costs.reason || 'Provider billing is unavailable. Refresh the page and try again.')); host.append(panel); return; }
     if(costs.status==='partial')panel.append(node('p','Cost coverage is partial: changed or unavailable allocations are excluded from current totals. Review the flagged sources below.'));
     panel.append(node('p', 'Provider amounts are separate from your reported total workflow, human and rework costs. Allocation to cases is your reviewed attribution; invoice authenticity is not independently verified.'));
     const setup=node('a','Open AI cost collection and receipt setup');setup.href='/security/assurance';panel.append(setup);

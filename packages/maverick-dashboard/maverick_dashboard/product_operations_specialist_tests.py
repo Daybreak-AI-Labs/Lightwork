@@ -40,8 +40,8 @@ def _snapshot(request, selection, *, admin=False, paid=False):
                "value": str(selection.get("specialist") or "")[:100], "max_length": 100}]
     return Snapshot(digest({"context": context_for(request), "admin": admin, "paid": paid,
                             "enabled": not blocked}),
-                    "Current specialist test controls in this account and workspace",
-                    "Use your saved examples to check the current specialist's answers; live checks use no tools or company knowledge.",
+                    "Current answer-check controls in this account and workspace",
+                    "Use your saved examples to check the current answers of an agent or specialist; live checks use no tools or company knowledge.",
                     fields=fields, blocked=blocked)
 
 
@@ -90,8 +90,8 @@ def create_prepare(request, selection, arguments):
     name = arguments["specialist"]
     native._test_profile(request, name)
     fields = _fields(arguments)
-    return Preview("Save this answer check for the selected specialist. Nothing is sent to an AI provider yet.",
-                   [{"label": "Specialist", "after": native._name(name)},
+    return Preview("Save this answer check for the selected agent or specialist. Nothing is sent to an AI provider yet.",
+                   [{"label": "Agent or specialist", "after": native._name(name)},
                     {"label": "Question", "after": fields["task"]},
                     {"label": "Passing answer", "after": "; ".join(
                         (["mentions " + ", ".join(fields["includes"])] if fields["includes"] else [])
@@ -119,7 +119,7 @@ def create_execute(request, selection, arguments, prepared, operation_id):
     name = arguments["specialist"]
     native._test_profile(request, name)
     if digest(saved.cases_for(name)) != prepared["case_digest"]:
-        raise HTTPException(409, "The specialist's test list changed. Review it again before saving.")
+        raise HTTPException(409, "The test list changed. Review it again before saving.")
     fields = _fields(arguments)
     native._audit(request, "specialist_test_save", specialist=name, test=operation_id)
     row = saved.save_once(name, fields, operation_id)
@@ -169,9 +169,9 @@ def run_prepare(request, selection, arguments):
     rows = _chosen(name, arguments["checks"])
     model = model_for_role(name)
     instructions = saved.instruction_digest(saved.answer_system(profile), model)
-    return Preview(f"Check {len(rows)} selected answers using the current specialist instructions and {model}. "
+    return Preview(f"Check {len(rows)} selected answers using the current instructions and {model}. "
                    "At most $0.25 of model spend, no tools or outside systems, no automatic retry of uncertain calls.",
-                   [{"label": "Specialist", "after": pack_display_name(name, profile.persona, profile.description)},
+                   [{"label": "Agent or specialist", "after": pack_display_name(name, profile.persona, profile.description)},
                     {"label": "Questions", "after": "; ".join(row["task"] for row in rows)},
                     {"label": "Maximum spend", "after": "$0.25"}],
                    {"cases_digest": digest(rows), "instructions": instructions, "model": model,
@@ -222,7 +222,7 @@ def run_execute(request, selection, arguments, prepared, operation_id):
     rows = _chosen(name, arguments["checks"])
     if (prepared["context"] != context_for(request) or model != prepared["model"] or digest(rows) != prepared["cases_digest"]
             or saved.instruction_digest(saved.answer_system(profile), model) != prepared["instructions"]):
-        raise HTTPException(409, "The specialist or its tests changed. Review again before spending.")
+        raise HTTPException(409, "Its instructions or tests changed. Review again before spending.")
     started = native._start_customer_test_job(request, name, operation_id=operation_id,
                                               case_ids=arguments["checks"], case_revisions=prepared["case_revisions"])
     if started.get("replayed"):
@@ -237,13 +237,13 @@ def run_execute(request, selection, arguments, prepared, operation_id):
 def entries():
     pages = ("/workforce", "/agents")
     return (
-        Adapter("specialists.tests.read", "Read specialist answer checks", "models", "/workforce", pages,
+        Adapter("specialists.tests.read", "Read answer checks", "models", "/workforce", pages,
                 ChooseInput, read_snapshot, read_prepare,
-                aliases=("show specialist tests", "show answer checks")),
-        Adapter("specialists.tests.create", "Add a specialist answer check", "models", "/workforce", pages,
+                aliases=("show specialist tests", "show agent tests", "show answer checks")),
+        Adapter("specialists.tests.create", "Add an answer check", "models", "/workforce", pages,
                 CreateInput, create_snapshot, create_prepare, create_execute, create_recover,
                 aliases=("add an answer check", "create specialist test")),
-        Adapter("specialists.tests.run", "Check specialist answers", "models", "/workforce", pages,
+        Adapter("specialists.tests.run", "Check answers", "models", "/workforce", pages,
                 RunInput, run_snapshot, run_prepare, run_execute, run_recover,
-                aliases=("run specialist tests", "check specialist answers")),
+                aliases=("run specialist tests", "check specialist answers", "check agent answers")),
     )

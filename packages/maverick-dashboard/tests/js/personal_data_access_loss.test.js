@@ -14,7 +14,7 @@ function boot(reply){
   return {dom,w,privateEditor,calls:()=>calls};
 }
 const settle=()=>new Promise(resolve=>setTimeout(resolve,15));
-for(const status of [401,403])test(`My Data clears private data before parsing an HTML ${status} and blocks another action`,async()=>{
+for(const status of [401,403])test(`My data clears private data before parsing an HTML ${status} and blocks another action`,async()=>{
   let parsed=false;const {dom,w,privateEditor,calls}=boot(()=>({status,ok:false,json:async()=>{parsed=true;throw Error('HTML sign-in page');}}));
   w.document.getElementById('pd-refresh').click();await settle();
   assert.equal(parsed,false);assert.equal(w.document.getElementById('pd-memory').textContent,'');
@@ -23,12 +23,12 @@ for(const status of [401,403])test(`My Data clears private data before parsing a
   assert.match(w.document.getElementById('pd-status').textContent,/Private data was cleared/);
   w.document.getElementById('pd-refresh').click();await settle();assert.equal(calls(),1);dom.window.close();
 });
-for(const mismatch of ['response','request'])test(`My Data locks on a proven ${mismatch} context change`,async()=>{
+for(const mismatch of ['response','request'])test(`My data locks on a proven ${mismatch} context change`,async()=>{
   const {dom,w}=boot(state=>mismatch==='response'?{status:200,ok:true,json:async()=>({...state,context:'b'.repeat(64)})}:{status:409,ok:false,json:async()=>({detail:'Your account or workspace changed. Refresh before changing personal data.'})});
   w.document.getElementById('pd-refresh').click();await settle();
   assert.equal(w.document.getElementById('pd-memory').textContent,'');assert.equal(w.document.getElementById('pd-refresh').disabled,true);dom.window.close();
 });
-for(const kind of ['network','service','revision'])test(`My Data preserves unfinished edits after a ${kind} failure`,async()=>{
+for(const kind of ['network','service','revision'])test(`My data preserves unfinished edits after a ${kind} failure`,async()=>{
   const {dom,w,privateEditor}=boot(()=>{if(kind==='network')throw Error('Synthetic network interruption');return {status:kind==='service'?503:409,ok:false,json:async()=>({detail:kind==='service'?'Temporarily unavailable':'The preference revision changed. Review its current state.'})};});
   w.document.getElementById('pd-refresh').click();await settle();
   assert.equal(privateEditor.isConnected,true);assert.equal(privateEditor.value,'Unfinished private correction');

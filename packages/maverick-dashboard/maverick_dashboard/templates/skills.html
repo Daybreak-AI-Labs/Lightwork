@@ -20,7 +20,7 @@
 
   <div class="sk-grid">
     <section class="panel" aria-labelledby="sk-create-title">
-      <h2 id="sk-create-title" class="sk-flush">Create a Skill</h2>
+      <h2 id="sk-create-title" class="sk-flush">Create a skill</h2>
       {% if not is_admin %}
         <p class="muted">Only administrators can add skills. Ask an administrator to add the one you need.</p>
       {% elif not install_allowed %}
@@ -111,7 +111,7 @@
     </section>
 
     <section aria-labelledby="sk-list-title">
-      <div class="section-head"><h2 id="sk-list-title">Your Skills</h2></div>
+      <div class="section-head"><h2 id="sk-list-title">Your skills</h2></div>
       <div id="installed-skills">
         {% for s in skills %}
           {% set label = s.name | humanize %}
@@ -154,7 +154,7 @@
   {% endif %}
 
   <section class="panel sk-section" aria-labelledby="to-skill-usage-title">
-    <div class="section-head"><h2 id="to-skill-usage-title">How Your Skills Are Doing</h2></div>
+    <div class="section-head"><h2 id="to-skill-usage-title">How your skills are doing</h2></div>
     <p class="muted sk-small">Each time agents use a skill, Lightwork notes whether the task went well.</p>
     <p id="to-skill-usage-status" class="muted" role="status" aria-live="polite">Loading…</p>
     <div id="to-skill-usage"></div>
@@ -162,7 +162,7 @@
 
   {% if is_admin %}
   <section class="panel sk-section" aria-labelledby="to-tidy-title">
-    <div class="section-head"><h2 id="to-tidy-title">Tidy Up Skills That Rarely Help</h2></div>
+    <div class="section-head"><h2 id="to-tidy-title">Tidy up skills that rarely help</h2></div>
     <p class="muted sk-small">Find skills that have had a fair trial and still rarely help, then remove them.
       Lightwork allows for chance, so a skill is only listed when the evidence is clear.</p>
     <div class="sk-row">

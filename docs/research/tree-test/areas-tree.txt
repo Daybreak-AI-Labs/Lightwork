@@ -42,7 +42,7 @@ Work
 		Code
 	Promise reviews
 	Hand over a team's work
-		Autonomous Shoring
+		Autonomous shoring
 Agents
 	Workforce
 		Workforce
@@ -80,7 +80,7 @@ Rules & safety
 	Safety monitoring
 	Outside agents
 		Outside agents
-		Agent Trust
+		Agent trust
 	Test a rule
 		Test a safety rule
 	Redaction check
@@ -96,7 +96,7 @@ Privacy
 	Notices
 		Privacy notices
 	Consent
-		Consent & Preferences
+		Consent and preferences
 		Mobile app consent
 		Find people by preference
 		Bulk consent changes
@@ -119,7 +119,7 @@ Privacy
 Risk & compliance
 	Compliance
 		Compliance
-		Autonomous Compliance
+		Autonomous compliance
 		No-code GRC studio
 		Continuous evidence
 		Policy links
@@ -139,16 +139,16 @@ Risk & compliance
 	AI risk
 		AI governance
 		Governance assistants
-		Governance Inventory
+		Governance inventory
 		AI system tasks
 		AI assurance
 	Vendors
 		AI vendor onboarding
 		Contracts and engagements
-		Executive Vendor Reports
+		Executive vendor reports
 		Third-party intelligence
-		Third-Party Lifecycle
-		Third-Party Collaboration
+		Third-party lifecycle
+		Third-party collaboration
 Evidence & audit
 	Activity log
 	Task replay

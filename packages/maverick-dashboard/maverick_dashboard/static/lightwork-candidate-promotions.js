@@ -96,7 +96,7 @@
       message('Candidate ' + candidate.candidate_id + ' is now updated.');
       await refresh();
     } catch (error) {
-      message(error.message || 'Candidate promotion action failed.', true);
+      message(error.message || 'That didn\'t work. Refresh the page and try again.', true);
     } finally {
       setBusy(false);
     }
@@ -216,12 +216,12 @@
       'Stage candidate', candidate, 'stage',
       'Stage this exact candidate after another current rights and artifact check?', 'btn btn--primary'));
     if (candidate.state === 'staged') item.appendChild(actionButton(
-      'Start canary', candidate, 'activate',
-      'Activate this staged candidate as a canary? Lightwork will retain the compatible rollback target.', 'btn btn--primary'));
+      'Start a limited trial', candidate, 'activate',
+      'Start this staged candidate as a limited trial? Lightwork will keep the version it can roll back to.', 'btn btn--primary'));
     if (candidate.state === 'canary') {
       item.appendChild(actionButton(
-        'Assess canary and apply rollback rules', candidate, 'canary',
-        'Read the current canary observations and immediately roll back if a declared invariant fails?', 'btn btn--primary'));
+        'Check the trial and apply rollback rules', candidate, 'canary',
+        'Read the current trial results and roll back at once if a declared rule fails?', 'btn btn--primary'));
       item.appendChild(rollbackForm(candidate));
     }
     if (candidate.state === 'active') item.appendChild(rollbackForm(candidate));
@@ -288,7 +288,7 @@
     setBusy(true);
     try { await refresh(); shown = true; }
     catch (error) {
-      message(error.message || 'Candidate promotions could not be loaded.', true);
+      message(error.message || 'Candidate promotions could not be loaded. Refresh the page and try again.', true);
       // Nothing was ever shown: clear the list's "Loading…"; the status line
       // above it says what happened and what to do.
       if (!shown) list.replaceChildren();

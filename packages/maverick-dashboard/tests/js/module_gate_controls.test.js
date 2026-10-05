@@ -9,7 +9,7 @@ const { JSDOM } = require("jsdom");
 const source = fs.readFileSync(
   path.resolve(__dirname, "../../maverick_dashboard/static/lightwork-ui.js"), "utf8");
 
-// The shape of Consent & Preferences and Find Personal Data while their feature
+// The shape of Consent and preferences and Find Personal Data while their feature
 // is off: the whole workbench root is marked off and the module gate sits inside it.
 const MARKUP = `
 <div id="toasts"></div>
