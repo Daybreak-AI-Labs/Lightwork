@@ -2,6 +2,7 @@
 {% block title %}Teams · Lightwork{% endblock %}
 {% block content %}
   {% from "_hero.html" import hero, state %}
+  {% from "_typical_cost.html" import typical_cost_text %}
   {% call hero('Human in command', 'Teams',
                subtitle='Each person\'s own team of agents',
                lede='Give someone a small team of agents, each with a job
@@ -89,7 +90,7 @@
                 <option value="">Choose an agent</option>
                 {% for agent in fleet.agents %}
                   {% set check = specialist_readiness.get(agent.domain) if agent.domain else none %}
-                  <option value="{{ agent.name }}"{% if check and check.state != 'action_ready' %} disabled{% endif %}>{{ agent.name|humanize }} ({{ agent.role|role_label if agent.role else 'no role' }}){% if check %} · {{ check.label }}{% endif %}</option>
+                  <option value="{{ agent.name }}"{% if check and check.state != 'action_ready' %} disabled{% endif %} data-typical="{{ typical_cost_text(typical_costs.get(fleet.name ~ '/' ~ agent.name)) | striptags }}">{{ agent.name|humanize }} ({{ agent.role|role_label if agent.role else 'no role' }}){% if check %} · {{ check.label }}{% endif %}</option>
                 {% endfor %}
               </select>
             </label>
@@ -100,6 +101,8 @@
             <button type="submit" class="btn btn--primary"{% if not fleet_can_start[fleet.name] %} disabled{% endif %}>Start task</button>
             <span class="fleet-run-msg muted" role="status" aria-live="polite"></span>
           </form>
+          <p class="muted fl-typical" aria-live="polite">Choose an agent to see what its past runs usually cost.</p>
+          {% if workspace_limit %}<p class="muted fl-remaining">The whole workspace has {{ workspace_limit.remaining | money }} left of {{ workspace_limit.limit.amount | money }} {{ 'today' if workspace_limit.limit.period == 'day' else 'this month' }}.</p>{% endif %}
           <p class="muted fl-help">Specialist status checks required actions. Connections, permissions and the AI service are checked when work starts.</p>
           {% if not fleet_can_start[fleet.name] %}<p class="muted">No specialist on this team passed the action check. Review setup above, then return to this team.</p>{% endif %}
         {% else %}
@@ -209,6 +212,14 @@
         el.textContent = text;
       }
       document.querySelectorAll('form.fleet-run-form').forEach(function(form) {
+        // Past runs of the chosen agent, from the recorded costs on its option.
+        const typical = form.parentNode.querySelector('.fl-typical');
+        const pick = form.querySelector('[name=agent]');
+        if (typical && pick) pick.addEventListener('change', function() {
+          const option = pick.options[pick.selectedIndex];
+          typical.textContent = option && option.dataset.typical ? option.dataset.typical
+            : 'Choose an agent to see what its past runs usually cost.';
+        });
         form.addEventListener('submit', async function(e) {
           e.preventDefault();
           const fleet = form.dataset.fleet;

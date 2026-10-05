@@ -3142,6 +3142,27 @@ class PostgresWorldModel:
             rows = cur.fetchall()
         return [(str(r[0] or ""), float(r[1]), float(r[2] or 0.0)) for r in rows]
 
+    def task_costs_for(self, *, domain: str = "", execution_principal: str = "",
+                       limit: int = 500) -> list[float]:
+        """The SQLite backend's contract, inside the active tenant."""
+        column, value = ("g.domain", domain) if domain else ("g.execution_principal", execution_principal)
+        if not value:
+            return []
+        frag, fparams = _tenant_scope("g.tenant_id")
+        sql = ("SELECT SUM(COALESCE(e.cost_dollars, 0)), MAX(e.ended_at) "
+               f"FROM episodes e JOIN goals g ON g.id = e.goal_id WHERE {column} = %s "
+               "AND e.ended_at IS NOT NULL")
+        params: list = [str(value)]
+        if frag:
+            sql += " AND " + frag
+            params += fparams
+        sql += " GROUP BY e.goal_id ORDER BY 2 DESC LIMIT %s"
+        params.append(int(limit))
+        with self._tx() as cur:
+            cur.execute(sql, tuple(params))
+            rows = cur.fetchall()
+        return [float(r[0] or 0.0) for r in rows]
+
     def episode_exists(self, goal_id: int, episode_id: int) -> bool:
         frag, fparams = _tenant_scope("g.tenant_id")
         table = "episodes e"

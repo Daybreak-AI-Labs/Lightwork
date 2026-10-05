@@ -2732,6 +2732,22 @@ class WorldModel:
         )
         return [(str(r["owner"] or ""), float(r["ended_at"]), float(r["cost"] or 0.0)) for r in rows]
 
+    def task_costs_for(self, *, domain: str = "", execution_principal: str = "",
+                       limit: int = 500) -> list[float]:
+        """What the most recent finished tasks run by one specialist (``domain``)
+        or one agent (``execution_principal``) cost, newest first: the sum of
+        each task's finished runs. Read-only history for "typical cost"."""
+        column, value = ("g.domain", domain) if domain else ("g.execution_principal", execution_principal)
+        if not value:
+            return []
+        rows = self._read_all(
+            "SELECT SUM(COALESCE(e.cost_dollars, 0)) AS cost, MAX(e.ended_at) AS ended "
+            f"FROM episodes e JOIN goals g ON e.goal_id = g.id WHERE {column} = ? "
+            "AND e.ended_at IS NOT NULL GROUP BY e.goal_id ORDER BY ended DESC LIMIT ?",
+            (str(value), int(limit)),
+        )
+        return [float(r["cost"] or 0.0) for r in rows]
+
     def episode_exists(self, goal_id: int, episode_id: int) -> bool:
         """True if ``episode_id`` belongs to ``goal_id``. A single indexed
         lookup -- callers must not scan list_episodes to check existence."""

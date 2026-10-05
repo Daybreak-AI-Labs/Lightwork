@@ -371,6 +371,22 @@ def _spending_alert_at(raw) -> list[int] | None:
     return None if chosen == list(DEFAULT_ALERT_AT) else chosen
 
 
+def _typical_cost_min_runs(raw) -> int | None:
+    """The wizard's answer for how many finished tasks a typical cost needs;
+    None keeps the default (10). An answer that cannot be read keeps it too."""
+    from maverick.typical_cost import DEFAULT_MIN_RUNS, validate_min_runs
+
+    text = str(raw if raw is not None else "").strip()
+    if not text:
+        return None
+    try:
+        chosen = validate_min_runs(text)
+    except ValueError:
+        print(f"  Typical cost: keeping {DEFAULT_MIN_RUNS} finished tasks (that answer could not be read).")
+        return None
+    return None if chosen == DEFAULT_MIN_RUNS else chosen
+
+
 def _safe_float(s: str, *, default: float) -> float:
     """``float()`` that doesn't crash on whitespace, empty, or junk input."""
     try:
@@ -5464,6 +5480,12 @@ def pick_advanced() -> dict[str, Any]:
             "for no alerts. The limits still stop paid work at 100%.",
             default="50, 75, 100",
         ),
+        "typical_cost_min_runs": _q_text(
+            "Show what an agent's or specialist's past runs usually cost beside the task "
+            "form once it has finished this many tasks (2 to 1000). It is recorded history, "
+            "never a prediction.",
+            default="10",
+        ),
         "tenant_by_user": _q_confirm(
             "Isolate each user into their own tenant? Per-user cross-session memory "
             "is kept separate — recommended for multi-user servers.",
@@ -8787,7 +8809,8 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
     _workspace_limit = _workspace_limit if math.isfinite(_workspace_limit) else 0.0
     _person_limit = _person_limit if math.isfinite(_person_limit) else 0.0
     _alert_at = _spending_alert_at(advanced.get("spending_alert_at"))
-    if _workspace_limit > 0 or _person_limit > 0 or _alert_at is not None:
+    _min_runs = _typical_cost_min_runs(advanced.get("typical_cost_min_runs"))
+    if _workspace_limit > 0 or _person_limit > 0 or _alert_at is not None or _min_runs is not None:
         # Starting limits; administrators change them in the dashboard
         # (Admin > Spending limits), which then takes precedence.
         lines.append("")
@@ -8801,6 +8824,9 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
         if _alert_at is not None:
             # In-app alerts at these percentages of each limit (default 50, 75, 100).
             lines.append(f"alert_at = [{', '.join(str(p) for p in _alert_at)}]")
+        if _min_runs is not None:
+            # Finished tasks needed before a typical cost is shown (default 10).
+            lines.append(f"typical_cost_min_runs = {_min_runs}")
     if advanced.get("tenant_by_user"):
         lines.append("")
         lines.append("[tenancy]")

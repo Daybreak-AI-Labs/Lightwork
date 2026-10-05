@@ -696,6 +696,12 @@ SETTINGS: tuple[Setting, ...] = (
       "list", "Spending & limits", [50, 75, 100], "maverick.spending_alerts",
       max_items=10, max_length=4, item_label="Percent", item_hint="75",
       item_error="a whole number from 1 to 100"),
+    S("spending_limits", "typical_cost_min_runs", "Past runs needed for a typical cost",
+      "How many finished tasks an agent or specialist needs in this workspace before Lightwork "
+      "shows what its past runs usually cost beside the task form. Below this, it says there "
+      "are not enough past runs yet. The range is recorded history, never a prediction.",
+      "number", "Spending & limits", 10, "maverick.typical_cost", minimum=2, maximum=1000,
+      integer=True, unit="finished tasks"),
     S("swarm", "max_total_spawns", "Helper agents per task",
       "The most helper agents one task may create.",
       "number", "Spending & limits", 64, "maverick.config", minimum=1, maximum=1000,

@@ -7223,6 +7223,11 @@ async def agents_page(request: Request) -> HTMLResponse:
             access = agent_access(selected["name"], selected)
         except Exception:  # noqa: BLE001 -- the access check is read-only help
             log.warning("specialist or agent access check unavailable", exc_info=True)
+    typical = None
+    if selected and not creating:
+        from maverick.typical_cost import typical_cost
+
+        typical = typical_cost(_world(), specialist=selected["name"])
     return templates.TemplateResponse(
         request,
         "agents.html",
@@ -7232,7 +7237,7 @@ async def agents_page(request: Request) -> HTMLResponse:
          "agent_changes": agent_changes, "selected_kind": selected_kind,
          # Names of the people who changed an agent are shown to administrators.
          "show_change_authors": has_global_permission(request, "admin"),
-         "access": access},
+         "access": access, "typical_cost": typical},
     )
 
 
@@ -9080,6 +9085,28 @@ def _recent_governance_holds(limit: int = 10) -> list[dict]:
     return [audit_metadata(event) for event in reversed(events)][:limit]
 
 
+def _fleet_typical_costs(fleets: list) -> tuple[dict, dict | None]:
+    """What each team agent's past tasks usually cost, beside the task form,
+    and the workspace's remaining budget. A specialist's history is its pack's
+    tasks in this workspace; any other agent's is its own tasks."""
+    from maverick.typical_cost import min_runs, typical_cost
+
+    world, minimum = _world(), min_runs()
+    costs: dict[str, dict] = {}
+    for fleet in fleets:
+        for agent in fleet.agents:
+            principal = "" if agent.domain else fleet.principal_for(agent.name)
+            costs[f"{fleet.name}/{agent.name}"] = typical_cost(
+                world, specialist=agent.domain or "", agent_principal=principal, minimum=minimum)
+    try:
+        from maverick import spending_limits
+
+        workspace = spending_limits.workspace_standing()
+    except Exception:  # noqa: BLE001 -- the task form still works; the line is left out
+        workspace = None
+    return costs, workspace
+
+
 def _fleet_recent_runs(fleet_name: str, *, owner: str | None = None, limit: int = 12) -> list[dict]:
     """A fleet's recent agent runs for the operator console (newest-first).
 
@@ -9184,6 +9211,7 @@ def fleets_page(request: Request) -> HTMLResponse:
     }
     # Per-fleet recent runs (newest-first), scoped to the fleets already shown.
     runs_by_fleet = {f.name: _fleet_recent_runs(f.name, owner=owner) for f in fleets}
+    typical_costs, workspace_limit = _fleet_typical_costs(fleets)
     try:  # role picker for new agents (same roles the access page offers)
         from . import rbac as _rbac
 
@@ -9199,6 +9227,8 @@ def fleets_page(request: Request) -> HTMLResponse:
             "fleet_can_start": fleet_can_start,
             "role_options": role_options,
             "runs_by_fleet": runs_by_fleet,
+            "typical_costs": typical_costs,
+            "workspace_limit": workspace_limit,
             "holds": _recent_governance_holds(),
             "pending_count": len(_world().pending_approvals()),
         },

@@ -948,7 +948,15 @@ workspace_dollars = 500.0       # 0 or unset = no workspace limit
 workspace_period = "month"      # "day" or "month"
 default_user_dollars = 50.0     # 0 or unset = no limit for each person
 default_user_period = "month"   # "task", "day" or "month"
+typical_cost_min_runs = 10      # finished tasks needed before a typical cost shows
 ```
+
+Beside the task form on **Teams** and in a specialist's or agent's **Check
+access** panel, Lightwork shows what that agent's or specialist's past runs
+usually cost: the middle half (25th to 75th percentile) and the median of its
+most recent finished tasks in this workspace. It is recorded history, never a
+prediction. With fewer finished tasks than `typical_cost_min_runs` (2 to 1000,
+default 10) it says there are not enough past runs yet.
 
 Spend is counted from the usage ledger plus runs still going in the dashboard
 process. Runs in separate worker processes are counted once they settle, so
