@@ -20,11 +20,11 @@ Approver,A2. See every decision waiting for you across tasks and workflows.,Gove
 Approver,A3. Find out what Lightwork may do without asking anyone first.,Administration > Permissions
 Approver,A4. Something looks wrong. Stop all agents at once.,Governance > Agent controls
 Approver,A5. Replay what happened step by step in a task you approved yesterday.,Governance > Task replay
-Approver,A6. Find the signed record that proves who approved a decision.,Governance > Trust Receipts
+Approver,A6. Find the signed record that proves who approved a decision.,Governance > Trust receipts
 Approver,A7. See the full history of actions taken in this workspace.,Governance > Activity log
 Approver,A8. Check whether a screening rule blocked a message.,Governance > Safety
 Approver,A9. Try out a new safety rule before it is turned on.,Governance > Test a safety rule
-Approver,A10. See what an outside company's agent is allowed to reach.,AI oversight > Outside agents | Governance > Agent Trust
+Approver,A10. See what an outside company's agent is allowed to reach.,AI oversight > Outside agents | Governance > Agent trust
 Approver,A11. Look at the regulations your company must follow.,Governance > Regulations and rules
 Approver,A12. See what Lightwork has learned and changed about how it works.,Governance > Learning history
 Approver,A13. Open the result of a task you approved.,Work > Results
@@ -33,7 +33,7 @@ Approver,A15. See how much time and money finished work has saved.,Insights > Sa
 Privacy officer,P1. A customer asks for a copy of all the data you hold about them. Start handling the request.,Privacy > Privacy requests
 Privacy officer,P2. Find every system where a customer's email address is stored.,Privacy > Find personal data
 Privacy officer,P3. Update the privacy notice on your website.,Privacy > Privacy notices
-Privacy officer,P4. Change the cookie banner on your website.,Consent > Website banner settings | Consent > Banner and preference center | Consent > Consent & Preferences
+Privacy officer,P4. Change the cookie banner on your website.,Consent > Website banner settings | Consent > Banner and preference center | Consent > Consent and preferences
 Privacy officer,P5. Record that a person opted out of marketing everywhere.,Consent > Opt out everywhere
 Privacy officer,P6. Check which of your apps track people without consent.,Consent > App tracking checks
 Privacy officer,P7. Handle deletion requests that arrive from the California state registry.,Privacy > California DROP requests

@@ -45,7 +45,7 @@ Insights
 	Branches
 	Spend
 	Savings
-	Autonomous Shoring
+	Autonomous shoring
 	Billing
 	Providers
 	Flow results
@@ -59,7 +59,7 @@ Insights
 	Compare cost records
 	Provider spending
 Governance
-	Autonomous Compliance
+	Autonomous compliance
 	Approvals
 	Agent controls
 	Security & GRC
@@ -82,11 +82,11 @@ Governance
 	Regulations and rules
 	Compartments
 	Activity log
-	Trust Receipts
+	Trust receipts
 	Safety monitoring
 	Learning history
 	Task replay
-	Agent Trust
+	Agent trust
 Privacy
 	Privacy
 	Find personal data
@@ -98,7 +98,7 @@ Privacy
 	Snowflake and Databricks
 	California DROP requests
 Consent
-	Consent & Preferences
+	Consent and preferences
 	Banner and preference center
 	Banner experiments
 	Send choices to other systems
@@ -115,7 +115,7 @@ Consent
 	Trust center access
 AI oversight
 	Governance assistants
-	Governance Inventory
+	Governance inventory
 	AI evidence analysis
 	Suggested assessment answers
 	AI system tasks
@@ -123,10 +123,10 @@ AI oversight
 Third parties
 	AI vendor onboarding
 	Contracts and engagements
-	Executive Vendor Reports
+	Executive vendor reports
 	Third-party intelligence
-	Third-Party Lifecycle
-	Third-Party Collaboration
+	Third-party lifecycle
+	Third-party collaboration
 	Partner fleet
 Administration
 	Permissions

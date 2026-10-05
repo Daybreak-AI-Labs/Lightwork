@@ -29,7 +29,7 @@ Work,Workflows,Flow results,/flows/analytics
 Work,Automations,,/automations
 Work,Code changes,Code,/code
 Work,Promise reviews,,/commitment-reviews
-Work,Hand over a team's work,Autonomous Shoring,/shoring
+Work,Hand over a team's work,Autonomous shoring,/shoring
 Agents,Workforce,Workforce,/workforce
 Agents,Workforce,Teams,/fleets
 Agents,Workforce,Roles,/roles
@@ -54,7 +54,7 @@ Rules & safety,What Lightwork can do,Compartments,/compartments
 Rules & safety,Screening,Safety,/safety
 Rules & safety,Safety monitoring,,/immune
 Rules & safety,Outside agents,Outside agents,/external-agents
-Rules & safety,Outside agents,Agent Trust,/trust
+Rules & safety,Outside agents,Agent trust,/trust
 Rules & safety,Test a rule,Test a safety rule,/simulate
 Rules & safety,Redaction check,,/redact
 Rules & safety,Regulations and rules,,/compliance/obligations
@@ -64,7 +64,7 @@ Privacy,Requests,California DROP requests,/privacy/drop
 Privacy,Requests,Send people their data,/privacy/rights-consumer-delivery
 Privacy,Find personal data,,/privacy/data-discovery
 Privacy,Notices,Privacy notices,/privacy/notice-governance
-Privacy,Consent,Consent & Preferences,/consent
+Privacy,Consent,Consent and preferences,/consent
 Privacy,Consent,Mobile app consent,/consent/native
 Privacy,Consent,Find people by preference,/consent/custom-indexes
 Privacy,Consent,Bulk consent changes,/consent/bulk-jobs
@@ -83,7 +83,7 @@ Privacy,Data use rules,Data use rules,/data-use
 Privacy,Data use rules,Snowflake and Databricks,/data-use/providers
 Privacy,Law research,Privacy law research,/privacy/regulatory-intelligence
 Risk & compliance,Compliance,Compliance,/compliance
-Risk & compliance,Compliance,Autonomous Compliance,/autonomous-compliance
+Risk & compliance,Compliance,Autonomous compliance,/autonomous-compliance
 Risk & compliance,Compliance,No-code GRC studio,/compliance/grc-studio
 Risk & compliance,Compliance,Continuous evidence,/compliance/continuous-evidence
 Risk & compliance,Compliance,Policy links,/compliance/policy-links
@@ -99,15 +99,15 @@ Risk & compliance,Security,Security readiness report,/security/report
 Risk & compliance,Financial controls,Financial risk,/finance
 Risk & compliance,AI risk,AI governance,/security/governance
 Risk & compliance,AI risk,Governance assistants,/governance-agents
-Risk & compliance,AI risk,Governance Inventory,/governance/inventory
+Risk & compliance,AI risk,Governance inventory,/governance/inventory
 Risk & compliance,AI risk,AI system tasks,/ai-entity-tasks
 Risk & compliance,AI risk,AI assurance,/security/assurance
 Risk & compliance,Vendors,AI vendor onboarding,/third-party/vendor-onboarding
 Risk & compliance,Vendors,Contracts and engagements,/third-party/contracts
-Risk & compliance,Vendors,Executive Vendor Reports,/third-party/executive-reports
+Risk & compliance,Vendors,Executive vendor reports,/third-party/executive-reports
 Risk & compliance,Vendors,Third-party intelligence,/third-party/intelligence
-Risk & compliance,Vendors,Third-Party Lifecycle,/third-party/lifecycle
-Risk & compliance,Vendors,Third-Party Collaboration,/third-party/collaboration
+Risk & compliance,Vendors,Third-party lifecycle,/third-party/lifecycle
+Risk & compliance,Vendors,Third-party collaboration,/third-party/collaboration
 Evidence & audit,Activity log,,/audit
 Evidence & audit,Task replay,Task replay,/replay
 Evidence & audit,Task replay,Branches,/run-tree

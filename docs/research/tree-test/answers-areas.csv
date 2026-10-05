@@ -24,7 +24,7 @@ Approver,A6. Find the signed record that proves who approved a decision.,Evidenc
 Approver,A7. See the full history of actions taken in this workspace.,Evidence & audit > Activity log
 Approver,A8. Check whether a screening rule blocked a message.,Rules & safety > Screening > Safety
 Approver,A9. Try out a new safety rule before it is turned on.,Rules & safety > Test a rule > Test a safety rule
-Approver,A10. See what an outside company's agent is allowed to reach.,Rules & safety > Outside agents > Outside agents | Rules & safety > Outside agents > Agent Trust
+Approver,A10. See what an outside company's agent is allowed to reach.,Rules & safety > Outside agents > Outside agents | Rules & safety > Outside agents > Agent trust
 Approver,A11. Look at the regulations your company must follow.,Rules & safety > Regulations and rules
 Approver,A12. See what Lightwork has learned and changed about how it works.,Evidence & audit > Learning history
 Approver,A13. Open the result of a task you approved.,Work > Results > Results
@@ -33,7 +33,7 @@ Approver,A15. See how much time and money finished work has saved.,Costs & value
 Privacy officer,P1. A customer asks for a copy of all the data you hold about them. Start handling the request.,Privacy > Requests > Privacy requests
 Privacy officer,P2. Find every system where a customer's email address is stored.,Privacy > Find personal data
 Privacy officer,P3. Update the privacy notice on your website.,Privacy > Notices > Privacy notices
-Privacy officer,P4. Change the cookie banner on your website.,Privacy > Consent > Website banner settings | Privacy > Consent > Banner and preference center | Privacy > Consent > Consent & Preferences
+Privacy officer,P4. Change the cookie banner on your website.,Privacy > Consent > Website banner settings | Privacy > Consent > Banner and preference center | Privacy > Consent > Consent and preferences
 Privacy officer,P5. Record that a person opted out of marketing everywhere.,Privacy > Consent > Opt out everywhere
 Privacy officer,P6. Check which of your apps track people without consent.,Privacy > Consent > App tracking checks
 Privacy officer,P7. Handle deletion requests that arrive from the California state registry.,Privacy > Requests > California DROP requests
