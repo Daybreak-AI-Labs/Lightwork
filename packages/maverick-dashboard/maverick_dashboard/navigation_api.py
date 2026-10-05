@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import hmac
 from typing import Literal
+from urllib.parse import parse_qsl, urlencode
 
 from fastapi import APIRouter, Form, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, RedirectResponse
@@ -81,7 +82,9 @@ def _personal_view(request: Request, role, finder_pages, off_pages, can_turn_on)
     offered = {href: {**link, "off": href in off_pages} for href, link in _links(finder_pages).items()
                if can_turn_on or href not in off_pages}
     pins, preset = pin_hrefs(state, offered, role)
-    path = request.url.path
+    # A merged view (/home?section=my-work) is pinned and remembered as the
+    # page it shows (/me), which forwards there.
+    path = forwarded_from(request.url.path, request.query_params) or request.url.path
     current = path if path in offered else ""
     return {
         "pins": [offered[href] for href in pins],
@@ -346,12 +349,18 @@ def area_context(request: Request, role, finder_pages, off_pages, can_turn_on) -
             kept = []
             for link in section["links"]:
                 moved = home(link["href"])
-                if moved != link["href"] and moved.split("?")[0] in listed:
+                if (link["href"] in _IN_PAGE_TAB_HOMES and moved != link["href"]
+                        and moved.split("?")[0] in listed):
                     continue  # its job is now a tab of a page this section already lists
                 link["href"] = moved
                 kept.append(link)
-            section["links"] = kept
-    page = page_for("/today" if request.url.path == "/home" else request.url.path)
+            # A page merged into another (Project workspaces into Projects)
+            # leaves one link to their shared address.
+            seen: set[str] = set()
+            section["links"] = [link for link in kept
+                                if not (link["href"] in seen or seen.add(link["href"]))]
+    # A merged view (/home?section=my-work) sits where its old page sat.
+    page = page_for(forwarded_from(request.url.path, request.query_params) or request.url.path)
     spot = place(page["path"]) if page else None
     area = nav["by_title"].get(spot[0]) if spot else None
     if area is not None:
@@ -368,22 +377,32 @@ def area_context(request: Request, role, finder_pages, off_pages, can_turn_on) -
 
 
 # Old addresses that move in areas mode (report section 5): (old, new, ready,
-# why it waits). In classic mode none fires. A redirect fires in areas mode
-# only once its new address holds the old page's job, and only for someone
-# the new address admits (see may_open); everyone else keeps the old page.
-# One more needs a decision first and is not listed: /goal-builder
-# (compose-form field parity). A held redirect also needs areas_redirect()
-# called in its old page's handler when it is switched on.
+# why it waits). In classic mode none fires.
+# A redirect fires only in areas mode, only once its new address holds the
+# old page's job, and only for someone the new address admits (see may_open
+# and app.require_page_visible); everyone else keeps the old page, so a
+# forward never shows anyone more or less than before. A ready redirect's old
+# page calls areas_redirect() at the top of its handler.
+# Old pages whose new home shows them in its own in-page tab bar (_tabs.html),
+# so the section's page row drops their separate link. The other merged views
+# (Home's views, Approvals' "All decisions", Tasks' background work) are page
+# tabs in that row themselves and keep their link at the new address.
+_IN_PAGE_TAB_HOMES = frozenset({
+    "/plan-tree-3d", "/run-tree", "/walkthroughs", "/trust", "/discovery",
+    "/autonomous-compliance", "/cortex", "/flows/designer",
+})
+
 REDIRECTS: tuple[tuple[str, str, bool, str], ...] = (
     ("/today", "/home", True, ""),
-    ("/me", "/home", False, "Home does not yet show My work's questions, spending and chat accounts."),
-    ("/overview", "/home", False, "Home does not yet show the Overview's activity and statistics."),
-    ("/action-center", "/approvals?view=all", False, "Approvals does not yet hold the Action Center's other kinds."),
-    ("/my-work", "/goals?owner=me&include=background", False, "Tasks does not yet list background work."),
+    ("/me", "/home?section=my-work", True, ""),
+    ("/overview", "/home?section=overview", True, ""),
+    ("/action-center", "/approvals?view=all", True, ""),
+    ("/my-work", "/goals?owner=me&include=background", True, ""),
     ("/plan-tree-3d", "/graph-editor?view=3d", True, ""),
     ("/tasks/{id}/diagnostics", "/goals/{id}/diagnostics", True, ""),
-    ("/project-workspaces", "/projects", False, "Projects does not yet hold project workspaces."),
-    ("/project-workspaces/{id}", "/projects/{id}?tab=plan", False, "A project has no Plan tab yet."),
+    ("/project-workspaces", "/projects", True, ""),
+    ("/project-workspaces/{id}", "/projects/{id}?tab=plan", True, ""),
+    ("/goal-builder", "/chat?compose=form", True, ""),
     ("/run-tree", "/replay?tab=branches", True, ""),
     ("/walkthroughs", "/replay?tab=video", True, ""),
     ("/trust", "/external-agents?tab=access", True, ""),
@@ -450,6 +469,28 @@ def may_open(request: Request, path: str) -> bool:
     return _admits(request, address)
 
 
+def forwarded_from(path: str, query) -> str | None:
+    """The old address whose content ``path`` with ``query`` now shows (the
+    reverse of a ready redirect), or None. A redirect whose new address names
+    no view (``/projects``) matches only an address that is no page of its
+    own (``/home``), so a page's plain address is never mistaken for an old one."""
+    from .ui_visibility import page_for
+
+    best, best_size = None, -1
+    for old, new, ready, _why in REDIRECTS:
+        new_path, _, new_query = new.partition("?")
+        wanted = parse_qsl(new_query)
+        if not ready or "{id}" in old or new_path != path:
+            continue
+        if not all(query.get(key) == value for key, value in wanted):
+            continue
+        if not wanted and page_for(path) is not None:
+            continue
+        if len(wanted) > best_size:
+            best, best_size = old, len(wanted)
+    return best
+
+
 def _with_query(target: str, query: str) -> str:
     """``target`` keeping the old address's own query values (``?goal=7``)."""
     if not query:
@@ -473,9 +514,14 @@ def areas_on(request: Request) -> bool:
 def areas_redirect(request: Request) -> RedirectResponse | None:
     """In areas mode, the redirect from an old address to its new one (keeping
     its query values) for someone the new address admits; otherwise, and
-    always in classic mode (the default), None, so the old page answers."""
+    always in classic mode (the default), None, so the old page answers.
+    Someone the new address's own page would refuse (an administrator hid it
+    for their role) keeps the old page, which they may open."""
     target = redirect_target(request.url.path)
     if target is None or not areas_on(request) or not may_open(request, target):
+        return None
+    new_path = target.split("?", 1)[0]
+    if not _app().page_visible(request, "/today" if new_path == "/home" else new_path):
         return None
     return RedirectResponse(_with_query(target, request.url.query), status_code=303)
 

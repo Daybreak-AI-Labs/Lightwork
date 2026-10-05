@@ -142,7 +142,7 @@ def test_every_everyday_navigation_page_has_authored_help() -> None:
 
 @pytest.mark.parametrize(("path", "template", "control"), [
     ("/today", "today.html", "In-flight work"),
-    ("/action-center", "action_center.html", "Refresh list"),
+    ("/action-center", "_action_center_body.html", "Refresh list"),  # the page includes it
     ("/goals", "goals.html", "Result"),
     ("/deliverables", "deliverables.html", "Finished work"),
     ("/automations", "automations.html", "Schedules"),

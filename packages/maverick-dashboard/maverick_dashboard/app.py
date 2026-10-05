@@ -1224,19 +1224,32 @@ def enforce_page_visibility(
     if request is None:  # WebSocket connection -- page policy doesn't apply
         return
     from . import auth as auth_boundary
-    from . import ui_visibility
 
     # A route that carries its own credential (the signed consent webhook) has
     # no dashboard role to compare against the page policy of its parent page.
     if auth_boundary._self_authenticated_path(request.url.path):
         return
-    page = ui_visibility.page_for(request.url.path)
+    require_page_visible(request, request.url.path)
+
+
+def page_visible(request: Request, path: str) -> bool:
+    """Whether the page governing ``path`` admits the caller: the same rule
+    :func:`enforce_page_visibility` applies to every request for it."""
+    from . import ui_visibility
+
+    page = ui_visibility.page_for(path)
     if page is None:
-        return
+        return True
     role = _page_role(request, global_scope=page.get("scope") == "global")
-    if ui_visibility.is_visible(page, role):
-        return
-    raise HTTPException(status_code=403, detail="this page is not enabled for your role")
+    return ui_visibility.is_visible(page, role)
+
+
+def require_page_visible(request: Request, path: str) -> None:
+    """403 unless the page governing ``path`` admits the caller. A page that
+    shows another page's content at a new address checks the old page here,
+    so a merged view never admits more (or fewer) people than before."""
+    if not page_visible(request, path):
+        raise HTTPException(status_code=403, detail="this page is not enabled for your role")
 
 
 async def enforce_expected_workspace_tenant(
@@ -3718,6 +3731,11 @@ def public_demo(request: Request) -> HTMLResponse:
 
 @app.get("/overview", response_class=HTMLResponse)
 def overview(request: Request) -> HTMLResponse:
+    from .navigation_api import areas_redirect
+
+    moved = areas_redirect(request)  # areas mode: Home's Overview section
+    if moved is not None:
+        return moved
     require_unscoped_board(request)
     from .value_views import value_scope
 
@@ -3901,9 +3919,20 @@ GOALS_PAGE_SIZE = 50
 
 
 @app.get("/goals", response_class=HTMLResponse)
-def goals_page(request: Request) -> HTMLResponse:
+def goals_page(request: Request, owner: str = "", include: str = "") -> HTMLResponse:
     """The Tasks page: the newest page of goals; the rest load on demand from
-    ``/api/v1/goals`` (rendering all 200 was 104 KB of rows per visit)."""
+    ``/api/v1/goals`` (rendering all 200 was 104 KB of rows per visit).
+
+    ``?owner=me`` names the list for what it is -- every account lists its own
+    tasks (``goal_owner_filter``), so it never widens or narrows the rows.
+    ``&include=background`` adds My background work (schedules, workflow runs
+    and connections) under the same check as its old page, /my-work."""
+    from .draft_api import context_for
+
+    background = include == "background"
+    if background:
+        require_page_visible(request, "/my-work")
+        require_permission(request, "view")
     goals = _world().list_goals(
         owner=goal_owner_filter(request), limit=GOALS_PAGE_SIZE + 1, order="desc",
     )
@@ -3920,14 +3949,26 @@ def goals_page(request: Request) -> HTMLResponse:
         "page_size": GOALS_PAGE_SIZE,
         "has_more": has_more,
         "next_offset": GOALS_PAGE_SIZE if has_more else 0,
+        "goals_owner": "me" if owner == "me" or background else "",
+        "goals_background": background,
+        "work_context": context_for(request) if background else "",
     })
 
 
 @app.get("/projects", response_class=HTMLResponse)
 def projects_page(request: Request) -> HTMLResponse:
-    """Projects ("matters") -- workspaces grouping related goals."""
+    """Projects ("matters") -- workspaces grouping related goals. In the
+    job-named navigation it also lists the project plans (the Project
+    workspaces page), for exactly the people that page admits."""
+    from .draft_api import context_for
+    from .navigation_api import areas_on
+
     projects = _world().list_projects(owner=goal_owner_filter(request))
-    return templates.TemplateResponse(request, "projects.html", {"projects": projects})
+    plans = areas_on(request) and page_visible(request, "/project-workspaces") and has_permission(request, "view")
+    return templates.TemplateResponse(request, "projects.html", {
+        "projects": projects, "project_plans": plans,
+        "project_context": context_for(request) if plans else "",
+    })
 
 
 @app.post("/projects")
@@ -3948,15 +3989,36 @@ def projects_create(
     return RedirectResponse(f"/projects/{pid}", status_code=303)
 
 
+def _project_plan_tab(request: Request, project_id: int, project) -> HTMLResponse:
+    """A project's Plan tab: the Project workspace page for this project,
+    under that page's own check (its page policy and ``view``). The
+    workspace's API decides what the person may read, as before -- a planning
+    member who cannot open the project's task list still sees the plan."""
+    from .draft_api import context_for
+
+    require_page_visible(request, "/project-workspaces")
+    require_permission(request, "view")
+    tabs = [("plan", "Plan", f"/projects/{project_id}?tab=plan")]
+    if project is not None:
+        tabs.insert(0, ("tasks", "Tasks", f"/projects/{project_id}"))
+    return templates.TemplateResponse(
+        request, "project_workspaces.html",
+        {"project_id": project_id, "project_context": context_for(request), "project_tabs": tabs},
+        headers={"Cache-Control": "private, no-store"},
+    )
+
+
 @app.get("/projects/{project_id}", response_class=HTMLResponse)
-def project_detail(request: Request, project_id: int) -> HTMLResponse:
+def project_detail(request: Request, project_id: int, tab: str = "") -> HTMLResponse:
     w = _world()
     project = w.get_project(project_id)
-    if project is None:
-        raise HTTPException(status_code=404, detail="no such project")
     # Owner-scoped like goals: a project you don't own 404s rather than leaks.
     owner = goal_owner_filter(request)
-    if owner is not None and project["owner"] != owner:
+    if project is not None and owner is not None and project["owner"] != owner:
+        project = None
+    if tab == "plan":
+        return _project_plan_tab(request, project_id, project)
+    if project is None:
         raise HTTPException(status_code=404, detail="no such project")
     goals = w.list_goals(project_id=project_id, owner=owner, order="desc")
     counts: dict[str, int] = {}
@@ -3965,7 +4027,8 @@ def project_detail(request: Request, project_id: int) -> HTMLResponse:
     return templates.TemplateResponse(
         request,
         "project_detail.html",
-        {"project": project, "goals": goals, "counts": counts},
+        {"project": project, "goals": goals, "counts": counts,
+         "project_plan_available": page_visible(request, "/project-workspaces")},
     )
 
 
@@ -4119,7 +4182,11 @@ def deliverables_page(request: Request, role: str = "") -> HTMLResponse:
 async def action_center_page(request: Request) -> HTMLResponse:
     from .action_center_api import require_enabled
     from .draft_api import context_for
+    from .navigation_api import areas_redirect
 
+    moved = areas_redirect(request)  # areas mode: Approvals' "All decisions"
+    if moved is not None:
+        return moved
     require_enabled(request)
     return templates.TemplateResponse(
         request, "action_center.html",
@@ -9142,8 +9209,26 @@ def _approval_queue_context(approvals: list, request: Request | None = None) -> 
     }
 
 
+def _all_decisions_view(request: Request, view: str) -> dict:
+    """Approvals' ``?view=all``: the Action Center's list (every kind of item
+    waiting on you) in place of the approvals list, under the hero's same
+    approval count. Only for people the Action Center itself admits -- its
+    page policy, ``operate`` and its feature switch -- refused with the Action
+    Center's own answer otherwise. In the job-named navigation the Approvals
+    section's page tabs (Approvals, Action Center) switch between the two."""
+    from .action_center_api import require_enabled
+    from .draft_api import context_for
+
+    if view != "all":
+        return {"approvals_view": ""}
+    require_page_visible(request, "/action-center")
+    require_enabled(request)
+    return {"approvals_view": "all", "action_context": context_for(request),
+            "can_admin": has_permission(request, "admin")}
+
+
 @app.get("/approvals", response_class=HTMLResponse)
-def approvals_page(request: Request) -> HTMLResponse:
+def approvals_page(request: Request, view: str = "") -> HTMLResponse:
     """Pending high-risk actions awaiting approve/deny.
 
     Populated when an agent runs with ``MAVERICK_CONSENT_MODE=dashboard``:
@@ -9162,6 +9247,7 @@ def approvals_page(request: Request) -> HTMLResponse:
     from .content_access import can_read_approval
     from .flow_approval_inbox import pending_for_request
 
+    all_view = _all_decisions_view(request, view)
     world = _world()
     pending = list(world.pending_approvals())
     approvals = [row for row in pending if can_read_approval(request, row, world)]
@@ -9187,6 +9273,7 @@ def approvals_page(request: Request) -> HTMLResponse:
             # Link to Content access only when asking for a card read is on.
             "content_access_on": content_access.enabled(),
             **_approval_queue_context(approvals, request),
+            **all_view,
         },
         headers={"Cache-Control": "private, no-store"},
     )
@@ -10310,11 +10397,18 @@ async def shield_calibration_api() -> JSONResponse:
 
 
 @app.get("/chat", response_class=HTMLResponse)
-def chat_page(request: Request) -> HTMLResponse:
+def chat_page(request: Request, compose: str = "") -> HTMLResponse:
+    """Chat. ``?compose=form`` shows the task builder's form (the Task builder
+    page's job in the job-named navigation): the same fields, checks and
+    submit, under that page's own check."""
     from maverick import flow
     from maverick.runner import configured_max_dollars, configured_max_wall_seconds
 
     from .onboarding_state import workspace_readiness
+
+    compose_form = compose == "form"
+    if compose_form:
+        require_page_visible(request, "/goal-builder")
 
     workspace = workspace_readiness()
     w = _world()
@@ -10345,8 +10439,17 @@ def chat_page(request: Request) -> HTMLResponse:
             # one limit that is true in code.
             "chat_examples": _chat_examples(request),
             "chat_limits": _CHAT_LIMITS,
+            "compose_form": compose_form,
+            "compose_form_available": page_visible(request, "/goal-builder"),
+            "channels": _goal_builder_channels() if compose_form else [],
         },
     )
+
+
+def _goal_builder_channels() -> list:
+    from .control_plane import _discover_channels
+
+    return _discover_channels()
 
 
 def _chat_examples(request: Request) -> dict:
@@ -13468,10 +13571,13 @@ def graph_editor_page(request: Request, view: str = "") -> HTMLResponse:
 @app.get("/goal-builder", response_class=HTMLResponse)
 async def goal_builder_page(request: Request) -> HTMLResponse:
     """Drag-and-drop goal builder: compose a brief from blocks, then run it."""
-    from .control_plane import _discover_channels
+    from .navigation_api import areas_redirect
 
+    moved = areas_redirect(request)  # areas mode: Chat's form mode
+    if moved is not None:
+        return moved
     return templates.TemplateResponse(
-        request, "goal_builder.html", {"channels": _discover_channels()}
+        request, "goal_builder.html", {"channels": _goal_builder_channels()}
     )
 
 

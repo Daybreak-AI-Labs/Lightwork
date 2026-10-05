@@ -36,7 +36,7 @@
     <a class="btn btn--ghost" href="/graph-editor">Visual task map</a>
   {% endset %}
   {% call hero('Your AI workforce', 'Tasks',
-               subtitle='Every task on record',
+               subtitle='Your tasks' if goals_owner == 'me' else 'Every task on record',
                lede='Find your work, read its result, and open a task to review or continue it.',
                actions=goals_actions if can_create_goal else '') %}
     {{ state('Current state',
@@ -100,6 +100,17 @@
   {% else %}
     {{ empty_state('No tasks yet',
                    'Tasks you can view appear here when someone in your workspace starts work you are allowed to see.') }}
+  {% endif %}
+
+  {# ?owner=me&include=background (My background work's address in the
+     job-named navigation): schedules, workflow runs and connections too. #}
+  {% if goals_background %}
+  <section id="my-work" class="panel" data-context="{{ work_context }}" data-row-heading="h3" aria-labelledby="my-work-title" style="max-width:72rem">
+    <h2 id="my-work-title">My background work</h2>
+    <p class="muted">Your tasks, schedules, workflow runs and connections. Open a row for its current controls and evidence.</p>
+    {% with my_work_level=3 %}{% include "_my_work_body.html" %}{% endwith %}
+  </section>
+  {% include "_my_work_assets.html" %}
   {% endif %}
 
   <script>

@@ -227,11 +227,18 @@ token = "${MAVERICK_DASHBOARD_TOKEN}"
 # every page in one of nine job-named areas (Home, Work, Agents, Rules &
 # safety, Privacy, Risk & compliance, Evidence & audit, Costs & value,
 # Settings) with local tabs and an "Area › Section" breadcrumb, and starts
-# each role from its own layout. Who may open a page never changes. Pages
-# merged into another page's tab forward there (/run-tree opens Task replay's
-# Branches tab, /flows/designer the workflow builder's Steps mode) for anyone
-# that page admits; everyone else, and classic mode, keeps the old address.
-# Run the tree test in docs/research/tree-test/ before switching everyone.
+# each role from its own layout. Who may open a page never changes. In areas
+# mode merged pages' old addresses forward to their new homes, each still
+# checked as the old page was: /today, /me and /overview to Home's views,
+# /action-center to Approvals' "All decisions", /my-work to Tasks with
+# background work, /project-workspaces to Projects (one project's to its Plan
+# tab), /goal-builder to Chat's form, /run-tree and /walkthroughs to Task
+# replay's Branches and Video tabs, /plan-tree-3d to the task map's 3D view,
+# /trust, /discovery, /autonomous-compliance and /cortex to tabs of Outside
+# agents, Permissions, Compliance and Knowledge access, and /flows/designer to
+# the workflow builder's Steps mode. Anyone the new address would not admit,
+# and classic mode, keeps the old address. Run the tree test in
+# docs/research/tree-test/ before switching everyone.
 # navigation_personal = true lets each person choose for themselves in Your
 # preferences. Settings > All settings and the setup wizard set both.
 # navigation = "classic"

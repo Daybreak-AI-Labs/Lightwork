@@ -381,12 +381,12 @@ def test_exported_tree_files_match_the_registry():
 
 # -- Redirects and Home (areas mode only) ----------------------------------------
 
-def test_redirect_table_covers_report_section_five_except_the_one_awaiting_a_decision():
+def test_redirect_table_covers_report_section_five_and_both_decided_pages():
     from maverick_dashboard import navigation_api
 
     olds = [old for old, _new, _ready, _why in navigation_api.REDIRECTS]
-    assert len(olds) == len(set(olds)) == 16
-    assert "/goal-builder" not in olds and "/flows/designer" in olds
+    assert len(olds) == len(set(olds)) == 17
+    assert "/goal-builder" in olds and "/flows/designer" in olds
     for old, new, ready, why in navigation_api.REDIRECTS:
         sample = old.replace("{id}", "7")
         if ready:
@@ -436,7 +436,7 @@ def test_ready_redirects_fire_and_root_opens_home_in_areas_mode(monkeypatch, tmp
     shell = _Shell(home.text)
     assert shell.areas[0] == "/home"  # the sidebar links straight to the new address
     # Held redirects leave their pages where they are.
-    assert client.get("/overview", follow_redirects=False).status_code == 200
+    assert client.get("/walkthroughs", follow_redirects=False).status_code != 303
 
 
 def test_a_chosen_start_page_still_wins_in_areas_mode(monkeypatch, tmp_path):

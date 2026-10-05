@@ -1,0 +1,12 @@
+{#- Views of one page as links (Approvals and All decisions; a project's
+    Tasks and Plan). `items` is a list of (key, label, href); `current` names
+    the view shown. Uses the task tabs' look, so no new styles. -#}
+{% macro view_tabs(label, items, current) %}
+<nav class="task-tabs" aria-label="{{ label }}">
+  <ul class="task-tabs__list">
+    {% for key, text, href in items %}
+    <li><a href="{{ href }}"{% if key == current %} class="task-tabs__on" aria-current="page"{% endif %}>{{ text }}</a></li>
+    {% endfor %}
+  </ul>
+</nav>
+{% endmacro %}

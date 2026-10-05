@@ -5,7 +5,7 @@ import hmac
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from maverick import experience_preferences as preferences
 from pydantic import BaseModel, Field
 
@@ -330,12 +330,39 @@ def today_page(request: Request):
     }, headers={'Cache-Control': 'private, no-store'})
 
 
+# Home's sections in the job-named navigation: each shows one old page in
+# full, at the old page's own access check. The area's page tabs (Today, My
+# work, Overview) switch between them, so Home stays a set of short views.
+HOME_SECTIONS = {"": "/today", "my-work": "/me", "overview": "/overview"}
+
+
 @router.get('/home')
-def home_page(request: Request):
+def home_page(request: Request, section: str = "", saved: str = ""):
     """Home in the job-named navigation: today's work, decisions, results and
-    pins (the Today page). The address exists only in areas mode."""
+    pins (the Today page); ``?section=my-work`` is My work (questions,
+    spending, chat accounts and the daily summary) and ``?section=overview``
+    the Overview (activity and statistics). The address exists only in areas
+    mode."""
     from .navigation_api import areas_on
 
-    if not areas_on(request):
+    if not areas_on(request) or section not in HOME_SECTIONS:
         raise HTTPException(404, "Not Found")
-    return today_page(request)
+    _app().require_page_visible(request, HOME_SECTIONS[section])
+    if section == "my-work":
+        from .me_api import me_page
+
+        return me_page(request, saved=saved)
+    if section == "overview":
+        return _app().overview(request)
+    try:
+        return today_page(request)
+    except HTTPException as exc:
+        # Today needs a named account with personal preferences on (the
+        # local owner has neither). Home is the start page, so it opens on
+        # the next view this person may open rather than on a refusal.
+        if exc.status_code != 403:
+            raise
+        for fallback in ("my-work", "overview"):
+            if _app().page_visible(request, HOME_SECTIONS[fallback]):
+                return RedirectResponse(f"/home?section={fallback}", status_code=303)
+        raise

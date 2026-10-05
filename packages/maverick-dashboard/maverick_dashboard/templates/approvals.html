@@ -20,6 +20,14 @@
              copy='Approve, reject, or send a request back with a note saying what should change.' if open_count or not private_count
                else 'The person who asked can open and decide their own request.') }}
   {% endcall %}
+  {# ?view=all (the Action Center's address in the job-named navigation):
+     every kind of item waiting on you, in place of the approvals list. #}
+  {% if approvals_view == 'all' %}
+  <section aria-labelledby="all-decisions-title">
+    <h2 id="all-decisions-title">Action Center</h2>
+    {% include "_action_center_body.html" %}
+  </section>
+  {% else %}
   {# A link to one approval (/approvals#approval-12) that is no longer waiting
      says so instead of landing on a list without it. #}
   <p class="panel" id="approval-missing" role="status" hidden>This approval was already decided or no longer exists.
@@ -88,4 +96,5 @@
     window.addEventListener('hashchange', check);
   })();
   </script>
+  {% endif %}
 {% endblock %}
