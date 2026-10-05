@@ -347,10 +347,10 @@
       </div>
       {% if access %}
       <details class="panel agent-access" id="agent-access">
-        <summary><strong>Check access</strong> <span class="sub">— what this specialist can do, and which rule allows it</span></summary>
+        <summary><strong>Check access</strong> <span class="badge">{{ access.label }}{% if access.customized %} · Customized{% endif %}</span> <span class="sub">— what this {{ access.noun }} can do, and which rule allows it</span></summary>
         <h3 class="agent-access__head">Independence by risk</h3>
         <table>
-          <caption class="sr-only">How this specialist handles consequential actions at each risk level</caption>
+          <caption class="sr-only">How this {{ access.noun }} handles consequential actions at each risk level</caption>
           <thead><tr><th scope="col">Actions</th><th scope="col">Level</th><th scope="col">What it does</th><th scope="col">Rule that sets it</th></tr></thead>
           <tbody>
           {% for t in access.tiers %}
@@ -372,7 +372,7 @@
         <ul class="agent-access__list">
           <li>{% if access.task_ceiling is not none %}Each task it works on stops at <strong>{{ access.task_ceiling | money }}</strong>, the spending limit per task for everyone.{% else %}There is no spending limit per task.{% endif %}</li>
           <li>{% if access.workspace_limit %}The whole workspace may spend {{ access.workspace_limit.limit.amount | money }} {{ 'per day' if access.workspace_limit.limit.period == 'day' else 'per month' }}: {{ access.workspace_limit.remaining | money }} left.{% else %}The workspace has no spending limit.{% endif %}</li>
-          <li>Tasks it works on also count against the spending limit of the person who starts them. There is no separate limit for one specialist.</li>
+          <li>Tasks it works on also count against the spending limit of the person who starts them. There is no separate limit for one {{ access.noun }}.</li>
         </ul>
         {% endif %}
       </details>

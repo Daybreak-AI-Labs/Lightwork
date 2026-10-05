@@ -5,7 +5,8 @@
   {% from "_empty_state.html" import empty_state %}
   {% set r = report %}
   {% set person_name = name or (r.principal | identity).name %}
-  {% set access_actions %}<a class="btn" href="/users">Back to Users</a>{% endset %}
+  {% from "_back_link.html" import back_link with context %}
+  {% set access_actions %}{{ back_link('/users', 'Users') }}{% endset %}
   {% call hero('Administration', 'Access for ' ~ person_name,
                subtitle='What they can do, and which rule allows it',
                lede='Read-only. Every answer comes from the same checks Lightwork applies when this person works, so it changes as soon as their role, departments or limits change.',
@@ -115,7 +116,7 @@
     {% else %}
     <p class="access-lead"><strong>No departments.</strong> {{ r.departments.source }}.</p>
     {% endif %}
-    <p class="muted access-help">Departments decide which specialists they work with. Their role still decides what they may do.</p>
+    <p class="muted access-help">Departments decide which specialists and agents they work with. Their role still decides what they may do.</p>
   </div>
 
   <div class="section-head"><h2 id="access-spending">Spending limits{% if r.current %} in {{ r.current.name }}{% endif %}</h2></div>

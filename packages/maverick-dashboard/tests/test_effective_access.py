@@ -291,3 +291,92 @@ def test_specialist_access_names_the_editor_setting_and_spending(client, monkeyp
     if ceiling is not None:
         assert f"stops at ${ceiling:,.2f}" in panel
     assert 'id="agent-access"' in page and "<summary>" in page
+
+
+# -- specialist or agent: the report names which kind it is --------------------
+
+def test_agent_built_here_is_called_an_agent_not_a_specialist(client, monkeypatch, tmp_path):
+    from maverick.domain_edit import write_override
+    monkeypatch.setenv("MAVERICK_DOMAINS_DIR", str(tmp_path / "domains"))
+    monkeypatch.setenv("MAVERICK_WORKFORCE_LEVELS", "1")
+    write_override("acme_quote_helper", {
+        "description": "Drafts customer quotes", "persona": "You draft quotes for customers.",
+        "max_risk": "low", "allow_tools": ["read_file"]})
+    page = client.get("/agents?name=acme_quote_helper").text
+    panel = visible_text(page).split("Check access", 1)[1].split("Spending limits", 1)[0]
+    assert "Agent built in this workspace" in panel
+    assert "what this agent can do" in panel
+    assert "specialist" not in panel.lower()
+    assert "Standard for agents without a department" in panel
+
+
+def test_customized_builtin_stays_a_specialist_marked_customized(client, monkeypatch, tmp_path):
+    from maverick.domain_edit import write_override
+    from maverick_dashboard import effective_access
+    monkeypatch.setenv("MAVERICK_DOMAINS_DIR", str(tmp_path / "domains"))
+    name = _clean_builtin_name()
+    from maverick.domain_edit import resolved_view
+    plain = effective_access.agent(name, resolved_view(name))
+    assert (plain["kind"], plain["label"], plain["customized"]) == ("specialist", "Specialist", False)
+    write_override(name, {"description": "Tuned for this workspace."})
+    tuned = effective_access.agent(name, resolved_view(name))
+    assert (tuned["kind"], tuned["customized"]) == ("specialist", True)
+    panel = visible_text(client.get(f"/agents?name={name}").text).split("Check access", 1)[1]
+    assert panel.lstrip().startswith("Specialist · Customized")
+
+
+@pytest.fixture
+def outside(tmp_path, monkeypatch, client):
+    from maverick import agent_trust, external_agents
+    monkeypatch.setenv("MAVERICK_EXTERNAL_AGENTS", "1")
+    monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "0")
+    monkeypatch.setattr(agent_trust, "managed_path", lambda: tmp_path / "agent_trust.json")
+    monkeypatch.setattr(external_agents, "registry_path", lambda: tmp_path / "external_agents.json")
+    return external_agents
+
+
+@pytest.mark.parametrize("ceiling", ["low", "medium", "high"])
+def test_outside_agent_tiers_match_what_screening_answers(outside, ceiling):
+    from maverick_dashboard import effective_access
+    outside.enroll("sf-quotebot", "agentforce", description="Quoting agent",
+                   max_risk=ceiling, max_dollars=5.0, deny_tools=["delete_record"])
+    report = effective_access.outside_agent("sf-quotebot")
+    assert (report["kind"], report["label"]) == ("outside", "Outside agent")
+    assert report["blocked"] == ["delete_record"]
+    # One action the catalog rates at each risk, so the tool ceiling and the
+    # risk ceiling agree on what the tier means.
+    rated = {"low": "read_file", "medium": "send_email", "high": "write_file"}
+    for tier in report["tiers"]:
+        verdict = outside.screen("sf-quotebot", rated[tier["risk"]], risk=tier["risk"])
+        expected = ("auto" if verdict["allowed"]
+                    else "request" if verdict.get("requires_approval") else "refused")
+        assert tier["level"] == expected, (tier, verdict)
+        assert tier["rule"]
+
+
+def test_outside_agent_over_its_limit_is_refused_like_screening(outside):
+    from maverick_dashboard import effective_access
+    outside.enroll("sf-quotebot", "agentforce", max_risk="high", max_dollars=1.0)
+    meta = outside._load_sidecar()
+    meta["sf-quotebot"]["spent_dollars"] = 2.0
+    meta["sf-quotebot"]["period"] = "total"
+    outside._save_sidecar(meta)
+    report = effective_access.outside_agent("sf-quotebot")
+    assert report["spending"]["over"] and report["spending"]["remaining"] == 0.0
+    for tier in report["tiers"]:
+        assert tier["level"] == "refused"
+        assert outside.screen("sf-quotebot", "quote.create", risk=tier["risk"])["rule"] == "budget"
+
+
+def test_outside_agent_page_shows_check_access(outside, client):
+    outside.enroll("sf-quotebot", "agentforce", description="Quoting agent",
+                   max_risk="medium", max_dollars=5.0)
+    page = client.get("/external-agents/sf-quotebot").text
+    text = visible_text(page)
+    panel = text.split("Check access", 1)[1]
+    assert 'id="agent-access"' in page
+    assert panel.lstrip().startswith("Outside agent")
+    assert ("High-risk actions Refused It may not take this action. "
+            "Above the riskiest action it is allowed (medium)") in panel
+    assert "$5.00 per month" in panel and "left" in panel
+    assert "specialist" not in panel.lower()

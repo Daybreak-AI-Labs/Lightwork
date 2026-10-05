@@ -6856,8 +6856,16 @@ async def external_agent_scorecard(request: Request, agent_id: str) -> HTMLRespo
     except xa.ExternalAgentsError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
     can_manage = xa.enabled() and xa.entitled() and has_permission(request, "admin")
+    access = None
+    try:
+        from .effective_access import outside_agent
+
+        access = outside_agent(agent_id)
+    except Exception:  # noqa: BLE001 -- the access check is read-only help
+        log.warning("outside agent access check unavailable", exc_info=True)
     return templates.TemplateResponse(
-        request, "external_agent_detail.html", {"a": detail, "can_manage": can_manage}
+        request, "external_agent_detail.html",
+        {"a": detail, "can_manage": can_manage, "access": access},
     )
 
 
@@ -7086,7 +7094,7 @@ async def agents_page(request: Request) -> HTMLResponse:
 
             access = agent_access(selected["name"], selected)
         except Exception:  # noqa: BLE001 -- the access check is read-only help
-            log.warning("specialist access check unavailable", exc_info=True)
+            log.warning("specialist or agent access check unavailable", exc_info=True)
     return templates.TemplateResponse(
         request,
         "agents.html",

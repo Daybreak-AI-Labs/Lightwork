@@ -1,4 +1,9 @@
-"""What one person or one specialist can do, and which rule allows it.
+"""What one person, specialist or agent can do, and which rule allows it.
+
+Words follow the product glossary: a *specialist* is one of Lightwork's own
+built-in job packs (a workspace's tailored copy is still a specialist, marked
+"Customized"); everything else is an *agent* -- one built in this workspace,
+or an outside agent that runs on another platform.
 
 Every answer comes from the functions that enforce access, never a copy of
 their logic: the role and permission checks in :mod:`auth` (asked with a
@@ -229,8 +234,23 @@ LEVELS = {
 RISKS = (("low", "Low-risk actions"), ("medium", "Medium-risk actions"), ("high", "High-risk actions"))
 
 
-def _level_source(name: str, view: dict, risk: str) -> str:
-    """Which setting gives a specialist its level for one risk tier."""
+def kind_of(name: str, view: dict) -> dict:
+    """Specialist (built-in pack, possibly customized) or agent built here."""
+    from maverick.domain import builtin_domains
+
+    try:
+        builtin = name in builtin_domains()
+    except Exception:  # noqa: BLE001 -- unknown catalog: never claim it is ours
+        builtin = False
+    if builtin:
+        return {"kind": "specialist", "noun": "specialist", "label": "Specialist",
+                "customized": bool(view.get("is_override"))}
+    return {"kind": "agent", "noun": "agent", "label": "Agent built in this workspace",
+            "customized": False}
+
+
+def _level_source(name: str, view: dict, risk: str, noun: str) -> str:
+    """Which setting gives a specialist or agent its level for one risk tier."""
     from maverick.departments import department_title
     from maverick.domain import available_domains
 
@@ -238,25 +258,28 @@ def _level_source(name: str, view: dict, risk: str) -> str:
     per_risk = auto.get(risk) is not None
     which = f"its level for {risk}-risk actions" if per_risk else "its usual level"
     if auto.get("config_override"):
-        return f"Set for this specialist in the installation's settings file ({which})"
+        return f"Set for this {noun} in the installation's settings file ({which})"
     if "autonomy" in view.get("overridden", ()):
-        return f"Set in this specialist's Independence settings ({which})"
+        return f"Set in this {noun}'s Independence settings ({which})"
     profile = available_domains().get(name)
     if profile is not None and profile.autonomy is not None:
+        if noun == "agent":
+            return f"Set in this agent's own definition ({which})"
         return f"Built into this specialist ({which})"
     suite = view.get("suite")
-    team = department_title(suite) if suite else "specialists without a department"
+    team = department_title(suite) if suite else f"{noun}s without a department"
     return f"Standard for {team} ({which})"
 
 
 def agent(name: str, view: dict) -> dict[str, Any]:
-    """The access report for one specialist (read-only).
+    """The access report for one specialist or agent built here (read-only).
 
     Levels per risk tier come from the resolver the runtime gate calls
     (:func:`maverick.agent_autonomy.resolve` on the effective profile, as
     :func:`maverick.domain_edit.resolved_view` records them); this only adds
     the setting each one comes from."""
     auto = view["autonomy"]
+    kind = kind_of(name, view)
     tiers = []
     for risk, title in RISKS:
         level = auto["effective"][risk]
@@ -264,7 +287,7 @@ def agent(name: str, view: dict) -> dict[str, Any]:
         if not auto["levels_enabled"]:
             rule = "Independence levels are off for this installation, so every consequential action waits for a person"
         else:
-            rule = _level_source(name, view, risk)
+            rule = _level_source(name, view, risk, kind["noun"])
             configured = auto.get(risk) or auto["default"]
             if auto["onboarding"] and configured != level:
                 rule += f", lowered one step from {LEVELS.get(configured, (configured,))[0]} while it is supervised"
@@ -278,6 +301,7 @@ def agent(name: str, view: dict) -> dict[str, Any]:
         spending_error = True
     required = sorted({tool for step in view.get("workflow", ()) for tool in step.get("tools", ())})
     return {
+        **kind,
         "levels_enabled": auto["levels_enabled"], "supervised": bool(auto["onboarding"]),
         "tiers": tiers, "readiness": view.get("readiness") or {},
         "required": required, "allowed": list(view.get("allow_tools", ())),
@@ -287,4 +311,82 @@ def agent(name: str, view: dict) -> dict[str, Any]:
     }
 
 
-__all__ = ["LEVELS", "agent", "person", "probe"]
+# Why the trust plane refuses an outside agent, in plain words.
+_REFUSALS = {
+    "disabled": "Outside agents are turned off for this installation",
+    "not_in_registry": "It is not on the list of trusted agents",
+    "revoked": "All its access is blocked",
+    "expired": "Its access has expired",
+    "not_yet_valid": "Its access has not started yet",
+    "direction": "It may only be called by Lightwork, not act on its own",
+    "contained": "It is blocked after repeated rule breaks until an administrator lets it work again",
+    "budget": "It has used its spending limit for this period",
+}
+
+
+def _outside_tier(agent_id: str, risk: str, *, on: bool, contained: bool, over: bool,
+                  floor: str, ceiling: str | None) -> dict:
+    """One risk tier for an outside agent, decided by the trust plane's own
+    inbound check (the one screening runs, always enforced) and the
+    installation's approval floor, in the order screening applies them."""
+    from maverick.agent_trust import decide_inbound
+    from maverick.safety.tool_risk import risk_rank
+
+    if not on or contained:
+        rule = "disabled" if not on else "contained"
+        return {"level": "refused", "label": "Refused", "rule": _REFUSALS[rule]}
+    decision = decide_inbound(agent_id, max_risk=risk, enforced=True)
+    if not decision.allowed:
+        if decision.rule == "capability":
+            why = f"Above the riskiest action it is allowed ({ceiling or 'not set'})"
+        else:
+            why = _REFUSALS.get(decision.rule, "Its trust entry refuses it")
+        return {"level": "refused", "label": "Refused", "rule": why}
+    if over:
+        return {"level": "refused", "label": "Refused", "rule": _REFUSALS["budget"]}
+    if risk_rank(risk) >= risk_rank(floor):
+        return {"level": "request", "label": LEVELS["request"][0],
+                "rule": f"Actions at {floor} risk and above wait for a person (the installation's approval setting)"}
+    return {"level": "auto", "label": LEVELS["auto"][0],
+            "rule": f"Below the {floor}-risk approval setting and within the riskiest action it is allowed"}
+
+
+def outside_agent(agent_id: str) -> dict[str, Any]:
+    """The access report for one outside agent (read-only).
+
+    Each tier is what screening would answer for an action at that risk:
+    containment, then the trust plane's inbound check (registry, lifecycle,
+    direction, risk ceiling), then the approval floor. Its spending limit is
+    the period cap screening enforces."""
+    from maverick import external_agents as xa
+    from maverick.agent_trust import lookup
+
+    row = next((r for r in xa.roster() if r["id"] == agent_id), None)
+    if row is None:
+        raise LookupError(agent_id)
+    entry = lookup(agent_id)
+    floor = xa._approval_floor()
+    on = xa.enabled()
+    cap = row["max_dollars"]
+    over = cap is not None and row["period_spent"] > cap
+    tiers = []
+    for risk, title in RISKS:
+        tier = _outside_tier(agent_id, risk, on=on, contained=row["contained"], over=over, floor=floor,
+                             ceiling=row["max_risk"])
+        tiers.append({"risk": risk, "title": title, "means": LEVELS.get(tier["level"], ("", ""))[1]
+                      or "It may not take this action.", **tier})
+    return {
+        "kind": "outside", "noun": "agent", "label": "Outside agent", "customized": False,
+        "platform": row["platform_label"], "tiers": tiers, "floor": floor,
+        "allowed": sorted(entry.allow_tools) if entry else [],
+        "blocked": sorted(entry.deny_tools) if entry else [],
+        "tool_risks": dict(row["tool_risks"]),
+        "data_scopes": sorted(entry.data_scopes) if entry else [],
+        "max_risk": row["max_risk"] or "",
+        "spending": {"limit": cap, "period": row["period"], "spent": row["period_spent"],
+                     "remaining": None if cap is None else max(0.0, cap - row["period_spent"]),
+                     "over": over},
+    }
+
+
+__all__ = ["LEVELS", "agent", "kind_of", "outside_agent", "person", "probe"]

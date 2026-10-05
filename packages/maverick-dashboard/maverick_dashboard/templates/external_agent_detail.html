@@ -34,6 +34,29 @@
 
   {% include "_external_agent_actions.html" %}
 
+  {% if access %}
+  <details class="panel" id="agent-access">
+    <summary><strong>Check access</strong> <span class="badge">{{ access.label }}</span> <span class="sub">— what this agent can do here, and which rule allows it</span></summary>
+    <h2 style="font-size: var(--text-md, 1rem); margin: var(--space-4) 0 var(--space-2);">Actions by risk</h2>
+    <table>
+      <caption class="sr-only">What this agent may do at each risk level</caption>
+      <thead><tr><th scope="col">Actions</th><th scope="col">Answer</th><th scope="col">What it means</th><th scope="col">Rule that decides it</th></tr></thead>
+      <tbody>
+      {% for t in access.tiers %}
+        <tr><th scope="row">{{ t.title }}</th><td><span class="badge{% if t.level == 'refused' %} failure{% endif %}">{{ t.label }}</span></td><td>{{ t.means }}</td><td>{{ t.rule }}.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    <p class="sub">It runs on {{ access.platform }}, so Lightwork checks each action before the agent takes it. Your risk ratings for its actions always win over what it reports.</p>
+    <h2 style="font-size: var(--text-md, 1rem); margin: var(--space-4) 0 var(--space-2);">Actions it may use</h2>
+    <p>{% if access.allowed %}Only: {{ access.allowed | map('humanize') | join(', ') }}.{% else %}Any action, within the risk answers above.{% endif %}
+      {% if access.blocked %}Never: {{ access.blocked | map('humanize') | join(', ') }}.{% endif %}</p>
+    <p>{% if access.data_scopes %}Shared knowledge it may read: {{ access.data_scopes | map('humanize') | join(', ') }}.{% else %}It may not read shared knowledge.{% endif %}</p>
+    <h2 style="font-size: var(--text-md, 1rem); margin: var(--space-4) 0 var(--space-2);">Spending limit</h2>
+    <p>{% if access.spending.limit is not none %}It may report {{ access.spending.limit | money }} {{ 'per month' if access.spending.period == 'monthly' else 'in total' }}: {{ access.spending.spent | money }} used, {{ access.spending.remaining | money }} left.{% if access.spending.over %} Further actions are refused until an administrator resets its spending.{% endif %}{% else %}It has no spending limit of its own.{% endif %}</p>
+  </details>
+  {% endif %}
+
   <div class="panel">
     <h2 style="margin-top:0">Spend and budget</h2>
     <table>
