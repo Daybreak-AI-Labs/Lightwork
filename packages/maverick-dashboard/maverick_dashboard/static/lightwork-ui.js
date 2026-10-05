@@ -991,6 +991,43 @@
       });
     })();
 
+    // A form that posts and reloads the page (<form data-mv-save>) says
+    // "Saving…" the moment it is sent, so a slow server never looks like a
+    // missed click. The page that loads next shows what happened.
+    (function () {
+      function say(status, text) {
+        if (window.LightworkI18n && text) window.LightworkI18n.set(status, text); else status.textContent = text;
+      }
+      function clear(form, button) {
+        var status = form.querySelector('[data-mv-save-status]');
+        if (status) say(status, '');
+        if (button) button.removeAttribute('aria-busy');
+      }
+      document.addEventListener('submit', function (event) {
+        var form = event.target;
+        if (!(form instanceof HTMLFormElement) || !form.hasAttribute('data-mv-save') || event.defaultPrevented) return;
+        var button = event.submitter || null, status = form.querySelector('[data-mv-save-status]');
+        if (!status) {
+          status = document.createElement('span');
+          status.className = 'muted';
+          status.setAttribute('role', 'status');
+          status.setAttribute('data-mv-save-status', '');
+          form.appendChild(status);
+        }
+        say(status, 'Saving…');
+        if (button) button.setAttribute('aria-busy', 'true');
+        form._mvSaveButton = button;
+        // A script that stops the submission after this point must not leave "Saving…".
+        setTimeout(function () { if (event.defaultPrevented) clear(form, button); }, 0);
+      });
+      window.addEventListener('pageshow', function (event) {
+        if (!event.persisted) return;
+        Array.prototype.forEach.call(document.querySelectorAll('form[data-mv-save]'), function (form) {
+          clear(form, form._mvSaveButton);
+        });
+      });
+    })();
+
     // Required fields say so beside their label: one small "Required" for
     // every [required] control, on load and for forms added later (dialogs,
     // rows built from data). The required attribute already tells assistive

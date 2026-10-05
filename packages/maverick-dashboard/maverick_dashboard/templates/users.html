@@ -115,7 +115,7 @@
         <tr>
           <td>{{ who(principal) }}{% if principal == you %} <span class="muted">(you)</span>{% endif %}</td>
           <td>
-            <form method="post" action="/users/set" class="users-row-form" id="role-form-{{ loop.index }}">
+            <form method="post" data-mv-save action="/users/set" class="users-row-form" id="role-form-{{ loop.index }}">
               {{ workspace_binding() }}
               <input type="hidden" name="principal" value="{{ principal }}" />
               <label class="sr-only" for="role-{{ loop.index }}">Role for {{ name_of(principal) }}</label>
@@ -148,7 +148,7 @@
     {% set unassigned = people | rejectattr('role') | list %}
     <h3 class="users-subhead">Give someone a role</h3>
     {% if unassigned %}
-    <form method="post" action="/users/set" class="users-row-form">
+    <form method="post" data-mv-save action="/users/set" class="users-row-form">
       {{ workspace_binding() }}
       <label class="users-field">
         <span>Person</span>
