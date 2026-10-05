@@ -862,6 +862,7 @@ client_token = ""             # MAVERICK_PROXY_CLIENT_TOKEN (sealed when set on 
 
 [analytics]
 task_questions = true         # Insights page questions (need the dashboard's "duckdb" extra)
+usability_survey = false      # optional ease-of-use survey (SUS + one question after top tasks); answers stay local
 
 [env_hunt.enrichment_sources.intel_feed]  # a lookup service your server registered
 enable = true

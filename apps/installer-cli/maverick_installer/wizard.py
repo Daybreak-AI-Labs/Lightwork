@@ -6647,6 +6647,27 @@ def pick_analytics() -> dict[str, Any]:
     return {"mcp_client_language": True}
 
 
+def pick_usability_survey() -> dict[str, Any]:
+    """Optional in-product ease-of-use survey. OFF by default.
+
+    When on, each signed-in person is offered the 10-question System
+    Usability Scale at most once a quarter (one click hides it) and one ease
+    question after a few common tasks. Answers stay on this server, are
+    reported by the role people choose and never by name. Written under
+    ``[analytics]`` as ``usability_survey``.
+    """
+    console.print()
+    console.print(
+        "[dim]Optional: ask people how easy Lightwork is to use - ten short "
+        "questions at most once a quarter, and one question after a few common "
+        "tasks. Answers stay on this server, are reported by role and never by "
+        "name, and nothing is sent anywhere. OFF by default.[/dim]"
+    )
+    if not _q_confirm("Ask people how easy Lightwork is to use?", default=False):
+        return {}
+    return {"usability_survey": True}
+
+
 def pick_persona() -> dict[str, str]:
     """Agent identity: name + voice."""
     if not _q_confirm(
@@ -11070,7 +11091,7 @@ def _run_plugin_picks(state: dict[str, Any], _announce, channels: dict[str, Any]
     _announce()
     analytics = state.get("analytics")
     if analytics is None:
-        analytics = pick_analytics()
+        analytics = {**pick_analytics(), **pick_usability_survey()}
         state["analytics"] = analytics
         _save_partial(state)
 
