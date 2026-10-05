@@ -5,6 +5,8 @@ remain verbatim. Arabic intentionally retains honest English fallback.
 """
 
 ROWS = [
+('Your spending allowance crossed a warning level', 'Votre budget a franchi un seuil d’alerte', 'Ihr Budget hat eine Warnschwelle überschritten', '予算枠が警告レベルを超えました', '您的支出额度已超过警告水平'),
+('Review the work scheduled against your allowance', 'Vérifiez le travail programmé sur votre budget', 'Prüfen Sie die Arbeit, die für Ihr Budget geplant ist', '予算枠に対して予定されている作業を確認してください', '请检查占用您额度的计划工作'),
 ('Your budget', 'Votre budget', 'Ihr Budget', '予算', '您的预算'),
 ('Your budget before work starts', 'Votre budget avant de commencer', 'Ihr Budget vor Arbeitsbeginn', '作業開始前の予算', '工作开始前的预算'),
 ('Review policy ceilings, reserved allowance and upcoming work. This preview never raises a limit or starts a paid request.', 'Vérifiez les plafonds, le budget réservé et le travail à venir. Cet aperçu n’augmente jamais un plafond et ne lance aucune demande payante.', 'Prüfen Sie Richtlinienlimits, reserviertes Budget und anstehende Arbeit. Diese Vorschau erhöht kein Limit und startet keine kostenpflichtige Anfrage.', 'ポリシーの上限、予約済み予算、今後の作業を確認します。このプレビューは上限を引き上げたり、有料リクエストを開始したりしません。', '查看策略上限、预留额度和即将开展的工作。此预览不会提高限额或启动付费请求。'),

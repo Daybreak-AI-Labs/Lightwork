@@ -755,7 +755,6 @@
       // The kernel replaces model-derived events with one fixed sentence when
       // the evidence gateway is on; the page folds those into a single line.
       const WITHHELD = new Set({{ (withheld_markers or [])|tojson }});
-      const TOOL_LINE = /^tool=([\w.:-]+)\s*->\s*([\s\S]*)$/;
       const rawTraceList = document.getElementById('raw-trace-list');
       const rawTrace = document.getElementById('raw-trace');
 

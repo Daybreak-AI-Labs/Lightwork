@@ -41,8 +41,11 @@ def test_the_polling_payload_carries_a_plain_step_for_every_event(world):
         ("Read a file", False, "Researcher"),
         ("", True, "Planner"),
     ]
-    # The recording is still delivered for Technical details.
-    assert events[0]["content"] == BRIEF
+    # The page receives the owner's readable activity, never the internal brief
+    # (the transport contract in test_event_transport_parity); the exact record
+    # stays in the world store.
+    assert events[0]["content"] == "Started work on this task."
+    assert all(BRIEF not in e["content"] for e in events)
 
 
 def test_the_live_stream_payload_carries_the_same_plain_steps(world):
@@ -54,12 +57,15 @@ def test_the_live_stream_payload_carries_the_same_plain_steps(world):
     assert texts[:2] == ["Started working on your request", "Read a file"]
 
 
-def test_the_conversation_folds_the_recording_under_technical_details(world):
+def test_the_conversation_folds_the_step_record_under_its_own_disclosure(world):
     gid = _goal(world)
     body = client.get(f"/chat/goal/{gid}").text
     assert '<details class="raw-trace" id="raw-trace" hidden>' in body
     disclosure = body.split('id="raw-trace"', 1)[1].split("</details>", 1)[0]
-    assert "Technical details" in disclosure
+    # Its own label: "Technical details" means only the administrator stop
+    # details a non-administrator never receives (test_workspace_default_repair).
+    assert "What each step recorded" in disclosure
+    assert "Technical details" not in disclosure
     # The page no longer parses raw tool lines into the step list itself.
     assert "TOOL_LINE" not in body and "humanTool" not in body
     assert "e.step && typeof e.step === 'object'" in body

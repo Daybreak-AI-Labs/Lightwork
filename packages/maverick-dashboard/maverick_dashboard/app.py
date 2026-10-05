@@ -7240,7 +7240,8 @@ async def agents_page(request: Request) -> HTMLResponse:
     if selected and not creating:
         from maverick.typical_cost import typical_cost
 
-        typical = typical_cost(_world(), specialist=selected["name"])
+        # The cost history is a database read: keep it off the event loop.
+        typical = await run_in_threadpool(lambda: typical_cost(_world(), specialist=selected["name"]))
     return templates.TemplateResponse(
         request,
         "agents.html",

@@ -516,7 +516,9 @@ def test_list_entries_that_would_break_the_settings_file_are_refused(audit_rows)
 
     from maverick_dashboard import settings_catalog as catalog
 
-    listed = next(s for s in catalog.SETTINGS if s.control == "list")
+    # A text list: the percentage lists have their own number check in coerce().
+    numeric = {"spending_limits.alert_at", "budget.warning_thresholds"}
+    listed = next(s for s in catalog.SETTINGS if s.control == "list" and s.id not in numeric)
     free_text = dataclasses.replace(listed, pattern="")
     assert catalog.coerce(free_text, ["ok"]) == ["ok"]
     for bad in ("bad\ud800", "bad\x7f", "bad\x1b"):
