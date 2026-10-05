@@ -59,3 +59,12 @@ def product_error(status_code: int, code: str, message: str, *,
                   retryable: bool = False) -> HTTPException:
     return HTTPException(status_code=status_code, detail=error_detail(
         code, message, next_action=next_action, field_errors=field_errors, retryable=retryable))
+
+
+def background_save(request) -> bool:
+    """A page script saving a form in the background (``data-mv-save="background"``
+    asks for ``Accept: application/json``): a refused value then comes back as
+    a business error the script shows beside its field, instead of a page to
+    load. A plain form post (or any other client) keeps its redirect."""
+    accept = (request.headers.get("accept") or "").lower()
+    return "application/json" in accept and "text/html" not in accept

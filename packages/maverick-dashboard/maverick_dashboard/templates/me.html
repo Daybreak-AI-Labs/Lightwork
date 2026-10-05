@@ -198,7 +198,10 @@
     {% if not digest_scheduler_on %}
     <p class="muted"><strong>The daily summary is turned off for this workspace.</strong> An administrator can turn it on in Settings (My work &rsaquo; Send a daily summary). Your choices below are kept for when it is on.</p>
     {% endif %}
-    <form method="post" data-mv-save action="/me/preferences" class="users-row-form">
+    {% from "_form_field.html" import error_summary %}
+    <form method="post" data-mv-save="background" data-mv-save-what="save your choices" action="/me/preferences" class="users-row-form"
+          id="digest-form" data-mv-validate data-mv-keep="me-preferences">
+      {{ error_summary('digest-form-errors') }}
       <label class="users-field">
         <span>Your time zone</span>
         <select class="select" name="time_zone">

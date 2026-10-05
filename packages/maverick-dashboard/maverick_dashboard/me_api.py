@@ -308,9 +308,25 @@ def me_preferences(
             email=email.strip(), digest_enabled=digest_enabled == "on",
             send_when_empty=send_when_empty == "on",
         )
-    except (user_preferences.UserPreferenceError, ValueError):
+    except (user_preferences.UserPreferenceError, ValueError) as exc:
+        from .product_errors import background_save
+        if background_save(request):
+            raise _preference_refusal(str(exc)) from exc
         return RedirectResponse("/me?saved=bad_preferences", status_code=303)
     return RedirectResponse("/me?saved=preferences", status_code=303)
+
+
+def _preference_refusal(reason: str) -> HTTPException:
+    """A refused daily-summary choice, tied to its field for a background save."""
+    from .product_errors import product_error
+    for words, field, message in (
+        ("time zone", "time_zone", "Choose your time zone from the list."),
+        ("hour", "digest_hour", "Choose the hour to send it from the list."),
+        ("email", "email", "Enter a full email address. For example: name@company.com."),
+    ):
+        if words in reason:
+            return product_error(422, "preferences_" + field, message, field_errors={field: message})
+    return product_error(422, "preferences_invalid", "Those choices could not be saved. Check the values and try again.")
 
 
 @router.post("/me/channels/link-code")

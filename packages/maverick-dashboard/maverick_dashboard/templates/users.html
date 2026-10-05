@@ -67,6 +67,8 @@
   {% if saved %}
   <div class="panel users-saved" role="status" data-mv-toast="Saved. {{ saved }}" data-mv-keep-done="users-{{ request.query_params.get('saved', '') }}"><strong>Saved.</strong> {{ saved }}</div>
   {% endif %}
+  {# A background save of the invite form (data-mv-save-show) puts its answer here. #}
+  <div id="invite-result-slot">
   {% if invite_link %}
   {# The one-time invite link is the result of the action just taken: shown
      first and given focus (script below), instead of beside the form far down
@@ -91,6 +93,7 @@
     </div>
   </section>
   {% endif %}
+  </div>
 
   {% if not auth_on %}
   <div class="panel users-note">
@@ -193,7 +196,7 @@
           <td><input type="checkbox" name="principals" value="{{ principal }}" form="users-bulk" id="pick-{{ loop.index }}" data-bulk-pick /><label class="sr-only" for="pick-{{ loop.index }}">Select {{ name_of(principal) }}</label></td>
           <td>{{ who(principal) }}{% if principal == you %} <span class="muted">(you)</span>{% endif %}</td>
           <td>
-            <form method="post" data-mv-save action="/users/set" class="users-row-form" id="role-form-{{ loop.index }}">
+            <form method="post" data-mv-save="background" data-mv-save-what="save the role" action="/users/set" class="users-row-form" id="role-form-{{ loop.index }}" data-mv-keep="users-role-{{ principal }}">
               {{ workspace_binding() }}
               <input type="hidden" name="principal" value="{{ principal }}" />
               <label class="sr-only" for="role-{{ loop.index }}">Role for {{ name_of(principal) }}</label>
@@ -261,7 +264,7 @@
     {% set unassigned = people | rejectattr('role') | list %}
     <h3 class="users-subhead">Give someone a role</h3>
     {% if unassigned %}
-    <form method="post" data-mv-save action="/users/set" class="users-row-form" id="give-role-form" data-mv-validate data-mv-keep="users-set">
+    <form method="post" data-mv-save="background" data-mv-save-what="give the role" action="/users/set" class="users-row-form" id="give-role-form" data-mv-validate data-mv-keep="users-set">
       {{ workspace_binding() }}
       {{ error_summary('give-role-errors') }}
       {% set person_choices = [('', 'Choose a person…')] %}{% for person in unassigned %}{% set _ = person_choices.append((person.principal, person.label)) %}{% endfor %}
@@ -347,7 +350,7 @@
   {% if invites_on %}
   <div class="section-head"><h2 id="invite-email">Invite someone by email</h2></div>
   <div class="panel">
-    <form method="post" data-mv-save action="/users/invite" class="users-row-form" id="invite-form" data-mv-validate data-mv-keep="users-invite">
+    <form method="post" data-mv-save="background" data-mv-save-what="create the invite link" data-mv-save-show="invite-result-slot" action="/users/invite" class="users-row-form" id="invite-form" data-mv-validate data-mv-keep="users-invite">
       {{ workspace_binding() }}
       {{ error_summary('invite-errors') }}
       <label class="users-field users-grow">
@@ -743,11 +746,17 @@
     syncPicks();
     var bulkResult = document.getElementById('bulk-result') || document.getElementById('invite-result');
     if (bulkResult) bulkResult.focus();
-    document.querySelectorAll('[data-copy-target]').forEach(function (button) {
-      button.addEventListener('click', function () {
-        var field = document.getElementById(button.dataset.copyTarget);
-        if (field) window.mvCopy(field.value);
-      });
+    // Delegated: an invite link shown after a background save copies too.
+    document.addEventListener('click', function (event) {
+      var button = event.target.closest && event.target.closest('[data-copy-target]');
+      if (!button) return;
+      var field = document.getElementById(button.dataset.copyTarget);
+      if (field) window.mvCopy(field.value);
+    });
+    var inviteForm = document.getElementById('invite-form');
+    if (inviteForm) inviteForm.addEventListener('mv:saved', function () {
+      if (inviteError) { inviteError.hidden = true; inviteError.textContent = ''; }
+      if (window.mvAskEase) window.mvAskEase('invite_person');
     });
     // A wrong invite address gets a written error tied to the field, in
     // place of the browser's bubble, and focus stays on the field.
