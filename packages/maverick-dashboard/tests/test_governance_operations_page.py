@@ -712,5 +712,5 @@ def test_governance_record_fields_are_labelled_in_plain_words():
         assert labels[key] == plain
     developer = re.compile(r"\b(projection|binding|sysparm|cursor|idempotent|payload|schema|manifest|"
                            r"canonical|plane|seam|adapter|sink|dispatch|params|uri|hex|arn|"
-                           r"determination|supersession|persisted|truncated|lease)\b", re.I)
+                           r"determination|supersession|persisted|truncated|lease)\b", re.IGNORECASE)
     assert not [label for label in labels.values() if developer.search(label)]
