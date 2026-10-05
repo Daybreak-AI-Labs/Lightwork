@@ -1783,6 +1783,10 @@
         if (key === 'theme') { document.body.dataset.themePreference = value; if (value === 'system') value = system.matches ? 'dark' : 'light'; }
         Array.from(document.body.classList).forEach(function (name) { if (name.startsWith(key + '-')) document.body.classList.remove(name); });
         document.body.classList.add(key + '-' + value);
+        // The browser's own chrome (phone address bar) follows the new canvas.
+        var chrome = key === 'theme' && document.querySelector('meta[name="theme-color"]');
+        var canvas = chrome && getComputedStyle(document.body).backgroundColor;
+        if (canvas && canvas !== 'rgba(0, 0, 0, 0)' && canvas !== 'transparent') chrome.setAttribute('content', canvas);
         window.dispatchEvent(new CustomEvent('lightwork:appearance-changed', {detail:{key:key,value:value}}));
       };
       var size = document.querySelector('meta[name="lightwork-text-size"]');

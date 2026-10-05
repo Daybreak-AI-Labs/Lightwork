@@ -41,21 +41,39 @@
       /* ---- spacing (8px system, 4px-quantised) ---- */
       --space-1: 4px;  --space-2: 8px;  --space-3: 12px; --space-4: 16px;
       --space-5: 24px; --space-6: 32px; --space-7: 48px;
+      --space-0-5: 2px;
       /* ---- radii ---- */
-      --radius-sm: 6px; --radius-md: 8px; --radius-lg: 12px; --radius-pill: 999px;
+      --radius-xs: 4px; --radius-sm: 6px; --radius-md: 8px; --radius-lg: 14px;
+      --radius-pill: 999px; --radius-round: 50%;
       /* ---- type scale ---- */
+      --text-2xs: 0.6875rem;
       --text-xs: 0.75rem;  --text-sm: 0.8125rem; --text-base: 0.875rem;
       --text-md: 1rem;     --text-lg: 1.125rem;  --text-xl: 1.375rem;
       --text-2xl: 1.75rem; --text-3xl: 2.25rem;
-      --font-normal: 400; --font-medium: 500; --font-semibold: 600; --font-bold: 700;
-      --leading-tight: 1.25; --leading: 1.55;
+      /* Display sizes: page titles (.page-title) and the page header (.hero-title). */
+      --text-display: clamp(2rem, 4.2vw, 3rem);
+      --text-hero: clamp(2.2rem, 5vw, 3.8rem);
+      --font-light: 200; --font-normal: 400; --font-medium: 500; --font-semibold: 600; --font-bold: 700;
+      --leading-none: 1; --leading-tight: 1.25; --leading: 1.55; --leading-relaxed: 1.7;
       /* The product face (Manrope, self-hosted below) with the system stack
-         it falls back to. */
+         it falls back to; JetBrains Mono for labels and data. */
       --font-sans: "Manrope", -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
-      /* Serif display face for greetings/headlines (system serif — New York on
-         Apple, Georgia elsewhere — no webfont, stays offline-first). */
-      --font-serif: ui-serif, Georgia, "Iowan Old Style", "Palatino Linotype", "Times New Roman", serif;
-      --font-mono: ui-monospace, "Cascadia Code", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+      --font-mono: "JetBrains Mono", ui-monospace, "Cascadia Code", SFMono-Regular, Consolas, monospace;
+      /* Old name for the display face. It held a serif stack until the
+         product moved to Manrope everywhere; kept as an alias so operator
+         and older page styles still resolve. Write var(--font-sans). */
+      --font-serif: var(--font-sans);
+      /* The brand gradient: a thin line on the page header, card hover rings. */
+      --grad: linear-gradient(90deg, #2F7CFF 0%, #8B5CF6 52%, #FF8A2B 100%);
+      /* ---- motion ---- */
+      --duration-fast: 120ms; --duration-base: 200ms; --duration-slow: 400ms;
+      --ease-standard: ease; --ease-emphasized: cubic-bezier(.22, 1, .36, 1);
+      /* ---- layers (z-index), lowest first ---- */
+      --z-raised: 1; --z-sticky: 50; --z-backdrop: 55; --z-drawer: 60; --z-fab: 60;
+      --z-popover: 70; --z-toast: 90; --z-tooltip: 90; --z-skip-link: 200;
+      /* ---- breakpoints (media queries cannot read custom properties, so
+         these are the documented widths to write): sm 560px, md 880px
+         (the sidebar becomes a drawer), lg 1100px. ---- */
       /* ---- layout ---- */
       --sidebar-w: 248px; --topbar-h: 56px; --drawer-w: min(82vw, 320px);
       --shell-topbar-h: var(--topbar-h);
@@ -70,13 +88,16 @@
     :root,
     body.theme-dark {
       color-scheme: dark;
-      --bg: #0e1320; --panel: #161c2c; --border: #283149;
-      --text: #e8ebf2; --muted: #97a1b5; --accent: #3ecf8e;
-      --warn: #e0a23a; --danger: #e5564b;
+      --bg: #04050A; --panel: #0B0E15; --border: #1B2130;
+      --text: #EEF1F7; --muted: #8E97AC; --accent: #3DDC97;
+      --warn: #FFB547; --danger: #FF6B6B;
       --danger-fg: #000000;
     }
+    /* Brand blue one step lighter than the website's #3D8BFF: brand text sits on
+       raised surfaces (--surface-2) too, where #3D8BFF measured 4.1:1; #5297FF
+       gives 4.7:1 there (tests/test_ui_semantic_contrast.py). */
     body.theme-dark {
-      --brand: #4f7bd0; --brand-hi: #6f95df; --brand-fg: #ffffff; --info: #56b6c2;
+      --brand: #5297FF; --brand-hi: #79ACFF; --brand-fg: #000000; --info: #37D7FF;
     }
     body.theme-light {
       color-scheme: light;
@@ -130,6 +151,31 @@
       --danger-subtle: color-mix(in srgb, var(--danger) 18%, transparent);
       --info-subtle: color-mix(in srgb, var(--info) 16%, transparent);
       --muted-subtle: color-mix(in srgb, var(--muted) 18%, transparent);
+      /* Semantic names (the design token set). Aliases of the values above,
+         declared here so they follow the active theme; new styles use these. */
+      --color-canvas: var(--bg);
+      --color-surface: var(--surface-1);
+      --color-surface-raised: var(--surface-2);
+      --color-surface-sunken: var(--surface-sunken);
+      --color-border: var(--border);
+      --color-border-strong: var(--border-strong);
+      --color-hairline: var(--hairline);
+      --color-text: var(--text);
+      --color-text-muted: var(--muted);
+      --color-link: var(--brand);
+      --color-focus: var(--ring);
+      --color-selected: var(--brand-subtle);
+      --color-success: var(--success);
+      --color-success-subtle: var(--success-subtle);
+      --color-warning: var(--warn);
+      --color-warning-subtle: var(--warn-subtle);
+      --color-danger: var(--danger);
+      --color-danger-text: var(--danger-fg);
+      --color-danger-subtle: var(--danger-subtle);
+      --color-info: var(--info);
+      --color-info-subtle: var(--info-subtle);
+      /* One focus glow for fields (on top of the global focus outline). */
+      --shadow-focus: 0 0 0 3px color-mix(in srgb, var(--brand) 25%, transparent);
     }
     /* Accessibility font axis (independent of theme). The dyslexia-friendly
        mode prefers OpenDyslexic when installed and falls back to commonly
@@ -166,8 +212,7 @@
     #content { scroll-margin-top: var(--space-2); }
     body {
       margin: 0;
-      font: var(--text-base)/var(--leading) -apple-system, BlinkMacSystemFont,
-             "Segoe UI", Inter, Roboto, "Helvetica Neue", Arial, sans-serif;
+      font: var(--text-base)/var(--leading) var(--font-sans);
       letter-spacing: -0.006em;
       background: var(--bg); color: var(--text);
       -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
@@ -198,7 +243,7 @@
     /* #content is a programmatic skip-link target (tabindex=-1), not a tab
        stop, so it needs no focus ring of its own. */
     main:focus { outline: none; }
-    .mono, code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, "Roboto Mono", monospace; }
+    .mono, code, pre, kbd { font-family: var(--font-mono); }
     .skip-link { position: absolute; inset-inline-start: -9999px; }
     .skip-link:focus {
       inset-inline-start: var(--space-4); top: var(--space-4); z-index: 200;
@@ -213,8 +258,8 @@
       display: flex; align-items: center; gap: var(--space-4);
       min-height: var(--topbar-h);
       padding: var(--space-2) var(--space-5);
-      background: color-mix(in srgb, var(--panel) 82%, transparent);
-      backdrop-filter: saturate(140%) blur(8px);
+      background: color-mix(in srgb, var(--bg) 84%, transparent);
+      backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
       border-bottom: 1px solid var(--border);
     }
     .topbar__menu {
@@ -231,10 +276,11 @@
     .brand:hover { text-decoration: none; }
     .brand__mark { display: block; flex: none; }
     .brand__plate { display: inline-flex; align-items: center; flex: none;
-      background: #0b0f1c; border-radius: var(--radius-sm); padding: 3px 6px; }
-    .brand__logo { display: block; height: 24px; width: auto; }
+      background: transparent; border-radius: var(--radius-sm); padding: 0; }
+    .brand__logo { display: block; height: 30px; width: auto; }
     .brand__name {
-      font-size: var(--text-lg); letter-spacing: -0.02em; line-height: 1; font-weight: var(--font-semibold);
+      font-size: 12.5px; letter-spacing: .18em; text-transform: uppercase; line-height: var(--leading-none);
+      font-weight: var(--font-semibold);
     }
     .topbar__controls {
       display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap;
@@ -300,9 +346,7 @@
          means the visible rail is always fully painted. */
       min-height: calc(100dvh - var(--shell-topbar-h));
       max-height: calc(100dvh - var(--shell-topbar-h)); overflow-y: auto;
-      background: linear-gradient(180deg,
-        color-mix(in srgb, var(--panel) 58%, var(--bg)),
-        color-mix(in srgb, var(--panel) 30%, var(--bg)));
+      background: var(--bg);
       border-inline-end: 1px solid var(--border);
       padding: var(--space-4) var(--space-3) var(--space-6);
     }
@@ -410,7 +454,7 @@
       gap: var(--space-4); padding: var(--space-4) var(--space-4) var(--space-3);
     }
     .navfinder__head h2 {
-      margin: 0; font-family: var(--font-serif); font-size: var(--text-xl);
+      margin: 0; font-family: var(--font-sans); font-size: var(--text-xl);
       font-weight: var(--font-normal); letter-spacing: -0.02em;
     }
     .navfinder__close { flex: none; }
@@ -497,35 +541,34 @@
 
     /* ---------- headings ---------- */
     .page-title {
-      /* Serif display face, matching the redesigned Chat / Agent Factory /
-         Flows headings — one editorial voice for every page title. */
-      font-family: var(--font-serif); font-weight: 400;
-      font-size: var(--text-3xl);
-      letter-spacing: -0.012em; line-height: 1.14; color: var(--text); margin: 0 0 var(--space-2);
+      /* Light display type, the same voice as the page header's title. */
+      font-family: var(--font-sans); font-weight: var(--font-light);
+      font-size: var(--text-display);
+      letter-spacing: -.035em; line-height: var(--leading-none); color: var(--text); margin: 0 0 var(--space-2);
     }
     .page-subtitle { color: var(--muted); margin: 0 0 var(--space-5); }
     /* Section title. A bare <h2> is a panel's title, the same job as the
        h2 in .section-head, so both use one size (it used to be a 12px
        eyebrow here and 18px there). Small labels use their own classes. */
     h2 {
-      margin: 0 0 var(--space-3); font-size: var(--text-lg); color: var(--muted);
-      text-transform: uppercase; letter-spacing: 0.08em; font-weight: var(--font-semibold);
+      margin: 0 0 var(--space-3); font-family: var(--font-sans); font-size: var(--text-lg); color: var(--brand);
+      text-transform: uppercase; letter-spacing: .1em; font-weight: var(--font-semibold);
     }
 
     /* ---------- surfaces ---------- */
     .panel {
       background: var(--surface-1); border: 1px solid var(--border);
       border-radius: var(--radius-lg); padding: var(--space-5);
-      margin-bottom: var(--space-5); overflow-x: auto; box-shadow: var(--shadow-sm);
+      margin-bottom: var(--space-5); overflow-x: auto; box-shadow: none;
     }
     .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: var(--space-4); margin-bottom: var(--space-5); }
     .stat {
       background: var(--surface-1);
       border: 1px solid var(--border); border-radius: var(--radius-lg);
-      padding: var(--space-5); box-shadow: var(--shadow-sm);
+      padding: var(--space-5); box-shadow: none;
     }
     .stat .num {
-      font-size: var(--text-3xl); font-weight: var(--font-semibold);
+      font-size: var(--text-3xl); font-weight: var(--font-medium);
       line-height: 1.1; font-variant-numeric: tabular-nums; letter-spacing: -0.03em;
     }
     .stat .label {
@@ -552,6 +595,7 @@
     .badge {
       display: inline-flex; align-items: center; gap: 0.4rem;
       padding: 0.16rem 0.6rem; border-radius: var(--radius-pill);
+      font-family: var(--font-mono); letter-spacing: .06em;
       font-size: var(--text-xs); font-weight: var(--font-medium); line-height: 1.4;
       background: var(--muted-subtle); color: var(--muted);
     }
@@ -590,7 +634,7 @@
     .btn {
       display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2);
       padding: 0.5rem 0.95rem; border-radius: var(--radius-md); cursor: pointer;
-      font-size: var(--text-base); font-weight: var(--font-medium); line-height: 1.2;
+      font-size: var(--text-base); font-weight: var(--font-semibold); line-height: 1.2;
       border: 1px solid var(--border); background: var(--surface-2); color: var(--text);
       transition: background-color .13s ease, border-color .13s ease, color .13s ease, transform .06s ease;
     }
@@ -631,7 +675,7 @@
     }
     .btn:disabled { opacity: 0.55; cursor: not-allowed; box-shadow: none; }
     .input, .select, .textarea {
-      background: var(--surface-sunken); color: var(--text);
+      background: var(--bg); color: var(--text);
       border: 1px solid var(--border); border-radius: var(--radius-md);
       padding: 0.55rem 0.7rem; font: inherit; width: 100%;
       transition: border-color .13s ease, box-shadow .13s ease;
@@ -641,7 +685,7 @@
        builder forms. Sits on top of the global :focus-visible outline, so
        keyboard users keep their outline; mouse-focus gets the polished glow. */
     .input:focus, .select:focus, .textarea:focus {
-      border-color: var(--brand-border); box-shadow: 0 0 0 3px var(--brand-subtle);
+      border-color: var(--brand); box-shadow: var(--shadow-focus);
     }
 
     /* ---------- empty + loading states ---------- */
@@ -872,7 +916,7 @@
     .mv-empty--compact .mv-empty__body { margin: 0 0 var(--space-2); max-width: none; }
     .mv-empty--compact .mv-empty__body:last-child { margin-bottom: 0; }
     /* Shared card + responsive card grid. */
-    .card { background: var(--surface-1); border: 1px solid var(--border); border-radius: var(--radius-md); padding: var(--space-4); display: flex; flex-direction: column; transition: border-color .12s ease, box-shadow .12s ease; animation: mv-rise 200ms ease-out both; }
+    .card { background: var(--surface-1); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: var(--space-4); display: flex; flex-direction: column; transition: border-color .12s ease, box-shadow .12s ease; animation: mv-rise 200ms ease-out both; }
     .card:hover { border-color: var(--border-strong); box-shadow: var(--shadow-sm); }
     .card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr)); gap: var(--space-4); }
     /* Shared section header: an h2 with optional right-aligned count/action. */
@@ -1258,24 +1302,23 @@
   gap: var(--space-5); align-items: end;
   padding: clamp(1.4rem, 4vw, 2.8rem);
   border: 1px solid var(--border); border-radius: var(--radius-lg);
-  background:
-    radial-gradient(circle at 86% 14%, color-mix(in srgb, var(--brand) 28%, transparent), transparent 34%),
-    linear-gradient(135deg, color-mix(in srgb, var(--panel) 88%, transparent), var(--surface-1));
-  box-shadow: var(--shadow-md); margin-bottom: var(--space-5);
+  background: var(--panel); box-shadow: none; margin-bottom: var(--space-5);
 }
 .hero--solo { grid-template-columns: 1fr; }
 .hero::before {
-  content: ""; position: absolute; inset: 0 0 auto; height: 3px;
-  background: linear-gradient(90deg, var(--brand-hi), var(--accent), transparent 78%);
+  content: ""; position: absolute; inset: 0 0 auto; height: 2px; background: var(--grad);
 }
-.hero-kicker { color: var(--brand-hi); font-size: var(--text-xs); font-weight: 750;
-  letter-spacing: .13em; text-transform: uppercase; }
-.hero-title { margin: .25rem 0 0; font-family: var(--font-serif);
-  font-size: clamp(2.1rem, 5vw, 3.6rem); line-height: .97; letter-spacing: -.03em; }
-.hero-subtitle { color: var(--accent); font-style: italic; margin: .55rem 0 var(--space-3); }
+.hero-kicker { color: var(--brand); font-family: var(--font-mono); font-size: var(--text-xs);
+  font-weight: var(--font-medium); letter-spacing: .14em; text-transform: uppercase; }
+/* The second size follows the header's own width where container units work. */
+.hero-title { margin: .25rem 0 0; font-family: var(--font-sans); font-weight: var(--font-light);
+  font-size: var(--text-hero); font-size: clamp(2rem, 12cqi, 3.8rem);
+  line-height: var(--leading-none); letter-spacing: -.035em; overflow-wrap: anywhere; }
+.hero-subtitle { color: var(--brand-hi); font-family: var(--font-mono); font-size: var(--text-xs);
+  letter-spacing: .1em; text-transform: uppercase; margin: .55rem 0 var(--space-3); }
 .hero-lede { color: var(--muted); max-width: 46rem; margin: 0; font-size: var(--text-md); }
 .hero-statebox { position: relative; padding: var(--space-4); border: 1px solid var(--border);
-  border-radius: var(--radius-lg); background: color-mix(in srgb, var(--panel) 72%, transparent); }
+  border-radius: var(--radius-lg); background: var(--bg); }
 .hero-statebox__label { color: var(--muted); font-size: var(--text-xs);
   text-transform: uppercase; letter-spacing: .08em; }
 .hero-statebox__row { display: flex; align-items: center; justify-content: space-between;
@@ -1299,9 +1342,6 @@
 .hero--compact .hero-statebox { padding: var(--space-3); }
 @media (max-width: 920px) {
   .hero { grid-template-columns: 1fr; }
-}
-@media (prefers-reduced-motion: reduce) {
-  .hero::before { background: var(--brand); }
 }
 
 /* --- Governance workbench primitives ------------------------------------
@@ -1351,7 +1391,6 @@
   border-radius: var(--radius-md); background: var(--warn-subtle);
 }
 .danger-text { color: var(--danger) !important; }
-.mono { font-family: var(--font-mono); }
 @media (max-width: 780px) {
   .governance-grid > * { grid-column: span 12; }
   .governance-form-grid { grid-template-columns: 1fr; }
@@ -1663,15 +1702,12 @@ body[data-global-admin="1"] .mg-banner .mg-nonadmin-note { display: none; }
 }
 
 /* =====================================================================
-   Neon lab (third edition). The website's design system brought into the
-   product: the same self-hosted faces (Manrope for display and body,
-   JetBrains Mono for labels and data), the same dark stage tokens, the
-   brand gradient as a thin line and a hover border, mono eyebrows, light
-   display type with weight for emphasis. Layered at the END of the sheet so
-   every earlier rule (and every test that pins one) still holds; the light,
-   solarized and high-contrast themes keep their own palettes and only pick
-   up the type and component treatment. Offline-first: no third-party font
-   or asset request is made.
+   Faces and the website's treatment. The product uses the website's
+   self-hosted faces (Manrope for display and body, JetBrains Mono for labels
+   and data), mono eyebrows and the brand gradient as a thin line and a hover
+   ring. The palettes and type rules live with the tokens at the top of the
+   sheet; what remains here layers onto shell and component rules of the
+   same weight. Offline-first: no third-party font or asset request is made.
    ===================================================================== */
 /* Manrope is a variable font: one file and one face cover every weight from
    200 to 700, so a page downloads it once (it was six faces naming six copies
@@ -1680,30 +1716,9 @@ body[data-global-admin="1"] .mg-banner .mg-nonadmin-note { display: none; }
 @font-face { font-family: "JetBrains Mono"; font-weight: 400; font-display: swap; src: url(/static/fonts/jbm-400.woff2) format("woff2"); }
 @font-face { font-family: "JetBrains Mono"; font-weight: 500; font-display: swap; src: url(/static/fonts/jbm-500.woff2) format("woff2"); }
 
-:root {
-  --font-serif: "Manrope", -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
-  --font-mono: "JetBrains Mono", ui-monospace, "Cascadia Code", SFMono-Regular, Consolas, monospace;
-  --grad: linear-gradient(90deg, #2F7CFF 0%, #8B5CF6 52%, #FF8A2B 100%);
-  --radius-md: 8px; --radius-lg: 14px;
-}
-:root, body.theme-dark {
-  --bg: #04050A; --panel: #0B0E15; --border: #1B2130;
-  --text: #EEF1F7; --muted: #8E97AC; --accent: #3DDC97;
-  --warn: #FFB547; --danger: #FF6B6B;
-}
-/* Brand blue one step lighter than the website's #3D8BFF: brand text sits on
-   raised surfaces (--surface-2) too, where #3D8BFF measured 4.1:1; #5297FF
-   gives 4.7:1 there (tests/test_ui_semantic_contrast.py). */
-body.theme-dark { --brand: #5297FF; --brand-hi: #79ACFF; --brand-fg: #000000; --info: #37D7FF; }
-body:not(.font-dyslexic) { font-family: var(--font-sans); }
-.mono, code, pre, kbd { font-family: var(--font-mono); }
 
-/* shell */
-.topbar { background: color-mix(in srgb, var(--bg) 84%, transparent); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); }
-.brand__plate { background: transparent; padding: 0; }
-.brand__logo { height: 30px; }
-.brand__name { font-size: 12.5px; letter-spacing: .18em; text-transform: uppercase; font-weight: 600; }
-.sidebar { background: var(--bg); }
+/* shell: the sidebar's mono group labels, its square-ish rows and the
+   current page's inset brand edge; the New task button in the text colour. */
 .sidebar .navgrp__label, .sidebar .navgrp__toggle {
   font-family: var(--font-mono); font-size: 10.5px; letter-spacing: .14em; text-transform: uppercase; color: var(--muted);
 }
@@ -1713,35 +1728,20 @@ body:not(.font-dyslexic) { font-family: var(--font-sans); }
 footer, .footer { font-family: var(--font-mono); font-size: 11.5px; letter-spacing: .04em; color: var(--muted); }
 
 /* type */
-.page-title, .hero-title {
-  font-family: var(--font-serif); font-weight: 200; letter-spacing: -.035em; line-height: 1.0;
-}
-.page-title { font-size: clamp(2rem, 4.2vw, 3rem); }
-.hero-title { font-size: clamp(2.2rem, 5vw, 3.8rem);
-  font-size: clamp(2rem, 12cqi, 3.8rem); overflow-wrap: anywhere; }
-.page-title b, .page-title strong, .hero-title b, .hero-title strong { font-weight: 600; }
-h2 { font-family: var(--font-serif); font-weight: 600; letter-spacing: .1em; color: var(--brand); }
-/* display-sized h2s (not eyebrows) keep the sans face and their own colour */
+.page-title b, .page-title strong, .hero-title b, .hero-title strong { font-weight: var(--font-semibold); }
+/* display-sized h2s (not eyebrows) keep their own colour */
 h2.empty__title, h2.mv-empty__title, h2.hero-title, h2.page-title, .modal h2, dialog h2 {
-  font-family: var(--font-serif); letter-spacing: -.01em; color: var(--text); }
-.hero-kicker { font-family: var(--font-mono); font-weight: 500; letter-spacing: .14em; color: var(--brand); }
-.hero-subtitle { font-family: var(--font-mono); font-style: normal; font-size: var(--text-xs); letter-spacing: .1em; text-transform: uppercase; color: var(--brand-hi); }
-.hero-lede { color: var(--muted); font-size: var(--text-md); }
+  font-family: var(--font-sans); letter-spacing: -.01em; color: var(--text); }
 th, .stat .label, .hero-statebox__label { font-family: var(--font-mono); letter-spacing: .1em; font-size: 11px; }
-.stat .num { font-weight: 500; letter-spacing: -.03em; }
 
 /* surfaces: the hero gets the stage's dot grid and the gradient line; cards
    and stats get the gradient border on hover (masked ring, no layout cost) */
-.hero { background: var(--panel); box-shadow: none; overflow: hidden; }
 .hero::after { content: ""; position: absolute; inset: 0; pointer-events: none;
   background-image: radial-gradient(color-mix(in srgb, var(--text) 14%, transparent) 1px, transparent 1.2px);
   background-size: 26px 26px;
   -webkit-mask-image: radial-gradient(ellipse 70% 80% at 80% 20%, #000 0%, transparent 70%);
   mask-image: radial-gradient(ellipse 70% 80% at 80% 20%, #000 0%, transparent 70%); }
 .hero > * { position: relative; z-index: 1; min-width: 0; }
-.hero::before { height: 2px; background: var(--grad); }
-.hero-statebox { background: var(--bg); }
-.panel, .stat, .card, .mv-empty { border-radius: var(--radius-lg); box-shadow: none; }
 .card, .stat { position: relative; }
 .card::before, .stat::before { content: ""; position: absolute; inset: -1px; border-radius: inherit; padding: 1px;
   background: var(--grad); -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
@@ -1749,13 +1749,9 @@ th, .stat .label, .hero-statebox__label { font-family: var(--font-mono); letter-
 .card:hover::before, .stat:hover::before { opacity: 1; }
 
 /* controls */
-.btn { border-radius: 8px; font-weight: 600; }
 /* Primary action in every theme except high contrast (see .btn--primary). */
 body:not(.theme-hicontrast) .btn--primary { background: var(--text); border-color: transparent; color: var(--bg); box-shadow: none; }
 body:not(.theme-hicontrast) .btn--primary:hover { background: color-mix(in srgb, var(--text) 88%, var(--bg)); border-color: transparent; box-shadow: none; }
-.input, .select, .textarea { background: var(--bg); border-radius: 8px; }
-.input:focus, .select:focus, .textarea:focus { border-color: var(--brand); box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand) 25%, transparent); }
-.badge { font-family: var(--font-mono); letter-spacing: .06em; }
 
 @media (prefers-reduced-motion: reduce) { .card::before, .stat::before { transition: none; } }
 
@@ -1888,7 +1884,7 @@ body:not(.theme-hicontrast) .btn--primary:hover { background: color-mix(in srgb,
   gap: var(--space-4); padding: var(--space-4) var(--space-4) var(--space-2);
 }
 .shortcuts__head h2 {
-  margin: 0; font-family: var(--font-serif); font-size: var(--text-xl);
+  margin: 0; font-family: var(--font-sans); font-size: var(--text-xl);
   font-weight: var(--font-normal); letter-spacing: -0.02em;
 }
 .shortcuts__close { flex: none; }

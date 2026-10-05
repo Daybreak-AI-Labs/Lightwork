@@ -100,7 +100,7 @@
   gap: var(--space-4); padding: var(--space-4) var(--space-4) var(--space-2);
 }
 .shortcuts__head h2 {
-  margin: 0; font-family: var(--font-serif); font-size: var(--text-xl);
+  margin: 0; font-family: var(--font-sans); font-size: var(--text-xl);
   font-weight: var(--font-normal); letter-spacing: -0.02em;
 }
 .shortcuts__close { flex: none; }

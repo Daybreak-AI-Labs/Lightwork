@@ -5,7 +5,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="color-scheme" content="dark light" />
-  <meta name="theme-color" content="#0e1320" />
+  <meta name="theme-color" content="{{ theme_color or '#04050A' }}" />
   <title>{% block title %}Lightwork{% endblock %}</title>
   <link rel="stylesheet" href="{{ asset('lightwork.css') }}" />
   <link rel="preload" href="/static/fonts/manrope-var.woff2" as="font" type="font/woff2" crossorigin>

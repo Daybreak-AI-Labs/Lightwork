@@ -10,7 +10,7 @@
   <meta name="lightwork-preference-revision" content="{{ display_preference_revision }}">
   <meta name="lightwork-preference-account" content="{{ '1' if display_signed_in else '0' }}">
   <meta name="lightwork-text-size" content="{{ display_text_size or 'standard' }}">
-  <meta name="theme-color" content="#0e1320" />
+  <meta name="theme-color" content="{{ theme_color or '#04050A' }}" />
   {% if draft_recovery_context %}<meta name="lightwork-draft-context" content="{{ draft_recovery_context }}">{% endif %}
   {% if workspace_tenant_selection %}
   <meta name="lightwork-workspace-tenant" content="{{ workspace_tenant_selection }}" />

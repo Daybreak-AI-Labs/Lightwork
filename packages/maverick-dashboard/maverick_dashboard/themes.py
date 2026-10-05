@@ -36,6 +36,10 @@ _NAME = re.compile(r"^[a-z][a-z0-9_-]{0,31}$")
 # Built-in body.theme-* presets in base.html; a custom theme may not shadow one.
 BUILTIN_THEMES = frozenset({"dark", "light", "solarized", "hicontrast"})
 
+# Each built-in theme's page canvas (--bg in static/lightwork.css), for the
+# browser's own chrome (<meta name="theme-color">, the phone address bar).
+_BUILTIN_CANVAS = {"dark": "#04050A", "light": "#f4f6fa", "solarized": "#002b36", "hicontrast": "#000000"}
+
 
 def contrast_ratio(first: str, second: str) -> float:
     """WCAG relative luminance for the validated sRGB palette."""
@@ -125,6 +129,15 @@ def custom_themes() -> dict[str, dict[str, str]]:
     return out
 
 
+def theme_color(theme: str, themes: dict[str, dict[str, str]] | None = None) -> str:
+    """The canvas colour of ``theme``: a built-in's, an operator theme's
+    ``bg``, or the default dark canvas for anything else."""
+    if theme in _BUILTIN_CANVAS:
+        return _BUILTIN_CANVAS[theme]
+    background = ((themes or {}).get(theme) or {}).get("bg", "")
+    return background if _HEX.match(background) else _BUILTIN_CANVAS["dark"]
+
+
 def theme_css(themes: dict[str, dict[str, str]]) -> str:
     """Render validated themes as ``body.theme-<name>`` CSS-variable blocks.
 
@@ -143,4 +156,4 @@ def theme_css(themes: dict[str, dict[str, str]]) -> str:
     return "\n".join(blocks)
 
 
-__all__ = ["custom_themes", "theme_css", "BUILTIN_THEMES", "REQUIRED_KEYS", "OPTIONAL_KEYS"]
+__all__ = ["custom_themes", "theme_color", "theme_css", "BUILTIN_THEMES", "REQUIRED_KEYS", "OPTIONAL_KEYS"]
