@@ -308,7 +308,7 @@
   {% include "_shortcuts.html" %}
   <main id="content" tabindex="-1">
     {% include "_halt_banner.html" %}
-    {% include "_service_status_banner.html" %}
+    {% include "_service_status_banner.html" %}{% if nav_mode == 'areas' %}{% include "_area_nav.html" %}{% endif %}
     <div class="cs-topbar">
       <button type="button" class="btn btn--ghost" id="cs-menu" aria-controls="cs-side" aria-expanded="false">{{ ui("Menu") }}</button>
       <span class="cs-topbar__title">Lightwork</span>

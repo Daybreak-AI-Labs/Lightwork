@@ -139,7 +139,7 @@
   {% include "_shortcuts.html" %}
   <main id="content" tabindex="-1">
     {% include "_halt_banner.html" %}
-    {% include "_service_status_banner.html" %}
+    {% include "_service_status_banner.html" %}{% if nav_mode == 'areas' %}{% include "_area_nav.html" %}{% endif %}
     {# The page's own tools: its documentation, and pinning it to the
        sidebar (only on a page the person may open, when they can pin). #}
     {% set _page_personal = nav_personal() if nav_personal is defined and nav_personal else none %}

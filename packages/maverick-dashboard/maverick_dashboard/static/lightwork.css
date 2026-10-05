@@ -1918,3 +1918,40 @@ body:not(.theme-hicontrast) .btn--primary:hover { background: color-mix(in srgb,
 .cs-account .help-menu .help-menu__panel { left: 0; right: 0; min-width: 0; }
 .cs-account .help-menu > summary { color: var(--muted); font-size: var(--text-sm); cursor: pointer; }
 .cs-account .help-menu > summary:hover, .cs-account .help-menu[open] > summary { color: var(--text); }
+
+/* Job-named navigation ([dashboard] navigation = "areas"): one sidebar entry
+   per area with its sections under it, and on the page the breadcrumb, the
+   area's section tabs and the pages of the current section. */
+.navareas__list, .navarea__sections { list-style: none; margin: 0; padding: 0; }
+.navarea { display: grid; grid-template-columns: 1fr auto; align-items: center; }
+.navarea > .navarea__link { grid-column: 1; }
+.navarea > .navarea__toggle { grid-column: 2; width: auto; min-width: 2.25rem; min-height: 2.25rem; justify-content: center; padding: 0 var(--space-2); }
+.navarea > .navarea__sections { grid-column: 1 / -1; padding-inline-start: var(--space-3); }
+.navarea__sections .nav-ic { width: 8px; height: 8px; }
+.navareas__arrange { margin-top: var(--space-3); padding: 0 var(--space-3); font-size: var(--text-sm); color: var(--muted); }
+.navareas__arrange > summary { cursor: pointer; padding: var(--space-1) 0; }
+.navareas__arrange-list { list-style: none; margin: var(--space-2) 0; padding: 0; display: grid; gap: var(--space-1); }
+.navareas__arrange-list li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-1); }
+.navareas__arrange form { display: inline-flex; gap: var(--space-1); }
+.navareas__arrange .btn { min-height: 2rem; padding: 0 var(--space-2); font-size: var(--text-xs); }
+.areanav { display: grid; gap: var(--space-2); margin: 0 0 var(--space-4); }
+.areanav ol, .areanav ul { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-2); }
+.areanav__crumbs { font-size: var(--text-sm); color: var(--muted); }
+.areanav__crumbs li + li::before { content: "›"; margin-inline-end: var(--space-2); color: var(--muted); }
+.areanav__tabs, .areanav__pages { overflow-x: auto; }
+.areanav__tabs { border-bottom: 1px solid var(--border); }
+.areanav__tabs ul { flex-wrap: nowrap; }
+.areanav__tabs a, .areanav__pages a {
+  display: inline-flex; align-items: center; gap: var(--space-1); min-height: 2.25rem; white-space: nowrap;
+  padding: 0 var(--space-3); color: var(--muted); border-radius: var(--radius-md) var(--radius-md) 0 0;
+}
+.areanav__pages a { border-radius: var(--radius-pill); font-size: var(--text-sm); }
+.areanav__tabs a:hover, .areanav__pages a:hover { color: var(--text); background: var(--surface-2); text-decoration: none; }
+.areanav__tabs a.active { color: var(--text); box-shadow: inset 0 -2px 0 0 var(--brand); }
+.areanav__pages a.active { color: var(--text); background: var(--panel); box-shadow: inset 0 0 0 1px var(--border); }
+.areanav__all > summary { cursor: pointer; font-size: var(--text-sm); color: var(--muted); }
+.areanav__all section { margin-top: var(--space-2); }
+.areanav__heading { margin: 0 0 var(--space-1); font-weight: var(--font-semibold); }
+@media (forced-colors: active) {
+  .areanav__tabs a.active, .areanav__pages a.active { outline: 2px solid Highlight; }
+}

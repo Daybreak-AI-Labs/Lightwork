@@ -5976,6 +5976,19 @@ def pick_advanced() -> dict[str, Any]:
         "People can still choose for themselves in Display preferences.",
         default=False,
     )
+    # The sidebar ([dashboard] navigation) stays "classic" by default. "areas"
+    # groups every page into nine job-named areas; run the tree test in
+    # docs/research/tree-test before switching it on for everyone.
+    # navigation_personal lets each person try it in Your preferences.
+    advanced["dashboard_navigation"] = "areas" if _q_confirm(
+        "Use the job-named sidebar (areas such as Work, Privacy and Settings) for everyone? "
+        "Keep the classic sidebar until a tree test shows people find pages faster.",
+        default=False,
+    ) else "classic"
+    advanced["dashboard_navigation_personal"] = _q_confirm(
+        "Let each person switch to the job-named sidebar for themselves in Your preferences?",
+        default=False,
+    )
     # Settings > Models lists the models each saved key can reach by asking the
     # provider's own model-list endpoint ([models] discovery, default on).
     advanced["mobile_offline"] = {"enabled": _q_confirm(
@@ -9424,6 +9437,10 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
     dept = advanced.get("department_access") or {}
     compress_off = advanced.get("dashboard_compress") is False
     glass_on = advanced.get("dashboard_glass") is True
+    navigation_lines = {key: value for key, value in (
+        ("navigation", "areas" if advanced.get("dashboard_navigation") == "areas" else None),
+        ("navigation_personal", True if advanced.get("dashboard_navigation_personal") is True else None),
+    ) if value is not None}
     api_keys = advanced.get("api_keys") if isinstance(advanced.get("api_keys"), dict) else {}
     # Only a deliberate change is written: the app's defaults (on, 90 / 365
     # days, 24 hours) apply when the table says nothing.
@@ -9434,7 +9451,7 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
         api_key_lines = {"api_keys": False}
     if isinstance(dept, dict) and (
         "default_suites" in dept or "default_role" in dept or dept.get("group_roles") or dept.get("group_suites")
-        or "local_owner_setup" in advanced or compress_off or glass_on or api_key_lines
+        or "local_owner_setup" in advanced or compress_off or glass_on or navigation_lines or api_key_lines
         or "employee_activation_jobs" in advanced or "extension_form_values" in advanced
         or "extension_page_structure" in advanced
     ):
@@ -9458,6 +9475,11 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
             # Default-off in the app; only a deliberate "yes" is written.
             lines.append("# Glass effects for everyone until people choose their own.")
             _emit_kv(lines, "glass", "on")
+        if navigation_lines:
+            # Default classic, chosen by nobody; only a deliberate "yes" is written.
+            lines.append("# The job-named sidebar (areas), for everyone or for people who choose it.")
+            for key, value in navigation_lines.items():
+                _emit_kv(lines, key, value)
         if api_key_lines:
             lines.append("# API keys for scripts and integrations (maverick.config.api_key_settings).")
             for key in ("api_keys", "api_key_default_days", "api_key_max_days",

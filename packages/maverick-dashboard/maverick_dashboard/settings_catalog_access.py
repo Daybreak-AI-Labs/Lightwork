@@ -444,6 +444,18 @@ def _people(S) -> tuple:  # noqa: N803 -- the catalog's row type
           "select", grp, "off", "maverick_dashboard.app", subgroup=access,
           choices=(("off", "Off"), ("on", "On")),
           aliases="glass blur translucent transparency appearance"),
+        S("dashboard", "navigation", "Sidebar for everyone",
+          "Classic lists pages in the current groups. Job-named areas puts every page in one of "
+          "nine areas, such as Work, Privacy and Settings, with tabs and a breadcrumb on each page. "
+          "Who can open each page does not change. Run the tree test before switching everyone.",
+          "select", grp, "classic", "maverick_dashboard.navigation_api", subgroup=access,
+          choices=(("classic", "Classic"), ("areas", "Job-named areas")),
+          aliases="navigation sidebar menu areas information architecture tree test"),
+        S("dashboard", "navigation_personal", "Let people choose their own sidebar",
+          "People can switch between the classic sidebar and the job-named areas for themselves "
+          "in Your preferences. Who can open each page does not change.",
+          "toggle", grp, False, "maverick_dashboard.navigation_api", subgroup=access,
+          aliases="navigation sidebar personal choice try areas"),
         S("dashboard", "invites", "Invite people by email link",
           "Administrators can invite people with a one-time link, and invited people sign in "
           "with that link instead of a company sign-in.",

@@ -217,6 +217,17 @@ token = "${MAVERICK_DASHBOARD_TOKEN}"
 # advanced step set it too.
 # glass = "off"
 
+# The sidebar: "classic" (the default) keeps today's groups; "areas" puts
+# every page in one of nine job-named areas (Home, Work, Agents, Rules &
+# safety, Privacy, Risk & compliance, Evidence & audit, Costs & value,
+# Settings) with local tabs and an "Area › Section" breadcrumb, and starts
+# each role from its own layout. Who may open a page never changes. Run the
+# tree test in docs/research/tree-test/ before switching everyone.
+# navigation_personal = true lets each person choose for themselves in Your
+# preferences. Settings > All settings and the setup wizard set both.
+# navigation = "classic"
+# navigation_personal = false
+
 # Department (suite) access for authenticated users with NO explicit grant on
 # the Users page (job-function scoping: a finance analyst sees and runs only
 # Finance specialists). Unset = unrestricted — scoping is opt-in per user.

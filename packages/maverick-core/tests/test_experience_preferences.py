@@ -177,3 +177,14 @@ def test_clearing_and_erasing_remove_recent_pages_for_that_person_only(isolated)
     write('user:alice', {'preferred_name': 'Alice'})
     assert prefs.erase_personal('user:alice') == 2
     assert prefs.recent_pages('user:alice') == [] and prefs.recent_pages('user:bob') == ['/goals']
+
+
+def test_navigation_choice_and_area_order_belong_to_one_person(isolated):
+    assert prefs.state('user:alice')['values']['navigation'] == ''
+    assert prefs.state('user:alice')['values']['navigation_areas'] == []
+    saved = write('user:alice', {'navigation': 'areas', 'navigation_areas': ['Privacy', 'Work', 'Privacy']})
+    assert saved['values']['navigation'] == 'areas'
+    assert saved['values']['navigation_areas'] == ['Privacy', 'Work']
+    with pytest.raises(ValueError):
+        write('user:alice', {'navigation': 'sideways'})
+    assert {'navigation', 'navigation_areas'} <= prefs.PERSONAL_ONLY
