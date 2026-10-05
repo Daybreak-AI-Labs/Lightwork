@@ -18,7 +18,7 @@ from .paths import current_tenant_id_strict, data_dir
 DEFAULTS = {
     "preferred_name": "", "tone": "", "language": "en", "interface_language": "", "verbosity": "balanced",
     "output_style": "", "custom_style_name": "", "custom_style": "",
-    "theme": "dark", "font": "default", "density": "comfortable", "text_size": "standard",
+    "theme": "dark", "font": "default", "density": "comfortable", "text_size": "standard", "glass": "off",
     "start_page": "/chat", "favorites": [], "today_cards": ["tasks", "decisions", "recent", "schedules", "templates"],
     "today_days": "7", "template_favorites": [],
     "notification_preferences": {},
@@ -29,7 +29,7 @@ CHOICES = {"interface_language": {"", "en", "fr", "de", "ja", "zh", "ar"},
            "conversation_mode": {"queue", "guidance", "independent"},
            "conversation_detail": {"brief", "balanced", "detailed"}, "verbosity": {"brief", "balanced", "detailed"},
            "font": {"default", "dyslexic"}, "density": {"comfortable", "compact"},
-           "text_size": {"standard", "large", "larger"}, "today_days": {"1", "7", "30"}}
+           "text_size": {"standard", "large", "larger"}, "glass": {"off", "on"}, "today_days": {"1", "7", "30"}}
 
 
 class PreferenceConflict(ValueError):
@@ -83,7 +83,7 @@ def state(principal: str, *, thread: int | None = None) -> dict:
     values = {**DEFAULTS}
     sources = dict.fromkeys(DEFAULTS, "product default")
     cfg = config.load_config()
-    for key in ("theme", "font", "density", "text_size"):
+    for key in ("theme", "font", "density", "text_size", "glass"):
         inherited = cfg.get("dashboard", {}).get(key)
         if inherited is not None:
             values[key], sources[key] = _validate(key, inherited), "installation settings"

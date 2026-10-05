@@ -20,7 +20,7 @@ HEADERS = {"Cache-Control": "private, no-store"}
 # credentials, access grants, identifiers, or deployment data leave the server.
 PORTABLE = frozenset({
     "persona.style", "persona.name", "persona.addendum",
-    "dashboard.theme", "dashboard.density",
+    "dashboard.theme", "dashboard.density", "dashboard.glass",
     "budget.max_wall_seconds", "budget.max_tool_calls", "budget.max_output_tokens",
     "models.vision", "speculative.draft_model", "verification.cross_family_model",
 })
@@ -297,7 +297,8 @@ def search(request: Request, q: str = Query('', max_length=200)):
                                     ('theme','Your theme','theme colors appearance system'),
                                     ('font','Your font','font dyslexia accessibility'),
                                     ('density','Your page spacing','density display compact'),
-                                    ('text_size','Your text size','text size reading accessibility')]:
+                                    ('text_size','Your text size','text size reading accessibility'),
+                                    ('glass','Your glass effects','glass blur translucent transparency appearance')]:
             if personal:
                 add(title, '/preferences#preference-' + key, aliases, scope='Personal', role='Signed-in member',
                     value=str(personal['values'][key]) or 'Inherited', source=personal['sources'][key])

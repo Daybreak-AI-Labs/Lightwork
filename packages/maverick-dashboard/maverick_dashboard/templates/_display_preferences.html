@@ -23,6 +23,9 @@
         {% endfor %}
       </select>
           </label>
+          <label class="prefs__row"><span>{{ ui("Glass effects") }}</span><select class="ctl" id="glass-select" data-ui-preference="glass" aria-label="{{ ut('Glass effects') }}" lang="{{ ul('Glass effects') }}">
+            {% for value, label in [('off', 'Off'), ('on', 'On')] %}<option value="{{ value }}" {% if (glass or 'off') == value %}selected{% endif %} lang="{{ ul(label) }}">{{ ut(label) }}</option>{% endfor %}
+          </select></label>
           <label class="prefs__row"><span>{{ ui("Density") }}</span>
       <select class="ctl" id="density-select" data-ui-preference="density" aria-label="{{ ut('Density') }}" lang="{{ ul('Density') }}">
         <option value="" lang="{{ ul("Density") }}">{{ ut("Density") }}</option>

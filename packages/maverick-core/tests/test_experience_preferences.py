@@ -111,3 +111,13 @@ def test_interface_language_never_changes_response_language_or_prompt(isolated):
         write('user:alice', {'interface_language': 'de'}, thread=12)
     with pytest.raises(ValueError, match='available preference'):
         write('user:alice', {'interface_language': 'not-a-language'})
+
+
+def test_glass_effects_are_off_until_the_installation_or_a_person_turns_them_on(isolated, monkeypatch):
+    assert prefs.state('user:alice')['values']['glass'] == 'off'
+    monkeypatch.setattr(prefs.config, 'load_config', lambda: {'dashboard': {'glass': 'on'}})
+    inherited = prefs.state('user:alice')
+    assert (inherited['values']['glass'], inherited['sources']['glass']) == ('on', 'installation settings')
+    assert write('user:alice', {'glass': 'off'})['values']['glass'] == 'off'
+    with pytest.raises(ValueError):
+        write('user:alice', {'glass': 'sparkle'})

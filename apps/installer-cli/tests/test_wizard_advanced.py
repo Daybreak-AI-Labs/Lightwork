@@ -1210,6 +1210,36 @@ def test_dashboard_compress_decline_is_written_and_accept_is_the_default(tmp_pat
     assert "compress" not in tomllib.loads(on).get("dashboard", {})
 
 
+def test_glass_effects_for_everyone_is_written_only_when_chosen(tmp_path, monkeypatch):
+    # Glass effects are off by default (solid panes respond faster), so only a
+    # deliberate "yes" reaches config.toml -- as the value the dashboard reads.
+    on = _write(tmp_path, monkeypatch, {"dashboard_glass": True})
+    assert tomllib.loads(on)["dashboard"]["glass"] == "on"
+    off = _write(tmp_path, monkeypatch, {"dashboard_glass": False})
+    assert "glass" not in tomllib.loads(off).get("dashboard", {})
+    from maverick_dashboard.app import _VALID_GLASS
+    assert tomllib.loads(on)["dashboard"]["glass"] in _VALID_GLASS
+
+
+def test_the_glass_question_defaults_to_off(monkeypatch):
+    from maverick_installer import wizard
+
+    asked = {}
+
+    def confirm(question, *, default=False):
+        if "glass effects" in question.lower():
+            asked["default"] = default
+        return default
+
+    monkeypatch.setattr(wizard, "_q_confirm", confirm)
+    monkeypatch.setattr(wizard, "_q_select", lambda *args, default=None, **kwargs: default)
+    monkeypatch.setattr(wizard, "_q_text", lambda *args, default="", **kwargs: default)
+    monkeypatch.setattr(wizard, "_q_checkbox", lambda *args, default=None, **kwargs: default or [])
+    advanced = wizard.pick_advanced()
+    assert asked == {"default": False}
+    assert advanced["dashboard_glass"] is False
+
+
 def test_model_discovery_decline_is_written_and_accept_is_the_default(tmp_path, monkeypatch):
     # Settings > Models discovers reachable models by default, so only a
     # deliberate "no" reaches config.toml, alongside any per-role picks.

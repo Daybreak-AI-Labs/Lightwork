@@ -114,7 +114,7 @@ def test_files_only_signed_in_pages_use_still_need_a_sign_in(isolated, mode):
         isolated.setenv("MAVERICK_DASHBOARD_INVITES", "1")
     client = _anonymous()
     for path in ("/static/lightwork-ui.js", "/static/lightwork-copilot.js",
-                 "/static/lightwork-preferences.css", "/static/lightwork-settings-admin.js",
+                 "/static/lightwork-guided-actions.css", "/static/lightwork-settings-admin.js",
                  "/api/v1/features/modules"):
         assert client.get(path).status_code == 401, path
 

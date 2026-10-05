@@ -293,6 +293,7 @@ templates.env.globals.setdefault("font", "default")
 templates.env.globals.setdefault("lang", "en")
 templates.env.globals.setdefault("page_lang", "en")
 templates.env.globals.setdefault("density", "comfortable")
+templates.env.globals.setdefault("glass", "off")
 templates.env.globals.setdefault("custom_theme_css", "")
 templates.env.globals.setdefault("custom_theme_names", [])
 templates.env.globals.setdefault("dir", "ltr")
@@ -382,6 +383,7 @@ templates.env.globals.setdefault("ul", lambda source: "en")
 _VALID_THEMES = {"dark", "light", "solarized", "hicontrast"}
 _VALID_FONTS = {"default", "dyslexic"}
 _VALID_DENSITIES = {"comfortable", "compact"}
+_VALID_GLASS = {"off", "on"}
 
 
 def _valid_theme_names() -> set[str]:
@@ -448,6 +450,20 @@ def resolve_density(request: Request) -> str:
     )
 
 
+def resolve_glass(request: Request) -> str:
+    """Glass effects: ``?glass=`` → ``mvk_glass`` cookie (or the account's
+    saved choice) → ``[dashboard] glass`` config → off. Default-off: solid
+    panes repaint fast; ``on`` brings back the translucent, blurred look."""
+    return _resolve_pref(
+        request,
+        param="glass",
+        cookie="mvk_glass",
+        valid=_VALID_GLASS,
+        config_key="glass",
+        default="off",
+    )
+
+
 def _resolve_font(request: Request) -> str:
     """Font preference: ``?font=`` → cookie → default. Independent axis from
     the theme so high-contrast + dyslexia-friendly compose."""
@@ -474,6 +490,7 @@ def _theme_context(request: Request) -> dict:
         "theme": _resolve_theme(request),
         "font": _resolve_font(request),
         "density": resolve_density(request),
+        "glass": resolve_glass(request),
         "custom_theme_css": theme_css(custom),
         "custom_theme_names": sorted(custom),
         # ``lang`` is the selected UI language (drives ``t()``); ``page_lang``
@@ -1931,7 +1948,7 @@ def _persist_pref_cookie(request, response, *, param, cookie, valid, max_age) ->
 
 @app.middleware("http")
 async def persist_theme(request: Request, call_next):
-    """If ?theme= / ?font= / ?density= / ?lang= is in the URL, set a cookie so it sticks."""
+    """If ?theme= / ?font= / ?density= / ?glass= / ?lang= is in the URL, set a cookie so it sticks."""
     response = await call_next(request)
     q = request.query_params.get("theme")
     if q and q.lower() in _valid_theme_names():
@@ -1952,6 +1969,14 @@ async def persist_theme(request: Request, call_next):
         param="density",
         cookie="mvk_density",
         valid=_VALID_DENSITIES,
+        max_age=30 * 24 * 3600,
+    )
+    _persist_pref_cookie(
+        request,
+        response,
+        param="glass",
+        cookie="mvk_glass",
+        valid=_VALID_GLASS,
         max_age=30 * 24 * 3600,
     )
     _persist_pref_cookie(
@@ -4580,6 +4605,15 @@ def _date(stamp) -> str:
     return _plain_labels.datetime_text(value, date_only=True) if value else "—"
 
 
+def _day(stamp) -> str:
+    """The UTC calendar day of a deadline stamp ("2026-10-04"; "" when unset)."""
+    try:
+        value = float(stamp or 0)
+    except (TypeError, ValueError):
+        return ""
+    return time.strftime("%Y-%m-%d", time.gmtime(value)) if value > 0 else ""
+
+
 @app.get("/privacy/vendors/{vendor_id}", response_class=HTMLResponse)
 async def vendor_detail_page(request: Request, vendor_id: str) -> HTMLResponse:
     """One vendor's full governed record: lifecycle, contracts and their
@@ -4684,11 +4718,12 @@ async def dsar_detail_page(request: Request, request_id: str) -> HTMLResponse:
     record = dict(record)
     now = _time.time()
     record.update(privacy_ops.dsar_clock(record, now=now))
-    record["created_date"] = _date(record.get("created_at"))
     record["received_date"] = _date(record.get("received_at") or record.get("created_at"))
-    record["due_date"] = _date(record.get("effective_due_at"))
-    record["acknowledge_date"] = _date(record.get("acknowledge_by"))
-    record["extended_date"] = _date(record.get("extended_until"))
+    # Deadlines are calendar days: the page shows that same day in each
+    # reader's own style (|datetime('date')), never shifted by a time zone.
+    record["due_day"] = _day(record.get("effective_due_at"))
+    record["acknowledge_day"] = _day(record.get("acknowledge_by"))
+    record["extended_day"] = _day(record.get("extended_until"))
     from maverick import rights_deadlines
 
     regime = rights_deadlines.REGIMES.get(str(record.get("jurisdiction") or ""))
@@ -4698,9 +4733,6 @@ async def dsar_detail_page(request: Request, request_id: str) -> HTMLResponse:
     fulfillment_enabled = dsar_fulfillment.enabled()
     if fulfillment_enabled:
         fulfillment = dsar_fulfillment.get_fulfillment(record["id"])
-        if fulfillment and fulfillment.get("response"):
-            fulfillment["response"]["expires_date"] = _date(
-                fulfillment["response"].get("expires_at"))
     # Which secure-link step the "Completed" notice can point to.
     fulfillment_state = (
         "off" if not fulfillment_enabled else "not_started" if not fulfillment
@@ -12555,7 +12587,6 @@ async def shell_copilot_js() -> FileResponse:
 @app.get("/static/lightwork-task-handoffs.js")
 @app.get("/static/lightwork-thread-history.js")
 @app.get("/static/lightwork-employee-companion.css")
-@app.get("/static/lightwork-preferences.css")
 @app.get("/static/lightwork-product-operations.js")
 @app.get("/static/lightwork-settings-search.js")
 @app.get("/static/lightwork-task-resume.js")

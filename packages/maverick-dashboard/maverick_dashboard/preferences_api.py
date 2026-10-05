@@ -14,7 +14,7 @@ from .draft_api import context_for
 
 router = APIRouter()
 PROFILE_FIELDS = frozenset({'tone', 'language', 'interface_language', 'verbosity', 'output_style', 'custom_style_name',
-                            'custom_style', 'theme', 'font', 'density', 'text_size'})
+                            'custom_style', 'theme', 'font', 'density', 'text_size', 'glass'})
 
 
 def _app():
@@ -95,7 +95,8 @@ def _check_display(key: str, value: str) -> None:
 
     allowed = {"theme": {*_app()._valid_theme_names(), "system"},
                "font": _app()._VALID_FONTS, "density": _app()._VALID_DENSITIES,
-               "language": set(LANGS), "interface_language": {"", *LANGS}, "text_size": {"standard", "large", "larger"}}
+               "language": set(LANGS), "interface_language": {"", *LANGS}, "text_size": {"standard", "large", "larger"},
+               "glass": {"off", "on"}}
     if key not in allowed or not isinstance(value, str) or value not in allowed[key]:
         raise HTTPException(422, "Choose an available display preference.")
 
@@ -124,7 +125,7 @@ def _update_preferences(request: Request, body: PreferenceUpdate) -> JSONRespons
     for key, value in body.changes.items():
         if value is None:
             continue
-        if key in {"theme", "font", "density", "language", "interface_language", "text_size"}:
+        if key in {"theme", "font", "density", "language", "interface_language", "text_size", "glass"}:
             _check_display(key, value)
         if key == "start_page" and (not isinstance(value, str) or value not in destinations):
             raise HTTPException(403, "That starting page is not available to your account.")
@@ -146,7 +147,7 @@ def _update_preferences(request: Request, body: PreferenceUpdate) -> JSONRespons
         raise HTTPException(422, str(exc)) from exc
     response = JSONResponse(_state(request, body.thread), headers={"Cache-Control": "private, no-store"})
     if body.scope == 'personal' and body.thread is None:
-        for key in set(body.changes) & {'theme', 'font', 'density', 'text_size', 'interface_language'}:
+        for key in set(body.changes) & {'theme', 'font', 'density', 'text_size', 'glass', 'interface_language'}:
             response.delete_cookie('mvk_lang' if key == 'interface_language' else 'mvk_' + key)
     return response
 
@@ -247,7 +248,7 @@ def import_personal_profile(request: Request, body: PersonalProfileImport):
         validate_payload(values)
         changes = {key: preferences._validate(key, value) for key, value in values.items()}
         for key, value in changes.items():
-            if key in {'theme', 'font', 'density', 'language', 'interface_language', 'text_size'}:
+            if key in {'theme', 'font', 'density', 'language', 'interface_language', 'text_size', 'glass'}:
                 _check_display(key, value)
     except ValueError as exc:
         raise HTTPException(422, 'The profile includes an unsupported value or credential-like data. Review the file; nothing was changed.') from exc

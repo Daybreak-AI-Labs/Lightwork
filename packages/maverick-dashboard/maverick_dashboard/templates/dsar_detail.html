@@ -66,20 +66,20 @@
 
   <div class="panel">
     <p class="muted" style="margin: 0;">
-      Opened {{ dsar.created_date or 'on an unknown date' }}{% if dsar.opened_by %} by {{ dsar.opened_by | identity }}{% endif %}
+      Opened {% if dsar.created_at %}{{ dsar.created_at | datetime('date') }}{% else %}on an unknown date{% endif %}{% if dsar.opened_by %} by {{ dsar.opened_by | identity }}{% endif %}
       {% if dsar.channel %} · received by {{ dsar.channel | humanize }}{% endif %}
       {% if dsar.source == 'public_form' %} · from your website{% endif %}
-      · answer due {{ dsar.due_date or 'date not set' }}{% if dsar.extended_until %} (extended){% endif %}
+      · answer due {% if dsar.due_day %}{{ dsar.due_day | datetime('date') }}{% else %}date not set{% endif %}{% if dsar.extended_until %} (extended){% endif %}
     </p>
     <p class="muted" style="font-size: var(--text-sm); margin: var(--space-2) 0 0;">
       {% if dsar.jurisdiction_name %}
         Law: {{ dsar.jurisdiction_name }} ({{ dsar.citation }}).
         {% if dsar.due_basis == 'internal_target' %}This law fixes no number of days; the date is your internal target.{% endif %}
-        {% if dsar.acknowledge_by %} Confirm receipt by {{ dsar.acknowledge_date }}{% if dsar.acknowledged_at %} — done{% elif dsar.acknowledge_overdue %} — <strong>not done in time</strong>{% endif %}.{% endif %}
+        {% if dsar.acknowledge_by %} Confirm receipt by {{ dsar.acknowledge_day | datetime('date') }}{% if dsar.acknowledged_at %} — done{% elif dsar.acknowledge_overdue %} — <strong>not done in time</strong>{% endif %}.{% endif %}
       {% else %}
         No law recorded: the 30-day fallback clock applies.
       {% endif %}
-      {% if dsar.extended_until %}Extended to {{ dsar.extended_date }}: {{ dsar.extension_reason }}.{% endif %}
+      {% if dsar.extended_until %}Extended to {{ dsar.extended_day | datetime('date') }}: {{ dsar.extension_reason }}.{% endif %}
       Identity:
       {% if dsar.verification and dsar.verification.status == 'verified' %}
         confirmed ({{ method_labels.get(dsar.verification.method, dsar.verification.method | humanize) }}).
@@ -175,7 +175,7 @@
         {% set outcome = dsar.outcome or {} %}
         {% if answer %}
           <span class="badge done">{{ 'Refused' if answer.kind == 'refused' else 'Answered' }}</span>
-          {{ 'Refused' if answer.kind == 'refused' else 'Answered' }} on {{ answer.on }}{% if dsar.due_date %} (due {{ dsar.due_date }}){% endif %}.
+          {{ 'Refused' if answer.kind == 'refused' else 'Answered' }} on {{ answer.on | datetime('date') }}{% if dsar.due_day %} (due {{ dsar.due_day | datetime('date') }}){% endif %}.
           {% if outcome.erasure == 'erased' %}Their data was erased.{% elif outcome.erasure == 'not_erased' %}Their data was kept.{% endif %}
           {% if outcome.lawful_basis %}Lawful reason: {{ outcome.lawful_basis }}.{% endif %}
           {% if outcome.reference %}Proof: {{ outcome.reference }}.{% endif %}
@@ -238,7 +238,7 @@
       {% if fulfillment.response %}
         <p>
           <span class="badge {{ 'done' if fulfillment.response.delivered_at else 'info' }}">{{ 'Opened by the requester' if fulfillment.response.delivered_at else 'Link created' }}</span>
-          expires {{ fulfillment.response.expires_date or 'at an unknown time' }}
+          expires {% if fulfillment.response.expires_at %}{{ fulfillment.response.expires_at | datetime('date') }}{% else %}at an unknown time{% endif %}
           {% if fulfillment.response.max_reads %}
             · opened {{ fulfillment.response.reads_used or 0 }}/{{ fulfillment.response.max_reads }} times
           {% endif %}

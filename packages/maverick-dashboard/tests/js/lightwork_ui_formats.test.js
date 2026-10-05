@@ -14,13 +14,17 @@ const i18nSource = static_("lightwork-i18n.js");
 const NOW = Date.UTC(2026, 9, 4, 13, 1, 12);
 process.env.TZ = "Europe/London";
 
-function load(body = "", { language = null } = {}) {
+// `browser` is the reader's regional setting (navigator.languages).
+function load(body = "", { language = null, browser = "en-GB" } = {}) {
   const config = language
     ? `<script id="lightwork-i18n-data" type="application/json">${JSON.stringify(
       { language, locale: language === "fr" ? "fr-CA" : "en-US", catalog: {} })}</script>` : "";
   const dom = new JSDOM(`<!doctype html><html><head>${config}</head><body>` +
     `<div id="mv-toasts"></div><div id="mv-toasts-alert"></div>${body}</body></html>`,
-    { url: "https://lightwork.test/", runScripts: "outside-only" });
+    { url: "https://lightwork.test/", runScripts: "outside-only", beforeParse(window) {
+      Object.defineProperty(window.navigator, "language", { value: browser, configurable: true });
+      Object.defineProperty(window.navigator, "languages", { value: [browser], configurable: true });
+    } });
   dom.window.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} });
   dom.window.Date.now = () => NOW;
   dom.window.eval(source);
@@ -57,7 +61,7 @@ test("relative times divide by the unit they name, before and after now", () => 
   w.close();
 });
 
-test("absolute times read one way in the viewer's zone, whatever the browser locale", () => {
+test("absolute times read in the viewer's zone and their browser's regional style", () => {
   const w = load();
   const seconds = NOW / 1000;
   assert.equal(w.mvTimeAbsolute(seconds), "4 Oct 2026, 14:01 BST");
@@ -68,6 +72,19 @@ test("absolute times read one way in the viewer's zone, whatever the browser loc
   // A schedule's own zone, named in the text; an unknown zone falls back to the viewer's.
   assert.equal(w.mvTimeAbsolute(seconds, "America/New_York"), "4 Oct 2026, 09:01 GMT-4");
   assert.equal(w.mvTimeAbsolute(seconds, "Not/AZone"), "4 Oct 2026, 14:01 BST");
+  // A US reader gets month-first dates, a 12-hour clock and US zone names.
+  const us = load("", { browser: "en-US" });
+  assert.equal(us.mvTimeAbsolute(seconds), "Oct 4, 2026, 2:01 PM GMT+1");
+  assert.equal(us.mvTimeAbsolute(seconds, "America/New_York"), "Oct 4, 2026, 9:01 AM EDT");
+  assert.equal(us.mvDateAbsolute("2026-10-04"), "Oct 4, 2026");
+  us.close();
+  // A German browser reads its own style; relative phrases stay in the
+  // interface language (English here) so a sentence never mixes languages.
+  const de = load("", { browser: "de-DE" });
+  assert.equal(de.mvTimeAbsolute(seconds), "4. Okt. 2026, 14:01 GMT+1");
+  assert.equal(de.mvDateAbsolute("2026-10-04"), "4. Okt. 2026");
+  assert.equal(de.mvTimeRelative(seconds - 180), "3 minutes ago");
+  de.close();
   for (const missing of [null, undefined, "", "soon", 0, NaN]) {
     assert.equal(w.mvTimeAbsolute(missing), "", String(missing));
     assert.equal(w.mvWhen(missing), "", String(missing));
@@ -97,21 +114,39 @@ test("server-rendered times become relative, absolute or calendar text", (t) => 
   assert.equal(doc.getElementById("both").textContent, "4 Oct 2026, 16:01 BST (in 2 hours)");
 });
 
+test("server-rendered times follow the reader's browser locale too", (t) => {
+  const seconds = NOW / 1000;
+  const w = load(
+    `<time id="abs" data-mv-time="${seconds}" data-mv-time-mode="absolute">4 Oct 2026, 13:01 UTC</time>` +
+    `<time id="day" datetime="2026-10-04" data-mv-time="2026-10-04" data-mv-time-mode="date">4 Oct 2026</time>`,
+    { browser: "en-US" });
+  t.after(() => w.close());
+  assert.equal(w.document.getElementById("abs").textContent, "Oct 4, 2026, 2:01 PM GMT+1");
+  assert.equal(w.document.getElementById("day").textContent, "Oct 4, 2026");
+});
+
 test("a translated interface uses its own locale, and both shared formatters agree", () => {
   const seconds = NOW / 1000;
   const fr = load("", { language: "fr" });
   const expected = new Intl.DateTimeFormat("fr-CA", { day: "numeric", month: "short", year: "numeric",
-    hour: "2-digit", minute: "2-digit", timeZoneName: "short" }).format(new Date(NOW));
+    hour: "numeric", minute: "2-digit", timeZoneName: "short" }).format(new Date(NOW));
   assert.equal(fr.mvTimeAbsolute(seconds), expected);
   assert.equal(fr.LightworkI18n.formatDate(seconds), expected);
   assert.equal(fr.mvTimeRelative(seconds - 180), "il y a 3 minutes");
   fr.close();
-  // English keeps one pattern even when the browser asks for US formatting.
-  const en = load("", { language: "en" });
-  assert.equal(en.LightworkI18n.formatDate(seconds), "4 Oct 2026, 14:01 BST");
-  assert.equal(en.LightworkI18n.formatDate("2026-10-04"), "4 Oct 2026");
-  assert.equal(en.LightworkI18n.formatDate(seconds), en.mvTimeAbsolute(seconds));
-  en.close();
+  // An English interface follows each reader's browser, with one format per
+  // reader: both shared formatters give the same text.
+  for (const [browser, moment, day] of [
+    ["en-GB", "4 Oct 2026, 14:01 BST", "4 Oct 2026"],
+    ["en-US", "Oct 4, 2026, 2:01 PM GMT+1", "Oct 4, 2026"],
+    ["de-DE", "4. Okt. 2026, 14:01 GMT+1", "4. Okt. 2026"],
+  ]) {
+    const en = load("", { language: "en", browser });
+    assert.equal(en.LightworkI18n.formatDate(seconds), moment, browser);
+    assert.equal(en.LightworkI18n.formatDate("2026-10-04"), day, browser);
+    assert.equal(en.LightworkI18n.formatDate(seconds), en.mvTimeAbsolute(seconds), browser);
+    en.close();
+  }
 });
 
 test("money reads one way: dollars and cents, separators, never a run of decimals", () => {
@@ -140,6 +175,6 @@ test("server-rendered times follow the interface locale once it is known", async
   t.after(() => page.close());
   await new Promise((done) => setImmediate(done)); // the runtime translates once the document has loaded
   const expected = new Intl.DateTimeFormat("fr-CA", { day: "numeric", month: "short", year: "numeric",
-    hour: "2-digit", minute: "2-digit", timeZoneName: "short" }).format(new Date(NOW));
+    hour: "numeric", minute: "2-digit", timeZoneName: "short" }).format(new Date(NOW));
   assert.equal(page.document.getElementById("t").textContent, expected);
 });

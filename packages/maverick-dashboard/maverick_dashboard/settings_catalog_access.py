@@ -438,6 +438,12 @@ def _people(S) -> tuple:  # noqa: N803 -- the catalog's row type
           "select", grp, "comfortable", "maverick_dashboard.app", subgroup=access,
           choices=(("comfortable", "Comfortable"), ("compact", "Compact")),
           aliases="density compact"),
+        S("dashboard", "glass", "Glass effects for everyone",
+          "See-through, blurred panels people see until they choose their own in Display "
+          "preferences. Off keeps pages faster to respond, especially on older computers.",
+          "select", grp, "off", "maverick_dashboard.app", subgroup=access,
+          choices=(("off", "Off"), ("on", "On")),
+          aliases="glass blur translucent transparency appearance"),
         S("dashboard", "invites", "Invite people by email link",
           "Administrators can invite people with a one-time link, and invited people sign in "
           "with that link instead of a company sign-in.",

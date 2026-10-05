@@ -10,7 +10,7 @@
   function appendCopy(node,source,values){var span=document.createElement('span');copy(span,source,values);node.append(' ',span);}
   function knownError(error,fallback){var message=error&&error.message;return window.LightworkI18n&&window.LightworkI18n.has(message)?message:fallback;}
   function sourceLabel(source){return text({'personal':'Personal','workspace':'Workspace','organization':'Organization','conversation':'Conversation','product default':'Product default','installation settings':'Installation settings','organization style':'Organization style','organization policy':'Organization policy'}[source]||source);}
-  function fieldLabel(key){return text({preferred_name:'What Lightwork calls you',tone:'Writing tone',verbosity:'Detail',language:'Response language',interface_language:'Interface language',output_style:'Output style',custom_style_name:'Style name',custom_style:'Style guidance',start_page:'Starting page',theme:'Theme',font:'Font',density:'Page spacing',text_size:'Text size',favorites:'Pinned pages',today_days:'Today period',today_cards:'Today cards',conversation_mode:'While a task runs',conversation_detail:'Inbox detail'}[key]||key);}
+  function fieldLabel(key){return text({preferred_name:'What Lightwork calls you',tone:'Writing tone',verbosity:'Detail',language:'Response language',interface_language:'Interface language',output_style:'Output style',custom_style_name:'Style name',custom_style:'Style guidance',start_page:'Starting page',theme:'Theme',font:'Font',density:'Page spacing',text_size:'Text size',glass:'Glass effects',favorites:'Pinned pages',today_days:'Today period',today_cards:'Today cards',conversation_mode:'While a task runs',conversation_detail:'Inbox detail'}[key]||key);}
   var changes = {}, pins = [], busy = false;
   var compare = document.getElementById('preference-compare');
   function renderPins() {
@@ -146,7 +146,7 @@
         var revision = document.querySelector('meta[name="lightwork-preference-revision"]');
         if (revision) revision.content = model.revision;
         Object.keys(submitted).forEach(function (key) {
-          if (['theme','font','density','text_size','interface_language'].indexOf(key) === -1) return;
+          if (['theme','font','density','text_size','glass','interface_language'].indexOf(key) === -1) return;
           if (key!=='interface_language'&&window.mvApplyDisplayPreference) window.mvApplyDisplayPreference(key, model.values[key]);
           var picker = document.querySelector('[data-ui-preference="' + key + '"]');
           if (picker) {picker.value=model.values[key];picker.dataset.savedValue=model.values[key];}

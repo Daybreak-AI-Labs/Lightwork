@@ -35,16 +35,24 @@
     var numeric = Number(value); if (!Number.isFinite(numeric)) return String(value);
     return new Intl.NumberFormat(data.locale || data.language || 'en', options || {}).format(numeric);
   }
+  function browserLocale() {
+    var wanted = [].concat(navigator.languages || [], navigator.language || []);
+    for (var i = 0; i < wanted.length; i++) {
+      try { if (wanted[i] && Intl.DateTimeFormat.supportedLocalesOf([wanted[i]]).length) return wanted[i]; } catch (_) { /* next */ }
+    }
+    return 'en-GB';
+  }
   function formatDate(value, options) {
     // A product date without a time is a calendar date, not UTC midnight.
     var parts = typeof value === 'string' && /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
     var date = parts ? new Date(Number(parts[1]), Number(parts[2])-1, Number(parts[3])) : value instanceof Date ? value : new Date(typeof value === 'number' || /^\d+(?:\.\d+)?$/.test(value) ? Number(value) * 1000 : value);
     if (Number.isNaN(date.getTime())) return text('Unknown');
-    // The same pattern as mvTimeAbsolute in lightwork-ui.js: "4 Oct 2026, 14:01 BST"
-    // on English pages in every browser; a translated interface uses its locale.
+    // The same choice as mvTimeAbsolute in lightwork-ui.js: English pages follow
+    // the reader's browser ("Oct 4, 2026, 2:01 PM EDT" in en-US, "4 Oct 2026,
+    // 19:01 BST" in en-GB); a translated interface uses its locale.
     var day = {day: 'numeric', month: 'short', year: 'numeric'};
-    var locale = !data.language || data.language === 'en' ? 'en-GB' : data.locale || data.language;
-    return new Intl.DateTimeFormat(locale, options || (parts ? day : Object.assign({hour: '2-digit', minute: '2-digit', timeZoneName: 'short'}, day))).format(date);
+    var locale = !data.language || data.language === 'en' ? browserLocale() : data.locale || data.language;
+    return new Intl.DateTimeFormat(locale, options || (parts ? day : Object.assign({hour: 'numeric', minute: '2-digit', timeZoneName: 'short'}, day))).format(date);
   }
   function plural(one, other, count) {
     var category = new Intl.PluralRules(data.locale || data.language || 'en').select(Number(count));
