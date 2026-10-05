@@ -1514,6 +1514,11 @@ from . import instruction_capture_api  # noqa: E402
 
 app.include_router(instruction_capture_api.router)
 app.include_router(instruction_capture_api.page_router)
+
+from . import webhook_settings_recovery_api  # noqa: E402
+
+app.include_router(webhook_settings_recovery_api.router)
+app.include_router(webhook_settings_recovery_api.asset_router)
 app.state.voice_setup = VoiceSetup()
 app.add_middleware(RecoveryOnlyMiddleware, dashboard_app=app)
 

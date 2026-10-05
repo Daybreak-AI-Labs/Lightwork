@@ -138,6 +138,7 @@ def _adapter_modules():
         product_operations_budget,
         product_operations_commitments,
         product_operations_companion,
+        product_operations_companion_admin,
         product_operations_connections,
         product_operations_consent_jobs,
         product_operations_conversation,
@@ -170,12 +171,14 @@ def _adapter_modules():
         product_operations_task_views,
         product_operations_tasks,
         product_operations_today,
+        product_operations_webhook_recovery,
         product_operations_workflow_explanation,
         product_operations_workflows,
     )
     return (
         product_operations_preferences,
         product_operations_companion,
+        product_operations_companion_admin,
         product_operations_commitments,
         product_operations_tasks,
         product_operations_task_launch,
@@ -212,6 +215,7 @@ def _adapter_modules():
         product_operations_personal_data,
         product_operations_workflow_explanation,
         product_operations_workflows,
+        product_operations_webhook_recovery,
     )
 
 

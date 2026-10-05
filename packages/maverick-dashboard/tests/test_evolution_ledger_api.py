@@ -51,6 +51,73 @@ def _client(monkeypatch: pytest.MonkeyPatch, *, permitted: bool = True) -> TestC
     return TestClient(app, headers={"Origin": "http://testserver"})
 
 
+def test_history_checkpoint_native_prefix_roundtrip_and_replacement_refusal(tmp_path, monkeypatch):
+    """An independently kept original catches validly rebuilt local history."""
+    from maverick import learning_history_checkpoint as checkpoint
+    from maverick_dashboard import product_operations_learning_history as copilot
+
+    path = tmp_path / "checkpoint-source.json"
+    ledger = PromotionLedger(path=path)
+    original = _record()
+    ledger.add(original)
+    journal = Path(f"{path}.journal")
+    lock = Path(f"{journal}.lock")
+    lock.unlink(missing_ok=True)
+    before = journal.read_bytes()
+    monkeypatch.setattr(api, "_promotion_ledger_source", lambda: (ledger, "available"))
+    client = _client(monkeypatch)
+    downloaded = client.get(f"{BASE}/checkpoint/download")
+    assert downloaded.status_code == 200, downloaded.text
+    assert downloaded.headers["content-disposition"].startswith("attachment;")
+    assert downloaded.headers["cache-control"].startswith("no-store")
+    retained_original = downloaded.text
+    for private in (original.id, original.summary, original.approval_signature, "never expose journal content"):
+        assert private not in retained_original
+    assert journal.read_bytes() == before and not lock.exists()
+    assert client.post(f"{BASE}/checkpoint/check", json={"checkpoint": retained_original}).json()["matches"] is True
+    # Restoration mutates the compatibility projection, never the old event.
+    ledger.mark_rolled_back(original.id, at=120)
+    ledger.add(_record(id="a-later-change", promoted_at=130))
+    checked = client.post(f"{BASE}/checkpoint/check", json={"checkpoint": retained_original})
+    assert checked.status_code == 200 and checked.json()["matches"] is True
+    assert checked.json()["later_records"] == 2
+    status = client.get(f"{BASE}/checkpoint/status").json()
+    assert status["record_count"] == 3 and status["adopted_changes"] == 2 and status["restorations"] == 1
+    monkeypatch.setattr(copilot, "require_permission", lambda _request, _permission: None)
+    assert copilot.checkpoint_snapshot(None, {}).details["record_count"] == 3
+    assert copilot.prepare_checkpoint_download(None, {}, {}).native["download"]["href"].endswith("/checkpoint/download")
+    assert copilot.prepare_checkpoint_check(None, {}, {}).native["choose_file"]["href"].endswith("#history-checkpoint")
+    tampered = downloaded.json()
+    tampered["record_count"] = 2
+    assert client.post(f"{BASE}/checkpoint/check", json={"checkpoint": json.dumps(tampered)}).status_code == 422
+    oversized = client.post(f"{BASE}/checkpoint/check", content=b"x" * 32769)
+    assert oversized.status_code == 413 and len(oversized.content) < 1024
+    # A replacement has a valid native chain. Local integrity alone accepts it,
+    # but comparison with the independently retained original refuses it.
+    replacement_path = tmp_path / "replacement.json"
+    replacement = PromotionLedger(path=replacement_path)
+    replacement.add(_record(summary="changed earlier contents"))
+    replacement.add(_record(id="a-later-change", promoted_at=130))
+    journal.write_bytes(Path(f"{replacement_path}.journal").read_bytes())
+    checked = client.post(f"{BASE}/checkpoint/check", json={"checkpoint": retained_original})
+    assert checked.status_code == 200 and checked.json()["matches"] is False
+    # Also refuse a missing earliest event even when the remaining native
+    # history was rebuilt with a completely valid chain.
+    missing_path = tmp_path / "missing.json"
+    missing = PromotionLedger(path=missing_path)
+    missing.add(_record(id="a-later-change", promoted_at=130))
+    journal.write_bytes(Path(f"{missing_path}.journal").read_bytes())
+    assert client.post(f"{BASE}/checkpoint/check", json={"checkpoint": retained_original}).json()["matches"] is False
+    journal.write_bytes(b"broken\n")
+    assert client.post(f"{BASE}/checkpoint/check", json={"checkpoint": retained_original}).status_code == 409
+    monkeypatch.setattr(api, "_promotion_ledger_source", lambda: (PromotionLedger(), "available"))
+    assert client.get(f"{BASE}/checkpoint/download").status_code == 409
+    monkeypatch.setattr(checkpoint, "MAX_SOURCE_BYTES", 1)
+    monkeypatch.setattr(api, "_promotion_ledger_source", lambda: (missing, "available"))
+    assert client.get(f"{BASE}/checkpoint/download").status_code == 409
+    assert _client(monkeypatch, permitted=False).get(f"{BASE}/checkpoint/download").status_code == 403
+
+
 def test_snapshot_is_digest_only_bounded_and_does_not_repair_source(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

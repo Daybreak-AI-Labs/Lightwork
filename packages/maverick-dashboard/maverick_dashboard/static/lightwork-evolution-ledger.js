@@ -272,3 +272,116 @@
 
   loadSnapshot();
 })();
+
+/* Complete native history references: retained files never enter Copilot text. */
+(function () {
+  "use strict";
+  var root = document.getElementById("elv-root");
+  var form = document.getElementById("elv-checkpoint-form");
+  if (!root || !form) { return; }
+  var base = (root.dataset.apiBase || "/api/v1/audit/evolution-ledger") + "/checkpoint";
+  var input = document.getElementById("elv-checkpoint-file");
+  var download = document.getElementById("elv-checkpoint-download");
+  var status = document.getElementById("elv-checkpoint-status");
+  var result = document.getElementById("elv-checkpoint-result");
+  var error = document.getElementById("elv-checkpoint-error");
+  var generation = 0, busy = false, available = false, refreshPending = false;
+  var controllers = new Set();
+  function clearResult() { result.hidden = true; result.textContent = ""; error.textContent = ""; }
+  function lock() { form.querySelector("button").disabled = busy; input.disabled = busy; download.disabled = busy || !available; }
+  function when(value) { var date = new Date(Number(value) * 1000); return Number.isFinite(date.getTime()) ? date.toLocaleString() : "an unrecorded time"; }
+  async function request(path, body) {
+    var controller = new AbortController(); controllers.add(controller);
+    var timeout = setTimeout(function () { controller.abort(); }, 15000);
+    try {
+      var response = await fetch(base + path, {method: body ? "POST" : "GET", credentials: "same-origin", cache: "no-store",
+        headers: {"Content-Type": "application/json"}, body: body ? JSON.stringify(body) : undefined, signal: controller.signal});
+      var chunks = [], total = 0, raw;
+      if (Number(response.headers.get("content-length") || 0) > 16384) { throw new Error("The checkpoint response was too large. Refresh before relying on it."); }
+      if (response.body && response.body.getReader) {
+        var reader = response.body.getReader();
+        try {
+          while (true) {
+            var chunk = await reader.read(); if (chunk.done) { break; }
+            total += chunk.value.byteLength;
+            if (total > 16384) { await reader.cancel(); throw new Error("The checkpoint response was too large. Refresh before relying on it."); }
+            chunks.push(chunk.value);
+          }
+        } finally { reader.releaseLock(); }
+        var bytes = new Uint8Array(total), offset = 0;
+        chunks.forEach(function (chunk) { bytes.set(chunk, offset); offset += chunk.byteLength; });
+        raw = new TextDecoder("utf-8", {fatal: true}).decode(bytes);
+      } else {
+        raw = await response.text();
+        if (new TextEncoder().encode(raw).length > 16384) { throw new Error("The checkpoint response was too large. Refresh before relying on it."); }
+      }
+      var value;
+      try { value = JSON.parse(raw); } catch (_) { throw new Error("The checkpoint response could not be read. Refresh before relying on it."); }
+      if (!response.ok) { throw new Error(typeof value.detail === "string" ? value.detail : "The checkpoint could not be checked. Refresh and choose the original file."); }
+      return {value: value, raw: raw};
+    } catch (failure) {
+      if (failure.name === "AbortError") { throw new Error("The wait ended before the checkpoint result was confirmed. Refresh and try again; no history was changed."); }
+      if (failure instanceof TypeError) { throw new Error("The checkpoint could not be reached. Check your connection and refresh; no history was changed."); }
+      throw failure;
+    } finally { clearTimeout(timeout); controller.abort(); controllers.delete(controller); }
+  }
+  async function perform(action) {
+    if (busy) { return; }
+    var current = generation; busy = true; lock(); clearResult();
+    try { await action(current); }
+    catch (failure) { if (current === generation) { error.textContent = failure.message || "The checkpoint result could not be confirmed. Refresh before relying on it."; } }
+    finally {
+      if (current === generation) {
+        busy = false; lock();
+        if (refreshPending) { refreshPending = false; void refresh(); }
+      }
+    }
+  }
+  function refresh() {
+    if (busy) { refreshPending = true; return; }
+    var currentGeneration = generation;
+    available = false; status.textContent = "Checking whether a complete checkpoint is available.";
+    return perform(async function (current) {
+      var checked = (await request("/status")).value;
+      if (current !== generation) { return; }
+      available = true;
+      status.textContent = "The complete supported history contains " + checked.record_count + " stored records, including " + checked.adopted_changes + " adopted changes and " + checked.restorations + " restorations. Checked " + when(checked.checked_at) + ".";
+    }).then(function () { if (currentGeneration === generation && !available) { status.textContent = "A complete checkpoint is unavailable. See the explanation below; no partial file was created."; } });
+  }
+  download.addEventListener("click", function () {
+    void perform(async function (current) {
+      var response = await request("/download");
+      if (current !== generation) { return; }
+      var url = URL.createObjectURL(new Blob([response.raw], {type: "application/json"}));
+      var link = document.createElement("a"); link.href = url; link.download = "lightwork-learning-history-checkpoint.json";
+      document.body.appendChild(link); link.click(); link.remove(); setTimeout(function () { URL.revokeObjectURL(url); }, 10000);
+      status.textContent = "A download was offered for all " + response.value.record_count + " stored records, checked " + when(response.value.saved_at) + ". Keep the original file somewhere you trust outside this installation; the browser controls whether it is saved.";
+    });
+  });
+  input.addEventListener("change", clearResult);
+  form.addEventListener("submit", function (event) {
+    event.preventDefault();
+    void perform(async function (current) {
+      var file = input.files && input.files[0];
+      if (!file) { throw new Error("Choose the original history checkpoint you kept first."); }
+      if (file.size > 4096) { throw new Error("Choose the original downloaded checkpoint, 4 KB or smaller."); }
+      var raw = await file.text();
+      if (new TextEncoder().encode(raw).length > 4096) { throw new Error("Choose the original downloaded checkpoint, 4 KB or smaller."); }
+      if (current !== generation) { return; }
+      var checked = (await request("/check", {checkpoint: raw})).value;
+      if (current !== generation) { return; }
+      result.hidden = false; result.dataset.matches = String(checked.matches === true);
+      result.textContent = (checked.matches ? "Saved history matches. " : "Saved history does not match. ") + checked.detail +
+        " Saved " + when(checked.saved_at) + "; checked " + when(checked.checked_at) + ". The checkpoint covers " + checked.saved_records + " earlier stored records" +
+        (checked.matches ? "; " + checked.later_records + " later records are present. " : ". ") + checked.trust;
+    });
+  });
+  document.getElementById("elv-refresh").addEventListener("click", function () { void refresh(); });
+  window.addEventListener("lightwork:product-state-changed", function () { void refresh(); });
+  document.addEventListener("lightwork:product-operation-complete", function () { void refresh(); });
+  document.addEventListener("lightwork:account-context-changed", function () {
+    ++generation; controllers.forEach(function (controller) { controller.abort(); }); controllers.clear();
+    busy = false; available = false; refreshPending = false; input.value = ""; clearResult(); lock(); void refresh();
+  });
+  void refresh();
+})();

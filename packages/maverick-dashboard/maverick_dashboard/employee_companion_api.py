@@ -107,7 +107,8 @@ def _credential_binding(request, actor, tenant):
     return {"epoch": session_revocation.revocation_epoch(actor.removeprefix("user:")), "selection": selection}
 
 
-def _authority(request: Request, *, admin: bool = False, write: bool = False):
+def _authority(request: Request, *, admin: bool = False, write: bool = False,
+               reviewed_context: str | None = None):
     """Named, current workspace membership is mandatory, including for admins."""
     auth.require_permission(request, "admin" if admin else "view")
     actor = auth.caller_principal(request)
@@ -120,6 +121,10 @@ def _authority(request: Request, *, admin: bool = False, write: bool = False):
     _credential_binding(request, actor, tenant)
     context = hashlib.sha256(json.dumps(["employee-companion-v1", tenant, actor]).encode()).hexdigest()
     supplied = request.headers.get(_HEADER)
+    if reviewed_context is not None:
+        if supplied is not None and not hmac.compare_digest(supplied, reviewed_context):
+            raise HTTPException(409, "Your account or workspace changed. Review the companion policy again.")
+        supplied = reviewed_context
     if write:
         from .app import _require_same_origin
 
@@ -130,17 +135,14 @@ def _authority(request: Request, *, admin: bool = False, write: bool = False):
     return actor, tenant, context
 
 
-async def _call(request: Request, response: Response, operation: Callable, *, admin=False, write=False):
-    response.headers["Cache-Control"] = "private, no-store"
-
-    def guarded():
-        # App-owned roster/suite changes use this same short local fence.
-        with authority_effect_fence():
-            actor, tenant, context = _authority(request, admin=admin, write=write)
-            return operation(actor, tenant, context, EmployeeCompanionStore())
-
+def _call_sync(request: Request, operation: Callable, *, admin=False, write=False,
+               reviewed_context: str | None = None):
+    """The native authority/effect contract, shared by HTTP and sealed Copilot."""
     try:
-        return await run_in_threadpool(guarded)
+        with authority_effect_fence():
+            actor, tenant, context = _authority(request, admin=admin, write=write,
+                                               reviewed_context=reviewed_context)
+            return operation(actor, tenant, context, EmployeeCompanionStore())
     except HTTPException:
         raise
     except CompanionConflictError as exc:
@@ -155,6 +157,11 @@ async def _call(request: Request, response: Response, operation: Callable, *, ad
         # Role/group or source-store outages must not fall back to broader
         # defaults, disclose internal paths, or show an unaudited answer.
         raise HTTPException(503, "Companion access is unavailable. Refresh before retrying; no task was changed.") from exc
+
+
+async def _call(request: Request, response: Response, operation: Callable, *, admin=False, write=False):
+    response.headers["Cache-Control"] = "private, no-store"
+    return await run_in_threadpool(_call_sync, request, operation, admin=admin, write=write)
 
 
 def _status_available(policy):
@@ -479,13 +486,34 @@ async def administration(request: Request, response: Response):
 
 @router.put(BASE + "/admin/policy")
 async def update_policy(request: Request, response: Response, body: PolicyIn):
+    response.headers["Cache-Control"] = "private, no-store"
+    return await run_in_threadpool(administration_update, request, body)
+
+
+def administration_update(request: Request, body: PolicyIn, *, reviewed_context: str | None = None):
+    """Apply the existing exact policy revision with current native authority."""
     def operation(actor, tenant, context, store):
         if body.owner not in {item["principal"] for item in _employees(tenant)}:
             raise HTTPException(404, "Choose a current member of this workspace.")
         policy = store.update_policy(body.owner, actor=actor, **body.model_dump(exclude={"owner"}))
         return {"context": context, "policy": policy}
 
-    return await _call(request, response, operation, admin=True, write=True)
+    return _call_sync(request, operation, admin=True, write=True, reviewed_context=reviewed_context)
+
+
+def administration_employee(request: Request, owner: str):
+    """Current member policy and bounded activity metadata, never history text."""
+    def operation(_actor, tenant, context, store):
+        employees = _employees(tenant)
+        employee = next((item for item in employees if item["principal"] == owner), None)
+        if employee is None:
+            raise HTTPException(404, "Choose a current member of this workspace.")
+        labels = {item["principal"]: item["label"] for item in employees}
+        return {"context": context, "employee": employee, "available": _enabled(),
+                "policy": store.policy(owner),
+                "events": [{**event, "actor_label": labels.get(event["actor"], "Workspace member")}
+                           for event in store.events() if event["owner"] == owner]}
+    return _call_sync(request, operation, admin=True)
 
 
 def navigation_available(request, *, admin=False):

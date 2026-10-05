@@ -734,17 +734,20 @@ _CONTEXTS = tuple(
             capabilities=(
                 "See when recorded changes were adopted or restored and whether their stored history checks match.",
                 "Download a recorded receipt and choose it in Check a receipt without editing its contents.",
+                "Download a checkpoint of the complete supported native history, keep the original file independently, then choose it to compare the earlier history against the current record.",
                 "Copilot can check the current workspace history when learning actions are enabled and your role permits audit review.",
             ),
             boundaries=(
                 "Adopting a change does not establish that it improved results. Use the recorded results and review controls for that decision.",
                 "Private learned content and approval material stay out of this page and its receipt downloads.",
                 "Matching fingerprints do not establish who created or approved a receipt, or detect replacement of the whole history. Confirming those claims requires separate trusted evidence.",
+                "A checkpoint can detect a changed or missing earlier history only when its original file was independently retained. File contents alone do not prove external custody or that all activity was recorded. Legacy or temporary history and sources exceeding 4,096 records or 16 MB are refused rather than truncated.",
                 "This history covers recorded adoptions and restorations, rather than every learning action. An empty history does not mean learning is turned off.",
             ),
             next_steps=(
                 "Select Refresh to check the current stored history.",
                 "Select Download receipt on a recorded change, then choose the downloaded file in Check a receipt.",
+                "Use Keep a history checkpoint to download the complete supported reference. Later select that original file and Compare saved history; this comparison runs without an AI call.",
                 "Open Learning or Release decisions to review or change learned work through its own controls.",
             ),
             suggested_questions=(

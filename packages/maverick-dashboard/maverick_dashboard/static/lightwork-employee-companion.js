@@ -25,6 +25,7 @@
   var policy = null;
   var policies = [];
   var employees = [];
+  var sharedEmployee = "";
   var messages = [];
   var status = document.getElementById("ec-status");
 
@@ -62,6 +63,13 @@
     var employee = employees.find(function (item) { return item.principal === principal; });
     return employee ? employee.label || "Employee" : "Workspace member";
   }
+  function shareEmployeeSelection(owner) {
+    if (owner === sharedEmployee) { return; }
+    sharedEmployee = owner;
+    document.dispatchEvent(new CustomEvent("lightwork:copilot-selection", {
+      detail: {selection: owner ? {kind: "companion_employee", id: owner} : {}}
+    }));
+  }
   function taskLink(task, label) {
     var link;
     try {
@@ -82,6 +90,7 @@
     if (admin) {
       el("ec-policy-controls").disabled = busy || blocked || !loaded;
       el("ec-save").disabled = busy || blocked || stale || !loaded || !el("ec-owner").value;
+      el("ec-copilot").disabled = busy || blocked || !loaded || !el("ec-owner").value;
     } else {
       var mayAsk = loaded && available && !blocked && !stale && !busy && !replyPending && !taskQuestionBusy;
       el("ec-message").disabled = !mayAsk;
@@ -112,6 +121,7 @@
       el("ec-events").textContent = "";
       el("ec-owner").textContent = "";
       el("ec-policy-form").reset();
+      shareEmployeeSelection("");
     } else {
       el("ec-messages").textContent = "";
       el("ec-tasks").textContent = "";
@@ -312,6 +322,7 @@
     el("ec-draft-tool").checked = (selected.allowed_tools || []).includes("draft_reply");
     el("ec-retention-days").value = String(selected.retention_days);
     el("ec-selection-summary").textContent = !owner ? "Choose an employee to review their policy." : selected.revision === 0 ? "Not enrolled. Review the options before enabling." : "Showing this employee's saved policy.";
+    shareEmployeeSelection(owner);
     setBusy(busy);
   }
   function tableEmpty(container, text) {
@@ -320,6 +331,11 @@
     cell.colSpan = 4;
     row.appendChild(cell);
     container.appendChild(row);
+  }
+  function metadataCell(row, label, value) {
+    var cell = node("td", value);
+    cell.dataset.label = label;
+    row.appendChild(cell);
   }
   function applyAdmin(data) {
     policies = Array.isArray(data.policies) ? data.policies : [];
@@ -345,14 +361,14 @@
     if (!policies.length) { tableEmpty(rows, "No employee policies saved yet. Choose an employee above to begin."); }
     policies.forEach(function (item) {
       var row = node("tr");
-      row.appendChild(node("td", employeeName(item.owner)));
-      row.appendChild(node("td", item.enabled ? "Enabled" : "Disabled"));
+      metadataCell(row, "Employee", employeeName(item.owner));
+      metadataCell(row, "Companion", item.enabled ? "Enabled" : "Disabled");
       var taskAccess = (item.allowed_sources || []).includes("own_tasks") && (item.allowed_tools || []).includes("task_status");
       var grants = [];
       if (taskAccess) { grants.push("Own task status"); }
       if ((item.allowed_tools || []).includes("draft_reply")) { grants.push("AI conversation and drafts"); }
-      row.appendChild(node("td", grants.length ? grants.join("; ") : "No help enabled"));
-      row.appendChild(node("td", retentionLabel(item.retention_days)));
+      metadataCell(row, "Allowed help", grants.length ? grants.join("; ") : "No help enabled");
+      metadataCell(row, "History", retentionLabel(item.retention_days));
       rows.appendChild(row);
     });
     var events = el("ec-events");
@@ -369,10 +385,10 @@
     };
     activity.forEach(function (event) {
       var row = node("tr");
-      row.appendChild(node("td", dateLabel(event.time)));
-      row.appendChild(node("td", employeeName(event.owner)));
-      row.appendChild(node("td", actions[event.action] || "Companion activity recorded"));
-      row.appendChild(node("td", employeeName(event.actor)));
+      metadataCell(row, "When", dateLabel(event.time));
+      metadataCell(row, "Employee", employeeName(event.owner));
+      metadataCell(row, "Activity", actions[event.action] || "Companion activity recorded");
+      metadataCell(row, "By", employeeName(event.actor));
       events.appendChild(row);
     });
     selectEmployee();
@@ -488,6 +504,30 @@
   el("ec-refresh").addEventListener("click", refresh);
   if (admin) {
     el("ec-owner").addEventListener("change", selectEmployee);
+    el("ec-copilot").addEventListener("click", async function () {
+      if (busy || blocked || !loaded || !el("ec-owner").value) { return; }
+      var selectedOwner = el("ec-owner").value;
+      setBusy(true);
+      try {
+        var data = await request("/admin");
+        if (!(data.employees || []).some(function (employee) { return employee.principal === selectedOwner; })) {
+          applyAdmin(data);
+          announce("This employee is no longer available. Choose a current employee.", true);
+          return;
+        }
+        shareEmployeeSelection(selectedOwner);
+        var opener = document.getElementById("mv-copilot-fab");
+        if (opener) {
+          if (opener.getAttribute("aria-expanded") !== "true") { opener.click(); }
+        } else { announce("Open Copilot to review this employee's saved policy and activity."); }
+      } catch (error) { failure(error); }
+      finally { setBusy(false); }
+    });
+    document.addEventListener("lightwork:product-operation-complete", function (event) {
+      var detail = event.detail || {};
+      if (!blocked && detail.operation === "companion.admin.policy" &&
+          ["confirmed", "replayed", "unconfirmed"].includes(detail.status)) { refresh(); }
+    });
     el("ec-policy-form").addEventListener("submit", async function (event) {
       event.preventDefault();
       if (busy || blocked || stale || !loaded || !el("ec-owner").value) { return; }

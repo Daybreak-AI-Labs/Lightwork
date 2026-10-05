@@ -114,7 +114,7 @@
       followup = followup || 'The result is uncertain. Your entry is still here. No change will be sent again automatically.';
       try { if (await read() === 'ok') say(followup + ' Current status has been refreshed.', true); }
       catch (_) { say(followup + ' Refresh status when the connection is available.', true); }
-    } finally { busy = false; controls(); }
+    } finally { busy = false; controls(); window.dispatchEvent(new CustomEvent('lightwork:product-state-changed')); }
   });
   controls(); refresh(false);
 })();

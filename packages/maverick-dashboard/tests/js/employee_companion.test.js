@@ -301,6 +301,26 @@ test("an administrator can allow drafts independently from tasks and sources", a
   assert.match(ui.el("ec-model-help").textContent, /provider's retention policy/);
 });
 
+test("named employee selection opens Copilot only after a native membership refresh and clears on lost access", async t => {
+  const ui = await setup([adminSnapshot(), adminSnapshot(), () => response("Sign in", 403)], true);
+  t.after(() => ui.dom.window.close());
+  const selections = [];
+  ui.document.addEventListener("lightwork:copilot-selection", event => selections.push(event.detail.selection));
+  const opener = ui.document.createElement("button");opener.id = "mv-copilot-fab";opener.setAttribute("aria-expanded", "false");
+  let opened = 0;opener.addEventListener("click", () => {opened += 1;opener.setAttribute("aria-expanded", "true");});
+  ui.document.body.appendChild(opener);
+  ui.el("ec-owner").value = "user:employee@example.test";
+  ui.el("ec-owner").dispatchEvent(new ui.window.Event("change"));
+  assert.equal(ui.el("ec-copilot").disabled, false);
+  assert.equal(selections[0].kind, "companion_employee");
+  assert.equal(selections[0].id, "user:employee@example.test");
+  ui.el("ec-copilot").click();await tick();
+  assert.equal(opened, 1);assert.equal(ui.calls[1].options.method, "GET");
+  ui.el("ec-copilot").click();await tick();
+  assert.equal(opened, 1);assert.deepEqual(JSON.parse(JSON.stringify(selections.at(-1))), {});
+  assert.equal(ui.el("ec-copilot").disabled, true);assert.equal(ui.el("ec-owner").options.length, 0);
+});
+
 test("refresh clears unsaved task-derived text without losing an unsent question", async t => {
   const ui = await setup([snapshot(), reply({message: {role: "assistant", kind: "task_status",
     content: "Previously visible task detail", sources: [{goal_id: 9, href: "/chat/goal/9", status: "active", checked_at: 1700000000}]}}), snapshot()]);

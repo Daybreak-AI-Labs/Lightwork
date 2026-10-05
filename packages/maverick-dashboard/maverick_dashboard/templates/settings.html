@@ -560,9 +560,18 @@
     </form>
     <noscript>Enable browser scripting to check the active secret and review a change safely.</noscript>
     <p style="margin-top:var(--space-3)"><a class="btn" href="/settings/webhooks/manage">Manage webhook subscriptions and deliveries</a></p>
+    <section id="webhook-change-recovery" aria-labelledby="webhook-change-title" style="margin-top:var(--space-5)">
+      <h3 id="webhook-change-title">Saved change history</h3>
+      <p>If saving was interrupted, check the original change here. Lightwork verifies its exact local setting and active owner, then adds a current-state observation to the original activity history. It does not save a secret again or contact connected systems.</p>
+      <p role="status" aria-live="polite">Checking your saved changes…</p>
+      <label>Saved signing-secret change<select class="input"><option value="">Choose a saved change</option></select></label>
+      <p data-detail></p>
+      <div style="display:flex;gap:var(--space-2);flex-wrap:wrap"><button class="btn" type="button" data-check disabled>Record verified check</button><button class="btn btn--ghost" type="button" data-refresh>Refresh saved changes</button></div>
+    </section>
   </section>
   <style>#webhook-settings .input{box-sizing:border-box;width:100%;max-width:100%;min-width:0}#webhook-settings label{margin-block:var(--space-2)}#webhook-settings p,#webhook-settings button{overflow-wrap:anywhere}#webhook-settings form{margin-top:var(--space-3)}</style>
   <script src="{{ asset('lightwork-webhook-settings.js') }}" defer></script>
+  <script src="{{ asset('lightwork-webhook-recovery.js') }}" defer></script>
 
   <div class="section-head" data-settings-group="controls" id="settings-controls"><h2>What agents can do</h2></div>
   <div class="panel" data-settings-group="controls">

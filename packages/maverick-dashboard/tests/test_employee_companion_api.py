@@ -1101,3 +1101,94 @@ def test_copilot_reviews_and_clears_only_owned_current_companion_history(environ
     assert "show my tasks" not in str(completed)
     environment.memberships["acme"][ALICE] = None
     assert environment.client.post(base + "/execute", headers=headers, json=payload).status_code == 403
+
+
+def test_copilot_admin_policy_uses_native_revision_and_current_membership(environment, monkeypatch):
+    from maverick.governed_operations import digest
+    from maverick_dashboard import product_operations as operations
+
+    monkeypatch.setattr(operations, "_gate", lambda _request: None)
+    monkeypatch.setattr(operations, "enabled_families", lambda: {"preferences"})
+    monkeypatch.setattr(operations, "_context", lambda request: digest([
+        request.headers.get("X-Test-Principal"), request.headers.get("X-Test-Tenant")]))
+    base, headers = "/api/v1/copilot/product-operations", _headers(ADMIN)
+    selection = {"kind": "companion_employee", "id": ALICE}
+    options = {"enabled": True, "own_tasks": True, "task_status": True,
+               "draft_reply": False, "retention_days": "7"}
+
+    def review():
+        catalog = _ok(environment.client.post(base + "/catalog", headers=headers,
+            json={"page": "/companion/admin", "selection": selection}))
+        action = next(row for row in catalog["operations"] if row["id"] == "companion.admin.policy")
+        return _ok(environment.client.post(base + "/prepare", headers=headers,
+            json={"page": "/companion/admin", "selection": selection, "operation": action["id"],
+                  "context": catalog["context"], "revision": action["revision"], "arguments": options}))
+
+    prepared = review()
+    payload = {"token": prepared["token"], "confirmed": True}
+    assert _ok(environment.client.post(base + "/execute", headers=headers, json=payload))["status"] == "confirmed"
+    assert environment.view()["policy"]["revision"] == 1
+    assert _ok(environment.client.post(base + "/execute", headers=headers, json=payload))["status"] == "unconfirmed"
+    assert environment.view()["policy"]["revision"] == 1
+    assert environment.client.post(base + "/execute", headers=_headers(BOB), json=payload).status_code == 403
+    assert environment.client.post(base + "/execute", headers=_headers(ADMIN, "globex"), json=payload).status_code in {404, 409}
+
+    prepared = review()
+    environment.policy(enabled=False, allowed_sources=[], allowed_tools=[])
+    changed = _ok(environment.client.post(base + "/execute", headers=headers,
+        json={"token": prepared["token"], "confirmed": True}))
+    assert changed["status"] == "unconfirmed"
+    assert environment.view()["policy"]["enabled"] is False
+    assert environment.view()["policy"]["revision"] == 2
+    prepared = review()
+    environment.active[ALICE] = False
+    assert environment.client.post(base + "/execute", headers=headers,
+        json={"token": prepared["token"], "confirmed": True}).status_code == 404
+    environment.active[ALICE] = True
+    environment.memberships["acme"][ADMIN] = None
+    assert environment.client.post(base + "/execute", headers=headers,
+        json={"token": prepared["token"], "confirmed": True}).status_code == 403
+
+
+def test_copilot_admin_metadata_and_lost_policy_response_do_not_read_or_repeat_content(environment, monkeypatch):
+    from fastapi import HTTPException
+    from maverick.governed_operations import digest
+    from maverick_dashboard import product_operations as operations
+
+    monkeypatch.setattr(operations, "_gate", lambda _request: None)
+    monkeypatch.setattr(operations, "enabled_families", lambda: {"preferences"})
+    monkeypatch.setattr(operations, "_context", lambda request: digest([
+        request.headers.get("X-Test-Principal"), request.headers.get("X-Test-Tenant")]))
+    environment.policy()
+    _ok(environment.message("Private companion question kept out of Copilot"))
+    base, headers = "/api/v1/copilot/product-operations", _headers(ADMIN)
+    selection = {"kind": "companion_employee", "id": ALICE}
+    catalog = _ok(environment.client.post(base + "/catalog", headers=headers,
+        json={"page": "/companion/admin", "selection": selection}))
+    actions = {row["id"]: row for row in catalog["operations"]}
+    read = _ok(environment.client.post(base + "/prepare", headers=headers,
+        json={"page": "/companion/admin", "selection": selection, "operation": "companion.admin.read",
+              "context": catalog["context"], "revision": actions["companion.admin.read"]["revision"], "arguments": {}}))
+    assert "Task question answered" in str(read)
+    assert "Private companion question" not in str(catalog) + str(read)
+    assert read["read_only"] is True
+    options = {"enabled": False, "own_tasks": False, "task_status": False,
+               "draft_reply": False, "retention_days": "0"}
+    prepared = _ok(environment.client.post(base + "/prepare", headers=headers,
+        json={"page": "/companion/admin", "selection": selection, "operation": "companion.admin.policy",
+              "context": catalog["context"], "revision": actions["companion.admin.policy"]["revision"], "arguments": options}))
+    calls, original = [], companion.administration_update
+
+    def lost_response(*args, **kwargs):
+        calls.append(True)
+        original(*args, **kwargs)
+        raise HTTPException(503, "Synthetic lost response after native save")
+
+    monkeypatch.setattr(companion, "administration_update", lost_response)
+    payload = {"token": prepared["token"], "confirmed": True}
+    outcome = _ok(environment.client.post(base + "/execute", headers=headers, json=payload))
+    assert outcome["status"] == "unconfirmed" and outcome["details"]["companion"] == "Disabled"
+    assert environment.view()["policy"]["revision"] == 2
+    assert environment.view()["history"] == []
+    assert _ok(environment.client.post(base + "/execute", headers=headers, json=payload))["status"] == "unconfirmed"
+    assert calls == [True]
