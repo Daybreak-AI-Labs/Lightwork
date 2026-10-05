@@ -7207,6 +7207,8 @@ async def agents_page(request: Request) -> HTMLResponse:
             view = resolved_view(name)
             if view and (allowed is None or set(view["suites"]) <= allowed):
                 selected = view
+                selected["plain_errors"] = _plain_findings(view.get("errors") or [])
+                selected["plain_warnings"] = _plain_findings(view.get("warnings") or [])
                 selected["picker_label"] = next(
                     (agent["picker_label"] for agent in agents if agent["name"] == name),
                     f"{view.get('description') or _idfmt.humanize(name)} · {_idfmt.humanize(name)}",
@@ -7248,6 +7250,14 @@ async def agents_page(request: Request) -> HTMLResponse:
          "show_change_authors": has_global_permission(request, "admin"),
          "access": access, "typical_cost": typical},
     )
+
+
+def _plain_findings(findings: list) -> list[str]:
+    """Setup-check findings in plain words, each said once; the raw lint text
+    stays under Technical details."""
+    from .workforce_ops_api import _finding
+
+    return list(dict.fromkeys(_finding(str(item)) for item in findings))
 
 
 def _assign_picker_labels(agents: list[dict]) -> None:

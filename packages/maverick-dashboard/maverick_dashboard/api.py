@@ -577,7 +577,7 @@ def workforce_posture(request: Request) -> dict:
                 "can_grant": out["can_manage"] and out["levels_enabled"]
                 and view["autonomy"]["onboarding"]
                 and not view["autonomy"]["config_override"] and not auto_risks,
-                "grant_block_reason": _autonomy_auto_graduation_reason(auto_risks) if auto_risks else None,
+                "grant_block_reason": _autonomy_auto_graduation_reason(auto_risks, c.name) if auto_risks else None,
                 "needs_supervision": view["autonomy"]["onboarding"],
             })
             if len(visible_candidates) >= 100:
@@ -14012,7 +14012,7 @@ def _agent_autonomy_errors(name: str, payload: AgentOverrideIn) -> list[str]:
         return ["A server-configured independence policy controls this " + _kind_word(name) + ". Remove it before editing here."]
     auto_risks = _autonomy_auto_risks(payload.autonomy.model_dump())
     if not payload.autonomy.onboarding and auto_risks:
-        return [_autonomy_auto_graduation_reason(auto_risks)]
+        return [_autonomy_auto_graduation_reason(auto_risks, name)]
     if payload.autonomy.onboarding or (view and not view["autonomy"]["onboarding"]):
         return []
     if not levels_enabled():
@@ -14144,7 +14144,7 @@ async def graduate_agent(request: Request, name: str, payload: AgentGraduationIn
         raise HTTPException(status_code=409, detail=_this_one(name) + " is already out of supervision.")
     auto_risks = _autonomy_auto_risks(view["autonomy"]["pack"])
     if auto_risks:
-        raise HTTPException(status_code=409, detail=_autonomy_auto_graduation_reason(auto_risks))
+        raise HTTPException(status_code=409, detail=_autonomy_auto_graduation_reason(auto_risks, name))
     try:
         verdict = await run_in_threadpool(
             lambda: graduation_status(name, _world().list_approvals(limit=5000)))

@@ -96,4 +96,9 @@ ROWS = [
 ('Product default, constrained by administrator policy','Valeur du produit, limitée par la politique administrateur','Produktstandard, begrenzt durch Administratorrichtlinie','管理者ポリシーの制限内での製品の既定値','受管理员策略限制的产品默认值'),
 ('Effective recall: {state}','Rappel effectif : {state}','Wirksamer Abruf: {state}','有効な参照状態：{state}','实际检索状态：{state}'),
 ('Source: {source}','Source : {source}','Quelle: {source}','ソース：{source}','来源：{source}'),
+('Applies from the next page you open. Who can open each page does not change.','S’applique à partir de la prochaine page que vous ouvrez. Les personnes autorisées à ouvrir chaque page ne changent pas.','Gilt ab der nächsten Seite, die Sie öffnen. Wer welche Seite öffnen darf, ändert sich nicht.','次に開くページから適用されます。各ページを開ける人は変わりません。','从您打开的下一个页面开始生效。谁可以打开每个页面不会改变。'),
+('Classic','Classique','Klassisch','クラシック','经典'),
+('Job-named areas','Espaces nommés par métier','Nach Aufgaben benannte Bereiche','業務名のエリア','按工作命名的区域'),
+('Same as everyone','Comme tout le monde','Wie bei allen anderen','全員と同じ','与其他人相同'),
+('Sidebar','Barre latérale','Seitenleiste','サイドバー','侧边栏'),
 ]

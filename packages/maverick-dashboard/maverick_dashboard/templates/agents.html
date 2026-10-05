@@ -531,8 +531,12 @@
 
       {% if selected and (selected.errors or selected.warnings) %}
       <div class="panel" style="margin-top: 1rem;">
-        {% for e in selected.errors %}<div>⛔ {{ e }}</div>{% endfor %}
-        {% for w in selected.warnings %}<div class="muted">⚠ {{ w }}</div>{% endfor %}
+        {% for e in selected.plain_errors %}<div>⛔ {{ e }}</div>{% endfor %}
+        {% for w in selected.plain_warnings %}<div class="muted">⚠ {{ w }}</div>{% endfor %}
+        <details class="muted"><summary>Technical details</summary>
+          {% for e in selected.errors %}<div>{{ e }}</div>{% endfor %}
+          {% for w in selected.warnings %}<div>{{ w }}</div>{% endfor %}
+        </details>
       </div>
       {% endif %}
       {% if selected %}
@@ -1187,14 +1191,14 @@
           : field === 'risk' ? 'agent-risk-error' : '');
         if (note) { note.textContent = text; note.hidden = false; note.style.color = 'var(--danger)'; }
       }
-      function saveProblem(detail) {
-        var raw = typeof detail === 'string' ? detail : '';
-        var added = raw.match(/allow_tools cannot add tools beyond the built-in pack:\s*([^;]+)/i);
-        if (added) return {
       function kindWord() {
         var form = document.getElementById('agent-form');
         return form && form.dataset.kind === 'specialist' ? 'specialist' : 'agent';
       }
+      function saveProblem(detail) {
+        var raw = typeof detail === 'string' ? detail : '';
+        var added = raw.match(/allow_tools cannot add tools beyond the built-in pack:\s*([^;]+)/i);
+        if (added) return {
           field: 'actions',
           text: 'This specialist cannot gain ' + added[1].split(/,\s*/).map(humanName).join(', ')
             + '. Remove that action from Allowed actions. Its built-in limits can only be tightened.',
