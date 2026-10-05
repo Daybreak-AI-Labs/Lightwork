@@ -10,9 +10,9 @@ const fs = require("node:fs"), path = require("node:path");
 const {JSDOM} = require("jsdom");
 const source = fs.readFileSync(path.resolve(__dirname, "../../maverick_dashboard/static/lightwork-ui.js"), "utf8");
 
-function load(body, setup) {
+function load(body, setup, url) {
   const dom = new JSDOM(`<title>Users · Lightwork</title><div id="mv-toasts"></div><div id="mv-toasts-alert"></div><main id="content">${body}</main>`,
-    {url: "https://lightwork.test/users", runScripts: "outside-only"});
+    {url: url || "https://lightwork.test/users", runScripts: "outside-only"});
   dom.window.matchMedia = () => ({matches: false, addEventListener() {}, removeEventListener() {}});
   if (setup) setup(dom.window);
   dom.window.eval(source);
@@ -152,11 +152,11 @@ test("what was typed survives a reload in this tab, but never hidden or secret f
     saved = {...w.sessionStorage};
     w.close();
   }
-  const kept = JSON.parse(saved["mv-keep:/users:users-invite"]);
+  const kept = JSON.parse(saved["mv-keep:users-invite"]);
   assert.equal(kept.values.email, "new@corp.example");
   assert.equal(kept.values.role, "viewer");
   assert.equal("_expected_tenant" in kept.values, false);
-  assert.doesNotMatch(saved["mv-keep:/users:secret"], /hunter2|abc/);
+  assert.doesNotMatch(saved["mv-keep:secret"], /hunter2|abc/);
   // The reload: a fresh page in the same tab gets the values back and says so.
   const w = load(INVITE, win => { for (const [k, v] of Object.entries(saved)) win.sessionStorage.setItem(k, v); });
   const doc = w.document;
@@ -168,16 +168,25 @@ test("what was typed survives a reload in this tab, but never hidden or secret f
   // Clear the form empties it and forgets the copy.
   note.querySelector("button").click();
   assert.equal(doc.getElementById("email").value, "");
-  assert.equal(w.sessionStorage.getItem("mv-keep:/users:users-invite"), null);
+  assert.equal(w.sessionStorage.getItem("mv-keep:users-invite"), null);
   w.close();
 });
 
 test("a page that says the form was saved starts it empty", () => {
   const stored = JSON.stringify({at: Date.now(), values: {email: "old@corp.example"}});
   const w = load(`<p data-mv-keep-done="users-invite">Invitation created.</p>` + INVITE,
-    win => win.sessionStorage.setItem("mv-keep:/users:users-invite", stored));
+    win => win.sessionStorage.setItem("mv-keep:users-invite", stored));
   assert.equal(w.document.getElementById("email").value, "");
-  assert.equal(w.sessionStorage.getItem("mv-keep:/users:users-invite"), null);
+  assert.equal(w.sessionStorage.getItem("mv-keep:users-invite"), null);
+  w.close();
+});
+
+test("a result shown at the form's post address clears the copy kept on the form's page", () => {
+  // Measured in the browser: the invite result renders at /users/invite.
+  const stored = JSON.stringify({at: Date.now(), values: {email: "old@corp.example"}});
+  const w = load(`<section data-mv-keep-done="users-invite">Invitation created.</section>` + INVITE,
+    win => win.sessionStorage.setItem("mv-keep:users-invite", stored), "https://lightwork.test/users/invite");
+  assert.equal(w.sessionStorage.getItem("mv-keep:users-invite"), null);
   w.close();
 });
 

@@ -14,6 +14,13 @@ test('keyboard submission cannot default a fresh role grant to admin and an expl
     let roleWrites=0;page.on('request',request=>{if(request.method()==='POST'&&new URL(request.url()).pathname==='/users/set')roleWrites++;});
     await form.getByRole('button',{name:'Give role',exact:true}).focus();
     await page.keyboard.press('Enter');
+    // The shared error pattern: focus moves to the summary, whose link puts
+    // focus in the role field (CTL-3); nothing is sent.
+    const summary=form.locator('[data-mv-error-summary]');
+    await expect(summary).toBeFocused();
+    await expect(summary.getByRole('link',{name:'Choose the role to give them.',exact:true})).toBeVisible();
+    await expect(form.locator('select[name=role]')).toHaveAttribute('aria-invalid','true');
+    await page.keyboard.press('Tab');await page.keyboard.press('Enter');
     await expect(form.locator('select[name=role]')).toBeFocused();
     expect(roleWrites).toBe(0);expect((await app.state()).unassigned_role).toBeNull();
     // Native malformed/stale submissions must still fail before any grant.

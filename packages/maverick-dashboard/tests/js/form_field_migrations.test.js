@@ -175,7 +175,7 @@ test("Automations: create a schedule ties each missing answer to its field and k
 test("Automations: what was typed comes back after a reload and is forgotten once the schedule is created", async () => {
   const stored = JSON.stringify({at: Date.now(), values: {what: ["workflow"], "auto-new-workflow": "weekly-report", "auto-new-param-0": "Support", "auto-new-title": "Monday digest"}});
   const {w} = schedulePage(url => url.includes("options") ? OPTIONS : url.includes("preview") ? {next_runs: []} : {next_run: 1790000000},
-    win => win.sessionStorage.setItem("mv-keep:/automations:automation-schedule", stored));
+    win => win.sessionStorage.setItem("mv-keep:automation-schedule", stored));
   w.eval(picker);
   const doc = w.document;
   assert.equal(doc.getElementById("auto-new-sched").open, true, "the section opens so the kept answers are seen");
@@ -187,6 +187,6 @@ test("Automations: what was typed comes back after a reload and is forgotten onc
   doc.getElementById("auto-new-form").requestSubmit();
   await tick(); await tick();
   assert.match(doc.getElementById("auto-new-preview").textContent, /Schedule created/);
-  assert.equal(w.sessionStorage.getItem("mv-keep:/automations:automation-schedule"), null);
+  assert.equal(w.sessionStorage.getItem("mv-keep:automation-schedule"), null);
   w.close();
 });

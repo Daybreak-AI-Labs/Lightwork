@@ -1406,7 +1406,9 @@
       }
       // Keeping what was typed, in this tab only. Hidden, password, file and
       // secret-looking fields are never kept.
-      function keepKey(form) { return 'mv-keep:' + location.pathname + ':' + form.getAttribute('data-mv-keep'); }
+      // Keyed by the form's name, not the address: a form posted to /users/invite
+      // that shows its result there must clear the copy kept on /users.
+      function keepKey(form) { return 'mv-keep:' + form.getAttribute('data-mv-keep'); }
       function keepable(c) {
         return !/^(password|file|hidden|submit|button|reset)$/.test(c.type) && !c.hasAttribute('data-mv-keep-off') &&
           !SECRET.test(c.name || '') && !SECRET.test(c.id || '') && c.autocomplete !== 'one-time-code';
