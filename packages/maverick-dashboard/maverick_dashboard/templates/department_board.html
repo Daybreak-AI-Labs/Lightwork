@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Overview' if board == 'overview' else 'Spend' }} · Lightwork{% endblock %}
+{% block content %}
+{% from "_hero.html" import hero %}
+{% call hero('Your permitted work', 'Overview' if board == 'overview' else 'Spend',
+    subtitle='An operating picture within your access', lede=scope_notice) %}{% endcall %}
+<style>
+  .department-board__toolbar { display:flex; flex-wrap:wrap; align-items:end; gap:var(--space-3); margin-block:var(--space-4); }
+  .department-board__toolbar label { display:grid; gap:var(--space-2); }
+  .department-board__toolbar select { min-width:10rem; }
+  .department-board__list { display:grid; gap:var(--space-3); padding:0; list-style:none; }
+  .department-board__list li { display:flex; align-items:center; justify-content:space-between; gap:var(--space-3); flex-wrap:wrap; padding-block:var(--space-2); border-bottom:1px solid var(--border); }
+  .department-board__list a { overflow-wrap:anywhere; }
+  .department-board__metric { margin:0; font-size:1.65rem; font-weight:600; }
+  .department-board__card { min-width:0; }
+  #department-board-shell { min-width:0; overflow-wrap:anywhere; }
+  #department-board-shell .bd-kpis { grid-template-columns:repeat(auto-fit,minmax(min(100%,9rem),1fr)); }
+</style>
+<section id="department-board-shell" data-board="{{ board }}" data-context="{{ board_context }}" aria-label="{{ 'Overview' if board == 'overview' else 'Spend' }} within your access">
+  <nav aria-label="Your work boards"><a href="/overview"{% if board == 'overview' %} aria-current="page"{% endif %}>Overview</a> · <a href="/spend"{% if board == 'spend' %} aria-current="page"{% endif %}>Spend</a> · <a href="/chat">Open your work</a></nav>
+  <div class="department-board__toolbar">
+    <label for="department-board-days">Report period
+      <select class="select" id="department-board-days"><option value="30">30 days</option><option value="90" selected>90 days</option><option value="180">6 months</option><option value="365">1 year</option></select>
+    </label>
+    <button type="button" class="btn" id="department-board-refresh">Refresh report</button>
+    <button type="button" class="btn" data-copilot-toggle>Ask Copilot</button>
+  </div>
+  <p id="department-board-status" role="status" aria-live="polite">Reading your permitted work…</p>
+  <p id="department-board-error" role="alert" hidden></p>
+  <p id="department-board-reload" hidden><a href="{{ '/overview' if board == 'overview' else '/spend' }}">Reload with current access</a></p>
+  <div class="bd-kpis" id="department-board-metrics" aria-label="Report figures"></div>
+  <div class="viz-grid">
+    <section class="panel viz-card department-board__card"><h2>{{ 'Where your work stands' if board == 'overview' else 'How your attempts ended' }}</h2><div id="department-board-statuses"></div></section>
+    <section class="panel viz-card department-board__card"><h2>{{ 'Your departments' if board == 'overview' else 'Known spending by task' }}</h2><div id="department-board-groups"></div></section>
+    <section class="panel viz-card viz-card--wide department-board__card"><h2>{{ 'Recent permitted tasks' if board == 'overview' else 'Spending over time' }}</h2><div id="department-board-records"></div></section>
+  </div>
+  <p class="muted">{% if board == 'overview' %}Status counts cover all your permitted tasks on record. The period figures count tasks created in the period and currently finished tasks last updated in the period. A finished task can have several attempts.{% else %}The period includes finished attempts started during the selected range. Running attempts appear separately. A retry can produce several attempts for one task.{{ ' ' ~ cost_notice }}{% endif %}</p>
+  <p class="muted">Workforce, Savings and Oversight include other company sources and are not available within your department access yet. Your permitted tasks and their results remain available in <a href="/chat">Chat</a>.</p>
+</section>
+<script src="/static/lightwork-department-board.js"></script>
+{% endblock %}

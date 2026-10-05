@@ -100,7 +100,18 @@ def test_department_scoped_user_cannot_read_unfiltered_company_boards(monkeypatc
 
     monkeypatch.setattr(auth, "caller_suites", lambda request: frozenset({"finance"}))
     client = _client()
-    for board in ("overview", "spend", "workforce", "savings", "oversight"):
+    for board in ("overview", "spend"):
+        api = client.get(f"/api/v1/dashboards/{board}")
+        page = client.get(f"/{board}", headers={"Accept": "text/html"})
+        assert api.status_code == 200, board
+        assert page.status_code == 200, board
+        assert api.json()["scope"] == "permitted_own"
+        assert "Vendor DPA review" not in api.text
+        assert "Access recert" not in api.text
+        assert "not company totals" in page.text
+    assert client.get("/api/v1/dashboards/overview").json()["totals"]["total"] == 0
+    assert client.get("/api/v1/spend").json()["total"]["runs"] == 0
+    for board in ("workforce", "savings", "oversight"):
         api = client.get(f"/api/v1/dashboards/{board}")
         page = client.get(f"/{board}", headers={"Accept": "text/html"})
         assert api.status_code == 403, board

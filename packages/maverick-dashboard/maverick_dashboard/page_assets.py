@@ -14,6 +14,7 @@ router = APIRouter()
 _STATIC = Path(__file__).parent / "static"
 ASSETS = (
     "lightwork-today.js",
+    "lightwork-department-board.js",
     "lightwork-employee-activation.js",
     "lightwork-budget-guidance.js",
     "lightwork-task-diagnostics.js",
@@ -52,7 +53,7 @@ ASSETS = (
     "lightwork-task-changes.js",
     "lightwork-viewpoints.js",
 )
-STYLES: tuple[str, ...] = ("lightwork-i18n.css",)
+STYLES: tuple[str, ...] = ("lightwork-i18n.css", "lightwork-schedule-management.css")
 
 
 @router.get("/static/lightwork-i18n-catalog/{language}/{revision}.js", include_in_schema=False)

@@ -208,6 +208,16 @@ class RecurrenceRecoveryIn(BaseModel):
     confirm: bool = False
 
 
+class RecurrenceReceiptIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    reference: str = Field(min_length=1, max_length=8000)
+
+
+class RecurrenceCopilotReferenceIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    token: str = Field(min_length=1, max_length=64000)
+
+
 @router.post("/api/v1/schedules/definitions/{identity}")
 def change_schedule(request: Request, identity: str, body: ScheduleChangeIn) -> dict:
     from maverick.job_queue import JobQueue
@@ -241,7 +251,6 @@ def recurrence_recovery_review(request: Request, job_id: int) -> dict:
     from maverick.schedule_definitions import recovery_evidence
 
     from .draft_api import context_for
-    from .queue_status_api import redacted_error
 
     require_permission(request, "admin")
     queue = JobQueue()
@@ -250,21 +259,148 @@ def recurrence_recovery_review(request: Request, job_id: int) -> dict:
         if row is None or not row["recurrence_reconcile_required"]:
             raise HTTPException(409, "This occurrence no longer needs recurrence recovery. Refresh schedules.")
         candidates = connection.execute(
-            "SELECT id,status,scheduled_at FROM jobs WHERE id>? AND kind=? AND recurrence_payload=? ORDER BY id",
+            "SELECT id,status,scheduled_at FROM jobs WHERE id>? AND kind=? AND recurrence_payload=? ORDER BY id LIMIT 101",
             (job_id, row["kind"], row["recurrence_payload"]),
         ).fetchall()
         evidence = recovery_evidence(connection, row)
+        import json
+        definition = connection.execute("SELECT payload FROM schedule_definitions WHERE id=?", (row["recurrence_id"],)).fetchone()
+        payload = json.loads(definition["payload"] if definition is not None else row["recurrence_payload"] or "{}")
         return {"job_id": job_id, "attempts": row["attempts"], "context": context_for(request),
+                "definition_id": row["recurrence_id"], "title": str(payload.get("title") or payload.get("template") or "Scheduled work")[:200],
                 "expected_evidence": evidence, "scheduled_at": row["scheduled_at"],
-                "status": row["status"], "problem": redacted_error(row["last_error"]),
-                "external_outcome": "unknown", "successors": [dict(item) for item in candidates],
+                "status": row["status"], "problem": "An earlier run was attempted before its continuation was reliably recorded. Review the retained execution evidence and investigate that historical result separately.",
+                "external_outcome": "unknown", "successors": [dict(item) for item in candidates[:100]],
+                "successors_complete": len(candidates) <= 100,
                 "consequence": "Only future recurrence is repaired. The historical action is never replayed. Confirm old workers are stopped before continuing."}
+
+
+@router.get("/api/v1/schedules/recovery-context")
+def recurrence_recovery_context(request: Request) -> dict:
+    from .draft_api import context_for
+    require_permission(request, "admin")
+    return {"context": context_for(request)}
+
+
+@router.get("/api/v1/schedules/definitions/{identity}/recovery-options")
+def recurrence_recovery_choices(request: Request, identity: str) -> dict:
+    from maverick.job_queue import JobQueue
+
+    from .draft_api import context_for
+    require_permission(request, "admin")
+    with JobQueue()._conn() as connection:
+        rows = connection.execute("SELECT id,status,scheduled_at FROM jobs WHERE recurrence_id=? "
+                                  "AND recurrence_reconcile_required=1 ORDER BY id DESC LIMIT 101", (identity,)).fetchall()
+    return {"context": context_for(request), "occurrences": [dict(row) for row in rows[:100]], "complete": len(rows) <= 100}
+
+
+def recurrence_receipt_reference(request: Request, job_id: int, body: RecurrenceRecoveryIn, *, review_current=True) -> str:
+    """Protect the exact read-only receipt recipe, never mutation authority."""
+    import hmac
+    import json
+
+    from maverick import crypto_at_rest
+    from maverick.job_queue import JobQueue
+
+    from .draft_api import context_for
+
+    require_permission(request, "admin")
+    if body.context != context_for(request) or not body.operation_id:
+        raise HTTPException(409, "Your account or workspace changed. Open the schedule and review its recovery again.")
+    if body.confirm is not True or body.rearm == (body.successor_id is not None):
+        raise HTTPException(422, "Choose one future occurrence, explain the repair and confirm that old workers are stopped.")
+    if review_current:
+        current = recurrence_recovery_review(request, job_id)
+        if current["attempts"] != body.expected_attempts or not hmac.compare_digest(current["expected_evidence"], body.expected_evidence):
+            raise HTTPException(409, "The recovery evidence changed. Refresh and review the schedule again.")
+    material = {"purpose": "lightwork.schedule-recovery-receipt.v1", "job_id": job_id,
+                "actor": caller_principal(request) or "local", "context": body.context,
+                "operation_id": body.operation_id,
+                "request_hash": JobQueue._recovery_fingerprint(body.expected_attempts, body.successor_id,
+                                                               body.rearm, body.expected_evidence, body.rationale)}
+    reference = crypto_at_rest.seal_to_str(json.dumps(material, sort_keys=True))
+    if not crypto_at_rest.is_sealed_str(reference):
+        raise HTTPException(503, "The original-request reference could not be protected. No repair was started.")
+    return reference
+
+
+@router.post("/api/v1/schedules/recovery/{job_id}/reference")
+def recurrence_recovery_reference(request: Request, job_id: int, body: RecurrenceRecoveryIn) -> dict:
+    from .app import _require_same_origin
+    _require_same_origin(request)
+    return {"reference": recurrence_receipt_reference(request, job_id, body), "context": body.context}
+
+
+@router.post("/api/v1/schedules/recovery/receipt")
+def recurrence_recovery_receipt(request: Request, body: RecurrenceReceiptIn) -> dict:
+    """Read the exact native receipt even when the source is no longer parked."""
+    import json
+
+    from maverick import crypto_at_rest
+    from maverick.job_queue import JobQueue
+
+    from .app import _require_same_origin
+    from .draft_api import context_for
+
+    _require_same_origin(request)
+    require_permission(request, "admin")
+    try:
+        if not crypto_at_rest.is_sealed_str(body.reference):
+            raise ValueError
+        material = json.loads(crypto_at_rest.unseal_from_str(body.reference))
+        if (set(material) != {"purpose", "job_id", "actor", "context", "operation_id", "request_hash"}
+                or material["purpose"] != "lightwork.schedule-recovery-receipt.v1"
+                or material["actor"] != (caller_principal(request) or "local") or material["context"] != context_for(request)):
+            raise ValueError
+        if (type(material["job_id"]) is not int or material["job_id"] < 1
+                or not isinstance(material["operation_id"], str) or len(material["operation_id"]) != 32
+                or any(character not in "0123456789abcdef" for character in material["operation_id"])):
+            raise ValueError
+    except Exception as exc:
+        raise HTTPException(404, "This original request is unavailable in your current account and workspace.") from exc
+    queue = JobQueue()
+    try:
+        successor = queue.recovery_receipt_commitment(material["job_id"], actor=material["actor"],
+            operation_id=material["operation_id"], request_hash=material["request_hash"])
+    except ValueError as exc:
+        raise HTTPException(409, "The original receipt does not match this reviewed decision. Nothing was repeated.") from exc
+    if successor is None:
+        return {"found": False, "message": "No receipt for this exact repair is recorded yet. This does not prove that a request still underway failed. Review current schedules before another repair.",
+                "historical_replayed": False, "external_outcome": "unknown"}
+    with queue._conn() as connection:
+        row = connection.execute("SELECT status,scheduled_at FROM jobs WHERE id=?", (successor,)).fetchone()
+    return {"found": True, "message": "The exact future recurrence repair is recorded. This receipt check did not repeat it. The historical business result remains unknown.",
+            "historical_replayed": False, "external_outcome": "unknown",
+            "future_occurrence": {"status": row["status"], "scheduled_at": row["scheduled_at"]} if row else None}
+
+
+@router.post("/api/v1/schedules/recovery/copilot-reference")
+def recurrence_copilot_reference(request: Request, body: RecurrenceCopilotReferenceIn) -> dict:
+    from .app import _require_same_origin
+    from .product_operations import _context, _gate, _open, enabled_families
+    from .product_operations_connections import RepairInput
+
+    _require_same_origin(request)
+    _gate(request)
+    require_permission(request, "admin")
+    material = _open(body.token)
+    if (material["operation"] != "schedules.repair" or material["page"] != "/automations"
+            or material["context"] != _context(request) or "schedules" not in enabled_families()):
+        raise HTTPException(409, "This schedule review is unavailable. Review its current recovery again.")
+    arguments = RepairInput.model_validate(material["arguments"])
+    if not arguments.old_workers_stopped:
+        raise HTTPException(422, "Confirm old workers are stopped before continuing.")
+    decision = RecurrenceRecoveryIn(**material["native"], successor_id=arguments.successor_id,
+        rearm=arguments.action == "rearm", rationale=arguments.rationale, confirm=True,
+        operation_id=material["operation_id"])
+    return {"reference": recurrence_receipt_reference(request, arguments.job_id, decision), "context": decision.context}
 
 
 @router.post("/api/v1/schedules/recovery/{job_id}")
 def recurrence_recovery_apply(request: Request, job_id: int, body: RecurrenceRecoveryIn) -> dict:
     import hmac
 
+    from maverick.authority_effects import authority_effect_fence
     from maverick.job_queue import JobQueue
 
     from .app import _require_same_origin
@@ -272,13 +408,19 @@ def recurrence_recovery_apply(request: Request, job_id: int, body: RecurrenceRec
 
     require_permission(request, "admin")
     _require_same_origin(request)
+    if not body.operation_id:
+        raise HTTPException(422, "Open the schedule's recovery form and review this repair before continuing.")
     if not hmac.compare_digest(body.context, context_for(request)):
         raise HTTPException(409, "Account or workspace changed. Review recovery again.")
     try:
-        successor = JobQueue().reconcile_recurrence(job_id, expected_attempts=body.expected_attempts,
-            successor_id=body.successor_id, rearm=body.rearm, confirm=body.confirm,
-            expected_evidence=body.expected_evidence, actor=caller_principal(request) or "local",
-            rationale=body.rationale, operation_id=body.operation_id)
+        with authority_effect_fence():
+            require_permission(request, "admin")
+            if not hmac.compare_digest(body.context, context_for(request)):
+                raise HTTPException(409, "Account or workspace changed. Review recovery again.")
+            successor = JobQueue().reconcile_recurrence(job_id, expected_attempts=body.expected_attempts,
+                successor_id=body.successor_id, rearm=body.rearm, confirm=body.confirm,
+                expected_evidence=body.expected_evidence, actor=caller_principal(request) or "local",
+                rationale=body.rationale, operation_id=body.operation_id)
     except (ValueError, KeyError) as exc:
         raise HTTPException(409, str(exc)) from exc
     return {"repaired": True, "job_id": job_id, "successor_id": successor,

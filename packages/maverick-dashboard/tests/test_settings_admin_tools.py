@@ -185,7 +185,7 @@ def test_health_check_collects_rows_without_printing(client, monkeypatch):
     assert health._row is not None and health._row.__name__ == "_row"
 
 
-def test_queue_lists_stopped_jobs_and_resumes_a_paused_schedule(client, monkeypatch, tmp_path):
+def test_queue_lists_stopped_jobs_and_refuses_the_old_resume_shortcut(client, monkeypatch, tmp_path):
     from maverick import job_queue
     queue = job_queue.JobQueue(tmp_path / "jobs.db")
     monkeypatch.setattr(job_queue, "_default_db", lambda: tmp_path / "jobs.db")
@@ -246,20 +246,22 @@ def _reviewed_encryption(client, monkeypatch, action):
         "context": value["context"], "review": value["token"], "operation": "b" * 32, "confirm": True})
 
 
-def test_resuming_a_schedule_is_recorded_with_who_did_it(client, monkeypatch, tmp_path, audit_rows):
+def test_legacy_resume_cannot_bypass_native_review_or_change_work(client, monkeypatch, tmp_path, audit_rows):
     from maverick import job_queue
     from maverick_dashboard import auth
     monkeypatch.setattr(job_queue, "_default_db", lambda: tmp_path / "jobs.db")
-    monkeypatch.setattr(job_queue.JobQueue, "reconcile_recurrence",
-                        lambda self, job_id, **kw: 77)
+    def forbidden(*args, **kwargs):
+        raise AssertionError("The legacy shortcut must not change the native queue")
+
+    monkeypatch.setattr(job_queue.JobQueue, "reconcile_recurrence", forbidden)
     monkeypatch.setattr(auth, "caller_principal", lambda request: "user:ada")
     from maverick_dashboard import rbac
     rbac.set_role("user:ada", "admin")
     r = client.post("/api/v1/admin/system/queue/5/resume", json={"attempts": 2})
-    assert r.status_code == 200, r.text
+    assert r.status_code == 409, r.text
+    assert r.json()["detail"]["href"] == "/automations?recover_schedule=5"
     rows = [row for row in audit_rows if row.get("verb") == "queue_resume"]
-    assert len(rows) == 1
-    assert rows[0]["actor"] == "user:ada" and rows[0]["job_id"] == 5
+    assert rows == []
 
 
 def test_stopped_job_errors_are_redacted_like_the_action_center(client, monkeypatch, tmp_path):

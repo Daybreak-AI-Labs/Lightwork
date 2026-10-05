@@ -8,7 +8,7 @@ from maverick.governed_operations import digest
 from pydantic import Field
 
 from .auth import caller_principal, goal_owner_filter, require_permission
-from .product_operations import Adapter, Outcome, Preview, Snapshot, StrictInput
+from .product_operations import Adapter, EmptyInput, Outcome, Preview, Snapshot, StrictInput
 
 
 class ConnectionInput(StrictInput):
@@ -144,32 +144,47 @@ class RecoveryInput(StrictInput):
 
 
 def recovery_snapshot(request, selection):
+    import json
+
     from maverick.job_queue import JobQueue
 
     require_permission(request, "admin")
     with JobQueue()._conn() as connection:
-        rows = [dict(row) for row in connection.execute("SELECT id,attempts,status,updated_at FROM jobs WHERE recurrence_reconcile_required=1 ORDER BY id LIMIT 100")]
+        rows = [dict(row) for row in connection.execute("SELECT j.id,j.attempts,j.status,j.scheduled_at,j.updated_at,"
+            "COALESCE(d.payload,j.recurrence_payload) AS source_payload FROM jobs j LEFT JOIN schedule_definitions d "
+            "ON d.id=j.recurrence_id WHERE j.recurrence_reconcile_required=1 ORDER BY j.id DESC LIMIT 101")]
+    for row in rows:
+        payload = json.loads(row.pop("source_payload") or "{}")
+        row["title"] = str(payload.get("title") or payload.get("template") or "Scheduled work")[:200]
     return Snapshot(digest(rows), "Automations recovery", "Review a parked occurrence before repairing future recurrence.",
-        fields=[{"name": "job_id", "label": "Parked occurrence", "kind": "select", "required": True,
-                 "choices": [{"value": row["id"], "label": str(row["id"]) + " / " + row["status"]} for row in rows]}],
+        details={"Available occurrences": "The newest 100 needing review are shown." if len(rows) > 100 else "All occurrences currently needing review are shown."},
+        fields=[{"name": "job_id", "label": "Schedule and occurrence needing review", "kind": "select", "required": True,
+                 "choices": [{"value": row["id"], "label": row["title"] + " · " + _occurrence(row)} for row in rows[:100]]}],
         blocked="No parked occurrence needs review." if not rows else "")
+
+
+def _occurrence(row):
+    from datetime import datetime, timezone
+    when = (datetime.fromtimestamp(row["scheduled_at"], tz=timezone.utc).strftime("%b %d, %Y %H:%M UTC")
+            if row["scheduled_at"] else "Time not recorded")
+    status = {"pending": "Waiting", "running": "Running", "failed": "Needs review", "done": "Finished",
+              "cancelled": "Cancelled"}.get(row["status"], "Recorded run")
+    return when + " · " + status
+
+
+def _review_details(value):
+    return {"Schedule": value["title"], "Occurrence": _occurrence(value),
+            "Historical business result": "Unknown; this repair will not repeat it.",
+            "Recorded problem": value["problem"],
+            "Compatible future occurrences shown": len(value["successors"]),
+            "All compatible occurrences shown": value["successors_complete"]}
 
 
 def recovery_prepare(request, selection, arguments):
     from .schedule_ops_api import recurrence_recovery_review
 
     value = recurrence_recovery_review(request, arguments["job_id"])
-    return Preview("Inspect the exact recovery evidence. Future rearming or successor selection requires native administrator review.", native=value)
-
-
-def recovery_execute(request, selection, arguments, native, operation):
-    from .schedule_ops_api import recurrence_recovery_review
-
-    value = recurrence_recovery_review(request, arguments["job_id"])
-    if value["expected_evidence"] != native["expected_evidence"]:
-        raise HTTPException(409, "Recovery evidence changed. Refresh Automations.")
-    return Outcome("confirmed", "Recovery evidence reviewed. Historical outcomes remain unknown; no occurrence was replayed.", value)
-
+    return Preview("Review the current occurrence and future choices. No work is repeated.", native=_review_details(value))
 
 
 class RepairInput(StrictInput):
@@ -182,13 +197,27 @@ class RepairInput(StrictInput):
 
 def repair_snapshot(request, selection):
     from dataclasses import replace
+
+    from .schedule_ops_api import recurrence_recovery_review
+
     state = recovery_snapshot(request, selection)
+    successors = {}
+    for choice in state.fields[0]["choices"]:
+        try:
+            current = recurrence_recovery_review(request, choice["value"])
+        except HTTPException as exc:
+            if exc.status_code == 409:
+                continue
+            raise
+        successors[choice["value"]] = [{"value": None, "label": "Create one next future occurrence"}] + [
+            {"value": row["id"], "label": "Existing occurrence · " + _occurrence(row)} for row in current["successors"][:100]]
     return replace(state, summary="Repair future recurrence only after stopping old workers and reviewing current evidence.",
         fields=state.fields + [
             {"name": "action", "label": "Future recurrence decision", "kind": "select", "required": True,
-             "choices": [{"value": "rearm", "label": "Admit one future occurrence"},
-                         {"value": "link_successor", "label": "Link an existing compatible successor"}]},
-            {"name": "successor_id", "label": "Existing successor job ID (leave blank for a new future occurrence)", "kind": "number"},
+             "choices": [{"value": "rearm", "label": "Create one next future occurrence"},
+                         {"value": "link_successor", "label": "Use an existing compatible occurrence"}]},
+            {"name": "successor_id", "label": "Future occurrence", "kind": "select", "depends_on": "job_id",
+             "choices_by": successors},
             {"name": "old_workers_stopped", "label": "I confirmed old workers are stopped", "kind": "boolean", "required": True},
             {"name": "rationale", "label": "Reason for this reviewed repair", "kind": "textarea", "required": True, "max_length": 1000}])
 
@@ -205,8 +234,8 @@ def repair_prepare(request, selection, arguments):
     if linking and selected is None:
         raise HTTPException(409, "This successor is not in the current compatible recovery evidence. Refresh native Automations.")
     return Preview("Repair future recurrence only. Historical business work will not be replayed; its external outcome remains unknown.",
-        [{"label": "Parked occurrence", "after": value},
-         {"label": "Reviewed decision", "after": selected if linking else "Admit exactly one future occurrence"},
+        [{"label": "Occurrence needing review", "after": _review_details(value)},
+         {"label": "Reviewed decision", "after": _occurrence(selected) if linking else "Create exactly one next future occurrence"},
          {"label": "Stopped old workers", "after": True},
          {"label": "Reason", "after": arguments["rationale"]}],
         {"expected_attempts": value["attempts"], "expected_evidence": value["expected_evidence"], "context": value["context"]})
@@ -229,7 +258,15 @@ def repair_recover(request, selection, arguments, native, operation):
     if successor is None:
         return None
     return Outcome("replayed", "This exact future recurrence repair was already recorded. Historical work was not replayed.",
-        {"job_id": arguments["job_id"], "successor_id": successor, "historical_replayed": False, "external_outcome": "unknown"})
+        _repair_details(successor))
+
+
+def _repair_details(successor):
+    from maverick.job_queue import JobQueue
+    with JobQueue()._conn() as connection:
+        row = connection.execute("SELECT status,scheduled_at FROM jobs WHERE id=?", (successor,)).fetchone()
+    return {"Recorded continuation": _occurrence(row) if row else "Its execution record is no longer retained.",
+            "Historical work repeated": False, "Historical business result": "Unknown"}
 
 
 def repair_execute(request, selection, arguments, native, operation):
@@ -239,13 +276,38 @@ def repair_execute(request, selection, arguments, native, operation):
     result = recurrence_recovery_apply(request, arguments["job_id"], RecurrenceRecoveryIn(
         **native, successor_id=arguments["successor_id"], rearm=arguments["action"] == "rearm",
         rationale=arguments["rationale"], confirm=True, operation_id=operation))
-    return Outcome("confirmed", "Future recurrence was repaired. Historical work was not replayed and its external outcome remains unknown.", result)
+    return Outcome("confirmed", "Future recurrence was repaired. Historical work was not replayed and its external outcome remains unknown.",
+                   _repair_details(result["successor_id"]))
+
+
+def receipt_snapshot(request, selection):
+    require_permission(request, "admin")
+    if (selection.get("kind") != "schedule_repair_receipt" or not isinstance(selection.get("reference"), str)
+            or len(selection["reference"]) > 8000):
+        return Snapshot(digest(selection), "Original schedule repair receipt", "Check the original repair without repeating it.",
+            blocked="Choose Check original request with Copilot beside the interrupted repair on Automations.")
+    result = _receipt(request, selection)
+    return Snapshot(digest([selection["reference"], result]), "Original schedule repair receipt",
+                    "Read the exact saved decision. This check cannot repair or repeat any work.", details=result)
+
+
+def _receipt(request, selection):
+    from .schedule_ops_api import RecurrenceReceiptIn, recurrence_recovery_receipt
+    value = recurrence_recovery_receipt(request, RecurrenceReceiptIn(reference=selection["reference"]))
+    return {"Exact original repair recorded": value["found"], "Result": value["message"],
+            "Recorded continuation": _occurrence(value["future_occurrence"]) if value.get("future_occurrence") else "Not currently recorded",
+            "Historical business result": "Unknown", "This check repeated work": False}
+
+
+def receipt_prepare(request, selection, arguments):
+    return Preview("The exact original schedule repair was checked. No repair was submitted or repeated.", native=_receipt(request, selection))
 
 def entries():
     return (
         Adapter("templates.accounts", "Review a workflow account selection", "connections", "/templates", ("/templates", "/workflow-builder", "/connections"), TemplateAccountInput, account_snapshot, account_prepare),
         Adapter("connections.review", "Review connection diagnostics", "connections", "/connections", ("/connections", "/automations"), ConnectionInput, connection_snapshot, connection_prepare, connection_execute, aliases=("check my connection",)),
         Adapter("schedules.change", "Change future schedule runs", "schedules", "/automations", ("/automations",), ScheduleInput, schedule_snapshot, schedule_prepare, schedule_execute, schedule_recover, aliases=("pause my schedule",)),
-        Adapter("schedules.recovery", "Review parked schedule recovery", "schedules", "/automations", ("/automations",), RecoveryInput, recovery_snapshot, recovery_prepare, recovery_execute),
+        Adapter("schedules.recovery", "Review parked schedule recovery", "schedules", "/automations", ("/automations",), RecoveryInput, recovery_snapshot, recovery_prepare),
         Adapter("schedules.repair", "Repair reviewed future recurrence", "schedules", "/automations", ("/automations",), RepairInput, repair_snapshot, repair_prepare, repair_execute, repair_recover),
+        Adapter("schedules.repair_receipt", "Check this original schedule repair", "schedules", "/automations", ("/automations",), EmptyInput, receipt_snapshot, receipt_prepare),
     )

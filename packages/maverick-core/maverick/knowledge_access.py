@@ -2076,6 +2076,50 @@ class KnowledgeAccessService:
             canonical, row, archived_at=archive_times.get(str(row["id"])),
         ) for row in rows[:limit]]
 
+    def browse_requests(self, tenant: str, *, view: str = "active",
+                        cursor: str = "", limit: int = 100) -> dict:
+        """Hydrate one bounded forward window, never the rotating prefix twice.
+
+        Positions are private persistence metadata. Dashboard callers must bind
+        them to their current administrator, workspace and selected view.
+        This is a current index walk, not a frozen or creation-time snapshot.
+        """
+        canonical = canonical_tenant_id(tenant)
+        if (view not in {"active", "archive", "ready"}
+                or not isinstance(cursor, str) or len(cursor) > 128
+                or isinstance(limit, bool) or not isinstance(limit, int)
+                or not 1 <= limit <= 250):
+            raise ValueError("knowledge request batch is malformed")
+        with tenant_scope(tenant=canonical):
+            store = self.archive_store if view == "archive" else self.request_store
+            # One identity-only lookahead distinguishes an exact final window.
+            identities = list(store.iter_record_ids(start_after=cursor, limit=limit + 1))
+            forward = [(position, record_id) for position, record_id in identities
+                       if not cursor or position > cursor]
+            window = forward[:limit]
+            more = len(forward) > limit
+            items = []
+            for _position, record_id in window:
+                row = store.get(record_id)
+                if row is None or row.get("tenant") != canonical:
+                    continue
+                archived_at = None
+                if view == "archive":
+                    # A partially completed archive move still has one live
+                    # authority. Do not display its cold copy as a second item.
+                    if self.request_store.get(record_id) is not None:
+                        continue
+                    archived_at = float(row["created_at"])
+                    row = self._archived_request(canonical, row)
+                if view == "ready" and not self._archive_ready(canonical, row):
+                    continue
+                items.append(self._fresh_request_projection(
+                    canonical, row, archived_at=archived_at,
+                ))
+            return {"items": items,
+                    "next_cursor": window[-1][0] if more else None,
+                    "scanned": len(window), "complete": not more}
+
     def place_retention_hold(
         self,
         tenant: str,

@@ -51,7 +51,8 @@ def readable(value, fallback="Control"):
 
 
 def authority(request, *, write=False, approval=False):
-    auth.require_permission(request, "operate" if write else "view")
+    auth.require_permission(request, "operate" if write or approval else "view",
+                            api_scope="approvals:decide" if approval else None)
     if approval:
         auth.require_global_permission(request, "admin")
     return native.authority(request)
@@ -273,7 +274,7 @@ def _apply(request, token, *, confirmed):
     previous = readback(request, token)
     if previous["status"] != "not_found":
         return previous
-    module, tenant, store = authority(request, write=True)
+    module, tenant, store = authority(request, write=True, approval=value["action"] == "approve")
     if value["action"] == "create":
         choices = Choices.model_validate(value["choices"])
         _module, _tenant, _store, scope = source(request, choices.scope)

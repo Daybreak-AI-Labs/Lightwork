@@ -560,12 +560,20 @@ class JobQueue:
     def recovery_receipt(self, job_id, *, actor, operation_id, expected_attempts, successor_id,
                          rearm, expected_evidence, rationale):
         digest = self._recovery_fingerprint(expected_attempts, successor_id, rearm, expected_evidence, rationale)
+        return self.recovery_receipt_commitment(job_id, actor=actor, operation_id=operation_id,
+                                                request_hash=digest)
+
+    def recovery_receipt_commitment(self, job_id, *, actor, operation_id, request_hash):
+        """Read one actor-bound exact original receipt; never repair or replay work."""
+        if not isinstance(request_hash, str) or len(request_hash) != 64 or any(
+                character not in "0123456789abcdef" for character in request_hash):
+            raise ValueError("The reviewed request commitment is invalid.")
         with self._conn() as connection:
             row = connection.execute("SELECT request_hash,successor_id FROM recurrence_recovery_receipts "
                 "WHERE job_id=? AND actor=? AND operation_id=?", (job_id, actor, operation_id)).fetchone()
         if row is None:
             return None
-        if row["request_hash"] != digest:
+        if row["request_hash"] != request_hash:
             raise ValueError("This recovery reference belongs to a different reviewed decision.")
         return int(row["successor_id"])
 

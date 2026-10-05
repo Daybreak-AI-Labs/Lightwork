@@ -129,6 +129,11 @@
         </div>
       </div>
       {% if knowledge_can_review %}<p class="muted" id="ka-capacity" role="status" aria-live="polite"></p>{% endif %}
+      {% if knowledge_can_review %}
+      <p class="muted" id="ka-batch-note" role="status" aria-live="polite"></p>
+      <button class="btn btn--ghost" type="button" id="ka-batch-copilot">Review this batch with Copilot</button>
+      {% else %}
+      <p class="muted">This list shows up to 100 of your requests from the retained history currently searched. For an older request, use the reference on your saved receipt below. It does not show other employees' requests.</p>
       <form id="ka-find-archived" class="ka-form" autocomplete="off">
         <label class="ka-field ka-field--wide" for="ka-archive-reference">Find an older archived request by its reference
           <input class="input" id="ka-archive-reference" name="request_reference" required
@@ -136,6 +141,7 @@
         </label>
         <button class="btn" type="submit">Find archived request</button>
       </form>
+      {% endif %}
       <div id="ka-requests" class="ka-requests" aria-live="polite">
         <p class="muted">Loading current request status…</p>
       </div>

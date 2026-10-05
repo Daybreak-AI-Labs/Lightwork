@@ -113,3 +113,27 @@ def test_snapshot_rechecks_before_readonly_publication(registry):
         return ops.Preview("Outdated")
     state["adapter"] = replace(state["adapter"], execute=None, prepare=changed)
     assert prepare(client, state).status_code == 409
+
+
+def test_catalog_does_not_release_previous_context_information(registry):
+    client, state = registry
+    def changed(request, selection):
+        state["context"] = "b" * 64
+        return ops.Snapshot("1", "Private source", "Earlier access", {"private": "old-account-content"})
+    state["adapter"] = replace(state["adapter"], snapshot=changed)
+    response = client.post(BASE + "/catalog", json={"page": "/preferences"})
+    assert response.status_code == 409
+    assert "old-account-content" not in response.text
+
+
+def test_no_department_access_and_unrestricted_access_have_distinct_contexts(monkeypatch):
+    from starlette.requests import Request
+    request = Request({"type": "http", "method": "POST", "path": "/", "headers": []})
+    monkeypatch.setattr(ops, "context_for", lambda request: "same-account-workspace")
+    monkeypatch.setattr(ops.auth, "caller_role", lambda request: "admin")
+    monkeypatch.setattr(ops.auth, "has_global_permission", lambda request, permission: True)
+    monkeypatch.setattr(ops, "enabled_families", lambda: {"preferences"})
+    monkeypatch.setattr(ops.auth, "caller_suites", lambda request: None)
+    unrestricted = ops._context(request)
+    monkeypatch.setattr(ops.auth, "caller_suites", lambda request: set())
+    assert ops._context(request) != unrestricted

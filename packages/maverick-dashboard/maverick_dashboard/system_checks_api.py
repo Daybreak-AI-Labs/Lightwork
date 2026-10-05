@@ -2,8 +2,8 @@
 
 Buttons for the operator tasks that were only reachable from a terminal:
 the installation health check, the go-live readiness check, the settings-file
-check, the license summary, the background work queue (including resuming a
-paused schedule), at-rest encryption maintenance and live diagnostics. Every
+check, the license summary, the background work queue with native schedule
+review links, at-rest encryption maintenance and live diagnostics. Every
 route calls the same kernel functions the terminal commands call and answers in
 plain sentences; the exact technical rows are returned separately so the page
 can keep them inside a collapsed "Technical details" section.
@@ -323,23 +323,12 @@ class ResumeIn(BaseModel):
 
 @router.post("/queue/{job_id}/resume")
 async def queue_resume(job_id: int, body: ResumeIn, request: Request) -> dict:
-    """Let a paused recurring schedule run again from its next occurrence.
-
-    The run that could not be confirmed stays stopped and is never repeated;
-    ``attempts`` is the value the page was showing, so a job that changed
-    since is refused rather than resumed blind."""
+    """Refuse the old shortcut; native recovery needs a complete exact review."""
     _mutation(request)
-    from maverick.job_queue import JobQueue
-
-    def _do() -> int:
-        return JobQueue().reconcile_recurrence(
-            job_id, expected_attempts=body.attempts, rearm=True, confirm=True)
-    try:
-        next_id = await run_in_threadpool(_do)
-    except ValueError as exc:
-        raise HTTPException(409, "This schedule changed since the list was loaded. Refresh and try again.") from exc
-    await run_in_threadpool(_record, request, "queue_resume", job_id=job_id, next_job_id=next_id)
-    return {"resumed": True, "next": next_id}
+    raise HTTPException(409, {
+        "message": "Open this schedule in Automations to review what happened and choose its next step.",
+        "href": "/automations?recover_schedule=" + str(job_id),
+    })
 
 
 # ---- encryption (maverick encryption migrate / rotate) ---------------------

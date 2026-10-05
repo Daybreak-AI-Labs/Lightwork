@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import re
 import secrets
 import threading
 from pathlib import Path
@@ -510,6 +511,19 @@ async def recovery_candidates(
     }
 
 
+@router.get("/request-batches")
+async def request_batches(
+    request: Request, response: Response,
+    view: str = Query(default="active", max_length=16),
+    cursor: str = Query(default="", max_length=2048),
+    limit: Annotated[int, Query(ge=1, le=250)] = 100,
+):
+    from .knowledge_request_browse import browse
+
+    _binding(request, response, administrator=True)
+    return await run_in_threadpool(browse, request, view=view, cursor=cursor, limit=limit)
+
+
 @router.get("/requests/{request_id}")
 async def get_request(request_id: str, request: Request, response: Response):
     tenant, actor, context = _binding(request, response)
@@ -674,9 +688,17 @@ _PAGE_HEADERS = {
 
 @page_router.get(PAGE_PATH, response_class=HTMLResponse, include_in_schema=False)
 async def knowledge_access_page(request: Request, response: Response):
-    if any(key not in {"theme", "density", "font", "lang"} for key in request.query_params):
+    if any(key not in {"theme", "density", "font", "lang", "requests_view", "requests_page"}
+           for key in request.query_params):
         raise HTTPException(404, "Knowledge access page unavailable")
     tenant, actor, context = _binding(request, response)
+    if "requests_view" in request.query_params or "requests_page" in request.query_params:
+        _binding(request, response, administrator=True)
+        view = request.query_params.get("requests_view")
+        cursor = request.query_params.get("requests_page", "")
+        if (view not in {"active", "archive", "ready"} or len(cursor) > 2048
+                or cursor and re.fullmatch(r"[A-Za-z0-9_-]+", cursor) is None):
+            raise HTTPException(404, "Knowledge access page unavailable")
     from .app import templates
 
     purpose_state = "available"

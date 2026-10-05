@@ -353,7 +353,7 @@
     var state = { status: null, jobs: [], credit: null, profiles: [], profileCache: new Map(), chosen: new Set(), policies: [], identifiers: [], receipts: [],
       peoplePages: [null], peoplePage: 0, nextPeople: null, chosenReceipts: new Set(), receiptPeopleKey: "", nextReceipt: null };
     var peopleGeneration = 0, selectionGeneration = 0, receiptsGeneration = 0, peopleSearchTimer = null, privatePeopleCleared = false;
-    var selectedJobId = null, detailGeneration = 0;
+    var selectedJobId = null, detailGeneration = 0, hostedCreate = null;
     function selectJob(job) {
       var id = job ? job.job_id : null;
       if (id === selectedJobId) return;
@@ -372,7 +372,7 @@
     async function request(base, path, options) {
       var selected = options || {};
       var headers = { Accept: "application/json" };
-      if (base === consentBase && shell.dataset.requestContext) headers['X-Lightwork-Profile-Context'] = shell.dataset.requestContext;
+      if ((base === consentBase || base === apiBase) && shell.dataset.requestContext) headers['X-Lightwork-Profile-Context'] = shell.dataset.requestContext;
       var body;
       if (Object.prototype.hasOwnProperty.call(selected, "body")) {
         headers["Content-Type"] = "application/json";
@@ -384,6 +384,9 @@
           method: selected.method || "GET", headers: headers, body: body, signal: controller.signal,
           credentials: "same-origin", cache: "no-store", redirect: "error", referrerPolicy: "no-referrer"
         });
+        var returnedContext = response.headers.get('X-Lightwork-Profile-Context');
+        if (returnedContext && shell.dataset.requestContext && returnedContext !== shell.dataset.requestContext)
+          throw failure('Your account or workspace changed. Reload this page before choosing people.', 'context_changed', 409);
         var result = await parseResponse(response);
         if (selected.profileContext && shell.dataset.requestContext &&
             (response.headers.get("X-Lightwork-Profile-Context") || result.context) !== shell.dataset.requestContext)
@@ -391,9 +394,20 @@
         return result;
       } finally { clearTimeout(timeout); }
     }
-    function api(path, options) { return request(apiBase, path, options); }
-    function say(text, isError) { CW.say(status, text, isError); }
+    async function api(path, options) {
+      try { return await request(apiBase, path, options); }
+      catch (error) {
+        if (error.code === 'context_changed' || error.status === 401 || error.status === 403) {
+          clearPrivatePeople(); error.plain = 'Your account, workspace or access changed. Reload the page before continuing.';
+        } else if (['A selected person\'s record changed. Review the selection again before submitting.',
+            'The selected policy is no longer current. Review the policy and choices again.',
+            'A selected choice is no longer available for this person. Choose it again before reviewing.'].indexOf(error.message) >= 0) error.plain = error.message;
+        throw error;
+      }
+    }
+    function say(text, isError) { CW.say(status, privatePeopleCleared ? "Your account, workspace or access changed. Reload the page before continuing." : text, privatePeopleCleared || isError); }
     function fail(error, action) {
+      if (privatePeopleCleared) { var changed="Your account, workspace or access changed. Reload the page before continuing.";say(changed,true);return changed; }
       if (error && typeof error.plain === "string") { say(error.plain, true); return error.plain; }
       return CW.fail(status, error, action);
     }
@@ -417,12 +431,13 @@
         $('cbj-submission-note').textContent = 'No saved submission has been found yet. The original request may still be finishing. Check again; this check starts no work.';
         return false;
       }
-      var job = result.job;
+      var job = result.job, inCopilot = !!hostedCreate;
       rememberSubmission(null); clearReview(); form.hidden = true;
       say(job.retained === false ? 'The original job was accepted, but its keeping period has ended. No job was repeated.'
         : 'Your original job is ' + (STATE_LABELS[job.state] || ['recorded'])[0].toLowerCase() + '. No job was repeated.');
       await Promise.all([refreshJobs(), refreshCredit()]);
-      if (job.retained !== false) await showDetail(job);
+      if (inCopilot) finishCreate("submitted", job);
+      else if (job.retained !== false) await showDetail(job);
       return true;
     }
     $('cbj-check-submission').addEventListener('click', function (event) {
@@ -452,6 +467,7 @@
     document.querySelectorAll("[data-cbj-close]").forEach(function (b) { b.addEventListener("click", function () {
       $(b.dataset.cbjClose).hidden = true;
       if (b.dataset.cbjClose === 'cbj-detail') { detailGeneration += 1; selectJob(null); }
+      if (b.dataset.cbjClose === 'cbj-create') finishCreate(pendingSubmission ? 'unconfirmed' : 'cancelled');
     }); });
 
     async function refreshStatus() {
@@ -703,8 +719,15 @@
       state.profileCache.forEach(function (_profile, id) { if (!keep.has(id)) state.profileCache.delete(id); });
     }
     function clearPrivatePeople() {
-      detailGeneration += 1; selectJob(null);
+      if (privatePeopleCleared) return;
       privatePeopleCleared = true;
+      if (hostedCreate) finishCreate(pendingSubmission ? "unconfirmed" : "cancelled");
+      if (peopleSearchTimer) clearTimeout(peopleSearchTimer);
+      detailGeneration += 1; selectJob(null);
+      jobsLoading += 1; operations.disabled = true;
+      $("cbj-detail").hidden = true; $("cbj-detail-body").replaceChildren();
+      $("cbj-job-list").replaceChildren(CW.el("p","muted","Reload this page to use the current account and workspace."));
+      state.credit = null; $("cbj-credit-detail").textContent = "";
       selectionGeneration += 1;
       peopleGeneration += 1; state.profiles = []; state.profileCache.clear(); state.chosen.clear();
       state.identifiers = []; state.receipts = []; state.policies = []; clearReview(); form.reset(); form.hidden = true;
@@ -724,6 +747,7 @@
       }
     }
     async function loadPeople(after, pageIndex) {
+      if (privatePeopleCleared) { fail(null,"find people");return; }
       var started = ++peopleGeneration, search = $("cbj-people-search").value.trim();
       $("cbj-people-prev").disabled = true; $("cbj-people-next").disabled = true; $("cbj-select-shown").disabled = true;
       $("cbj-people").replaceChildren(CW.el("p", "muted", "Finding people…"));
@@ -819,6 +843,38 @@
       renderPeople(); syncForm();
       CW.open(form, "input[name=operation]:checked");
     }
+    function finishCreate(outcome, job) {
+      var session = hostedCreate;
+      if (!session) return;
+      hostedCreate = null; session.observer.disconnect();
+      session.nodes.forEach(function (pair) { pair.marker.replaceWith(pair.node); });
+      var publicJob = job ? {Status:job.retained === false ? 'Original acceptance retained; job no longer kept' : (STATE_LABELS[job.state] || ['Recorded'])[0],
+        'Selected records':job.total_items, Progress:job.retained === false ? 'The processing result is no longer retained.' : progressText(job)} : null;
+      if (job && job.retained !== false) publicJob.open={label:'Open submitted job',href:'/consent/bulk-jobs?job='+encodeURIComponent(job.job_id)};
+      session.resolve({status:outcome, job:publicJob});
+    }
+    global.LightworkConsentBulkJobs = {
+      openCreate:async function (options) {
+        if (!options || !options.host || !options.host.isConnected || typeof options.active !== 'function' ||
+            options.context !== shell.dataset.requestContext || !canAdmin || hostedCreate || privatePeopleCleared)
+          throw new Error('Reopen the current consent page before preparing a request.');
+        if (!(await refreshStatus()) || !options.active()) throw new Error('Consent requests are not available here.');
+        var result = new Promise(function (resolve) {
+          var nodes = [form,$('cbj-submission-recovery'),status].map(function (node) {
+            var marker = document.createComment('native consent form position'); node.before(marker); options.host.appendChild(node);
+            return {node:node,marker:marker};
+          });
+          var observer = new MutationObserver(function () {
+            if (!options.host.isConnected || !options.active()) finishCreate(pendingSubmission ? 'unconfirmed' : 'cancelled');
+          });
+          hostedCreate = {nodes:nodes,observer:observer,resolve:resolve};
+          observer.observe(document.body,{subtree:true,childList:true,attributes:true,attributeFilter:['hidden']});
+        });
+        try { await openCreate(); }
+        catch (error) { finishCreate(pendingSubmission ? 'unconfirmed' : 'cancelled'); throw error; }
+        return result;
+      }
+    };
     function fillPurposes() {
       var key = form.elements.policy_key.value.split("|"), policy = state.policies.filter(function (p) { return p.policy_id === key[0] && String(p.version) === key[1]; })[0];
       CW.fill(form.elements.purpose_id, Object.keys((policy && policy.purposes) || {}).map(function (k) { return { value: k, label: CW.human(k) }; }));
@@ -996,7 +1052,7 @@
         disableControls();
         rememberSubmission(selected.payload.idempotency_key);
         try {
-          await api(selected.operation === "export_receipts" ? "/exports" : "/actions", { method: "POST", body: selected.payload });
+          var acceptedJob = await api(selected.operation === "export_receipts" ? "/exports" : "/actions", { method: "POST", body: selected.payload });
         } catch (error) {
           // A failed wait is not evidence that admission failed. Read this
           // exact actor-bound submission rather than creating a new reference.
@@ -1012,6 +1068,7 @@
         clearReview(); form.hidden = true;
         say("Job queued. Use Run now on its row when it is due." + (selected.operation === "export_receipts" ? " Download the file when it has finished." : ""));
         await Promise.all([refreshJobs(), refreshCredit()]);
+        finishCreate("submitted", acceptedJob);
       });
     });
     $("cbj-edit-reviewed").addEventListener("click", function () {
@@ -1022,20 +1079,43 @@
 
     // ----- Allowance and upkeep -----
     async function refreshCredit() {
+      state.credit = null;
       try {
         var credit = await api("/credits/detail");
+        if (privatePeopleCleared) return;
         state.credit = credit;
         $("cbj-credit-detail").textContent = credit.available + " records can still be processed (" + credit.reserved + " set aside for waiting jobs, " + credit.consumed + " used).";
       } catch (error) { CW.fail($("cbj-credit-detail"), error, "load the allowance"); }
     }
+    var pendingAllowance = null, allowanceKey = recoveryKey ? recoveryKey + ':allowance' : '';
+    try { var storedAllowance = allowanceKey && global.sessionStorage.getItem(allowanceKey); if (storedAllowance && IDEMPOTENCY_PATTERN.test(storedAllowance)) pendingAllowance = storedAllowance; } catch (_) {}
+    function rememberAllowance(reference) {
+      pendingAllowance = reference;
+      try { if (allowanceKey) { if (reference) global.sessionStorage.setItem(allowanceKey,reference); else global.sessionStorage.removeItem(allowanceKey); } } catch (_) {}
+      $('cbj-allowance-recovery').hidden = !reference;
+    }
+    rememberAllowance(pendingAllowance);
+    async function checkAllowance() {
+      if (!pendingAllowance) return;
+      var result = await api('/credits/check',{method:'POST',body:{idempotency_key:pendingAllowance}});
+      if (!result.found) { $('cbj-allowance-note').textContent='No original acceptance is recorded yet. Check again before deciding on another change. This check does not add records.'; return; }
+      rememberAllowance(null);say('Your original change allowed '+result.allowance.added+' more records. No allowance was added again.');await refreshCredit();
+    }
+    $('cbj-check-allowance').addEventListener('click',function(event){handle(event.currentTarget,function(disableControls){disableControls();return checkAllowance();});});
     async function addCredits(disableControls) {
+      if (pendingAllowance) { CW.open($('cbj-allowance-recovery'),'#cbj-check-allowance');return; }
+      await refreshCredit();
       if (!state.credit) return;
       var answers = await global.mvForm("Add to the allowance", [{ key: "amount", label: "How many more records", type: "select", required: true, default: "10", options: [{ value: "10", label: "10" }, { value: "50", label: "50" }, { value: "100", label: "100" }, { value: "500", label: "500" }] }], { okText: "Continue" });
       if (!answers) return;
-      if (!(await CW.confirm("Allow " + answers.amount + " more consent records to be processed in this workspace?", "Add"))) return;
+      if (!(await CW.confirm("Allow " + answers.amount + " more consent records to be processed in this workspace? No job runs and no payment is made.", "Add"))) return;
       disableControls();
-      try { await api("/credits/grant", { method: "POST", body: { amount: Number(answers.amount), expected_revision: state.credit.revision, idempotency_key: CW.reference() } }); say("Allowance updated."); await refreshCredit(); }
-      catch (error) { fail(error, "update the allowance"); }
+      var original = CW.reference();rememberAllowance(original);
+      try { await api("/credits/grant", { method: "POST", body: { amount: Number(answers.amount), expected_revision: state.credit.revision, idempotency_key: original } });rememberAllowance(null);say("Allowance updated.");await refreshCredit(); }
+      catch (error) {
+        if ([400,409,422].indexOf(error.status)>=0) { rememberAllowance(null);fail(error,'update the allowance');await refreshCredit();return; }
+        say('The allowance reply was interrupted. Check your original allowance change before adding more. No automatic repeat will occur.',true);
+      }
     }
 
     $("cbj-new").addEventListener("click", function (event) { CW.busy(event.currentTarget, openCreate); });
@@ -1148,6 +1228,9 @@
         var selected = new URLSearchParams(global.location.search).get('job');
         if (selected && ID_PATTERN.test(selected)) showDetail({job_id:selected});
       });
+    });
+    document.addEventListener('lightwork:copilot-context-changed',function(){
+      if (!privatePeopleCleared) api('/status').catch(function(error){if(privatePeopleCleared)fail(error,'continue');});
     });
     document.addEventListener('lightwork:product-operation-complete', function (event) {
       if (event.detail && /^consent\.jobs\./.test(event.detail.operation || '')) {

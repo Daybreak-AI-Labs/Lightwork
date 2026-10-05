@@ -148,27 +148,9 @@
         tr.appendChild(el('td', null, when(job.when)));
         var action = el('td');
         if (job.needs_decision) {
-          var button = el('button', 'btn btn--primary', 'Resume schedule');
-          button.type = 'button';
-          button.addEventListener('click', async function () {
-            var ok = await window.mvConfirm('Let this schedule run again from its next time? The run that could not be confirmed will not be repeated.', {okText: 'Resume schedule'});
-            if (!ok) return;
-            button.disabled = true;
-            try {
-              var response = await window.fetch(base + '/queue/' + encodeURIComponent(job.id) + '/resume', {
-                method: 'POST', credentials: 'same-origin',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({attempts: job.attempts})
-              });
-              if (!response.ok) throw response;
-              say('queue', 'The schedule will run again at its next time.');
-              run('queue');
-            } catch (failure) {
-              say('queue', errorText(failure, 'resume the schedule'));
-              button.disabled = false;
-            }
-          });
-          action.appendChild(button);
+          var review = el('a', 'btn btn--primary', 'Review this schedule');
+          review.href = '/automations?recover_schedule=' + encodeURIComponent(job.id);
+          action.appendChild(review);
         } else {
           action.appendChild(el('span', 'muted', 'Nothing to do. It will not run again.'));
         }

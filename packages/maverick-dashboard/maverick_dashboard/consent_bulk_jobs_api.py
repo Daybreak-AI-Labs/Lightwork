@@ -224,6 +224,12 @@ class ConsentJobControls:
     run_part: Callable
     cancel_future: Callable
     download_result: Callable
+    creation_state: Callable
+    submit: Callable
+    check_submission: Callable
+    credit_detail: Callable
+    grant_allowance: Callable
+    check_allowance: Callable
 
 
 class RecoveryIn(_StrictModel):
@@ -460,10 +466,16 @@ def create_consent_bulk_jobs_router(  # noqa: C901, PLR0915
         return await run_in_threadpool(call_state, ops, function, *args, **kwargs)
 
     def require_audit(request: Request) -> None:
+        from .consent_job_admission import context
+
+        context(request)
         require_permission(request, "view")
         require_global_permission(request, "audit")
 
     def require_admin(request: Request) -> None:
+        from .consent_job_admission import context
+
+        context(request)
         require_permission(request, "operate")
         require_global_permission(request, "admin")
 
@@ -498,7 +510,65 @@ def create_consent_bulk_jobs_router(  # noqa: C901, PLR0915
         ops, tenant, runtime = composition_state(request)
         return call_state(ops, runtime.store.download_artifact, tenant, job_id)
 
-    controls = ConsentJobControls(job_state, run_part, cancel_future, download_result)
+    def creation_state(request: Request):
+        require_admin(request)
+        _ops, _tenant, runtime = composition_state(request)
+        return {"operations": runtime.operation_capabilities(), "allowance": runtime.store.credit_detail(runtime.tenant_id)}
+
+    def submitted(request: Request, key: str):
+        require_admin(request)
+        ops, tenant, runtime = composition_state(request)
+        return call_state(ops, runtime.store.created_job_for_request, tenant,
+                          idempotency_key=key, actor_sha256=runtime.actor_sha256)
+
+    def submit(request: Request, body, operation: str):
+        from maverick.authority_effects import authority_effect_fence
+
+        from .consent_job_admission import reviewed_sources
+
+        with authority_effect_fence():
+            require_admin(request)
+            ops, tenant, runtime = composition_state(request)
+            ensure_operation(runtime, operation)
+            items = [item.model_dump(mode="python", exclude_none=True) for item in body.items]
+            def admit():
+                require_admin(request)
+                return call_state(ops, runtime.store.create_job, tenant,
+                    kind="export" if operation == "export_receipts" else "mutation", operation=operation,
+                    items=items, actor_sha256=runtime.actor_sha256, scheduled_for=body.scheduled_for,
+                    idempotency_key=body.idempotency_key)
+            # Original admission readback must not revalidate a now-changed
+            # profile as a new submission, and native replay still binds payload.
+            original = call_state(ops, runtime.store.created_job_for_request, tenant,
+                idempotency_key=body.idempotency_key, actor_sha256=runtime.actor_sha256)
+            if original is not None or request.headers.get("X-Lightwork-Profile-Context") is None:
+                return admit()
+            with reviewed_sources(runtime, operation, items):
+                return admit()
+
+    def credit_state(request: Request):
+        require_audit(request)
+        ops, tenant, runtime = composition_state(request)
+        return call_state(ops, runtime.store.credit_detail, tenant)
+
+    def grant_allowance(request: Request, body: GrantCreditsIn):
+        from maverick.authority_effects import authority_effect_fence
+
+        with authority_effect_fence():
+            require_admin(request)
+            ops, tenant, runtime = composition_state(request)
+            return call_state(ops, runtime.store.grant_credits, tenant, body.amount,
+                expected_revision=body.expected_revision, idempotency_key=body.idempotency_key,
+                actor_sha256=runtime.actor_sha256)
+
+    def check_allowance(request: Request, key: str):
+        require_admin(request)
+        ops, tenant, runtime = composition_state(request)
+        return call_state(ops, runtime.store.granted_credit_for_request, tenant,
+            idempotency_key=key, actor_sha256=runtime.actor_sha256)
+
+    controls = ConsentJobControls(job_state, run_part, cancel_future, download_result,
+        creation_state, submit, submitted, credit_state, grant_allowance, check_allowance)
     router.consent_job_controls = controls
 
     @router.get("/status")
@@ -527,21 +597,7 @@ def create_consent_bulk_jobs_router(  # noqa: C901, PLR0915
         response: Response,
         body: CreateExportJobIn,
     ) -> dict[str, Any]:
-        require_admin(request)
-        ops, tenant, runtime = await composition(request)
-        items = [item.model_dump(mode="python", exclude_none=True) for item in body.items]
-        ensure_operation(runtime, "export_receipts")
-        result = await call(
-            ops,
-            runtime.store.create_job,
-            tenant,
-            kind="export",
-            operation="export_receipts",
-            items=items,
-            actor_sha256=runtime.actor_sha256,
-            scheduled_for=body.scheduled_for,
-            idempotency_key=body.idempotency_key,
-        )
+        result = await run_in_threadpool(controls.submit, request, body, "export_receipts")
         _secure(response)
         return result
 
@@ -551,21 +607,7 @@ def create_consent_bulk_jobs_router(  # noqa: C901, PLR0915
         response: Response,
         body: CreateActionJobIn,
     ) -> dict[str, Any]:
-        require_admin(request)
-        ops, tenant, runtime = await composition(request)
-        items = [item.model_dump(mode="python", exclude_none=True) for item in body.items]
-        ensure_operation(runtime, body.operation)
-        result = await call(
-            ops,
-            runtime.store.create_job,
-            tenant,
-            kind="mutation",
-            operation=body.operation,
-            items=items,
-            actor_sha256=runtime.actor_sha256,
-            scheduled_for=body.scheduled_for,
-            idempotency_key=body.idempotency_key,
-        )
+        result = await run_in_threadpool(controls.submit, request, body, body.operation)
         _secure(response)
         return result
 
@@ -573,10 +615,7 @@ def create_consent_bulk_jobs_router(  # noqa: C901, PLR0915
     async def check_submission(
         request: Request, response: Response, body: CheckSubmissionIn,
     ) -> dict[str, Any]:
-        require_admin(request)
-        ops, tenant, runtime = await composition(request)
-        job = await call(ops, runtime.store.created_job_for_request, tenant,
-                         idempotency_key=body.idempotency_key, actor_sha256=runtime.actor_sha256)
+        job = await run_in_threadpool(controls.check_submission, request, body.idempotency_key)
         _secure(response)
         return {"found": job is not None, "job": job}
 
@@ -718,9 +757,7 @@ def create_consent_bulk_jobs_router(  # noqa: C901, PLR0915
 
     @router.get("/credits/detail")
     async def credit_detail(request: Request, response: Response) -> dict[str, Any]:
-        require_audit(request)
-        ops, tenant, runtime = await composition(request)
-        result = await call(ops, runtime.store.credit_detail, tenant)
+        result = await run_in_threadpool(controls.credit_detail, request)
         _secure(response)
         return result
 
@@ -730,18 +767,15 @@ def create_consent_bulk_jobs_router(  # noqa: C901, PLR0915
         response: Response,
         body: GrantCreditsIn,
     ) -> dict[str, Any]:
-        require_admin(request)
-        ops, tenant, runtime = await composition(request)
-        result = await call(
-            ops,
-            runtime.store.grant_credits,
-            tenant,
-            body.amount,
-            expected_revision=body.expected_revision,
-            idempotency_key=body.idempotency_key,
-        )
+        result = await run_in_threadpool(controls.grant_allowance, request, body)
         _secure(response)
         return result
+
+    @router.post("/credits/check")
+    async def check_credits(request: Request, response: Response, body: CheckSubmissionIn):
+        result = await run_in_threadpool(controls.check_allowance, request, body.idempotency_key)
+        _secure(response)
+        return {"found": result is not None, "allowance": result}
 
     @router.post("/operations/recover")
     async def recover(

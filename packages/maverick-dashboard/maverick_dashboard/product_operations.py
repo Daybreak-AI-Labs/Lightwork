@@ -124,9 +124,10 @@ def _gate(request):
 
 
 def _context(request):
+    suites = auth.caller_suites(request)
     return digest({"context": context_for(request), "role": auth.caller_role(request),
                    "global_admin": auth.has_global_permission(request, "admin"),
-                   "suites": sorted(auth.caller_suites(request) or []),
+                   "suites": sorted(suites) if suites is not None else None,
                    "families": sorted(enabled_families())})
 
 
@@ -137,6 +138,7 @@ def _adapter_modules():
         product_operations_activation,
         product_operations_approval_challenges,
         product_operations_approvals,
+        product_operations_audit_checkpoints,
         product_operations_budget,
         product_operations_commitments,
         product_operations_companion,
@@ -146,6 +148,7 @@ def _adapter_modules():
         product_operations_connections,
         product_operations_consent_jobs,
         product_operations_conversation,
+        product_operations_department_boards,
         product_operations_devices,
         product_operations_diagnostics,
         product_operations_dsar_handoff,
@@ -190,6 +193,7 @@ def _adapter_modules():
         product_operations_approvals,
         product_operations_approval_challenges,
         product_operations_preferences,
+        product_operations_audit_checkpoints,
         product_operations_companion,
         product_operations_companion_admin,
         product_operations_companion_conversation,
@@ -202,6 +206,7 @@ def _adapter_modules():
         product_operations_connections,
         product_operations_consent_jobs,
         product_operations_notifications,
+        product_operations_department_boards,
         product_operations_outcome_pilots,
         product_operations_budget,
         product_operations_models,
@@ -297,6 +302,8 @@ def catalog(request: Request, body: ContextInput):
     _same_origin(request)
     _gate(request)
     page, selection = _page(body.page), _selection(body.selection)
+    original_context = _context(request)
+    families = enabled_families()
     items = []
     for adapter in adapters().values():
         if not any(fnmatchcase(page, path) for path in adapter.pages):
@@ -311,15 +318,18 @@ def catalog(request: Request, body: ContextInput):
                           "direct_ui": adapter.direct_ui})
             continue
         blocked = state.blocked
-        if adapter.family not in enabled_families():
+        if adapter.family not in families:
             blocked = "An administrator must enable this Copilot action family. Native controls remain available."
         items.append({"id": adapter.id, "label": adapter.label, "family": adapter.family,
                       "direct_ui": adapter.direct_ui, "available": not blocked,
                       "blocked": blocked, "revision": state.revision, "source": state.source,
                       "summary": state.summary, "details": state.details, "fields": state.fields,
                       "confirmation_required": adapter.execute is not None})
+    _gate(request)
+    if original_context != _context(request):
+        raise HTTPException(409, "Your account, workspace or access changed while these controls were read. Reopen Copilot to check current controls.")
     return _response({"schema": 1, "page": page, "selection": selection,
-                      "context": _context(request), "checked_at": time.time(), "operations": items})
+                      "context": original_context, "checked_at": time.time(), "operations": items})
 
 
 def _arguments(adapter, raw):

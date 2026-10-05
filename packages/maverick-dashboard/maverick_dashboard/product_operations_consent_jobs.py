@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import re
 from datetime import datetime, timezone
+from typing import Literal
 from urllib.parse import quote
 
 from fastapi import HTTPException
@@ -11,7 +12,7 @@ from maverick.governed_operations import digest
 from . import auth
 from . import consent_bulk_jobs_api as native
 from .draft_api import context_for
-from .product_operations import Adapter, EmptyInput, Outcome, Preview, Snapshot
+from .product_operations import Adapter, EmptyInput, Outcome, Preview, Snapshot, StrictInput
 
 _OPERATIONS = {"export_receipts": "Export consent records", "edit_preferences": "Change choices",
     "delete_subject": "Erase stored identifiers", "change_identifier_type": "Change how people are identified",
@@ -158,8 +159,66 @@ def download_prepare(request, selection, _arguments):
                              "label":"Download consent records"}})
 
 
+
+class AllowanceInput(StrictInput):
+    amount: Literal[10, 50, 100, 500]
+
+
+def create_snapshot(request, _selection):
+    state = native.job_controls().creation_state(request)
+    available = [label for key, label in _OPERATIONS.items() if state["operations"].get(key)]
+    return Snapshot(digest([context_for(request), state]), "Current native consent executors and record allowance",
+        "Choose people and their choices in the ordinary request form, review every selected record, then submit once. Private selections stay in the native consent controls and are not sent to the model guide.",
+        {"Available requests": available, "Records available": state["allowance"]["available"]},
+        blocked="No consent request executor is available yet." if not available else "")
+
+
+def create_prepare(request, _selection, _arguments):
+    native.job_controls().creation_state(request)
+    return Preview("Open the current account's consent request form. Choose people, policy and choices there; review and confirm before submission. A submitted request is queued, and processing is confirmed separately.",
+        native={"context": context_for(request), "form": "consent_bulk_job"})
+
+
+def allowance_snapshot(request, _selection):
+    auth.require_permission(request, "operate")
+    auth.require_global_permission(request, "admin")
+    value = native.job_controls().credit_detail(request)
+    return Snapshot(digest([context_for(request), value]), "Current native consent record allowance",
+        "Allow more records to be processed in this workspace. This changes the processing allowance; it does not purchase anything or run a job.",
+        {"Available": value["available"], "Set aside for waiting jobs": value["reserved"], "Already used": value["consumed"]},
+        [{"name": "amount", "label": "Additional records allowed", "kind": "select", "required": True,
+          "choices": [{"value": amount, "label": str(amount) + " records"} for amount in (10, 50, 100, 500)]}])
+
+
+def allowance_prepare(request, selection, arguments):
+    allowance_snapshot(request, selection)
+    current = native.job_controls().credit_detail(request)
+    return Preview("Allow " + str(arguments["amount"]) + " more consent records to be processed. No job runs and no payment is made.",
+        [{"label": "Available records", "before": current["available"], "after": current["available"] + arguments["amount"]}],
+        {"revision": current["revision"]})
+
+
+def allowance_execute(request, _selection, arguments, prepared, operation_id):
+    value = native.job_controls().grant_allowance(request, native.GrantCreditsIn(amount=arguments["amount"],
+        expected_revision=prepared["revision"], idempotency_key="copilot-" + operation_id))
+    return Outcome("confirmed", "The allowance was increased by " + str(value["added"]) + " records. No job was run.",
+        {"Available after this change": value["available"], "Added records": value["added"]})
+
+
+def allowance_recover(request, _selection, _arguments, _prepared, operation_id):
+    value = native.job_controls().check_allowance(request, "copilot-" + operation_id)
+    if value is None:
+        return None
+    return Outcome("replayed", "Read your original accepted allowance change. No records were added again and no job was run.",
+        {"Available after the original change": value["available"], "Added records": value["added"]})
+
+
 def entries():
     return (
+        Adapter("consent.jobs.create", "Prepare a consent request", "tasks", _PAGE, (_PAGE,), EmptyInput,
+                create_snapshot, create_prepare, aliases=("start a bulk consent change", "export selected consent records")),
+        Adapter("consent.jobs.allowance", "Increase the consent record allowance", "tasks", _PAGE, (_PAGE,), AllowanceInput,
+                allowance_snapshot, allowance_prepare, allowance_execute, allowance_recover, aliases=("allow more consent records",)),
         Adapter("consent.jobs.read", "Read this consent job", "tasks", _PAGE, (_PAGE,), EmptyInput,
                 read_snapshot, read_prepare, aliases=("check this consent job", "show saved consent progress")),
         Adapter("consent.jobs.run_part", "Run one part of this consent job", "tasks", _PAGE, (_PAGE,), EmptyInput,

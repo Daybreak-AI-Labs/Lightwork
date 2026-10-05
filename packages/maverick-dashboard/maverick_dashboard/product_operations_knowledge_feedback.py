@@ -86,7 +86,7 @@ def feedback_execute(request, selection, arguments, prepared, operation):
 def status_snapshot(request, selection):
     tenant, actor, context, service = _scope(request)
     items = native.call_native(service.feedback_requests, tenant, actor, limit=100)
-    return Snapshot(digest([context, items]), "Your knowledge feedback", "The latest 100 requests from your current named account and workspace; independent administrative evidence is withheld.")
+    return Snapshot(digest([context, items]), "Your knowledge feedback", "Up to 100 of your requests from the retained history currently searched. For an older request, use its saved receipt in Knowledge. Independent administrative evidence is withheld.")
 
 
 def status_prepare(request, selection, arguments):
@@ -179,10 +179,71 @@ def archive_execute(request, selection, arguments, prepared, operation):
         return _archive_outcome("confirmed", result)
 
 
+class BrowseRequests(StrictInput):
+    view: Literal["active", "archive", "ready"]
+    page: Literal["current", "first", "next"]
+
+
+def _batch_selection(selection):
+    if selection.get("kind") != "knowledge_request_batch":
+        return "active", ""
+    if (set(selection) != {"kind", "view", "cursor"}
+            or selection.get("view") not in {"active", "archive", "ready"}
+            or not isinstance(selection.get("cursor"), str)
+            or len(selection["cursor"]) > 2048):
+        raise HTTPException(422, "Select a request batch from Knowledge again.")
+    return selection["view"], selection["cursor"]
+
+
+def browse_snapshot(request, selection):
+    from .knowledge_request_browse import VIEWS, browse
+
+    view, cursor = _batch_selection(selection)
+    page = browse(request, view=view, cursor=cursor, limit=25)
+    choices = [{"value": "current", "label": "Selected batch"},
+               {"value": "first", "label": "Start this view again"}]
+    if not page["complete"]:
+        choices.append({"value": "next", "label": "Next batch"})
+    return Snapshot(digest([page["context"], view, cursor, page["items"], page["complete"]]),
+                    "Current retained knowledge requests",
+                    "Read one batch with current source restrictions and legal holds. Only administrators can review shared requests; this read never applies a change.",
+                    fields=[{"name": "view", "label": "Request view", "kind": "select", "required": True,
+                             "value": view, "choices": [{"value": key, "label": label} for key, label in VIEWS.items()]},
+                            {"name": "page", "label": "Which batch", "kind": "select", "required": True,
+                             "value": "current", "choices": choices}])
+
+
+def browse_prepare(request, selection, arguments):
+    from .knowledge_request_browse import VIEWS, browse
+
+    selected_view, cursor = _batch_selection(selection)
+    view = arguments["view"]
+    if view != selected_view or arguments["page"] == "first":
+        cursor = ""
+    elif arguments["page"] == "next":
+        previous = browse(request, view=view, cursor=cursor, limit=25)
+        cursor = previous["next_cursor"]
+        if cursor is None:
+            raise HTTPException(409, "This view reached its last batch. Start the view again to check new requests.")
+    page = browse(request, view=view, cursor=cursor, limit=25)
+    rows = [{"request": row["request_type"].replace("_", " ").capitalize() + " — " + row["reason"],
+             "status": row["status"].replace("_", " "),
+             "source_use": row["source_use_status"].replace("_", " "),
+             "retention_review": row["retention_review_status"].replace("_", " "),
+             "legal_hold": (row["retention_hold"]["effective_status"].replace("_", " ")
+                            if row["retention_hold"] else "No hold"),
+             "updated": row["updated_at"]} for row in page["items"]]
+    return Preview("Showing " + VIEWS[view].lower() + ". " +
+                   ("This is the last batch currently found. " if page["complete"] else "More records can be checked with Next batch. ") + page["notice"],
+                   native={"requests": rows, "knowledge_request_page": {"view": view, "cursor": cursor}})
+
+
 def feedback_entries():
     return (Adapter("knowledge.feedback", "Report an exact source correction or concern", "learning", "/knowledge-access", ("/knowledge-access",),
                     Feedback, feedback_snapshot, feedback_prepare, feedback_execute),
             Adapter("knowledge.my_feedback", "Review my knowledge requests", "learning", "/knowledge-access", ("/knowledge-access",),
                     EmptyInput, status_snapshot, status_prepare),
+            Adapter("knowledge.browse_requests", "Browse retained knowledge requests", "learning", "/knowledge-access", ("/knowledge-access",),
+                    BrowseRequests, browse_snapshot, browse_prepare),
             Adapter("knowledge.archive_request", "Move a finished rights request to the retained archive", "learning", "/knowledge-access", ("/knowledge-access",),
                     EmptyInput, archive_snapshot, archive_prepare, archive_execute, archive_recover))

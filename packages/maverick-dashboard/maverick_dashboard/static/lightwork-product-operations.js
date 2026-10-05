@@ -95,6 +95,36 @@
       }
       var list = node('dl', undefined, target);
       Object.entries(item).slice(0, 35).forEach(function (entry) {
+        if (entry[0] === 'knowledge_request_page') {
+          var page = entry[1], started = generation;
+          if (!page || Array.isArray(page) || Object.keys(page).sort().join(',') !== 'cursor,view' ||
+              !['active', 'archive', 'ready'].includes(page.view) || typeof page.cursor !== 'string' ||
+              page.cursor.length > 2048 || (page.cursor && !/^[A-Za-z0-9_-]+$/.test(page.cursor))) return;
+          node('dt', 'Saved requests', list);
+          var destination = node('dd', undefined, list);
+          if (window.LightworkKnowledgeRequests && typeof window.LightworkKnowledgeRequests.openBatch === 'function') {
+            button('Open these requests', destination, async function (event) {
+              if (!active(started) || busy) return;
+              var control = event.currentTarget; control.disabled = true;
+              try {
+                var opened = await window.LightworkKnowledgeRequests.openBatch(page.view, page.cursor);
+                if (active(started)) status.textContent = opened ? 'These requests are open in Knowledge.' : 'This batch could not be opened. Check your current access in Knowledge.';
+                if (opened && active(started)) {
+                  var close = document.getElementById('mv-copilot-close');
+                  if (close) close.click();
+                  var heading = document.getElementById('ka-requests-heading');
+                  if (heading) heading.focus({preventScroll: true});
+                }
+              } catch (_) {
+                if (active(started)) status.textContent = 'This batch could not be opened. Check your current access in Knowledge.';
+              } finally { if (active(started)) control.disabled = false; }
+            });
+          } else {
+            var knowledge = node('a', 'Open Knowledge requests', destination);
+            knowledge.href = '/knowledge-access'; knowledge.className = 'btn btn--ghost';
+          }
+          return;
+        }
         var label = entry[0].replace(/_/g, ' ');
         node('dt', label.charAt(0).toUpperCase() + label.slice(1), list);
         append(node('dd', undefined, list), entry[1], depth + 1);
@@ -370,6 +400,16 @@
       if (Date.now() >= review.expires_at * 1000) { status.textContent = 'This review expired. Refresh controls and review again.'; return; }
       lock(true); uncertainty = 'A submitted action needs a status check before another attempt.';
       try {
+        if (item.id === 'schedules.repair') {
+          var recovery = window.LightworkScheduleRecovery;
+          if (!recovery || typeof recovery.rememberReview !== 'function') {
+            uncertainty = 'Nothing was submitted. Open this schedule in Automations to keep its recovery reference.';
+            throw new Error(uncertainty);
+          }
+          try { await recovery.rememberReview(review.token); }
+          catch (error) { uncertainty = 'Nothing was submitted. The recovery reference could not be saved.'; throw error; }
+          if (!active(started)) return;
+        }
         var result = await request('/execute', {token: review.token, confirmed: true});
         if (!active(started)) return;
         clear(formHost); node('h3', item.label, formHost); node('p', result.message, formHost);

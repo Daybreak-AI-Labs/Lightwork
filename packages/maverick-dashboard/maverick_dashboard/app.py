@@ -600,12 +600,12 @@ def _nav_context(request: Request) -> dict:
             return key_scopes is not None and ("admin" in key_scopes or scope in key_scopes)
         return True
     unavailable |= _account_pages_unavailable(request)
-    # These rollups refuse scoped callers until every metric has its own
-    # department projection. Discovery must follow the same native boundary.
+    # Boards without native department projections remain unavailable.
+    # Discovery follows the same boundary as their page and API readers.
     try:
         require_unscoped_board(request)
     except HTTPException:
-        unavailable |= {"/overview", "/spend", "/workforce", "/savings", "/oversight"}
+        unavailable |= {"/workforce", "/savings", "/oversight"}
     for collection in (groups, finder):
         for group in collection:
             group["links"] = [link for link in group["links"]
@@ -3698,6 +3698,10 @@ def public_demo(request: Request) -> HTMLResponse:
 
 @app.get("/overview", response_class=HTMLResponse)
 def overview(request: Request) -> HTMLResponse:
+    from . import department_boards
+
+    if department_boards.scoped(request):
+        return department_boards.page(request, "overview")
     require_unscoped_board(request)
     from .value_views import value_scope
 
@@ -4368,6 +4372,10 @@ def facts_page(request: Request) -> HTMLResponse:
 
 @app.get("/spend", response_class=HTMLResponse)
 def spend_page(request: Request) -> HTMLResponse:
+    from . import department_boards
+
+    if department_boards.scoped(request):
+        return department_boards.page(request, "spend")
     require_unscoped_board(request)
     # The burn/outcome/top-goal charts render client-side from
     # GET /api/v1/dashboards/spend; the page keeps the episode table + hero.
