@@ -78,6 +78,40 @@ class TestFeedCircuitClassificationIntegration:
                 raise exc
         return _Client()
 
+    @pytest.mark.parametrize("guard", ["cap", "accounting"])
+    @pytest.mark.parametrize("asynchronous", [False, True])
+    def test_local_accounting_refusal_does_not_change_provider_health(self, monkeypatch, guard, asynchronous):
+        import asyncio
+        from types import SimpleNamespace
+
+        from maverick.budget import Budget
+        from maverick.llm import LLM
+        from maverick.provider_cost_cap import ProviderAccountingUnavailable, ProviderCapExceeded
+
+        error = ProviderAccountingUnavailable() if guard == "accounting" else ProviderCapExceeded("anthropic", 10, 10, "2026-10")
+        observed = []
+        monkeypatch.setattr("maverick.llm._feed_circuit", lambda *args: observed.append("circuit"))
+        monkeypatch.setattr("maverick.llm._note_bandit", lambda *args: observed.append("routing"))
+        monkeypatch.setattr("maverick.provider_health.get", lambda: SimpleNamespace(record=lambda *args, **kwargs: observed.append("health")))
+        monkeypatch.setattr("maverick.llm._run_preflight", lambda *args, **kwargs: None)
+        monkeypatch.setattr("maverick.llm._enforce_provider_cap", lambda *args, **kwargs: None)
+        monkeypatch.setattr(LLM, "_get_client", lambda self, provider: self._unused_client)
+        client = SimpleNamespace(complete=lambda **kwargs: pytest.fail("A refused call cannot reach the provider"))
+
+        def refuse(*args, **kwargs):
+            raise error
+
+        monkeypatch.setattr("maverick.llm._reserve_provider_call", refuse)
+        llm = LLM(model="anthropic:claude-sonnet-4-6")
+        llm._unused_client = client
+        for _ in range(5):
+            with pytest.raises(type(error)):
+                method = llm.complete_async if asynchronous else llm.complete
+                result = method("sys", [{"role": "user", "content": "hi"}], budget=Budget(max_dollars=100.0))
+                if asynchronous:
+                    asyncio.run(result)
+        assert observed == []  # A local refusal neither trips nor resets shared health.
+
     def test_complete_feeds_circuit_success_false_for_budget_exceeded(self, monkeypatch):
         from maverick.budget import Budget, BudgetExceeded
         from maverick.llm import LLM

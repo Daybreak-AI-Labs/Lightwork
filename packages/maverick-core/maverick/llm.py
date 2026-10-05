@@ -811,6 +811,12 @@ def _add_tool_choice(
             type(client).__name__, method)
 
 
+def _local_provider_accounting_refusal(exc: BaseException | None) -> bool:
+    from .provider_cost_cap import ProviderAccountingUnavailable, ProviderCapExceeded
+
+    return isinstance(exc, (ProviderAccountingUnavailable, ProviderCapExceeded))
+
+
 def _is_provider_transport_failure(exc: BaseException) -> bool:
     """True only for a genuine provider-transport failure (429/5xx/timeout/
     connection) -- never for a LOCAL guard (budget, model-not-allowed,
@@ -824,7 +830,7 @@ def _is_provider_transport_failure(exc: BaseException) -> bool:
     goal and tenant sharing this process -- one tenant's quota problem
     should never degrade another's.
     """
-    if isinstance(exc, (BudgetExceeded, ModelNotAllowedError)):
+    if isinstance(exc, (BudgetExceeded, ModelNotAllowedError)) or _local_provider_accounting_refusal(exc):
         return False
     try:
         from .preflight import PreflightFailed
@@ -859,6 +865,19 @@ def _feed_circuit(provider: str, error: bool) -> None:
         br.record_failure() if error else br.record_success()
     except Exception:  # pragma: no cover -- breaker never blocks a call
         pass
+
+
+def _observe_provider_result(provider, model_id, latency_ms, dollars, error, exception):
+    # A local accounting refusal is neither provider failure nor success.
+    if _local_provider_accounting_refusal(exception):
+        return
+    try:
+        from .provider_health import get
+        get().record(provider, model_id, latency_ms=latency_ms, dollars=dollars, error=error)
+    except Exception:  # pragma: no cover -- never fail on stats
+        pass
+    _note_bandit(provider, model_id, error, dollars)
+    _feed_circuit(provider, error)
 
 
 def _circuit_open(provider: str) -> bool:
@@ -2117,14 +2136,7 @@ class LLM:
                     _resp,
                     _provider_error,
                 )
-            try:
-                from .provider_health import get as _h
-                _h().record(provider, model_id,
-                            latency_ms=_dt_ms, dollars=_spent, error=_err)
-            except Exception:  # pragma: no cover -- never fail on stats
-                pass
-            _note_bandit(provider, model_id, _err, _spent)
-            _feed_circuit(provider, _err)
+            _observe_provider_result(provider, model_id, _dt_ms, _spent, _err, _provider_error)
             try:
                 from .observability import record_metric as _rm
                 _rm("llm_calls", labels={"provider": provider, "model": model_id})
@@ -2241,6 +2253,7 @@ class LLM:
         _d0 = budget.dollars if budget else 0.0
         _err = False
         _resp = None
+        _provider_error: BaseException | None = None
         # Hold this call's projected cost against the cap BEFORE dispatching, so
         # concurrent sub-agents on a shared budget can't each pass an individual
         # check and then collectively overshoot (a $2.50 cap reached $6+ with a
@@ -2343,6 +2356,7 @@ class LLM:
                     # the race wrapper.
                     raise (e.__cause__ or e) from None
         except BaseException as _exc:
+            _provider_error = _exc
             _err = _provider_failure_flag(_exc)
             raise
         finally:
@@ -2355,14 +2369,7 @@ class LLM:
             # cached-prompt discount per-provider (DeepSeek 0.1x, Gemini 0.25x).
             _spent = _call_spend(_price_spec, _resp, budget, _d0,
                                  getattr(client, "CACHE_READ_MULT", None))
-            try:
-                from .provider_health import get as _h
-                _h().record(provider, model_id,
-                            latency_ms=_dt_ms, dollars=_spent, error=_err)
-            except Exception:  # pragma: no cover
-                pass
-            _note_bandit(provider, model_id, _err, _spent)
-            _feed_circuit(provider, _err)
+            _observe_provider_result(provider, model_id, _dt_ms, _spent, _err, _provider_error)
             try:
                 from .observability import record_metric as _rm
                 _rm("llm_calls", labels={"provider": provider, "model": model_id})
