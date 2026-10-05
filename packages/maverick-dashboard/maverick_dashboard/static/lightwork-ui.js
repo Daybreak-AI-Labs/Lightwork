@@ -1614,7 +1614,10 @@
       document.querySelectorAll('.navgrp__toggle').forEach(function(btn) {
         const grp = btn.getAttribute('data-grp');
         const hasActive = btn.parentElement.querySelector('a.active');
-        const open = !!expanded[grp] || !!hasActive;
+        // An area the role's preset opens (areas navigation) starts open
+        // until the person closes it.
+        const preset = btn.getAttribute('data-grp-open') === 'true' && expanded[grp] !== false;
+        const open = !!expanded[grp] || !!hasActive || preset;
         btn.setAttribute('aria-expanded', open ? 'true' : 'false');
         btn.addEventListener('click', function() {
           const nowOpen = btn.getAttribute('aria-expanded') === 'true';

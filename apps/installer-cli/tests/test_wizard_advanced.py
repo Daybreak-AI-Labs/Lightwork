@@ -1240,6 +1240,38 @@ def test_the_glass_question_defaults_to_off(monkeypatch):
     assert advanced["dashboard_glass"] is False
 
 
+def test_navigation_areas_are_written_only_when_chosen(tmp_path, monkeypatch):
+    # The classic sidebar is the default, so only a deliberate "yes" reaches
+    # config.toml -- as the values the dashboard reads.
+    on = _write(tmp_path, monkeypatch, {"dashboard_navigation": "areas", "dashboard_navigation_personal": True})
+    table = tomllib.loads(on)["dashboard"]
+    assert (table["navigation"], table["navigation_personal"]) == ("areas", True)
+    off = _write(tmp_path, monkeypatch, {"dashboard_navigation": "classic", "dashboard_navigation_personal": False})
+    assert {"navigation", "navigation_personal"}.isdisjoint(tomllib.loads(off).get("dashboard", {}))
+    from maverick_dashboard.navigation_api import NAVIGATION_MODES
+    assert table["navigation"] in NAVIGATION_MODES
+
+
+def test_the_navigation_questions_default_to_the_classic_sidebar(monkeypatch):
+    from maverick_installer import wizard
+
+    asked = {}
+
+    def confirm(question, *, default=False):
+        if "sidebar" in question.lower():
+            asked[question.split("?")[0]] = default
+        return default
+
+    monkeypatch.setattr(wizard, "_q_confirm", confirm)
+    monkeypatch.setattr(wizard, "_q_select", lambda *args, default=None, **kwargs: default)
+    monkeypatch.setattr(wizard, "_q_text", lambda *args, default="", **kwargs: default)
+    monkeypatch.setattr(wizard, "_q_checkbox", lambda *args, default=None, **kwargs: default or [])
+    advanced = wizard.pick_advanced()
+    assert len(asked) == 2 and not any(asked.values())
+    assert advanced["dashboard_navigation"] == "classic"
+    assert advanced["dashboard_navigation_personal"] is False
+
+
 def test_model_discovery_decline_is_written_and_accept_is_the_default(tmp_path, monkeypatch):
     # Settings > Models discovers reachable models by default, so only a
     # deliberate "no" reaches config.toml, alongside any per-role picks.

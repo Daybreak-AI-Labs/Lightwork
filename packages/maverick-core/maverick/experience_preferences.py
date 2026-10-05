@@ -24,13 +24,19 @@ DEFAULTS = {
     "today_days": "7", "template_favorites": [],
     "notification_preferences": {},
     "conversation_mode": "queue", "conversation_detail": "balanced",
+    # Navigation style ("" follows the installation's [dashboard] navigation;
+    # used only while [dashboard] navigation_personal lets people choose) and
+    # the person's own order of sidebar areas ([] = their role's preset).
+    "navigation": "", "navigation_areas": [],
 }
-PERSONAL_ONLY = frozenset({"preferred_name", "favorites", "today_cards", "today_days", "template_favorites", "start_page", "notification_preferences"})
+PERSONAL_ONLY = frozenset({"preferred_name", "favorites", "today_cards", "today_days", "template_favorites", "start_page", "notification_preferences",
+                           "navigation", "navigation_areas"})
 CHOICES = {"interface_language": {"", "en", "fr", "de", "ja", "zh", "ar"},
            "conversation_mode": {"queue", "guidance", "independent"},
            "conversation_detail": {"brief", "balanced", "detailed"}, "verbosity": {"brief", "balanced", "detailed"},
            "font": {"default", "dyslexic"}, "density": {"comfortable", "compact"},
-           "text_size": {"standard", "large", "larger"}, "glass": {"off", "on"}, "today_days": {"1", "7", "30"}}
+           "text_size": {"standard", "large", "larger"}, "glass": {"off", "on"}, "today_days": {"1", "7", "30"},
+           "navigation": {"", "classic", "areas"}}
 
 
 class PreferenceConflict(ValueError):
@@ -150,7 +156,7 @@ def _validate(key: str, value):
         raise ValueError("Choose a supported writing tone.")
     elif key == "output_style" and value not in {"", "custom", *BUILTIN_STYLES}:
         raise ValueError("Choose an available output style.")
-    elif key in {"favorites", "today_cards", "template_favorites"}:
+    elif key in {"favorites", "today_cards", "template_favorites", "navigation_areas"}:
         if not isinstance(value, list) or len(value) > 30 or not all(isinstance(v, str) and len(v) < 180 for v in value):
             raise ValueError("Choose up to 30 named destinations.")
         return list(dict.fromkeys(value))

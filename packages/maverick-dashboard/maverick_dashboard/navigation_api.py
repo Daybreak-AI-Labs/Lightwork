@@ -14,8 +14,8 @@ from __future__ import annotations
 import hmac
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException, Query, Request
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, Form, HTTPException, Query, Request
+from fastapi.responses import JSONResponse, RedirectResponse
 from maverick import experience_preferences as preferences
 from pydantic import BaseModel, Field
 
@@ -269,3 +269,204 @@ def people_results(request: Request, q: str = Query("", max_length=200)) -> JSON
              "href": "/users"}
             for person in people if all(term in person["label"].casefold() for term in terms)]
     return JSONResponse({"people": rows[:PEOPLE_LIMIT], "total": len(rows)}, headers=_PRIVATE)
+
+
+# -- The job-named navigation ("areas") ---------------------------------------
+# ``[dashboard] navigation`` picks the sidebar for everyone: "classic" (the
+# default, the registry groups) or "areas" (one entry per job, see
+# ui_visibility.AREAS). ``[dashboard] navigation_personal`` lets each person
+# choose their own in Your preferences. Nothing here changes who may open a
+# page: areas are built from the page finder's destinations.
+NAVIGATION_MODES = ("classic", "areas")
+
+
+def navigation_settings() -> tuple[str, bool]:
+    """The installation's navigation style and whether people may choose."""
+    from maverick import config
+
+    try:
+        table = config.load_config().get("dashboard", {})
+    except Exception:  # unreadable configuration: the classic sidebar
+        return "classic", False
+    mode = table.get("navigation")
+    return (mode if mode in NAVIGATION_MODES else "classic"), table.get("navigation_personal") is True
+
+
+def navigation_choice(request: Request) -> tuple[str, list[str]]:
+    """This person's navigation style and their own order of sidebar areas
+    ([] = their role's preset)."""
+    mode, personal = navigation_settings()
+    try:
+        principal = auth.caller_principal(request)
+        if not principal or not preferences.enabled():
+            return mode, []
+        values = _state(request, principal)["values"]
+    except Exception:  # unreadable preferences: the installation's choice
+        return mode, []
+    chosen = values.get("navigation", "")
+    if personal and chosen in NAVIGATION_MODES:
+        mode = chosen
+    layout = values.get("navigation_areas") or []
+    return mode, list(layout) if isinstance(layout, list) else []
+
+
+def area_context(request: Request, role, finder_pages, off_pages, can_turn_on) -> dict:
+    """The template values for the navigation style: ``nav_mode`` always;
+    in areas mode also ``nav_areas`` (the areas, and where this page sits)."""
+    try:
+        mode, layout = navigation_choice(request)
+    except Exception:  # shell rendering stays on the classic sidebar
+        mode, layout = "classic", []
+    if mode != "areas":
+        return {"nav_mode": "classic", "nav_areas": None}
+    from .ui_visibility import area_nav, page_for, place
+
+    nav = area_nav(finder_pages, role, off=off_pages, can_turn_on=can_turn_on, layout=layout)
+    shown = {area["title"] for area in nav["sidebar"]}
+    nav["hidden"] = [area for area in nav["by_title"].values() if area["sidebar"] and area["title"] not in shown]
+    nav["here"] = None
+    for area in nav["by_title"].values():  # link straight to an address's new home
+        area["href"] = redirect_target(area["href"]) or area["href"]
+        for section in area["sections"]:
+            section["href"] = redirect_target(section["href"]) or section["href"]
+            for link in section["links"]:
+                link["href"] = redirect_target(link["href"]) or link["href"]
+    page = page_for("/today" if request.url.path == "/home" else request.url.path)
+    spot = place(page["path"]) if page else None
+    area = nav["by_title"].get(spot[0]) if spot else None
+    if area is not None:
+        section = next((item for item in area["sections"] if item["title"] == spot[1]), None)
+        nav["here"] = {"area": area, "section": section, "path": redirect_target(page["path"]) or page["path"],
+                       "label": page["label"], "hub": page["path"] == area["hub"]}
+    # Ctrl+K shows each page as "Area › Section".
+    for group in finder_pages:
+        for link in group["links"]:
+            spot = place(link["href"])
+            if spot is not None:
+                link["area"], link["section"] = spot
+    return {"nav_mode": "areas", "nav_areas": nav}
+
+
+# Old addresses that move in areas mode (report section 5): (old, new, ready,
+# why it waits). In classic mode none fires. A redirect fires in areas mode
+# only once its new address holds the old page's job; until the merge it
+# depends on is built, sending people there would hide the old page's
+# content, so it waits. Two more need a decision first and are not listed:
+# /goal-builder (compose-form field parity) and /flows/designer (product
+# decision). A held redirect also needs areas_redirect() called in its old
+# page's handler when it is switched on.
+REDIRECTS: tuple[tuple[str, str, bool, str], ...] = (
+    ("/today", "/home", True, ""),
+    ("/me", "/home", False, "Home does not yet show My work's questions, spending and chat accounts."),
+    ("/overview", "/home", False, "Home does not yet show the Overview's activity and statistics."),
+    ("/action-center", "/approvals?view=all", False, "Approvals does not yet hold the Action Center's other kinds."),
+    ("/my-work", "/goals?owner=me&include=background", False, "Tasks does not yet list background work."),
+    ("/plan-tree-3d", "/graph-editor?view=3d", False, "The task map has no 3D view yet."),
+    ("/tasks/{id}/diagnostics", "/goals/{id}/diagnostics", True, ""),
+    ("/project-workspaces", "/projects", False, "Projects does not yet hold project workspaces."),
+    ("/project-workspaces/{id}", "/projects/{id}?tab=plan", False, "A project has no Plan tab yet."),
+    ("/run-tree", "/replay?tab=branches", False, "Task replay has no Branches tab yet."),
+    ("/walkthroughs", "/replay?tab=video", False, "Task replay has no Video tab yet."),
+    ("/trust", "/external-agents?tab=access", False, "Outside agents has no Access tab yet."),
+    ("/discovery", "/permissions?tab=inventory", False, "Permissions has no Inventory tab yet."),
+    ("/autonomous-compliance", "/compliance?tab=overview", False, "Compliance has no Overview tab yet."),
+    ("/cortex", "/knowledge-access", False, "Retire only after checking whether anyone uses its diagnostics."),
+)
+
+
+def redirect_target(path: str) -> str | None:
+    """The new address for ``path`` among the ready redirects, or None."""
+    parts = path.rstrip("/").split("/") if path != "/" else [""]
+    for old, new, ready, _why in REDIRECTS:
+        pattern = old.split("/")
+        if not ready or len(pattern) != len(parts):
+            continue
+        values = {}
+        for want, got in zip(pattern, parts, strict=True):
+            if want == "{id}" and got.isdigit():
+                values["id"] = got
+            elif want != got:
+                break
+        else:
+            return new.replace("{id}", values.get("id", ""))
+    return None
+
+
+def areas_on(request: Request) -> bool:
+    try:
+        return navigation_choice(request)[0] == "areas"
+    except Exception:  # unreadable choice: the classic addresses
+        return False
+
+
+def areas_redirect(request: Request) -> RedirectResponse | None:
+    """In areas mode, the redirect from an old address to its new one; in
+    classic mode (the default) always None, so old addresses stay as they are."""
+    target = redirect_target(request.url.path)
+    if target is None or not areas_on(request):
+        return None
+    return RedirectResponse(target, status_code=303)
+
+
+def preset_start(request: Request) -> str | None:
+    """In areas mode, the start page of the person's role preset, when they
+    have not chosen their own and may open it; otherwise None."""
+    context = _app()._nav_context(request)
+    nav = context.get("nav_areas")
+    if context.get("nav_mode") != "areas" or not nav:
+        return None
+    # Home serves the Today page, so whoever may open Today may open Home.
+    probe = "/today" if nav["start"] == "/home" else nav["start"]
+    return nav["start"] if context["can_open_page"](probe) else None
+
+
+def _arranged(layout: list[str], op: str, area: str) -> list[str]:
+    if op == "reset":
+        return []
+    if op == "hide":
+        return [title for title in layout if title != area]
+    if op == "show":
+        return layout if area in layout else [*layout, area]
+    return _moved(layout, op, area)
+
+
+@router.post("/navigation/areas", include_in_schema=False)
+def arrange_areas(
+    request: Request,
+    op: Literal["up", "down", "hide", "show", "reset"] = Form(...),
+    area: str = Form("", max_length=40),
+    context: str = Form(..., max_length=128),
+    back: str = Form("/", max_length=2048),
+) -> RedirectResponse:
+    """Move, hide or show one sidebar area for this person (or go back to
+    their role's layout), then return to the page they were on. Only the
+    order and visibility of entries change; floors still decide every page."""
+    from .preferences_api import _principal
+
+    app = _app()
+    app._require_same_origin(request)
+    principal = _principal(request)
+    if not _check_context(request, context):
+        raise HTTPException(409, "The account or workspace changed. Reload the page before arranging areas.")
+    nav = app._nav_context(request).get("nav_areas")
+    if not nav:
+        raise HTTPException(409, "Areas navigation is not turned on for your account.")
+    offered = [item["title"] for item in nav["sidebar"]]
+    if op != "reset" and area not in {*offered, *(item["title"] for item in nav["hidden"])}:
+        raise HTTPException(403, "Only areas you can open can be arranged.")
+    if op == "hide" and offered == [area]:
+        raise HTTPException(422, "Keep at least one area in the sidebar.")
+    for attempt in (1, 2):
+        state = preferences.state(principal)
+        try:
+            preferences.save(principal, scope="personal",
+                             changes={"navigation_areas": _arranged(offered, op, area)},
+                             expected_revision=state["revision"])
+            break
+        except preferences.PreferenceConflict as exc:
+            if attempt == 2:
+                raise HTTPException(409, "Your areas changed in another window. Reload and try again.") from exc
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+    target = back if back.startswith("/") and not back.startswith("//") and "\\" not in back else "/"
+    return RedirectResponse(target, status_code=303)

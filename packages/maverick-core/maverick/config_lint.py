@@ -225,6 +225,8 @@ KNOWN_SCHEMA: dict[str, set[str] | None] = {
         "theme",
         "density",
         "glass",
+        "navigation",
+        "navigation_personal",
         "allow_extension",
         "compress",
         "themes",

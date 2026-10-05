@@ -121,7 +121,7 @@ from .i18n_journeys import region as _journey_region
 from .i18n_journeys import text as _journey_text
 from .model_tests_api import router as model_tests_router
 from .my_work_api import router as my_work_router
-from .navigation_api import GO_TO_KEYS, command_list, personal_view
+from .navigation_api import GO_TO_KEYS, area_context, command_list, personal_view
 from .navigation_api import router as navigation_router
 from .oidc_login import router as oidc_login_router
 from .outcome_accounting_api import router as outcome_accounting_router
@@ -705,6 +705,9 @@ def _nav_context(request: Request) -> dict:
                                      can_open_page=can_open_page, global_admin=viewer_global_admin,
                                      personal=personal),
         "nav_go_to_keys": GO_TO_KEYS,
+        # The navigation style ("classic" or "areas") and, in areas mode, the
+        # areas and where this page sits in them.
+        **area_context(request, role, finder, switched_off, viewer_global_admin),
     }
 
 
@@ -769,6 +772,8 @@ templates.env.globals.setdefault("service_status", None)
 templates.env.globals.setdefault("nav_groups", [])
 templates.env.globals.setdefault("finder_pages", [])
 templates.env.globals.setdefault("can_open_page", lambda path: False)
+templates.env.globals.setdefault("nav_mode", "classic")
+templates.env.globals.setdefault("nav_areas", None)
 
 
 def _set_theme_cookie(response, theme: str) -> None:
@@ -10357,7 +10362,13 @@ async def home(request: Request) -> HTMLResponse | RedirectResponse:
         from .preferences_api import _state
 
         try:
-            start = (await run_in_threadpool(_state, request))["values"]["start_page"]
+            start_state = await run_in_threadpool(_state, request)
+            start = start_state["values"]["start_page"]
+            if start_state["sources"].get("start_page") == "product default":
+                # Areas navigation starts each role on its preset's page.
+                from .navigation_api import preset_start
+
+                start = await run_in_threadpool(preset_start, request) or start
             if start != "/chat" and start != "/":
                 return RedirectResponse(start, status_code=303)
         except (HTTPException, ValueError, OSError):

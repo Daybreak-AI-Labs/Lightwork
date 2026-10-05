@@ -69,12 +69,14 @@ def preferences_page(request: Request, thread: int | None = None):
     from maverick.persona import load_persona, style_choices
     from maverick.styles import BUILTIN_STYLES
 
+    from .navigation_api import navigation_settings
     from .preference_memory import describe
 
     state = _state(request, thread)
     return _app().templates.TemplateResponse(request, 'preferences.html', {
         "preference_state": state, "preference_thread": thread, "tones": style_choices(),
         "memory_preferences": describe(request) if thread is None else None,
+        "navigation_choice": navigation_settings()[1],
         "output_styles": BUILTIN_STYLES, "preference_themes": [("system", "Follow system")] + [(name, {"light": "Light", "dark": "Dark", "solarized": "Solarized", "hicontrast": "High contrast"}.get(name, name)) for name in sorted(_app()._valid_theme_names())], "legacy_name": load_persona().get("user_name", "") if auth.has_global_permission(request, "admin") else "",
     }, headers={"Cache-Control": "private, no-store"})
 
@@ -315,9 +317,25 @@ def resolved_display(request: Request, key: str, fallback: str | None = None):
 
 @router.get('/today')
 def today_page(request: Request):
+    from .navigation_api import areas_redirect
     from .today_projection import project
+
+    moved = areas_redirect(request)
+    if moved is not None:
+        return moved
     model = _state(request)
     return _app().templates.TemplateResponse(request, 'today.html', {
         'today_preferences': model, 'today': project(request, _app()._world(), model),
         'today_decisions_allowed': auth.has_permission(request, 'operate'),
     }, headers={'Cache-Control': 'private, no-store'})
+
+
+@router.get('/home')
+def home_page(request: Request):
+    """Home in the job-named navigation: today's work, decisions, results and
+    pins (the Today page). The address exists only in areas mode."""
+    from .navigation_api import areas_on
+
+    if not areas_on(request):
+        raise HTTPException(404, "Not Found")
+    return today_page(request)

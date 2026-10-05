@@ -20,10 +20,11 @@
          data-label="{{ _link.label }}|{{ ut(_link.label) }}"
          data-heading="{{ _heading }}{% if _heading %}|{{ ut(_heading) }}{% endif %}"
          data-synonyms="{{ _synonyms }}"
-         data-search="{{ _link.label }} {{ ut(_link.label) }} {{ _group_labels.get(_group.label, _group.label) }} {{ ut(_group_labels.get(_group.label, _group.label)) }} {{ _group.label }} {{ _link.href }} {{ _link.aliases }} {{ _heading }} {{ _synonyms | replace('|', ' ') }}">
+         data-search="{{ _link.label }} {{ ut(_link.label) }} {{ _group_labels.get(_group.label, _group.label) }} {{ ut(_group_labels.get(_group.label, _group.label)) }} {{ _group.label }} {{ _link.href }} {{ _link.aliases }} {{ _heading }} {{ _synonyms | replace('|', ' ') }}{% if _link.area %} {{ _link.area }} {{ ut(_link.area) }} {{ _link.section }} {{ ut(_link.section) }}{% endif %}">
         <span class="navfinder__label">{{ ui(_link.label) }}</span>
-        {# Where the page lives: "Area › Page", and its go-to keys if it has them. #}
-        <span class="navfinder__group">{{ ui(_group_labels.get(_group.label, _group.label)) }} › {{ ui(_link.label) }}{% for _key, _href, _label in _go_to_keys if _href == _link.href %} <span class="navfinder__keys" aria-hidden="true"><kbd>G</kbd> <kbd>{{ _key | upper }}</kbd></span>{% endfor %}</span>
+        {# Where the page lives: "Group › Page" ("Area › Section" with the
+           areas navigation), and its go-to keys if it has them. #}
+        <span class="navfinder__group">{% if _link.area %}{{ ui(_link.area) }} › {{ ui(_link.section) }}{% else %}{{ ui(_group_labels.get(_group.label, _group.label)) }} › {{ ui(_link.label) }}{% endif %}{% for _key, _href, _label in _go_to_keys if _href == _link.href %} <span class="navfinder__keys" aria-hidden="true"><kbd>G</kbd> <kbd>{{ _key | upper }}</kbd></span>{% endfor %}</span>
       </a>
     </li>
   {% endfor %}

@@ -18,7 +18,7 @@
 {%- endmacro %}
 {# The five most-used pages sit above the groups so a first visit never
    lands on closed headers alone. Only pages the caller may see appear. #}
-{% set _quick_hrefs = ['/chat', '/goals', '/approvals', '/deliverables', '/settings'] %}
+{% set _quick_hrefs = ['/chat', '/goals', '/approvals', '/deliverables', '/settings'] if nav_mode != 'areas' else [] %}
 {% set _path = request.url.path if request else '' %}
 {# The dashboard lands on /chat, so highlight Chat when at the bare root. #}
 {% set _active_path = '/chat' if _path == '/' else ('/workflows' if _path.startswith('/flows/') else _path) %}
@@ -87,7 +87,7 @@
 </div>
   {% endif %}
 {% endif %}
-{% for _group in nav_groups %}
+{% for _group in (nav_groups if nav_mode != 'areas' else []) %}
   <div class="navgrp">
     <button type="button" class="navgrp__toggle" data-grp="{{ _group.label }}"
             aria-expanded="true" aria-controls="navgrp-{{ loop.index0 }}">
@@ -102,4 +102,4 @@
       {% endfor %}
     </ul>
   </div>
-{% endfor %}
+{% endfor %}{% if nav_mode == 'areas' and nav_areas %}{% include "_sidebar_areas.html" %}{% endif %}

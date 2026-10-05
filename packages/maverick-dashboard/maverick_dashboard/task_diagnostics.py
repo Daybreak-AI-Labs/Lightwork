@@ -8,7 +8,7 @@ import secrets
 import time
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Request, Response
+from fastapi import APIRouter, HTTPException, Request, Response
 from maverick import crypto_at_rest
 from maverick.authority_effects import authority_effect_fence
 from maverick.governed_records import GovernedRecordStore
@@ -65,6 +65,23 @@ def _document(world, goal, identity):
 
 @router.get("/tasks/{goal_id}/diagnostics")
 def page(request: Request, goal_id: int):
+    from .navigation_api import areas_redirect
+
+    _goal(request, goal_id)
+    moved = areas_redirect(request)
+    if moved is not None:
+        return moved
+    return _app().templates.TemplateResponse(request, "task_diagnostics.html", {"goal_id": goal_id, "diagnostic_context": context_for(request)},
+        headers={"Cache-Control": "private, no-store"})
+
+
+@router.get("/goals/{goal_id}/diagnostics")
+def goal_page(request: Request, goal_id: int):
+    """The same report page under its task's address (areas mode only)."""
+    from .navigation_api import areas_on
+
+    if not areas_on(request):
+        raise HTTPException(404, "Not Found")
     _goal(request, goal_id)
     return _app().templates.TemplateResponse(request, "task_diagnostics.html", {"goal_id": goal_id, "diagnostic_context": context_for(request)},
         headers={"Cache-Control": "private, no-store"})
