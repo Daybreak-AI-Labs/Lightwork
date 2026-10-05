@@ -495,7 +495,6 @@ def _with_query(target: str, query: str) -> str:
     """``target`` keeping the old address's own query values (``?goal=7``)."""
     if not query:
         return target
-    from urllib.parse import parse_qsl, urlencode
 
     base, _, own = target.partition("?")
     pairs = parse_qsl(own, keep_blank_values=True)
