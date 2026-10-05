@@ -501,8 +501,9 @@ def _safety(S, C) -> tuple:
                    ("auto-approve", "Allow them all")),
           weaker=True, order=("auto-deny", "dashboard", "ask", "", "auto-approve"),
           env=("MAVERICK_CONSENT_MODE",),
-          aliases="approval approvals approve risky irreversible undo undone permanent",
-          warning="Actions that can't be undone will go ahead with less oversight."),
+          aliases="approval approvals approve risky irreversible undo undone permanent threshold",
+          warning="Actions that can't be undone will go ahead with less oversight.",
+          preview="approval_checks"),
         S("safety", "constitution", "Your own phrases to block",
           "Requests and answers containing any of these words or phrases are treated as a "
           "threat of the level you choose. Separate phrases with commas.", "rules", "Safety",

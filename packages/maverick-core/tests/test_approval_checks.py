@@ -118,3 +118,30 @@ def test_the_read_function_returns_this_workspace_since_a_time(world, monkeypatc
     rows = approval_checks.checks_since(world, 15.0)
     assert rows == [{"checked_at": 20.0, "risk": "high", "action_kind": "email.send",
                      "agent": "", "outcome": "asked"}]
+
+
+def test_the_tally_counts_this_workspace_by_risk_agent_and_outcome(world, monkeypatch):
+    now = 1_800_000_000.0
+    assert approval_checks.first_check_at(world) is None
+    assert approval_checks.tally_since(world, 0) == []
+    for _ in range(3):
+        approval_checks.record_check(world, risk="high", action="shell", outcome="asked", agent="finance_close", now=now - DAY)
+    approval_checks.record_check(world, risk="low", action="email.send", outcome="allowed", now=now - 40 * DAY)
+    approval_checks.record_check(world, risk="low", action="email.send", outcome="allowed", agent="", now=now - 2 * DAY)
+    monkeypatch.setattr(approval_checks, "_workspace", lambda: "other")
+    approval_checks.record_check(world, risk="high", action="shell", outcome="refused", agent="x", now=now - 3 * DAY)
+    approval_checks.record_check(world, risk="high", action="shell", outcome="refused", agent="x", now=now - 90 * DAY)
+    monkeypatch.setattr(approval_checks, "_workspace", lambda: "")
+    assert approval_checks.first_check_at(world) == now - 40 * DAY
+    rows = approval_checks.tally_since(world, now - 30 * DAY)
+    assert sorted((r["risk"], r["agent"], r["outcome"], r["checks"]) for r in rows) == [
+        ("high", "finance_close", "asked", 3), ("low", "", "allowed", 1)]
+
+
+@pytest.mark.parametrize("risk", ["low", "medium", "high", "critical", "", None])
+@pytest.mark.parametrize("configured", ["", "dashboard", "ask", "auto-deny", "auto-approve"])
+def test_the_mode_for_an_unsaved_choice_matches_the_gate_once_saved(world, monkeypatch, tmp_path, risk, configured):
+    from maverick.safety import consent as gate
+    (tmp_path / "config.toml").write_text(f'[safety]\nconsent_mode = "{configured}"\n' if configured else "")
+    config.reset_config_cache()
+    assert gate.installation_mode_for(configured, risk) == gate._installation_mode(risk)
