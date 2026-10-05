@@ -30,7 +30,7 @@
       <p class="muted">Support reference: {{ failure_reference or 'Unavailable' }}</p>
       {% if failure_time %}<p class="muted">Time: {{ failure_time }}</p>{% endif %}
       <p class="muted" style="margin: 0.5rem 0 0;">An administrator can locate this reference in restricted server logs, or prepare a support report on the <a href="/help{% if failure_reference %}?failure={{ failure_reference }}{% endif %}">Help</a> page.</p>
-      <button type="button" class="btn btn--ghost" id="support-copy" data-copy="Support reference: {{ failure_reference or 'Unavailable' }}{% if failure_time %} | Time: {{ failure_time }}{% endif %}">Copy support details</button>
+      <button type="button" class="btn btn--ghost" id="support-copy"{% if failure_reference %} data-failure-reference="{{ failure_reference }}"{% endif %} data-copy="Support reference: {{ failure_reference or 'Unavailable' }}{% if failure_time %} | Time: {{ failure_time }}{% endif %}">Copy support details</button>
     </details>
   {% endif %}
   <script>

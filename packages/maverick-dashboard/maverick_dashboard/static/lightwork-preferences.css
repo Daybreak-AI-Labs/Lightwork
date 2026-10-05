@@ -10,5 +10,11 @@
 .settings-review pre, #settings-tools pre { white-space: pre-wrap; overflow-wrap: anywhere; }
 
 .cs-account .prefs__panel { bottom: 100%; top: auto; left: 0; right: auto; }
+/* The Help menu in the chat sidebar opens across the sidebar's width, above the row. */
+.cs-account { position: relative; }
+.cs-account .help-menu { position: static; }
+.cs-account .help-menu .help-menu__panel { left: 0; right: 0; min-width: 0; }
+.cs-account .help-menu > summary { color: var(--muted); font-size: var(--text-sm); cursor: pointer; }
+.cs-account .help-menu > summary:hover, .cs-account .help-menu[open] > summary { color: var(--text); }
 
 .active-workspace-banner { margin: .5rem 1rem; }

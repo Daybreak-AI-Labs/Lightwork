@@ -262,7 +262,7 @@
     <div class="cs-account">
       <a class="cs-avatar" href="/account" aria-label="{{ t('chrome.account') }}" title="{{ t('chrome.account') }}"{% if lang and page_lang and lang != page_lang %} lang="{{ lang }}"{% endif %}><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="5.5" r="2.6"/><path d="M3 13.5a5 5 0 0 1 10 0"/></svg></a>
       {% if show_settings_link %}<a href="/settings">{{ ui("Settings") }}</a>{% endif %}
-      <a href="/help" aria-label="{{ ut('Help and diagnostics') }}" title="{{ ut('Help and diagnostics') }}" lang="{{ ul('Help and diagnostics') }}">{{ ui('Help') }}</a>
+      {% with help_menu_text=true, help_menu_class='' %}{% include "_help_menu.html" %}{% endwith %}
       <a href="{{ docs_learn_more.url if docs_learn_more else docs_home }}" target="_blank" rel="noopener noreferrer"
          aria-label="Documentation (opens in a new tab)" title="Documentation (opens in a new tab)">Docs</a>
       {% include "_display_preferences.html" %}
@@ -274,6 +274,7 @@
   {% include "_navfinder.html" %}
   <main id="content" tabindex="-1">
     {% include "_halt_banner.html" %}
+    {% include "_service_status_banner.html" %}
     <div class="cs-topbar">
       <button type="button" class="btn btn--ghost" id="cs-menu" aria-controls="cs-side" aria-expanded="false">{{ ui("Menu") }}</button>
       <span class="cs-topbar__title">Lightwork</span>
@@ -456,6 +457,7 @@
   <link rel="stylesheet" href="{{ asset('lightwork-draft-recovery.css') }}">
   <script src="{{ asset('lightwork-draft-recovery.js') }}" defer></script>
   <script src="{{ asset('lightwork-chat-drafts.js') }}" defer></script>
+  <script src="{{ asset('lightwork-help-menu.js') }}" defer></script>
   {% endif %}
   <script src="{{ asset('lightwork-product-operations.js') }}"></script>
   <script src="{{ asset('lightwork-copilot.js') }}"></script>

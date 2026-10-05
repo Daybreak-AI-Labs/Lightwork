@@ -28,7 +28,7 @@ test('Help reviews the actual redacted support report before downloading its exa
   expect(sizes.right).toBeLessThanOrEqual(sizes.width+1);expect(sizes.scroll).toBeLessThanOrEqual(sizes.inner+1);
   // The report's follow-up links and the task bug-report form (added with the
   // same FAB-clearing layout class) must each stay clear of the Copilot button.
-  const followups=page.locator('.support-followups');await expect(followups).toHaveCount(3);
+  const followups=page.locator('.support-followups');await expect(followups).toHaveCount(4);
   const fab=await page.locator('#mv-copilot-fab').boundingBox();
   for(const item of await followups.all()){
     const links=await item.boundingBox();

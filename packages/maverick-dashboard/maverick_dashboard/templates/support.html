@@ -32,6 +32,33 @@
   </section>
   {% elif not support_enabled %}<div class="panel"><p>Support reports are switched off. An administrator can turn them on in Settings.</p><p><a class="btn" href="/goals">Open your tasks</a></p></div>
   {% else %}<div class="panel"><p>Your administrator can make a support report. You can see each task's status and problems on its task page.</p><p><a class="btn" href="/goals">Open your tasks</a></p></div>{% endif %}
+  <section class="panel" id="get-help" aria-labelledby="get-help-title" data-draft-recovery="off">
+    <h2 id="get-help-title">Get Help From a Person</h2>
+    {% if help_request.email %}
+    <p>Your support contact is <a href="mailto:{{ help_request.email }}">{{ help_request.email }}</a>. Review the request below, then open it in your email app or copy it.</p>
+    {% else %}
+    <p>Send this request to your Lightwork administrator: the person who invited you or who looks after Lightwork for your team. Review it below, then copy it into an email or chat message to them.</p>
+    {% endif %}
+    <label for="get-help-body">Your request</label>
+    <textarea class="input" id="get-help-body" rows="12" maxlength="4000" autocomplete="off" data-help-subject="{{ help_request.subject }}" data-help-email="{{ help_request.email }}">{{ help_request.body }}</textarea>
+    <p class="muted">It already says which page you were on{% if help_request.task %}, the task{% endif %}{% if help_request.failure %} and the error reference{% endif %}. Task text and results are not included; add only what you are happy to share. Nothing is sent automatically.</p>
+    <p class="support-followups">
+      <button type="button" class="btn" id="get-help-copy">Copy request</button>
+      {% if help_request.email %}<a class="btn" id="get-help-email" href="mailto:{{ help_request.email }}?subject={{ help_request.subject|urlencode }}&amp;body={{ help_request.body|urlencode }}">Open in your email app</a>{% endif %}
+      {% if help_request.task %}<a class="btn btn--ghost" href="#issue-report">Also prepare a report about this task</a>{% endif %}
+    </p>
+    <p id="get-help-status" role="status" aria-live="polite"></p>
+  </section>
+  <section class="panel" id="how-to" aria-labelledby="how-to-title">
+    <h2 id="how-to-title">How to Do Common Tasks</h2>
+    <p class="muted">Short steps for the tasks people do most. The Help menu on each page opens the steps for that page under “How this works”.</p>
+    {% for topic in help_topics %}
+    <details class="help-topic" id="how-{{ topic.slug }}">
+      <summary>{{ topic.title }} <span class="muted">· {{ topic.persona }}</span></summary>
+      <ol>{% for step in topic.steps %}<li>{{ step }}</li>{% endfor %}</ol>
+    </details>
+    {% endfor %}
+  </section>
   <section class="panel" id="issue-report" aria-labelledby="issue-report-title">
     <h2 id="issue-report-title">Report a Problem With a Task</h2>
     <p class="muted">Choose a task that stopped with a problem. Review the draft here and remove business details before sharing. Recognized passwords and keys are removed. This app has no support inbox set up for task reports; copy or download your reviewed draft, then share it through the support channel your organization gave you. Nothing is sent automatically.</p>
