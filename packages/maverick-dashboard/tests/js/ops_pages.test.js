@@ -1,6 +1,7 @@
 'use strict';
 const {test} = require('node:test'), assert = require('node:assert/strict');
 const fs = require('node:fs'), path = require('node:path'), {JSDOM} = require('jsdom');
+const {shell} = require('./_shell');
 const folder = path.resolve(__dirname, '../../maverick_dashboard');
 
 function read(name) { return fs.readFileSync(path.join(folder, name), 'utf8'); }
@@ -16,6 +17,7 @@ function response(value, status = 200) {
 async function fixture(markup, script, route, {confirm = true, url = 'https://lightwork.example/'} = {}) {
   const dom = new JSDOM('<main>' + markup + '</main>', {url, runScripts: 'outside-only'});
   const {window} = dom, calls = [], confirms = [], opened = [];
+  shell(window);
   window.fetch = async (u, options = {}) => { calls.push({url: u, options}); return route(u, options); };
   window.mvConfirm = async (message) => { confirms.push(message); return confirm; };
   window.mvErrorText = (failure, action) => 'Could not ' + action + '.';

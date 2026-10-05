@@ -19,8 +19,7 @@
     if (checking) return checking;
     checking = (async function () {
       try {
-        var response = await fetch('/api/v1/chat/goal/' + root.dataset.goal + '/permissions', {credentials: 'same-origin', cache: 'no-store'});
-        var body = response.ok ? await response.json() : null;
+        var body = await window.mvFetchJSON('/api/v1/chat/goal/' + root.dataset.goal + '/permissions', {cache: 'no-store'}).catch(function () { return null; });
         allowed = !!(body && body.can_operate === true);
         reason = body && typeof body.reason === "string" ? body.reason : "";
       } catch (_) { allowed = false; reason = ""; }

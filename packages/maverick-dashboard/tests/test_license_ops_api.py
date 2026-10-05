@@ -138,7 +138,7 @@ def test_page_offers_every_control_in_plain_language(client, signing):
     for word in BANNED:
         assert word not in text, word
     assert signing[0] not in page.text
-    assert '<script src="/static/lightwork-license.js"></script>' in page.text
+    assert '<script src="/static/lightwork-license.js" defer></script>' in page.text
     script = client.get("/static/lightwork-license.js")
     assert script.status_code == 200
     assert script.headers["content-type"].startswith("application/javascript")

@@ -209,7 +209,7 @@
       }
       function say(el, text, bad) {
         el.style.color = bad ? 'var(--danger)' : 'var(--muted)';
-        el.textContent = text;
+        if (window.mvStatus) window.mvStatus(el, text, {error: !!bad}); else el.textContent = text;
       }
       document.querySelectorAll('form.fleet-run-form').forEach(function(form) {
         // Past runs of the chosen agent, from the recorded costs on its option.

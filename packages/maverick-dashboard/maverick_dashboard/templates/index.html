@@ -71,12 +71,8 @@
     <div class="bd-toolbar">
       <span class="bd-live"><span class="dot" aria-hidden="true"></span>Live
         <span class="bd-stamp" id="bd-stamp" role="status" aria-live="off">loading…</span></span>
-      <div class="bd-slicer" role="group" aria-label="Time range">
-        <button type="button" data-days="30" aria-pressed="false">30d</button>
-        <button type="button" data-days="90" class="on" aria-pressed="true">90d</button>
-        <button type="button" data-days="180" aria-pressed="false">180d</button>
-        <button type="button" data-days="365" aria-pressed="false">1y</button>
-      </div>
+      {% from "_tabs.html" import panel_tabs %}
+      {{ panel_tabs('Time range', [('30', '30d'), ('90', '90d'), ('180', '180d'), ('365', '1y')], '90', id='bd-range', data='days', controls=false, activation='manual') }}
     </div>
 
     {% from "_board_kpis.html" import kpi_row %}

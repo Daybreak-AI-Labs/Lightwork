@@ -7,14 +7,8 @@
   const clear=()=>{lost=true;serial++;panel.replaceChildren(node('p','Access or workspace changed. Reload Connections.'));};
   document.addEventListener('lightwork:workspace-changed',clear);document.addEventListener('lightwork:connection-access-lost',clear);
   async function request(name,path,body){
-    const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),20000);
-    try{
-      const response=await fetch('/api/v1/connections/'+encodeURIComponent(name)+path,{method:body?'POST':'GET',headers:{'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined,cache:'no-store',signal:controller.signal});
-      const result=await response.json().catch(()=>({}));
-      if(response.status===401||response.status===403){clear();document.dispatchEvent(new Event('lightwork:connection-access-lost'));}
-      if(!response.ok)throw new Error(typeof result.detail==='string'?result.detail:'The connection review is unavailable. Refresh the page and try again.');
-      return result;
-    }finally{clearTimeout(timer);}
+    return window.mvFetchJSON('/api/v1/connections/'+encodeURIComponent(name)+path,{method:body?'POST':'GET',body,cache:'no-store',timeout:20000,plainDetail:true,
+      onAccess:()=>{clear();document.dispatchEvent(new Event('lightwork:connection-access-lost'));}},body?'review the connection change':'load the connection review');
   }
   function button(label,fn){const item=node('button',label);item.className='btn';item.type='button';item.addEventListener('click',fn);return item;}
   function render(value){

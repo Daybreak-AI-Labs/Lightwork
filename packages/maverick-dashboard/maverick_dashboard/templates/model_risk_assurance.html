@@ -1250,15 +1250,10 @@ window.mraFailure = response => {
   const when = ts => (typeof window.mvWhen === "function" ? window.mvWhen(ts) : "");
   const status = (id, message) => {
     const element = document.getElementById(id);
-    if (element) element.textContent = String(message || "").slice(0, 280);
+    if (element && window.mvStatus) window.mvStatus(element, String(message || "").slice(0, 280));
+    else if (element) element.textContent = String(message || "").slice(0, 280);
   };
-  const call = async (path, options) => {
-    let response;
-    try { response = await fetch(prefix + path, Object.assign({credentials: "same-origin"}, options || {})); }
-    catch (networkError) { throw networkError; }
-    if (!response.ok) throw window.mraFailure(response);
-    return response.json();
-  };
+  const call = (path, options) => window.mvFetchJSON(prefix + path, options || {});
   const post = (path, body) => call(path, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
   const slug = text => String(text || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 100);
   const cell = (row, value) => { const td = document.createElement("td"); td.textContent = String(value ?? "—"); row.appendChild(td); return td; };
@@ -1430,7 +1425,8 @@ window.mraFailure = response => {
       baselineSelect.replaceChildren(new Option("Saved patterns could not be loaded", ""));
     }
   };
-  loadBaselines();
+  // The shell's helpers (lightwork-ui.js) load after the page content.
+  if (window.mvFetchJSON) loadBaselines(); else document.addEventListener("DOMContentLoaded", loadBaselines);
   const baseline = document.getElementById("drift-baseline-create");
   if (baseline) baseline.addEventListener("submit", async event => {
     event.preventDefault(); const fields = new FormData(baseline); const button = baseline.querySelector('button[type="submit"]'); button.disabled = true;

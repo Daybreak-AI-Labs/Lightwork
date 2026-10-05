@@ -1,6 +1,7 @@
 const test=require('node:test'),assert=require('node:assert/strict');
 const fs=require('node:fs'),path=require('node:path');
 const {JSDOM}=require('jsdom');
+const {shell} = require('./_shell');
 const root=path.join(__dirname,'../../maverick_dashboard');
 const code=fs.readFileSync(path.join(root,'static/lightwork-personal-data.js'),'utf8');
 function boot(reply){
@@ -8,7 +9,7 @@ function boot(reply){
   const dom=new JSDOM(html,{url:'https://local.example/my-data',runScripts:'outside-only'}),w=dom.window;
   const state={context:'a'.repeat(64),identity:{channels:['dashboard'],links:[],challenges:[]},sharing:{shared_source:'',revision:1},scopes:[{id:'own',channel:'dashboard',user_id:'employee',recall:false,revision:1,notes:[]}],policy:{personal_recall:false,effective_learning:{}},can_review_deletion:false};
   w.document.getElementById('pd-bootstrap').textContent=JSON.stringify(state);
-  let calls=0;w.fetch=async()=>{calls++;return reply(state);};w.confirm=()=>true;w.eval(code);
+  shell(w);let calls=0;w.fetch=async()=>{calls++;return reply(state);};w.confirm=()=>true;w.eval(code);
   const privateEditor=w.document.createElement('textarea');privateEditor.value='Unfinished private correction';w.document.getElementById('pd-memory').append(privateEditor);
   w.document.getElementById('pd-stores').textContent='Private retained account inventory';
   return {dom,w,privateEditor,calls:()=>calls};

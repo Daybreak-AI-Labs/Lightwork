@@ -1191,8 +1191,7 @@
     }
   }
   function loadRoi(type) {
-    fetch('/api/v1/assess/question-roi?type=' + encodeURIComponent(type))
-      .then(function (r) { if (!r.ok) throw r; return r.json(); })
+    window.mvFetchJSON('/api/v1/assess/question-roi?type=' + encodeURIComponent(type))
       .then(function (d) { roiAll = false; renderRoiTable(d); })
       .catch(function (e) {
         $('pb-roi').textContent = '';
@@ -1243,10 +1242,7 @@
       (window.mvTimeAbsolute ? window.mvTimeAbsolute(Date.now()) : new Date().toLocaleTimeString()) + ' · updates every minute';
   }
   function load() {
-    fetch(API).then(function (r) {
-      if (!r.ok) throw r;
-      return r.json();
-    }).then(function (d) {
+    window.mvFetchJSON(API).then(function (d) {
       DATA = d;
       stamp();
       renderAll();
@@ -1283,7 +1279,8 @@
   setInterval(function () {
     if (!document.hidden) load();
   }, 60000);
-  load();
+  // The shell's helpers (lightwork-ui.js) load after the page content.
+  if (window.mvFetchJSON) load(); else document.addEventListener('DOMContentLoaded', load);
 })();
 </script>
 {% endblock %}

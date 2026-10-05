@@ -21,7 +21,7 @@
     if (text != null) node.textContent = text;
     return node;
   }
-  function say(text, id) { const node = $(id || 'ft-status'); if (node) node.textContent = text; }
+  function say(text, id) { window.mvStatus($(id || 'ft-status'), text); }
   function human(value) { return typeof window.mvHuman === 'function' ? window.mvHuman(value) : String(value).replace(/[_.-]+/g, ' '); }
   function failText(failure, what) {
     return typeof window.mvErrorText === 'function' ? window.mvErrorText(failure, what) : 'Could not ' + what + '. Please try again.';
@@ -34,13 +34,8 @@
       headers['X-Lightwork-Flow-Revision'] = current.revision;
       if (current.context) headers['X-Lightwork-Teaching-Context'] = current.context;
     }
-    const response = await fetch(path, {
-      method: method || (body === undefined ? 'GET' : 'POST'), credentials: 'same-origin', cache: 'no-store',
-      headers: headers,
-      body: body === undefined ? undefined : JSON.stringify(body)
-    });
-    if (!response.ok) throw response;
-    return response.json();
+    return window.mvFetchJSON(path, {method: method || (body === undefined ? 'GET' : 'POST'), cache: 'no-store',
+      headers: headers, body: body});
   }
   function syncNextActions() {
     const readyRecipe = Boolean(state.recipe) && !state.busy;

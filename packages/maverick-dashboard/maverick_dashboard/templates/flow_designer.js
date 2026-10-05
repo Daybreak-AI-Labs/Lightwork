@@ -299,7 +299,7 @@
   }
   function nodeById(id) { for (var i = 0; i < flow.nodes.length; i++) if (flow.nodes[i].id === id) return flow.nodes[i]; return null; }
   function newId() { var id; do { id = 'n' + (idSeq++); } while (nodeById(id)); return id; }
-  function say(t, err) { msg.textContent = t || ''; msg.style.color = err ? 'var(--danger)' : 'var(--muted)'; }
+  function say(t, err) { if (window.mvStatus) window.mvStatus(msg, t || '', {error: !!err}); else msg.textContent = t || ''; msg.style.color = err ? 'var(--danger)' : 'var(--muted)'; }
   function trunc(s, n) { s = String(s || ''); return s.length > n ? s.slice(0, n - 1) + '…' : s; }
 
   function summary(n) {

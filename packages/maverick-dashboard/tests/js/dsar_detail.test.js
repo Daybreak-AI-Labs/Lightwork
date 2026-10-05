@@ -4,6 +4,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const { JSDOM } = require("jsdom");
+const {shell} = require('./_shell');
 
 const source = fs.readFileSync(path.resolve(__dirname, "../../maverick_dashboard/static/lightwork-dsar-detail.js"), "utf8");
 const html = `<div id="dsar-page" data-request-id="DSAR-1" data-subject="a@example.com" data-channel="email" data-kind="erasure" data-fulfillment-id="F-1" data-revision="4">
@@ -15,6 +16,7 @@ const json = (v, status = 200) => new Response(JSON.stringify(v), { status, head
 async function fixture({ formValues, confirm = true, reply, markup = html, hash = "" }) {
   const dom = new JSDOM(markup, { url: "https://lightwork.example/privacy/dsar/DSAR-1" + hash, runScripts: "outside-only" });
   const { window } = dom;
+  shell(window);
   const calls = [], forms = [], confirms = [];
   window.mvForm = async (title, fields, opts) => { forms.push({ title, fields, opts }); return formValues.shift(); };
   window.mvPlainDetail = (d) => (typeof d === "string" && /^[A-Z].*\.$/.test(d) ? d : "");

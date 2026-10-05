@@ -33,37 +33,26 @@
   }
   function human(v) { return window.mvHuman ? window.mvHuman(v) : String(v || ""); }
   function when(ts) { return window.mvWhen ? window.mvWhen(ts) : ""; }
-  function say(text) { if (statusEl) { statusEl.textContent = text; } }
+  function say(text) { window.mvStatus(statusEl, text); }
   function fail(text) { if (errorEl) { errorEl.textContent = text; } if (window.mvToast) { window.mvToast(text, { error: true }); } }
   function clear(node) { while (node.firstChild) { node.removeChild(node.firstChild); } }
 
   // Our own action routes answer with a short plain sentence; anything else
   // (a validation list, a proxy page) falls back to the shared wording.
-  async function failure(response, action) {
-    var body = null;
-    try { body = await response.json(); } catch (e) { body = null; }
-    var plain = body && window.mvPlainDetail && window.mvPlainDetail(body.detail);
-    if (plain && [409, 422, 502, 503].indexOf(response.status) >= 0) {
+  function failure(error, action) {
+    var plain = window.mvPlainDetail && window.mvPlainDetail(error && error.detail);
+    if (plain && [409, 422, 502, 503].indexOf(error.status) >= 0) {
       return plain;
     }
-    return window.mvErrorText(response, action);
+    return error && error.message ? error.message : window.mvErrorText(error, action);
   }
 
   async function post(url, body, action) {
-    var response;
-    try {
-      response = await fetch(url, {
-        method: "POST", credentials: "same-origin",
-        headers: { "Content-Type": "application/json", "Accept": "application/json" },
-        body: JSON.stringify(body || {})
-      });
-    } catch (e) {
-      fail(window.mvErrorText(e, action));
-      return null;
-    }
-    if (!response.ok) { fail(await failure(response, action)); return null; }
+    var data;
+    try { data = await window.mvFetchJSON(url, { method: "POST", body: body || {} }, action); }
+    catch (error) { fail(failure(error, action)); return null; }
     if (errorEl) { errorEl.textContent = ""; }
-    try { return await response.json(); } catch (e) { return {}; }
+    return data || {};
   }
 
   function button(label, cls, onClick) {
@@ -177,12 +166,9 @@
     say("Preparing a copy of " + name + ". Large projects can take a minute.");
     var response;
     try {
-      response = await fetch("/api/v1/code/repos/" + encodeURIComponent(name) + "/export", {
-        method: "POST", credentials: "same-origin",
-        headers: { "Content-Type": "application/json" }, body: JSON.stringify({ confirm: true })
-      });
-    } catch (e) { say(""); fail(window.mvErrorText(e, "download the copy")); return; }
-    if (!response.ok) { say(""); fail(await failure(response, "download the copy")); return; }
+      response = await window.mvFetchJSON("/api/v1/code/repos/" + encodeURIComponent(name) + "/export",
+        { method: "POST", body: { confirm: true }, raw: true }, "download the copy");
+    } catch (error) { say(""); fail(failure(error, "download the copy")); return; }
     var link = document.createElement("a");
     link.href = URL.createObjectURL(await response.blob());
     link.download = name + "-copy.zip";
@@ -250,9 +236,7 @@
   async function loadWatch() {
     if (!document.getElementById("code-watch-list")) { return; }
     try {
-      var response = await fetch("/api/v1/code/watch", { credentials: "same-origin", headers: { "Accept": "application/json" } });
-      if (!response.ok) { return; }
-      watchState.rows = (await response.json()).watching || [];
+      watchState.rows = ((await window.mvFetchJSON("/api/v1/code/watch")) || {}).watching || [];
       renderWatch();
     } catch (e) { /* the list simply stays as it was */ }
   }
@@ -318,14 +302,12 @@
 
   async function load(keepStatus) {
     try {
-      var response = await fetch(root.dataset.apiUrl, { credentials: "same-origin", headers: { "Accept": "application/json" } });
-      if (!response.ok) { say(""); fail(window.mvErrorText(response, "load the code projects")); return; }
-      summary = await response.json();
+      summary = await window.mvFetchJSON(root.dataset.apiUrl, {}, "load the code projects");
       render();
       if (!keepStatus) { say("Up to date."); }
     } catch (error) {
       say("");
-      fail(window.mvErrorText(error, "load the code projects"));
+      fail(error.message);
     }
   }
 
@@ -411,12 +393,9 @@
   async function review(pid) {
     var panel = document.getElementById("code-review");
     var body = document.getElementById("code-review-body");
-    var response;
-    try {
-      response = await fetch("/api/v1/code/proposals/" + encodeURIComponent(pid), { credentials: "same-origin", headers: { "Accept": "application/json" } });
-    } catch (e) { fail(window.mvErrorText(e, "open the change")); return; }
-    if (!response.ok) { fail(await failure(response, "open the change")); return; }
-    var p = await response.json();
+    var p;
+    try { p = await window.mvFetchJSON("/api/v1/code/proposals/" + encodeURIComponent(pid), {}, "open the change"); }
+    catch (error) { fail(failure(error, "open the change")); return; }
     clear(body);
     body.appendChild(el("p", null, p.title + " · " + p.repo + " · " + (STATUS[p.status] || human(p.status))));
     section(body, "Tests");

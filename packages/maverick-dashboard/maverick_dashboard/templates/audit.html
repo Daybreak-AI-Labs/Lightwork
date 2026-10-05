@@ -255,17 +255,11 @@
       return { since: today, until: today };
     }
     async function call(method, url, body, action) {
-      try {
-        var r = await fetch(url, { method: method, credentials: 'same-origin',
-          headers: body ? { 'Content-Type': 'application/json' } : {}, body: body ? JSON.stringify(body) : undefined });
-        var j = await r.json().catch(function () { return {}; });
-        if (!r.ok) {
-          show([([403, 409, 422, 502, 503].indexOf(r.status) >= 0 && window.mvPlainDetail(j.detail))
-            || window.mvErrorText(r, action)]);
-          return null;
-        }
-        return j;
-      } catch (e) { show([window.mvErrorText(e, action)]); return null; }
+      try { return (await window.mvFetchJSON(url, { method: method, body: body || undefined }, action)) || {}; }
+      catch (e) {
+        show([([403, 409, 422, 502, 503].indexOf(e.status) >= 0 && window.mvPlainDetail(e.detail)) || e.message]);
+        return null;
+      }
     }
     function wire(id, fn) {
       var b = $(id);

@@ -335,16 +335,13 @@
     say(row, 'Checking…');
     button.disabled = true;
     try {
-      var response = await window.fetch(API + '/test', {
-        method: 'POST', cache: 'no-store', credentials: 'same-origin',
-        headers: {'Content-Type': 'application/json', Accept: 'application/json'},
-        body: JSON.stringify({id: row.dataset.settingId, value: checkValue(row)})
-      });
-      var data = null;
-      try { data = await response.json(); } catch (ignore) { data = null; }
-      say(row, data && typeof data.message === 'string' ? data.message : errorText(response, 'run the check'));
+      var data = await window.mvFetchJSON(API + '/test', {method: 'POST', cache: 'no-store',
+        body: {id: row.dataset.settingId, value: checkValue(row)}}, 'run the check');
+      say(row, data && typeof data.message === 'string' ? data.message : errorText({status: 0}, 'run the check'));
     } catch (failure) {
-      say(row, errorText(failure, 'run the check'));
+      // A refused check still explains itself in plain words.
+      var told = failure && failure.payload && failure.payload.message;
+      say(row, typeof told === 'string' ? told : errorText(failure, 'run the check'));
     } finally {
       button.disabled = false;
     }
@@ -730,10 +727,7 @@
     if (!url) return [];
     if (loadedChoices[url]) return loadedChoices[url];
     try {
-      var response = await window.fetch(url, {cache: 'no-store', credentials: 'same-origin',
-                                              headers: {Accept: 'application/json'}});
-      if (!response.ok) throw response;
-      var data = await response.json();
+      var data = await window.mvFetchJSON(url, {cache: 'no-store'});
       loadedChoices[url] = data.choices || [];
     } catch (failure) {
       say(row, errorText(failure, 'load the list of tools'));
@@ -1067,10 +1061,7 @@
     if (!column.choices_url) return column.choices || [];
     if (columnChoiceCache[column.choices_url]) return columnChoiceCache[column.choices_url];
     try {
-      var response = await window.fetch(column.choices_url, {cache: 'no-store', credentials: 'same-origin',
-                                                             headers: {Accept: 'application/json'}});
-      if (!response.ok) throw response;
-      var data = await response.json();
+      var data = await window.mvFetchJSON(column.choices_url, {cache: 'no-store'});
       columnChoiceCache[column.choices_url] = data.choices || [];
     } catch (failure) {
       say(row, errorText(failure, 'load the list of options'));
@@ -1183,15 +1174,17 @@
     say(row, file ? 'Working out the fingerprint…' : 'Reading the files on this server…');
     if (button) button.disabled = true;
     try {
-      var response = await window.fetch(url, {
-        method: 'POST', cache: 'no-store', credentials: 'same-origin',
-        headers: {'Content-Type': 'application/octet-stream', Accept: 'application/json'},
-        body: file || new Blob([])
-      });
-      var data = null;
-      try { data = await response.json(); } catch (ignore) { data = null; }
-      if (!response.ok || !data || !data.fingerprint) {
-        say(row, data && typeof data.message === 'string' ? data.message : errorText(response, 'work out the fingerprint'));
+      var data;
+      try {
+        data = await window.mvFetchJSON(url, {method: 'POST', cache: 'no-store',
+          headers: {'Content-Type': 'application/octet-stream'}, body: file || new Blob([])}, 'work out the fingerprint');
+      } catch (refused) {
+        var told = refused && refused.payload && refused.payload.message;
+        say(row, typeof told === 'string' ? told : errorText(refused, 'work out the fingerprint'));
+        return;
+      }
+      if (!data || !data.fingerprint) {
+        say(row, data && typeof data.message === 'string' ? data.message : errorText({status: 0}, 'work out the fingerprint'));
         return;
       }
       row.querySelector('[data-input]').value = data.fingerprint;

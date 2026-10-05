@@ -603,9 +603,7 @@
       if (!peopleSource || !text) { setPeople([]); return; }
       peopleTimer = global.setTimeout(function () {
         peopleTimer = null;
-        global.fetch(peopleSource + "?q=" + encodeURIComponent(text.slice(0, 100)),
-          {credentials: "same-origin", cache: "no-store", headers: {"Accept": "application/json"}})
-          .then(function (response) { return response.ok ? response.json() : null; })
+        global.mvFetchJSON(peopleSource + "?q=" + encodeURIComponent(text.slice(0, 100)), {cache: "no-store"})
           .then(function (data) {
             if (generation !== peopleGeneration || parsed().scope !== "people") return;
             setPeople(data && Array.isArray(data.people) ? data.people : []);
@@ -673,11 +671,7 @@
       setChoices([]);
       queryChanged("input");
       input.focus({ preventScroll: true });
-      global.fetch(listSource, {credentials: "same-origin", cache: "no-store", headers: {"Accept": "application/json"}})
-        .then(function (response) {
-          if (!response.ok) throw new Error("requests unavailable");
-          return response.json();
-        })
+      global.mvFetchJSON(listSource, {cache: "no-store"})
         .then(function (data) {
           if (generation !== listGeneration || mode !== "approvals") return;
           listLoading = false;

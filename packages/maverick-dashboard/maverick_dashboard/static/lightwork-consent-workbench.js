@@ -15,31 +15,22 @@
     return node;
   }
 
-  // One JSON client per API base. A non-2xx response throws an Error whose
-  // .status drives the plain sentence; malformed bodies never count as success.
+  // One JSON client per API base (mvFetchJSON). A non-2xx response throws an
+  // Error whose .status drives the plain sentence; malformed bodies never
+  // count as success.
   function client(base) {
     return async function jsonClient(path, options) {
       var opts = Object.assign({ cache: 'no-store' }, options || {});
-      if (opts.json !== undefined) {
-        opts.body = JSON.stringify(opts.json);
-        opts.headers = Object.assign({ 'Content-Type': 'application/json' }, opts.headers || {});
-        delete opts.json;
-      }
-      var response = await root.fetch(base + path, opts);
-      var body;
-      try { body = await response.json(); }
-      catch (_error) {
+      if (opts.json !== undefined) { opts.body = opts.json; delete opts.json; }
+      try { return await root.mvFetchJSON(base + path, opts); }
+      catch (error) {
+        // A refusal without a plain detail keeps the pages' own next step.
+        if (!error.unreadable && error.status && typeof error.detail !== 'string') error.message = 'That didn\'t work. Refresh the page and try again.';
+        if (!error.unreadable) throw error;
         var bad = new Error(INVALID);
-        bad.status = response.ok ? 0 : response.status;
+        bad.status = 0;
         throw bad;
       }
-      if (!response.ok) {
-        var failure = new Error(body && typeof body.detail === 'string' ? body.detail : 'That didn\'t work. Refresh the page and try again.');
-        failure.status = response.status;
-        failure.detail = body ? body.detail : undefined;
-        throw failure;
-      }
-      return body;
     };
   }
 

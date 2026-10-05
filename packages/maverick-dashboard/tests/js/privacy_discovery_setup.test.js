@@ -2,6 +2,7 @@
 const {test}=require("node:test"), assert=require("node:assert/strict");
 const fs=require("node:fs"), path=require("node:path");
 const {JSDOM}=require("jsdom");
+const {shell: loadShell} = require("./_shell");
 const folder=path.resolve(__dirname,"../../maverick_dashboard");
 const markup=fs.readFileSync(path.join(folder,"templates/privacy_data_discovery.html"),"utf8").replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi,"");
 const helpers=fs.readFileSync(path.join(folder,"static/lightwork-record-workflows.js"),"utf8");
@@ -28,7 +29,7 @@ async function fixture(intercept=()=>undefined, sources=[]) {
     if(body===undefined) body=p.endsWith("/setup")?setup:p.endsWith("/sources")?{items:sources}:p.endsWith("/jobs")||p.endsWith("/reports")||p.endsWith("/reviews")?{items:[]}:{};
     return new Response(JSON.stringify(body),{headers:{"Content-Type":"application/json"}});
   };
-  window.eval(helpers);window.eval(source);
+  loadShell(window);window.eval(helpers);window.eval(source);
   async function settle(){for(let i=0;i<25;i++)await new Promise(done=>setImmediate(done));}
   const el=id=>document.getElementById("pdd-"+id);
   function rowButton(container,label){return [...el(container).querySelectorAll("button")].find(b=>b.textContent===label);}

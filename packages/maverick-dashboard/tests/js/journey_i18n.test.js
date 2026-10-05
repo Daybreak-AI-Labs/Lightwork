@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const {JSDOM} = require('jsdom');
+const {shell} = require('./_shell');
 const script = fs.readFileSync(path.join(__dirname, '../../maverick_dashboard/static/lightwork-i18n.js'), 'utf8');
 
 function page(language='fr', locale='fr-CA') {
@@ -24,6 +25,7 @@ function page(language='fr', locale='fr-CA') {
   };
   const dom = new JSDOM('<!doctype html><html lang="en"><head></head><body><div id="message"></div><div data-user-content dir="auto" lang="und"><span id="user" data-i18n="Save">Save</span></div><dialog id="dialog"><table><tr><th data-i18n="Save">Save</th><td data-user-content lang="und" dir="auto">مرحبا Save</td></tr></table></dialog><div id="stream" data-user-content dir="auto" lang="und"></div></body></html>', {runScripts:'outside-only'});
   const config=dom.window.document.createElement('script');config.id='lightwork-i18n-data';config.type='application/json';config.textContent=JSON.stringify({language,locale,catalog});dom.window.document.head.appendChild(config);
+  shell(dom.window);
   dom.window.eval(script);
   return dom;
 }
@@ -46,6 +48,7 @@ test('live work summary localizes product status without changing streamed evide
   const dom=page(),w=dom.window,doc=w.document;
   doc.body.insertAdjacentHTML('beforeend','<details id="work-activity"><p id="work-now"></p><p id="work-meta"></p><span id="work-spin"></span></details><div id="events" data-steps="1200"><div data-kind="observation">Save {"original":"مرحبا"}</div></div><span id="status" data-status="running">Working</span>');
   const source=fs.readFileSync(path.join(__dirname,'../../maverick_dashboard/templates/chat_goal.html'),'utf8');
+  shell(w);
   w.eval(source.slice(source.indexOf('    function cgText('),source.indexOf('    // Plain-language failure text')));
   const start=source.indexOf('    (function () {',source.indexOf('// "Show work" strip'));
   w.eval(source.slice(start,source.indexOf('    })();',start)+'    })();'.length));
@@ -63,6 +66,7 @@ test('live work summary localizes product status without changing streamed evide
 test('classified request failures keep their language when shown by a status controller',()=>{
   const dom=page(),w=dom.window;
   w.matchMedia=()=>({matches:false,addEventListener(){},removeEventListener(){}});
+  shell(w);
   w.eval(fs.readFileSync(path.join(__dirname,'../../maverick_dashboard/static/lightwork-ui.js'),'utf8'));
   const result=w.mvErrorText({status:403},'publish this draft');
   assert.equal(result,'Cette action n’a pas pu être effectuée. Vous n’avez pas l’autorisation nécessaire. Demandez un accès à un administrateur.');
@@ -78,6 +82,7 @@ test('workflow review localizes actions while preserving stored labels, choices 
   doc.body.insertAdjacentHTML('beforeend','<section id="workflow-versions"><div id="workflow-versions-content"></div><p id="workflow-versions-status"></p><button id="workflow-versions-refresh"></button></section>');
   const records={context:'owner',current:'v2',published:'v1',params:['answer'],parameter_schema:{fields:{answer:{label:'Save',type:'enum',choices:['Save','مرحبا'],required:true}}},can_publish:true,effect:'Existing schedules keep their reviewed content and version. Publishing affects only new schedules; migration is never automatic.',schedules:[],generation:2,fixtures:[],versions:[{label:'Save مرحبا',version:'v1',current:false,published:true,diff:['+Save <img src=x> مرحبا']}]};
   const calls=[];w.fetch=async(url,options)=>{calls.push({url,options});return {ok:true,status:200,json:async()=>records};};
+  shell(w);
   w.eval(fs.readFileSync(path.join(__dirname,'../../maverick_dashboard/static/lightwork-workflow-versions.js'),'utf8'));
   doc.dispatchEvent(new w.CustomEvent('lightwork:workflow-saved',{detail:{name:'verbatim'}}));
   await new Promise(resolve=>setImmediate(resolve));
@@ -85,7 +90,7 @@ test('workflow review localizes actions while preserving stored labels, choices 
   const buttons=[...content.querySelectorAll('button')];
   assert.equal(buttons.find(b=>b.textContent==='Vérifier la publication').lang,'fr');
   assert.equal(buttons.find(b=>b.textContent==='Restaurer comme brouillon').lang,'fr');
-  assert.equal(content.querySelector('label bdi').textContent,'Save');
+  assert.equal(content.querySelector('label bdi').childNodes[0].textContent,'Save');  // the shell then adds the required marker
   assert.equal(content.querySelector('option[value="Save"]').textContent,'Save');
   assert.equal(content.querySelector('summary bdi').textContent,'Save مرحبا');
   assert.equal(content.querySelector('ins').textContent,'+Save <img src=x> مرحبا\n');

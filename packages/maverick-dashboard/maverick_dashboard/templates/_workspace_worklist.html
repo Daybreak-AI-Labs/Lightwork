@@ -40,15 +40,15 @@
     </details>
     <p id="pw-start-msg" class="muted" role="status" aria-live="polite"></p>
     <button id="pw-start-open" class="btn" type="button" hidden>Open new assessment</button>
-    <div class="mv-tabs pw-filters" role="group" aria-label="Filter worklist">
-      <button class="mv-tab" data-filter="all" type="button" aria-pressed="true">All ({{ stats.total }})</button>
-      <button class="mv-tab" data-filter="pending_review" type="button" aria-pressed="false">Needs review ({{ stats.pending }})</button>
-      <button class="mv-tab" data-filter="needs_more" type="button" aria-pressed="false">Awaiting answers ({{ stats.needs_more }})</button>
-      <button class="mv-tab" data-filter="high" type="button" aria-pressed="false">High risk after safeguards ({{ stats.high_residual }})</button>
-      <button class="mv-tab" data-filter="due" type="button" aria-pressed="false">Due for re-review ({{ stats.review_due }})</button>
-      <button class="mv-tab" data-filter="mine" type="button" aria-pressed="false">Mine ({{ stats.mine }})</button>
-      <button class="mv-tab" data-filter="unassigned" type="button" aria-pressed="false">Unassigned ({{ stats.unassigned }})</button>
-    </div>
+    {% from "_tabs.html" import panel_tabs %}
+    {{ panel_tabs('Filter worklist', [
+         ('all', 'All (' ~ stats.total ~ ')'), ('pending_review', 'Needs review (' ~ stats.pending ~ ')'),
+         ('needs_more', 'Awaiting answers (' ~ stats.needs_more ~ ')'),
+         ('high', 'High risk after safeguards (' ~ stats.high_residual ~ ')'),
+         ('due', 'Due for re-review (' ~ stats.review_due ~ ')'), ('mine', 'Mine (' ~ stats.mine ~ ')'),
+         ('unassigned', 'Unassigned (' ~ stats.unassigned ~ ')')], 'all',
+       id='pw-filter', data='filter', controls='pw-worklist', cls='pw-filters') }}
+    <div id="pw-worklist" role="tabpanel" aria-labelledby="pw-filter-tab-all">
     {% if sessions %}
     <table id="pw-table">
       <thead>
@@ -124,6 +124,7 @@
         <button class="btn mv-empty__action" type="button" id="pw-start-empty">Start an assessment</button>
       {% endcall %}
     {% endif %}
+    </div>
   </div>
   <script>
   (function assessmentIntake() {

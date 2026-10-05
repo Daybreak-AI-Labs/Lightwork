@@ -398,12 +398,14 @@
   var state = {targets: [], workspaces: []};
   function say(text, isError) { status.textContent = text; status.setAttribute("role", isError ? "alert" : "status"); }
   async function call(method, path, body) {
-    var response = await fetch(API + path, {method: method, cache: "no-store",
-      headers: body ? {"Content-Type": "application/json"} : undefined, body: body ? JSON.stringify(body) : undefined});
-    var data = {};
-    try { data = await response.json(); } catch (_error) { data = {}; }
-    if (!response.ok && response.status !== 409) { var failure = new Error("failed"); failure.status = response.status; failure.detail = data.detail; throw failure; }
-    data.status = response.status;
+    // A conflict (409) answers with the current record, so it is returned too.
+    var data;
+    try { data = (await window.mvFetchJSON(API + path, {method: method, cache: "no-store", body: body || undefined})) || {}; }
+    catch (error) {
+      if (error.status !== 409) throw error;
+      data = error.payload || {}; data.status = 409; return data;
+    }
+    data.status = 200;
     return data;
   }
   function failText(error, action) {
@@ -411,11 +413,8 @@
     return plain || window.mvErrorText(error, action);
   }
   async function options(path, pick) {
-    try {
-      var response = await fetch(path, {cache: "no-store"});
-      if (!response.ok) return [];
-      return pick(await response.json());
-    } catch (_error) { return []; }
+    try { return pick((await window.mvFetchJSON(path, {cache: "no-store"})) || {}); }
+    catch (_error) { return []; }
   }
   async function choices() {
     var notices = await options("/api/v1/privacy/notices/records", function (d) {
@@ -508,8 +507,12 @@
     list.appendChild(table);
   }
   document.getElementById("png-target-add").addEventListener("click", function () { edit(null); });
-  call("GET", "").then(function (result) { state = result; render(); })
-    .catch(function (error) { list.textContent = ""; say(failText(error, "load the publishing targets"), true); });
+  function start() {
+    call("GET", "").then(function (result) { state = result; render(); })
+      .catch(function (error) { list.textContent = ""; say(failText(error, "load the publishing targets"), true); });
+  }
+  // The shell's helpers (lightwork-ui.js) load after the page content.
+  if (window.mvFetchJSON) start(); else document.addEventListener("DOMContentLoaded", start);
 }());
 </script>
 {% endif %}

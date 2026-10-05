@@ -18,10 +18,9 @@
 (function () {
   'use strict';
   const byId = id => document.getElementById(id); let model = null, busy = false;
-  function say(text) { byId('ca-status').textContent = text; }
+  function say(text) { window.mvStatus(byId('ca-status'), text); }
   async function call(url, body) {
-    const response = await fetch(url, {method: body ? 'POST' : 'GET', headers: {'Content-Type': 'application/json'}, body: body ? JSON.stringify(body) : undefined});
-    const data = await response.json(); if (!response.ok) throw new Error(typeof data.detail === 'string' ? data.detail : 'Access changed or the request is unavailable. Refresh before retrying.'); return data;
+    return window.mvFetchJSON(url, {method: body ? 'POST' : 'GET', body, plainDetail: true}, body ? 'save the access change' : 'load content access');
   }
   function paragraph(parent, text) { const p = document.createElement('p'); p.textContent = text; parent.appendChild(p); }
   function button(parent, text, action) { const b = document.createElement('button'); b.type = 'button'; b.className = 'btn'; b.textContent = text; b.addEventListener('click', action); parent.appendChild(b); }
@@ -59,7 +58,9 @@
     try { await call('/api/v1/content-access', {resource_kind: selected.resource_kind, resource_id: selected.resource_id, purpose: byId('ca-purpose').value, minutes: Number(byId('ca-minutes').value)}); await load(); }
     catch (error) { say(error.message); } finally { busy = false; }
   });
-  load().catch(error => say(error.message));
+  // The shell's shared helpers (lightwork-ui.js) load after the page content.
+  const start = () => load().catch(error => say(error.message));
+  if (window.mvFetchJSON) start(); else document.addEventListener('DOMContentLoaded', start);
 })();
 </script>
 {% endblock %}

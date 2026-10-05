@@ -433,13 +433,11 @@
   function reloadListSelection() { renderList(lastItems); }
 
   function reload() {
-    return jfetch('/api/v1/assessments').then(function (r) {
-      if (r.status === 403) { listEl.innerHTML = '<div class="as-empty">You need auditor access to see assessments. Ask your administrator.</div>'; return null; }
-      if (!r.ok) {
-        pageMessage('Could not load the assessment register. Reload to try again.', true);
-        return null;
-      }
-      return r.json();
+    return window.mvFetchJSON('/api/v1/assessments').catch(function (error) {
+      if (error.status === 403) { listEl.innerHTML = '<div class="as-empty">You need auditor access to see assessments. Ask your administrator.</div>'; return null; }
+      if (!error.status) throw error;
+      pageMessage('Could not load the assessment register. Reload to try again.', true);
+      return null;
     }).then(function (j) {
       if (!j) return;
       pageMessage('', false);
@@ -503,7 +501,8 @@
       });
   });
 
-  reload();
+  // The shell's helpers (lightwork-ui.js) load after the page content.
+  if (window.mvFetchJSON) reload(); else document.addEventListener('DOMContentLoaded', reload);
 })();
 </script>
 <script src="/static/lightwork-typeahead.js" defer></script>

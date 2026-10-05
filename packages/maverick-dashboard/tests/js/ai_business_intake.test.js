@@ -1,5 +1,6 @@
 const {test}=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path');
 const {JSDOM}=require('jsdom');const base=path.join(__dirname,'../../maverick_dashboard');
+const {shell: loadShell} = require("./_shell");
 const html=fs.readFileSync(path.join(base,'templates/_ai_business_intake.html'),'utf8');
 const source=fs.readFileSync(path.join(base,'static/lightwork-ai-business-intake.js'),'utf8');
 const context='a'.repeat(64),id='ABI-'+'b'.repeat(24);
@@ -26,7 +27,7 @@ async function fixture(t,{intercept=()=>undefined,initial=null,canEdit=true}={})
   const change=(name,value)=>{const control=field(name).querySelector('input:not([type=checkbox]),select,textarea');control.value=value;control.dispatchEvent(new w.Event('input',{bubbles:true}));control.dispatchEvent(new w.Event('change',{bubbles:true}));};
   const choose=(name,value)=>{const control=[...field(name).querySelectorAll('input[type=checkbox]')].find(item=>item.value===value);control.click();};
   const save=async()=>{el('answers').dispatchEvent(new w.Event('submit',{cancelable:true,bubbles:true}));await settle();};
-  w.eval(source);await settle();return{w,calls,el,field,settle,change,choose,save,record};
+  loadShell(w);w.eval(source);await settle();return{w,calls,el,field,settle,change,choose,save,record};
 }
 async function importText(h,text){const input=h.el('import');Object.defineProperty(input,'files',{configurable:true,value:[{name:'answers.json',text:async()=>text}]});input.dispatchEvent(new h.w.Event('change',{bubbles:true}));await h.settle();}
 async function fill(h){h.change('use_case_name','Support assistant');h.change('purpose','Help employees review public support documentation.');h.choose('data_context.categories','public');h.change('data_context.personal_data','false');h.change('deployment_context.stage','pilot');h.choose('regulatory_context.high_risk_domains','');}

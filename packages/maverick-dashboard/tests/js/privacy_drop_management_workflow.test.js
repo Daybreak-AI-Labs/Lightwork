@@ -4,6 +4,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const { JSDOM } = require("jsdom");
+const {shell: loadShell} = require('./_shell');
 
 const folder = path.resolve(__dirname, "../../maverick_dashboard");
 const markup = fs.readFileSync(path.join(folder, "templates/privacy_drop_management.html"), "utf8")
@@ -54,6 +55,7 @@ async function fixture({ intercept = () => undefined, roles = { canOperate: "tru
     const status = reply && reply.__status ? reply.__status : 200;
     return new Response(JSON.stringify(reply), { status, headers: { "Content-Type": "application/json" } });
   };
+  loadShell(window);
   window.eval(helpers);
   window.eval(source);
   async function settle() { for (let i = 0; i < 30; i++) await new Promise((done) => setImmediate(done)); }

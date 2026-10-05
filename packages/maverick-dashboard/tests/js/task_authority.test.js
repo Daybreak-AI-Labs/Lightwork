@@ -4,6 +4,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
+const { fetchHelpers } = require('./_shell');
 const source = fs.readFileSync(path.resolve(__dirname, "../../maverick_dashboard/static/lightwork-task-authority.js"), "utf8");
 const html = fs.readFileSync(path.resolve(__dirname, "../../maverick_dashboard/templates/chat_goal.html"), "utf8");
 function fixture(initial = true) {
@@ -13,8 +14,9 @@ function fixture(initial = true) {
   const form = {matches: selector => selector.includes(".goal-project"), requestSubmit() { state.submitted = (state.submitted || 0) + 1; }};
   const document = {hidden: false, body: {}, getElementById: () => root, querySelectorAll: selector => { state.selectors = selector; return [control]; }, addEventListener: (name, callback) => { callbacks[name] = callback; }};
   class Observer { constructor(callback) { state.mutate = callback; } observe() {} }
-  vm.runInNewContext(source, {document, window: {addEventListener: (name, callback) => { focus[name] = callback; }}, MutationObserver: Observer,
-    fetch: async () => { state.calls += 1; return {ok: true, json: async () => ({can_operate: state.allowed, reason: state.reason})}; }, WeakMap, WeakSet});
+  const fetch = async () => { state.calls += 1; return {ok: true, json: async () => ({can_operate: state.allowed, reason: state.reason})}; };
+  vm.runInNewContext(source, {document, window: {addEventListener: (name, callback) => { focus[name] = callback; },
+    mvFetchJSON: fetchHelpers(() => fetch).mvFetchJSON}, MutationObserver: Observer, fetch, WeakMap, WeakSet});
   return {state, root, control, form, callbacks, focus};
 }
 function event(target) { return {target, prevented: false, preventDefault() { this.prevented = true; }, stopImmediatePropagation() { this.stopped = true; }}; }

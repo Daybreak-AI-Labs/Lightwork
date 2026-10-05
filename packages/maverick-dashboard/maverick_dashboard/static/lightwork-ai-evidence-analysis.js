@@ -47,7 +47,7 @@ const REVOKE_REASONS = [
 const state = { artifacts: [], criteria: [], analyses: [] };
 
 function setStatus(element, message, failed = false) {
-  element.textContent = message;
+  window.mvStatus(element, message, {error: !!failed});
   element.dataset.state = failed ? "failed" : "ready";
 }
 
@@ -78,32 +78,21 @@ function plainError(status, action) {
 }
 
 async function apiRequest(path, options = {}, action = "finish this") {
-  const response = await fetch(`${apiBase}${path}`, {
-    cache: "no-store",
-    credentials: "same-origin",
-    redirect: "error",
-    referrerPolicy: "no-referrer",
-    ...options,
-    headers: {
-      Accept: "application/json",
-      ...(options.headers || {}),
-    },
-  });
-  let payload;
   try {
-    payload = await response.json();
-  } catch (_error) {
-    const error = new Error("Lightwork returned something unexpected. Refresh the page and try again.");
-    error.status = response.status;
+    return await window.mvFetchJSON(`${apiBase}${path}`, {
+      cache: "no-store", credentials: "same-origin", redirect: "error", referrerPolicy: "no-referrer", ...options,
+      // The server's own detail stays out of the sentence: it is kept as technical text.
+      messages: { 409: `Could not ${action}. This changed since you opened it. Refresh the page and try again.` },
+    }, action);
+  } catch (error) {
+    if (error.unreadable) {
+      const unexpected = new Error("Lightwork returned something unexpected. Refresh the page and try again.");
+      unexpected.status = error.status;
+      throw unexpected;
+    }
+    error.technical = typeof error.detail === "string" ? error.detail : "";
     throw error;
   }
-  if (!response.ok) {
-    const error = new Error(plainError(response.status, action));
-    error.status = response.status;
-    error.technical = payload && typeof payload.detail === "string" ? payload.detail : "";
-    throw error;
-  }
-  return payload;
 }
 
 async function run(label, operation) {

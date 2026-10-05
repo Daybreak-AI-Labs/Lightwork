@@ -30,7 +30,7 @@
     { value: "other", label: "Another reason" },
   ];
 
-  function say(text) { statusLine.textContent = text; }
+  function say(text) { window.mvStatus(statusLine, text); }
   function fail(action) { return function (f) { var t = R.errorText(f, action); say(t); if (window.mvToast) { window.mvToast(t, { error: true }); } }; }
   function words(value) {
     if (value === null || value === undefined || value === "") { return ""; }

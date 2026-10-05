@@ -3,6 +3,7 @@
 const {test} = require('node:test');
 const assert = require('node:assert/strict');
 const {JSDOM, VirtualConsole} = require('jsdom');
+const {shell} = require('./_shell');
 const {fixture, reply, setup, names} = require('../browser/motion_fixture');
 
 for (const name of names) test(`${name} actual reveal callsites follow a changed motion preference`, async t => {
@@ -12,6 +13,7 @@ for (const name of names) test(`${name} actual reveal callsites follow a changed
   t.after(() => dom.window.close());
   const {window} = dom;
   setup(window, data); window.TextDecoder = TextDecoder;
+  shell(window);
   let reduce = true;
   window.matchMedia = () => ({matches: reduce});
   window.Element.prototype.scrollIntoView = function (options) {calls.push({id: this.id, ...options});};

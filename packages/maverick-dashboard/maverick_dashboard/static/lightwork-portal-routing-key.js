@@ -26,9 +26,8 @@
   }
   async function load() {
     try {
-      const response = await fetch(api, {credentials: 'same-origin', cache: 'no-store', headers: {'Accept': 'application/json'}});
-      if (!response.ok) return; // not an installation administrator: stay hidden
-      render(await response.json());
+      // A refusal (not an installation administrator) leaves it hidden.
+      render(await window.mvFetchJSON(api, {cache: 'no-store'}));
     } catch (_) { /* stays hidden */ }
   }
   el('confirm').addEventListener('change', update);

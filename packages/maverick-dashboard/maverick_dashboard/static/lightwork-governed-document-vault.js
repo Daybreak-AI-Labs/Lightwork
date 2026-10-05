@@ -160,7 +160,7 @@
     return "vault-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 12);
   }
   function setStatus(target, message, failed) {
-    target.textContent = message;
+    window.mvStatus(target, message, {error: !!failed});
     target.dataset.state = failed ? "failed" : "ready";
   }
   function technical(value) {

@@ -16,13 +16,7 @@
       if (busy) return;
       busy = true; button.disabled = true; status.textContent = 'Building today’s summary…';
       try {
-        var response = await fetch('/api/v1/me/digest/preview', {credentials: 'same-origin', cache: 'no-store'});
-        if (!response.ok) {
-          clear();
-          status.textContent = window.mvErrorText ? window.mvErrorText(response, 'preview your summary') : 'Could not preview your summary. Try again.';
-          return;
-        }
-        var data = await response.json();
+        var data = await window.mvFetchJSON('/api/v1/me/digest/preview', {cache: 'no-store'}, 'preview your summary');
         clear();
         (Array.isArray(data.notes) ? data.notes : []).forEach(function (note) {
           var item = document.createElement('li'); item.textContent = String(note); notes.append(item);
@@ -32,7 +26,7 @@
         status.textContent = data.would_send ? 'This is what goes out today.' : 'This is what it would contain; it is not being sent today.';
       } catch (error) {
         clear();
-        status.textContent = window.mvErrorText ? window.mvErrorText(error, 'preview your summary') : 'Could not preview your summary. Try again.';
+        status.textContent = error.message;
       } finally { busy = false; button.disabled = false; }
     }
     box.addEventListener('toggle', function () { if (box.open && !text.textContent) load(); });

@@ -37,7 +37,7 @@
   }
 
   function hidden(form, name) { return form.elements[name]; }
-  function say(text) { const s = document.getElementById('research-governed-status'); if (s) s.textContent = text; }
+  function say(text) { window.mvStatus(document.getElementById('research-governed-status'), text); }
 
   // Names -> identifiers (and the next free version for datasets and models).
   function syncSlug(input) {
@@ -113,20 +113,15 @@
     if (!file) { if (state) state.textContent = state.dataset.help || ''; return; }
     const job = (async () => {
       if (state) state.textContent = `Reading ${file.name}…`;
-      let response;
+      let body;
       try {
-        response = await fetch('/api/v1/research-files/fingerprint', {method: 'POST', credentials: 'same-origin',
-          headers: {'Content-Type': 'application/octet-stream'}, body: file});
+        body = await window.mvFetchJSON('/api/v1/research-files/fingerprint', {method: 'POST',
+          headers: {'Content-Type': 'application/octet-stream'}, body: file,
+          messages: {413: 'That file is too large. Ask your administrator to record it for you.'}}, 'read the file');
       } catch (error) {
-        if (state) state.textContent = window.mvErrorText ? window.mvErrorText(error, 'read the file') : 'Could not read the file. Choose the file again, or try a different file.';
+        if (state) state.textContent = error.message;
         return;
       }
-      if (!response.ok) {
-        if (state) state.textContent = response.status === 413 ? 'That file is too large. Ask your administrator to record it for you.' :
-          (window.mvErrorText ? window.mvErrorText(response, 'read the file') : 'Could not read the file. Choose the file again, or try a different file.');
-        return;
-      }
-      const body = await response.json();
       if (input.files && input.files[0] === file) {
         target.value = body.fingerprint;
         if (state) state.textContent = `Ready: ${file.name}`;
@@ -190,9 +185,7 @@
     if (!select) return;
     let repos = [];
     try {
-      const response = await fetch('/api/v1/code/heads', {credentials: 'same-origin'});
-      if (response.ok) repos = (await response.json()).repos || [];
-      else await release(response);
+      repos = ((await window.mvFetchJSON('/api/v1/code/heads')) || {}).repos || [];
     } catch (_) { repos = []; }
     select.replaceChildren(new Option(repos.length ? 'Choose a code project' : 'No code projects yet (add one on the Code page)', ''));
     repos.forEach(repo => select.appendChild(new Option(`${repo.name} (latest version)`, repo.head)));
@@ -211,17 +204,9 @@
     }
   }
 
-  // A refusal's body is never read here; release it so the request ends
-  // instead of staying open (the page never went quiet).
-  async function release(response) {
-    try { await response.body?.cancel(); } catch (_) { /* already closed */ }
-  }
-
   async function loadRegistry() {
     try {
-      const response = await fetch('/api/v1/research', {credentials: 'same-origin', cache: 'no-store', headers: {Accept: 'application/json'}});
-      if (!response.ok) { await release(response); return; }
-      const value = await response.json();
+      const value = await window.mvFetchJSON('/api/v1/research', {cache: 'no-store'});
       registry = {datasets: value.registry?.datasets || [], models: value.registry?.models || [], runs: value.governed_runs || []};
       renderPurposes();
       renderExperiments();

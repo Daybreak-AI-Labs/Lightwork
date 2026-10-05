@@ -191,8 +191,7 @@
     tplDlg.showModal();
     if (!type) { tplQs.appendChild(qRow()); return; }
     tplStatus.textContent = 'Loading…';
-    fetch('/api/v1/assess/templates/' + encodeURIComponent(type))
-      .then(function (r) { if (!r.ok) throw new Error(plain(r, 'open the questionnaire')); return r.json(); })
+    window.mvFetchJSON('/api/v1/assess/templates/' + encodeURIComponent(type), {}, 'open the questionnaire')
       .then(function (tpl) {
         tplStatus.textContent = '';
         document.getElementById('tpl-title').value = tpl.title;
@@ -286,11 +285,10 @@
       })
       .catch(function (e) { tplStatus.textContent = e && e.name !== 'TypeError' && e.message ? e.message : plain(e, 'restore the original'); });
   });
-  // Client-side worklist filters.
+  // Client-side worklist filters (the shared tab bar marks the chosen one).
   var buttons = document.querySelectorAll('.pw-filters button[data-filter]');
   buttons.forEach(function (fb) {
     fb.addEventListener('click', function () {
-      buttons.forEach(function (b) { b.setAttribute('aria-pressed', b === fb ? 'true' : 'false'); });
       var f = fb.dataset.filter;
       document.querySelectorAll('#pw-table tbody tr').forEach(function (tr) {
         var show = f === 'all' ||
@@ -308,9 +306,8 @@
   // refresh rather than overwriting someone else's change.
   var reviewers = null;
   function loadReviewers() {
-    if (!reviewers) reviewers = fetch('/api/v1/assess/reviewers')
-      .then(function (r) { if (!r.ok) throw r; return r.json(); })
-      .then(function (j) { return j.items || []; });
+    if (!reviewers) reviewers = window.mvFetchJSON('/api/v1/assess/reviewers')
+      .then(function (j) { return (j && j.items) || []; });
     return reviewers;
   }
   document.querySelectorAll('.pw-assign-btn').forEach(function (btn) {

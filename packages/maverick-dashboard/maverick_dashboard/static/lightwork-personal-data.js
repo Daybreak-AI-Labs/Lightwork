@@ -3,7 +3,7 @@
   const el = id => document.getElementById(id);
   let state = JSON.parse(el('pd-bootstrap').textContent), busy = false, dirty = false, locked = false;
   const expectedContext = state.context;
-  function say(message) { el('pd-status').textContent = message; }
+  function say(message) { window.mvStatus(el('pd-status'), message); }
   function text(parent, value, tag = 'p') { const node = document.createElement(tag); node.textContent = value; parent.appendChild(node); return node; }
   function button(parent, label, handler) { const node = text(parent, label, 'button'); node.type = 'button'; node.className = 'btn'; node.addEventListener('click', handler); return node; }
   function lock() {
@@ -22,16 +22,17 @@
   }
   async function call(path, data) {
     if (locked) throw lock();
-    const response = await fetch('/api/v1/my-data' + path, {method: data ? 'POST' : 'GET', credentials: 'same-origin', cache: 'no-store',
-      headers: {'Content-Type': 'application/json'}, body: data ? JSON.stringify({...data, context: expectedContext}) : undefined});
-    if (locked || [401, 403].includes(response.status) || response.redirected) throw lock();
     let result;
-    try { result = await response.json(); }
-    catch (_) { throw new Error('Personal data could not be confirmed. Refresh saved state before retrying.'); }
-    const detail = result && typeof result.detail === 'string' ? result.detail : '';
-    if (response.status === 409 && /account or workspace changed|workspace changed since/i.test(detail)) throw lock();
+    try {
+      result = await window.mvFetchJSON('/api/v1/my-data' + path, {method: data ? 'POST' : 'GET', cache: 'no-store',
+        body: data ? {...data, context: expectedContext} : undefined, plainDetail: true, onAccess: () => {}}, data ? 'save your personal data request' : 'load your personal data');
+    } catch (error) {
+      if (locked || error.accessChanged) throw lock();
+      if (error.status === 409 && /account or workspace changed|workspace changed since/i.test(typeof error.detail === 'string' ? error.detail : '')) throw lock();
+      throw error;
+    }
+    if (locked) throw lock();
     if (result && result.context !== undefined && result.context !== expectedContext) throw lock();
-    if (!response.ok) throw new Error(detail || 'This operation is unavailable. Refresh saved state before retrying.');
     return result;
   }
   async function action(work, refresh = true) {

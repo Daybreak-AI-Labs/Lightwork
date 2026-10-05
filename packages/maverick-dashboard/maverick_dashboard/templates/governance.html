@@ -650,25 +650,12 @@
   const IFU_ITEMS = {{ ifu_items|tojson }};
   const ASSET_NAMES = {{ ASSET_NAMES|tojson }};
   const nameOf = assetId => ASSET_NAMES[assetId] || "this AI system";
-  const status = (id, text) => { const el = document.getElementById(id); if (el) el.textContent = text; };
-  // A failed request becomes one plain sentence; call sites add what failed.
-  const reason = failure => (typeof window.mvErrorText === "function"
-    ? window.mvErrorText(failure)
-    : "Something went wrong. Please try again.");
+  const status = (id, text) => { const el = document.getElementById(id); if (el && window.mvStatus) window.mvStatus(el, text); else if (el) el.textContent = text; };
   const say = (id, error, action) => status(id, "Could not " + action + ". " + ((error && error.message) || "Please try again."));
-  const failure = response => {
-    const error = new Error(reason(response));
-    error.status = response.status;
-    return error;
-  };
-  const send = async (url, options) => {
-    let response;
-    try { response = await fetch(url, Object.assign({credentials: "same-origin"}, options)); }
-    catch (networkError) { throw new Error(reason(networkError)); }
-    if (!response.ok) throw failure(response);
-    try { return await response.json(); }
-    catch { throw new Error("Lightwork sent back something unexpected. Refresh the page and try again."); }
-  };
+  // Requests go through the shell's mvFetchJSON (lightwork-ui.js), which loads
+  // after the page content; a failure is one plain sentence without the action.
+  const shellReady = window.mvFetchJSON ? Promise.resolve() : new Promise(done => document.addEventListener("DOMContentLoaded", done));
+  const send = async (url, options) => { await shellReady; return window.mvFetchJSON(url, options); };
   const post = (base, path, body) => send(base + path, {
     method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body),
   });

@@ -1,6 +1,7 @@
 'use strict';
 const {test} = require('node:test'), assert = require('node:assert/strict');
 const fs = require('node:fs'), path = require('node:path'), {JSDOM} = require('jsdom');
+const {shell} = require('./_shell');
 const settle = async () => { for (let i = 0; i < 5; i++) await new Promise(resolve => setImmediate(resolve)); };
 
 test('private task count reaches both chat navigation controls and recovers after a failed check', async t => {
@@ -15,6 +16,7 @@ test('private task count reaches both chat navigation controls and recovers afte
     if (calls === 2) throw new Error('Offline');
     return {ok:true, json:async()=>({unseen:calls === 1 ? 2 : 0, partial:false})};
   };
+  shell(dom.window);
   dom.window.eval(fs.readFileSync(path.resolve(__dirname, '../../maverick_dashboard/static/lightwork-notification-badge.js'), 'utf8'));
   await settle();
   assert.deepEqual(links.map(node => node.querySelector('.notification-count').textContent), ['2','2']);

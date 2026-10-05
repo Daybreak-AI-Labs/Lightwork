@@ -87,7 +87,8 @@ def test_settings_has_bounded_sections_keyboard_tabs_and_search(monkeypatch, tmp
     for group in ("general", "models", "integrations", "controls", "access", "maintenance"):
         assert f'data-settings-tab="{group}"' in text
         assert f'data-settings-group="{group}"' in text
-    assert "ArrowRight" in text and "ArrowLeft" in text
+    # The arrow, Home and End keys come from the shared tab bar's script.
+    assert 'data-mv-tabs="panels"' in text and '<script src="/static/lightwork-tabs.js" defer></script>' in text
     assert "applySearch" in text
     assert "data-settings-search-item" in text
 

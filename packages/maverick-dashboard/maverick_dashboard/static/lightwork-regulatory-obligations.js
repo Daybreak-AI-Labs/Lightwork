@@ -39,7 +39,7 @@
   function errorText(failure, action) {
     return window.mvErrorText ? window.mvErrorText(failure, action) : "Could not " + action + ". Please try again.";
   }
-  function say(text) { operationState.textContent = text; }
+  function say(text) { window.mvStatus(operationState, text); }
 
   async function readJson(response) {
     if (!response.ok) { throw response; }

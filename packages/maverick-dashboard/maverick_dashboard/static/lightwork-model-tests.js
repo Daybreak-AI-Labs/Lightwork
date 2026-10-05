@@ -6,11 +6,8 @@
   let context = '', review = null, busy = false, timer = null, enabled = false, visible = 50;
   const words = {prepared: 'Awaiting your confirmation', queued: 'Queued once; not replayed after interruption', executing: 'One request in progress', passed: 'Synthetic sample matched', not_matched: 'Response received; sample did not match', cancelled: 'Cancelled before dispatch', refused: 'Refused before dispatch', unknown: 'Unconfirmed outcome; check original accounting receipt'};
   async function request(path, body) {
-    const response = await fetch('/api/v1/models/tests' + path, {credentials: 'same-origin', cache: 'no-store',
-      method: body ? 'POST' : 'GET', headers: body ? {'Content-Type': 'application/json'} : {}, body: body ? JSON.stringify(body) : undefined});
-    let value; try { value = await response.json(); } catch (_) { throw new Error('The response is unavailable. Refresh original test results before deciding what to do next.'); }
-    if (!response.ok) throw new Error(typeof value.detail === 'string' ? value.detail : 'The test could not be confirmed. Refresh its original receipt; no automatic repeat was sent.');
-    return value;
+    return window.mvFetchJSON('/api/v1/models/tests' + path, {cache: 'no-store', method: body ? 'POST' : 'GET', body, plainDetail: true},
+      body ? 'record the model test' : 'load the model tests');
   }
   function controls() {
     el('review').disabled = busy || !enabled;

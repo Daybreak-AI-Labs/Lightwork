@@ -27,7 +27,7 @@
     return e;
   }
   function human(v) { return window.mvHuman ? window.mvHuman(v) : String(v || ""); }
-  function say(text) { if (statusEl) { statusEl.textContent = text; } }
+  function say(text) { window.mvStatus(statusEl, text); }
   function fail(text) { if (errorEl) { errorEl.textContent = text; } if (window.mvToast) { window.mvToast(text, { error: true }); } }
   function clear(node) { while (node.firstChild) { node.removeChild(node.firstChild); } }
   function text(id, value) {
@@ -49,28 +49,20 @@
     return human(pair[1]) + " (" + human(pair[0]) + ")";
   }
 
-  async function failure(response, action) {
-    var body = null;
-    try { body = await response.json(); } catch (e) { body = null; }
-    var plain = body && window.mvPlainDetail && window.mvPlainDetail(body.detail);
-    if (plain && [404, 409, 422, 503].indexOf(response.status) >= 0) {
+  function failure(error, action) {
+    var plain = window.mvPlainDetail && window.mvPlainDetail(error && error.detail);
+    if (plain && [404, 409, 422, 503].indexOf(error.status) >= 0) {
       return plain;
     }
-    return window.mvErrorText(response, action);
+    return error && error.message ? error.message : window.mvErrorText(error, action);
   }
 
   async function call(method, url, body, action) {
-    var response;
-    try {
-      response = await fetch(url, {
-        method: method, credentials: "same-origin",
-        headers: { "Content-Type": "application/json", "Accept": "application/json" },
-        body: body === undefined ? undefined : JSON.stringify(body)
-      });
-    } catch (e) { fail(window.mvErrorText(e, action)); return null; }
-    if (!response.ok) { fail(await failure(response, action)); return null; }
+    var data;
+    try { data = await window.mvFetchJSON(url, { method: method, body: body }, action); }
+    catch (error) { fail(failure(error, action)); return null; }
     if (errorEl) { errorEl.textContent = ""; }
-    try { return await response.json(); } catch (e) { return {}; }
+    return data || {};
   }
 
   function button(label, cls, onClick) {
@@ -259,15 +251,12 @@
 
   async function loadAll(keepStatus) {
     try {
-      var response = await fetch(root.dataset.apiUrl, { credentials: "same-origin", headers: { "Accept": "application/json" } });
-      if (!response.ok) { say(""); fail(window.mvErrorText(response, "load the safety summary")); return; }
-      renderSummary(await response.json());
-      var c = await fetch("/api/v1/immune/choices", { credentials: "same-origin", headers: { "Accept": "application/json" } });
-      if (c.ok) { choices = await c.json(); renderChoices(); }
+      renderSummary(await window.mvFetchJSON(root.dataset.apiUrl, {}, "load the safety summary"));
+      try { choices = await window.mvFetchJSON("/api/v1/immune/choices"); renderChoices(); } catch (e) { /* choices stay as they were */ }
       if (!keepStatus) { say("Up to date."); }
     } catch (error) {
       say("");
-      fail(window.mvErrorText(error, "load the safety summary"));
+      fail(error.message);
     }
   }
 

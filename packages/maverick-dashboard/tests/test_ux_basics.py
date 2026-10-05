@@ -224,7 +224,9 @@ def test_goal_id_resolves_and_every_task_page_shares_the_tabs():
         for tab in (f'href="/chat/goal/{g.id}"', f'href="/goals/{g.id}/trajectory"',
                     f'href="/goals/{g.id}/plan"', f'href="/goals/{g.id}/errors"'):
             assert tab in body, (path, tab)
-        assert body.count('class="task-tabs__on" aria-current="page"') == 1
+        bar = body[body.index('aria-label="Task pages"'):]
+        bar = bar[:bar.index("</nav>")]
+        assert bar.count('aria-current="page"') == 1, path
     # A one-step task's plan page explains the missing map without claiming
     # the task already ran.
     plan = client.get(f"/goals/{g.id}/plan").text

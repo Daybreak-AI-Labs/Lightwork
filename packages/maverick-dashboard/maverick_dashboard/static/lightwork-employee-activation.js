@@ -10,14 +10,11 @@
 
   var operation = Array.from(crypto.getRandomValues(new Uint8Array(16)), function (v) { return v.toString(16).padStart(2,'0'); }).join('');
   async function call(url, body) {
-    var controller = new AbortController(), timer = setTimeout(function () { controller.abort(); }, 30000); requests.add(controller);
+    var controller = new AbortController(); requests.add(controller);
     try {
-      var response = await fetch(url, {method: body ? 'POST' : 'GET', credentials:'same-origin', cache:'no-store', signal:controller.signal,
-        headers:body ? {'Content-Type':'application/json'} : {}, body:body ? JSON.stringify(body) : undefined});
-      var value = await response.json();
-      if (!response.ok) throw new Error(typeof value.detail === 'string' ? value.detail : value.detail && value.detail.message || 'This action could not be confirmed. Refresh the saved draft before trying again.');
-      return value;
-    } finally { clearTimeout(timer); requests.delete(controller); }
+      return await window.mvFetchJSON(url, {method: body ? 'POST' : 'GET', cache: 'no-store', signal: controller.signal, timeout: 30000,
+        body: body, plainDetail: true}, body ? 'save the draft' : 'load the draft');
+    } finally { requests.delete(controller); }
   }
   function sourceControls() {
     el('real').hidden = el('mode').value !== 'real';

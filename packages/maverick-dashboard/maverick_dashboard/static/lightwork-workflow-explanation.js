@@ -61,15 +61,13 @@
   async function load() {
     if (controller) controller.abort();
     controller = new AbortController(); var activeController = controller, started = ++generation;
-    var timer = setTimeout(function () { activeController.abort(); }, 30000);
     refresh.disabled = true; content.replaceChildren(); status.textContent = 'Checking the saved workflow and current permissions…';
     var url = '/api/v1/flows/' + encodeURIComponent(panel.dataset.flowId) + '/explanation';
     if (panel.dataset.runId) url += '?run_id=' + encodeURIComponent(panel.dataset.runId);
     try {
-      var response = await fetch(url, {credentials: 'same-origin', cache: 'no-store', signal: activeController.signal});
-      var body = await response.json();
+      var body = await window.mvFetchJSON(url, {cache: 'no-store', signal: activeController.signal, timeout: 30000});
       if (started !== generation) return;
-      if (!response.ok || !body.explanation || typeof body.explanation.is_learned !== 'boolean') throw new Error('unavailable');
+      if (!body || !body.explanation || typeof body.explanation.is_learned !== 'boolean') throw new Error('unavailable');
       panel.hidden = !body.explanation.is_learned;
       if (!panel.hidden) render(body.explanation);
     } catch (_) {
@@ -77,7 +75,7 @@
         panel.hidden = false; content.replaceChildren();
         status.textContent = 'The current explanation could not be confirmed. Check access and the saved workflow, then refresh. No learning or action permission is established by this page.';
       }
-    } finally { clearTimeout(timer); if (started === generation) refresh.disabled = false; }
+    } finally { if (started === generation) refresh.disabled = false; }
   }
   refresh.addEventListener('click', load);
   window.addEventListener('lightwork:flow-loaded', load);

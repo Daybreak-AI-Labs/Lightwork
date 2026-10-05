@@ -20,7 +20,7 @@
   var ROLE = { privacy: 'Privacy', legal: 'Legal', brand: 'Brand', accessibility: 'Accessibility' };
   var PROPOSAL = { pending_review: ['Waiting for review', 'warn'], approved: ['Accepted', 'active'], rejected: ['Rejected', 'idle'] };
 
-  function say(text) { statusEl.textContent = text; }
+  function say(text) { window.mvStatus(statusEl, text); }
   function fail(f, action) { say(R.errorText(f, action)); }
   function badge(map, v) { var s = map[v] || [R.human(v), 'info']; return R.badge(s[0], s[1]); }
   function name(id) { return R.human(id); }

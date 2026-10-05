@@ -365,7 +365,7 @@
     });
   }
 
-  function setStatus(msg) { statusEl.textContent = msg; }
+  function setStatus(msg) { if (window.mvStatus) window.mvStatus(statusEl, msg); else statusEl.textContent = msg; }
   function showError(msg) {
     errEl.textContent = msg; errEl.style.display = msg ? "block" : "none";
   }
@@ -448,19 +448,17 @@
   const pendingRequests = new Set();
   let contextChanged = false;
   async function boundedRequest(url, options) {
+    // The answer's status and body, as the callers read them; the request
+    // goes through the shell's mvFetchJSON with a 15-second deadline.
     const controller = new AbortController();
     pendingRequests.add(controller);
-    let timer;
-    const timeout = new Promise((_resolve, reject) => {
-      timer = setTimeout(() => { controller.abort(); reject(new Error('Request outcome is unknown.')); }, 15000);
-    });
-    const request = (async () => {
-      const response = await fetch(url, Object.assign({}, options || {}, {signal: controller.signal}));
-      const body = response.ok && response.status !== 204 ? await response.json() : null;
-      return {response, body};
-    })();
-    try { return await Promise.race([request, timeout]); }
-    finally { clearTimeout(timer); pendingRequests.delete(controller); }
+    try {
+      const body = await window.mvFetchJSON(url, Object.assign({}, options || {}, {signal: controller.signal, timeout: 15000}));
+      return {response: {ok: true, status: body === null ? 204 : 200, headers: null}, body};
+    } catch (error) {
+      if (!error.status) throw error;
+      return {response: {ok: false, status: error.status, headers: error.headers}, body: null};
+    } finally { pendingRequests.delete(controller); }
   }
   function abandonRequests() { pendingRequests.forEach(controller => controller.abort()); }
   window.addEventListener('pagehide', abandonRequests);
@@ -641,7 +639,8 @@
 
   window.addEventListener("resize", () => { measure(); });
 
-  load();
+  // The shell's helpers (lightwork-ui.js) load after the page content.
+  if (window.mvFetchJSON) load(); else document.addEventListener('DOMContentLoaded', load);
 })();
 </script>
 {% endblock %}

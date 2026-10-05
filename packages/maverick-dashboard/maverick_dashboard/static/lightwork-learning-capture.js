@@ -22,15 +22,9 @@
     return node;
   }
   function human(value) { return typeof window.mvHuman === 'function' ? window.mvHuman(String(value)) : String(value).replace(/[_.-]+/g, ' '); }
-  function say(text) { $('status').textContent = text; }
+  function say(text) { window.mvStatus($('status'), text); }
   async function api(path, body) {
-    const response = await fetch(base + path, {
-      method: body === undefined ? 'GET' : 'POST', credentials: 'same-origin', cache: 'no-store',
-      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-      body: body === undefined ? undefined : JSON.stringify(body)
-    });
-    if (!response.ok) throw response;
-    return response.json();
+    return window.mvFetchJSON(base + path, {method: body === undefined ? 'GET' : 'POST', cache: 'no-store', body: body});
   }
   function isoDay(epoch) { const d = new Date(epoch * 1000); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
   function endOfDay(value) { const t = Date.parse(value + 'T23:59:00'); return Number.isFinite(t) ? t / 1000 : NaN; }

@@ -7,7 +7,6 @@
   var readable=doc.getElementById('support-readable');
   function human(v){return root.mvHuman?root.mvHuman(v):String(v).replace(/_/g,' ');}
   // The file service explains refusals in sentences written for people; anything else gets a plain fallback.
-  function plain(detail,fallback){return typeof detail==='string'&&detail.length<=400&&/^[A-Z]/.test(detail)&&!/[_{}<>]|HTTP|Traceback/.test(detail)?detail:fallback;}
   function value(v){if(v===true)return'Yes';if(v===false)return'No';if(v===null||v===undefined||v==='')return'Not set';return String(v);}
   // A readable view of the same report: sections as headings, values as label/value rows.
   function render(node,data,depth){
@@ -24,10 +23,10 @@
   function controls(){prepare.disabled=busy;download.disabled=busy||!current||!confirm.checked;confirm.disabled=busy||!current;}
   function clear(){current=null;preview.textContent='';if(readable)readable.replaceChildren();reference.textContent='';readiness.replaceChildren();confirm.checked=false;result.hidden=true;controls();}
   async function call(path,body){
-    var response=await root.fetch('/api/v1/support/'+path,{method:'POST',cache:'no-store',headers:{'Content-Type':'application/json','X-Lightwork-Support-Context':host.dataset.context},body:JSON.stringify(body)});
-    if(response.status===401||response.status===403){clear();throw new Error('Your access changed. Sign in again before preparing or downloading a support report.');}
-    if(!response.ok){var error;try{error=await response.json();}catch(_e){}throw new Error(plain(error&&error.detail,'The report could not be confirmed. Prepare a new report before trying again.'));}
-    return response;
+    // The response itself: a download is read by its caller.
+    return root.mvFetchJSON('/api/v1/support/'+path,{method:'POST',cache:'no-store',raw:true,plainDetail:true,body,
+      headers:{'X-Lightwork-Support-Context':host.dataset.context},onAccess:clear,
+      messages:{401:'Your access changed. Sign in again before preparing or downloading a support report.',403:'Your access changed. Sign in again before preparing or downloading a support report.',409:'The report could not be confirmed. Prepare a new report before trying again.'}},'prepare the support report');
   }
   prepare.addEventListener('click',async function(){
     if(busy)return;clear();busy=true;controls();status.textContent='Preparing the support report…';

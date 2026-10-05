@@ -19,7 +19,7 @@
   var BASE = '/api/v1/support/issue-report';
   var next = null, task = null, approved = null, busy = false, generation = 0;
   var selected = new URLSearchParams(window.location.search).get('task');
-  function say(text) { status.textContent = text || ''; }
+  function say(text) { window.mvStatus(status, text || ''); }
   function clear() { task = null; approved = null; title.value = ''; body.value = ''; confirm.checked = false; panel.hidden = true; }
   function ready() { return approved && confirm.checked && approved.task === task && approved.title === title.value && approved.body === body.value; }
   function controls() {
@@ -32,19 +32,8 @@
     download.disabled = busy || !ready();
   }
   async function call(path, payload) {
-    var controller = new AbortController();
-    var timer = window.setTimeout(function () { controller.abort(); }, 20000);
-    try {
-      var response = await window.fetch(BASE + path, {method: payload ? 'POST' : 'GET',
-        credentials: 'same-origin', cache: 'no-store', signal: controller.signal,
-        headers: payload ? {'Content-Type': 'application/json'} : {}, body: payload ? JSON.stringify(payload) : undefined});
-      if (!response.ok) {
-        if (response.status === 401 || response.status === 403 || response.status === 404) clear();
-        var error; try { error = await response.json(); } catch (_) { /* no readable error */ }
-        throw new Error(typeof (error && error.detail) === 'string' ? error.detail : 'The request could not be completed. Try again.');
-      }
-      return await response.json();
-    } finally { window.clearTimeout(timer); }
+    return window.mvFetchJSON(BASE + path, {method: payload ? 'POST' : 'GET', cache: 'no-store', timeout: 20000, body: payload,
+      plainDetail: true, onAccess: clear, accessStatuses: [401, 403, 404]}, payload ? 'finish the support step' : 'load support');
   }
   function option(t) {
     var node = document.createElement('option'); node.value = String(t.id);

@@ -67,6 +67,6 @@ def test_pages_ship_the_board_skeleton(monkeypatch, tmp_path):
             ("/oversight", ("bd-interventions", "bd-fired"))):
         t = c.get(path).text
         assert "/static/board.js" in t, path
-        assert 'id="bd-stamp"' in t and 'class="bd-slicer"' in t, path
+        assert 'id="bd-stamp"' in t and 'aria-label="Time range"' in t and 'data-days="90"' in t, path
         for marker in markers:
             assert marker in t, path

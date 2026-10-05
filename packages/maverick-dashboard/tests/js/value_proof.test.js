@@ -4,6 +4,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const { JSDOM } = require("jsdom");
+const {shell} = require('./_shell');
 
 const source = fs.readFileSync(
   path.resolve(__dirname, "../../maverick_dashboard/static/lightwork-value-proof.js"), "utf8");
@@ -40,6 +41,7 @@ function answers(over) {
 async function fixture(html, { over, confirm = true } = {}) {
   const dom = new JSDOM(html, { url: "https://lightwork.example/savings", runScripts: "outside-only" });
   const { window } = dom;
+  shell(window);
   const calls = [];
   const table = answers(over);
   window.mvErrorText = (failure, action) => `Could not ${action}.`;

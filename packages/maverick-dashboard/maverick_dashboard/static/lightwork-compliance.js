@@ -11,19 +11,13 @@
   function confirmAction(message, okText) {
     return window.mvConfirm ? window.mvConfirm(message, { okText: okText }) : Promise.resolve(false);
   }
-  function say(el, text) { if (el) el.textContent = text; }
-  function jsonHeaders() { return { 'Content-Type': 'application/json', Accept: 'application/json' }; }
+  function say(el, text) { window.mvStatus(el, text); }
   function getJSON(url) {
-    return fetch(url, { headers: { Accept: 'application/json' }, credentials: 'same-origin' }).then(function (r) {
-      if (!r.ok) throw r;
-      return r.json();
-    });
+    return window.mvFetchJSON(url);
   }
   function post(url, body) {
-    return fetch(url, {
-      method: 'POST', headers: jsonHeaders(), credentials: 'same-origin',
-      body: JSON.stringify(body || {}),
-    }).then(function (r) { if (!r.ok) throw r; return r; });
+    // The response itself: some answers are files (an export).
+    return window.mvFetchJSON(url, {method: 'POST', body: body || {}, raw: true});
   }
   function human(days) {
     if (days % 365 === 0) { var y = days / 365; return y + (y === 1 ? ' year' : ' years'); }

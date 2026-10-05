@@ -1185,7 +1185,8 @@
   const byId = id => document.getElementById(id);
   const setStatus = (id, message) => {
     const target = byId(id);
-    if (target) target.textContent = String(message || "").slice(0, 320);
+    if (target && window.mvStatus) window.mvStatus(target, String(message || "").slice(0, 320));
+    else if (target) target.textContent = String(message || "").slice(0, 320);
   };
   const asText = value => value === null || value === undefined || value === "" ? "—" : String(value);
   const splitTokens = value => String(value || "").split(",").map(item => item.trim()).filter(Boolean);
@@ -1248,22 +1249,10 @@
     if (response.status === 503) return "This feature is not available right now. It may need to be turned on or set up first.";
     return `Could not ${fallback}. Please try again.`;
   };
-  const request = async (path, options = {}, action = "finish that") => {
-    let response;
-    try {
-      response = await fetch(prefix + path, {credentials: "same-origin", ...options});
-    } catch (_error) {
-      throw new Error("Could not reach the server — check your connection and try again.");
-    }
-    if (!response.ok) {
-      // The refusal's body is never read: release it so the request ends
-      // instead of staying open (the page never went quiet).
-      try { if (response.body) response.body.cancel().catch(() => {}); } catch (_error) { /* already closed */ }
-      throw new Error(await safeDetail(response, action));
-    }
-    if (response.status === 204) return null;
-    return response.json();
-  };
+  // One JSON request through the shell's mvFetchJSON: one plain sentence per
+  // failure, never a status code or server wording.
+  const request = (path, options = {}, action = "finish that") => window.mvFetchJSON(prefix + path,
+    {...options, messages: {offline: "Could not reach the server — check your connection and try again."}}, action);
   const sendJson = (path, method, body, action) => request(path, {
     method,
     headers: {"Content-Type": "application/json"},
@@ -3871,6 +3860,9 @@
       loadAllButton.removeAttribute("aria-busy");
     }
   });
+  // Sections load once the shell's helpers (lightwork-ui.js, after the page
+  // content) are ready.
+  const watchPanels = () => {
   if ("IntersectionObserver" in window) {
     panelObserver = new IntersectionObserver(entries => {
       entries.forEach(entry => {
@@ -3888,5 +3880,7 @@
   } else {
     void Promise.all(panelLoaders.map(loadPanel));
   }
+  };
+  if (window.mvFetchJSON) watchPanels(); else document.addEventListener("DOMContentLoaded", watchPanels);
 })();
 </script>

@@ -112,7 +112,9 @@ def test_tenant_policy_and_notice_publication_are_confirmed_and_retryable():
     assert "New requests will be decided with it straight away." in data_use
     assert "expected_revision: policy.revision" in data_use
     assert "error.status === 409" in data_use
-    assert "Request failed: the server returned an invalid JSON response." in data_use
+    # Replies are read by the shared consent client, which fails closed on an
+    # unreadable one (consent_workbench.test.js).
+    assert "window.LightworkConsentWorkbench.client(API)(path, options)" in data_use
 
     assert "if (noticeBtn.dataset.inFlight === 'true') return;" in privacy
     assert "Publish privacy notice version “' + version + '”? It cannot be changed afterwards" in privacy

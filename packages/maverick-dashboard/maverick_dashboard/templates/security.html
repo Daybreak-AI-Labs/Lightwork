@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Security &amp; GRC · Lightwork{% endblock %}
 {% block content %}
+{% from "_tabs.html" import panel_tabs, tab_panel %}
 <style>
   /* The live board below supersedes the workspace chassis' static hero
      tiles on this page; the shared include still renders them elsewhere. */
@@ -16,7 +17,6 @@
   .sec-framework { padding:var(--space-2); border:1px solid var(--border);
                    border-radius: var(--radius-md); background:var(--surface-2); }
   .sec-framework strong { display:block; }
-  .sec-tab[hidden] { display:none; }
   .sec-scroll { overflow-x:auto; }
   .sec-form { display:grid; grid-template-columns:repeat(3,minmax(10rem,1fr));
               gap:var(--space-3); padding:var(--space-3); margin-bottom:var(--space-4);
@@ -274,18 +274,17 @@
 
 <div class="section-head"><h2>Security records</h2></div>
 <div class="panel">
-  <div class="mv-tabs" role="tablist" aria-label="Security record types">
-    <button class="mv-tab" id="sec-tab-controls" role="tab" aria-selected="true" aria-controls="sec-panel-controls" tabindex="0" data-sec-tab="controls" type="button">Controls ({{ records.controls|length }})</button>
-    <button class="mv-tab" id="sec-tab-evidence" role="tab" aria-selected="false" aria-controls="sec-panel-evidence" tabindex="-1" data-sec-tab="evidence" type="button">Evidence ({{ records.evidence|length }})</button>
-    <button class="mv-tab" id="sec-tab-risks" role="tab" aria-selected="false" aria-controls="sec-panel-risks" tabindex="-1" data-sec-tab="risks" type="button">Risks ({{ records.risks|length }})</button>
-    <button class="mv-tab" id="sec-tab-poams" role="tab" aria-selected="false" aria-controls="sec-panel-poams" tabindex="-1" data-sec-tab="poams" type="button">Fix plans ({{ records.poams|length }})</button>
-    <button class="mv-tab" id="sec-tab-vendors" role="tab" aria-selected="false" aria-controls="sec-panel-vendors" tabindex="-1" data-sec-tab="vendors" type="button">Vendors ({{ records.vendors|length }})</button>
-    <button class="mv-tab" id="sec-tab-policies" role="tab" aria-selected="false" aria-controls="sec-panel-policies" tabindex="-1" data-sec-tab="policies" type="button">Policies ({{ records.policies|length }})</button>
-    <button class="mv-tab" id="sec-tab-incidents" role="tab" aria-selected="false" aria-controls="sec-panel-incidents" tabindex="-1" data-sec-tab="incidents" type="button">Incidents ({{ records.incidents|length }})</button>
-    <button class="mv-tab" id="sec-tab-audits" role="tab" aria-selected="false" aria-controls="sec-panel-audits" tabindex="-1" data-sec-tab="audits" type="button">Audits ({{ records.audits|length }})</button>
-  </div>
+  {{ panel_tabs('Security record types', [
+       ('controls', 'Controls (%d)' % records.controls|length),
+       ('evidence', 'Evidence (%d)' % records.evidence|length),
+       ('risks', 'Risks (%d)' % records.risks|length),
+       ('poams', 'Fix plans (%d)' % records.poams|length),
+       ('vendors', 'Vendors (%d)' % records.vendors|length),
+       ('policies', 'Policies (%d)' % records.policies|length),
+       ('incidents', 'Incidents (%d)' % records.incidents|length),
+       ('audits', 'Audits (%d)' % records.audits|length)], 'controls', id='sec', hash='sec-') }}
 
-  <section class="sec-tab" id="sec-panel-controls" role="tabpanel" aria-labelledby="sec-tab-controls" data-sec-panel="controls">
+  <section {{ tab_panel('controls', 'controls', id='sec') }}>
     <span id="sec-controls"></span>
     {% if not records.controls %}
     <form class="sec-form" data-control-initialize>
@@ -330,7 +329,7 @@
     {% else %}<tr><td colspan="4" class="sec-empty">No controls yet. Use “Set up standard controls” above.</td></tr>{% endfor %}</tbody></table></div>
   </section>
 
-  <section class="sec-tab" id="sec-panel-evidence" role="tabpanel" aria-labelledby="sec-tab-evidence" data-sec-panel="evidence" hidden>
+  <section {{ tab_panel('evidence', 'controls', id='sec') }}>
     <form class="sec-form" data-endpoint="/api/v1/security/evidence">
       <label>Title<input class="input" name="title" required maxlength="300"></label>
       <label>Where it came from<select class="select" name="source"><option value="paste">Typed or pasted</option><option value="upload">From a file</option><option value="email">From an email</option><option value="ticket">From a ticket</option></select></label>
@@ -389,7 +388,7 @@
     {% else %}<tr><td colspan="4" class="sec-empty">No evidence yet. Add some above.</td></tr>{% endfor %}</tbody></table></div>
   </section>
 
-  <section class="sec-tab" id="sec-panel-risks" role="tabpanel" aria-labelledby="sec-tab-risks" data-sec-panel="risks" hidden>
+  <section {{ tab_panel('risks', 'controls', id='sec') }}>
     <form class="sec-form" data-endpoint="/api/v1/security/risks">
       <label class="wide">Risk<input class="input" name="title" required maxlength="300"></label>
       <label>How likely<select class="select" name="likelihood">{% for v, l in likelihood_words %}<option value="{{ v }}"{% if v == 3 %} selected{% endif %}>{{ l }}</option>{% endfor %}</select></label>
@@ -427,7 +426,7 @@
     {% else %}<tr><td colspan="5" class="sec-empty">No risks yet. Add one above.</td></tr>{% endfor %}</tbody></table></div>
   </section>
 
-  <section class="sec-tab" id="sec-panel-poams" role="tabpanel" aria-labelledby="sec-tab-poams" data-sec-panel="poams" hidden>
+  <section {{ tab_panel('poams', 'controls', id='sec') }}>
     <p class="muted">Fix plans (sometimes called a plan of action and milestones, or POA&amp;M) track problems until they are fixed.</p>
     <form class="sec-form" data-endpoint="/api/v1/security/poams">
       <label class="wide">Problem to fix<input class="input" name="finding" required maxlength="1000"></label>
@@ -444,7 +443,7 @@
     {% else %}<tr><td colspan="4" class="sec-empty">No fix plans yet.</td></tr>{% endfor %}</tbody></table></div>
   </section>
 
-  <section class="sec-tab" id="sec-panel-vendors" role="tabpanel" aria-labelledby="sec-tab-vendors" data-sec-panel="vendors" hidden>
+  <section {{ tab_panel('vendors', 'controls', id='sec') }}>
     <form class="sec-form" data-endpoint="/api/v1/security/vendors">
       <label>Vendor name<input class="input" name="name" required maxlength="300"></label>
       <label>How important<select class="select" name="criticality">{% for c in ['low','medium','high','critical'] %}<option value="{{ c }}"{% if c == 'medium' %} selected{% endif %}>{{ status_words[c] }}</option>{% endfor %}</select></label>
@@ -457,7 +456,7 @@
       <form class="sec-action" data-endpoint="/api/v1/security/vendors/{{ row.id }}/decision"><label>Decision<select class="select" name="decision"><option value="approved">Approve</option><option value="needs_work">Needs more work</option><option value="rejected">Reject</option></select></label><label>Why<input class="input" name="rationale" required maxlength="4000"></label><input type="hidden" name="expected_revision" value="{{ row.revision }}"><button class="btn" type="submit">Save decision</button><span role="status" class="muted"></span></form></td><td>{{ (row.get('owner') | identity) if row.get('owner') else '—' }}</td></tr>{% else %}<tr><td colspan="4" class="sec-empty">No vendors assessed yet.</td></tr>{% endfor %}</tbody></table></div>
   </section>
 
-  <section class="sec-tab" id="sec-panel-policies" role="tabpanel" aria-labelledby="sec-tab-policies" data-sec-panel="policies" hidden>
+  <section {{ tab_panel('policies', 'controls', id='sec') }}>
     <form class="sec-form" data-endpoint="/api/v1/security/policies">
       <label>Policy name<input class="input" name="title" required maxlength="300"></label>
       {{ owner_field(required=true) }}
@@ -500,7 +499,7 @@
     {% else %}<tr><td colspan="4" class="sec-empty">No policies yet.</td></tr>{% endfor %}</tbody></table></div>
   </section>
 
-  <section class="sec-tab" id="sec-panel-incidents" role="tabpanel" aria-labelledby="sec-tab-incidents" data-sec-panel="incidents" hidden>
+  <section {{ tab_panel('incidents', 'controls', id='sec') }}>
     <form class="sec-form" data-endpoint="/api/v1/security/incidents">
       <label>What happened<input class="input" name="title" required maxlength="300"></label>
       <label>How serious<select class="select" name="severity">{% for c in ['low','medium','high','critical'] %}<option value="{{ c }}"{% if c == 'medium' %} selected{% endif %}>{{ status_words[c] }}</option>{% endfor %}</select></label>
@@ -530,7 +529,7 @@
     {% else %}<tr><td colspan="4" class="sec-empty">No incidents.</td></tr>{% endfor %}</tbody></table></div>
   </section>
 
-  <section class="sec-tab" id="sec-panel-audits" role="tabpanel" aria-labelledby="sec-tab-audits" data-sec-panel="audits" hidden>
+  <section {{ tab_panel('audits', 'controls', id='sec') }}>
     <form class="sec-form" data-endpoint="/api/v1/security/audits">
       <label>Audit name<input class="input" name="name" required maxlength="300"></label>
       <label>Framework<select class="select" name="framework" data-other-select required>{% for framework in insights.crosswalk_frameworks %}<option value="{{ framework.label }}">{{ framework.label }}</option>{% endfor %}<option value="__other__">Another framework…</option></select><input class="input" data-other-input hidden maxlength="120" aria-label="Name of the framework"></label>
@@ -570,46 +569,8 @@
     }
     return window.mvErrorText(response, action);
   }
-  var buttons = document.querySelectorAll('[data-sec-tab]');
-  function activateTab(button, focus) {
-    buttons.forEach(function (b) {
-      var selected = b === button;
-      b.setAttribute('aria-selected', selected ? 'true' : 'false');
-      b.tabIndex = selected ? 0 : -1;
-    });
-    document.querySelectorAll('[data-sec-panel]').forEach(function (panel) {
-      panel.hidden = panel.dataset.secPanel !== button.dataset.secTab;
-    });
-    if (focus) button.focus();
-  }
-  // Each tab has its own address (#sec-incidents and so on), so a link or a
-  // refresh opens the same tab. replaceState keeps Back for leaving the page.
-  function remember(button) {
-    history.replaceState(history.state, '', '#sec-' + button.dataset.secTab);
-  }
-  buttons.forEach(function (button) {
-    button.addEventListener('click', function () { activateTab(button, false); remember(button); });
-    button.addEventListener('keydown', function (event) {
-      var list = Array.prototype.slice.call(buttons);
-      var index = list.indexOf(button);
-      var next = null;
-      if (event.key === 'ArrowRight') next = list[(index + 1) % list.length];
-      if (event.key === 'ArrowLeft') next = list[(index - 1 + list.length) % list.length];
-      if (event.key === 'Home') next = list[0];
-      if (event.key === 'End') next = list[list.length - 1];
-      if (next) { event.preventDefault(); activateTab(next, true); remember(next); }
-    });
-  });
-  function openFromAddress() {
-    var match = /^#sec-([a-z]+)$/.exec(location.hash);
-    var button = match && document.querySelector('[data-sec-tab="' + match[1] + '"]');
-    if (!button) return;
-    activateTab(button, false);
-    var tabs = button.closest('[role="tablist"]');
-    if (tabs && typeof tabs.scrollIntoView === 'function') tabs.scrollIntoView({block: 'start'});
-  }
-  openFromAddress();
-  window.addEventListener('hashchange', openFromAddress);
+  // The record tabs, their keys and their #sec-… addresses are the shared tab
+  // bar's (_tabs.html, lightwork-tabs.js).
 
   // "Someone else…" / "Another framework…" reveal a text field.
   document.querySelectorAll('select[data-owner-select], select[data-other-select]').forEach(function (sel) {

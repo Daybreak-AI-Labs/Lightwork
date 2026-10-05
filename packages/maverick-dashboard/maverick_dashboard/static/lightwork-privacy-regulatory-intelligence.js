@@ -22,7 +22,7 @@
     enforcement_action: 'Enforcement action', regulatory_update: 'Regulatory update', standard: 'Standard',
   };
 
-  function say(text) { statusEl.textContent = text; }
+  function say(text) { window.mvStatus(statusEl, text); }
   function fail(f, action) { say(R.errorText(f, action)); }
   function place(code) { return PLACE[code] || code; }
   function ticked(name) {

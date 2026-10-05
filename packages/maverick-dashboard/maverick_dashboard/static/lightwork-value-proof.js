@@ -23,7 +23,7 @@
   function empty(id, title, body, action) {
     fill(id, window.mvEmpty ? window.mvEmpty(title, body, action, { compact: true }) : el('p', 'muted', title + '. ' + body));
   }
-  function say(id, text) { var box = $(id); if (box) box.textContent = String(text || ''); }
+  function say(id, text) { window.mvStatus($(id), String(text || '')); }
   function money(n) {
     var v = Number(n) || 0;
     return window.mvMoney ? window.mvMoney(v) : '$' + v.toFixed(2);
@@ -33,27 +33,14 @@
     return typeof window.mvErrorText === 'function' ? window.mvErrorText(failure, action) : 'Could not ' + action + '.';
   }
   function get(path) {
-    return fetch(API + path, { credentials: 'same-origin' }).then(function (r) {
-      if (!r.ok) throw r;
-      return r.json();
-    });
+    return window.mvFetchJSON(API + path);
   }
   function post(path, body) {
-    return fetch(API + path, {
-      method: 'POST', credentials: 'same-origin',
-      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {})
-    }).then(function (r) {
-      if (!r.ok) throw r;
-      return r.json();
-    });
+    return window.mvFetchJSON(API + path, {method: 'POST', body: body || {}});
   }
   async function planError(failure, action) {
-    if (failure && (failure.status === 409 || failure.status === 422) && typeof failure.json === 'function') {
-      try {
-        var body = await failure.json();
-        if (body && typeof body.detail === 'string' && body.detail.length < 240) return body.detail;
-      } catch (e) { /* fall through */ }
-    }
+    var plain = failure && (failure.status === 409 || failure.status === 422) && window.mvPlainDetail ? window.mvPlainDetail(failure.detail) : '';
+    if (plain) return plain;
     return errorText(failure, action);
   }
   function table(headers, rows) {
@@ -253,11 +240,7 @@
     var submit = fleetForm.querySelector('button[type=submit]');
     submit.disabled = true;
     try {
-      var r = await fetch('/api/v1/workforce-ops/outside-agents', {
-        method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ vendor: $('vp-fleet-vendor').value, name: name, description: $('vp-fleet-about').value.trim() })
-      });
-      if (!r.ok) throw r;
+      await window.mvFetchJSON('/api/v1/workforce-ops/outside-agents', { method: 'POST', body: { vendor: $('vp-fleet-vendor').value, name: name, description: $('vp-fleet-about').value.trim() } });
       say('vp-fleet-msg', 'Added ' + name + '. It can now share what it learns.');
       fleetForm.reset();
       await loadFleet();
@@ -282,8 +265,7 @@
       event.preventDefault();
       say('vp-proof-msg', 'Preparing the download…');
       try {
-        var r = await fetch(link.getAttribute('href'), { credentials: 'same-origin' });
-        if (!r.ok) throw r;
+        var r = await window.mvFetchJSON(link.getAttribute('href'), { raw: true });
         var blob = await r.blob();
         var url = URL.createObjectURL(blob);
         var a = document.createElement('a');

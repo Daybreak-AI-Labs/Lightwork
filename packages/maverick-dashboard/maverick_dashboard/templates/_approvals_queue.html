@@ -267,7 +267,7 @@
     }
     function say(text, color) {
       msg.style.color = color || 'var(--muted)';
-      msg.textContent = text;
+      if (window.mvStatus) window.mvStatus(msg, text, {error: color === 'var(--danger)'}); else msg.textContent = text;
     }
     function plainError(failure, what) {
       return window.mvErrorText ? window.mvErrorText(failure, what)

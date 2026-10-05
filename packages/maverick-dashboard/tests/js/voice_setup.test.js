@@ -1,6 +1,7 @@
 'use strict';
 const {test}=require('node:test'),assert=require('node:assert/strict');
 const fs=require('node:fs'),path=require('node:path'),{JSDOM}=require('jsdom');
+const {shell} = require('./_shell');
 const folder=path.resolve(__dirname,'../../maverick_dashboard');
 const markup=fs.readFileSync(path.join(folder,'templates/settings.html'),'utf8').replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi,'');
 const script=path.join(folder,'static/lightwork-voice-setup.js');
@@ -13,7 +14,7 @@ async function fixture(intercept=()=>undefined,setup=()=>{}){
   const dom=new JSDOM(markup,{url:'https://lightwork.example/settings#settings-voice',runScripts:'outside-only'}),{window}=dom,calls=[],timers=[];
   window.setTimeout=fn=>{timers.push(fn);return timers.length;};window.clearTimeout=id=>{timers[id-1]=null;};
   window.fetch=async(url,options={})=>{const call={url,options};calls.push(call);const value=await intercept(call);return value instanceof Response?value:response(value===undefined?base:value);};
-  setup(window);if(fs.existsSync(script))window.eval(fs.readFileSync(script,'utf8'));
+  shell(window);setup(window);if(fs.existsSync(script))window.eval(fs.readFileSync(script,'utf8'));
   async function settle(){for(let i=0;i<12;i++)await new Promise(done=>setImmediate(done));}
   const el=id=>window.document.getElementById('voice-setup-'+id);
   async function click(id){el(id).click();await settle();}

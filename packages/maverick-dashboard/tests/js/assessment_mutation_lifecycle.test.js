@@ -3,6 +3,7 @@ const {test} = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs"), path = require("node:path");
 const {JSDOM} = require("jsdom");
+const {shell} = require('./_shell');
 const read = name => fs.readFileSync(path.resolve(__dirname,"../../maverick_dashboard/templates",name),"utf8").replace(/\r\n/g,"\n");
 const source=read("_assessment_review.html"),queue=read("_approvals_queue.html");
 const flush=async()=>{for(let i=0;i<12;i++)await new Promise(setImmediate);};
@@ -20,6 +21,7 @@ async function fixture(action) {
     const match=url.match(/\/sessions\/([AB])$/);
     return {ok:true,json:async()=>match?record(match[1]):{timeline:[]}};
   };
+  shell(w);
   w.eval(source.slice(source.indexOf("<script>")+8,source.indexOf("</script>")));
   const start=queue.indexOf("    document.addEventListener('mv-assessment-decided'");
   w.eval(queue.slice(start,queue.indexOf("\n  })();",start)));

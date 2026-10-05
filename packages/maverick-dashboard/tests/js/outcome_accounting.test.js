@@ -3,6 +3,7 @@ const {test} = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs'), path = require('node:path');
 const {JSDOM} = require('jsdom');
+const {shell} = require('./_shell');
 const script = fs.readFileSync(path.resolve(
   __dirname, '../../maverick_dashboard/static/lightwork-outcome-accounting.js',
 ), 'utf8');
@@ -200,6 +201,7 @@ async function fixture(response, context = 'alice') {
     calls.push({url, options});
     return typeof response === 'function' ? response(url, options, calls.length) : response;
   };
+  shell(dom.window);
   dom.window.eval(script);
   await settle();
   return {dom, host: dom.window.document.getElementById('op-accounting-summary'), calls};
@@ -418,7 +420,7 @@ test('refuses portfolio count, context, money, overflow, cursor, and record mism
   }
   const ui = await fixture({ok: false, status: 403, json: async () => { throw new SyntaxError('<script>secret</script>'); }});
   t.after(() => ui.dom.window.close());
-  assert.match(ui.host.textContent, /unavailable/);
+  assert.match(ui.host.textContent, /unavailable|do not have permission/);
   assert.doesNotMatch(ui.host.textContent, /secret/);
 });
 

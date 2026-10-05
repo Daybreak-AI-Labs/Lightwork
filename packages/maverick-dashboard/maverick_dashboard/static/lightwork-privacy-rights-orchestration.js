@@ -40,7 +40,7 @@
     salesforce_contacts: 'Salesforce contacts', servicenow_users: 'ServiceNow users',
   };
 
-  function say(text) { statusEl.textContent = text; }
+  function say(text) { window.mvStatus(statusEl, text); }
   function fail(f, action) { say(R.errorText(f, action)); }
   function badge(map, value) { var s = map[value] || [R.human(value), 'info']; return R.badge(s[0], s[1]); }
   function sourceName(id) {

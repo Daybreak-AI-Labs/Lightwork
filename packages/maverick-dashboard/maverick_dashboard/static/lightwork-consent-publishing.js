@@ -7,33 +7,18 @@
   "use strict";
   var API = "/api/v1/consent/publishing";
 
-  // The page's JSON client: a non-2xx or malformed response is never success.
+  // The shared consent JSON client (mvFetchJSON): a non-2xx or malformed response is never success.
   async function call(path, options) {
-    var opts = Object.assign({ cache: "no-store" }, options || {});
-    if (opts.json !== undefined) {
-      opts.body = JSON.stringify(opts.json);
-      opts.headers = { "Content-Type": "application/json" };
-      delete opts.json;
-    }
-    var response = await fetch(API + path, opts);
-    var body;
-    try { body = await response.json(); }
-    catch (_error) {
-      var bad = new Error("Request failed: the server returned an invalid JSON response.");
-      bad.status = response.ok ? 0 : response.status;
-      throw bad;
-    }
-    if (!response.ok) {
-      var failure = new Error(body && typeof body.detail === "string" ? body.detail : "That didn't work. Refresh the page and try again.");
-      failure.status = response.status;
-      throw failure;
-    }
-    return body;
+    return window.LightworkConsentWorkbench.client(API)(path, options);
   }
 
   var CW = window.LightworkConsentWorkbench;
-  if (CW && document.getElementById("cpp-root")) start();
-  if (CW && document.getElementById("cpp-signing")) startSigning();
+  // The shell's helpers (lightwork-ui.js) load after the page content.
+  function begin() {
+    if (CW && document.getElementById("cpp-root")) start();
+    if (CW && document.getElementById("cpp-signing")) startSigning();
+  }
+  if (window.mvFetchJSON) begin(); else document.addEventListener("DOMContentLoaded", begin);
 
   // ---- Signing key: shown by fingerprint only; the private key never leaves the server.
   function startSigning() {

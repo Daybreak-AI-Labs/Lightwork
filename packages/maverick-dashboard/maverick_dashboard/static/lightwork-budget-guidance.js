@@ -23,10 +23,7 @@
   // connection, a non-JSON reply) gets one plain sentence, never raw text.
   function errorMessage(error) { var business = window.mvBusinessError && window.mvBusinessError(error); return business ? business.message : 'Budget details could not be refreshed. Try again in a moment.'; }
   async function call(url, options, signal) {
-    var response = await fetch(url, Object.assign({credentials: 'same-origin', cache: 'no-store', signal: signal}, options || {}));
-    var value = await response.json();
-    if (!response.ok) { var error = new Error(value.detail && (value.detail.message || value.detail) || 'The budget could not be checked. Refresh the page and try again.'); error.detail = value.detail; error.status = response.status; throw error; }
-    return value;
+    return window.mvFetchJSON(url, Object.assign({cache: 'no-store', signal: signal}, options || {}), 'check the budget');
   }
   function paragraph(parent, source, values) { if (source) parent.appendChild(node('p', source, values)); }
   function render(value) {

@@ -22,26 +22,10 @@
     return text ? text.charAt(0).toUpperCase() + text.slice(1) : "";
   }
   function money(value) { return window.mvMoney ? window.mvMoney(Number(value || 0)) : "$" + Number(value || 0).toFixed(2); }
-  function plain(status, action, headers) {
-    // Headers carry the turned-off reason, so "off" is never read as "no permission".
-    if (typeof window.mvErrorText === "function") return window.mvErrorText({ status: status, headers: headers }, action);
-    return "Could not " + action + ". Please try again.";
-  }
   async function call(method, path, body, action) {
-    var response;
-    try {
-      response = await fetch(API + path, {
-        method: method, credentials: "same-origin",
-        headers: { Accept: "application/json", "Content-Type": "application/json" },
-        body: body === undefined ? undefined : JSON.stringify(body)
-      });
-    } catch (error) {
-      throw new Error(typeof window.mvErrorText === "function" ? window.mvErrorText(error, action) : "Could not " + action + ".");
-    }
-    var payload = {};
-    try { payload = await response.json(); } catch (_error) { payload = null; }
-    if (!response.ok || !payload || typeof payload !== "object") {
-      throw new Error(response.ok ? "Could not " + action + ". Lightwork returned something unexpected." : (payload && window.mvPlainDetail && window.mvPlainDetail(payload.detail) || plain(response.status, action, response.headers)));
+    var payload = await window.mvFetchJSON(API + path, { method: method, body: body, plainDetail: true }, action);
+    if (!payload || typeof payload !== "object") {
+      throw new Error(window.mvErrorText({ name: "SyntaxError" }, action));
     }
     return payload;
   }

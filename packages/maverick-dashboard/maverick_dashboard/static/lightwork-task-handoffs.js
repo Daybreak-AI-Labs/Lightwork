@@ -10,16 +10,17 @@
   function link(parent, label, href) { const a = document.createElement('a'); a.textContent = label; a.href = href; parent.appendChild(a); }
   function clear() { detail.hidden = true; document.getElementById('handoff-content').replaceChildren(); previewBox.replaceChildren(); previewBox.hidden = true; reviewed = null; selected = null; offer.hidden = true; form.reset(); }
   async function request(path, body) {
-    const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 30000);
+    let value;
     try {
-      const response = await fetch(base + path, {method:body ? 'POST':'GET', credentials:'same-origin', cache:'no-store',
-        headers:{'Content-Type':'application/json','X-Lightwork-Bundle-Context':root.dataset.context}, body:body ? JSON.stringify(body):undefined,signal:controller.signal});
-      const value = await response.json().catch(() => ({}));
-      if (response.status === 401 || response.status === 403 || (value.detail && value.detail.code === 'context_changed')) clear();
-      if (!response.ok) { const business=window.mvBusinessError ? window.mvBusinessError(value) : null; const error = new Error(business ? business.message : 'The handoff was not accepted. Review current access and retry.'); error.known = response.status < 500; throw error; }
-      if (value.context !== root.dataset.context) { clear(); const error = new Error('Your account or workspace changed. Reopen handoffs.'); error.known = true; throw error; }
-      return value;
-    } finally { clearTimeout(timer); }
+      value = await window.mvFetchJSON(base + path, {method: body ? 'POST' : 'GET', cache: 'no-store', timeout: 30000, body,
+        headers: {'X-Lightwork-Bundle-Context': root.dataset.context}, onAccess: clear}, body ? 'send the handoff' : 'load the handoffs');
+    } catch (error) {
+      if (error.detail && error.detail.code === 'context_changed') clear();
+      error.known = error.status >= 400 && error.status < 500;
+      throw error;
+    }
+    if (value.context !== root.dataset.context) { clear(); const error = new Error('Your account or workspace changed. Reopen handoffs.'); error.known = true; throw error; }
+    return value;
   }
   function review(parent, p) {
     parent.replaceChildren(); paragraph(parent, 'Recipient: ' + p.recipient + '. Source task: #' + p.source_id + '.');

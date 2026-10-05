@@ -27,15 +27,10 @@
       : 'Could not ' + what + '. Try again.';
   }
   async function send(path, body) {
-    var response = await fetch(API + path, {method: 'POST', credentials: 'same-origin',
-      headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
-    if (!response.ok) throw response;
-    return response.json();
+    return window.mvFetchJSON(API + path, {method: 'POST', body: body});
   }
   async function state(task) {
-    var response = await fetch(API + (task ? '?task=' + encodeURIComponent(task) : ''), {credentials: 'same-origin'});
-    if (!response.ok) throw response;
-    return response.json();
+    return window.mvFetchJSON(API + (task ? '?task=' + encodeURIComponent(task) : ''));
   }
   function panel(id, title) {
     var box = el('section', 'panel mv-survey');

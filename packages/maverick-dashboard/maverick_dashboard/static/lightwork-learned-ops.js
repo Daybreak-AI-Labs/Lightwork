@@ -9,7 +9,7 @@
   var el = J.el, plural = J.plural;
   var API = '/api/v1/learning-ops/self-harness';
   function $(id) { return document.getElementById(id); }
-  function say(id, text) { $(id).textContent = text || ''; }
+  function say(id, text) { window.mvStatus($(id), text || ''); }
   function fill(id, nodes) {
     var box = $(id);
     box.textContent = '';

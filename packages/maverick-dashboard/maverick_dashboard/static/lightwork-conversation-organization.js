@@ -5,16 +5,16 @@
   var expectedContext = (editor || browser).dataset.context;
   function node(tag, text) { var item = document.createElement(tag); item.textContent = text; return item; }
   async function api(path, options) {
-    var control = new AbortController(), timeout = setTimeout(function () { control.abort(); }, 12000);
-    try {
-      var response = await fetch('/api/v1/conversations' + path, Object.assign({credentials: 'same-origin', cache: 'no-store', headers: {'Content-Type': 'application/json', 'X-Lightwork-Conversation-Context': expectedContext}, signal: control.signal}, options));
-      var value = await response.json().catch(function () { return {}; });
-      if (response.redirected || [401,403,404].includes(response.status) || (response.ok && value.context !== expectedContext)) {
-        var error = new Error('Your account, conversation or access changed. Reload this page.'); error.denied = true; throw error;
-      }
-      if (!response.ok) throw new Error(typeof value.detail === 'string' ? value.detail : 'The change could not be confirmed. Refresh to check the saved state before retrying.');
-      return value;
-    } finally { clearTimeout(timeout); }
+    var DENIED = 'Your account, conversation or access changed. Reload this page.';
+    var opts = Object.assign({cache: 'no-store', timeout: 12000, plainDetail: true, accessStatuses: [401, 403, 404],
+      onAccess: function (error) { error.denied = true; },
+      messages: {401: DENIED, 403: DENIED, 404: DENIED}}, options);
+    opts.headers = Object.assign({'Content-Type': 'application/json', 'X-Lightwork-Conversation-Context': expectedContext}, options && options.headers);
+    var value = await window.mvFetchJSON('/api/v1/conversations' + path, opts, opts.method ? 'save the conversation' : 'load your conversations');
+    if (!value || value.context !== expectedContext) {
+      var error = new Error(DENIED); error.denied = true; throw error;
+    }
+    return value;
   }
   if (editor) {
     var title = document.getElementById('conversation-name'), pin = document.getElementById('conversation-pin'), archive = document.getElementById('conversation-archive');

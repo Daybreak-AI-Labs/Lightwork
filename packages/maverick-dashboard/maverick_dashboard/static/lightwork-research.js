@@ -93,22 +93,10 @@
   }
 
   async function api(path, method, body) {
-    const options = {method: method || 'GET', cache: 'no-store', headers: {'Accept': 'application/json'}};
-    if (body !== undefined) {
-      options.headers['Content-Type'] = 'application/json';
-      options.body = JSON.stringify(body);
-    }
-    const response = await fetch('/api/v1/research' + path, options);
-    let value = null;
-    try { value = await response.json(); } catch (_) { value = null; }
-    if (!response.ok) {
-      const error = new Error(response.status === 409 ? 'This research record changed. Refresh and review it again.' :
-        response.status === 403 ? 'Your current account cannot perform that research action.' :
-        response.status === 422 ? 'Some details need fixing. Check the highlighted fields and try again.' :
-        'The research lab is not available right now. Refresh and try again.');
-      error.status = response.status;
-      throw error;
-    }
+    const value = await window.mvFetchJSON('/api/v1/research' + path, {method: method || 'GET', cache: 'no-store', body, messages: {
+      409: 'This research record changed. Refresh and review it again.',
+      403: 'Your current account cannot perform that research action.',
+      422: 'Some details need fixing. Check the highlighted fields and try again.'}});
     if (value && value.context && value.context !== context) {
       throw new Error('You switched account or workspace. Reload this page.');
     }
@@ -162,10 +150,8 @@
       if (!chosen) return;
       state.textContent = `Reading ${chosen.name}…`;
       try {
-        const response = await fetch('/api/v1/research-files/fingerprint', {method:'POST', credentials:'same-origin',
-          headers:{'Content-Type':'application/octet-stream'}, body:chosen});
-        if (!response.ok) throw response;
-        expected.value = (await response.json()).fingerprint;
+        expected.value = (await window.mvFetchJSON('/api/v1/research-files/fingerprint', {method:'POST',
+          headers:{'Content-Type':'application/octet-stream'}, body:chosen}, 'read the file')).fingerprint;
         state.textContent = `Ready: ${chosen.name}`;
         settingsDirty = true;
         syncControls();

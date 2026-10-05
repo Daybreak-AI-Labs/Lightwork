@@ -246,11 +246,11 @@
        alone (WCAG 1.4.1): sentences, list items, table cells and help text.
        Navigation, buttons, tabs and chips keep their own look. The high
        contrast theme underlines every link in the page content. */
-    main :where(p, li, td, dd, figcaption, blockquote, [id$="-help"]) a:where(:not(.btn, .iconbtn, .mv-tab, .chip, .badge, [role="button"], [role="tab"], [role="menuitem"], [role="option"], nav a, .task-tabs a, [role="tablist"] a)),
+    main :where(p, li, td, dd, figcaption, blockquote, [id$="-help"]) a:where(:not(.btn, .iconbtn, .mv-tab, .chip, .badge, [role="button"], [role="tab"], [role="menuitem"], [role="option"], nav a, [role="tablist"] a)),
     .active-workspace-banner a, .cs-workspace a {
       text-decoration: underline; text-underline-offset: 0.16em;
     }
-    body.theme-hicontrast main a:where(:not(.btn, .iconbtn, .mv-tab, .chip, .badge, [role="button"], [role="tab"], [role="menuitem"], [role="option"], nav a, .task-tabs a, [role="tablist"] a)) {
+    body.theme-hicontrast main a:where(:not(.btn, .iconbtn, .mv-tab, .chip, .badge, [role="button"], [role="tab"], [role="menuitem"], [role="option"], nav a, [role="tablist"] a)) {
       text-decoration: underline; text-underline-offset: 0.16em;
     }
     a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible,
@@ -762,19 +762,18 @@
     .iconbtn--text { width: auto; padding-inline: 0.55rem; gap: 0.35rem; }
     .iconbtn__text { font-size: var(--text-sm); }
     .page-docs { margin: 0 0 var(--space-3); font-size: var(--text-sm); color: var(--muted); }
-    /* Task pages share one tab strip: Result · Steps · Plan · Problems. */
-    .task-tabs { display: flex; align-items: center; gap: var(--space-4); flex-wrap: wrap; margin: 0 0 var(--space-4); }
-    .task-tabs__back { font-size: var(--text-sm); color: var(--muted); }
-    .task-tabs__list { display: flex; gap: var(--space-1); list-style: none; margin: 0; padding: 0; border-bottom: 1px solid var(--border); flex: 1 1 auto; }
-    .task-tabs__list a { display: inline-block; padding: var(--space-2) var(--space-3); color: var(--muted); border-bottom: 2px solid transparent; margin-bottom: -1px; }
-    .task-tabs__list a:hover { color: var(--text); text-decoration: none; }
-    .task-tabs__list a.task-tabs__on { color: var(--text); border-bottom-color: var(--brand); font-weight: var(--font-semibold); }
     /* Tabs and filter toggles in the same look. The selected item shows a
        selected state (aria-selected, aria-pressed or aria-current), never
        btn--primary: the primary style is kept for the view's main action. */
     .mv-tabs { display: flex; flex-wrap: wrap; gap: var(--space-1); margin: 0 0 var(--space-3); padding: 0; border-bottom: 1px solid var(--border); }
     .mv-tab { appearance: none; background: none; border: 0; border-bottom: 2px solid transparent; border-radius: 0; margin-bottom: -1px; padding: var(--space-2) var(--space-3); color: var(--muted); font: inherit; cursor: pointer; }
     .mv-tab:hover { color: var(--text); }
+    a.mv-tab, a.mv-tab:hover { display: inline-block; text-decoration: none; }
+    /* A bar of sibling pages (sub_nav in _tabs.html): this page is marked
+       with aria-current; groups carry a small label. */
+    .mv-tabs--nav { align-items: flex-end; column-gap: var(--space-4); }
+    .mv-tabs__group { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1); }
+    .mv-tabs__label { color: var(--muted); font-size: var(--text-xs); text-transform: uppercase; letter-spacing: .06em; }
     .mv-tab[aria-selected="true"], .mv-tab[aria-pressed="true"], .mv-tab[aria-current="page"] { color: var(--text); border-bottom-color: var(--brand); font-weight: var(--font-semibold); }
     @media (forced-colors: active) {
       .mv-tab[aria-selected="true"], .mv-tab[aria-pressed="true"], .mv-tab[aria-current="page"] { border-bottom-color: Highlight; }
@@ -1623,10 +1622,11 @@ body.theme-hicontrast :where(
   white-space: nowrap; }
 
 /* ---- Executive boards (board.js) ----------------------------------------
-   KPI tiles, range slicer, live stamp, crosshair tooltip, donut/area SVG
+   KPI tiles, range tabs, live stamp, crosshair tooltip, donut/area SVG
    color roles. Extends the .viz-* chart classes above.                     */
 .bd-toolbar { display: flex; align-items: center; justify-content: space-between;
   gap: var(--space-3); flex-wrap: wrap; margin-bottom: var(--space-4); }
+.bd-toolbar > .mv-tabs { margin: 0; }
 .bd-live { display: inline-flex; align-items: center; gap: 0.45rem;
   font-size: var(--text-xs); letter-spacing: 0.08em; color: var(--muted);
   text-transform: uppercase; }
@@ -1640,14 +1640,6 @@ body.theme-hicontrast :where(
 }
 @media (prefers-reduced-motion: reduce) { .bd-live .dot { animation: none; } }
 .bd-stamp { font-size: var(--text-xs); color: var(--muted); }
-.bd-slicer { display: inline-flex; border: 1px solid var(--border);
-  border-radius: var(--radius-pill); overflow: hidden;
-  background: var(--surface-sunken); }
-.bd-slicer button { border: 0; background: transparent; color: var(--muted);
-  font-size: var(--text-xs); padding: 0.4rem 0.85rem; cursor: pointer; }
-.bd-slicer button:hover { color: var(--text); }
-.bd-slicer button.on { background: var(--brand); color: var(--brand-fg); }
-
 .bd-kpis { display: grid; gap: var(--space-4); margin-bottom: var(--space-4);
   grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr)); }
 .bd-kpi { margin-bottom: 0; padding: var(--space-4) var(--space-5); }

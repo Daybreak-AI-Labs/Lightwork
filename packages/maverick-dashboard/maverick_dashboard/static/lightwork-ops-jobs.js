@@ -20,12 +20,9 @@
   // A failed request as one sentence. Our routes write their refusals for
   // people; anything else gets the shared wording.
   async function problem(failure, action) {
-    if (failure && typeof failure.json === 'function' && [404, 409, 413, 422, 503].indexOf(failure.status) >= 0) {
-      try {
-        var body = await failure.clone().json();
-        var text = window.mvPlainDetail ? window.mvPlainDetail(body.detail) : '';
-        if (text) return text;
-      } catch (e) { /* fall through */ }
+    if (failure && [404, 409, 413, 422, 503].indexOf(failure.status) >= 0) {
+      var text = window.mvPlainDetail ? window.mvPlainDetail(failure.detail) : '';
+      if (text) return text;
     }
     if (failure && failure.status === 403) return 'Only an administrator can ' + action + '.';
     return typeof window.mvErrorText === 'function' ? window.mvErrorText(failure, action) : 'Could not ' + action + '.';
@@ -33,17 +30,12 @@
 
   async function request(url, opts) {
     opts = opts || {};
-    var init = { method: opts.method || 'GET', credentials: 'same-origin', headers: {} };
-    if (opts.json !== undefined) {
-      init.headers['Content-Type'] = 'application/json';
-      init.body = JSON.stringify(opts.json);
-    } else if (opts.body !== undefined) {
-      init.headers['Content-Type'] = opts.type || 'application/octet-stream';
+    var init = { method: opts.method || 'GET', raw: !!opts.raw, body: opts.json };
+    if (opts.json === undefined && opts.body !== undefined) {
+      init.headers = { 'Content-Type': opts.type || 'application/octet-stream' };
       init.body = opts.body;
     }
-    var r = await window.fetch(url, init);
-    if (!r.ok) throw r;
-    return opts.raw ? r : r.json();
+    return window.mvFetchJSON(url, init);
   }
 
   function saveBlob(blob, name) {

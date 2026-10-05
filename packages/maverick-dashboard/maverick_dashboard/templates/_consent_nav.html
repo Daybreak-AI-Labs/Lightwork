@@ -1,5 +1,6 @@
-{# Plain-language sub-navigation shared by the consent pages.
-   Usage: {% include "_consent_nav.html" %} (highlights the current path). #}
+{# Plain-language sub-navigation shared by the consent pages, drawn by the
+   shared sub_nav bar (_tabs.html).
+   Usage: {% include "_consent_nav.html" %} (marks the current path). #}
 {% set _here = request.url.path if request is defined else '' %}
 {% set _consent_groups = [
   ('Set up', [
@@ -24,13 +25,5 @@
     ('/consent/trust-center-authority', 'Trust Center approvals'),
   ]),
 ] %}
-<nav class="cw-nav" aria-label="Consent tools">
-  {% for group, links in _consent_groups %}
-  <div class="cw-nav__group" role="group" aria-label="{{ group }}">
-    <span class="cw-nav__label" aria-hidden="true">{{ group }}</span>
-    {% for href, text in links %}
-    <a class="btn btn--ghost" href="{{ href }}"{% if href == _here %} aria-current="page"{% endif %}>{{ text }}</a>
-    {% endfor %}
-  </div>
-  {% endfor %}
-</nav>
+{% from "_tabs.html" import sub_nav %}
+{{ sub_nav('Consent tools', _consent_groups, _here) }}

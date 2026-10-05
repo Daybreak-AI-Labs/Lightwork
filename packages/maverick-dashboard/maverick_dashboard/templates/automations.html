@@ -819,9 +819,8 @@
     async function loadTargetChoices() {
       await Promise.all(['template', 'flow'].map(async function (kind) {
         try {
-          var response = await fetch('/api/v1/' + (kind === 'template' ? 'templates' : 'flows'));
-          if (!response.ok) throw new Error('Could not load ' + (kind === 'template' ? 'workflows' : 'flows') + '. Refresh to try again.');
-          var data = await response.json(), items = kind === 'template' ? data.templates : data.flows;
+          var data = await window.mvFetchJSON('/api/v1/' + (kind === 'template' ? 'templates' : 'flows'), {}, 'load the ' + (kind === 'template' ? 'workflows' : 'flows'));
+          var items = data && (kind === 'template' ? data.templates : data.flows);
           if (!Array.isArray(items)) throw new Error('The workflow list could not be read. Refresh to try again.');
           targetCatalog[kind] = kind === 'template' ? items : items.filter(function (item) { return item.published; }).map(function (item) { return { name: item.id, title: item.name || item.id }; });
         } catch (e) { targetErrors[kind] = e.message; }
@@ -1317,16 +1316,16 @@
     async function testConn(name, label, btn) {
       if (btn) { btn.disabled = true; }
       try {
-        var r = await fetch('/api/v1/oauth/' + encodeURIComponent(name) + '/test', { method: 'POST' });
-        var body = {};
-        try { body = await r.json(); } catch (e) { body = {}; }
-        if (r.ok && body.ok) { mvToast(label + ' is connected and working'); loadOAuth(); }
-        else if (r.ok || r.status === 401) {
+        var body = null, refused = null;
+        try { body = (await window.mvFetchJSON('/api/v1/oauth/' + encodeURIComponent(name) + '/test', { method: 'POST' }, 'test ' + label)) || {}; }
+        catch (e) { if (!e.status) throw e; refused = e; }
+        if (body && body.ok) { mvToast(label + ' is connected and working'); loadOAuth(); }
+        else if (body || refused.status === 401) {
           oMsg.textContent = label + ' needs to be reconnected.';
           var again = el('button', 'btn', 'Reconnect ' + label); again.type = 'button';
           again.addEventListener('click', function () { reconnect(name); });
           oMsg.appendChild(document.createTextNode(' ')); oMsg.appendChild(again);
-        } else { mvFail(r, 'test ' + label); }
+        } else { mvFail(refused, 'test ' + label); }
       } catch (e) { mvFail(e, 'test ' + label); }
       finally { if (btn) { btn.disabled = false; } }
     }
@@ -1405,12 +1404,11 @@
     function statusText(st) { return STATUS_WORDS[st] || mvHuman(st || 'unknown'); }
     var ORIGIN_WORDS = { webhook: 'started by another app', schedule: 'started on schedule', event_trigger: 'started by a new item', retry: 'retry' };
     async function loadFlows() {
-      var r;
-      try { r = await fetch('/api/v1/flows'); } catch (e) { return; }
-      if (r.status === 403) { flowsSection.hidden = true; return; }  // engine off
-      if (!r.ok) { flowsSection.hidden = true; return; }
+      var data;
+      try { data = await window.mvFetchJSON('/api/v1/flows'); }
+      catch (e) { if (e.status) flowsSection.hidden = true; return; }  // a refusal: the engine is off
       flowsSection.hidden = false;
-      var flows = (await r.json()).flows || [];
+      var flows = (data && data.flows) || [];
       flowsCount.textContent = flows.length ? (flows.length + (flows.length === 1 ? ' flow' : ' flows')) : '';
       flowsEmpty.hidden = flows.length > 0;
       flowsList.textContent = '';
@@ -1451,16 +1449,14 @@
       }
       flowsMsg.textContent = 'Starting…';
       try {
-        var r = await fetch('/api/v1/flows/' + encodeURIComponent(id) + '/run', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ data: data }),
-        });
-        var j;
-        try { j = await r.json(); }
-        catch (e) { flowsMsg.textContent = 'The run could not be confirmed. Check Recent runs before trying again.'; return; }
-        if (r.ok && j) { flowsMsg.textContent = 'Run started. It appears under Recent runs.'; }
-        else { flowsMsg.textContent = plainError(r, 'start the run'); }
+        var j = await window.mvFetchJSON('/api/v1/flows/' + encodeURIComponent(id) + '/run', { method: 'POST', body: { data: data } }, 'start the run');
+        flowsMsg.textContent = j ? 'Run started. It appears under Recent runs.' : 'The run could not be confirmed. Check Recent runs before trying again.';
         setTimeout(loadFlowRuns, 500);
-      } catch (e) { flowsMsg.textContent = plainError(e, 'start the run'); }
+      } catch (e) {
+        if (e.unreadable) { flowsMsg.textContent = 'The run could not be confirmed. Check Recent runs before trying again.'; return; }
+        flowsMsg.textContent = e.message;
+        if (e.status) setTimeout(loadFlowRuns, 500);
+      }
     }
     async function loadFlowRuns() {
       var r;

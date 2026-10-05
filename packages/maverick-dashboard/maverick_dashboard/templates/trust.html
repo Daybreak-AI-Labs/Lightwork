@@ -322,9 +322,7 @@
   var keyText = null;
   async function loadKey() {
     if (keyText) return keyText;
-    var r = await fetch("/api/v1/trust/pubkey", { headers: { Accept: "application/json" } });
-    if (!r.ok) throw r;
-    keyText = (await r.json()).key;
+    keyText = (await window.mvFetchJSON("/api/v1/trust/pubkey")).key;
     document.getElementById("tr-key-text").textContent = keyText;
     return keyText;
   }

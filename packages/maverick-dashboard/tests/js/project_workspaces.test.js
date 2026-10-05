@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const {JSDOM} = require('jsdom');
+const {shell} = require('./_shell');
 const script = fs.readFileSync(path.resolve(__dirname, '../../maverick_dashboard/static/lightwork-project-workspaces.js'), 'utf8');
 const templates = path.resolve(__dirname, '../../maverick_dashboard/templates');
 // The page includes the workspace controls it shares with Projects.
@@ -29,6 +30,7 @@ function page() {
     if (url.endsWith('/receipt')) return {ok:true,status:200,json:async () => ({confirmed:receipt})};
     return {ok:true,status:200,json:async () => structuredClone(state)};
   };
+  shell(dom.window);
   dom.window.eval(script);
   const doc = dom.window.document;
   function edit(value) { const input = doc.getElementById('pw-outcome-input'); input.value = value; input.dispatchEvent(new dom.window.Event('input', {bubbles:true})); }
@@ -103,6 +105,7 @@ test('the project list opens each plan where the page says plans live', async ()
       {url:'https://lightwork.invalid/projects', runScripts:'outside-only'});
     dom.window.mvDraftRecovery = {create() { return {clear:async () => true, dispose() {}}; }};
     dom.window.fetch = async () => ({ok:true, status:200, json:async () => structuredClone(listing)});
+    shell(dom.window);
     dom.window.eval(script);
     await settle();
     assert.equal(dom.window.document.querySelector('#pw-list a').getAttribute('href'), expected);

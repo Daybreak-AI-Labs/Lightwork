@@ -17,7 +17,14 @@
   function pointer(){try{const value=sessionStorage.getItem(key);return value&&/^[a-f0-9]{32}$/.test(value)?value:null;}catch(_){return null;}}
   function remember(id){try{sessionStorage.setItem(key,id);}catch(_){copy(message,'Keep this page open until its restart receipt is confirmed.');}}
   function forget(){try{sessionStorage.removeItem(key);}catch(_){}check.hidden=true;}
-  async function request(path,body){const abort=new AbortController(),timer=setTimeout(()=>abort.abort(),30000);try{const response=await fetch(root+path,{method:body?'POST':'GET',credentials:'same-origin',cache:'no-store',signal:abort.signal,headers:{'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined});const value=await response.json().catch(()=>null);if(response.redirected||!value)throw new Error('Restart outcome is not confirmed. Keep the receipt reference and check current progress.');if(!response.ok){const error=new Error(value.detail&&value.detail.message||typeof value.detail==='string'&&value.detail||'Restart could not be accepted. Review current task progress.');error.known=response.status<500;throw error;}if(value.context&&value.context!==context){prepared=null;forget();const error=new Error('Your account or workspace changed. Reopen this task before restarting.');error.known=true;throw error;}return value;}finally{clearTimeout(timer);}}
+  async function request(path,body){
+    let value;
+    try{value=await window.mvFetchJSON(root+path,{method:body?'POST':'GET',cache:'no-store',timeout:30000,body,plainDetail:true,onAccess:()=>{},accessStatuses:[]},'restart the task');}
+    catch(error){error.known=error.status>=400&&error.status<500;throw error;}
+    if(!value)throw new Error('Restart outcome is not confirmed. Keep the receipt reference and check current progress.');
+    if(value.context&&value.context!==context){prepared=null;forget();const error=new Error('Your account or workspace changed. Reopen this task before restarting.');error.known=true;throw error;}
+    return value;
+  }
   if(setupButton&&setupMessage)setupButton.addEventListener('click',async()=>{
     if(busy)return;busy=true;setupButton.disabled=true;
     try{const review=await request('/resume-review');if(review.blocked){form.hidden=true;copy(setupMessage,review.blocked);}else{form.hidden=false;copy(setupMessage,'Required actions are available. Review a restart to continue; live connections are checked when work starts.');}}
