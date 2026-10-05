@@ -76,7 +76,7 @@
 <div class="pro-grid">
   <section class="panel pro-stack">
     <h2>Choose an action</h2>
-    <p>Tenant and actor come only from the authenticated request. Unknown fields
+    <p>The workspace and the person acting come only from your sign-in. Unknown fields
       are rejected. After case opening, the browser clears the raw intake body.</p>
     <label>Operation
       <select id="pro-operation" data-guided-api="/api/v1/privacy/rights-orchestration">
@@ -90,7 +90,7 @@
         <option value="retention-gate" data-method="POST" data-path="/cases/{case_id}/retention-gate">Case: retention gate</option>
         <option value="task-plan" data-method="POST" data-path="/cases/{case_id}/sources/{source_id}/plan">Source work: plan tasks</option>
         <option value="destructive-approve" data-method="POST" data-path="/tasks/{task_id}/approve-destructive">Deletion: independent approval</option>
-        <option value="callback-claim" data-method="POST" data-path="/callbacks/claim">Callback: claim worker lease</option>
+        <option value="callback-claim" data-method="POST" data-path="/callbacks/claim">Callback: take the next one</option>
         <option value="callback-list" data-method="GET" data-path="/callbacks">Callback: list governed queue</option>
         <option value="callback-fail" data-method="POST" data-path="/callbacks/{callback_id}/fail">Callback: record failure</option>
         <option value="callback-ack" data-method="POST" data-path="/callbacks/{callback_id}/acknowledge">Callback: acknowledge worker evidence</option>
@@ -105,7 +105,7 @@
         <option value="case-close" data-method="POST" data-path="/cases/{case_id}/close">Case: close as opener</option>
         <option value="case-export" data-method="PUT" data-path="/cases/{case_id}/exports/{export_id}">Case: create local export</option>
         <option value="retention-purge" data-method="POST" data-path="/retention/purge">Retention: purge expired state</option>
-        <option value="integrity" data-method="GET" data-path="/integrity">Integrity: verify tenant state</option>
+        <option value="integrity" data-method="GET" data-path="/integrity">Integrity: check this workspace’s records</option>
       </select>
     </label>
     <label>Record references (JSON)
@@ -116,7 +116,7 @@
     </label>
     <div class="pro-warning" id="pro-confirm-panel">
       <label class="pro-confirm"><input id="pro-confirm" type="checkbox">
-        <span>I reviewed the exact tenant, principal, revision, evidence, hold,
+        <span>I reviewed the exact workspace, person, version, evidence, hold,
           retention, destructive-work, callback, or closure consequences.</span>
       </label>
     </div>
@@ -215,7 +215,7 @@
           Object.prototype.hasOwnProperty.call(payload, "tenant_id") ||
           Object.prototype.hasOwnProperty.call(payload, "actor") ||
           Object.prototype.hasOwnProperty.call(payload, "actor_ref")) {
-        throw new Error("Tenant and actor fields are never accepted. Remove them from Action details, then try again.");
+        throw new Error("Workspace and person-acting fields are never accepted. Remove them from Action details, then try again.");
       }
       var path = buildPath(route.dataset.path, pathValues);
       await run(route.dataset.method, path, payload);

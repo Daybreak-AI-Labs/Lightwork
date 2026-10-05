@@ -356,7 +356,7 @@ def build(
             ),
             "status": "complete" if activated else "incomplete",
             "cta": "/chat",
-            "cta_label": "Start a goal",
+            "cta_label": "Start a task",
             "allowed": bool(can_operate),
             "readonly_label": "An operator can start or automate the first run.",
             "command": "",

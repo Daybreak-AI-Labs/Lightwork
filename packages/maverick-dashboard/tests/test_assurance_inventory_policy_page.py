@@ -304,7 +304,7 @@ def test_policy_partial_read_keeps_available_state_and_withholds_mutations(
 
     assert response.status_code == 200
     page = response.text
-    assert "Select a tenant to view policy-pack subscriptions." in page
+    assert "Select a workspace to view policy-pack subscriptions." in page
     assert "What could be loaded is shown below" in page
     assert "Example controls" in page  # pack names are shown as words
     assert "data-policy-action" not in page

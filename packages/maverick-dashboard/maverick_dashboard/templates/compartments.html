@@ -68,7 +68,7 @@
                 <strong>Delivers:</strong> {{ d.output.deliverable }}
                 {%- if d.output.consumers %} to {{ d.output.consumers|map('humanize')|join(', ') }}{% endif -%}
                 {%- if d.output.cadence %} ({{ d.output.cadence | humanize | lower }}){% endif -%}
-                {%- if d.output.gate %} · needs {{ d.output.gate | humanize }} sign-off{% endif -%}
+                {%- if d.output.gate %} · needs {{ d.output.gate | humanize | lower }}{% endif -%}
               </div>
             {% endif %}
             {% if d.persona %}<details class="muted cmp-wide"><summary>Technical details</summary><p>Instructions it follows:</p><p>{{ d.persona }}</p></details>{% endif %}

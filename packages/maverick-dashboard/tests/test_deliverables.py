@@ -142,7 +142,7 @@ class TestDeliverablesPage:
         gid = w.create_goal("Refresh the cash forecast", "", domain="finance_cash13w")
         w.set_goal_status(gid, "done", result="| Week | Net |\n| --- | --- |\n| W1 | 10 |\n")
         t = client.get("/deliverables").text
-        assert "Awaiting sign-off" in t
+        assert "Awaiting approval" in t
         assert f'href="/chat/goal/{gid}"' in t   # Review links to the deliverable view
 
     def test_default_results_show_only_the_local_owner_finished_root_work(self, tmp_path, monkeypatch):

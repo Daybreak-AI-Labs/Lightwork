@@ -1180,7 +1180,7 @@ async def create_tenant(request: Request, body: TenantCreateIn) -> TenantOut:
             ) from rollback_exc
         raise HTTPException(
             status_code=503,
-            detail="Audit custody refused tenant creation. The workspace is unavailable and its identifier remains reserved; retry with a new identifier or a display name.",
+            detail="Audit custody refused workspace creation. The workspace is unavailable and its identifier remains reserved; retry with a new identifier or a display name.",
         ) from exc
     return _to_tenant_out(rec)
 
@@ -12542,7 +12542,7 @@ async def set_model_cost_tier_endpoint(request: Request, body: ModelCostTierIn) 
 _FEATURE_SWITCHES: dict = {
     "dreaming": (
         "Dreaming",
-        "Consolidates completed goals overnight into reusable lessons the fleet can recall.",
+        "Consolidates finished tasks overnight into reusable lessons your teams can recall.",
     ),
     "self_improvement": (
         "Self-improvement",

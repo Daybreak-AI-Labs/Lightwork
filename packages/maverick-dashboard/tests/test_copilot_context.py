@@ -146,7 +146,7 @@ def test_every_everyday_navigation_page_has_authored_help() -> None:
     ("/goals", "goals.html", "Result"),
     ("/deliverables", "deliverables.html", "Finished work"),
     ("/automations", "automations.html", "Schedules"),
-    ("/overview", "index.html", "Recent goals"),
+    ("/overview", "index.html", "Recent tasks"),
     ("/spend", "spend.html", "Cost of each task"),
     ("/savings", "savings.html", "Save and recalculate"),
     ("/shoring", "shoring.html", "Book of Work"),

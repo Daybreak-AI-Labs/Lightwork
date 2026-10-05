@@ -5747,7 +5747,7 @@ async def _policy_pack_page_data(module: Any) -> dict[str, Any]:
         else:
             channels = channel_result
         if isinstance(subscription_result, Exception):
-            error = error or "Select a tenant to view policy-pack subscriptions."
+            error = error or "Select a workspace to view policy-pack subscriptions."
         else:
             subscriptions = subscription_result
     return {
@@ -10468,7 +10468,7 @@ async def chat_send(
         if len(title) > GOAL_TITLE_MAX_LENGTH:
             raise HTTPException(
                 status_code=422,
-                detail=f"Shorten the goal to {GOAL_TITLE_MAX_LENGTH:,} characters or fewer. Move additional instructions to Add details.",
+                detail=f"Shorten the task to {GOAL_TITLE_MAX_LENGTH:,} characters or fewer. Move additional instructions to Add details.",
             )
         if len(description) > GOAL_DESCRIPTION_MAX_LENGTH:
             raise HTTPException(
@@ -11076,7 +11076,7 @@ def _load_paused_approval_run(token: str):
 
             assert_tenant_active(tenant)
         except Exception:
-            return None, "That tenant is not active.", tenant, ""
+            return None, "That workspace is not active.", tenant, ""
         from maverick.paths import set_tenant
 
         tenant_token = set_tenant(tenant)

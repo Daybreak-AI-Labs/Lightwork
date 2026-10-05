@@ -297,7 +297,7 @@
         <div class="pb-flow">
           <div class="pb-flow__node pb-flow__start"><span class="dot" aria-hidden="true"></span>{{ ui("Start here") }}</div>
           <div id="pb-steps"></div>
-          <div class="pb-flow__node pb-flow__end" id="pb-flow-end" hidden><span class="dot" aria-hidden="true"></span>{{ ui("Goal complete") }}</div>
+          <div class="pb-flow__node pb-flow__end" id="pb-flow-end" hidden><span class="dot" aria-hidden="true"></span>{{ ui("Task complete") }}</div>
         </div>
         <button type="button" id="pb-add-step" class="btn btn--ghost" style="margin-top: var(--space-4);">{{ ui("Add a step") }}</button>
       </div>
@@ -1266,7 +1266,7 @@
       steps.forEach(function (row, i) {
         row.querySelector('.pb-step__num').textContent = localizedNumber(i+1);
       });
-      pbFlowEnd.hidden = !steps.length;   // the "Goal complete" node appears once there are steps
+      pbFlowEnd.hidden = !steps.length;   // the "Task complete" node appears once there are steps
     }
     function moveStep(row, dir) {
       if (dir < 0 && row.previousElementSibling) pbSteps.insertBefore(row, row.previousElementSibling);

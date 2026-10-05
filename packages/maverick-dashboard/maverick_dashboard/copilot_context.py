@@ -142,7 +142,7 @@ _GENERIC = CopilotPageContext(
         "move from operating work to evidence, risk, privacy, security, and audit."
     ),
     capabilities=(
-        "Create and supervise governed goals and workflows.",
+        "Create and supervise governed tasks and workflows.",
         "Inspect signed operating evidence, controls, spend, and risk.",
     ),
     boundaries=(
@@ -213,7 +213,7 @@ _OPERATIONAL_GUIDES = (
     # Insights
     ("/overview", "Overview", "See recorded task momentum, current task states, recent work and department activity.",
      "Change the time range, open a recent task, or start a first task when the workspace is empty.",
-     "Choose a time range, then open a task from Recent goals or use Chat to start new work.",
+     "Choose a time range, then open a task from Recent tasks or use Chat to start new work.",
      "These counts describe recorded work; they do not by themselves prove business value.",
      "What is happening with our tasks?", "How do I start our first task?"),
     ("/ekko", "Ekko", "Record work you permit on this device and look for repeated steps Lightwork could take over.",
@@ -516,7 +516,7 @@ _CONTEXTS = tuple(
         CopilotPageContext(
             path="/users/departures", title="Employee departures",
             summary="Review employee access and retained work before deactivating an exact named identity.",
-            capabilities=("Preview owned work, memberships, connections and pending run-goal schedules.",
+            capabilities=("Preview owned work, memberships, connections and pending scheduled tasks.",
                           "Deactivate local access and record named responsibility for unresolved handoffs."),
             boundaries=("Removing local credentials does not revoke external provider consent.",
                         "Data and holds remain retained; a custodian receives no private-content access.",
@@ -628,7 +628,7 @@ _CONTEXTS = tuple(
                 "Extracted text is not persisted, but process-memory zeroization is not guaranteed.",
             ),
             next_steps=(
-                "Refresh status and confirm the tenant is enabled and configured for an operation attempt; status does not resolve artifact-specific authorities or prove them ready.",
+                "Refresh status and confirm the workspace is enabled and configured for an operation attempt; status does not resolve artifact-specific authorities or prove them ready.",
                 "Upload only an attested artifact with exact authority digests and revisions.",
                 "Have a distinct authorized human review the pending result.",
             ),
@@ -650,7 +650,7 @@ _CONTEXTS = tuple(
                 "Inspect audit integrity and apply authorized retention maintenance.",
             ),
             boundaries=(
-                "Tenant, actor, entity authority, entity digest, retention, and quotas are server-owned.",
+                "Workspace, actor, entity authority, entity digest, retention, and quotas are server-owned.",
                 "Task creation independently re-resolves the current inventory authority.",
                 "Local readiness does not prove an external workflow or customer has accepted the task outcome.",
             ),
@@ -678,7 +678,7 @@ _CONTEXTS = tuple(
             ),
             boundaries=(
                 "Agents provide decision support and never become autonomous authority.",
-                "Evidence, adapters, dispatchers, credentials, and tenant identity are server-owned.",
+                "Evidence, adapters, dispatchers, credentials, and workspace identity are server-owned.",
                 "Execution is default-off and requires durable token custody plus independent approval.",
             ),
             next_steps=(
@@ -764,12 +764,12 @@ _CONTEXTS = tuple(
                 "Every choice is bound to an exact policy and notice version.",
                 "Privacy signals can deny covered purposes; they never manufacture consent.",
                 "An enforcement result does not prove every tracker or destination in an estate is known.",
-                "The operator page cannot unlink, relink, choose a tenant, or submit identity subjects.",
+                "The operator page cannot unlink, relink, choose a workspace, or submit identity subjects.",
                 "Receipt rows are never moved or merged; the current link is an association projection.",
                 "Production IdP/JWKS operation and live multi-device acceptance remain external evidence.",
             ),
             next_steps=(
-                "Refresh the page and verify the consent authority is enabled for the active tenant.",
+                "Refresh the page and verify the consent authority is enabled for the active workspace.",
                 "Confirm the exact policy, notice, purpose, and jurisdiction before recording a choice.",
                 "Run the enforcement check before activating a tracker or destination.",
                 "Use a fresh public pairing and exact revisions for unlink, relink, or account transition.",
@@ -790,10 +790,10 @@ _CONTEXTS = tuple(
                 "Create an index definition pinned to one published data element.",
                 "Build or rebuild a revision-pinned HMAC index without persisting raw values.",
                 "Search one ready index and inspect bounded opaque profile matches.",
-                "Revoke indexes and verify tenant-local audit and integrity records.",
+                "Revoke indexes and verify workspace-local audit and integrity records.",
             ),
             boundaries=(
-                "The browser cannot choose tenant identity, actors, key material, key versions, retention, or quotas.",
+                "The browser cannot choose workspace identity, actors, key material, key versions, retention, or quotas.",
                 "Search is exact and intentionally excludes free-text, fuzzy, inferred, or cross-tenant discovery.",
                 "A ready local index does not prove customer privacy review or production-scale acceptance.",
             ),
@@ -811,7 +811,7 @@ _CONTEXTS = tuple(
         _registered(
             path="/consent/bulk-jobs",
             summary=(
-                "Run tenant-scoped, credit-limited asynchronous receipt exports "
+                "Run workspace-scoped, credit-limited asynchronous receipt exports "
                 "and governed consent-subject lifecycle actions."
             ),
             capabilities=(
@@ -820,7 +820,7 @@ _CONTEXTS = tuple(
                 "Inspect credits, progress, immutable history, retention, and integrity without exposing raw subject identifiers.",
             ),
             boundaries=(
-                "Tenant, principal, actor, worker, stores, paths, and provider authority are server-derived and cannot be supplied by the browser.",
+                "Workspace, principal, actor, worker, stores, paths, and provider authority are server-derived and cannot be supplied by the browser.",
                 "Each operation fails closed unless its real consent-store primitive is installed; a similarly shaped callback is not sufficient.",
                 "Local completion does not prove production volume, customer acceptance, regulator delivery, or an external provider effect.",
             ),
@@ -830,7 +830,7 @@ _CONTEXTS = tuple(
                 "Review terminal history and download integrity before relying on an export or action result.",
             ),
             suggested_questions=(
-                "Which bulk operations are ready for this tenant?",
+                "Which bulk operations are ready for this workspace?",
                 "What should I verify before scheduling a destructive action?",
                 "What does a successful export prove?",
             ),
@@ -847,7 +847,7 @@ _CONTEXTS = tuple(
                 "Expose only the active integrity-checked SDK projection while retaining bounded history, recovery, and audit evidence.",
             ),
             boundaries=(
-                "The browser cannot choose tenant, actor, authority digests, storage, retention, CSP nonce values, or signing material.",
+                "The browser cannot choose workspace, actor, authority digests, storage, retention, CSP nonce values, or signing material.",
                 "A CSP nonce requirement is configuration metadata; Lightwork never stores or publishes a reusable nonce value.",
                 "A locally active setting does not prove the SDK was installed on a customer property or accepted in live browsers.",
             ),
@@ -874,12 +874,12 @@ _CONTEXTS = tuple(
                 "Create a real privacy-rights opt-out case while retaining only bounded case and signed-result digests in this control plane.",
             ),
             boundaries=(
-                "The browser cannot select tenant, profile, property, origin, service, publication, policy, storage, or retention authority.",
+                "The browser cannot select workspace, profile, property, origin, service, publication, policy, storage, or retention authority.",
                 "A successful local submission proves the governed workflow ran; it does not prove every device or service honored the request.",
                 "Live mobile, email, connected-device, customer-estate, and legal acceptance require separate evidence.",
             ),
             next_steps=(
-                "Confirm public consent and privacy-rights intake readiness for the active tenant.",
+                "Confirm public consent and privacy-rights intake readiness for the active workspace.",
                 "Bind the experience to the exact active public client and independently review its device and service coverage.",
                 "Exercise revocation, retry, recovery, and representative live-device acceptance before relying on production coverage.",
             ),
@@ -906,7 +906,7 @@ _CONTEXTS = tuple(
                 "Local manifest analysis does not prove a native SDK, deployed-device behavior, completeness, scale, or customer acceptance.",
             ),
             next_steps=(
-                "Confirm tenant composition and application authority are ready before uploading extracted manifests.",
+                "Confirm workspace composition and application authority are ready before uploading extracted manifests.",
                 "Review cited completeness limits and have a different authorized person decide the exact result.",
                 "Run separate device, runtime-traffic, accessibility, recovery, and scale acceptance before relying on production coverage.",
             ),
@@ -982,7 +982,7 @@ _CONTEXTS = tuple(
             ),
             boundaries=(
                 "Sync queues only events reconstructed from immutable receipts.",
-                "Provider origins, DNS authority, signing keys, OAuth credentials, tenant identity, and destination mappings are server-controlled.",
+                "Provider origins, DNS authority, signing keys, OAuth credentials, workspace identity, and destination mappings are server-controlled.",
                 "Named adapters refuse redirects and remain unavailable without deployment-held credential references and independent reconciliation authority.",
                 "A local acknowledgement or ready state does not prove live provider interoperability, permissions, completeness, customer acceptance, or applied state.",
             ),
@@ -1035,7 +1035,7 @@ _CONTEXTS = tuple(
                 "Check fail-closed readiness and integrity and discover current and historical public receipt verification keys.",
             ),
             boundaries=(
-                "Tenant, principal, publication, service-client, signer and stored device authority are server-derived; the browser supplies only safe selectors, CAS revisions and attestation evidence.",
+                "Workspace, principal, publication, service-client, signer and stored device authority are server-derived; the browser supplies only safe selectors, CAS revisions and attestation evidence.",
                 "Platform attestation has no permissive fallback, and configured profile, rights and GPP/TCF callbacks are required before readiness.",
                 "Local and synthetic success does not prove app-store, live-device, accessibility, conformance, customer-estate or regulator acceptance.",
             ),
@@ -1062,7 +1062,7 @@ _CONTEXTS = tuple(
                 "Verify integrity and purge only retention-eligible operational records.",
             ),
             boundaries=(
-                "Tenant and actor are server-derived; the page accepts no raw profile or capability selector.",
+                "Workspace and actor are server-derived; the page accepts no raw profile or capability selector.",
                 "Authors cannot approve their own versions and every mutation uses an exact revision.",
                 "Only closed published values and trusted purposes are supported; protected traits are never inferred.",
             ),
@@ -1114,7 +1114,7 @@ _CONTEXTS = tuple(
                 "Inspect integrity and export a signed, content-free governance record.",
             ),
             boundaries=(
-                "The browser cannot select tenant, principal, property, report, inventory revision, or revocation set.",
+                "The browser cannot select workspace, principal, property, report, inventory revision, or revocation set.",
                 "Approval and local acceptance require different authenticated people and exact source pins.",
                 "Acceptance does not generate legal copy, mutate a site or app, call a provider, or publish a notice.",
             ),
@@ -1143,10 +1143,10 @@ _CONTEXTS = tuple(
                 "Bind an approved asset and optional verified domain to the exact enrolled client and consent publication.",
             ),
             boundaries=(
-                "Tenant, operator, consumer binding, permission authority, and signing keys are server-resolved.",
+                "Workspace, operator, consumer binding, permission authority, and signing keys are server-resolved.",
                 "Every grant and case authorization requires a requester plus two other distinct approvers.",
                 "The surface performs no identity proof, network call, provider write, or completeness inference.",
-                "Branding accepts no SVG, HTML, CSS, URL, raw storage path, caller-selected tenant, or encryption key.",
+                "Branding accepts no SVG, HTML, CSS, URL, raw storage path, caller-selected workspace, or encryption key.",
                 "Live DNS/TLS/CDN issuance and accessibility, brand, and customer acceptance remain external.",
             ),
             next_steps=(
@@ -1255,7 +1255,7 @@ _CONTEXTS = tuple(
                 "Local studio state is not evidence of live provider interoperability, customer usability, regulator acceptance, or compliance.",
             ),
             next_steps=(
-                "Confirm the active tenant, readiness state, and role before authoring a draft.",
+                "Confirm the active workspace, readiness state, and role before authoring a draft.",
                 "Use different principals for authoring, review, and approval before publication.",
                 "Validate runtime projections and recovery with the deployment-owned target before relying on them operationally.",
             ),
@@ -1352,16 +1352,16 @@ _CONTEXTS = tuple(
             capabilities=(
                 "Run the local SOC 2 observer and configured read-only AWS Security Hub, AWS Config, Azure Defender, Azure Policy, Google Cloud Security Command Center, GitHub security-stream, and Okta posture collectors.",
                 "Inspect exact definition and enrollment authority, jobs, runs, digest-only observations, alerts, retention, and integrity.",
-                "Run one bounded server-authorized scheduler cycle or let the configured leased scheduler operate across active tenants.",
+                "Run one bounded server-authorized scheduler cycle or let the configured leased scheduler operate across active workspaces.",
             ),
             boundaries=(
-                "The browser cannot choose a tenant, provider origin, asset scope, source selector, credential reference, transport, or raw provider payload.",
+                "The browser cannot choose a workspace, provider origin, asset scope, source selector, credential reference, transport, or raw provider payload.",
                 "Readiness resolves no credential value and performs no provider network request; collection rechecks the exact approved definition and active enrollment for every job.",
                 "A configured source or successful observation does not prove estate completeness, control effectiveness, compliance, certification, licensed access, or live provider/customer acceptance.",
             ),
             next_steps=(
                 "Refresh readiness and resolve every missing stock source manifest or credential reference.",
-                "Register and independently approve the exact collector definition, then create the matching tenant enrollment using its current integrity digest.",
+                "Register and independently approve the exact collector definition, then create the matching workspace enrollment using its current integrity digest.",
                 "Run a bounded cycle, inspect incomplete/retry/dead-letter state, verify integrity, and obtain live provider and customer acceptance before relying on coverage.",
             ),
             suggested_questions=(
@@ -1406,7 +1406,7 @@ _CONTEXTS = tuple(
                 "Enroll, suspend, reactivate, or revoke an exact source and its schedule.",
                 "Lease, execute, fail, replay, and inspect bounded jobs through stock AWS S3, Azure Blob, Google Cloud Storage, Snowflake metadata, ServiceNow CMDB, and Microsoft Entra adapters.",
                 "Propose and independently approve a classification, then operate its durable remediation outbox and digest-only governed data-map projection.",
-                "Inspect or enable the bounded managed remediation scheduler for tenant-derived retry and exact local ambiguity reconciliation.",
+                "Inspect or enable the bounded managed remediation scheduler for workspace-derived retry and exact local ambiguity reconciliation.",
             ),
             boundaries=(
                 "Raw secrets never enter the page; credentials and adapters are server-resolved.",
@@ -1418,7 +1418,7 @@ _CONTEXTS = tuple(
                 "Verify the exact source, credential reference, provider adapter, privacy review, and scan bounds.",
                 "Inspect completeness, truncation, and errors before proposing a classification.",
                 "Use a distinct authorized approver, then run and reconcile the durable outbox before treating the data map as current.",
-                "Confirm the tenant scheduler opt-in, bounded cycle status, recovery counter, and concurrency exclusion before relying on automatic retry.",
+                "Confirm the workspace scheduler opt-in, bounded cycle status, recovery counter, and concurrency exclusion before relying on automatic retry.",
             ),
             suggested_questions=(
                 "What does a discovery report prove?",
@@ -1515,21 +1515,21 @@ _CONTEXTS = tuple(
             capabilities=(
                 "Create a notice release from opaque content and evidence references.",
                 "Record independent approval, publication intent, rollback, withdrawal, revocation, and expiry.",
-                "Run one bounded tenant-derived local publication cycle through an exact server-owned target binding.",
+                "Run one bounded workspace-derived local publication cycle through an exact server-owned target binding.",
             ),
             boundaries=(
                 "Releases carry only digests and opaque references; raw notice content and key values are rejected.",
-                "Tenant, target property, consent reference, rule group, resource versions, and CAS revisions are server-derived.",
+                "Workspace, target property, consent reference, rule group, resource versions, and CAS revisions are server-derived.",
                 "The runtime mutates only Lightwork's local consent publication store; it has no website, provider, tag-manager, or SDK mutation path.",
                 "Local completion is not proof of customer browser behavior, provider acceptance, production deployment, or legal sufficiency.",
             ),
             next_steps=(
-                "Load runtime status and confirm configuration preflight is ready for the active tenant.",
+                "Load runtime status and confirm configuration preflight is ready for the active workspace.",
                 "Have an authorized person other than the author approve the exact release.",
                 "Verify the release digests and exact target binding before authorizing one local cycle.",
             ),
             suggested_questions=(
-                "Is the local publication runtime configured for this tenant?",
+                "Is the local publication runtime configured for this workspace?",
                 "What does a successful local publication prove?",
                 "How does rollback choose the exact prior bundle?",
             ),
@@ -1546,12 +1546,12 @@ _CONTEXTS = tuple(
                 "Inspect immutable history, integrity, retention queues, and recovery readiness.",
             ),
             boundaries=(
-                "Tenant, actor, vendor type, vendor authority, issuer, revocation, retention, and storage are server-owned.",
+                "Workspace, actor, vendor type, vendor authority, issuer, revocation, retention, and storage are server-owned.",
                 "Raw contracts, licensed templates, executable formulas, provider adapters, and recovery paths are not accepted.",
                 "Recovery preflight verifies readiness and integrity; actual backups remain server-configured administrator operations.",
             ),
             next_steps=(
-                "Confirm the tenant composition is enabled, configured, and ready.",
+                "Confirm the workspace composition is enabled, configured, and ready.",
                 "Use the exact enrolled vendor ID and revision before creating a record.",
                 "Review redaction, history, and integrity after material lifecycle changes.",
             ),
@@ -1591,7 +1591,7 @@ _CONTEXTS = tuple(
         _registered(
             path="/administration/document-vault",
             summary=(
-                "Custody bounded approved document bytes in tenant-private encrypted "
+                "Custody bounded approved document bytes in workspace-private encrypted "
                 "storage and deliver them only through one-time principal-bound grants."
             ),
             capabilities=(
@@ -1791,7 +1791,7 @@ _CONTEXTS = tuple(
                 "workflow and track a terminal, evidence-backed outcome."
             ),
             capabilities=(
-                "List tenant-local broker, record, outcome, proposal, and key-revision authority without raw subject fields or key material.",
+                "List workspace-local broker, record, outcome, proposal, and key-revision authority without raw subject fields or key material.",
                 "Propose broker enrollment/revocation, DROP record import/revocation, independent outcomes, and key lifecycle operations.",
                 "Apply every authority mutation through a different authenticated administrator with revision and idempotency checks.",
                 "Create a deletion or opt-out request from an enrolled DROP record.",
@@ -1807,7 +1807,7 @@ _CONTEXTS = tuple(
             ),
             next_steps=(
                 "Refresh status and distinguish local operation from request executability; zero active records means no DROP request can execute.",
-                "For a fresh tenant, enroll a broker and import a record through two-person authority proposals before creating a request.",
+                "For a fresh workspace, enroll a broker and import a record through two-person authority proposals before creating a request.",
                 "Use the exact external DROP ID, request type, approved template, and language.",
                 "Propose and independently approve outcome evidence before recording a terminal status.",
             ),

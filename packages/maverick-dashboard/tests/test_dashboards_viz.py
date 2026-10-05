@@ -141,5 +141,5 @@ def test_pages_ship_the_board_skeleton(monkeypatch, tmp_path):
 def test_overview_empty_still_offers_first_goal(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     t = _client().get("/overview").text
-    assert "Start your first goal" in t
+    assert "Start your first task" in t
     assert "bd-momentum" not in t   # no board over an empty record

@@ -2295,8 +2295,8 @@ _POLICY: tuple[Setting, ...] = (
       warning="Supplier files will no longer be previewed and reviewed before use."),
 
     # ------------------------------------------------------ integrations
-    S("template_registries", "indexes", "Where to find goal templates",
-      "Web addresses of the catalogs goal templates can be installed from. With none listed, "
+    S("template_registries", "indexes", "Where to find task templates",
+      "Web addresses of the catalogs task templates can be installed from. With none listed, "
       "the built-in catalog is used.", "list", "Integrations", [], "maverick.templates",
       subgroup="Template and tool server catalogs", pattern=_HTTPS_PLAIN, max_length=300,
       item_error="a secure web address without a question mark", empty_unset=True,

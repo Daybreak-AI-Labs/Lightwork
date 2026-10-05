@@ -148,7 +148,7 @@ ROWS = [('Workflow builder', 'Créateur de workflows', 'Workfloweditor', 'ワー
   'フローの承認ステップ',
   '流程中的审批步骤'),
  ('Start here', 'Commencer ici', 'Hier beginnen', 'ここから開始', '从这里开始'),
- ('Goal complete', 'Objectif atteint', 'Ziel erreicht', '目標達成', '目标完成'),
+ ('Task complete', 'Tâche terminée', 'Aufgabe abgeschlossen', 'タスク完了', '任务完成'),
  ('Add a step', 'Ajouter une étape', 'Schritt hinzufügen', '手順を追加', '添加步骤'),
  ('Governance check', 'Vérification de gouvernance', 'Governanceprüfung', 'ガバナンスの確認', '治理检查'),
  ('Save playbook', 'Enregistrer le guide', 'Anleitung speichern', '手順書を保存', '保存操作手册'),
