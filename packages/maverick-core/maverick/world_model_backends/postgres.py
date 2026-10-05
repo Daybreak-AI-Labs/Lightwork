@@ -38,6 +38,7 @@ from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from urllib.parse import quote
 
+from ..approval_checks import POSTGRES_SCHEMA as _APPROVAL_CHECK_SCHEMA_PG
 from ..attachment_submissions import POSTGRES_SCHEMA as _ATTACHMENT_SUBMISSION_SCHEMA
 from ..deadline_alerts import POSTGRES_SCHEMA as _DEADLINE_ALERT_SCHEMA_PG
 from ..event_admission import POSTGRES_SCHEMA as _EVENT_ADMISSION_SCHEMA
@@ -746,6 +747,8 @@ MIGRATIONS.append((47, [
     *_WEBHOOK_SUBSCRIPTION_SCHEMA_PG,
     *_DEADLINE_ALERT_SCHEMA_PG,
 ]))
+# v48: approval-gate decisions without content (maverick.approval_checks).
+MIGRATIONS.append((48, _APPROVAL_CHECK_SCHEMA_PG))
 
 _PG_SCHEMA_VERSION = MIGRATIONS[-1][0]
 
@@ -3141,6 +3144,27 @@ class PostgresWorldModel:
             cur.execute(sql, tuple(params))
             rows = cur.fetchall()
         return [(str(r[0] or ""), float(r[1]), float(r[2] or 0.0)) for r in rows]
+
+    def task_costs_for(self, *, domain: str = "", execution_principal: str = "",
+                       limit: int = 500) -> list[float]:
+        """The SQLite backend's contract, inside the active tenant."""
+        column, value = ("g.domain", domain) if domain else ("g.execution_principal", execution_principal)
+        if not value:
+            return []
+        frag, fparams = _tenant_scope("g.tenant_id")
+        sql = ("SELECT SUM(COALESCE(e.cost_dollars, 0)), MAX(e.ended_at) "
+               f"FROM episodes e JOIN goals g ON g.id = e.goal_id WHERE {column} = %s "
+               "AND e.ended_at IS NOT NULL")
+        params: list = [str(value)]
+        if frag:
+            sql += " AND " + frag
+            params += fparams
+        sql += " GROUP BY e.goal_id ORDER BY 2 DESC LIMIT %s"
+        params.append(int(limit))
+        with self._tx() as cur:
+            cur.execute(sql, tuple(params))
+            rows = cur.fetchall()
+        return [float(r[0] or 0.0) for r in rows]
 
     def episode_exists(self, goal_id: int, episode_id: int) -> bool:
         frag, fparams = _tenant_scope("g.tenant_id")

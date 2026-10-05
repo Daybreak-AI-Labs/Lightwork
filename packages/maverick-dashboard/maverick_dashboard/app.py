@@ -7232,6 +7232,11 @@ async def agents_page(request: Request) -> HTMLResponse:
             access = agent_access(selected["name"], selected)
         except Exception:  # noqa: BLE001 -- the access check is read-only help
             log.warning("specialist or agent access check unavailable", exc_info=True)
+    typical = None
+    if selected and not creating:
+        from maverick.typical_cost import typical_cost
+
+        typical = typical_cost(_world(), specialist=selected["name"])
     return templates.TemplateResponse(
         request,
         "agents.html",
@@ -7241,7 +7246,7 @@ async def agents_page(request: Request) -> HTMLResponse:
          "agent_changes": agent_changes, "selected_kind": selected_kind,
          # Names of the people who changed an agent are shown to administrators.
          "show_change_authors": has_global_permission(request, "admin"),
-         "access": access},
+         "access": access, "typical_cost": typical},
     )
 
 
@@ -9033,6 +9038,14 @@ def approvals_page(request: Request) -> HTMLResponse:
     pending = list(world.pending_approvals())
     approvals = [row for row in pending if can_read_approval(request, row, world)]
     flow_approvals = pending_for_request(request)
+    # Requests from colleagues' private tasks: a card with only who asked,
+    # the action and its risk, the agent or specialist and the expiry.
+    from .api import _supervisor
+    from .approval_private_cards import private_cards
+
+    readable = {row.id for row in approvals}
+    private = private_cards(world, [row for row in pending if row.id not in readable],
+                            _supervisor(request) or "")
     return templates.TemplateResponse(
         request,
         "approvals.html",
@@ -9041,12 +9054,25 @@ def approvals_page(request: Request) -> HTMLResponse:
             "flow_approvals": flow_approvals["items"],
             "flow_approval_coverage": flow_approvals["coverage"],
             "private_count": len(pending) - len(approvals),
+            "private_cards": private,
+            "viewer_role": _approval_viewer_role(request),
             # Link to Content access only when asking for a card read is on.
             "content_access_on": content_access.enabled(),
             **_approval_queue_context(approvals, request),
         },
         headers={"Cache-Control": "private, no-store"},
     )
+
+
+def _approval_viewer_role(request: Request) -> str:
+    """The viewer's role name in this workspace, for "why you see this"."""
+    from . import auth as _auth
+    from .api import _supervisor
+
+    try:
+        return _auth.role_for_principal(_supervisor(request) or "") or ""
+    except Exception:  # an unreadable roster names no role
+        return ""
 
 
 def _recent_governance_holds(limit: int = 10) -> list[dict]:
@@ -9066,6 +9092,28 @@ def _recent_governance_holds(limit: int = 10) -> list[dict]:
         return []
     from .content_access import audit_metadata
     return [audit_metadata(event) for event in reversed(events)][:limit]
+
+
+def _fleet_typical_costs(fleets: list) -> tuple[dict, dict | None]:
+    """What each team agent's past tasks usually cost, beside the task form,
+    and the workspace's remaining budget. A specialist's history is its pack's
+    tasks in this workspace; any other agent's is its own tasks."""
+    from maverick.typical_cost import min_runs, typical_cost
+
+    world, minimum = _world(), min_runs()
+    costs: dict[str, dict] = {}
+    for fleet in fleets:
+        for agent in fleet.agents:
+            principal = "" if agent.domain else fleet.principal_for(agent.name)
+            costs[f"{fleet.name}/{agent.name}"] = typical_cost(
+                world, specialist=agent.domain or "", agent_principal=principal, minimum=minimum)
+    try:
+        from maverick import spending_limits
+
+        workspace = spending_limits.workspace_standing()
+    except Exception:  # noqa: BLE001 -- the task form still works; the line is left out
+        workspace = None
+    return costs, workspace
 
 
 def _fleet_recent_runs(fleet_name: str, *, owner: str | None = None, limit: int = 12) -> list[dict]:
@@ -9172,6 +9220,7 @@ def fleets_page(request: Request) -> HTMLResponse:
     }
     # Per-fleet recent runs (newest-first), scoped to the fleets already shown.
     runs_by_fleet = {f.name: _fleet_recent_runs(f.name, owner=owner) for f in fleets}
+    typical_costs, workspace_limit = _fleet_typical_costs(fleets)
     try:  # role picker for new agents (same roles the access page offers)
         from . import rbac as _rbac
 
@@ -9187,6 +9236,8 @@ def fleets_page(request: Request) -> HTMLResponse:
             "fleet_can_start": fleet_can_start,
             "role_options": role_options,
             "runs_by_fleet": runs_by_fleet,
+            "typical_costs": typical_costs,
+            "workspace_limit": workspace_limit,
             "holds": _recent_governance_holds(),
             "pending_count": len(_world().pending_approvals()),
         },

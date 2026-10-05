@@ -143,6 +143,12 @@ require_acknowledgement = true
 # decide it, else the requester (recorded as a self-approval); "always" =
 # always someone else; "never" = the requester may approve it.
 separate_approver       = "when_available"
+# One row per approval check: when, workspace, risk, kind of action, agent or
+# specialist, and whether it was allowed, sent to a person or refused. Never
+# the content, arguments or command. For previewing a threshold change later;
+# rows older than check_retention_days are pruned a few hundred at a time.
+record_checks           = true
+check_retention_days    = 90
 
 [sandbox]
 backend = "local"                   # local | docker | ssh | podman | devcontainer | firecracker | kubernetes
@@ -960,7 +966,15 @@ workspace_dollars = 500.0       # 0 or unset = no workspace limit
 workspace_period = "month"      # "day" or "month"
 default_user_dollars = 50.0     # 0 or unset = no limit for each person
 default_user_period = "month"   # "task", "day" or "month"
+typical_cost_min_runs = 10      # finished tasks needed before a typical cost shows
 ```
+
+Beside the task form on **Teams** and in a specialist's or agent's **Check
+access** panel, Lightwork shows what that agent's or specialist's past runs
+usually cost: the middle half (25th to 75th percentile) and the median of its
+most recent finished tasks in this workspace. It is recorded history, never a
+prediction. With fewer finished tasks than `typical_cost_min_runs` (2 to 1000,
+default 10) it says there are not enough past runs yet.
 
 Spend is counted from the usage ledger plus runs still going in the dashboard
 process. Runs in separate worker processes are counted once they settle, so

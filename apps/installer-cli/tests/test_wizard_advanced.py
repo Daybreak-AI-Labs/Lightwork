@@ -1339,3 +1339,21 @@ def test_spending_alerts_keep_their_default_unless_changed(tmp_path, monkeypatch
     config.reset_config_cache()
     assert spending_alerts.alert_at() == [80, 90]
     config.reset_config_cache()
+
+
+def test_typical_cost_minimum_keeps_its_default_unless_changed(tmp_path, monkeypatch):
+    def section(answer):
+        cfg = _write(tmp_path, monkeypatch, {"typical_cost_min_runs": answer})
+        return tomllib.loads(cfg).get("spending_limits")
+
+    assert section("10") is None  # the default needs no line
+    assert section("") is None
+    assert section("1") is None  # out of range keeps the default
+    assert section("lots") is None
+    assert section("25") == {"typical_cost_min_runs": 25}
+    monkeypatch.setenv("MAVERICK_CONFIG", str(tmp_path / "config.toml"))
+    section("30")
+    from maverick import config, typical_cost
+    config.reset_config_cache()
+    assert typical_cost.min_runs() == 30
+    config.reset_config_cache()

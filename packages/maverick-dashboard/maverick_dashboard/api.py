@@ -15090,13 +15090,16 @@ def list_approvals(request: Request, response: Response) -> dict:
     require_permission(request, "operate")
     response.headers["Cache-Control"] = "private, no-store"
     w = _world()
+    from .approval_private_cards import private_cards
     from .content_access import can_read_approval
     from .flow_approval_inbox import pending_for_request
 
     rows = list(w.pending_approvals())
     readable = [a for a in rows if can_read_approval(request, a, w)]
     flow_approvals = pending_for_request(request)
+    private = private_cards(w, [a for a in rows if a not in readable], _supervisor(request) or "")
     return {"approvals": [_approval_api_row(a) for a in readable],
+            "private_requests": private,
             "flow_approvals": flow_approvals["items"],
             "flow_approval_coverage": flow_approvals["coverage"],
             "private_count": len(rows) - len(readable), "content_access_url": "/content-access"}
@@ -15110,11 +15113,15 @@ def approvals_waiting_count(request: Request, response: Response) -> dict:
     require_permission(request, "operate")
     response.headers["Cache-Control"] = "private, no-store"
     w = _world()
+    from .approval_private_cards import waiting_in_chat
     from .content_access import can_read_approval
     from .flow_approval_inbox import pending_for_request
 
-    readable = sum(1 for a in w.pending_approvals() if can_read_approval(request, a, w))
-    return {"waiting": readable + len(pending_for_request(request)["items"])}
+    pending = list(w.pending_approvals())
+    opened = [a for a in pending if can_read_approval(request, a, w)]
+    # A private request still waits on someone the rules let decide it in chat.
+    private = waiting_in_chat([a for a in pending if a not in opened], _supervisor(request) or "")
+    return {"waiting": len(opened) + private + len(pending_for_request(request)["items"])}
 
 
 def _approval_api_row(approval) -> dict:

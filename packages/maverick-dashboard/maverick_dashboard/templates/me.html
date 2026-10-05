@@ -12,8 +12,8 @@
                      linked chat app or inbox.') %}
     {{ state('Right now',
              waiting ~ (' thing needs you' if waiting == 1 else ' things need you'),
-             badge='Action needed' if waiting else 'All clear',
-             badge_class='warn' if waiting else 'ok',
+             badge='Action needed' if waiting else ('Waiting on others' if d.approvals else 'All clear'),
+             badge_class='warn' if waiting else ('pending' if d.approvals else 'ok'),
              copy=d.local_date | datetime('date') ~ ' · ' ~ preferences.time_zone) }}
   {% endcall %}
 
@@ -35,7 +35,7 @@
           <td><span class="badge {{ 'blocked' if a.risk in ('high', 'critical') else 'pending' }}">{{ a.risk_label }}</span></td>
           <td>{{ a.spending }}</td>
           <td>{% if a.decide_by %}{{ a.decide_by | datetime }}{% else %}No deadline{% endif %}{% if a.status == 'expired' %} <span class="badge blocked">Expired</span>{% endif %}</td>
-          <td>{{ {'you': 'You', 'you_own': 'You (your own request)', 'requester': 'The person who asked'}.get(a.waiting_on, 'Other people') }}</td>
+          <td>{{ {'you': 'You', 'you_own': 'You (your own request)', 'you_chat': 'You (decide in Slack or Teams)', 'requester': 'The person who asked'}.get(a.waiting_on, 'Other people') }}</td>
         </tr>
       {% endfor %}
       </tbody>

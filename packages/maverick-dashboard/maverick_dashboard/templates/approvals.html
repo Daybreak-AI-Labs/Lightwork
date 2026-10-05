@@ -15,7 +15,7 @@
              (open_count ~ (' request waiting' if open_count == 1 else ' requests waiting')) if open_count
                else ((private_count ~ (" request is waiting that you can't open here" if private_count == 1 else " requests are waiting that you can't open here")) if private_count
                else '0 requests waiting'),
-             badge='Action needed' if open_count else ('Waiting' if private_count else ('Check needed' if flow_approval_coverage != 'current' else 'All clear')),
+             badge='Action needed' if open_count or (private_cards | default([]) | selectattr('in_chat') | list) else ('Waiting' if private_count else ('Check needed' if flow_approval_coverage != 'current' else 'All clear')),
              badge_class='warn' if open_count or private_count or flow_approval_coverage != 'current' else 'ok',
              copy='Approve, reject, or send a request back with a note saying what should change.' if open_count or not private_count
                else 'The person who asked can open and decide their own request.') }}
@@ -31,6 +31,26 @@
     {% if content_access_on %}To review one yourself, <a href="/content-access">ask for access to that approval card</a>. Access lets you read the card; your role and the approval rules still decide whether your decision counts.
     {% else %}Asking for access to a colleague's approval card is turned off. An installation administrator can turn on “Employee content access requests” in Settings.{% endif %}
   </p>{% endif %}
+  {% if private_cards %}{% set role_text = (' (' ~ (viewer_role | role_label) ~ ')') if viewer_role else '' %}
+  <section class="panel" aria-labelledby="private-approvals-title" id="private-approvals">
+    <h2 id="private-approvals-title">Requests you can't open</h2>
+    <p class="muted">Only who asked, the action, its risk, who is doing the work and the deadline are shown. Everything else stays private to the person who asked.</p>
+    <div class="approval-list">
+    {% for p in private_cards %}<article class="approval-item approval-item--private" id="approval-{{ p.id }}" aria-labelledby="approval-title-{{ p.id }}">
+      <div class="approval-item__head"><h3 class="approval-item__title" id="approval-title-{{ p.id }}">{{ p.action }}</h3>
+        <span class="badge {{ 'blocked' if p.risk in ('high', 'critical') else 'pending' }} approval-risk">{{ p.risk_label }}</span>
+        {% if p.in_chat %}<span class="badge pending">Waiting on you</span>{% endif %}</div>
+      <dl class="approval-item__meta">
+        <div><dt>Asked by</dt><dd>{{ p.requested_by | identity if p.requested_by else 'Not recorded' }}</dd></div>
+        <div><dt>{{ p.worker.noun }}</dt><dd>{{ p.worker.name }}</dd></div>
+        <div><dt>Decide by</dt><dd>{% if p.expires_at %}{{ p.expires_at | datetime }}{% else %}Not stated{% endif %}</dd></div>
+      </dl>
+      <p class="approval-private-why"><strong>Why you see this:</strong>
+        {% if p.in_chat %}You're one of the people who can decide it. Your role{{ role_text }} lets you approve risky actions, and you're linked in Slack or Teams, where its card is posted. Decide there with the buttons on the card.
+        {% else %}Your role{{ role_text }} lets you approve risky actions in this workspace, but this request comes from a colleague's private task, so you can't open or decide it here.{% endif %}</p>
+    </article>{% endfor %}
+    </div>
+  </section>{% endif %}
 
   {% if flow_approval_coverage != 'current' %}<p class="panel" role="status">Some flow approvals could not be checked. Open your <a href="/automations">flows and runs</a> to inspect older requests, or refresh this page.</p>{% endif %}
   {% if flow_approvals %}<section class="panel" aria-labelledby="flow-approvals-title">
