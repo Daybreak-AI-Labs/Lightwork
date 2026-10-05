@@ -89,3 +89,17 @@ test('opening an old finished task does not ask; watching one finish does', asyn
   await settle();
   assert.equal(second.calls.some(c => c.url.includes('task=run_task')), true);
 });
+
+test('the panels arrive after the page content, so nothing already shown moves', async () => {
+  const {window, document} = load();
+  const heading = document.querySelector('main h1');
+  await settle();
+  const main = document.getElementById('content');
+  assert.equal(main.firstElementChild, heading, 'the page still starts with its own heading');
+  assert.equal(main.lastElementChild.id, 'mv-survey-sus');
+  document.dispatchEvent(new window.CustomEvent('lightwork:approval-decided', {detail: {id: '1'}}));
+  await settle();
+  assert.equal(main.firstElementChild, heading);
+  assert.equal(main.lastElementChild.id, 'mv-survey-seq');
+  assert.match(document.getElementById('mv-survey-seq').textContent, /at the end of this page/);
+});
