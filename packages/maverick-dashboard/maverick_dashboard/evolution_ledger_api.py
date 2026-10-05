@@ -16,11 +16,14 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Annotated, Any
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi import Path as PathParam
+from maverick import learning_history_checkpoint as checkpoint
 from maverick.evolution_ledger import (
     EVOLUTION_LEDGER_SCHEMA,
     EvolutionLedgerError,
     project_evolution_ledger,
+    promotion_receipt_for_entry,
     verify_promotion_receipt,
 )
 from pydantic import BaseModel, ConfigDict, StringConstraints
@@ -54,6 +57,10 @@ class VerifyReceiptIn(_StrictModel):
     """
 
     receipt: ReceiptText
+
+
+class VerifyCheckpointIn(_StrictModel):
+    checkpoint: Annotated[str, StringConstraints(strict=True, min_length=2, max_length=checkpoint.MAX_FILE_BYTES)]
 
 
 class EvolutionLedgerInputError(ValueError):
@@ -238,10 +245,68 @@ def _verify_receipt(body: VerifyReceiptIn) -> dict[str, Any]:
     # reports that limitation rather than treating a receipt digest as proof of
     # human approval.
     result = verify_promotion_receipt(receipt)
+    recorded = None
+    if result.receipt_valid:
+        ledger, state = _promotion_ledger_source()
+        # Check the entire native projection, not the newest 500 visible rows.
+        # A valid self-contained fingerprint alone is not a recorded change.
+        recorded = state == "available" and any(
+            entry.promotion_receipt_sha256 == result.receipt_sha256
+            for entry in project_evolution_ledger(ledger).entries
+        )
     return {
         "schema": RECEIPT_VERIFICATION_SCHEMA,
         **result.to_dict(),
+        "recorded_in_current_history": recorded,
+        "checked_at": time.time(),
     }
+
+
+def _recorded_receipt(entry_sha256: str) -> dict[str, Any]:
+    ledger, state = _promotion_ledger_source()
+    result = promotion_receipt_for_entry(ledger, entry_sha256) if state == "available" else None
+    if result is None:
+        raise HTTPException(404, "That recorded receipt is unavailable. Refresh Learning history.")
+    return result
+
+
+def _checkpoint_history() -> dict[str, Any]:
+    ledger, _state = _promotion_ledger_source()
+    return checkpoint.history(ledger)
+
+
+def _checkpoint_status() -> dict[str, Any]:
+    current = _checkpoint_history()
+    reference = checkpoint.build(current)
+    return {"record_count": reference["record_count"], "checked_at": reference["saved_at"],
+            "adopted_changes": current["adopted_changes"], "restorations": current["restorations"],
+            "scope": "The complete native record of learning adoption, restoration, and their related recording steps. Other platform activity is outside this checkpoint.",
+            "limits": "Up to 4,096 stored records and 16 MB of source history; no partial checkpoint is offered.",
+            "trust": "Keep the original downloaded file independently of this installation. A file created after history was replaced cannot reveal that replacement.",
+            "revision": reference["prefix_sha256"]}
+
+
+def _download_checkpoint() -> dict[str, Any]:
+    return checkpoint.build(_checkpoint_history())
+
+
+def _verify_checkpoint(body: VerifyCheckpointIn) -> dict[str, Any]:
+    reference = checkpoint.parse(body.checkpoint)
+    return checkpoint.compare(reference, _checkpoint_history())
+
+
+async def _checkpoint_upload(request: Request) -> VerifyCheckpointIn:
+    """Bound the JSON envelope before parsing; never echo uploaded file text."""
+    raw = bytearray()
+    async for chunk in request.stream():
+        if len(raw) + len(chunk) > 32 * 1024:
+            raise HTTPException(413, "Choose the original downloaded checkpoint, 4 KB or smaller.")
+        raw.extend(chunk)
+    try:
+        value = json.loads(raw, object_pairs_hook=_without_duplicate_keys, parse_constant=_reject_nonfinite_number)
+        return VerifyCheckpointIn.model_validate(value)
+    except (TypeError, ValueError, UnicodeError) as exc:
+        raise HTTPException(422, "The checkpoint upload could not be read. Choose the original downloaded file, 4 KB or smaller.") from exc
 
 
 async def _call(function: Callable[..., Any], *args: Any) -> Any:
@@ -249,15 +314,19 @@ async def _call(function: Callable[..., Any], *args: Any) -> Any:
         return await run_in_threadpool(function, *args)
     except EvolutionLedgerInputError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except checkpoint.CheckpointInputError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except checkpoint.CheckpointUnavailable as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except EvolutionLedgerError as exc:
         raise HTTPException(
             status_code=503,
-            detail="evolution ledger is unavailable or did not verify",
+            detail="Learning history is unavailable or its stored checks did not match. Select Refresh before relying on it.",
         ) from exc
     except (OSError, RuntimeError) as exc:
         raise HTTPException(
             status_code=503,
-            detail="evolution ledger is unavailable",
+            detail="Learning history is unavailable. Select Refresh; if it keeps failing, ask your administrator to check it.",
         ) from exc
 
 
@@ -277,6 +346,45 @@ def create_evolution_ledger_router() -> APIRouter:
     async def verify_receipt(request: Request, body: VerifyReceiptIn) -> dict[str, Any]:
         require_permission(request, "audit")
         return await _call(_verify_receipt, body)
+
+    @router.get("/checkpoint/status")
+    async def checkpoint_status(request: Request) -> dict[str, Any]:
+        require_permission(request, "audit")
+        if request.query_params:
+            raise HTTPException(404, "History checkpoint unavailable")
+        return await _call(_checkpoint_status)
+
+    @router.get("/checkpoint/download")
+    async def download_checkpoint(request: Request) -> Response:
+        require_permission(request, "audit")
+        if request.query_params:
+            raise HTTPException(404, "History checkpoint unavailable")
+        value = await _call(_download_checkpoint)
+        return Response(json.dumps(value, sort_keys=True, separators=(",", ":")), media_type="application/json",
+                        headers={"Cache-Control": "no-store, private, max-age=0", "Pragma": "no-cache",
+                                 "X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-referrer",
+                                 "Content-Disposition": 'attachment; filename="lightwork-learning-history-checkpoint.json"'})
+
+    @router.post("/checkpoint/check")
+    async def verify_checkpoint(request: Request) -> dict[str, Any]:
+        require_permission(request, "audit")
+        if request.query_params:
+            raise HTTPException(404, "History checkpoint unavailable")
+        body = await _checkpoint_upload(request)
+        return await _call(_verify_checkpoint, body)
+
+    @router.get("/entries/{entry_sha256}/receipt")
+    async def download_receipt(
+        request: Request, entry_sha256: str = PathParam(pattern=r"^[0-9a-f]{64}$"),
+    ) -> Response:
+        require_permission(request, "audit")
+        if request.query_params:
+            raise HTTPException(404, "Recorded receipt unavailable")
+        receipt = await _call(_recorded_receipt, entry_sha256)
+        return Response(json.dumps(receipt, sort_keys=True, separators=(",", ":")), media_type="application/json",
+                        headers={"Cache-Control": "no-store, private, max-age=0", "Pragma": "no-cache",
+                                 "X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-referrer",
+                                 "Content-Disposition": f'attachment; filename="learning-receipt-{entry_sha256[:16]}.json"'})
 
     return router
 

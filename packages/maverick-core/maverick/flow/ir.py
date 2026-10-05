@@ -300,6 +300,8 @@ class FlowNode:
     y: float = 0.0
     # Optional pure scalar specialization; original agent remains the fallback.
     learned_operator: dict[str, Any] | None = None
+    # A reviewed rule-only release must stop on uncertainty instead of invoking AI.
+    learned_fallback: bool = True
     recipe_step: int | None = None  # requires the parent flow's complete recipe
 
     def to_dict(self) -> dict:
@@ -316,6 +318,8 @@ class FlowNode:
             d["recipe_step"] = self.recipe_step
         if self.learned_operator is not None:
             d["learned_operator"] = copy.deepcopy(self.learned_operator)
+        if self.learned_fallback is not True:
+            d["learned_fallback"] = self.learned_fallback
         for key in ("seconds", "retries", "retry_backoff", "timeout", "limit"):
             value = getattr(self, key)
             if value:
@@ -356,6 +360,7 @@ class FlowNode:
             next=d.get("next"), tool=str(d.get("tool", "")),
             params=dict(d.get("params") or {}), brief=str(d.get("brief", "")),
             learned_operator=copy.deepcopy(d.get("learned_operator")),
+            learned_fallback=d.get("learned_fallback", True),
             recipe_step=d.get("recipe_step"),
             condition=str(d.get("condition", "")),
             if_true=d.get("if_true"), if_false=d.get("if_false"),
@@ -557,6 +562,10 @@ class Flow:
 
     def _validate_retry_policy(self, n: FlowNode) -> list[str]:
         errs = []
+        if type(n.learned_fallback) is not bool:
+            errs.append(f"node {n.id!r}: learned fallback must be a boolean")
+        elif not n.learned_fallback and (n.kind != NODE_AGENT or n.learned_operator is None):
+            errs.append(f"node {n.id!r}: rule-only work requires a learned operator")
         retries = max(0, n.retries)
         backoff = max(0.0, n.retry_backoff)
         if retries > MAX_FLOW_NODE_RETRIES:

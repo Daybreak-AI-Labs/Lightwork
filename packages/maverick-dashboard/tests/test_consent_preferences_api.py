@@ -622,6 +622,26 @@ def test_cross_tenant_reads_writes_and_outbox_are_isolated(
     assert _ok(client.get(f"{API}/profiles"))["profiles"] == [profile_a]
 
 
+def test_people_paging_and_lookup_bind_the_current_workspace(monkeypatch: pytest.MonkeyPatch) -> None:
+    _create_profile(profile_id="person-1", idempotency_key="person-1")
+    _create_profile(profile_id="person-2", subject_sha256=DIGEST_C, idempotency_key="person-2")
+    first = _ok(client.get(f"{API}/profiles", params={"limit": 1}))
+    assert first["next_after"] == "person-1"
+    headers = {"X-Lightwork-Profile-Context": first["context"]}
+    assert client.get(f"{API}/profiles", params={"after": "person-1"}).status_code == 409
+    following = _ok(client.get(f"{API}/profiles", params={"after": "person-1"}, headers=headers))
+    assert [row["profile_id"] for row in following["profiles"]] == ["person-2"]
+    result = _ok(client.post(f"{API}/profiles/lookup", json={"profile_ids": ["person-2", "unavailable"]}, headers=headers))
+    assert result["missing"] == ["unavailable"]
+    assert "subject_sha256" not in result["profiles"][0]
+    assert client.post(f"{API}/profiles/lookup", json={"profile_ids": ["person-2"] * 2}).status_code == 422
+    assert client.post(f"{API}/profiles/lookup", json={"profile_ids": [f"person-{number}" for number in range(101)]}).status_code == 422
+    monkeypatch.setenv("MAVERICK_TENANT", "tenant-b")
+    assert client.get(f"{API}/profiles", headers=headers).status_code == 409
+    assert client.post(f"{API}/profiles/lookup", json={"profile_ids": ["person-2"]}, headers=headers).status_code == 409
+    assert _ok(client.post(f"{API}/profiles/lookup", json={"profile_ids": ["person-2"]}))["missing"] == ["person-2"]
+
+
 def test_consent_analytics_is_independently_gated_and_cohort_suppressed(
     _isolated_consent_plane: Path,
 ) -> None:

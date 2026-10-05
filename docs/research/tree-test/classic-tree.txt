@@ -1,3 +1,28 @@
+Insights
+	Approval challenges
+	Instructions used in real work
+	Content access
+	Workflow readiness
+	Overview
+	Ekko
+	Oversight
+	Discovery
+	Branches
+	Spend
+	Savings
+	Autonomous shoring
+	Billing
+	Providers
+	Flow results
+	Knowledge
+	Learning
+	Learned
+	Video walkthroughs
+	Facts
+	3D plan view
+	Your budget
+	Compare cost records
+	Provider spending
 Work
 	My data
 	Your account
@@ -35,29 +60,6 @@ Work
 	Project workspaces
 	Your paired devices
 	Permission requests
-Insights
-	Content access
-	Workflow readiness
-	Overview
-	Ekko
-	Oversight
-	Discovery
-	Branches
-	Spend
-	Savings
-	Autonomous shoring
-	Billing
-	Providers
-	Flow results
-	Knowledge
-	Learning
-	Learned
-	Video walkthroughs
-	Facts
-	3D plan view
-	Your budget
-	Compare cost records
-	Provider spending
 Governance
 	Autonomous compliance
 	Approvals

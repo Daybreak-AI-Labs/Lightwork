@@ -51,9 +51,41 @@ self-improvement lifecycle, installed acceptance, or externally anchored audit.
 
 ## Product foundations
 
+October 5 product follow-through adds guarded Copilot teaching from selected
+permitted runs, native rule/procedure refinement forms, exact whole-instruction
+restoration, readable source/publication explanations, current nightly scheduling,
+and selected specialist questions from larger saved sets. These narrow F04/F05/F06
+operating gaps. Authenticated disposable native-dashboard journeys exercise
+teaching, saving, running and withdrawal stopping the next action. Learning history
+now downloads its actual digest-only receipts and checks them through the page.
+Its copy separates stored-chain consistency from human approval and an independent
+history copy. This does not establish external anchoring, measured improvement,
+customer qualification, or a new research mechanism; the status counts stay unchanged.
+
+The next October 5 batch adds frozen current/proposed specialist instruction
+comparisons through ordinary questions and typed Copilot, plus owner-consented
+instruction recording from actual native AI calls. Historical instruction
+records have review, download, withdrawal and uncertain-receipt recovery;
+recording makes no additional model call. Paired specialist checks bind the
+exact instructions, model and chosen case versions before spending. These
+close concrete operating gaps in F04/F05, but neither literal answer checks nor
+recorded instructions establish causal customer lift or the proposed research
+mechanisms. The status counts stay unchanged.
+
+The subsequent October 5 batch adds an independently retainable native learning-
+history checkpoint. Download checks the complete supported immutable journal;
+later comparison checks its exact earlier prefix while allowing new records.
+The native UI journey detects validly rebuilt or missing earlier history when
+the original file is retained. This narrows F03/F06's replacement-detection gap
+without creating external custody, a signature, approval proof or an all-action
+recording guarantee. Selected employee-companion policy and metadata controls
+also use the same native authority in the page and Copilot, with current-state
+readback after an uncertain save. Neither addition implements the proposed
+research mechanisms or changes the status counts.
+
 | ID | Status | Present code and exact remaining boundary |
 | --- | --- | --- |
-| F01 | Partial product support | [Outcome pilots](https://github.com/Daybreak-AI-Labs/Lightwork/blob/1c27445dda93e21e2eb38ef2dde5193646832da8/packages/maverick-dashboard/maverick_dashboard/outcome_pilots.py#L1-L26), [outcome accounting](https://github.com/Daybreak-AI-Labs/Lightwork/blob/1c27445dda93e21e2eb38ef2dde5193646832da8/packages/maverick-core/maverick/outcome_accounting.py#L1-L8), and [candidate promotion](https://github.com/Daybreak-AI-Labs/Lightwork/blob/1c27445dda93e21e2eb38ef2dde5193646832da8/packages/maverick-core/maverick/candidate_promotion.py#L1-L15) cover separate stages. The source does not establish one completed customer-owned path from selected work through measured result and recovery. Promotion needs an installed deployment adapter; [composition refuses its absence](https://github.com/Daybreak-AI-Labs/Lightwork/blob/1c27445dda93e21e2eb38ef2dde5193646832da8/packages/maverick-dashboard/maverick_dashboard/candidate_promotion_composition.py#L281-L315). |
+| F01 | Partial product support | [Outcome pilots](https://github.com/Daybreak-AI-Labs/Lightwork/blob/1c27445dda93e21e2eb38ef2dde5193646832da8/packages/maverick-dashboard/maverick_dashboard/outcome_pilots.py#L1-L26), [outcome accounting](https://github.com/Daybreak-AI-Labs/Lightwork/blob/1c27445dda93e21e2eb38ef2dde5193646832da8/packages/maverick-core/maverick/outcome_accounting.py#L1-L8), and [candidate promotion](https://github.com/Daybreak-AI-Labs/Lightwork/blob/1c27445dda93e21e2eb38ef2dde5193646832da8/packages/maverick-core/maverick/candidate_promotion.py#L1-L15) cover separate stages. The source does not establish one completed customer-owned path from selected work through measured result and recovery. October 5 adds a stock installed release adapter for bounded taught-rule workflows on a single-computer installation. Its native UI and Copilot bind exact practice, owner authorization, independent review, publication, actual release-run failure checks and retained-rule restoration. Practice establishes readiness, not measured accuracy or business lift; connected actions, nested workflows, shared-storage qualification and the general measured-result path remain open. Custom deployment composition still refuses missing adapters: [composition refuses its absence](https://github.com/Daybreak-AI-Labs/Lightwork/blob/1c27445dda93e21e2eb38ef2dde5193646832da8/packages/maverick-dashboard/maverick_dashboard/candidate_promotion_composition.py#L281-L315). |
 | F02 | Partial product support | [Frozen paired pilots](https://github.com/Daybreak-AI-Labs/Lightwork/blob/1c27445dda93e21e2eb38ef2dde5193646832da8/packages/maverick-dashboard/maverick_dashboard/outcome_pilots.py#L1-L7), [source-bound cost and outcome records](https://github.com/Daybreak-AI-Labs/Lightwork/blob/1c27445dda93e21e2eb38ef2dde5193646832da8/packages/maverick-core/maverick/outcome_accounting.py#L1-L8), and an [injected A/B harness](https://github.com/Daybreak-AI-Labs/Lightwork/blob/1c27445dda93e21e2eb38ef2dde5193646832da8/packages/maverick-core/maverick/learning_proof.py#L1-L17) exist. An [in-product evidence-readiness check](../../packages/maverick-dashboard/maverick_dashboard/outcome_pilots.py) now identifies missing paired observations, frozen-criteria decisions, and cost-family coverage; Copilot reads the same result. A passing or uploaded score, or complete operator-reported pair coverage, is not measured causal customer lift. The [simulator explicitly disallows live business-outcome acceptance](https://github.com/Daybreak-AI-Labs/Lightwork/blob/1c27445dda93e21e2eb38ef2dde5193646832da8/packages/maverick-core/maverick/research_simulator.py#L1-L14). |
 | F03 | Partial product support | [The shared learning stop](https://github.com/Daybreak-AI-Labs/Lightwork/blob/1c27445dda93e21e2eb38ef2dde5193646832da8/packages/maverick-core/maverick/learning_guard.py#L1-L19), [authority/effect fencing](https://github.com/Daybreak-AI-Labs/Lightwork/blob/1c27445dda93e21e2eb38ef2dde5193646832da8/packages/maverick-core/maverick/authority_effects.py#L1-L14), and the [evolution ledger’s stated local-only integrity limit](https://github.com/Daybreak-AI-Labs/Lightwork/blob/1c27445dda93e21e2eb38ef2dde5193646832da8/packages/maverick-core/maverick/evolution_ledger.py#L1038-L1058) are concrete. This is not a complete installed, externally anchored, every-operation audit or recovery guarantee. |
 | F04 | Partial product support | [Teaching and withdrawal controls](https://github.com/Daybreak-AI-Labs/Lightwork/blob/1c27445dda93e21e2eb38ef2dde5193646832da8/packages/maverick-dashboard/maverick_dashboard/templates/flow_teach.html#L15-L24), a [labelled learned-flow input form](https://github.com/Daybreak-AI-Labs/Lightwork/blob/1c27445dda93e21e2eb38ef2dde5193646832da8/packages/maverick-dashboard/maverick_dashboard/templates/flow_designer_inputs.js), and [exact lesson removal on Learned](../../packages/maverick-dashboard/maverick_dashboard/templates/_learning_loop.html) exist. Copilot has a bounded review/removal adapter for currently shared lessons. The [coverage register](https://github.com/Daybreak-AI-Labs/Lightwork/blob/1c27445dda93e21e2eb38ef2dde5193646832da8/docs/post-install-operation-coverage.md#L40-L51) still requires installed-app acceptance and many direct/Copilot journeys. [Page guidance is explicitly read-only](https://github.com/Daybreak-AI-Labs/Lightwork/blob/1c27445dda93e21e2eb38ef2dde5193646832da8/packages/maverick-dashboard/maverick_dashboard/copilot_context.py#L1-L17); separate operation catalogs cover only bounded actions. |
@@ -61,6 +93,39 @@ self-improvement lifecycle, installed acceptance, or externally anchored audit.
 | F06 | Partial product support | [Signed recipe lineage](https://github.com/Daybreak-AI-Labs/Lightwork/blob/1c27445dda93e21e2eb38ef2dde5193646832da8/packages/maverick-core/maverick/flow/recipe_lineage.py#L1-L8), [durable candidate-promotion authority](https://github.com/Daybreak-AI-Labs/Lightwork/blob/1c27445dda93e21e2eb38ef2dde5193646832da8/packages/maverick-core/maverick/candidate_promotion.py#L1-L16), and [bounded ledger projection](https://github.com/Daybreak-AI-Labs/Lightwork/blob/1c27445dda93e21e2eb38ef2dde5193646832da8/packages/maverick-core/maverick/evolution_ledger.py#L1038-L1058) exist. Recipe signatures attest recorded evidence, not correctness; receipt-byte verification alone cannot establish human approval without private approval material [as the verifier states](https://github.com/Daybreak-AI-Labs/Lightwork/blob/1c27445dda93e21e2eb38ef2dde5193646832da8/packages/maverick-core/maverick/evolution_ledger.py#L883-L929). The ledger is local rather than externally anchored. |
 
 ## Earlier research directions
+
+The October 5 bounded F01/F02 native path now joins actual retained published
+runs, owner-labeled expected answers, complete frozen baseline/candidate
+executions, verified source and replay receipts, and the installed independent
+release and exact restoration adapter. Designer provides ordinary case controls;
+Copilot opens them, reads saved results and operates the existing release
+decisions. This specific local rule-only journey passed native and Chromium
+checks. Its constraints and source limits are recorded in the
+[post-install coverage register](../post-install-operation-coverage.md). It
+establishes a usable bounded implementation, without claiming held-out accuracy,
+causal customer lift, universal workflow coverage or research novelty.
+
+October 5 runtime corrections add two specific foundations. F03 outside-agent
+requests now retain distinct unknown-effect and asynchronous-acceptance states,
+with read-only recent receipts in the ordinary page and authorized Copilot;
+neither state automatically repeats an action or claims a business result.
+Native AI circuit admission also binds the admitted tenant/connection and
+permits one cooldown probe, keeping local spending refusals separate from
+provider outages. F05 learned-answer recall now requires the original task's
+current ownership and learning permission, isolates the cache by tenant/path,
+and withholds unbound legacy answers. These are concrete runtime repairs, not
+proof that an entire research direction or installation has been qualified.
+
+The next F03 correction binds a human's finished-result decision and its exact
+actor/result receipt in the native sign-off transaction. Direct Chat controls
+and Copilot recover that original receipt without repeating learning or a
+configured handoff, and label prior reviewers and historical results honestly.
+Channel decisions now carry the original card into the same transaction-local
+approval guard, refusing a competing claim or changed card rather than voting
+on stale material. F05 also checks the exact admitted learned-skill file and
+tenant after selection and before prompt construction; withdrawal, replacement
+and relabeling cannot revive a retained learned object. These concrete repairs
+do not undo text already sent to a model or qualify an entire learning family.
 
 | ID | Status | Present code and exact remaining boundary |
 | --- | --- | --- |
@@ -83,15 +148,15 @@ self-improvement lifecycle, installed acceptance, or externally anchored audit.
 
 ## New candidates
 
-The register identifies N01–N06 as hypotheses. N01 now has a bounded pilot,
-but its proposed novel mechanism and discriminating experiment remain
-unqualified; N02 still needs those specifications before implementation. The
-related components below should not be marketed as completed inventions.
+The register identifies N01–N06 as hypotheses. N01 has a bounded feasibility
+pilot and N02 has a model-only approval-challenge pilot. Their proposed novel
+mechanisms and discriminating experiments remain unqualified. The related
+components below should not be marketed as completed inventions.
 
 | ID | Status | Closest current component and missing mechanism |
 | --- | --- | --- |
 | N01 | Bounded pilot; novel mechanism unproven | [Commitment viability model](../../packages/maverick-core/maverick/commitment_viability.py) and [Promise reviews](../../packages/maverick-dashboard/maverick_dashboard/commitment_viability_store.py) support two manually entered orders, conditional options, owner-reviewed proposed contention, UI/Copilot controls and source-labeled assessment. They do not provide verified live resources, external reservations, full production constraints, customer-accepted outcomes, or demonstrated advantage over a robust scheduler. [Definition](lightwork-invention-register.md#n01-preserve-achievable-customer-commitments). |
-| N02 | Research only | [Fleet memory](https://github.com/Daybreak-AI-Labs/Lightwork/blob/1c27445dda93e21e2eb38ef2dde5193646832da8/packages/maverick-core/maverick/fleet_memory.py#L1-L23) can share scoped lessons, but there is no joint private-failure witness synthesis, permitted-release noninterference check, and target-local semantic retargeting. [Definition](https://github.com/Daybreak-AI-Labs/Lightwork/blob/1c27445dda93e21e2eb38ef2dde5193646832da8/docs/research/lightwork-invention-register.md#L71-L93). |
+| N02 | Bounded model-only pilot; novel mechanism unproven | [Approval challenge compiler and fixed native receiver](../../packages/maverick-core/maverick/approval_challenges.py), [ordinary protected controls](../../packages/maverick-dashboard/maverick_dashboard/approval_challenges_api.py) and [Copilot](../../packages/maverick-dashboard/maverick_dashboard/product_operations_approval_challenges.py) generate, check, consent to sharing, receive and remove closed fictional approval-race programs. Actual local native guards are checked against the selected weakened variant, with source-version binding and retained receipts. No private-incident witness synthesis, joint permitted-release noninterference algorithm, automatic target semantic mapping or superiority comparison is implemented. [Definition](lightwork-invention-register.md#n02-transfer-executable-lessons-from-private-failures). |
 | N03 | Research only | [Signed recipe lineage](https://github.com/Daybreak-AI-Labs/Lightwork/blob/1c27445dda93e21e2eb38ef2dde5193646832da8/packages/maverick-core/maverick/flow/recipe_lineage.py#L1-L8) is local evidence; no joint abstract-procedure/adapter discovery and target qualification across organizations. [Definition](https://github.com/Daybreak-AI-Labs/Lightwork/blob/1c27445dda93e21e2eb38ef2dde5193646832da8/docs/research/lightwork-invention-register.md#L95-L107). |
 | N04 | Research only | [Flow rewrites](https://github.com/Daybreak-AI-Labs/Lightwork/blob/1c27445dda93e21e2eb38ef2dde5193646832da8/packages/maverick-core/maverick/flow/evolve.py#L1-L20) propose node-type swaps; they do not learn obligation-preserving split/merge/batch/reorder transformations across jobs. [Definition](https://github.com/Daybreak-AI-Labs/Lightwork/blob/1c27445dda93e21e2eb38ef2dde5193646832da8/docs/research/lightwork-invention-register.md#L109-L121). |
 | N05 | Research only | [Operator questions](https://github.com/Daybreak-AI-Labs/Lightwork/blob/1c27445dda93e21e2eb38ef2dde5193646832da8/packages/maverick-core/maverick/flow/operator_queries.py#L1-L10) address one bounded operator. No shared decision-sufficiency certificate and freshness/permission dependency update across simultaneous business cases. [Definition](https://github.com/Daybreak-AI-Labs/Lightwork/blob/1c27445dda93e21e2eb38ef2dde5193646832da8/docs/research/lightwork-invention-register.md#L123-L133). |

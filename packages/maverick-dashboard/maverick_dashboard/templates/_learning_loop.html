@@ -75,7 +75,8 @@
     <ol id="llp-log" class="llp-log" aria-labelledby="llp-log-title"><li class="muted">Loading…</li></ol>
 
     <h3>Hold-out check</h3>
-    <p class="muted">Confirms the private record of test questions kept aside for fair testing is complete and untouched.</p>
+    <p class="muted">Checks whether the stored history of questions kept aside for fair testing is consistent.
+      A separately retained copy is needed to detect replacement of the whole history.</p>
     <p><button type="button" class="btn btn--ghost" id="llp-holdout-btn">Check the hold-out record</button></p>
     <div id="llp-holdout"></div>
 
@@ -99,6 +100,8 @@
              aria-describedby="llp-instructions-help">
       <span id="llp-instructions-help" class="muted">A plain text copy of the instructions your agents use today, up to 1 MB.
         With careful testing on, new lessons are only adopted when this is given.</span>
+      <a href="/learning/instructions">Record and review instructions from real work</a>
+      <span class="muted">A recorded file is historical. Review whether it still applies and is appropriate to share before using it here.</span>
     </div>
     <div class="llp-row">
       <button type="button" class="btn btn--primary" id="llp-run">Run a learning pass now</button>

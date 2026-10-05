@@ -1,4 +1,28 @@
 Level 1,Level 2,Level 3,Address
+Insights,Approval challenges,,/learning/approval-challenges
+Insights,Instructions used in real work,,/learning/instructions
+Insights,Content access,,/content-access
+Insights,Workflow readiness,,/workflow-readiness
+Insights,Overview,,/overview
+Insights,Ekko,,/ekko
+Insights,Oversight,,/oversight
+Insights,Discovery,,/discovery
+Insights,Branches,,/run-tree
+Insights,Spend,,/spend
+Insights,Savings,,/savings
+Insights,Autonomous shoring,,/shoring
+Insights,Billing,,/billing
+Insights,Providers,,/providers
+Insights,Flow results,,/flows/analytics
+Insights,Knowledge,,/knowledge-access
+Insights,Learning,,/learning
+Insights,Learned,,/learned
+Insights,Video walkthroughs,,/walkthroughs
+Insights,Facts,,/facts
+Insights,3D plan view,,/plan-tree-3d
+Insights,Your budget,,/budget
+Insights,Compare cost records,,/cost-reconciliation
+Insights,Provider spending,,/provider-spending
 Work,My data,,/my-data
 Work,Your account,,/account
 Work,Your preferences,,/preferences
@@ -35,28 +59,6 @@ Work,Your first useful result,,/get-started/employee
 Work,Project workspaces,,/project-workspaces
 Work,Your paired devices,,/devices
 Work,Permission requests,,/access-requests
-Insights,Content access,,/content-access
-Insights,Workflow readiness,,/workflow-readiness
-Insights,Overview,,/overview
-Insights,Ekko,,/ekko
-Insights,Oversight,,/oversight
-Insights,Discovery,,/discovery
-Insights,Branches,,/run-tree
-Insights,Spend,,/spend
-Insights,Savings,,/savings
-Insights,Autonomous shoring,,/shoring
-Insights,Billing,,/billing
-Insights,Providers,,/providers
-Insights,Flow results,,/flows/analytics
-Insights,Knowledge,,/knowledge-access
-Insights,Learning,,/learning
-Insights,Learned,,/learned
-Insights,Video walkthroughs,,/walkthroughs
-Insights,Facts,,/facts
-Insights,3D plan view,,/plan-tree-3d
-Insights,Your budget,,/budget
-Insights,Compare cost records,,/cost-reconciliation
-Insights,Provider spending,,/provider-spending
 Governance,Autonomous compliance,,/autonomous-compliance
 Governance,Approvals,,/approvals
 Governance,Agent controls,,/agent-control-plane

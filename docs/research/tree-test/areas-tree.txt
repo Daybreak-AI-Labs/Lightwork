@@ -63,6 +63,8 @@ Agents
 		Facts
 	Learning
 		Learning
+		Approval challenges
+		Instructions used in real work
 		Learned
 	Discover work to automate
 		Ekko

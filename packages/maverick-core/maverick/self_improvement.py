@@ -2391,6 +2391,16 @@ class PromotionLedger:
             text = journal.read_text(encoding="utf-8")
         except (OSError, UnicodeError) as exc:
             raise PromotionLedgerError("cannot read promotion ledger journal") from exc
+        return self._replay_journal_text(text)
+
+    def _replay_journal_text(self, text: str) -> tuple[
+        dict[str, PromotionRecord], dict[str, PromotionTransaction], str,
+    ]:
+        """Verify and replay an already-read journal without repairing files.
+
+        Audit readers may bound their read before using the same native replay
+        authority. The caller owns any file permission and read-size checks.
+        """
         if not text or not text.endswith("\n"):
             raise PromotionLedgerError("promotion ledger journal is incomplete")
 

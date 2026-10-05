@@ -1525,8 +1525,10 @@ app.include_router(in_app_router)
 app.include_router(first_outcome_router)
 from .billing_invoice_api import router as billing_invoice_router  # noqa: E402
 from .channel_check_api import router as channel_check_router  # noqa: E402
+from .dsar_export_handoff_api import router as dsar_export_handoff_router  # noqa: E402
 from .feature_actions_api import page_router as feature_actions_page_router  # noqa: E402
 from .feature_actions_api import router as feature_actions_router  # noqa: E402
+from .flow_action_fields import router as flow_action_fields_router  # noqa: E402
 from .mcp_presets import router as mcp_presets_router  # noqa: E402
 from .page_assets import router as page_assets_router  # noqa: E402
 from .provider_spending_api import router as provider_spending_router  # noqa: E402
@@ -1550,6 +1552,8 @@ app.include_router(feature_actions_router)
 app.include_router(feature_actions_page_router)
 app.include_router(tax_actions_router)
 app.include_router(channel_check_router)
+app.include_router(dsar_export_handoff_router)
+app.include_router(flow_action_fields_router)
 app.include_router(teams_links_router)
 app.include_router(page_assets_router)
 app.include_router(mcp_presets_router)
@@ -1578,6 +1582,26 @@ app.include_router(setup_guide.router)
 from .workflow_explanation import asset_router as workflow_explanation_assets  # noqa: E402
 
 app.include_router(workflow_explanation_assets)
+from . import local_flow_promotions  # noqa: E402
+
+app.include_router(local_flow_promotions.router)
+app.include_router(local_flow_promotions.asset_router)
+from . import local_flow_comparisons  # noqa: E402
+
+app.include_router(local_flow_comparisons.router)
+from . import instruction_capture_api  # noqa: E402
+
+app.include_router(instruction_capture_api.router)
+app.include_router(instruction_capture_api.page_router)
+from . import approval_challenges_api  # noqa: E402
+
+app.include_router(approval_challenges_api.router)
+app.include_router(approval_challenges_api.page_router)
+
+from . import webhook_settings_recovery_api  # noqa: E402
+
+app.include_router(webhook_settings_recovery_api.router)
+app.include_router(webhook_settings_recovery_api.asset_router)
 app.state.voice_setup = VoiceSetup()
 app.add_middleware(RecoveryOnlyMiddleware, dashboard_app=app)
 
@@ -3865,6 +3889,7 @@ async def learning_page(request: Request) -> HTMLResponse:
             "snap": _learning_snapshot(request),
             "learning_can_manage": has_global_permission(request, "admin"),
             "agent_feedback": _agent_feedback_summary(),
+            "learning_can_operate": has_permission(request, "operate"),
         },
     )
 
@@ -4893,6 +4918,7 @@ async def dsar_detail_page(request: Request, request_id: str) -> HTMLResponse:
          "record_alerts": record_alerts("dsar", record["id"]),
          "can_admin": has_permission(request, "admin"),
          "can_manage_email": has_global_permission(request, "admin"),
+         "can_record_package_handoff": has_permission(request, "operate") and has_permission(request, "audit"),
          "notices": public_rights_form.notice_log(record),
          "answer": privacy_ops.dsar_answer(record)})
 
@@ -7117,10 +7143,9 @@ async def external_agent_scorecard(request: Request, agent_id: str) -> HTMLRespo
     wall violations, credentials)."""
     from maverick import external_agents as xa
 
-    try:
-        detail = xa.agent_detail(agent_id)
-    except xa.ExternalAgentsError as e:
-        raise HTTPException(status_code=404, detail=str(e)) from e
+    from .external_agent_detail_service import detail_for
+
+    detail = await run_in_threadpool(detail_for, request, agent_id)
     can_manage = xa.enabled() and xa.entitled() and has_permission(request, "admin")
     access = None
     try:
@@ -7132,6 +7157,7 @@ async def external_agent_scorecard(request: Request, agent_id: str) -> HTMLRespo
     return templates.TemplateResponse(
         request, "external_agent_detail.html",
         {"a": detail, "can_manage": can_manage, "access": access},
+        headers={"Cache-Control": "private, no-store"}
     )
 
 
@@ -12352,7 +12378,7 @@ def chat_goal(request: Request, goal_id: int) -> HTMLResponse:
             "rendered": rendered,
             "signoff": signoff,
             "artifacts": artifacts,
-            "answer_version": version_for(g, contract, signoff, artifacts),
+            "answer_version": version_for(g, contract, signoff, artifacts, handed_off),
             **answer_facts(w, g, frozenset(_withheld_event_markers())),
             "projects": projects,
             "share_links": share_links,
@@ -13067,6 +13093,7 @@ async def shell_copilot_js() -> FileResponse:
 @app.get("/static/lightwork-deliverable-bundles.js")
 @app.get("/static/lightwork-deliverable-sharing.js")
 @app.get("/static/lightwork-employee-companion.js")
+@app.get("/static/lightwork-external-agent-executions.js")
 @app.get("/static/lightwork-file-selection.js")
 @app.get("/static/lightwork-my-work.js")
 @app.get("/static/lightwork-permission-requests.js")

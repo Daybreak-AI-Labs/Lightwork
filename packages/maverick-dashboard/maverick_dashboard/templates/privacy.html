@@ -730,7 +730,7 @@
               {% endif %}
             </td>
             <td {% if r.overdue %}class="pw-due-warn"{% endif %}>
-              {% if r.status in ('open', 'unverified', 'awaiting_erasure') %}
+              {% if r.response_pending %}
                 {% if not r.overdue %}{{ r.days_left }} day{{ '' if r.days_left == 1 else 's' }} left{% else %}{{ r.days_left | abs }} day{{ '' if (r.days_left | abs) == 1 else 's' }} overdue{% endif %}
                 {% if r.extended_until %}<br><span class="muted" style="font-size:var(--text-xs);">Extended</span>{% endif %}
                 {% if r.acknowledge_overdue %}<br><span class="badge warn">Receipt not confirmed in time</span>{% endif %}

@@ -1809,7 +1809,7 @@ class WorldModel:
 
     def record_signoff(self, goal_id: int, decision: str, *,
                        decided_by: str = "", note: str | None = None,
-                       expected_updated_at: float | None = None) -> bool:
+                       expected_updated_at: float | None = None, _cursor=None) -> bool:
         """Record a human's certify/reject decision on a finished deliverable --
         the sign-off a pack's output gate calls for. One authoritative row per
         goal (a later decision replaces an earlier one); the note is encrypted
@@ -1826,7 +1826,7 @@ class WorldModel:
         """
         if decision not in {"approved", "rejected"}:
             raise ValueError("decision must be 'approved' or 'rejected'")
-        with self._writing() as conn:
+        with (self._writing() if _cursor is None else contextlib.nullcontext(_cursor)) as conn:
             sql = (
                 "INSERT INTO signoffs(goal_id, decision, decided_by, "
                 "note, created_at) SELECT id, ?, ?, ?, ? FROM goals "
@@ -3581,6 +3581,7 @@ class WorldModel:
         status: str,
         *,
         decided_by: str,
+        reviewed_card: dict | None = None,
     ) -> ApprovalAuditEvent | None:
         """Atomically accept a vote and queue its signed-audit delivery.
 
@@ -3612,6 +3613,22 @@ class WorldModel:
             event_id = _approval_audit_event_id(
                 current_tenant_id(), approval_id, status, approver, undo_round,
             )
+
+            if reviewed_card is not None:
+                from .approval_vote_review import require_locked_vote_review
+
+                locked = conn.execute("SELECT * FROM approvals WHERE id = ?", (int(approval_id),)).fetchone()
+                approval = _approval_from_row(locked) if locked is not None else None
+                signoffs = conn.execute("SELECT approver, decision FROM approval_signoffs WHERE approval_id = ? ORDER BY decided_at", (int(approval_id),)).fetchall()
+                approvers = _single_approver(approval, [row["approver"] for row in signoffs if row["decision"] == "approved"]) if approval is not None else []
+                audit_pending = int(conn.execute("SELECT COUNT(*) FROM approval_audit_outbox WHERE approval_id = ? AND delivered_at IS NULL", (int(approval_id),)).fetchone()[0])
+                content_owner = (approval.requested_by or "") if approval is not None else None
+                if approval is not None and approval.goal_id:
+                    source = conn.execute("SELECT owner FROM goals WHERE id = ?", (approval.goal_id,)).fetchone()
+                    content_owner = (source["owner"] or "") if source is not None else None
+                require_locked_vote_review(approval, reviewed_card, status=status, actor=approver,
+                                           event_id=event_id, approvers=approvers, audit_pending=audit_pending,
+                                           content_owner=content_owner)
 
             prior = conn.execute(
                 "SELECT event_id, approval_id, status, decided_by, final_status, "

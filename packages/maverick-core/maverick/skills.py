@@ -17,7 +17,7 @@ import re
 import stat
 import urllib.error
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from .blackboard import Blackboard
@@ -117,6 +117,8 @@ class Skill:
     purposes: tuple[str, ...] = ()
     source: str = ""
     source_goal_ids: tuple[int, ...] = ()
+    _runtime_binding: tuple[str | None, str, str, str, str] | None = field(
+        default=None, repr=False, compare=False)
 
     @classmethod
     def parse(cls, text: str, path: Path) -> Skill:
@@ -275,12 +277,51 @@ def load_skills(skills_dir: Path | None = None) -> list[Skill]:
     out = []
     for p in target_dir.glob("*.md"):
         try:
-            skill = Skill.parse(p.read_text(encoding="utf-8"), p)
+            with p.open("rb") as stream:
+                raw = stream.read(MAX_SKILL_DOWNLOAD_BYTES + 1)
+            if len(raw) > MAX_SKILL_DOWNLOAD_BYTES:
+                continue
+            skill = Skill.parse(raw.decode("utf-8").replace("\r\n", "\n"), p)
+            _bind_learned_snapshot(skill, raw)
             if _source_readable(skill):
                 out.append(skill)
         except Exception:
             continue
     return out
+
+
+def _bind_learned_snapshot(skill: Skill, raw: bytes) -> None:
+    if skill.source in {"auto-distilled-provider-v1", _REVIEWED_LOCAL_SOURCE}:
+        from .paths import current_tenant
+
+        skill._runtime_binding = (
+            current_tenant(), str(skill.path.resolve()), hashlib.sha256(raw).hexdigest(),
+            learned_skill_use_key(skill), hashlib.sha256(_canonical_signed_bytes(skill)).hexdigest(),
+        )
+
+
+def _learned_snapshot_current(skill: Skill) -> bool:
+    """A removed/replaced learned artifact cannot survive a slow recall."""
+    if (skill._runtime_binding is None
+            and skill.source not in {"auto-distilled-provider-v1", _REVIEWED_LOCAL_SOURCE}):
+        return True
+    try:
+        from .file_lock import ensure_private_file
+        from .paths import current_tenant
+
+        tenant, path, digest, use_key, instructions = skill._runtime_binding
+        if (current_tenant() != tenant or str(skill.path.resolve()) != path
+                or learned_skill_use_key(skill) != use_key
+                or hashlib.sha256(_canonical_signed_bytes(skill)).hexdigest() != instructions):
+            return False
+        ensure_private_file(skill.path)
+        with skill.path.open("rb") as stream:
+            raw = stream.read(MAX_SKILL_DOWNLOAD_BYTES + 1)
+        return (len(raw) <= MAX_SKILL_DOWNLOAD_BYTES
+                and hashlib.sha256(raw).hexdigest() == digest
+                and current_tenant() == tenant)
+    except (OSError, ValueError, TypeError):
+        return False
 
 
 def _source_readable(skill: Skill) -> bool:
@@ -289,6 +330,10 @@ def _source_readable(skill: Skill) -> bool:
     Installed human-authored and packaged skills are explicit shared resources.
     Automatically distilled skills without verifiable lineage stay unavailable.
     """
+    # The original learned binding cannot be downgraded by changing a mutable
+    # classification field on an already loaded object.
+    if skill._runtime_binding is not None and not _learned_snapshot_current(skill):
+        return False
     if not skill.source.startswith("auto-distilled"):
         return True
     if not skill.source_goal_ids:
@@ -300,7 +345,8 @@ def _source_readable(skill: Skill) -> bool:
         # retain them for review but never serve them to any employee. A
         # personal skill needs a separate owner-scoped store and recall path.
         if skill.source in {"auto-distilled-provider-v1", _REVIEWED_LOCAL_SOURCE}:
-            return all(source_allowed(gid, "") for gid in skill.source_goal_ids)
+            return (all(source_allowed(gid, "") for gid in skill.source_goal_ids)
+                    and _learned_snapshot_current(skill))
         owner = current_owner()
         return all(source_allowed(gid, owner) or source_allowed(gid, "")
                    for gid in skill.source_goal_ids)
@@ -459,14 +505,16 @@ def relevant_skills(goal: str, all_skills: list[Skill], max_n: int = 3) -> list[
         from .skill.embeddings import relevant_skills_embed
         result = relevant_skills_embed(goal, all_skills, max_n=max_n, threshold=embed_threshold)
         if result is not None:
-            return result
+            return [s for s in result if _source_readable(s)]
     except Exception as e:
         log.debug("embedding retrieval failed; falling back to lexical: %s", e)
-    return _relevant_skills_lexical(goal, all_skills, max_n=max_n, min_score=lexical_min)
+    return [s for s in _relevant_skills_lexical(
+        goal, all_skills, max_n=max_n, min_score=lexical_min) if _source_readable(s)]
 
 
 def render_for_prompt(skills: list[Skill], *, max_body_chars: int | None = None,
-                      max_total_chars: int | None = None) -> str:
+                      max_total_chars: int | None = None,
+                      rendered_skills: list[Skill] | None = None) -> str:
     """Render recalled skills for the system prompt, BOUNDED.
 
     Bodies ride every agent's system prompt at every swarm depth, and the only
@@ -477,6 +525,8 @@ def render_for_prompt(skills: list[Skill], *, max_body_chars: int | None = None,
     the relevance-ranked tail once spent (the first skill always renders).
     0 disables either cap.
     """
+    if rendered_skills is not None:
+        rendered_skills.clear()
     skills = [s for s in skills if _source_readable(s)]
     if not skills:
         return ""
@@ -487,21 +537,31 @@ def render_for_prompt(skills: list[Skill], *, max_body_chars: int | None = None,
     if max_total_chars is None:
         max_total_chars = env_or_config_int(
             "MAVERICK_SKILL_RENDER_TOTAL_CHARS", "skills", "render_total_chars", 10_000)
-    parts = ["# Relevant skills from past runs", ""]
+    entries = []
     total = 0
     for s in skills:
         from .plugin_execution_pins import check_skill
         check_skill(s)
+        if not _source_readable(s):
+            continue
         body = s.body or ""
         if max_body_chars > 0 and len(body) > max_body_chars:
             body = (body[:max_body_chars].rstrip()
                     + f"\n... [skill body {len(s.body)}B truncated to {max_body_chars}B]")
         if max_total_chars > 0 and total and total + len(body) > max_total_chars:
             break  # combined budget spent; skills are relevance-ranked
-        parts.append(f"## {s.name}")
-        parts.append(body)
-        parts.append("")
+        entries.append((s, body))
         total += len(body)
+    # Configuration, plugin checks, and source-authority reads can block.
+    # Re-read the actual admitted bytes at the last prompt-delivery boundary.
+    entries = [(s, body) for s, body in entries if _source_readable(s)]
+    if not entries:
+        return ""
+    parts = ["# Relevant skills from past runs", ""]
+    for s, body in entries:
+        parts.extend((f"## {s.name}", body, ""))
+        if rendered_skills is not None:
+            rendered_skills.append(s)
     return "\n".join(parts)
 
 
@@ -859,8 +919,12 @@ def _validate_and_write(
         if before_save is not None:
             before_save()
         atomic_write_text(target, content, mode=0o600)
+        # Windows text publication may use CRLF. Bind the exact saved bytes,
+        # not a hash guessed from the pre-publication string.
+        raw = target.read_bytes()
     result = Skill.parse(content, target)
     result.verified = verified
+    _bind_learned_snapshot(result, raw)
     return result
 
 

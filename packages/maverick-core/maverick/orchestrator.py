@@ -553,7 +553,10 @@ def _maybe_learning_cache_block(goal, shield) -> str | None:
         from .pilot_learning import excluded
         if excluded(goal.id):
             return None
-        entry = learning.shared().get(_learning_cache_task(goal))
+        owner = getattr(goal, "owner", None)
+        if not isinstance(owner, str):
+            return None
+        entry = learning.shared().get(_learning_cache_task(goal), source_owner=owner)
         if not entry:
             return None
         result = str(entry.get("result") or "").strip()
@@ -562,6 +565,9 @@ def _maybe_learning_cache_block(goal, shield) -> str | None:
             if not getattr(verdict, "allowed", True):
                 return None
         if not result:
+            return None
+        from .learning_content import allowed
+        if not allowed(entry, owner=owner) or excluded(goal.id):
             return None
         return (
             "\n## A verified answer to this exact task from an earlier run\n"
@@ -594,7 +600,8 @@ def _maybe_store_learning_cache(goal, summary: str, confidence: float | None) ->
         if excluded(goal.id):
             return
         learning.shared().put(_learning_cache_task(goal), summary,
-                              verified_by=f"verifier:goal-{goal.id}")
+                              verified_by=f"verifier:goal-{goal.id}",
+                              source_goal_id=goal.id, source_owner=getattr(goal, "owner", None))
 
 
 def _maybe_recall_prior_work(world, goal, shield) -> str | None:

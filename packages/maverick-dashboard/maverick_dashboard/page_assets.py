@@ -37,6 +37,7 @@ ASSETS = (
     "lightwork-compliance-scoping.js",
     "lightwork-compliance-scope-actions.js",
     "lightwork-dsar-detail.js",
+    "lightwork-dsar-handoff.js",
     "lightwork-privacy-notice-governance.js",
     "lightwork-privacy-rights-form.js",
     "lightwork-privacy-regulatory-intelligence.js",

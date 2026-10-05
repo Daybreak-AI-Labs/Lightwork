@@ -2310,6 +2310,17 @@ def _reconcile_execution_approval(
         return dict(entry)
 
 
+def _retained_execution_status(entry: dict, now: float) -> str:
+    status = str(entry.get("status") or "pending")
+    created = float(entry.get("created_at") or 0)
+    if status == "pending" and now - created > _EXECUTION_TTL_SECONDS:
+        return "expired"
+    if status == "executing" and now - float(
+            entry.get("claimed_at") or created) > _EXECUTING_GRACE_SECONDS:
+        return "indeterminate"
+    return status
+
+
 def execute_status(agent_id: str, execution_id: str) -> dict:
     """Poll one parked execution: ledger status joined with the live approval
     decision, so the agent knows when to re-send the request and commit."""
@@ -2320,20 +2331,19 @@ def execute_status(agent_id: str, execution_id: str) -> dict:
     if not entry.get("approval_id") and entry.get("approval_action"):
         entry = _reconcile_execution_approval(agent_id, str(execution_id)) or entry
     created = float(entry.get("created_at") or 0)
-    status = str(entry.get("status") or "pending")
-    now = time.time()
-    if status == "pending" and now - created > _EXECUTION_TTL_SECONDS:
-        status = "expired"
-    elif status == "executing" and now - float(
-            entry.get("claimed_at") or created) > _EXECUTING_GRACE_SECONDS:
-        # The worker died between the claim and the terminal write: the
-        # effect may or may not have fired. Never re-fire automatically —
-        # the operator verifies in the system of record.
-        status = "indeterminate"
+    status = _retained_execution_status(entry, time.time())
     out = {"execution_id": str(execution_id), "status": status,
            "approval_id": entry.get("approval_id"),
            "connector": entry.get("connector"), "op": entry.get("op"),
            "expires_at": created + _EXECUTION_TTL_SECONDS}
+    if status in {"indeterminate", "accepted"}:
+        out["request_sha256"] = entry.get("digest")
+        out["reason"] = (
+            ("The service accepted the request, but completion has not been confirmed. "
+             if status == "accepted" else "The change may already have happened. ")
+            + "Check the connected service "
+            "before submitting another request; this execution will not run again."
+        )
     if status == "pending" and entry.get("approval_id"):
         try:
             from .world_model import open_world
@@ -2663,11 +2673,7 @@ def execute_commit(
     # aged executed entry told "expired; submit it again" is an instruction
     # to duplicate the effect through a second park + approval.
     if entry.get("status") != "pending":
-        status = str(entry.get("status") or "")
-        if status == "executing" and now - float(
-                entry.get("claimed_at")
-                or entry.get("created_at") or 0) > _EXECUTING_GRACE_SECONDS:
-            status = "indeterminate"
+        status = _retained_execution_status(entry, now)
         out = _screen_verdict(
             agent_id, tool, False, "already_finished",
             f"execution already {status}; a commit never re-fires"
@@ -2850,10 +2856,12 @@ def _set_execution_status(agent_id: str, execution_id: str,
         else:
             entry = dict(entry)
             entry["status"] = status
-            if status in ("executed", "failed", "denied"):
+            if status in ("executed", "failed", "denied", "indeterminate", "accepted"):
                 entry["finished_at"] = time.time()
-                # The digest is spent — a finished entry must never re-fire.
-                entry.pop("digest", None)
+                # Keep an uncertain request's fingerprint for reconciliation.
+                # Its terminal status, not digest deletion, prevents re-firing.
+                if status not in {"indeterminate", "accepted"}:
+                    entry.pop("digest", None)
             ex[execution_id] = entry
         meta["executions"] = ex
         _save_sidecar(sidecar)
@@ -2992,17 +3000,28 @@ def _perform_execution(agent_id: str, connector: str, op: str, path: str,
         except Exception:  # pragma: no cover -- receipt is best-effort here
             log.warning("external_agents: INDETERMINATE receipt failed",
                         exc_info=True)
-        _audit_execution(agent_id, connector, op, "failed", digest,
+        _audit_execution(agent_id, connector, op, "indeterminate", digest,
                          approved=approved, goal_id=goal_id)
-        return {"allowed": True, "rule": "executed", "status": "failed",
-                "result": "ERROR: the request failed in transit; its effect "
-                          "is INDETERMINATE — verify in the system of record "
-                          "before retrying"}
-    outcome = "failed" if str(raw).lstrip().startswith("ERROR") else "executed"
+        return {"allowed": True, "rule": "indeterminate", "status": "indeterminate",
+                "result": "The connection ended before the result was confirmed. "
+                          "The change may already have happened. Check the connected "
+                          "service before submitting another request."}
+    from .connector_attempts import ConnectorResult
+
+    unknown = (
+        isinstance(raw, ConnectorResult) and raw.attempt.outcome_unknown
+    ) or str(raw).lstrip().startswith("INDETERMINATE:")
+    accepted = isinstance(raw, ConnectorResult) and raw.attempt.status_code == 202
+    outcome = (
+        "indeterminate" if unknown else
+        "accepted" if accepted else
+        "failed" if str(raw).lstrip().startswith("ERROR") else "executed"
+    )
     try:
         record_tool_lineage(
             goal_id, tool, receipt, actor=principal,
-            transaction_id=digest[:16], phase="commit", result=outcome,
+            transaction_id=digest[:16],
+            phase="indeterminate" if unknown else "commit", result=outcome,
             force=True)
     except Exception:  # pragma: no cover -- effect already happened
         log.warning("external_agents: COMMIT receipt failed", exc_info=True)
@@ -3012,6 +3031,11 @@ def _perform_execution(agent_id: str, connector: str, op: str, path: str,
     except Exception:
         # The redactor erroring must not leak the raw response outward.
         result = f"({outcome}; response withheld — redaction unavailable)"
+    if unknown:
+        result = (
+            "The connected service did not confirm the result. The change may "
+            "already have happened. Check that service before submitting another request."
+        )
     if goal_id is not None:
         try:
             from .world_model import open_world
@@ -3034,7 +3058,7 @@ def _perform_execution(agent_id: str, connector: str, op: str, path: str,
         log.warning("external_agents: execution meter failed", exc_info=True)
     _audit_execution(agent_id, connector, op, outcome, digest,
                      approved=approved, goal_id=goal_id)
-    return {"allowed": True, "rule": "executed", "status": outcome,
+    return {"allowed": True, "rule": outcome if unknown or accepted else "executed", "status": outcome,
             "result": result}
 
 
@@ -3100,12 +3124,53 @@ def roster(*, registry: dict[str, Any] | None = None,
     return out
 
 
+def _execution_history(agent_id: str) -> dict:
+    """Bounded read-only metadata; no approval repair or private request data."""
+    entries = (_load_sidecar(strict=True).get(agent_id) or {}).get("executions") or {}
+    if not isinstance(entries, dict) or any(not isinstance(e, dict) for e in entries.values()):
+        raise ExternalAgentsDependencyError("The agent's saved request history is unavailable.")
+    try:
+        ordered = sorted(entries.items(), key=lambda item: float(item[1].get("created_at") or 0), reverse=True)
+        now, rows = time.time(), []
+        for identity, entry in ordered[:20]:
+            if entry.get("status", "pending") not in {
+                "pending", "executing", "executed", "failed", "denied", "expired", "indeterminate", "accepted",
+            }:
+                raise ValueError("invalid request status")
+            row = {"execution_id": identity, "status": _retained_execution_status(entry, now),
+                   "connector": entry.get("connector"), "op": entry.get("op")}
+            for key in ("connector", "op"):
+                value = row[key]
+                if value is not None and (not isinstance(value, str) or len(value) > 200):
+                    raise ValueError("invalid request metadata")
+            for key in ("created_at", "claimed_at", "finished_at"):
+                stamp = entry.get(key)
+                if stamp is not None:
+                    stamp = float(stamp)
+                    if not math.isfinite(stamp) or not 0 <= stamp <= 253402300799:
+                        raise ValueError("invalid request time")
+                    row[key] = stamp
+            if row["status"] == "pending" and entry.get("approval_id"):
+                try:
+                    from .world_model import open_world
+                    approval = open_world().get_approval(int(entry["approval_id"]))
+                    row["approval_status"] = approval.status if approval else "unknown"
+                except Exception:
+                    row["approval_status"] = "unknown"
+            rows.append(row)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ExternalAgentsDependencyError("The agent's saved request history cannot be checked.") from exc
+    return {"executions": rows, "execution_coverage": {"retained_count": len(entries),
+            "displayed_count": len(rows), "limit": 20, "retention_seconds": _EXECUTION_TTL_SECONDS}}
+
+
 def agent_detail(agent_id: str) -> dict:
     """One agent's roster row + its Operating Record footprint."""
     rows = [r for r in roster() if r["id"] == agent_id]
     if not rows:
         raise ExternalAgentsError(f"agent {agent_id!r} is not enrolled")
     row = rows[0]
+    row.update(_execution_history(agent_id))
     principal = f"agent:{agent_id}"
     try:
         from .world_model import open_world

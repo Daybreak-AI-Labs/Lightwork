@@ -23,6 +23,10 @@ class RunInput(ChooseInput):
     checks: list[str] = Field(min_length=1, max_length=saved.MAX_CASES_PER_RUN)
 
 
+class CompareInput(RunInput):
+    proposed_instructions: str = Field(min_length=8, max_length=6000)
+
+
 class CreateInput(ChooseInput):
     task: str = Field(min_length=8, max_length=1000)
     must_mention: str = Field(default="", max_length=100)
@@ -129,11 +133,8 @@ def create_execute(request, selection, arguments, prepared, operation_id):
 
 def run_snapshot(request, selection):
     state = _snapshot(request, selection, admin=True, paid=True)
-    from maverick.domain import available_domains
-
-    profiles = available_domains()
-    allowed = {name for name in profiles if auth.domain_suites_allowed(request, name)}
-    groups = saved.cases_for_specialists(allowed)
+    profiles = native._test_profiles(request)
+    groups = saved.cases_for_specialists(set(profiles))
     labels = {name: pack_display_name(name, profiles[name].persona, profiles[name].description) for name in groups}
     names = sorted(groups, key=labels.get)
     specialist = selection.get("specialist") if selection.get("specialist") in groups else next(iter(names), "")
@@ -184,15 +185,56 @@ def _match_original(request, name, prepared, row):
             or row["model"] != prepared["model"] or row["instruction_hash"] != prepared["instructions"]
             or {case["id"]: case["revision"] for case in row["case_revisions"]} != prepared["case_revisions"]):
         raise HTTPException(409, "The original run does not match these reviewed questions, instructions or workspace.")
+    if prepared.get("proposed_instructions") is not None:
+        proposed = row.get("comparison") or {}
+        if (proposed.get("proposed_instructions") != prepared["proposed_instructions"]
+                or proposed.get("proposed_instruction_hash") != prepared["proposed_instruction_hash"]):
+            raise HTTPException(409, "The original comparison does not match these proposed instructions.")
 
 
-def _run_details(row):
-    return {"status": {"prepared": "Not sent yet", "running": "Checking answers", "done": "Finished",
+def _run_details(row, request=None):
+    details = {"status": {"prepared": "Not sent yet", "running": "Checking answers", "done": "Finished",
                        "stopped": "Stopped", "unknown": "Result needs review"}.get(row["state"], "Result needs review"),
             "questions": "; ".join(case["task"] for case in row["case_snapshots"]),
             "answers_checked": len(row["results"]), "passed": row["passed"],
             "review_results": {"href": "/workforce?specialist=" + row["specialist"],
                                "label": "Review answer results in Workforce"}}
+    if row.get("comparison"):
+        if request is not None:
+            from maverick.llm import model_for_role
+            profile = native._test_profile(request, row["specialist"])
+            native._current_test_result(row, saved.instruction_digest(saved.answer_system(profile), model_for_role(row["specialist"])), saved.cases_for(row["specialist"]))
+        details.update(current_passed=sum(r.get("passed", False) for r in row["results"] if r.get("variant") == "current"),
+                       proposed_passed=sum(r.get("passed", False) for r in row["results"] if r.get("variant") == "proposed"),
+                       recorded_cost=f"${row['spent_dollars']:.6f}",
+                       interpretation="Recorded answers and literal rule checks only. This does not establish business improvement; no instructions were published.",
+                       instructions_status="Current instructions still match" if row.get("baseline_current", True) else "Current instructions changed; this result is historical",
+                       questions_status="Current questions still match" if row.get("questions_current", True) else "Saved questions changed; this result is historical",
+                       answers=[{"question":case["task"], **{variant+"_answer":next((result["answer"] for result in row["results"] if result["case_id"]==case["id"] and result.get("variant")==variant), "Not checked") for variant in ("current", "proposed")}} for case in row["case_snapshots"]])
+    return details
+
+
+def compare_snapshot(request, selection):
+    state = run_snapshot(request, selection)
+    return Snapshot(state.revision, state.source,
+        "Compare proposed answer instructions with the current specialist on the same chosen questions. Nothing is published.",
+        fields=state.fields + [{"name":"proposed_instructions", "label":"Proposed answer instructions", "kind":"textarea",
+                               "required":True, "max_length":6000}], blocked=state.blocked)
+
+
+def compare_prepare(request, selection, arguments):
+    from dataclasses import replace
+
+    from maverick.llm import model_for_role
+    state = run_prepare(request, selection, arguments)
+    profile = native._test_profile(request, arguments["specialist"])
+    proposed = arguments["proposed_instructions"]
+    if len(proposed.strip()) < 8 or proposed.strip() == profile.persona.strip():
+        raise HTTPException(422, "Write different proposed instructions before comparing.")
+    return Preview("Compare both instruction versions on exactly these saved questions. At most $0.25 total, no tools or company knowledge, and no automatic retry. No instructions will change.",
+        state.changes + [{"label":"Answer instructions", "before":profile.persona, "after":proposed}],
+        {**state.native, "proposed_instructions":proposed,
+         "proposed_instruction_hash":saved.instruction_digest(saved.answer_system(replace(profile, persona=proposed)), model_for_role(arguments["specialist"]))})
 
 
 def run_recover(request, selection, arguments, prepared, operation_id):
@@ -203,7 +245,7 @@ def run_recover(request, selection, arguments, prepared, operation_id):
         return None
     _match_original(request, arguments["specialist"], prepared, row)
     return Outcome("replayed", "The original run was found. No paid request was repeated.",
-                   _run_details(saved.public_run(row)))
+                   _run_details(saved.public_run(row), request))
 
 
 def run_execute(request, selection, arguments, prepared, operation_id):
@@ -217,17 +259,19 @@ def run_execute(request, selection, arguments, prepared, operation_id):
         _match_original(request, name, prepared, existing)
     if existing is not None and existing["state"] != "prepared":
         return Outcome("replayed", "The original run was found. No paid request was repeated.",
-                       _run_details(saved.public_run(existing)))
+                       _run_details(saved.public_run(existing), request))
     model = model_for_role(name)
     rows = _chosen(name, arguments["checks"])
     if (prepared["context"] != context_for(request) or model != prepared["model"] or digest(rows) != prepared["cases_digest"]
             or saved.instruction_digest(saved.answer_system(profile), model) != prepared["instructions"]):
         raise HTTPException(409, "Its instructions or tests changed. Review again before spending.")
     started = native._start_customer_test_job(request, name, operation_id=operation_id,
-                                              case_ids=arguments["checks"], case_revisions=prepared["case_revisions"])
+        case_ids=arguments["checks"], case_revisions=prepared["case_revisions"],
+        **({"proposed_instructions":arguments["proposed_instructions"], "baseline_revision":prepared["instructions"], "expected_context":prepared["context"]}
+           if prepared.get("proposed_instructions") is not None else {}))
     if started.get("replayed"):
         return Outcome("replayed", "The original run was found. No paid request was repeated.",
-                       _run_details(started["run"]))
+                       _run_details(started["run"], request))
     return Outcome("queued", "The answer checks started. Open Workforce to see the exact results; no uncertain call is replayed.",
                    {"status": "Checking selected answers", "questions": "; ".join(row["task"] for row in rows),
                     "review_results": {"href": "/workforce?specialist=" + name,
@@ -246,4 +290,7 @@ def entries():
         Adapter("specialists.tests.run", "Check answers", "models", "/workforce", pages,
                 RunInput, run_snapshot, run_prepare, run_execute, run_recover,
                 aliases=("run specialist tests", "check specialist answers", "check agent answers")),
+        Adapter("specialists.tests.compare", "Compare specialist instructions", "models", "/workforce", pages,
+                CompareInput, compare_snapshot, compare_prepare, run_execute, run_recover,
+                aliases=("compare proposed instructions", "compare specialist answers", "check better specialist instructions")),
     )

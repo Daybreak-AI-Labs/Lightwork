@@ -10,10 +10,11 @@ from .draft_api import context_for
 from .product_errors import product_error
 
 
-def version_for(goal, contract, signoff, artifacts):
+def version_for(goal, contract, signoff, artifacts, handoff_closed=None):
     source = {"goal": asdict(goal), "contract": contract, "signoff": signoff, "artifacts": artifacts}
-    return hashlib.sha256(json.dumps(source, sort_keys=True, separators=(",", ":"),
-                                     default=str).encode()).hexdigest()
+    version = hashlib.sha256(json.dumps(source, sort_keys=True, separators=(",", ":"),
+                                       default=str).encode()).hexdigest()
+    return hashlib.sha256((version + json.dumps(handoff_closed, sort_keys=True)).encode()).hexdigest()
 
 
 def _snapshot(world, goal):
@@ -25,8 +26,7 @@ def _snapshot(world, goal):
     artifacts = _goal_artifacts(world, goal.id, strict=True)
     from maverick.task_handoffs import closure
     closed = closure(world, goal.id)
-    version = version_for(goal, contract, signoff, artifacts)
-    version = hashlib.sha256((version + json.dumps(closed, sort_keys=True)).encode()).hexdigest()
+    version = version_for(goal, contract, signoff, artifacts, closed)
     return {"goal": goal, "deliverable": contract, "rendered": rendered,
             "signoff": signoff, "artifacts": artifacts, "answer_version": version, "handoff_closed": closed}
 

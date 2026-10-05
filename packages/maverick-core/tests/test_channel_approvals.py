@@ -125,6 +125,35 @@ def test_reject_needs_no_card_binding(tmp_path, recorded):
     assert recorded[1][1]["channel"] == "teams"
 
 
+@pytest.mark.parametrize("change", ["claim", "card"])
+def test_native_channel_rechecks_review_inside_vote_reservation(tmp_path, recorded, monkeypatch, change):
+    from maverick import channel_approvals as channels
+    from maverick.approval_cards import encode_approval_detail
+
+    world = _world(tmp_path)
+    card = _card()
+    aid = _park(world, card=card)
+    native_vote = world.decide_approval_audited
+
+    def changed_before_reservation(*args, **kwargs):
+        if change == "claim":
+            assert world.claim_approval(aid, "user:other-reviewer")
+        else:
+            replacement = _card(action="different.reviewed.action")
+            with world._writing() as conn:
+                conn.execute("UPDATE approvals SET detail = ? WHERE id = ?", (encode_approval_detail(replacement), aid))
+        return native_vote(*args, **kwargs)
+
+    monkeypatch.setattr(world, "decide_approval_audited", changed_before_reservation)
+    with pytest.raises(channels.ChannelApprovalRefused) as refusal:
+        channels.decide_from_channel(world, aid, "approved", principal="user:alice", channel="slack",
+                                     binding=card["binding_sha256"])
+    assert refusal.value.reason == "stale_card"
+    assert world.get_approval(aid).status == "pending"
+    assert world.get_approval_audit_event(world.approval_audit_event_id(aid, "approved", "user:alice")) is None
+    assert recorded == []
+
+
 def test_high_and_critical_need_a_second_confirmation(tmp_path, recorded):
     from maverick.channel_approvals import ChannelApprovalRefused, decide_from_channel
 

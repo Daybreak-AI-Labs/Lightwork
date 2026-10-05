@@ -3766,6 +3766,7 @@ class ConsentPreferenceStore:
         actor_sha256: str,
         access_purpose: str,
         receipt_limit: int = 100,
+        before_sequence: int | None = None,
     ) -> dict[str, Any]:
         """Export bounded linked-profile state and append an access log."""
 
@@ -3774,6 +3775,8 @@ class ConsentPreferenceStore:
         actor = _digest(actor_sha256, "actor_sha256")
         purpose = _text(access_purpose, "access_purpose")
         page_size = _limit(receipt_limit)
+        if before_sequence is not None and (isinstance(before_sequence, bool) or not isinstance(before_sequence, int) or before_sequence < 1):
+            raise ConsentValidationError("Choose a valid earlier records page.")
         now = _timestamp(self._clock(), "clock")
         assert now is not None
         with self._connect() as conn:
@@ -3787,11 +3790,12 @@ class ConsentPreferenceStore:
                     f"AND profile_id IN ({placeholders}) ORDER BY profile_id",
                     (tenant, *group),
                 ).fetchall()
+                before = " AND sequence < ?" if before_sequence is not None else ""
                 receipt_rows = conn.execute(
                     "SELECT * FROM consent_receipts WHERE tenant = ? "
-                    f"AND profile_id IN ({placeholders}) "
+                    f"AND profile_id IN ({placeholders})" + before + " "
                     "ORDER BY sequence DESC LIMIT ?",
-                    (tenant, *group, page_size + 1),
+                    (tenant, *group, *((before_sequence,) if before_sequence is not None else ()), page_size + 1),
                 ).fetchall()
                 truncated = len(receipt_rows) > page_size
                 receipt_rows = receipt_rows[:page_size]
@@ -3811,6 +3815,7 @@ class ConsentPreferenceStore:
                     ],
                     "receipts": receipts,
                     "receipts_truncated": truncated,
+                    "next_before_sequence": int(receipt_rows[-1]["sequence"]) if truncated else None,
                     "generated_at": now,
                 }
                 export_sha = _sha256(body)
@@ -4189,19 +4194,51 @@ class ConsentPreferenceStore:
         policies = [self._policy_from_row(row) for row in rows[:page_size]]
         return {"policies": policies, "truncated": len(rows) > page_size}
 
-    def list_profiles(self, tenant_id: str, *, limit: int = 100) -> dict[str, Any]:
+    def list_profiles(self, tenant_id: str, *, limit: int = 100,
+                      after: str | None = None, search: str = "") -> dict[str, Any]:
         tenant = self._tenant(tenant_id)
         page_size = _limit(limit)
+        if after is not None:
+            after = _text(after, "profile page")
+        if not isinstance(search, str) or len(search) > 128 or _CONTROL_RE.search(search):
+            raise ConsentValidationError("Search must be at most 128 characters without control characters.")
+        pattern = "%" + search.strip().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+        where, values = "tenant = ?", [tenant]
+        if after is not None:
+            where += " AND profile_id > ?"
+            values.append(after)
+        if search.strip():
+            where += " AND profile_id LIKE ? ESCAPE '\\'"
+            values.append(pattern)
         with self._connect() as conn:
             rows = conn.execute(
                 "SELECT profile_id, identity_kind, subject_sha256, revision, created_at "
-                "FROM consent_profiles WHERE tenant = ? ORDER BY profile_id LIMIT ?",
-                (tenant, page_size + 1),
+                "FROM consent_profiles WHERE " + where + " ORDER BY profile_id LIMIT ?",
+                (*values, page_size + 1),
             ).fetchall()
         return {
             "profiles": [dict(row) for row in rows[:page_size]],
             "truncated": len(rows) > page_size,
+            "next_after": str(rows[page_size - 1]["profile_id"]) if len(rows) > page_size else None,
         }
+
+    def lookup_profiles(self, tenant_id: str, profile_ids: list[str]) -> dict[str, Any]:
+        """Resolve a bounded exact selection without scanning the first list page."""
+        tenant = self._tenant(tenant_id)
+        if (not isinstance(profile_ids, list) or not 1 <= len(profile_ids) <= 100
+                or any(not isinstance(value, str) for value in profile_ids)
+                or len(set(profile_ids)) != len(profile_ids)):
+            raise ConsentValidationError("Choose between 1 and 100 different people per lookup.")
+        selected = [_text(value, "person reference") for value in profile_ids]
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT profile_id, identity_kind, revision, created_at FROM consent_profiles "
+                "WHERE tenant = ? AND profile_id IN (" + ",".join("?" for _ in selected) + ")",
+                (tenant, *selected),
+            ).fetchall()
+        found = {str(row["profile_id"]): dict(row) for row in rows}
+        return {"profiles": [found[value] for value in selected if value in found],
+                "missing": [value for value in selected if value not in found]}
 
     def get_profile_authority(
         self,

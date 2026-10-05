@@ -1322,6 +1322,49 @@ def test_bounded_reads_report_truncation_and_reject_unbounded_limits(
         store.list_profiles("tenant-a", limit=501)
 
 
+def test_people_pages_and_exact_import_reach_beyond_first_500(store: ConsentPreferenceStore) -> None:
+    with sqlite3.connect(store.path) as conn:
+        conn.executemany("INSERT INTO consent_profiles VALUES (?, ?, 'known', ?, ?, ?)",
+            [("tenant-a", f"person-{number:04d}", hashlib.sha256(str(number).encode()).hexdigest(), number, NOW)
+             for number in range(605)])
+        conn.execute("INSERT INTO consent_profiles VALUES (?, ?, 'known', ?, 8, ?)",
+                     ("tenant-b", "person-private", DIGEST_D, NOW))
+    ids, after = [], None
+    while True:
+        page = store.list_profiles("tenant-a", limit=50, after=after)
+        ids.extend(row["profile_id"] for row in page["profiles"])
+        after = page["next_after"]
+        if after is None:
+            break
+    assert len(ids) == len(set(ids)) == 605
+    assert ids[-1] == "person-0604"
+    assert [row["profile_id"] for row in store.list_profiles("tenant-a", search="0604")["profiles"]] == ["person-0604"]
+    assert store.list_profiles("tenant-a", search="%_")["profiles"] == []
+    result = store.lookup_profiles("tenant-a", ["person-0604", "person-private", "person-0001"])
+    assert [row["profile_id"] for row in result["profiles"]] == ["person-0604", "person-0001"]
+    assert result["profiles"][0]["revision"] == 604
+    assert "subject_sha256" not in result["profiles"][0]
+    assert result["missing"] == ["person-private"]
+    for invalid in ([], ["person-0604"] * 2, [f"person-{number}" for number in range(101)]):
+        with pytest.raises(ConsentValidationError):
+            store.lookup_profiles("tenant-a", invalid)
+
+
+def test_older_choices_are_bounded_and_logged(store: ConsentPreferenceStore) -> None:
+    _policy(store)
+    _profile(store)
+    receipts = [_record(store, expected_revision=version, idem=f"choice-{version}")["receipt_id"]
+                for version in range(12)]
+    latest = store.export_profile("tenant-a", "profile-001", actor_sha256=DIGEST_C,
+                                 access_purpose="bulk-change-selection", receipt_limit=10)
+    earlier = store.export_profile("tenant-a", "profile-001", actor_sha256=DIGEST_C,
+        access_purpose="bulk-change-selection", receipt_limit=10,
+        before_sequence=latest["next_before_sequence"])
+    assert [row["receipt_id"] for row in latest["receipts"] + earlier["receipts"]] == list(reversed(receipts))
+    assert earlier["next_before_sequence"] is None
+    assert len(store.list_access_log("tenant-a", "profile-001")["events"]) == 2
+
+
 def test_missing_and_non_consent_authority_fail_closed(
     store: ConsentPreferenceStore,
 ) -> None:

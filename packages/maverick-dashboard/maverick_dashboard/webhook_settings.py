@@ -231,7 +231,16 @@ def _commit(before: dict, cleaned: str, action: str, principal: str,
     if _stable_snapshot() != before:
         raise WebhookSettingsConflict("Webhook settings changed. Refresh status and review again.")
     operation_id = uuid.uuid4().hex
+    from . import webhook_settings_recovery as recovery
+
+    # Seal once before publication, so recovery can identify the exact bytes
+    # intended by this review rather than guessing from a matching secret.
+    prepared_text = settings_store._dump(data)
+    data = settings_store._tomllib().loads(prepared_text)
+    prepared_text = settings_store._dump(data)
+    journal = recovery.prepare(before, cleaned, action, principal, operation_id, prepared_text)
     _record(principal, action, before, None, operation_id, "reviewed")
+    journal = recovery.reviewed(journal)
     try:
         settings_store._write(data)
         authorize()
@@ -250,6 +259,13 @@ def _commit(before: dict, cleaned: str, action: str, principal: str,
             raise WebhookSettingsUnavailable("The change could not be confirmed or restored. Refresh status and contact your installation administrator before trying again.") from exc
         raise
     result["result"] = "active" if action == "set" else "app_copy_removed"
+    try:
+        recovery.completed(journal, after, "reviewed_change")
+    except Exception:
+        # The accepted outcome already exists. Keep its pending journal for
+        # exact-state readback; do not roll back an audit-confirmed publication.
+        result["history_pending"] = True
+    result["operation_id"] = operation_id
     return result
 
 

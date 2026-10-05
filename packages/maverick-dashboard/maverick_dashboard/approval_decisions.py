@@ -103,7 +103,8 @@ def _require_acknowledgement(world, approval_id: int, payload: dict, who: str, *
         raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
 
 
-def _record_vote_or_raise(world, approval_id: int, status: str, who: str):
+def _record_vote_or_raise(world, approval_id: int, status: str, who: str, *,
+                          reviewed_card: dict | None = None):
     """Apply one approver's vote, mapping a refusal to the right HTTP error.
 
     Segregation-of-duties refusals are 403, an unknown/already-decided approval
@@ -111,7 +112,8 @@ def _record_vote_or_raise(world, approval_id: int, status: str, who: str):
     commit-reconciliation outcomes keep their stable decision id in the
     response so a retry is keyed exactly."""
     try:
-        return record_vote(world, approval_id, status, who)
+        return (record_vote(world, approval_id, status, who) if reviewed_card is None
+                else record_vote(world, approval_id, status, who, reviewed_card=reviewed_card))
     except ChannelApprovalRefused as exc:
         if exc.reason in ("outcome_uncertain", "outbox_integrity_error"):
             state = "uncertain" if exc.reason == "outcome_uncertain" else "integrity_error"

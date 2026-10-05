@@ -160,6 +160,8 @@ class SignoffIn(BaseModel):
     decision: str = Field(..., pattern="^(approved|rejected)$")
     expected_updated_at: float = Field(..., gt=0)
     note: str | None = Field(default=None, max_length=2000)
+    operation_id: str | None = Field(default=None, pattern=r"^[a-f0-9]{32}$")
+    expected_context: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
 
 
 class RoleOverrideIn(BaseModel):

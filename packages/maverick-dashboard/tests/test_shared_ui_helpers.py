@@ -56,6 +56,16 @@ _KEPT_WRAPPERS = {
     # previous sign-in is dropped between the two.
     ("lightwork-source-analysis.js", "json"),
     ("lightwork-workspace-members.js", "api"),
+    # From the owner's PR #2529 (Settings recovery, taught-workflow releases,
+    # instruction records, the privacy handoff and workflow action forms):
+    # each shows the server's own detail sentence as written, and its own
+    # status-specific wording, where mvFetchJSON would put mvErrorText's
+    # words. Kept as the owner wrote them until they are moved deliberately.
+    ("lightwork-webhook-recovery.js", "request"),
+    ("lightwork-local-flow-release.js", "request"),
+    ("lightwork-instruction-capture.js", "request"),
+    ("lightwork-dsar-handoff.js", "call"),
+    ("flow_designer_action_fields.js", "task"),
 }
 
 # Status-line setters that still write the text themselves, each named with

@@ -4787,6 +4787,16 @@ def pick_advanced() -> dict[str, Any]:
             "back any time with `maverick self-harness`. ON by default.",
             default=True,
         ),
+        "approval_challenges": _q_confirm(
+            "Allow fictional approval challenges and isolated local checks? Uses disposable local requests, "
+            "no customer credentials and no AI calls. Each check and shared file needs separate review; "
+            "no live approval rule is activated. OFF by default.", default=False,
+        ),
+        "instruction_capture": _q_confirm(
+            "Allow private instruction recording on this local installation? Each person must separately authorize "
+            "one task's next completed model call. It records instruction text, makes no extra AI call, "
+            "and does not enable learning. OFF by default.", default=False,
+        ),
         "fleet_memory": _q_confirm(
             "Fleet memory? Let EXTERNAL agents (Agentforce, Copilot, custom) "
             "deposit experience into and recall from Lightwork's governed "
@@ -9120,6 +9130,16 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
         lines.append("")
         lines.append("[attachments]")
         lines.extend(_attach_lines)
+    if "approval_challenges" in advanced:
+        if type(advanced["approval_challenges"]) is not bool:
+            raise ValueError("Local approval challenge permission must be on or off.")
+        lines.append("")
+        lines.append("[approval_challenges]")
+        lines.append("enable = " + ("true" if advanced["approval_challenges"] else "false"))
+    if "instruction_capture" in advanced:
+        lines.append("")
+        lines.append("[instruction_capture]")
+        lines.append("enable = " + ("true" if advanced["instruction_capture"] else "false"))
     if advanced.get("reflexion"):
         lines.append("")
         lines.append("[reflexion]")

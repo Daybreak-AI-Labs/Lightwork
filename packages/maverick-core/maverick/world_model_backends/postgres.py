@@ -2426,7 +2426,7 @@ class PostgresWorldModel:
 
     def record_signoff(
         self, goal_id: int, decision: str, *, decided_by: str = "",
-        note: str | None = None, expected_updated_at: float | None = None,
+        note: str | None = None, expected_updated_at: float | None = None, _cursor=None,
     ) -> bool:
         """Record a human's certify/reject decision on a deliverable. One row per
         goal (a later decision replaces an earlier one).
@@ -2440,7 +2440,7 @@ class PostgresWorldModel:
         if decision not in {"approved", "rejected"}:
             raise ValueError("decision must be 'approved' or 'rejected'")
         frag, fparams = _tenant_scope()
-        with self._tx() as cur:
+        with (self._tx() if _cursor is None else nullcontext(_cursor)) as cur:
             check_sql = (
                 "SELECT status, updated_at FROM goals WHERE id=%s"
             )
@@ -4174,12 +4174,47 @@ class PostgresWorldModel:
             row = cur.fetchone()
         return row is not None
 
+    def _require_locked_approval_review(self, cur, approval_id: int, status: str,
+                                        approver: str, event_id: str, review: dict) -> None:
+        """Read reviewed card, quorum and content owner under the held row lock."""
+        from ..approval_vote_review import require_locked_vote_review
+        from ..world_model import _single_approver
+
+        approval_scope, approval_params = _tenant_scope()
+        outbox_scope, outbox_params = _approval_outbox_scope()
+        sql = ("SELECT id, action, risk, scope, detail, provenance, status, requested_at, decided_at, claimed_by, claimed_at, decided_by, approvals_required, requested_by, goal_id, department FROM approvals WHERE id = %s")
+        values = [int(approval_id)]
+        if approval_scope:
+            sql += " AND " + approval_scope
+            values += approval_params
+        cur.execute(sql, tuple(values))
+        locked = cur.fetchone()
+        exact = _dec_approval_row(locked) if locked is not None else None
+        cur.execute("SELECT approver, decision FROM approval_signoffs WHERE approval_id = %s ORDER BY decided_at", (int(approval_id),))
+        approvers = _single_approver(exact, [row[0] for row in cur.fetchall() if row[1] == "approved"]) if exact is not None else []
+        cur.execute(f"SELECT COUNT(*) FROM approval_audit_outbox WHERE approval_id = %s AND delivered_at IS NULL AND {outbox_scope}", tuple([int(approval_id), *outbox_params]))
+        audit_pending = int(cur.fetchone()[0])
+        content_owner = (exact.requested_by or "") if exact is not None else None
+        if exact is not None and exact.goal_id:
+            owner_sql = "SELECT owner FROM goals WHERE id = %s"
+            owner_values = [exact.goal_id]
+            if approval_scope:
+                owner_sql += " AND " + approval_scope
+                owner_values += approval_params
+            cur.execute(owner_sql + " FOR SHARE", tuple(owner_values))
+            source = cur.fetchone()
+            content_owner = (source[0] or "") if source is not None else None
+        require_locked_vote_review(exact, review, status=status, actor=approver,
+                                   event_id=event_id, approvers=approvers, audit_pending=audit_pending,
+                                   content_owner=content_owner)
+
     def decide_approval_audited(
         self,
         approval_id: int,
         status: str,
         *,
         decided_by: str,
+        reviewed_card: dict | None = None,
     ):
         """Atomically accept a vote and queue its signed-audit delivery."""
         if status not in ("approved", "denied"):
@@ -4211,6 +4246,9 @@ class PostgresWorldModel:
             event_id = _approval_audit_event_id(
                 tenant, approval_id, status, approver, undo_round,
             )
+
+            if reviewed_card is not None:
+                self._require_locked_approval_review(cur, approval_id, status, approver, event_id, reviewed_card)
 
             cur.execute(
                 "SELECT event_id, approval_id, status, decided_by, final_status, "

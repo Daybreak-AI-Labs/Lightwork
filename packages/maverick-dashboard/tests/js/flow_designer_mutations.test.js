@@ -31,7 +31,8 @@ function fixture(fetchImpl) {
     rootFlow: { id: "flow", name: "Flow", start: "step", version: 1, revision: "draft-1", published: false,
       nodes: [{ id: "step", kind: "action", tool: "lookup", label: "Lookup" }] },
     idInput: { value: "flow" },
-    flowInputs: [], saveInFlight: false, publishInFlight: false, runInFlight: false,
+    flowInputs: [], saveInFlight: false, publishInFlight: false, runInFlight: false, actionFieldsChecking: false,
+    FDActionFields: {async ready() {}, check() { return []; }},
     applyInFlight: false, retireInFlight: false, draftGeneration: 0, pendingDraft: null,
     snapshot: "unsaved draft", cleanDraft: null, description: { value: "First draft" },
     sample: { value: "", focus() { this.focused = true; } }, testData: { open: false },
@@ -216,6 +217,7 @@ test("a duplicate run click queues one request and restores controls after respo
   const ui = fixture(() => pending);
   ui.context.run(true);
   ui.context.run(true);
+  await turn();
   assert.equal(ui.calls.length, 1);
   assert.equal(ui.buttons.get("fd-run").disabled, true);
   resolve(response({ run_id: "run", dry_run: true, status: "queued" }));
@@ -270,6 +272,7 @@ test("Apply & track awaits its confirmed save and suppresses duplicate clicks un
   const button = { disabled: false };
   const operation = ui.context.applyProposal(proposalNode, proposal, button);
   ui.context.applyProposal(proposalNode, proposal, button);
+  await turn();
   assert.equal(ui.calls.length, 1);
   assert.equal(button.disabled, true);
   saveResult.resolve(response(saved()));
@@ -368,6 +371,7 @@ test("Apply preserves canvas edits made while save is pending and does not apply
   const ui = fixture(() => pending.promise);
   const proposalNode = ui.context.rootFlow.nodes[0];
   const operation = ui.context.applyProposal(proposalNode, proposal);
+  await turn();
   ui.context.snapshot = "newer canvas edits";
   pending.resolve(response(saved()));
   await operation;

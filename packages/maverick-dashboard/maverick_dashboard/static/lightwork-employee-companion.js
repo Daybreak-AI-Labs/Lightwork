@@ -25,6 +25,11 @@
   var policy = null;
   var policies = [];
   var employees = [];
+  var sharedEmployee = "";
+  var sharedOwnCompanion = false;
+  var viewedReplyId = "";
+  var openingReply = admin ? "" : new URLSearchParams(window.location.search).get("reply") || "";
+  if (!/^[1-9][0-9]{0,15}\.[0-9a-f]{32}$/.test(openingReply)) { openingReply = ""; }
   var messages = [];
   var status = document.getElementById("ec-status");
 
@@ -62,6 +67,20 @@
     var employee = employees.find(function (item) { return item.principal === principal; });
     return employee ? employee.label || "Employee" : "Workspace member";
   }
+  function shareEmployeeSelection(owner) {
+    if (owner === sharedEmployee) { return; }
+    sharedEmployee = owner;
+    document.dispatchEvent(new CustomEvent("lightwork:copilot-selection", {
+      detail: {selection: owner ? {kind: "companion_employee", id: owner} : {}}
+    }));
+  }
+  function shareOwnSelection(allowed) {
+    if (sharedOwnCompanion === allowed) { return; }
+    sharedOwnCompanion = allowed;
+    document.dispatchEvent(new CustomEvent("lightwork:copilot-selection", {
+      detail: {selection: allowed ? {kind: "own_companion"} : {}}
+    }));
+  }
   function taskLink(task, label) {
     var link;
     try {
@@ -82,7 +101,9 @@
     if (admin) {
       el("ec-policy-controls").disabled = busy || blocked || !loaded;
       el("ec-save").disabled = busy || blocked || stale || !loaded || !el("ec-owner").value;
+      el("ec-copilot").disabled = busy || blocked || !loaded || !el("ec-owner").value;
     } else {
+      el("ec-own-copilot").disabled = busy || blocked || !loaded;
       var mayAsk = loaded && available && !blocked && !stale && !busy && !replyPending && !taskQuestionBusy;
       el("ec-message").disabled = !mayAsk;
       el("ec-send").disabled = !mayAsk;
@@ -112,6 +133,7 @@
       el("ec-events").textContent = "";
       el("ec-owner").textContent = "";
       el("ec-policy-form").reset();
+      shareEmployeeSelection("");
     } else {
       el("ec-messages").textContent = "";
       el("ec-tasks").textContent = "";
@@ -119,6 +141,10 @@
       el("ec-clear-confirm").hidden = true;
       el("ec-reply-state").hidden = true;
       replyRequestId = "";
+      viewedReplyId = "";
+      el("ec-retained-reply").hidden = true;
+      el("ec-retained-answer").textContent = "";
+      shareOwnSelection(false);
     }
     el("ec-policy-label").textContent = "Access needs checking";
     el("ec-policy-summary").textContent = "Reload this page after checking your account and workspace.";
@@ -312,6 +338,7 @@
     el("ec-draft-tool").checked = (selected.allowed_tools || []).includes("draft_reply");
     el("ec-retention-days").value = String(selected.retention_days);
     el("ec-selection-summary").textContent = !owner ? "Choose an employee to review their policy." : selected.revision === 0 ? "Not enrolled. Review the options before enabling." : "Showing this employee's saved policy.";
+    shareEmployeeSelection(owner);
     setBusy(busy);
   }
   function tableEmpty(container, text) {
@@ -320,6 +347,11 @@
     cell.colSpan = 4;
     row.appendChild(cell);
     container.appendChild(row);
+  }
+  function metadataCell(row, label, value) {
+    var cell = node("td", value);
+    cell.dataset.label = label;
+    row.appendChild(cell);
   }
   function applyAdmin(data) {
     policies = Array.isArray(data.policies) ? data.policies : [];
@@ -345,14 +377,14 @@
     if (!policies.length) { tableEmpty(rows, "No employee policies saved yet. Choose an employee above to begin."); }
     policies.forEach(function (item) {
       var row = node("tr");
-      row.appendChild(node("td", employeeName(item.owner)));
-      row.appendChild(node("td", item.enabled ? "Enabled" : "Disabled"));
+      metadataCell(row, "Employee", employeeName(item.owner));
+      metadataCell(row, "Companion", item.enabled ? "Enabled" : "Disabled");
       var taskAccess = (item.allowed_sources || []).includes("own_tasks") && (item.allowed_tools || []).includes("task_status");
       var grants = [];
       if (taskAccess) { grants.push("Own task status"); }
       if ((item.allowed_tools || []).includes("draft_reply")) { grants.push("AI conversation and drafts"); }
-      row.appendChild(node("td", grants.length ? grants.join("; ") : "No help enabled"));
-      row.appendChild(node("td", retentionLabel(item.retention_days)));
+      metadataCell(row, "Allowed help", grants.length ? grants.join("; ") : "No help enabled");
+      metadataCell(row, "History", retentionLabel(item.retention_days));
       rows.appendChild(row);
     });
     var events = el("ec-events");
@@ -369,10 +401,10 @@
     };
     activity.forEach(function (event) {
       var row = node("tr");
-      row.appendChild(node("td", dateLabel(event.time)));
-      row.appendChild(node("td", employeeName(event.owner)));
-      row.appendChild(node("td", actions[event.action] || "Companion activity recorded"));
-      row.appendChild(node("td", employeeName(event.actor)));
+      metadataCell(row, "When", dateLabel(event.time));
+      metadataCell(row, "Employee", employeeName(event.owner));
+      metadataCell(row, "Activity", actions[event.action] || "Companion activity recorded");
+      metadataCell(row, "By", employeeName(event.actor));
       events.appendChild(row);
     });
     selectEmployee();
@@ -380,6 +412,10 @@
   async function refresh() {
     if (busy || blocked) { return; }
     setBusy(true);
+    if (!admin && viewedReplyId) {
+      el("ec-retained-reply").hidden = true;
+      el("ec-retained-answer").textContent = "";
+    }
     var version = conversationVersion;
     announce(admin ? "Loading saved policies and activity." : "Checking your policy and task status.");
     try {
@@ -387,9 +423,16 @@
       if (admin) { applyAdmin(data); } else { applyEmployee(data, version === conversationVersion); }
       loaded = true;
       stale = false;
+      if (!admin) { shareOwnSelection(true); }
       announce(admin ? "Saved policies and activity are up to date." : available ? "Ready. Ask about your work." : "Your companion is unavailable. You can still clear your conversation history.");
     } catch (error) { failure(error); }
     finally { setBusy(false); }
+    if (!admin && (openingReply || viewedReplyId) && loaded && !blocked && !stale) {
+      viewedReplyId = openingReply || viewedReplyId;
+      replyRequestId = viewedReplyId;
+      openingReply = "";
+      await checkReply();
+    }
   }
 
   function requestId() {
@@ -449,6 +492,8 @@
       if (!receipt || receipt.request_id !== id) { throw new Error("Reply status could not be confirmed. Check again before starting a new request."); }
       if (data.policy) { applyEmployee(data, false); stale = false; }
       if (receipt.state === "pending") {
+        el("ec-retained-reply").hidden = true;
+        el("ec-retained-answer").textContent = "";
         replyPending = true;
         replyNotice("Your reply is still being prepared. Refresh can update your active tasks while you wait. Check again before starting another request.", true, true);
       } else if (["completed", "failed", "expired", "cancelled", "not_started"].includes(receipt.state)) {
@@ -466,6 +511,9 @@
           conversationVersion += 1;
           renderMessages();
         }
+        var exactReply = data.retained_reply;
+        el("ec-retained-reply").hidden = !(receipt.state === "completed" && exactReply && typeof exactReply.content === "string");
+        el("ec-retained-answer").textContent = el("ec-retained-reply").hidden ? "" : exactReply.content;
         if (data.active_turn && data.active_turn.request_id !== id) {
           replyRequestId = data.active_turn.request_id;
           replyPending = true;
@@ -473,7 +521,7 @@
           return;
         }
         var explanation = receipt.state === "completed"
-          ? (policy && policy.retention_days > 0 ? "The reply completed. Available saved conversation is shown above." : "The reply completed, but the answer cannot be recovered because history is not saved.")
+          ? (exactReply && typeof exactReply.content === "string" ? "The reply completed. Its exact saved answer is shown here." : policy && policy.retention_days === 0 ? "The reply completed, but the answer cannot be recovered because history is not saved." : "The reply completed, but its exact answer is no longer saved or currently accessible. Available conversation is shown above.")
           : receipt.state === "not_started" ? "No request receipt was found. Earlier provider processing cannot be ruled out. The question has not been resent."
             : receipt.state === "cancelled" ? "The reply was cancelled. Any earlier provider processing may still be billed."
               : "This reply did not complete. Earlier provider processing may still be billed.";
@@ -488,6 +536,30 @@
   el("ec-refresh").addEventListener("click", refresh);
   if (admin) {
     el("ec-owner").addEventListener("change", selectEmployee);
+    el("ec-copilot").addEventListener("click", async function () {
+      if (busy || blocked || !loaded || !el("ec-owner").value) { return; }
+      var selectedOwner = el("ec-owner").value;
+      setBusy(true);
+      try {
+        var data = await request("/admin");
+        if (!(data.employees || []).some(function (employee) { return employee.principal === selectedOwner; })) {
+          applyAdmin(data);
+          announce("This employee is no longer available. Choose a current employee.", true);
+          return;
+        }
+        shareEmployeeSelection(selectedOwner);
+        var opener = document.getElementById("mv-copilot-fab");
+        if (opener) {
+          if (opener.getAttribute("aria-expanded") !== "true") { opener.click(); }
+        } else { announce("Open Copilot to review this employee's saved policy and activity."); }
+      } catch (error) { failure(error); }
+      finally { setBusy(false); }
+    });
+    document.addEventListener("lightwork:product-operation-complete", function (event) {
+      var detail = event.detail || {};
+      if (!blocked && detail.operation === "companion.admin.policy" &&
+          ["confirmed", "replayed", "unconfirmed"].includes(detail.status)) { refresh(); }
+    });
     el("ec-policy-form").addEventListener("submit", async function (event) {
       event.preventDefault();
       if (busy || blocked || stale || !loaded || !el("ec-owner").value) { return; }
@@ -510,8 +582,23 @@
       finally { setBusy(false); }
     });
   } else {
+    el("ec-own-copilot").addEventListener("click", async function () {
+      if (busy || blocked || !loaded) { return; }
+      await refresh();
+      if (blocked || stale || !loaded) { return; }
+      shareOwnSelection(true);
+      var opener = document.getElementById("mv-copilot-fab");
+      if (opener && opener.getAttribute("aria-expanded") !== "true") { opener.click(); }
+      else if (!opener) { announce("Open Copilot to check your current work or review a draft request."); }
+    });
     document.addEventListener("lightwork:product-operation-complete", function (event) {
       var detail = event.detail || {};
+      if (!blocked && detail.operation === "companion.draft") {
+        viewedReplyId = "";
+        el("ec-retained-reply").hidden = true;
+        el("ec-retained-answer").textContent = "";
+        refresh(); return;
+      }
       if (blocked || detail.operation !== "companion.clear_history" ||
           !["confirmed", "replayed"].includes(detail.status)) { return; }
       // Invalidate in-flight replies before re-reading the owner-bound source.
@@ -521,6 +608,9 @@
       messages = [];
       replyPending = false;
       replyRequestId = "";
+      viewedReplyId = "";
+      el("ec-retained-reply").hidden = true;
+      el("ec-retained-answer").textContent = "";
       newReplyWarning = false;
       el("ec-message").value = "";
       el("ec-reply-state").hidden = true;
@@ -540,6 +630,9 @@
       try { id = requestId(); }
       catch (error) { failure(error); return; }
       replyRequestId = id;
+      viewedReplyId = "";
+      el("ec-retained-reply").hidden = true;
+      el("ec-retained-answer").textContent = "";
       replyPending = true;
       replyNetworkBusy = id;
       newReplyWarning = false;
@@ -554,6 +647,8 @@
         input.value = "";
         replyPending = false;
         replyRequestId = "";
+        el("ec-retained-reply").hidden = true;
+        el("ec-retained-answer").textContent = "";
         replyNotice("Draft ready. Review it before use. No task or external action was performed.", false, false);
       } catch (error) {
         if (id !== replyRequestId) { return; }
@@ -590,6 +685,9 @@
         messages = [];
         replyPending = false;
         replyRequestId = "";
+        viewedReplyId = "";
+        el("ec-retained-reply").hidden = true;
+        el("ec-retained-answer").textContent = "";
         newReplyWarning = false;
         el("ec-message").value = "";
         el("ec-reply-state").hidden = true;

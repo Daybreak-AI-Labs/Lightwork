@@ -28,7 +28,8 @@ from maverick.employee_companion import (
     CompanionValidationError,
     EmployeeCompanionStore,
 )
-from maverick.paths import current_tenant_id_strict
+from maverick.governed_operations import digest
+from maverick.paths import current_tenant_id_strict, tenant_scope
 from maverick.suite_grants import granted_suites
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.concurrency import run_in_threadpool
@@ -107,7 +108,8 @@ def _credential_binding(request, actor, tenant):
     return {"epoch": session_revocation.revocation_epoch(actor.removeprefix("user:")), "selection": selection}
 
 
-def _authority(request: Request, *, admin: bool = False, write: bool = False):
+def _authority(request: Request, *, admin: bool = False, write: bool = False,
+               reviewed_context: str | None = None):
     """Named, current workspace membership is mandatory, including for admins."""
     auth.require_permission(request, "admin" if admin else "view")
     actor = auth.caller_principal(request)
@@ -120,6 +122,10 @@ def _authority(request: Request, *, admin: bool = False, write: bool = False):
     _credential_binding(request, actor, tenant)
     context = hashlib.sha256(json.dumps(["employee-companion-v1", tenant, actor]).encode()).hexdigest()
     supplied = request.headers.get(_HEADER)
+    if reviewed_context is not None:
+        if supplied is not None and not hmac.compare_digest(supplied, reviewed_context):
+            raise HTTPException(409, "Your account or workspace changed. Review the companion policy again.")
+        supplied = reviewed_context
     if write:
         from .app import _require_same_origin
 
@@ -130,17 +136,14 @@ def _authority(request: Request, *, admin: bool = False, write: bool = False):
     return actor, tenant, context
 
 
-async def _call(request: Request, response: Response, operation: Callable, *, admin=False, write=False):
-    response.headers["Cache-Control"] = "private, no-store"
-
-    def guarded():
-        # App-owned roster/suite changes use this same short local fence.
-        with authority_effect_fence():
-            actor, tenant, context = _authority(request, admin=admin, write=write)
-            return operation(actor, tenant, context, EmployeeCompanionStore())
-
+def _call_sync(request: Request, operation: Callable, *, admin=False, write=False,
+               reviewed_context: str | None = None):
+    """The native authority/effect contract, shared by HTTP and sealed Copilot."""
     try:
-        return await run_in_threadpool(guarded)
+        with authority_effect_fence():
+            actor, tenant, context = _authority(request, admin=admin, write=write,
+                                               reviewed_context=reviewed_context)
+            return operation(actor, tenant, context, EmployeeCompanionStore())
     except HTTPException:
         raise
     except CompanionConflictError as exc:
@@ -155,6 +158,13 @@ async def _call(request: Request, response: Response, operation: Callable, *, ad
         # Role/group or source-store outages must not fall back to broader
         # defaults, disclose internal paths, or show an unaudited answer.
         raise HTTPException(503, "Companion access is unavailable. Refresh before retrying; no task was changed.") from exc
+
+
+async def _call(request: Request, response: Response, operation: Callable, *, admin=False, write=False,
+                reviewed_context: str | None = None):
+    response.headers["Cache-Control"] = "private, no-store"
+    return await run_in_threadpool(_call_sync, request, operation, admin=admin, write=write,
+                                 reviewed_context=reviewed_context)
 
 
 def _status_available(policy):
@@ -263,6 +273,63 @@ def _snapshot(store, actor, context):
             "history_revision": store.history_review(actor)["revision"]}
 
 
+def _conversation_review(store, actor, context):
+    """Current owner-only work and history metadata, without prior private text."""
+    policy = store.policy(actor)
+    _eligible_history(store, actor)  # Expiry and source access affect admission.
+    tasks = _tasks(actor) if _available(policy) and "own_tasks" in policy["allowed_sources"] else []
+    tasks = [{key: value for key, value in task.items() if key != "checked_at"} for task in tasks]
+    state = {"context": context, "owner": actor, "policy": policy, "tasks": tasks,
+             "status_available": _status_available(policy), "conversation_available": _conversation_available(policy),
+             "explanation": _explanation(policy), "history": store.history_review(actor),
+             **store.conversation_state(actor)}
+    return {**state, "revision": digest(state)}
+
+
+def conversation_review(request: Request):
+    return _call_sync(request, lambda actor, _tenant, context, store: _conversation_review(store, actor, context))
+
+
+def _turn_fingerprint(actor, tenant, body):
+    return hashlib.sha256(json.dumps(
+        [tenant, actor, body.message.strip(), body.expected_revision, body.expected_history_generation],
+        ensure_ascii=False, separators=(",", ":"),
+    ).encode()).hexdigest()
+
+
+def _request_result(store, actor, request_id):
+    result = store.turn_result(actor, request_id)
+    reply = result["reply"]
+    if reply is not None:
+        policy = store.policy(actor)
+        permitted = _sources(actor, reply["source_refs"]) if "own_tasks" in policy["allowed_sources"] else {}
+        if any(ref not in permitted for ref in reply["source_refs"]):
+            reply = None
+    return {**result, "reply": reply}
+
+
+def conversation_request(request: Request, request_id: str):
+    return _call_sync(request, lambda actor, _tenant, context, store:
+                      {"context": context, **_request_result(store, actor, request_id)})
+
+
+def admit_reviewed_draft(request: Request, body: MessageIn, *, reviewed_context: str,
+                         expected_state: str, expected_route: dict, expected_limits: dict):
+    """Consume the same native request receipt; never perform paid I/O here."""
+    def prepare(actor, tenant, context, store):
+        if _conversation_review(store, actor, context)["revision"] != expected_state:
+            raise CompanionConflictError("conversation or task context changed")
+        route = companion_model.prepare_route()
+        if vars(route) != expected_route or companion_model.draft_limits() != expected_limits:
+            raise CompanionConflictError("configured AI or allowance changed")
+        admitted = _prepare_draft_turn(request, body, body.message.strip(), actor, tenant, context, store)
+        if "duplicate" not in admitted:
+            admitted["reviewed_route"] = expected_route
+            admitted["reviewed_limits"] = expected_limits
+        return admitted
+    return _call_sync(request, prepare, write=True, reviewed_context=reviewed_context)
+
+
 @router.get(BASE)
 async def current(request: Request, response: Response):
     def operation(actor, _tenant, context, store):
@@ -328,10 +395,7 @@ def _prepare_draft_turn(request, body, text, actor, tenant, context, store):
     sources = _sources(actor, sorted(refs))
     if set(sources) != refs:
         raise CompanionPolicyDenied("task source permission changed")
-    fingerprint = hashlib.sha256(json.dumps(
-        [tenant, actor, text, body.expected_revision, body.expected_history_generation],
-        ensure_ascii=False, separators=(",", ":"),
-    ).encode()).hexdigest()
+    fingerprint = _turn_fingerprint(actor, tenant, body)
     ticket = store.reserve_turn(actor, request_id=body.request_id,
                                 expected_revision=body.expected_revision,
                                 expected_history_generation=body.expected_history_generation,
@@ -367,13 +431,20 @@ async def _draft_message(request: Request, response: Response, body: MessageIn):
     admitted = await _call(request, response, prepare, write=True)
     if "duplicate" in admitted:
         return admitted["duplicate"]
+    return await complete_admitted_draft(request, response, body, admitted)
+
+
+async def complete_admitted_draft(request: Request, response: Response, body: MessageIn, admitted: dict,
+                                  *, reviewed_context: str | None = None):
+    """Shared native completion, run only after the admission fence is released."""
+    text = body.message.strip()
     actor, tenant, ticket = admitted["actor"], admitted["tenant"], admitted["ticket"]
     binding = {"request_id": body.request_id, "token": ticket["token"],
                "expected_revision": body.expected_revision, "history_generation": ticket["history_generation"]}
 
     def validate():
         with authority_effect_fence():
-            current_actor, current_tenant, context = _authority(request, write=True)
+            current_actor, current_tenant, context = _authority(request, write=True, reviewed_context=reviewed_context)
             if (current_actor, current_tenant, context) != (actor, tenant, admitted["context"]):
                 raise CompanionPolicyDenied("identity changed")
             if _credential_binding(request, actor, tenant) != admitted["credentials"]:
@@ -385,6 +456,10 @@ async def _draft_message(request: Request, response: Response, body: MessageIn):
             if set(_sources(actor, admitted["refs"])) != set(admitted["refs"]):
                 raise CompanionPolicyDenied("task source permission changed")
             companion_model.validate_route(admitted["route"])
+            if (admitted.get("reviewed_route") is not None
+                    and (vars(admitted["route"]) != admitted["reviewed_route"]
+                         or companion_model.draft_limits() != admitted["reviewed_limits"])):
+                raise CompanionConflictError("configured AI or allowance changed")
 
     completed = False
     try:
@@ -410,7 +485,7 @@ async def _draft_message(request: Request, response: Response, body: MessageIn):
                                 "model_route": admitted["route"].model, "sources": list(_sources(actor, admitted["refs"]).values()),
                                 "trace": result["trace"]}}
 
-        result = await _call(request, response, publish, write=True)
+        result = await _call(request, response, publish, write=True, reviewed_context=reviewed_context)
         completed = True
         return result
     except HTTPException:
@@ -435,11 +510,25 @@ async def _draft_message(request: Request, response: Response, body: MessageIn):
                 pass  # Its bounded lease expires; never retry the model.
 
 
+async def continue_reviewed_draft(request: Request, body: MessageIn, admitted: dict, reviewed_context: str):
+    """Complete once outside Copilot's effect fence; status recovers failures."""
+    with tenant_scope(tenant=admitted["tenant"]):
+        try:
+            await complete_admitted_draft(request, Response(), body, admitted, reviewed_context=reviewed_context)
+        except HTTPException:
+            # The native coordinator consumes/ends the request even on failure.
+            # The owner reads its saved status; another paid call is never sent.
+            return
+
+
 @router.get(BASE + "/requests/{request_id}")
 async def request_status(request_id: str, request: Request, response: Response):
     def operation(actor, _tenant, context, store):
         snapshot = _snapshot(store, actor, context)
-        return {**snapshot, "request": store.turn_status(actor, request_id)}
+        result = _request_result(store, actor, request_id)
+        return {**snapshot, "request": result["request"],
+                "retained_reply": ({"role": "assistant", "kind": "draft", "content": result["reply"]["response"]}
+                                   if result["reply"] is not None else None)}
 
     return await _call(request, response, operation)
 
@@ -479,13 +568,34 @@ async def administration(request: Request, response: Response):
 
 @router.put(BASE + "/admin/policy")
 async def update_policy(request: Request, response: Response, body: PolicyIn):
+    response.headers["Cache-Control"] = "private, no-store"
+    return await run_in_threadpool(administration_update, request, body)
+
+
+def administration_update(request: Request, body: PolicyIn, *, reviewed_context: str | None = None):
+    """Apply the existing exact policy revision with current native authority."""
     def operation(actor, tenant, context, store):
         if body.owner not in {item["principal"] for item in _employees(tenant)}:
             raise HTTPException(404, "Choose a current member of this workspace.")
         policy = store.update_policy(body.owner, actor=actor, **body.model_dump(exclude={"owner"}))
         return {"context": context, "policy": policy}
 
-    return await _call(request, response, operation, admin=True, write=True)
+    return _call_sync(request, operation, admin=True, write=True, reviewed_context=reviewed_context)
+
+
+def administration_employee(request: Request, owner: str):
+    """Current member policy and bounded activity metadata, never history text."""
+    def operation(_actor, tenant, context, store):
+        employees = _employees(tenant)
+        employee = next((item for item in employees if item["principal"] == owner), None)
+        if employee is None:
+            raise HTTPException(404, "Choose a current member of this workspace.")
+        labels = {item["principal"]: item["label"] for item in employees}
+        return {"context": context, "employee": employee, "available": _enabled(),
+                "policy": store.policy(owner),
+                "events": [{**event, "actor_label": labels.get(event["actor"], "Workspace member")}
+                           for event in store.events() if event["owner"] == owner]}
+    return _call_sync(request, operation, admin=True)
 
 
 def navigation_available(request, *, admin=False):

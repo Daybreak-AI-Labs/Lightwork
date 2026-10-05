@@ -143,6 +143,7 @@ function runner(prompt) {
   inputs.parseText(JSON.stringify(rootFlow));
   const button = {setAttribute() {}, removeAttribute() {}, focus() {this.focused = true;}};
   const context = {rootFlow, publishedFlow: clone(rootFlow), flowInputs: [], runInFlight: false, FDCore: core,
+    FDActionFields: {async ready() {}, check() { return []; }},
     FDRecipeInputs: {...inputs, prompt}, draftSnapshot: () => JSON.stringify(context.rootFlow),
     document: {getElementById(id) { if (id === "fd-sample") throw new Error("learned flow read hidden JSON");
       if (id === "fd-legend") return {classList: {add() {}}}; return button; }},

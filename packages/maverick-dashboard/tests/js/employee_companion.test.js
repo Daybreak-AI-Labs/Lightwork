@@ -23,13 +23,13 @@ const adminSnapshot = overrides => ({context: CONTEXT, available: true,
 const response = (payload, status = 200) => ({ok: status >= 200 && status < 300, status,
   text: async () => typeof payload === "string" ? payload : JSON.stringify(payload)});
 
-async function setup(queue, admin = false) {
+async function setup(queue, admin = false, query = "") {
   const filename = admin ? "employee_companion_admin.html" : "employee_companion.html";
   const template = fs.readFileSync(path.resolve(__dirname, "../../maverick_dashboard/templates", filename), "utf8")
     .replace(/{%[\s\S]*?%}/g, "")
     .replace(/{{ companion_context \| default\(''\) }}/g, CONTEXT)
     .replace(/{{[\s\S]*?}}/g, "");
-  const dom = new JSDOM(template, {url: "https://lightwork.test/companion" + (admin ? "/admin" : ""), runScripts: "outside-only"});
+  const dom = new JSDOM(template, {url: "https://lightwork.test/companion" + (admin ? "/admin" : "") + query, runScripts: "outside-only"});
   const calls = [];
   dom.window.fetch = async (url, options) => {
     calls.push({url, options});
@@ -301,6 +301,26 @@ test("an administrator can allow drafts independently from tasks and sources", a
   assert.match(ui.el("ec-model-help").textContent, /provider's retention policy/);
 });
 
+test("named employee selection opens Copilot only after a native membership refresh and clears on lost access", async t => {
+  const ui = await setup([adminSnapshot(), adminSnapshot(), () => response("Sign in", 403)], true);
+  t.after(() => ui.dom.window.close());
+  const selections = [];
+  ui.document.addEventListener("lightwork:copilot-selection", event => selections.push(event.detail.selection));
+  const opener = ui.document.createElement("button");opener.id = "mv-copilot-fab";opener.setAttribute("aria-expanded", "false");
+  let opened = 0;opener.addEventListener("click", () => {opened += 1;opener.setAttribute("aria-expanded", "true");});
+  ui.document.body.appendChild(opener);
+  ui.el("ec-owner").value = "user:employee@example.test";
+  ui.el("ec-owner").dispatchEvent(new ui.window.Event("change"));
+  assert.equal(ui.el("ec-copilot").disabled, false);
+  assert.equal(selections[0].kind, "companion_employee");
+  assert.equal(selections[0].id, "user:employee@example.test");
+  ui.el("ec-copilot").click();await tick();
+  assert.equal(opened, 1);assert.equal(ui.calls[1].options.method, "GET");
+  ui.el("ec-copilot").click();await tick();
+  assert.equal(opened, 1);assert.deepEqual(JSON.parse(JSON.stringify(selections.at(-1))), {});
+  assert.equal(ui.el("ec-copilot").disabled, true);assert.equal(ui.el("ec-owner").options.length, 0);
+});
+
 test("refresh clears unsaved task-derived text without losing an unsent question", async t => {
   const ui = await setup([snapshot(), reply({message: {role: "assistant", kind: "task_status",
     content: "Previously visible task detail", sources: [{goal_id: 9, href: "/chat/goal/9", status: "active", checked_at: 1700000000}]}}), snapshot()]);
@@ -315,4 +335,55 @@ test("refresh clears unsaved task-derived text without losing an unsent question
   assert.doesNotMatch(ui.el("ec-messages").textContent, /Previously visible task detail/);
   assert.equal(ui.el("ec-message").value, "Unsent question");
   assert.match(ui.el("ec-retention").textContent, /Refresh clears unsaved conversation/);
+});
+
+test("own companion Copilot handoff checks current access and clears selection on refusal", async t => {
+  const ui = await setup([snapshot(), snapshot(), () => response("Sign in", 403)]);
+  t.after(() => ui.dom.window.close());
+  const selections = [];
+  ui.document.addEventListener("lightwork:copilot-selection", event => selections.push(event.detail.selection));
+  const opener = ui.document.createElement("button");opener.id = "mv-copilot-fab";opener.setAttribute("aria-expanded", "false");
+  let opened = 0;opener.addEventListener("click", () => {opened += 1;opener.setAttribute("aria-expanded", "true");});
+  ui.document.body.appendChild(opener);
+  ui.el("ec-own-copilot").click();await tick();
+  assert.equal(opened, 1);assert.equal(ui.calls[1].options.method, "GET");
+  ui.el("ec-own-copilot").click();await tick();
+  assert.equal(opened, 1);assert.deepEqual(JSON.parse(JSON.stringify(selections.at(-1))), {});
+  assert.equal(ui.el("ec-own-copilot").disabled, true);
+});
+
+test("a saved reply link reads that exact answer after navigation without a paid request", async t => {
+  const id = "1800000000000." + "a".repeat(32), saved = policy({retention_days: 7});
+  const current = snapshot({policy: saved, history: [{role: "assistant", content: "A different newer answer"}]});
+  const ui = await setup([current, {...current, request: {request_id: id, state: "completed"},
+    retained_reply: {role: "assistant", kind: "draft", content: "Exact saved answer\n<img src=x onerror=alert(1)>"}}], false, "?reply=" + id);
+  t.after(() => ui.dom.window.close());await tick();
+  assert.equal(ui.calls.length, 2);assert.equal(ui.calls.every(call => call.options.method === "GET"), true);
+  assert.equal(ui.el("ec-retained-reply").hidden, false);
+  assert.match(ui.el("ec-retained-answer").textContent, /Exact saved answer/);
+  assert.equal(ui.el("ec-retained-answer").querySelector("img"), null);
+  assert.match(ui.el("ec-reply-status").textContent, /exact saved answer/);
+});
+
+test("an unavailable exact reply never substitutes a newer retained answer", async t => {
+  const id = "1800000000000." + "b".repeat(32), saved = policy({retention_days: 7});
+  const current = snapshot({policy: saved, history: [{role: "assistant", content: "A different newer answer"}]});
+  const ui = await setup([current, {...current, request: {request_id: id, state: "completed"}, retained_reply: null}], false, "?reply=" + id);
+  t.after(() => ui.dom.window.close());await tick();
+  assert.equal(ui.el("ec-retained-reply").hidden, true);assert.equal(ui.el("ec-retained-answer").textContent, "");
+  assert.match(ui.el("ec-reply-status").textContent, /exact answer is no longer saved or currently accessible/);
+  assert.equal(ui.calls.every(call => call.options.method === "GET"), true);
+});
+
+test("refresh rechecks a displayed exact reply before preserving any source-derived answer", async t => {
+  const id = "1800000000000." + "c".repeat(32), saved = policy({retention_days: 7});
+  const current = snapshot({policy: saved});
+  const ui = await setup([current, {...current, request: {request_id: id, state: "completed"},
+    retained_reply: {content: "Previously allowed private task facts"}}, current,
+  {...current, request: {request_id: id, state: "completed"}, retained_reply: null}], false, "?reply=" + id);
+  t.after(() => ui.dom.window.close());await tick();
+  assert.match(ui.el("ec-retained-answer").textContent, /Previously allowed/);
+  ui.el("ec-refresh").click();await tick();await tick();
+  assert.equal(ui.el("ec-retained-reply").hidden, true);assert.equal(ui.el("ec-retained-answer").textContent, "");
+  assert.equal(ui.calls.length, 4);assert.equal(ui.calls.every(call => call.options.method === "GET"), true);
 });

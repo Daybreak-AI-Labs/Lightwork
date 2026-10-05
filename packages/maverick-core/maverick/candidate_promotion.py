@@ -22,7 +22,7 @@ import json
 import math
 import re
 from collections.abc import Callable, Mapping, Sequence
-from contextlib import AbstractContextManager
+from contextlib import AbstractContextManager, nullcontext
 from dataclasses import asdict, dataclass
 from typing import Protocol
 
@@ -1185,6 +1185,18 @@ class CandidatePromotions:
         return adapter
 
     @staticmethod
+    def _invoke_adapter(adapter, method, record, actor, *args):
+        """Give an installed adapter the already-checked current named actor.
+
+        Older deployment adapters retain their existing protocol. An adapter
+        may recheck native operation rights inside this effect-scoped context;
+        the candidate manifest and its immutable approval are never rewritten.
+        """
+        scope = getattr(adapter, "authority_scope", None)
+        with scope(str(record["tenant"]), actor) if callable(scope) else nullcontext():
+            return getattr(adapter, method)(record["manifest"], *args)
+
+    @staticmethod
     def _target(record: Mapping[str, object]) -> PromotionTarget:
         return PromotionTarget(**record["manifest"]["target"])  # type: ignore[index]
 
@@ -1269,7 +1281,7 @@ class CandidatePromotions:
             try:
                 receipt = self._validate_receipt(
                     claimed,
-                    adapter.stage(claimed["manifest"]),
+                    self._invoke_adapter(adapter, "stage", claimed, actor),
                     action="stage",
                     before=observation.active_artifact_sha256,
                     after=self._candidate_sha(claimed),
@@ -1334,7 +1346,7 @@ class CandidatePromotions:
             try:
                 receipt = self._validate_receipt(
                     claimed,
-                    adapter.activate(claimed["manifest"], claimed["deployment"]["stage_receipt"]),
+                    self._invoke_adapter(adapter, "activate", claimed, actor, claimed["deployment"]["stage_receipt"]),
                     action="activate",
                     before=before,
                     after=after,
@@ -1404,12 +1416,12 @@ class CandidatePromotions:
         try:
             receipt = self._validate_receipt(
                 claimed,
-                adapter.rollback(claimed["manifest"], before.rollback_handle),
+                self._invoke_adapter(adapter, "rollback", claimed, actor, before.rollback_handle),
                 action="rollback",
                 before=candidate_sha,
                 after=before.active_artifact_sha256,
             )
-            reconciliation = adapter.reconcile(claimed["manifest"])
+            reconciliation = self._invoke_adapter(adapter, "reconcile", claimed, actor)
             target = self._target(record)
             if (
                 type(reconciliation) is not DeploymentReconciliation
@@ -1492,7 +1504,7 @@ class CandidatePromotions:
                 ))
             adapter = self._adapter()
             try:
-                observation = adapter.canary(record["manifest"])
+                observation = self._invoke_adapter(adapter, "canary", record, actor)
                 if (
                     type(observation) is not CanaryObservation
                     or observation.tenant != canonical
@@ -1587,7 +1599,7 @@ class CandidatePromotions:
             policy = self._policy()
             now = self.store.authoritative_time()
             self._post_deployment_authority(record, policy, actor, "reconcile", now)
-            observation = self._adapter().reconcile(record["manifest"])
+            observation = self._invoke_adapter(self._adapter(), "reconcile", record, actor)
             if (
                 type(observation) is not DeploymentReconciliation
                 or observation.tenant != canonical

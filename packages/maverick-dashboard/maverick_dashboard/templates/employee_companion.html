@@ -9,7 +9,7 @@
       <div class="hero-statebox__label">Conversation and draft preview</div>
       <div class="hero-statebox__row"><strong id="ec-policy-label">Checking availability</strong><span class="badge idle" id="ec-badge">Loading</span></div>
       <p class="hero-statebox__copy" id="ec-policy-summary">Loading your companion policy.</p>
-      <button class="btn btn--ghost" id="ec-refresh" type="button">Refresh</button>
+      <div class="ec-actions"><button class="btn btn--ghost" id="ec-refresh" type="button">Refresh</button><button class="btn btn--ghost" id="ec-own-copilot" type="button" disabled>Ask Copilot</button></div>
     </div>
   {% endcall %}
   <p class="ec-status" id="ec-status" role="status" aria-live="polite" aria-atomic="true">Loading your companion.</p>
@@ -25,6 +25,7 @@
       <div class="ec-reply-state" id="ec-reply-state" hidden>
         <p id="ec-reply-status" role="status" aria-live="polite" aria-atomic="true"></p>
         <button class="btn btn--ghost" id="ec-check-reply" type="button" hidden>Check reply status</button>
+        <div id="ec-retained-reply" hidden><h3>Requested reply</h3><p id="ec-retained-answer"></p><p class="muted ec-help">This is the saved answer to the request you opened. Review it before use.</p></div>
       </div>
       <form class="ec-form" id="ec-message-form" autocomplete="off">
         <label for="ec-message">Ask about your work</label>

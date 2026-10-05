@@ -53,6 +53,10 @@ from . import rbac
 # not in the Settings visibility matrix. Flip it back to ready when the page
 # speaks to a non-technical user.
 PAGES: tuple[dict, ...] = (
+    {"path": "/learning/approval-challenges", "label": "Approval challenges", "group": "Observe",
+     "icon": "learned", "floor": "operate", "default": "operate", "in_nav": False},
+    {"path": "/learning/instructions", "label": "Instructions used in real work", "group": "Observe",
+     "icon": "learned", "floor": "operate", "default": "operate", "in_nav": False},
     {"path": "/my-data", "label": "My data", "group": "Operate",
      "icon": "settings", "floor": "view", "default": "view", "in_nav": False},
     {"path": "/account", "label": "Your account", "group": "Operate",
@@ -1445,6 +1449,8 @@ PAGE_AREAS: dict[str, tuple[str, str]] = {
     "/cortex": ("Agents", "Knowledge"),
     "/knowledge-access": ("Agents", "Knowledge"),
     "/learning": ("Agents", "Learning"),
+    "/learning/approval-challenges": ("Agents", "Learning"),
+    "/learning/instructions": ("Agents", "Learning"),
     "/learned": ("Agents", "Learning"),
     "/walkthroughs": ("Evidence & audit", "Task replay"),
     "/facts": ("Agents", "Knowledge"),

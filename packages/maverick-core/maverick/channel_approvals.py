@@ -451,7 +451,8 @@ def require_separate_approver(world: Any, approval_id: int, who: str) -> None:
 # The vote itself (shared by the dashboard routes and every channel).
 # ----------------------------------------------------------------------------
 
-def record_vote(world: Any, approval_id: int, status: str, who: str) -> Any:
+def record_vote(world: Any, approval_id: int, status: str, who: str, *,
+                reviewed_card: dict | None = None) -> Any:
     """Apply one approver's vote and return its outbox event.
 
     The person who asked may be told to leave a High or Critical approval to
@@ -471,7 +472,13 @@ def record_vote(world: Any, approval_id: int, status: str, who: str) -> Any:
         require_separate_approver(world, approval_id, who)
     event_id = world.approval_audit_event_id(approval_id, status, who)
     try:
-        event = world.decide_approval_audited(approval_id, status, decided_by=who)
+        event = (world.decide_approval_audited(approval_id, status, decided_by=who)
+                 if reviewed_card is None else world.decide_approval_audited(
+                     approval_id, status, decided_by=who, reviewed_card=reviewed_card))
+    except ChannelApprovalRefused:
+        # A known atomic review refusal is not a lost commit acknowledgement.
+        # Never replace it with an unrelated pre-existing vote's readback.
+        raise
     except Exception as decision_error:
         try:
             event = world.get_approval_audit_event(event_id)
@@ -656,6 +663,9 @@ def decide_from_channel(
         raise ChannelApprovalRefused(
             "not_pending", "This request was already decided or no longer exists.",
         )
+    from .approval_vote_review import channel_vote_review
+
+    review = channel_vote_review(world, approval, status=decision, actor=who, binding=binding)
     if authorize is not None:
         authorize(who, int(approval_id))
     if approval.provenance == SETTINGS_PROVENANCE:
@@ -670,7 +680,7 @@ def decide_from_channel(
     require_acknowledgement(approval, who=who, channel=channel, decision=decision,
                             confirmed=confirmed, acknowledged=acknowledged,
                             typed_confirmation=typed_confirmation)
-    event = record_vote(world, int(approval_id), decision, who)
+    event = record_vote(world, int(approval_id), decision, who, reviewed_card=review)
     delivered = audit_approval_decision(world, event)
     try:
         state = world.approval_state(int(approval_id)) or {}

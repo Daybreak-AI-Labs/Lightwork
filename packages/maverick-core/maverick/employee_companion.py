@@ -571,6 +571,29 @@ class EmployeeCompanionStore:
             turn = self._find_turn(state, request_id)
             return _turn_metadata(turn) if turn else {"request_id": request_id, "state": "not_started"}
 
+    def turn_result(self, owner: str, request_id: str) -> dict:
+        """Read this exact request's retained answer, never infer it from text.
+
+        Callers must enforce current owner and source authority before exposing
+        the answer. Clearing, expiry and retention limits can remove the answer
+        while the consumed request receipt remains available.
+        """
+        owner = _identity(owner)
+        _request_timestamp(request_id)
+        with self._locked():
+            state = self._read(owner)
+            self._prepare_turns(state)
+            self._prune_history(state)
+            turn = self._find_turn(state, request_id)
+            if turn is None:
+                return {"request": {"request_id": request_id, "state": "not_started"},
+                        "reply": None, "binding": None}
+            reply = next((copy.deepcopy(item) for item in self._history(state)
+                          if turn["state"] == "completed" and item["id"] == turn["trace_id"]), None)
+            return {"request": _turn_metadata(turn), "reply": reply,
+                    "binding": {"revision": turn["revision"], "history_generation": turn["history_generation"],
+                                "fingerprint": turn["fingerprint"]}}
+
     def reserve_turn(self, owner: str, *, request_id: str, expected_revision: int,
                      expected_history_generation: int, fingerprint: str) -> dict:
         """Admit exactly one application dispatch; a duplicate never gets a token.

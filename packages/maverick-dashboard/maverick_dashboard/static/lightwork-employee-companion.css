@@ -30,6 +30,7 @@
 .ec-quick-status { border-top: 1px solid var(--hairline); margin-top: var(--space-5); padding-top: var(--space-4); }
 .ec-reply-state { border-inline-start: 3px solid var(--accent); padding: var(--space-3) var(--space-4); margin-bottom: var(--space-4); background: var(--surface-1); }
 .ec-reply-state p { margin-top: 0; }
+#ec-retained-answer { white-space: pre-wrap; overflow-wrap: anywhere; }
 .ec-reply-state[data-pending="true"]::before { content: ""; display: inline-block; width: .7rem; height: .7rem; margin-inline-end: var(--space-2); border: 2px solid var(--border-strong); border-top-color: var(--accent); border-radius: var(--radius-round); animation: ec-spin 1s linear infinite; }
 .ec-message-actions { display: flex; gap: var(--space-2); align-items: center; margin-top: var(--space-3); flex-wrap: wrap; }
 @keyframes ec-spin { to { transform: rotate(360deg); } }
@@ -38,5 +39,14 @@
 .ec-shell [hidden] { display: none !important; }
 @media (max-width: 850px) { .ec-columns { grid-template-columns: 1fr; } }
 @media (max-width: 540px) { .ec-fields { grid-template-columns: 1fr; } .ec-message--user { margin-inline-start: var(--space-2); } }
+@media (max-width: 540px) {
+  .ec-shell[data-mode="admin"] .ec-table-wrap table { display: block; }
+  .ec-shell[data-mode="admin"] .ec-table-wrap thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  .ec-shell[data-mode="admin"] .ec-table-wrap tbody { display: grid; gap: var(--space-3); }
+  .ec-shell[data-mode="admin"] .ec-table-wrap tr { display: grid; padding: var(--space-3); border: 1px solid var(--glass-border); border-radius: var(--radius-md); background: var(--glass-soft); }
+  .ec-shell[data-mode="admin"] .ec-table-wrap td { display: grid; grid-template-columns: minmax(5.5rem, .8fr) minmax(0, 1.2fr); gap: var(--space-3); padding: var(--space-2) 0; border: 0; }
+  .ec-shell[data-mode="admin"] .ec-table-wrap td::before { content: attr(data-label); color: var(--muted); font-weight: var(--font-semibold); }
+  .ec-shell[data-mode="admin"] .ec-table-wrap td[colspan] { display: block; }
+}
 @media (prefers-reduced-motion: reduce) { .ec-shell *, .ec-shell *::before, .ec-shell *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; } }
 @media (prefers-reduced-transparency: reduce), (forced-colors: active) { .ec-shell .panel, .ec-shell .hero-statebox { backdrop-filter: none; background: var(--surface-1); } }

@@ -391,6 +391,8 @@ def install_candidate_promotion_composition(app: Any) -> None:
     state = getattr(app, "state", None)
     if state is None:
         raise TypeError("app must expose state")
+    from .local_flow_promotions import install_local_flow_promotions
+    install_local_flow_promotions(state)
     if getattr(state, "candidate_promotions_factory", None) is None:
         state.candidate_promotions_factory = build_candidate_promotions
     if getattr(state, "candidate_promotion_capability_probe", None) is None:

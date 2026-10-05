@@ -428,20 +428,28 @@ async def encryption_new_key(request: Request) -> dict:
 def _diagnostics() -> dict[str, Any]:
     from maverick.circuit_breaker import snapshot
     from maverick.rate_limit_predictor import report
+
+    from .plain_labels import provider_name
+
     paused = [s for s in snapshot() if s.get("state") in {"open", "half_open", "half-open"}]
+    groups: dict[tuple[str, str], int] = {}
+    for entry in paused:
+        key = str(entry.get("key") or "").split(":", 2)
+        name = provider_name(key[1]) + " connection" if len(key) > 1 and key[0] == "llm" else "Connected service"
+        state = "Paused after repeated errors" if entry.get("state") == "open" else "A new request may check this connection"
+        groups[(name, state)] = groups.get((name, state), 0) + 1
     return {
-        "paused_services": [{"name": str(s.get("key") or "").split(":")[0].capitalize() or "A service",
-                             "state": "Paused after repeated errors" if s.get("state") == "open"
-                             else "Trying again"} for s in paused],
-        "recent_calls": [{"provider": str(r.get("provider") or "").capitalize(),
-                          "calls": int(r.get("recorded") or 0)} for r in report()],
+        "paused_services": [{"name": name + (f" ({count} recorded connections)" if count > 1 else ""),
+                             "state": state} for (name, state), count in sorted(groups.items())[:64]],
+        "recent_calls": [{"provider": provider_name(str(r.get("provider") or "")),
+                          "calls": int(r.get("recorded") or 0)} for r in report()[:64]],
     }
 
 
 @router.get("/diagnostics")
 async def diagnostics(request: Request) -> dict:
     _admin(request)
-    return await run_in_threadpool(_diagnostics)
+    return JSONResponse(await run_in_threadpool(_diagnostics), headers={"Cache-Control": "private, no-store"})
 
 
 # ---- one-button installation checks -----------------------------------------

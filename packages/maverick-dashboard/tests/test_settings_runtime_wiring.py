@@ -64,9 +64,11 @@ def _set(setting_id, value):
 def test_learning_cache_setting_reuses_a_checked_answer(monkeypatch):
     from maverick import orchestrator
     from maverick.cache import learning
+    from maverick_dashboard.app import _world
 
     learning.reset_shared()
-    goal = types.SimpleNamespace(id=7, owner="ada", title="Build the app", description="")
+    world = _world()
+    goal = world.get_goal(world.create_goal("Build the app", "", owner="ada"))
     orchestrator._maybe_store_learning_cache(goal, "run make -j test", 0.9)
     assert orchestrator._maybe_learning_cache_block(goal, None) is None  # off: today
 

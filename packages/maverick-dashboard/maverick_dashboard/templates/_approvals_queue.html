@@ -91,12 +91,14 @@
       <p class="approval-item__decided muted" hidden></p>
       {% if own_note %}<p class="muted approval-own-note" id="approval-own-note-{{ a.id }}">{{ own_note }}</p>{% endif %}
       <div class="approval-actions">
+        <button type="button" class="btn btn--ghost approval-copilot" data-id="{{ a.id }}">Review with Copilot</button>
         <button type="button" class="btn approval-btn" data-id="{{ a.id }}" data-action="approve"{% if card %} data-binding="{{ card.binding_sha256 }}"{% endif %}{% if card_status in ('expired', 'invalid', 'legacy') %} disabled title="A new request is needed before this can be approved"{% elif own_note %} disabled title="{{ own_note }}" aria-describedby="approval-own-note-{{ a.id }}"{% elif own_request and not own_vote_counts %} disabled title="You asked for this, so other people must approve it."{% elif progress and progress.recorded %} disabled{% endif %}>Approve</button>
         <button type="button" class="btn btn--ghost approval-btn" data-id="{{ a.id }}" data-action="deny">Reject</button>
         <button type="button" class="btn btn--ghost approval-btn" data-id="{{ a.id }}" data-action="revise">Send back for changes</button>
         {% if progress %}<p class="approval-quorum" data-approval-quorum-status="1">{{ progress.text }}</p>{% endif %}
       </div>
       <div class="approval-actions approval-actions--decided" hidden>
+        <button type="button" class="btn btn--ghost approval-copilot" data-id="{{ a.id }}">Read decision with Copilot</button>
         <button type="button" class="btn approval-undo" data-id="{{ a.id }}">Undo</button>
         <button type="button" class="btn btn--ghost approval-dismiss" data-id="{{ a.id }}">Dismiss</button>
       </div>
@@ -672,6 +674,16 @@
     document.addEventListener('click', function (ev) {
       const target = ev.target instanceof Element ? ev.target : null;
       if (!target) return;
+      const copilot = target.closest('button.approval-copilot');
+      if (copilot) {
+        window.history.replaceState(null, '', '#approval-' + copilot.dataset.id);
+        document.dispatchEvent(new CustomEvent('lightwork:copilot-selection', {detail: {selection: {kind: 'approval', id: Number(copilot.dataset.id)}}}));
+        const panel = document.getElementById('mv-copilot');
+        const opener = document.getElementById('mv-copilot-fab');
+        if (panel && panel.hidden && opener) opener.click();
+        say('Copilot is reviewing this selected request. A decision requires your separate review and confirmation.');
+        return;
+      }
       // detail is 0 for a click made with the keyboard (Enter or Space).
       const pointer = ev.detail > 0;
       const decideBtn = target.closest('button.approval-btn');

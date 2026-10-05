@@ -66,6 +66,23 @@
     </div>
     <p id="wo-test-run-status" role="status" aria-live="polite"></p>
     <div id="wo-test-run-out"></div>
+    <details class="wo-test-admin" hidden id="wo-compare">
+      <summary>Compare proposed instructions</summary>
+      <p class="muted">Try a different way of answering the same questions. Both versions keep the specialist’s safety rules and use the same model without tools or company knowledge. Instructions stay unchanged.</p>
+      <details><summary>Current answer instructions</summary><p id="wo-test-current-instructions" class="wo-answer-text"></p></details>
+      <form id="wo-compare-form" class="wo-test-form">
+        <label for="wo-compare-instructions">Proposed answer instructions</label>
+        <textarea id="wo-compare-instructions" class="textarea" rows="5" minlength="8" maxlength="6000" required placeholder="Describe how this specialist should answer. Use fictional examples."></textarea>
+        <button type="submit" class="btn" id="wo-compare-review-button">Review comparison</button>
+      </form>
+      <section id="wo-compare-review" class="panel" hidden tabindex="-1" aria-labelledby="wo-compare-review-title">
+        <h3 id="wo-compare-review-title">Review instruction comparison</h3>
+        <div id="wo-compare-reviewed"></div>
+        <p class="muted">At most $0.25 total, up to 5 questions and 2 answers per question. Each answer is limited in length. Literal checks do not prove correctness or business improvement. No instructions will be published.</p>
+        <div class="wo-row"><button type="button" class="btn" id="wo-compare-start">Start comparison</button>
+          <button type="button" class="btn btn--ghost" id="wo-compare-edit">Change proposal</button></div>
+      </section>
+    </details>
     <h3>Previous checks</h3>
     <div id="wo-test-history"></div>
   </section>
@@ -79,6 +96,9 @@
   .wo-test-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
   @media (max-width: 700px) { .wo-test-grid { grid-template-columns: 1fr; } }
   .wo-test-run-row { align-items: center; gap: .7rem; margin: 1rem 0; }
+  .wo-answer-text { white-space:pre-wrap; overflow-wrap:anywhere; }
+  .wo-answer-card { min-width:0; padding:var(--space-3); border:1px solid var(--border); border-radius:var(--radius-lg); }
+  #wo-compare > summary { margin:var(--space-3) 0; }
 </style>
 <script src="/static/lightwork-ops-jobs.js" defer></script>
 <script src="/static/lightwork-workforce-ops.js" defer></script>

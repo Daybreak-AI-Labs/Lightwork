@@ -368,15 +368,26 @@ def recall_addendum(model_id: str | None, path: Path | None = None, *,
     that can call ``web_fetch`` -- #7 component profiles). With none (the default)
     this is exactly the model-wide block, MODULO the recall-time re-screen
     (see :func:`_rescreen_block`) every contributing block passes through."""
+    return recall_addendum_with_sources(model_id, path, domain=domain, tools=tools, role=role)[0]
+
+
+def recall_addendum_with_sources(model_id: str | None, path: Path | None = None, *,
+                                 domain=None, tools=None, role=None):
+    """Return exactly the recalled guidance and its currently permitted sources."""
     if not model_id or not enabled():
-        return ""
-    store = shared_addenda(path)
-    block = _rescreen_block(store.get(str(model_id), ""))
-    for ctx in _scope_contexts(domain, tools, role):
-        scoped = _rescreen_block(store.get(_scoped_key(str(model_id), ctx), ""))
-        if scoped:
-            block = (block + "\n" + scoped) if block else scoped
-    return block
+        return "", ()
+    raw, meta = load_addenda(path), load_line_meta(path)
+    blocks, sources = [], set()
+    keys = [str(model_id)] + [_scoped_key(str(model_id), ctx) for ctx in _scope_contexts(domain, tools, role)]
+    for key in keys:
+        lines = [line for line in _bullets(raw.get(key, ""))
+                 if _shared_line_current(key, line, meta) and screen_stored_line(line)]
+        block = _rescreen_block(_ADDENDUM_HEADER + "\n" + "\n".join("- " + line for line in lines)) if lines else ""
+        if block:
+            blocks.append(block)
+            for line in lines:
+                sources.update(meta[_line_id(key, line)]["source_goal_ids"])
+    return "\n".join(blocks), tuple(sorted(sources))
 
 
 # ---- sidecar: structured per-line provenance ------------------------------

@@ -212,8 +212,10 @@ def apply_skill_overlays(
         skills = relevant_skills(brief, available_skills(),
                                  max_n=3 if depth == 0 else 1)
         if skills:
-            base = base + "\n\n" + render_for_prompt(skills)
-            return base, list(skills)
+            delivered = []
+            overlay = render_for_prompt(skills, rendered_skills=delivered)
+            if overlay:
+                return base + "\n\n" + overlay, delivered
     except (ImportError, FileNotFoundError, ValueError):
         pass
     return base, []
@@ -2186,6 +2188,9 @@ class Agent:
         return core, hidden
 
     def _build_system(self) -> str:
+        self._instruction_source_goals = set()
+        self._instruction_capture_ready = True
+        self._instruction_preferences_owner = ""
         # Wave 9 fix: coding mode applies to the ORCHESTRATOR too, not
         # just workers. The orchestrator emits the FINAL; if it's still
         # using ORCHESTRATOR_SYSTEM_TEMPLATE (prose-oriented), the patch
@@ -2218,7 +2223,10 @@ class Agent:
                 from .chat_threads import ChatThreads
                 binding = ChatThreads(self.ctx.world).binding(self.ctx.goal_id)
                 thread_id = binding.root_id if binding and binding.owner == principal else self.ctx.goal_id
-                base += preference_prompt(principal, thread=thread_id)
+                preferences = preference_prompt(principal, thread=thread_id)
+                base += preferences
+                if preferences:
+                    self._instruction_preferences_owner = principal
             elif user:
                 from .personal_identity import CHANNELS
                 from .personal_memory import shared_principal
@@ -2228,7 +2236,10 @@ class Agent:
                 if channel in CHANNELS and owner.startswith("user:" + channel + ":account:"):
                     principal = shared_principal(channel, owner[len("user:" + channel + ":"):])
                     if principal:
-                        base += preference_prompt(principal)
+                        preferences = preference_prompt(principal)
+                        base += preferences
+                        if preferences:
+                            self._instruction_preferences_owner = principal
         except Exception:
             log.warning("Account response preferences are unavailable; using organization voice.")
 
@@ -2244,6 +2255,10 @@ class Agent:
             base, brief=self.brief, use_skills=self.ctx.use_skills,
             depth=self.depth)
         if _skills:
+            try:
+                self._instruction_source_goals.update(identity for skill in _skills for identity in skill.source_goal_ids)
+            except Exception:
+                self._instruction_capture_ready = False
             try:
                 from .skill import stats as skill_stats
                 from .skills import learned_skill_use_key
@@ -2270,7 +2285,7 @@ class Agent:
         Empty (no change) unless [self_harness] is enabled and an addendum
         exists. Fully fail-safe."""
         try:
-            from .self_harness import note_recall, recall_addendum
+            from .self_harness import note_recall, recall_addendum_with_sources
             # Pass this run's domain AND its available tools so guidance mined
             # SCOPED to a department or a tool is recalled only when it applies
             # (model-wide guidance always is): a finance lesson on finance runs, a
@@ -2282,9 +2297,13 @@ class Agent:
             # only that role's prompts (an orchestrator lesson stays off a
             # coder's context of the same model).
             _role = getattr(self, "role", None)
-            addendum = recall_addendum(self.model, domain=_dom, tools=_tools,
-                                       role=_role)
+            addendum, recalled_sources = recall_addendum_with_sources(self.model, domain=_dom, tools=_tools,
+                                                                      role=_role)
             if addendum:
+                try:
+                    self._instruction_source_goals.update(recalled_sources)
+                except Exception:
+                    self._instruction_capture_ready = False
                 # Track that this guidance was USED (throttled, best-effort) so
                 # retirement keeps actively-recalled lines and prunes dormant ones.
                 note_recall(self.model, domain=_dom, tools=_tools, role=_role)
@@ -4450,7 +4469,13 @@ class Agent:
             # Waiting for a swarm model slot counts against the wall clock too.
             slot = getattr(self.ctx, "model_slot", None)
             async with slot() if slot else contextlib.nullcontext():
-                return await self.ctx.llm.complete_async(**kw)
+                from .instruction_capture import runtime_scope
+                with runtime_scope(getattr(self.ctx, "world", None),
+                                   getattr(self.ctx, "goal_id", None),
+                                   getattr(self, "role", ""), getattr(self, "_instruction_source_goals", ()),
+                                   verified=getattr(self, "_instruction_capture_ready", False),
+                                   preferences_owner=getattr(self, "_instruction_preferences_owner", "")):
+                    return await self.ctx.llm.complete_async(**kw)
         return await self._await_wall_clock_guarded(
             _call, in_flight_note="mid-generation")
 

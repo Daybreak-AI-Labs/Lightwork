@@ -26,6 +26,7 @@ import threading
 import uuid
 from collections import OrderedDict
 from collections.abc import Callable, Mapping
+from contextvars import ContextVar
 from dataclasses import asdict, dataclass
 from typing import Any
 
@@ -815,6 +816,12 @@ def _add_tool_choice(
             type(client).__name__, method)
 
 
+def _local_provider_accounting_refusal(exc: BaseException | None) -> bool:
+    from .provider_cost_cap import ProviderAccountingUnavailable, ProviderCapExceeded
+
+    return isinstance(exc, (ProviderAccountingUnavailable, ProviderCapExceeded))
+
+
 def _is_provider_transport_failure(exc: BaseException) -> bool:
     """True only for a genuine provider-transport failure (429/5xx/timeout/
     connection) -- never for a LOCAL guard (budget, model-not-allowed,
@@ -828,7 +835,7 @@ def _is_provider_transport_failure(exc: BaseException) -> bool:
     goal and tenant sharing this process -- one tenant's quota problem
     should never degrade another's.
     """
-    if isinstance(exc, (BudgetExceeded, ModelNotAllowedError)):
+    if isinstance(exc, (BudgetExceeded, ModelNotAllowedError)) or _local_provider_accounting_refusal(exc):
         return False
     try:
         from .preflight import PreflightFailed
@@ -855,8 +862,8 @@ def _provider_failure_flag(exc: BaseException) -> bool:
 def _feed_circuit(provider: str, error: bool) -> None:
     """Record a provider call's outcome on its circuit breaker so repeated
     failures trip it (observable via ``maverick diag circuits``). This is the
-    recorder half; ``_circuit_open`` is the enforcer half that consults the
-    state before dispatch. Never raises."""
+    recorder half; ``_enforce_circuit`` admits the call and owns any probe.
+    Never raises."""
     try:
         from .circuit_breaker import get
         br = get(f"llm:{provider}")
@@ -865,24 +872,30 @@ def _feed_circuit(provider: str, error: bool) -> None:
         pass
 
 
-def _circuit_open(provider: str) -> bool:
-    """True only if this provider's circuit breaker is definitively OPEN.
+def _observe_provider_result(provider, model_id, latency_ms, dollars, error, exception, circuit_scope=None, probe=False):
+    from .circuit_breaker import CircuitOpen
+    from .circuit_breaker import get as get_circuit
 
-    Read BEFORE dispatch so an outage window fast-fails instead of hammering a
-    dead provider (``complete``/``complete_async``). Fails SAFE: any
-    breaker-INTERNAL error (import / registry / state read) returns False, so
-    breaker bookkeeping can never block an otherwise healthy call -- only a
-    cleanly-observed OPEN state short-circuits. HALF_OPEN returns False so the
-    single cooldown probe is allowed through; ``_feed_circuit`` records its
-    outcome and resolves the state."""
+    # A local accounting refusal is neither provider failure nor success.
+    if _local_provider_accounting_refusal(exception) or isinstance(exception, ProviderDispatchDenied):
+        if probe:
+            try:
+                get_circuit(f"llm:{circuit_scope or provider}").release_probe()
+            except Exception:  # pragma: no cover -- health bookkeeping stays best effort
+                pass
+        return
+    if isinstance(exception, CircuitOpen):
+        return
     try:
-        from .circuit_breaker import CircuitState, get
-        return get(f"llm:{provider}").state is CircuitState.OPEN
-    except Exception:  # pragma: no cover -- breaker never blocks a call
-        return False
+        from .provider_health import get
+        get().record(provider, model_id, latency_ms=latency_ms, dollars=dollars, error=error)
+    except Exception:  # pragma: no cover -- never fail on stats
+        pass
+    _note_bandit(provider, model_id, error, dollars)
+    _feed_circuit(circuit_scope or provider, error)
 
 
-def _enforce_circuit(provider: str) -> None:
+def _enforce_circuit(provider: str) -> bool:
     """Fast-fail BEFORE dispatch when this provider's breaker is OPEN.
 
     Raises ``CircuitOpen`` -- a transient provider signal the failover chain
@@ -891,10 +904,16 @@ def _enforce_circuit(provider: str) -> None:
     buckets it ``"other"``, in the default failover set). So a configured chain
     moves to the next model and, chain or not, a dead-provider timeout is
     skipped. No outcome is recorded (the call never ran). Fails safe: a
-    breaker-internal error proceeds (see ``_circuit_open``)."""
-    if _circuit_open(provider):
-        from .circuit_breaker import CircuitOpen
-        raise CircuitOpen(f"llm:{provider} breaker OPEN; skipping dispatch")
+    breaker-internal error proceeds. At cooldown, exactly one in-flight probe
+    owns admission; its actual result resolves the state."""
+    from .circuit_breaker import CircuitOpen, get
+
+    try:
+        return get(f"llm:{provider}").admit()
+    except CircuitOpen:
+        raise
+    except Exception:  # pragma: no cover -- bookkeeping cannot stop a healthy call
+        return False
 
 
 def _safe_cap_projection(model_id, system, messages, tools, max_tokens,
@@ -1774,6 +1793,7 @@ class LLM:
         # concurrent calls don't double-init httpx connection pools.
         import threading as _threading
         self._clients_lock = _threading.Lock()
+        self._client_dispatch_scope = ContextVar("lightwork_client_dispatch_scope", default=None)
 
     def _provider_client_config(
         self, provider: str
@@ -1904,6 +1924,7 @@ class LLM:
             # older, slow resolution from being inserted after a newer one.
             config = self._provider_client_config(provider)
             cache_key = (provider, tenant_id, config.fingerprint)
+            self._client_dispatch_scope.set(cache_key)
             cached = self._client_cache.get(cache_key)
             if cached is not None:
                 self._client_cache.move_to_end(cache_key)
@@ -1937,6 +1958,24 @@ class LLM:
                 self._client_cache.popitem(last=False)
             self._clients[provider] = client
             return client
+
+    def _dispatch_client(self, provider: str):
+        """Bind circuit observations to the exact admitted, tenant-scoped client.
+
+        A config rotation during an in-flight call must not charge its outcome
+        to the new connection. Context-local capture also covers cached clients
+        without sharing mutable last-route state across threads or async tasks.
+        """
+        token = self._client_dispatch_scope.set(None)
+        try:
+            client = self._get_client(provider)
+            scope = self._client_dispatch_scope.get()
+        finally:
+            self._client_dispatch_scope.reset(token)
+        if scope is None:  # Legacy/custom injected clients have no native route.
+            return client, provider
+        fingerprint = hashlib.sha256(json.dumps(scope, separators=(",", ":")).encode()).hexdigest()
+        return client, f"{provider}:route:{fingerprint}"
 
     def complete(
         self,
@@ -2030,11 +2069,10 @@ class LLM:
         _enforce_provider_cap(provider, _safe_cap_projection(
             _price_spec, system, messages, tools, max_tokens, thinking_budget))
         _run_preflight(model_id, system, messages, tools, max_tokens)
-        client = self._get_client(provider)
+        client, _circuit_scope = self._dispatch_client(provider)
         # Circuit-breaker enforcement (the breaker was observe-only): if this
         # provider's breaker is OPEN, fast-fail before dispatch. _feed_circuit
         # below still records the real outcome; this only short-circuits.
-        _enforce_circuit(provider)
         kwargs: dict[str, Any] = dict(
             system=system, messages=messages, tools=tools, budget=budget,
             max_tokens=max_tokens, thinking_budget=thinking_budget, model=model_id,
@@ -2088,7 +2126,9 @@ class LLM:
         _provider_tracker = None
         _provider_started = False
         _provider_error: BaseException | None = None
+        _provider_probe = False
         try:
+            _provider_probe = _enforce_circuit(_circuit_scope)
             with _trace_span(
                 _gen_ai_span_name("chat", model_id),
                 attributes={
@@ -2111,6 +2151,8 @@ class LLM:
 
                 with observe_physical_attempts(_provider_tracker):
                     _resp = client.complete(**kwargs)
+                from .instruction_capture import record_dispatch
+                record_dispatch(_price_spec, system)
                 return _resp
         except BaseException as _exc:
             _provider_error = _exc
@@ -2126,19 +2168,15 @@ class LLM:
             # cached-prompt discount per-provider (DeepSeek 0.1x, Gemini 0.25x).
             _spent = _call_spend(_price_spec, _resp, budget, _d0,
                                  getattr(client, "CACHE_READ_MULT", None))
-            if _provider_started and _provider_tracker is not None:
-                _provider_tracker.finalize(
-                    _resp,
-                    _provider_error,
-                )
             try:
-                from .provider_health import get as _h
-                _h().record(provider, model_id,
-                            latency_ms=_dt_ms, dollars=_spent, error=_err)
-            except Exception:  # pragma: no cover -- never fail on stats
-                pass
-            _note_bandit(provider, model_id, _err, _spent)
-            _feed_circuit(provider, _err)
+                if _provider_started and _provider_tracker is not None:
+                    _provider_tracker.finalize(_resp, _provider_error)
+            except BaseException as _finalization_error:
+                _provider_error = _provider_error or _finalization_error
+                _err = _provider_failure_flag(_provider_error)
+                raise
+            finally:
+                _observe_provider_result(provider, model_id, _dt_ms, _spent, _err, _provider_error, _circuit_scope, _provider_probe)
             try:
                 from .observability import record_metric as _rm
                 _rm("llm_calls", labels={"provider": provider, "model": model_id})
@@ -2220,10 +2258,9 @@ class LLM:
         _enforce_provider_cap(provider, _safe_cap_projection(
             _price_spec, system, messages, tools, max_tokens, thinking_budget))
         _run_preflight(model_id, system, messages, tools, max_tokens)
-        client = self._get_client(provider)
+        client, _circuit_scope = self._dispatch_client(provider)
         # Circuit-breaker enforcement -- see complete(). OPEN fast-fails with a
         # failover-retryable CircuitOpen before dispatch; fails safe.
-        _enforce_circuit(provider)
         import time as _time
         # complete_async is the PRIMARY agent-loop path; the sync complete()
         # had the chaos hook + trace span but this one didn't, so chaos
@@ -2255,6 +2292,7 @@ class LLM:
         _d0 = budget.dollars if budget else 0.0
         _err = False
         _resp = None
+        _provider_error: BaseException | None = None
         # Hold this call's projected cost against the cap BEFORE dispatching, so
         # concurrent sub-agents on a shared budget can't each pass an individual
         # check and then collectively overshoot (a $2.50 cap reached $6+ with a
@@ -2263,7 +2301,9 @@ class LLM:
         _est_cost = _estimate_call_cost(_price_spec, system, messages, tools,
                                         max_tokens, thinking_budget=thinking_budget)
         _held = budget.reserve(_est_cost) if budget is not None else 0.0
+        _provider_probe = False
         try:
+            _provider_probe = _enforce_circuit(_circuit_scope)
             with _trace_span(
                 _gen_ai_span_name("chat", model_id),
                 attributes={
@@ -2302,6 +2342,8 @@ class LLM:
                                 max_tokens=max_tokens, thinking_budget=thinking_budget,
                                 model=model_id, **_ekw,
                             )
+                        from .instruction_capture import record_dispatch
+                        record_dispatch(_price_spec, system)
                         return response
                     finally:
                         tracker.finalize(response, sys.exc_info()[1])
@@ -2355,6 +2397,7 @@ class LLM:
                     # the race wrapper.
                     raise (e.__cause__ or e) from None
         except BaseException as _exc:
+            _provider_error = _exc
             _err = _provider_failure_flag(_exc)
             raise
         finally:
@@ -2367,14 +2410,7 @@ class LLM:
             # cached-prompt discount per-provider (DeepSeek 0.1x, Gemini 0.25x).
             _spent = _call_spend(_price_spec, _resp, budget, _d0,
                                  getattr(client, "CACHE_READ_MULT", None))
-            try:
-                from .provider_health import get as _h
-                _h().record(provider, model_id,
-                            latency_ms=_dt_ms, dollars=_spent, error=_err)
-            except Exception:  # pragma: no cover
-                pass
-            _note_bandit(provider, model_id, _err, _spent)
-            _feed_circuit(provider, _err)
+            _observe_provider_result(provider, model_id, _dt_ms, _spent, _err, _provider_error, _circuit_scope, _provider_probe)
             try:
                 from .observability import record_metric as _rm
                 _rm("llm_calls", labels={"provider": provider, "model": model_id})

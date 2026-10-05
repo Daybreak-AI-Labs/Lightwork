@@ -58,7 +58,7 @@
   <h1 class="page-title">{{ kind_label }}: request from {{ dsar.subject_id }}</h1>
   <p class="page-subtitle">
     <span class="badge {{ 'info' if dsar.status == 'fulfilled' and dsar.kind in ('access', 'portability') else 'done' if dsar.status == 'fulfilled' else 'warn' if dsar.status in ('awaiting_erasure', 'unverified') else 'info' if dsar.status == 'open' else '' }}">{{ 'Data collected' if dsar.status == 'fulfilled' and dsar.kind in ('access', 'portability') else status_labels.get(dsar.status, dsar.status | humanize) }}</span>
-    {% if dsar.status in ('open', 'unverified', 'awaiting_erasure') %}
+    {% if dsar.response_pending %}
       · <span {% if dsar.overdue %}class="pw-due-warn"{% endif %}>{{ (dsar.days_left ~ ' days left') if not dsar.overdue else ((dsar.days_left | abs) ~ ' days overdue') }}</span>
     {% endif %}
     · <span class="muted">Reference {{ dsar.id }}</span>
@@ -114,10 +114,10 @@
       {% if dsar.kind == 'erasure' and dsar.status in ('open', 'awaiting_erasure') and can_admin %}
         <button type="button" class="btn btn--danger" id="dsar-erase">Erase their data now</button>
       {% endif %}
-      {% if dsar.status in ('open', 'unverified', 'awaiting_erasure') and not dsar.acknowledged_at %}
+      {% if dsar.response_pending and not dsar.acknowledged_at %}
         <button type="button" class="btn btn--ghost" id="dsar-acknowledge">Mark receipt confirmed</button>
       {% endif %}
-      {% if dsar.status in ('open', 'unverified', 'awaiting_erasure') and not dsar.extended_until %}
+      {% if dsar.response_pending and not dsar.extended_until %}
         <button type="button" class="btn btn--ghost" id="dsar-extend">Record an extension</button>
       {% endif %}
       {% if dsar.status == 'unverified' %}
@@ -191,6 +191,7 @@
     <div id="dsar-worksheet-result"></div>
   </div>
 
+  {% include "_dsar_export_handoff.html" %}
   <div class="section-head"><h2>Answering the request</h2></div>
   {% if fulfillment %}
     <div class="panel">

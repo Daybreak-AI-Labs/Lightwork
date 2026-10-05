@@ -641,14 +641,64 @@ def publish_flow(
     *,
     expected_version: int,
     expected_revision: str,
+    expected_release_id: str | None = None,
+    activation_id: str | None = None,
 ) -> dict:
     """Activate a coherent immutable release under the dispatch lock."""
     with _activation_lock(flow_id):
+        if expected_release_id is not None:
+            active = load_published_bundle(flow_id)
+            if active is None or active[1]["release_id"] != expected_release_id:
+                raise FlowSnapshotError("The published workflow changed. Review its current release again.")
         return _publish_flow_under_activation(
             flow_id,
             expected_version=expected_version,
             expected_revision=expected_revision,
+            activation_id=activation_id,
         )
+
+
+def restore_published_flow(
+    flow_id: str, retained_release: dict, *, expected_release_id: str,
+    expected_version: int, expected_revision: str,
+    activation_id: str | None = None,
+) -> dict:
+    """Restore retained content with a fresh activation, without editing the draft.
+
+    Old waiting runs remain revoked: restoration must never revive a previous
+    authorization epoch. The caller owns current permission and evidence checks.
+    """
+    import secrets
+
+    with _activation_lock(flow_id), _definitions_lock():
+        draft = load_flow(flow_id)
+        active = load_published_bundle(flow_id)
+        if (draft is None or draft.version != expected_version
+                or draft.revision != expected_revision):
+            raise FlowVersionConflict("The saved workflow changed. Review restoration again.")
+        if active is None or active[1]["release_id"] != expected_release_id:
+            raise FlowSnapshotError("The published workflow changed. Review restoration again.")
+        prior = load_flow_snapshot(str(retained_release.get("definition_digest") or ""))
+        manifest = retained_release.get("subflow_digests")
+        if (prior.id != flow_id or prior.owner != draft.owner or prior.revision != draft.revision
+                or retained_release.get("flow_id") != flow_id
+                or prior.version != retained_release.get("definition_version")
+                or prior.revision != retained_release.get("definition_revision")
+                or not isinstance(manifest, dict)):
+            raise FlowSnapshotError("The retained release no longer belongs to this workflow.")
+        validate_snapshot_bundle_owners(prior, manifest)
+        digest = release_digest_for(retained_release["definition_digest"], manifest)
+        if digest != retained_release.get("release_digest"):
+            raise FlowSnapshotError("The retained release failed its content check.")
+        from .recipe_flow import check_persisted_lineage
+        check_persisted_lineage(prior)
+        if activation_id is not None and (not _valid_release_token(activation_id)
+                or activation_id in {active[1]["release_id"], retained_release.get("release_id")}):
+            raise FlowSnapshotError("The new activation identity is invalid.")
+        restored = {**retained_release, "release_digest": digest,
+                    "release_id": activation_id or secrets.token_hex(32), "published_at": time.time()}
+        _write_json(_published_pointer_path(flow_id), restored)
+        return restored
 
 
 def save_and_publish_flow(
@@ -713,6 +763,7 @@ def _publish_flow_under_activation(
     *,
     expected_version: int,
     expected_revision: str,
+    activation_id: str | None = None,
 ) -> dict:
     """Atomically activate the exact current draft as an immutable release.
 
@@ -745,6 +796,8 @@ def _publish_flow_under_activation(
         import secrets
 
         release_digest = release_digest_for(digest, subflows)
+        if activation_id is not None and not _valid_release_token(activation_id):
+            raise FlowSnapshotError("The new activation identity is invalid.")
         release = {
             "flow_id": flow.id,
             "definition_digest": digest,
@@ -755,7 +808,7 @@ def _publish_flow_under_activation(
             # identity answers "is this particular authorization still live?".
             # A fresh nonce prevents revoke/republish ABA for identical content.
             "release_digest": release_digest,
-            "release_id": secrets.token_hex(32),
+            "release_id": activation_id or secrets.token_hex(32),
             "published_at": time.time(),
         }
         # The definition lock makes the snapshot coherent; the activation lock
@@ -1533,7 +1586,7 @@ __all__: list[str] = [
     "FlowVersionConflict", "FlowSnapshotError", "snapshot_flow_bundle",
     "snapshot_current_flow_bundle", "load_flow_snapshot",
     "definition_cohort", "flow_cohort", "release_digest_for", "release_id_for",
-    "publish_flow", "save_and_publish_flow",
+    "publish_flow", "save_and_publish_flow", "restore_published_flow",
     "unpublish_flow", "load_published_bundle", "list_published_bundles",
     "published_flow_guard", "active_release_guard",
     "FlowRun", "new_run_id", "save_run", "load_run", "delete_run", "run_lock",

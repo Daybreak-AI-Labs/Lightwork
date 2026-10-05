@@ -36,7 +36,11 @@
   <section id="mv-product-operations" class="mv-copilot__operations" aria-labelledby="mv-product-operations-title" hidden>
     <h2 id="mv-product-operations-title">Available controls</h2>
     <p id="mv-product-operation-status" role="status"></p>
+    <label class="sr-only" for="mv-product-operation-search">Find a control on this page</label>
+    <input class="input" id="mv-product-operation-search" type="search" autocomplete="off"
+           maxlength="100" placeholder="Find a control…" aria-controls="mv-product-operation-buttons">
     <div id="mv-product-operation-buttons" class="mv-copilot__operation-buttons"></div>
+    <p id="mv-product-operation-empty" role="status" hidden>No matching control. Try another name or ask Copilot below.</p>
     <div id="mv-product-operation-form" data-draft-recovery="off"></div>
   </section>
   <div class="mv-copilot__log" id="mv-copilot-log"

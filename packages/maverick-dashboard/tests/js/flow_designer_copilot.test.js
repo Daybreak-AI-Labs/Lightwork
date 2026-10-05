@@ -25,7 +25,8 @@ function fixture() {
       published: true, published_version: 1, published_revision: "published-1",
       start: "lookup", nodes: [{ id: "lookup", kind: "action", tool: "lookup", label: "Original" }] },
     view: { x: 23, y: 42, k: 0.8 }, lastRunId: null, draftGeneration: 0, pendingDraft: null,
-    saveInFlight: false, publishInFlight: false, applyInFlight: false,
+    saveInFlight: false, publishInFlight: false, applyInFlight: false, retireInFlight: false, actionFieldsChecking: false,
+    FDActionFields: {async ready() {}, check() { return []; }, validDetails() { return true; }}, syncSaveButtons() {},
     FDCore: core, FDRecipeInputs: inputs, rawErrors: [],
     commitRawFields() { return context.rawErrors; },
     draftSnapshot() { return JSON.stringify(context.rootFlow); },
@@ -360,6 +361,7 @@ for (const operation of ["save", "publishFlow"]) test(`Undo after actual ${opera
   ui.send("Increase the budget");
   ui.finish(0, "Budget ten", {flow: {...ctx.toApiFlow(), max_dollars: 10}}); await turn();
   const operationDone = ctx[operation]();
+  await turn();
   const receipt = {id: "orders", version: 3, revision: "saved-2", published: true,
     published_version: 1, published_revision: "published-1"};
   ui.calls[1].resolve({ok: true, text: async () => JSON.stringify(receipt)}); await turn();
@@ -418,6 +420,7 @@ for (const assignedId of ["", "new-orders"]) test(`actual first save binds exist
     published: false, published_version: 0, published_revision: ""});
   ctx.pushHistory(); ui.controls["fd-maxdollars"].value = "10";
   const saved = ctx.save();
+  await turn();
   assert.equal(JSON.parse(ui.calls[0].options.body).flow.version, 0);
   ui.calls[0].resolve({ok: true, text: async () => JSON.stringify({id: "new-orders", version: 1,
     revision: "created-generation", published: false, published_version: null, published_revision: ""})});

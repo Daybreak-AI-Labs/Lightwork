@@ -158,10 +158,64 @@ def test_reviewed_local_skill_enters_recall_only_after_exact_admission(tmp_path,
     with raises(ValueError, match="changed"):
         skills.withdraw_admitted_learned_skill("research-pricing", "0" * 64,
                                               skills_dir=installed_dir)
-    assert skills.withdraw_admitted_learned_skill(
-        "research-pricing", current[0].fingerprint, skills_dir=installed_dir,
-    ).candidate_fingerprint == fingerprint
+    # Retaining an object must not reinterpret its source IDs in another
+    # tenant, even when that tenant has a currently shared goal at the same ID.
+    from maverick.paths import reset_tenant, set_tenant
+
+    token = set_tenant("other-customer")
+    try:
+        other_world = WorldModel(default_db_path())
+        assert other_world.create_goal("Research competitor pricing", owner="") == goal_id
+        other_world.close()
+        assert skills.render_for_prompt(recalled) == ""
+    finally:
+        reset_tenant(token)
+
+    withdrawn = []
+    def withdraw_while_ranking(_goal, loaded, **_kwargs):
+        # Optional local embedding/ranking is a slow boundary after loading.
+        # Use the same native removal service as the Skills page and Copilot.
+        if not loaded:
+            return loaded
+        assert [s.name for s in loaded] == ["research-pricing"]
+        withdrawn.append(skills.withdraw_admitted_learned_skill(
+            "research-pricing", current[0].fingerprint, skills_dir=installed_dir,
+        ))
+        return loaded
+    monkeypatch.setattr("maverick.skill.embeddings.relevant_skills_embed", withdraw_while_ranking)
+    agent.ctx.skills_used.clear()
+    assert "Distilled from" not in agent._build_system()
+    assert agent.ctx.skills_used == set()
+    assert skill_stats.get(use_key).uses == 1  # no false later-use receipt
+    assert withdrawn[0].candidate_fingerprint == fingerprint
+    assert skills.render_for_prompt(recalled) == ""  # stale held objects also refuse
+    original_source = recalled[0].source
+    for downgraded_source in ("", "manual"):
+        recalled[0].source = downgraded_source
+        assert skills.render_for_prompt(recalled) == ""
+        assert skills.relevant_skills("Research competitor pricing", recalled) == []
+    recalled[0].source = original_source
+    manual = skills.Skill.parse("---\nname: manual\n---\nManual instructions",
+                                tmp_path / "manual.md")
+    assert "Manual instructions" in skills.render_for_prompt([manual])
     assert skills.available_skills(installed_dir) == []
+    assert apply_skill_overlays("Base", brief="Research competitor pricing",
+                                use_skills=True)[1] == []
+
+    # A later explicit review can reuse the name, but never revives the old
+    # held instruction object or its version-bound use receipt.
+    save_skill({**proposal, "summary": "Research competitor pricing and highlight verified changes"},
+               proposal_dir)
+    next_candidate = skills.learned_skill_candidates(store=proposal_dir, skills_dir=installed_dir)[0]
+    skills.admit_learned_skill(next_candidate.name, next_candidate.fingerprint,
+                              store=proposal_dir, skills_dir=installed_dir)
+    assert skills.render_for_prompt(recalled) == ""
+    monkeypatch.setattr("maverick.skill.embeddings.relevant_skills_embed", lambda *args, **kwargs: None)
+    assert "highlight verified changes" in apply_skill_overlays(
+        "Base", brief="Research competitor pricing", use_skills=True)[0]
+    world = WorldModel(default_db_path())
+    assert world.bind_goal_owner(goal_id, "user:alice")
+    world.close()
     assert apply_skill_overlays("Base", brief="Research competitor pricing",
                                 use_skills=True)[1] == []
 

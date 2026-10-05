@@ -48,6 +48,7 @@
   var runCursor = null; // node a paused run is waiting on
   var flowInputs = [];  // declared manual-run inputs [{key,type,label,required,default}]
   var toolCatalog = {}; // tool name -> {description, params[], category} for the action picker
+  var actionFieldsChecking = false;
   var toolCategories = [];   // display-ordered category names from the server
   var toolFilterCategory = ''; // '' = all; else browse one category in the picker
   var flowSchema = {};  // output key -> {type, keys[]} learned from real runs (nested pills)
@@ -144,6 +145,17 @@
     // version/publication metadata is excluded so a successful save can update
     // CAS tokens without making an otherwise unchanged canvas look dirty.
     var editableFlow = JSON.parse(JSON.stringify(rootFlow));
+    (function removeEmptyActionBuffers(graph) {
+      (Array.isArray(graph.nodes) ? graph.nodes : Object.values(graph.nodes || {})).forEach(function (node) {
+        ['_actionRaw', '_actionErrors', '_actionKinds'].forEach(function (key) {
+          if (node[key] && !Object.keys(node[key]).length) delete node[key];
+        });
+        if (!node._actionRaw && !node._actionErrors && FDActionFields.validDetails(node)) delete node._actionKinds;
+        if (!node._actionRaw && !node._actionErrors && !node._actionKinds) delete node._actionTool;
+        if (node.body) removeEmptyActionBuffers(node.body);
+        (node.branches || []).forEach(removeEmptyActionBuffers);
+      });
+    }(editableFlow));
     delete editableFlow.version;
     delete editableFlow.revision;
     delete editableFlow.published;
@@ -165,7 +177,7 @@
   function markClean(snapshot) { cleanDraft = snapshot || draftSnapshot(); }
   function draftIsDirty() { return cleanDraft !== null && cleanDraft !== draftSnapshot(); }
   function syncSaveButtons() {
-    var busy = saveInFlight || publishInFlight || applyInFlight || retireInFlight;
+    var busy = saveInFlight || publishInFlight || applyInFlight || retireInFlight || actionFieldsChecking;
     saveButton.disabled = busy;
     publishButton.disabled = busy;
     var more = document.getElementById('fd-more');
@@ -971,20 +983,28 @@
         try { var parsedRaw = JSON.parse(n._paramsRaw || '{}'); if (parsedRaw && typeof parsedRaw === 'object' && !Array.isArray(parsedRaw)) n.params = parsedRaw; delete n._paramsRaw; }
         catch (e) { /* keep the buffered text; Save explains which step needs attention */ }
       }
-      var known = (meta && meta.params) || [];
-      if (known.length) {
-        known.forEach(function (pk) {
-          var pin = input(n.params[pk] != null ? String(n.params[pk]) : '',
-            function (v) { if (v === '') delete n.params[pk]; else n.params[pk] = v; }, '');
-          props.appendChild(withPills(n.id, field(human(pk), pin), pin));
-        });
-        props.appendChild(hint('Use the buttons under a box to insert a result from an earlier step.'));
-      } else if (n.tool) {
-        var pw = document.createElement('div'); pw.className = 'field';
-        var pl0 = document.createElement('div'); pl0.className = 'fd__label'; pl0.textContent = 'Action settings'; pw.appendChild(pl0);
-        pairRows(pw, n.params, { keyPlaceholder: 'Setting', valuePlaceholder: 'Value', keyAria: 'Setting', valueAria: 'Value for' });
-        pw.appendChild(addButton('Add a setting', function () { var key = 'setting_' + (Object.keys(n.params).length + 1); n.params[key] = ''; renderProps(); }));
-        props.appendChild(pw);
+      if (n.tool) {
+        var actionHost = document.createElement('div'); actionHost.className = 'fd-action-fields';
+        actionHost.textContent = 'Loading this action’s details…'; props.appendChild(actionHost);
+        var requestedTool = n.tool;
+        function showActionFields(refresh) {
+          FDActionFields.load(requestedTool, refresh).then(function (contract) {
+            if (!actionHost.isConnected || selected !== n.id || n.tool !== requestedTool) return;
+            FDActionFields.mount(actionHost, n, contract, function () { render(); }, {
+              sources: availableKeys(n.id).map(function (key) { return { key: key, label: human(key) }; })
+            });
+          }).catch(function (error) {
+            if (!actionHost.isConnected || n.tool !== requestedTool) return;
+            actionHost.replaceChildren(hint(error.message));
+            if (error.message.indexOf('protected connection information') >= 0) {
+              var connectionLink = document.createElement('a'); connectionLink.href = '/connections';
+              connectionLink.className = 'btn btn--ghost'; connectionLink.textContent = 'Open Connections';
+              actionHost.appendChild(connectionLink);
+            }
+            actionHost.appendChild(addButton('Try loading action details again', function () { showActionFields(true); }));
+          });
+        }
+        showActionFields(false);
       }
     }
     if (n.kind === 'branch') {
@@ -1333,7 +1353,7 @@
 
   // ---- serialize / api ----
   function commitRawFields() {
-    return FDCore.commitRawParams(rootFlow);
+    return FDCore.commitRawParams(rootFlow).concat(FDActionFields.check(rootFlow));
   }
   var serializeFlow = FDCore.serializeFlow;
   function toApiFlow() {
@@ -1607,9 +1627,19 @@
     return String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60);
   }
   async function save(forApply) {
-    if (saveInFlight || retireInFlight || (applyInFlight && forApply !== true)) return false;
+    if (saveInFlight || actionFieldsChecking || retireInFlight || (applyInFlight && forApply !== true)) return false;
+    var checkedFlow = rootFlow, checkedSnapshot = draftSnapshot();
+    actionFieldsChecking = true; syncSaveButtons();
+    say('Checking the workflow’s current action details…');
+    try { await FDActionFields.ready(rootFlow, true); }
+    catch (error) { say(error.message, true); return false; }
+    finally { actionFieldsChecking = false; syncSaveButtons(); }
+    if (rootFlow !== checkedFlow || draftSnapshot() !== checkedSnapshot) {
+      say('The workflow changed while its action details loaded. Your newer edits are kept; review them and save again.', true);
+      return false;
+    }
     var bad = commitRawFields();
-    if (bad.length) { say('Some action settings aren’t filled in correctly. Check the steps and try again.', true); return false; }
+    if (bad.length) { say(FDActionFields.check(rootFlow)[0] || 'Some action settings aren’t filled in correctly. Check the steps and try again.', true); renderProps(); return false; }
     var body = toApiFlow();
     if (!body.id) { body.id = slugify(body.name); idInput.value = body.id; }   // auto-id from the name
     if (!body.id) { say('Give the flow a name (top-left).', true); return false; }
@@ -1733,8 +1763,11 @@
       if (runInFlight) return;
       var url, payload;
       if (dryRun) {
+        try { await FDActionFields.ready(rootFlow, true); }
+        catch (error) { say(error.message, true); return; }
+        if (runInFlight) return;
         var bad = commitRawFields();
-        if (bad.length) { say('Some action settings aren’t filled in correctly. Check the steps and try again.', true); return; }
+        if (bad.length) { say(FDActionFields.check(rootFlow)[0] || 'Some action settings aren’t filled in correctly. Check the steps and try again.', true); renderProps(); return; }
         var draftBody = toApiFlow();
         if (!draftBody.id) draftBody.id = slugify(draftBody.name);
         if (!draftBody.id) { say('Give the flow a name (top-left).', true); return; }
@@ -2495,6 +2528,7 @@
         toolTotal = Number.isInteger(j.total) ? j.total : toolResults.length;
         toolNext = Number.isInteger(j.next_offset) ? j.next_offset : null;
         toolLoading = false;
+        FDActionFields.ready(rootFlow, false).catch(function () { /* The selected action shows its own recovery control. */ });
         if (selected) renderProps();
       }).catch(function () {
         if (request !== toolRequest) return;

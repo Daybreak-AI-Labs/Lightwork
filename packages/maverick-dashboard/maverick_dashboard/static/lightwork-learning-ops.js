@@ -85,7 +85,7 @@
   if (faAdopt) faAdopt.addEventListener('click', async function () {
     var body = await fileBody($('lo-fa-file'), 'Choose the results file first.');
     if (!body) return;
-    if (!(await window.mvConfirm('Adopt the guidance this results file proves helps? New agents are built with it from now on. Guidance that the file does not prove is left out.',
+    if (!(await window.mvConfirm('Apply the guidance that passes the paired comparison checks? New agents will be built with it. You are responsible for reviewing the source of the uploaded results; a file check alone does not establish their accuracy or business value.',
       { okText: 'Adopt guidance' }))) return;
     faAdopt.disabled = true;
     $('lo-fa-status').textContent = 'Checking the results file…';

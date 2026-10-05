@@ -2770,6 +2770,15 @@ def read_dsar_export(request_id: str) -> tuple[dict, str] | None:
     return recovered
 
 
+def dsar_response_pending(record: dict) -> bool:
+    """Collected data remains response work until an answer is actually recorded."""
+    status = record.get("status")
+    active = status in ("open", "unverified", "awaiting_erasure") or (
+        status == "fulfilled" and record.get("kind") in ("access", "portability")
+    )
+    return active and dsar_answer(record) is None
+
+
 def dsar_clock(record: dict, *, now: float | None = None) -> dict:
     """The live clock fields for one request, computed from the stored
     deadlines so the list, the detail page and the alerting (work package
@@ -2777,17 +2786,18 @@ def dsar_clock(record: dict, *, now: float | None = None) -> dict:
 
     ``effective_due_at`` is ``extended_until`` when an extension was recorded,
     else ``due_at``; ``days_left`` counts to it; ``overdue`` and ``due_soon``
-    apply only while the request is still being worked (``open``,
-    ``unverified``, ``awaiting_erasure``); ``acknowledge_overdue`` fires when
+    apply while a response is pending, including access/portability data
+    collected without an answer; ``acknowledge_overdue`` fires when
     a regime fixes an acknowledgement deadline that passed unacknowledged."""
     moment = time.time() if now is None else float(now)
     due = float(record.get("extended_until") or record.get("due_at") or moment)
     days_left = int((due - moment) // 86400)
-    active = record.get("status") in ("open", "unverified", "awaiting_erasure")
+    active = dsar_response_pending(record)
     ack_by = record.get("acknowledge_by")
     return {
         "effective_due_at": due,
         "days_left": days_left,
+        "response_pending": active,
         "overdue": active and days_left < 0,
         "due_soon": active and 0 <= days_left <= DSAR_DUE_SOON_DAYS,
         "acknowledge_overdue": (
@@ -3123,7 +3133,7 @@ def extend_dsar(
     now = time.time()
 
     def _extend(record: dict) -> bool:
-        if record.get("status") not in ("open", "unverified", "awaiting_erasure"):
+        if not dsar_response_pending(record):
             raise ValueError("only a request still being worked can be extended")
         if record.get("extended_until"):
             raise ValueError("this request was already extended once")
@@ -3454,7 +3464,7 @@ def dsar_answer(record: dict) -> dict | None:
 
     Counted: an outcome recorded when closing (``answered`` or ``refused``),
     a request a named person marked answered, whether or not it was closed
-    afterwards (never a deletion -- that needs its erasure result), and a
+    afterwards (data collection and deletion preparation are not answers), and a
     refusal or completion notice that was actually sent (a completion for a
     deletion request still needs its erasure result). Returns
     ``{"kind", "on"}`` with the UTC day of the answer."""
@@ -3464,7 +3474,7 @@ def dsar_answer(record: dict) -> dict | None:
             return {"kind": outcome["kind"], "on": str(outcome["answered_on"])}
         return None
     erasure = record.get("kind") == "erasure"
-    if record.get("fulfilled_at") and not erasure:
+    if record.get("fulfilled_at") and record.get("kind") not in {"access", "portability", "erasure"}:
         return {"kind": "answered", "on": _utc_day(record["fulfilled_at"])}
     emails = (record.get("public_form") or {}).get("emails") or []
     for entry in emails if isinstance(emails, list) else ():
@@ -3799,7 +3809,7 @@ def program_report(assessment_types: set | None = None) -> dict:
     # is still open work. "On time" needs an answer on record by the
     # deadline in force (an extension included); a request closed without
     # one is counted as exactly that.
-    handled = [d for d in dsars if d["status"] in ("fulfilled", "closed")]
+    handled = [d for d in dsars if d["status"] == "closed" or dsar_answer(d) is not None]
     answers = [(d, dsar_answer(d)) for d in handled]
     answered = [(d, a) for d, a in answers if a is not None]
     on_time = sum(1 for d, a in answered if a["on"] <= _utc_day(d.get("effective_due_at")))
@@ -3807,7 +3817,7 @@ def program_report(assessment_types: set | None = None) -> dict:
                     if a is None and (d.get("outcome") or {}).get("kind") == "withdrawn")
     dsar = {
         "total": len(dsars),
-        "open": sum(1 for d in dsars if d["status"] in ("open", "unverified", "awaiting_erasure")),
+        "open": sum(1 for d in dsars if dsar_response_pending(d)),
         "overdue": sum(1 for d in dsars if d.get("overdue")),
         "by_kind": dict(Counter(d["kind"] for d in dsars)),
         "handled": len(handled),
@@ -3880,7 +3890,7 @@ __all__ = [
     "DSAR_SOURCES", "acknowledge_dsar", "dsar_answer",
     "annotate_dsar", "dsar_clock", "extend_dsar", "iter_dsar_records",
     "verify_dsar", "close_incident", "decide_incident_notification",
-    "list_incidents", "open_incident", "privacy_program_context_heads", "program_report",
+    "list_incidents", "open_incident", "privacy_program_context_heads", "program_report", "dsar_response_pending",
     "ROPA_FIELDS", "RecordConflict", "classify_ai_system", "close_dsar",
     "draft_ropa_from_assessment", "enabled", "export_ropa_art30",
     "detect_dsar", "dsar_estate_worksheet", "fulfill_dsar",
