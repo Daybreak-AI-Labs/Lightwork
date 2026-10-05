@@ -107,12 +107,13 @@ def _bullets(items: object) -> str:
 
 
 def approval_card(approval: dict, card: dict | None, *, source_label: str | None = None,
-                  decided: dict | None = None, note: str = "") -> dict:
+                  decided: dict | None = None, note: str = "", dashboard_url: str = "") -> dict:
     """The approval request as a card. ``approval`` is the queue row projected
     to a dict (``id``, ``action``, ``risk``, ``scope``, ``detail``); ``card`` is
     the decoded structured card (``maverick.approval_cards``) or ``None`` for a
     legacy or invalid request, which the card refuses to approve like the
-    dashboard does. ``decided`` replaces the buttons with the outcome."""
+    dashboard does. ``decided`` replaces the buttons with the outcome. With a
+    ``dashboard_url`` the card also opens that exact approval in Lightwork."""
     risk = str(approval.get("risk") or "medium")
     action = humanize(approval.get("action")) or "Reviewed action"
     body: list[dict] = [
@@ -121,6 +122,7 @@ def approval_card(approval: dict, card: dict | None, *, source_label: str | None
         _block(_text(action, limit=300), weight="bolder", size="medium"),
         _block(f"Risk: {humanize(risk)}", weight="bolder",
                color="attention" if risk in ("high", "critical") else "default"),
+        _block("You get this because you are linked to Lightwork as an approver."),
     ]
     if source_label:
         body.append(_block(_text(source_label, limit=200), color="attention"))
@@ -186,6 +188,9 @@ def approval_card(approval: dict, card: dict | None, *, source_label: str | None
     data = {"approval_id": int(approval["id"]),
             "binding": str((card or {}).get("binding_sha256") or ""), "risk": risk}
     actions = []
+    if dashboard_url:
+        actions.append({"type": "Action.OpenUrl", "title": "Open in Lightwork",
+                        "url": f"{dashboard_url.rstrip('/')}/approvals#approval-{int(approval['id'])}"})
     if card:
         actions.append({"type": "Action.Execute", "title": "Approve", "verb": "approve",
                         "style": "positive", "data": data})

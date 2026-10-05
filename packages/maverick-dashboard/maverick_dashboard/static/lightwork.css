@@ -676,6 +676,20 @@
     .halt-banner__text { flex: 1 1 16rem; min-width: 0; }
     .halt-banner .btn.halt-banner__resume { background: var(--danger-fg); color: var(--danger); border-color: var(--danger-fg); }
     .chat-shell .halt-banner { border-radius: 0; }
+    /* The AI service banner (an AI service paused after repeated errors). */
+    .service-banner {
+      margin: 0 0 var(--space-4); padding: var(--space-2) var(--space-4); border-radius: var(--radius-md);
+      border: 1px solid var(--warn); border-inline-start-width: 4px; background: var(--warn-subtle);
+      color: var(--text); font-size: var(--text-sm);
+    }
+    .service-banner p { margin: 0.2rem 0; }
+    .chat-shell .service-banner { border-radius: 0; }
+    /* The Help menu: same popover as display preferences. */
+    .help-menu__panel { display: flex; flex-direction: column; gap: var(--space-1); min-width: 16rem; }
+    .help-menu__item { display: block; padding: 0.35rem 0.5rem; border-radius: var(--radius-sm); color: var(--text); text-decoration: none; }
+    .help-menu__item:hover, .help-menu__item:focus-visible { background: var(--surface-2); text-decoration: none; }
+    .help-topic { margin: var(--space-2) 0; }
+    .help-topic summary { cursor: pointer; font-weight: 600; }
     .iconbtn--text { width: auto; padding-inline: 0.55rem; gap: 0.35rem; }
     .iconbtn__text { font-size: var(--text-sm); }
     .page-docs { margin: 0 0 var(--space-3); font-size: var(--text-sm); color: var(--muted); }
@@ -1897,3 +1911,10 @@ body:not(.theme-hicontrast) .btn--primary:hover { background: color-mix(in srgb,
   .shortcuts, .navpins__tool, .navfinder__mode { border: 1px solid CanvasText; }
   .page-pin[aria-pressed="true"] { outline: 2px solid Highlight; }
 }
+
+/* The Help menu in the chat sidebar opens across the sidebar's width, above the row. */
+.cs-account { position: relative; }
+.cs-account .help-menu { position: static; }
+.cs-account .help-menu .help-menu__panel { left: 0; right: 0; min-width: 0; }
+.cs-account .help-menu > summary { color: var(--muted); font-size: var(--text-sm); cursor: pointer; }
+.cs-account .help-menu > summary:hover, .cs-account .help-menu[open] > summary { color: var(--text); }

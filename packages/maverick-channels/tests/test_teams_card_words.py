@@ -37,3 +37,27 @@ def test_the_command_stays_off_the_shared_room_card():
     assert command not in rendered
     assert "5ac93412" not in rendered
     assert "The exact command is shown on the Approvals page." in rendered
+
+
+def test_the_card_says_why_the_approver_gets_it_and_opens_the_exact_card():
+    """NOT-1: a reason, the decide-by time and a link to that approval card."""
+    card = build_approval_card(
+        action="shell", summary="Run a command in the sandbox.", target_label="sandbox:/work",
+        target={"workdir": "/work"}, parameters={"command": "ls"},
+        parameter_summary=["Runs this exact command once; nothing else is approved."],
+        actor="user:sam", workspace="local", role="operator", authority_versions={},
+        input_versions={}, credential_versions={}, budget=SHELL_BUDGET,
+        expires_at=time.time() + 300, known_effects=["Runs one command."],
+        unresolved_assumptions=[], before="Not run.", after="Run once.", irreversible=False,
+        display_command="ls",
+    )
+    rendered = approval_card({"id": 7, "action": "shell", "risk": "high", "scope": "sandbox:/work"}, card,
+                             dashboard_url="https://lw.test/")
+    text = str(rendered)
+    assert "You get this because you are linked to Lightwork as an approver." in text
+    assert "Decide by" in text
+    opens = [a for a in rendered.get("actions", []) if a.get("type") == "Action.OpenUrl"]
+    assert opens and opens[0]["url"] == "https://lw.test/approvals#approval-7"
+    # Without a known dashboard address the card still decides in place.
+    assert not [a for a in approval_card({"id": 7, "action": "shell", "risk": "high"}, card).get("actions", [])
+                if a.get("type") == "Action.OpenUrl"]

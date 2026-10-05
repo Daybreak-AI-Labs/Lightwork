@@ -408,3 +408,16 @@ def test_post_message_open_dm_and_respond_use_the_guarded_client(monkeypatch):
     monkeypatch.setattr(_ssrf, "safe_client", lambda url, **kw: (_ for _ in ()).throw(OSError("down")))
     assert send_dm("xoxb-fake", "U1", "hi") is False
     assert respond("", {}) is False
+
+
+def test_approval_card_in_the_shared_channel_says_why_it_is_there(tmp_path):
+    """NOT-1: the channel card names why it is posted, the decide-by time and the exact link."""
+    from maverick.channel_approvals import card_content
+    from maverick.slack_interactive import approval_blocks
+
+    world = _world(tmp_path)
+    aid = _park(world, card=_card())
+    blocks = approval_blocks(card_content(world.get_approval(aid)), dashboard_url="https://lw.test/")
+    text = json.dumps(blocks)
+    assert "Posted here because this channel receives Lightwork approval requests" in text
+    assert "*Decide by*" in text and f"https://lw.test/approvals#approval-{aid}" in text

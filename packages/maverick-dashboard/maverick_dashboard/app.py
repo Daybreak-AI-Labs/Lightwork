@@ -751,6 +751,19 @@ def _docs_context(request: Request) -> dict:
 templates.context_processors.append(_docs_context)
 templates.env.globals.setdefault("docs_home", "https://daybreak-ai-labs.github.io/Lightwork/")
 templates.env.globals.setdefault("docs_learn_more", None)
+
+
+def _help_context(request: Request) -> dict:
+    """The Help menu (page topic, status page) and the AI service banner."""
+    from .help_menu import context
+
+    return context(request)
+
+
+templates.context_processors.append(_help_context)
+templates.env.globals.setdefault("help_topic", None)
+templates.env.globals.setdefault("support_status_page_url", "")
+templates.env.globals.setdefault("service_status", None)
 # Requestless renders cannot prove authority; the request processor supplies
 # permitted destinations, including full navigation in verified local mode.
 templates.env.globals.setdefault("nav_groups", [])

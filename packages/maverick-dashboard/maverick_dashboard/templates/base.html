@@ -94,7 +94,7 @@
       {% endif %}
       <a class="iconbtn iconbtn--text" href="{{ docs_learn_more.url if docs_learn_more else docs_home }}" target="_blank" rel="noopener noreferrer"
          aria-label="Docs (opens in a new tab)" title="Docs (opens in a new tab)"><svg viewBox="0 0 16 16" aria-hidden="true"><use href="#i-walkthroughs"></use></svg><span class="iconbtn__text">Docs</span></a>
-      <a class="iconbtn" href="/help" aria-label="{{ ut('Help and diagnostics') }}" title="{{ ut('Help and diagnostics') }}" lang="{{ ul('Help and diagnostics') }}"><svg viewBox="0 0 16 16" aria-hidden="true"><use href="#i-facts"></use></svg></a>
+      {% include "_help_menu.html" %}
       {% include "_display_preferences.html" %}
       <a class="iconbtn" href="/account" aria-label="{{ t('chrome.account') }}" title="{{ t('chrome.account') }}"{% if lang and page_lang and lang != page_lang %} lang="{{ lang }}"{% endif %}>
         <svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="5.5" r="2.75"/><path d="M2.75 14a5.25 5.25 0 0 1 10.5 0"/></svg>
@@ -139,6 +139,7 @@
   {% include "_shortcuts.html" %}
   <main id="content" tabindex="-1">
     {% include "_halt_banner.html" %}
+    {% include "_service_status_banner.html" %}
     {# The page's own tools: its documentation, and pinning it to the
        sidebar (only on a page the person may open, when they can pin). #}
     {% set _page_personal = nav_personal() if nav_personal is defined and nav_personal else none %}
@@ -195,6 +196,7 @@
   <script src="{{ asset('lightwork-navfinder.js') }}" defer></script>
   <script src="{{ asset('lightwork-shortcuts.js') }}" defer></script>
   <script src="{{ asset('lightwork-pins.js') }}" defer></script>
+  <script src="{{ asset('lightwork-help-menu.js') }}" defer></script>
   <script src="{{ asset('lightwork-settings-search.js') }}" defer></script>
   {% if show_personal_notifications %}<script src="{{ asset('lightwork-notification-badge.js') }}" defer></script>{% endif %}
   {% if record_search_context %}<link rel="stylesheet" href="{{ asset('lightwork-record-search.css') }}"><script src="{{ asset('lightwork-record-search.js') }}" defer></script>{% endif %}

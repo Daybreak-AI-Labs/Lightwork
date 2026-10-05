@@ -114,3 +114,49 @@ def test_misbound_delivery_file_cannot_publish_another_persons_history(ledger):
     other = delivery.DeliveryStore('user:bob', {'id': 'a' * 32, 'verified_at': 1}, path=ledger.path)
     with pytest.raises(ValueError, match='unavailable'):
         other.recent()
+
+
+def _dispatch_fixture(tmp_path, monkeypatch, sent):
+    monkeypatch.setattr(delivery, 'seal', lambda value: value)
+    monkeypatch.setattr(delivery, 'unseal', lambda value: value)
+    monkeypatch.setattr(delivery, 'data_dir', lambda *parts: tmp_path.joinpath(*parts))
+    config = {'personal_alerts': True, 'personal_background': True, 'personal_external': True,
+              'personal_dashboard_url': 'https://dashboard.example.test'}
+    monkeypatch.setattr(delivery, '_settings', lambda: config)
+    link = {'id': 'a' * 32, 'verified_at': 1, 'channel': 'telegram', 'sender_id': '123'}
+    monkeypatch.setitem(sys.modules, 'maverick.personal_identity', SimpleNamespace(
+        linked_channels=lambda _: [link], principal_current=lambda _: True))
+    monkeypatch.setattr(delivery, 'send_private', lambda target, text: sent.append(text))
+    return link
+
+
+def test_private_message_says_why_what_and_by_when_without_task_text(tmp_path, monkeypatch):
+    """NOT-1 for Slack/Telegram: reason, action and due time, plus the exact link."""
+    sent = []
+    link = _dispatch_fixture(tmp_path, monkeypatch, sent)
+    item = {'id': 'b' * 64, 'category': 'needs-decision', 'label': 'Needs your decision',
+            'title': 'Acquire Initech secretly', 'result': 'Confidential board memo',
+            'reason': 'You were assigned this approval', 'action': 'Approve or reject the request',
+            'due_at': 1791148500.0, 'href': '/approvals#approval-7', 'seen_at': None}
+    choice = validate_preferences({'external_links': [link['id']], 'timezone': 'UTC'})
+    delivery.dispatch('user:alice', {'items': [item]}, choice)
+    assert len(sent) == 1
+    text = sent[0]
+    assert 'Why: You were assigned this approval.' in text
+    assert 'Approve or reject the request' in text and 'Decide by ' in text
+    assert 'https://dashboard.example.test/approvals#approval-7' in text
+    assert 'Initech' not in text and 'Confidential' not in text
+
+
+def test_an_alert_already_seen_in_the_app_is_not_sent_again_privately(tmp_path, monkeypatch):
+    """NOT-2: reading an item in the app suppresses its pending external copy."""
+    sent = []
+    link = _dispatch_fixture(tmp_path, monkeypatch, sent)
+    seen = {'id': 'c' * 64, 'category': 'completed', 'label': 'Finished', 'href': '/chat/goal/1',
+            'seen_at': 100.0, 'state': 'seen'}
+    choice = validate_preferences({'external_links': [link['id']]})
+    delivery.dispatch('user:alice', {'items': [seen]}, choice)
+    assert sent == []
+    fresh = {**seen, 'id': 'd' * 64, 'seen_at': None, 'state': 'available', 'href': '/chat/goal/2'}
+    delivery.dispatch('user:alice', {'items': [seen, fresh]}, choice)
+    assert len(sent) == 1 and '/chat/goal/2' in sent[0] and '/chat/goal/1' not in sent[0]

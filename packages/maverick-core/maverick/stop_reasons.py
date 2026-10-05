@@ -37,6 +37,12 @@ def exception_stop_text(exc: BaseException) -> str:
     bodies. Those belong in the server log, never in the customer-facing goal.
     Classification uses SDK type/status rather than matching those bodies.
     """
+    from .circuit_breaker import CircuitOpen
+
+    if isinstance(exc, CircuitOpen):
+        # The AI service was paused after repeated errors (the service banner
+        # says when Lightwork checks again); not a fault inside Lightwork.
+        return "provider_error:paused"
     name = type(exc).__name__
     module = type(exc).__module__.split(".", 1)[0]
     provider = module in {"openai", "anthropic"} or name in {
@@ -112,6 +118,13 @@ _RULES: tuple[tuple[str, re.Pattern[str], str, str, str | None, str | None], ...
         "The selected AI model is unavailable.",
         "Ask an administrator to choose an available model, then try again.",
         AI_PROVIDER_KEYS_HREF, "Open AI provider keys",
+    ),
+    (
+        "provider_paused",
+        _rx(r"^provider_error:paused$"),
+        "The AI service was paused after repeated errors, so this task stopped. What it already finished is kept.",
+        "Run it again once the service is back. The notice at the top of the page says when Lightwork checks again.",
+        None, None,
     ),
     (
         "provider_unavailable",

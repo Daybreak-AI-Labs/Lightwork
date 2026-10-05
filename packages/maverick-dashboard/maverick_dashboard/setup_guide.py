@@ -96,7 +96,8 @@ STEPS: tuple[tuple[str, str, str, tuple[str, ...], str], ...] = (
     ("deadline_alerts", "Deadline alerts", "Warnings before a data request, incident clock, renewal or approval is due.",
      ("deadline_alerts",), ""),
     ("daily_summary", "Daily summary and chat approvals",
-     "Each person's daily summary, and approval cards in Slack.", ("my_work", "notifications"), "/me"),
+     "Each person's daily summary, approval cards in Slack, and the Help menu's status page and support contact.",
+     ("my_work", "notifications", "support"), "/me"),
     ("webhooks", "Webhooks", "Sending events to other apps.", ("webhooks",), "/settings#settings-integrations"),
     ("a2a", "Outside agents", "Letting agents from other systems send work.", ("a2a",), ""),
 )
