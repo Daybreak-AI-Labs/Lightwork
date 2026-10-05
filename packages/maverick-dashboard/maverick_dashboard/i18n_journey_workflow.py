@@ -525,6 +525,8 @@ ROWS = [('Workflow builder', 'Créateur de workflows', 'Workfloweditor', 'ワー
  ('Open latest', 'Ouvrir la dernière version', 'Neueste Version öffnen', '最新版を開く', '打开最新版本'),
  ('Scheduling…', 'Planification…', 'Zeitplan wird erstellt…', 'スケジュールを設定中…', '正在安排计划…'),
  ('Delete', 'Supprimer', 'Löschen', '削除', '删除'),
+ ('Delete schedule', 'Supprimer la planification', 'Zeitplan löschen', 'スケジュールを削除', '删除计划'),
+ ('Delete start', 'Supprimer le déclencheur', 'Auslöser löschen', '開始トリガーを削除', '删除启动入口'),
  ('Delete this schedule? It will stop running.',
   'Supprimer cette planification ? Elle ne s’exécutera plus.',
   'Diesen Zeitplan löschen? Er wird nicht mehr ausgeführt.',

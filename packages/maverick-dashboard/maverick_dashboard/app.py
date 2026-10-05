@@ -13478,7 +13478,8 @@ async def goal_builder_page(request: Request) -> HTMLResponse:
     )
 
 
-_BUILDER_MODES = (("", "Describe it", "/workflow-builder"), ("steps", "Steps", "/workflow-builder?mode=steps"))
+# "Step by step", not "Steps": the editor's own view switch already says "Steps".
+_BUILDER_MODES = (("", "Describe it", "/workflow-builder"), ("steps", "Step by step", "/workflow-builder?mode=steps"))
 _FLOW_ID = re.compile(r"[A-Za-z0-9_-]{1,120}")
 
 

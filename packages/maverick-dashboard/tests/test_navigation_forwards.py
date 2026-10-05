@@ -307,7 +307,10 @@ def test_steps_mode_holds_every_flow_designer_control(monkeypatch, tmp_path):
     for call in ("'/api/v1/flows'", "'/api/v1/flows/' + encodeURIComponent(rootFlow.id) + '/publish'",
                  "'/api/v1/flows/insights'", "'/flows/designer/' + encodeURIComponent(id)"):
         assert call in steps, call
-    assert "<title>Steps · Workflow builder · Lightwork</title>" in steps
+    assert "<title>Step by step · Workflow builder · Lightwork</title>" in steps
+    # One "Steps": the mode tab says "Step by step", the editor's own switch keeps "Steps".
+    assert ">Step by step</a>" in steps and ">Steps</a>" not in steps
+    assert '<button type="button" id="fd-view-steps" class="is-on" aria-pressed="true">Steps</button>' in steps
 
 
 def test_a_saved_flow_opens_and_saves_unchanged_in_steps_mode(monkeypatch, tmp_path):
