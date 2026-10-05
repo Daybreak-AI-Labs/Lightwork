@@ -595,19 +595,56 @@
         error.status = failure.status; error.detail = failure.detail; error.headers = failure.headers; error.payload = payload;
         throw error;
       };
+      // Two page-wide live regions (polite, and assertive for errors) that
+      // exist before any message: base.html renders them, and they are made
+      // here once if a page lacks them. A region that appears, or gets its
+      // role, in the same moment as its first words is often not read out,
+      // so status lines speak through these instead of becoming regions
+      // themselves. Each message clears both, then writes a moment later, so
+      // a repeat of the same words is spoken again and only the latest of
+      // quick messages is.
+      var announceTimer = null;
+      function announcer(id, live) {
+        var region = document.getElementById(id);
+        if (region || !document.body) return region;
+        region = document.createElement('div');
+        region.id = id; region.className = 'sr-only';
+        region.setAttribute('role', live === 'assertive' ? 'alert' : 'status');
+        region.setAttribute('aria-live', live);
+        region.setAttribute('aria-atomic', 'true');
+        document.body.appendChild(region);
+        return region;
+      }
+      function announcers() {
+        return { polite: announcer('mv-announce', 'polite'), alert: announcer('mv-announce-alert', 'assertive') };
+      }
+      if (document.body) announcers();
+      else document.addEventListener('DOMContentLoaded', announcers);
+      window.mvAnnounce = function (text, opts) {
+        var regions = announcers(), words = text == null ? '' : String(text);
+        var target = opts && opts.error ? regions.alert : regions.polite;
+        clearTimeout(announceTimer);
+        if (regions.polite) regions.polite.textContent = '';
+        if (regions.alert) regions.alert.textContent = '';
+        if (!words || !target) return;
+        announceTimer = setTimeout(function () { target.textContent = words; }, 100);
+      };
       // One inline status line next to the control it reports on. Sets the
-      // words and, unless the page made the element a live region itself,
-      // announces them: politely (role=status), or at once (role=alert) for
-      // an error, which also gets the error style. Empty text clears it.
+      // words at once (with the error style for an error) and, unless the
+      // page made the element a live region itself, announces them through
+      // mvAnnounce: politely, or at once for an error. Empty text clears it
+      // and announces nothing.
       window.mvStatus = function (element, text, opts) {
         if (!element) return null;
         var error = !!(opts && opts.error);
-        if (!element.hasAttribute('aria-live') && (!element.hasAttribute('role') || element.hasAttribute('data-mv-status'))) {
-          element.setAttribute('data-mv-status', '');
-          element.setAttribute('role', error ? 'alert' : 'status');
-        }
+        var words = text == null ? '' : String(text);
+        var own = element.hasAttribute('aria-live') || (element.hasAttribute('role') && !element.hasAttribute('data-mv-status'));
         element.classList.toggle('mv-status--error', error);
-        element.textContent = text == null ? '' : String(text);
+        element.textContent = words;
+        if (!own) {
+          element.setAttribute('data-mv-status', '');
+          if (words) window.mvAnnounce(words, { error: error });
+        }
         return element;
       };
       // A stored value (status, kind, slug) as a readable label:

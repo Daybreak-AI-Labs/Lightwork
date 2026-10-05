@@ -109,25 +109,79 @@ test("a business error keeps its authored message and its payload for mvRenderEr
 });
 
 // ---- mvStatus: one inline status line --------------------------------------
-test("mvStatus writes the text, announces it politely, and switches to an alert for errors", () => {
+test("mvStatus writes the text at once and styles errors", () => {
   const w = load("", '<p id="s"></p><p id="own" aria-live="assertive"></p>');
   const line = w.document.getElementById("s");
   w.mvStatus(line, "Saving…");
   assert.equal(line.textContent, "Saving…");
-  assert.equal(line.getAttribute("role"), "status");
   assert.equal(line.classList.contains("mv-status--error"), false);
   w.mvStatus(line, "Could not save. Try again.", { error: true });
-  assert.equal(line.getAttribute("role"), "alert");
+  assert.equal(line.textContent, "Could not save. Try again.");
   assert.equal(line.classList.contains("mv-status--error"), true);
   w.mvStatus(line, "");
   assert.equal(line.textContent, "");
-  assert.equal(line.getAttribute("role"), "status");
   assert.equal(line.classList.contains("mv-status--error"), false);
   const own = w.document.getElementById("own");   // a page's own live region is left as it is
   w.mvStatus(own, "Done", { error: true });
   assert.equal(own.getAttribute("role"), null);
   assert.equal(own.textContent, "Done");
   assert.equal(w.mvStatus(null, "x"), null);
+  w.close();
+});
+
+// A live region that appears, or gets its role, in the same moment as its
+// first words is often not read out at all. mvStatus never makes the line
+// itself a fresh region: it speaks through two regions that exist before
+// any message (base.html, or made once here), and writes into them a moment
+// after clearing them, so even the first message, and a repeat of the same
+// words, is a change to a region the screen reader already knows.
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+test("the first message into a brand-new status line is announced through a region that already existed", async () => {
+  const w = load("", '<p id="s"></p>');
+  const polite = w.document.getElementById("mv-announce"), alert = w.document.getElementById("mv-announce-alert");
+  assert.ok(polite && alert, "both announcers exist before the first message");
+  assert.equal(polite.getAttribute("aria-live"), "polite");
+  assert.equal(alert.getAttribute("aria-live"), "assertive");
+  assert.equal(polite.textContent + alert.textContent, "", "they start empty");
+  const line = w.document.getElementById("s");
+  w.mvStatus(line, "Saved.");
+  assert.equal(line.textContent, "Saved.", "the words show at once");
+  assert.equal(line.hasAttribute("role") || line.hasAttribute("aria-live"), false, "the line is not made a fresh live region");
+  assert.equal(polite.textContent, "", "the announcer is cleared first");
+  await wait(150);
+  assert.equal(polite.textContent, "Saved.");
+  w.mvStatus(line, "Saved.");   // the same words again are spoken again
+  assert.equal(polite.textContent, "");
+  await wait(150);
+  assert.equal(polite.textContent, "Saved.");
+  w.mvStatus(line, "Could not save. Try again.", { error: true });
+  await wait(150);
+  assert.equal(alert.textContent, "Could not save. Try again.", "an error is spoken at once");
+  assert.equal(polite.textContent, "", "and the polite region does not repeat it");
+  w.close();
+});
+
+test("only the latest of quick messages is spoken, and clearing the line speaks nothing", async () => {
+  const w = load("", '<p id="s"></p>');
+  const polite = w.document.getElementById("mv-announce");
+  const line = w.document.getElementById("s");
+  w.mvStatus(line, "Saving…");
+  w.mvStatus(line, "Saved.");
+  await wait(150);
+  assert.equal(polite.textContent, "Saved.");
+  w.mvStatus(line, "");
+  await wait(150);
+  assert.equal(polite.textContent, "Saved.", "an empty line is not announced");
+  w.close();
+});
+
+test("announcers already in the page (base.html) are reused, not duplicated", async () => {
+  const w = load("", '<div id="mv-announce" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></div><p id="s"></p>');
+  assert.equal(w.document.querySelectorAll("#mv-announce").length, 1);
+  w.mvStatus(w.document.getElementById("s"), "Done.");
+  await wait(150);
+  assert.equal(w.document.querySelector("#mv-announce").textContent, "Done.");
   w.close();
 });
 
