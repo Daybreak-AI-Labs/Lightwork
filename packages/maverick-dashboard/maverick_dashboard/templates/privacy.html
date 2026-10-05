@@ -41,6 +41,7 @@
 
   {% from "_hero.html" import hero, state %}
   {% from "_empty_state.html" import empty_state %}
+  {% from "_form_field.html" import error_summary %}
   {% set privacy_actions %}<a class="btn btn--primary" href="#pw-start">Start an assessment</a>{% endset %}
   {% call hero('Governed workspaces', 'Privacy',
                subtitle='Program of record',
@@ -632,10 +633,13 @@
     </div>
 
     <div class="pw-tab" id="pw-tab-dsar" role="tabpanel" aria-labelledby="pw-tabbtn-dsar" hidden>
-      <form class="pw-form" data-endpoint="/api/v1/privacy/dsar">
+      <form class="pw-form" id="pw-dsar-form" data-endpoint="/api/v1/privacy/dsar" data-mv-validate data-mv-keep="privacy-dsar">
+        {{ error_summary('pw-dsar-errors') }}
         <div class="pw-form-row">
           <label><span>Person making the request (email or ID)</span>
-            <input class="input" name="subject_id" required maxlength="200" placeholder="jordan@example.com"></label>
+            <input class="input" id="pw-dsar-subject" name="subject_id" required maxlength="200" placeholder="jordan@example.com"
+                   data-error-required="Enter the email address or ID of the person making the request."
+                   data-error-length="Shorten the email address or ID to 200 characters or fewer."></label>
           <label><span>What they asked for</span>
             <select class="select" name="kind">
               <option value="access">A copy of their data</option>
@@ -685,9 +689,11 @@
       <p class="muted" style="font-size: var(--text-sm);">People can also file requests themselves from your website:
         <a href="/privacy/rights-form">set up the rights request form</a>. Those arrive here as
         <em>From your website</em> and open once the person confirms their email address.</p>
-      <form class="pw-form" data-endpoint="/api/v1/privacy/dsar/from-message">
+      <form class="pw-form" id="pw-dsar-message-form" data-endpoint="/api/v1/privacy/dsar/from-message" data-mv-validate data-mv-keep="privacy-dsar-message">
+        {{ error_summary('pw-dsar-message-errors') }}
         <label><span>…or paste an inbound message</span>
-          <textarea class="textarea" name="text" rows="3" required
+          <textarea class="textarea" id="pw-dsar-message" name="text" rows="3" required
+            data-error-required="Paste the message the person sent, so Lightwork can read what they asked for."
             placeholder='For example: "Please delete my data. Sam, sam@example.com". Lightwork works out what was asked and who asked, and keeps the phrases it matched.'></textarea></label>
         <div class="pw-form-actions">
           <label style="flex:1;"><span>Sender (optional — detected from the message when present)</span>
@@ -1706,13 +1712,13 @@
   function day(ts) {
     return ts ? (window.mvDateAbsolute ? window.mvDateAbsolute(ts) : new Date(ts * 1000).toLocaleDateString()) : '';
   }
-  function post(url, body) {
+  function post(url, body, beforeReload) {
     return fetch(url, {
       method: 'POST',
       headers: body ? { 'Content-Type': 'application/json' } : {},
       body: body ? JSON.stringify(body) : undefined
     }).then(function (r) {
-      if (r.ok) { location.reload(); return null; }
+      if (r.ok) { if (beforeReload) beforeReload(); location.reload(); return null; }
       throw failed(r);
     });
   }
@@ -1734,8 +1740,11 @@
       });
       var err = form.querySelector('.pw-form-err');
       err.textContent = '';
-      post(form.dataset.endpoint, body).catch(function (e) {
-        err.textContent = errText(e, 'save this');
+      var fields = form.hasAttribute('data-mv-validate') && window.mvFieldErrors;
+      // A saved form starts empty after the reload; a failed one keeps every value.
+      post(form.dataset.endpoint, body, fields ? function () { fields.forget(form); } : null).catch(function (e) {
+        if (fields) fields.fail(form, e, 'save this');
+        else err.textContent = errText(e, 'save this');
       });
     });
   });

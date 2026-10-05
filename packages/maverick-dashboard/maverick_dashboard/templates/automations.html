@@ -71,7 +71,7 @@
                    action_label='Create a schedule', action_href='#auto-new-sched', id='auto-sched-empty', hidden=true) }}
     <details id="auto-new-sched" class="auto__new">
       <summary><span role="heading" aria-level="3">Create a schedule</span></summary>
-      <form id="auto-new-form" novalidate>
+      <form id="auto-new-form" novalidate data-mv-validate data-mv-keep="automation-schedule">
         <fieldset class="auto__what">
           <legend>What should run?</legend>
           <label><input type="radio" name="what" value="workflow" checked> A saved workflow</label>

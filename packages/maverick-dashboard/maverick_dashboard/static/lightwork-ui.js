@@ -1077,6 +1077,344 @@
       }
     }, true);
 
+    // One form-field error pattern (GOV.UK error summary). A form marked
+    // data-mv-validate is checked on submit: each problem is written next to
+    // its field (aria-invalid plus aria-describedby to the message) and listed
+    // in a summary at the top of the form that takes focus and links to each
+    // field. The page title starts with "Error: " while problems remain.
+    // Nothing typed is cleared. A form marked data-mv-keep="name" also keeps
+    // what was typed in this tab (sessionStorage) across a reload, a failed
+    // request or a sign-in, until the page shows it was saved
+    // (an element with data-mv-keep-done="name") or the script calls forget().
+    //   mvFieldErrors.validate(form) -> true when there is nothing to fix
+    //   mvFieldErrors.show(form, [{field, message}], {message}) -> list problems
+    //   mvFieldErrors.fail(form, failure, action) -> a failed request, values kept
+    //   mvFieldErrors.clear(form) / restore(form) / forget(form)
+    // Extra checks: listen for 'mv:validate' on the form and call
+    // event.detail.error(control, message). Field wording: data-error-required,
+    // data-error-format, data-error-range and data-error-length on the control.
+    // Template side: templates/_form_field.html (form_field, error_summary).
+    (function () {
+      if (typeof document.querySelectorAll !== 'function') return;
+      var TITLE_PREFIX = 'Error: ';
+      var KEEP_HOURS = 24;
+      var SECRET = /(pass(word|phrase)?|secret|token|api[_-]?key|credential|private[_-]?key|authorization|cookie|otp|mfa[_-]?code)/i;
+      function t(source, values) { return window.LightworkI18n ? window.LightworkI18n.text(source, values) : source.replace(/\{(\w+)\}/g, function (_m, k) { return values && values[k] != null ? values[k] : ''; }); }
+      function controls(form) {
+        return Array.prototype.filter.call(form.elements, function (c) {
+          return c.matches && c.matches('input, select, textarea') && c.type !== 'hidden' && !c.disabled;
+        });
+      }
+      function labelText(control) {
+        var label = null;
+        if (control.type === 'radio' || control.type === 'checkbox') {
+          var group = control.closest('fieldset');
+          if (control.type === 'radio' && group && group.querySelector('legend')) label = group.querySelector('legend');
+        }
+        if (!label && control.labels && control.labels.length) label = control.labels[0];
+        var text = '';
+        if (label) {
+          var copy = label.cloneNode(true);
+          Array.prototype.forEach.call(copy.querySelectorAll('.mv-required, .sr-only, input, select, textarea, button, [role="status"]'), function (n) { n.remove(); });
+          text = copy.textContent;
+        }
+        if (!text.trim()) text = control.getAttribute('aria-label') || control.name || '';
+        return text.replace(/\s+/g, ' ').replace(/\s*\((optional|required)\)\s*$/i, '').replace(/[:*]\s*$/, '').trim();
+      }
+      function lower(text) { return /^[A-Z][a-z]/.test(text) ? text.charAt(0).toLowerCase() + text.slice(1) : text; }
+      // The message for one invalid control: the page's own words first, then
+      // a written error another script already showed for it, then a plain default.
+      function messageFor(control) {
+        var v = control.validity, d = control.dataset || {}, label = lower(labelText(control));
+        if (v.valueMissing && d.errorRequired) return d.errorRequired;
+        if ((v.typeMismatch || v.patternMismatch || v.badInput) && d.errorFormat) return d.errorFormat;
+        if ((v.rangeUnderflow || v.rangeOverflow || v.stepMismatch) && d.errorRange) return d.errorRange;
+        if ((v.tooLong || v.tooShort) && d.errorLength) return d.errorLength;
+        var shown = describedError(control);
+        if (shown) return shown;
+        if (v.valueMissing) {
+          if (control.type === 'checkbox') return t('Tick the box to confirm: {label}', {label: labelText(control)});
+          if (control.tagName === 'SELECT' || control.type === 'radio') return t('Choose {label}.', {label: label});
+          return t('Enter {label}.', {label: label});
+        }
+        if (v.typeMismatch && control.type === 'email') return t('Enter a full email address. For example: name@company.com.');
+        if (v.typeMismatch && control.type === 'url') return t('Enter a full web address, starting with https://.');
+        if (v.badInput) return t('Enter {label} as a number.', {label: label});
+        if (v.rangeUnderflow) return t('Enter {label} of at least {min}.', {label: label, min: control.min});
+        if (v.rangeOverflow) return t('Enter {label} of no more than {max}.', {label: label, max: control.max});
+        if (v.stepMismatch) return t('Check {label}: use at most two decimal places.', {label: label});
+        if (v.tooLong) return t('Shorten {label} to {max} characters or fewer.', {label: label, max: control.maxLength});
+        if (v.tooShort) return t('Make {label} at least {min} characters long.', {label: label, min: control.minLength});
+        if (v.patternMismatch) return t('Check the format of {label}.', {label: label});
+        return control.validationMessage || t('Check {label}.', {label: label});
+      }
+      function describedError(control) {
+        var ids = (control.getAttribute('aria-describedby') || '').split(/\s+/);
+        for (var i = 0; i < ids.length; i++) {
+          var node = ids[i] && document.getElementById(ids[i]);
+          if (node && !node.hidden && node.classList.contains('mv-form__err') && !node.hasAttribute('data-mv-field-error')) {
+            var text = node.textContent.replace(/^\s*Error:\s*/, '').trim();
+            if (text) return text;
+          }
+        }
+        return '';
+      }
+      function target(control) {
+        if (control.type === 'radio') {
+          var first = control.form && control.form.querySelector('input[type="radio"][name="' + (window.CSS && CSS.escape ? CSS.escape(control.name) : control.name) + '"]');
+          if (first) control = first;
+        }
+        if (!control.id) control.id = 'mvf-' + Math.random().toString(36).slice(2, 10);
+        return control;
+      }
+      // The field's error slot: its own (id-error or data-mv-error-for), or a
+      // written error another script already ties to it (aria-describedby).
+      function existingSlot(control) {
+        var slot = document.getElementById(control.id + '-error') ||
+          (control.form && control.form.querySelector('[data-mv-error-for="' + control.id + '"]'));
+        if (slot) return slot;
+        var ids = (control.getAttribute('aria-describedby') || '').split(/\s+/);
+        for (var i = 0; i < ids.length; i++) {
+          var node = ids[i] && document.getElementById(ids[i]);
+          if (node && node.classList.contains('mv-form__err')) return node;
+        }
+        return null;
+      }
+      function slotFor(control) {
+        var slot = existingSlot(control);
+        if (slot) return slot;
+        slot = document.createElement('p');
+        slot.className = 'mv-form__err mv-field__error'; slot.id = control.id + '-error'; slot.hidden = true;
+        var anchor = control.closest('.mv-field') || (control.labels && control.labels[0] && control.labels[0].contains(control) ? control.labels[0] : control);
+        if (anchor === control.closest('.mv-field')) anchor.appendChild(slot);
+        else anchor.insertAdjacentElement('afterend', slot);
+        return slot;
+      }
+      function describe(control, id, on) {
+        var ids = (control.getAttribute('aria-describedby') || '').split(/\s+/).filter(function (x) { return x && x !== id; });
+        if (on) ids.unshift(id);
+        if (ids.length) control.setAttribute('aria-describedby', ids.join(' ')); else control.removeAttribute('aria-describedby');
+      }
+      function markField(control, message) {
+        var slot = slotFor(control);
+        slot.setAttribute('data-mv-field-error', '');
+        slot.replaceChildren();
+        var hidden = document.createElement('span'); hidden.className = 'sr-only'; hidden.textContent = t('Error:') + ' ';
+        slot.append(hidden, document.createTextNode(message));
+        slot.hidden = false;
+        control.setAttribute('aria-invalid', 'true');
+        describe(control, slot.id, true);
+        var wrap = control.closest('.mv-field'); if (wrap) wrap.classList.add('mv-field--error');
+      }
+      function unmarkField(control) {
+        var slot = existingSlot(control);
+        if (slot && slot.hasAttribute('data-mv-field-error')) {
+          slot.hidden = true; slot.replaceChildren(); slot.removeAttribute('data-mv-field-error');
+          describe(control, slot.id, false);
+        }
+        if (control.getAttribute('aria-invalid') === 'true') control.removeAttribute('aria-invalid');
+        var wrap = control.closest('.mv-field'); if (wrap) wrap.classList.remove('mv-field--error');
+      }
+      function summaryFor(form) {
+        var box = form.querySelector('[data-mv-error-summary]');
+        var before = form.previousElementSibling;
+        if (!box && before && before.hasAttribute('data-mv-error-summary')) box = before;
+        if (box) return box;
+        box = document.createElement('div');
+        box.className = 'mv-error-summary'; box.setAttribute('data-mv-error-summary', '');
+        box.id = (form.id || 'mvf-' + Math.random().toString(36).slice(2, 10)) + '-errors';
+        box.tabIndex = -1; box.hidden = true;
+        form.insertBefore(box, form.firstChild);
+        return box;
+      }
+      function setTitle(on) {
+        var has = document.title.indexOf(TITLE_PREFIX) === 0;
+        if (on && !has) document.title = TITLE_PREFIX + document.title;
+        if (!on && has && !document.querySelector('[data-mv-error-summary]:not([hidden])')) document.title = document.title.slice(TITLE_PREFIX.length);
+      }
+      function renderSummary(form, problems, general) {
+        var box = summaryFor(form);
+        box.replaceChildren();
+        box.setAttribute('tabindex', '-1');
+        var titleId = box.id + '-title';
+        var title = document.createElement('h2'); title.className = 'mv-error-summary__title'; title.id = titleId;
+        title.textContent = problems.length ? t('There is a problem') : t('This was not saved');
+        box.setAttribute('aria-labelledby', titleId);
+        box.appendChild(title);
+        if (general) { var p = document.createElement('p'); p.className = 'mv-error-summary__body'; p.textContent = general; box.appendChild(p); }
+        if (problems.length) {
+          var list = document.createElement('ul'); list.className = 'mv-error-summary__list';
+          problems.forEach(function (problem) {
+            var item = document.createElement('li'), link = document.createElement('a');
+            link.href = '#' + problem.control.id; link.textContent = problem.message;
+            item.appendChild(link); list.appendChild(item);
+          });
+          box.appendChild(list);
+        }
+        box.hidden = false;
+        setTitle(true);
+        var disclosure = form.closest('details');
+        while (disclosure) { disclosure.open = true; disclosure = disclosure.parentElement && disclosure.parentElement.closest('details'); }
+        box.focus();
+        return box;
+      }
+      function clear(form) {
+        controls(form).forEach(unmarkField);
+        var box = form.querySelector('[data-mv-error-summary]') || (form.previousElementSibling && form.previousElementSibling.hasAttribute('data-mv-error-summary') ? form.previousElementSibling : null);
+        if (box) { box.hidden = true; box.replaceChildren(); }
+        setTitle(false);
+      }
+      function show(form, errors, opts) {
+        opts = opts || {};
+        controls(form).forEach(unmarkField);
+        var seen = [], problems = [];
+        (errors || []).forEach(function (e) {
+          var c = typeof e.field === 'string' ? (document.getElementById(e.field) || form.elements[e.field]) : e.field;
+          if (c && c.length && !c.tagName) c = c[0];
+          if (!c || seen.indexOf(c) >= 0) return;
+          c = target(c); seen.push(c);
+          markField(c, e.message);
+          problems.push({control: c, message: e.message});
+        });
+        if (!problems.length && !opts.message) { clear(form); return null; }
+        return renderSummary(form, problems, opts.message || '');
+      }
+      function validate(form) {
+        var problems = [], seenGroups = {};
+        controls(form).forEach(function (c) {
+          if (c.closest('[hidden]') && !c.closest('details')) return;   // a branch that is not in use
+          if (c.type === 'radio') { if (seenGroups[c.name]) return; seenGroups[c.name] = true; }
+          if (c.checkValidity()) return;   // fires 'invalid' so page handlers can word it first
+          problems.push({field: c, message: messageFor(c)});
+        });
+        var extra = [];
+        form.dispatchEvent(new CustomEvent('mv:validate', {detail: {error: function (control, message) { extra.push({field: control, message: message}); }}}));
+        extra.forEach(function (e) { if (!problems.some(function (p) { return p.field === e.field; })) problems.push(e); });
+        if (!problems.length) { clear(form); return true; }
+        // Keep the page's field order in the summary.
+        var order = controls(form);
+        problems.sort(function (a, b) { return order.indexOf(a.field) - order.indexOf(b.field); });
+        show(form, problems);
+        return false;
+      }
+      function fail(form, failure, action) {
+        var text = window.mvErrorText ? window.mvErrorText(failure, action) : 'Could not ' + action + '. Try again.';
+        return show(form, [], {message: text + ' ' + t('What you entered is still here.')});
+      }
+      // Keeping what was typed, in this tab only. Hidden, password, file and
+      // secret-looking fields are never kept.
+      function keepKey(form) { return 'mv-keep:' + location.pathname + ':' + form.getAttribute('data-mv-keep'); }
+      function keepable(c) {
+        return !/^(password|file|hidden|submit|button|reset)$/.test(c.type) && !c.hasAttribute('data-mv-keep-off') &&
+          !SECRET.test(c.name || '') && !SECRET.test(c.id || '') && c.autocomplete !== 'one-time-code';
+      }
+      function keyOf(c) { return c.name || c.id; }
+      function save(form) {
+        var values = {};
+        controls(form).filter(keepable).forEach(function (c) {
+          var k = keyOf(c); if (!k) return;
+          if (c.type === 'checkbox' || c.type === 'radio') { values[k] = values[k] || []; if (c.checked) values[k].push(c.value); }
+          else if (c.tagName === 'SELECT' && c.multiple) values[k] = Array.prototype.filter.call(c.options, function (o) { return o.selected; }).map(function (o) { return o.value; });
+          else values[k] = c.value;
+        });
+        try { sessionStorage.setItem(keepKey(form), JSON.stringify({at: Date.now(), values: values})); } catch (_) {}
+      }
+      function stored(form) {
+        try {
+          var raw = JSON.parse(sessionStorage.getItem(keepKey(form)) || 'null');
+          if (!raw || typeof raw.values !== 'object' || Date.now() - raw.at > KEEP_HOURS * 3600000) return null;
+          return raw.values;
+        } catch (_) { return null; }
+      }
+      function forget(form) {
+        try { sessionStorage.removeItem(keepKey(form)); } catch (_) {}
+        var note = form.querySelector('.mv-keep-note'); if (note) note.remove();
+      }
+      function restore(form) {
+        var values = stored(form), changed = [];
+        if (!values) return false;
+        controls(form).filter(keepable).forEach(function (c) {
+          var k = keyOf(c); if (!k || !(k in values)) return;
+          var v = values[k], before = c.type === 'checkbox' || c.type === 'radio' ? c.checked : c.value;
+          if (c.type === 'checkbox' || c.type === 'radio') c.checked = Array.isArray(v) && v.indexOf(c.value) >= 0;
+          else if (c.tagName === 'SELECT' && c.multiple) Array.prototype.forEach.call(c.options, function (o) { o.selected = Array.isArray(v) && v.indexOf(o.value) >= 0; });
+          else if (c.tagName !== 'SELECT' || Array.prototype.some.call(c.options, function (o) { return o.value === v; })) c.value = v;
+          if ((c.type === 'checkbox' || c.type === 'radio' ? c.checked : c.value) !== before) changed.push(c);
+        });
+        // Pages react to the restored values; the stored copy is not rewritten meanwhile.
+        form.__mvRestoring = true;
+        try { changed.forEach(function (c) { c.dispatchEvent(new Event('change', {bubbles: true})); }); }
+        finally { form.__mvRestoring = false; }
+        if (changed.length) {
+          var section = form.closest('details');
+          while (section) { section.open = true; section = section.parentElement && section.parentElement.closest('details'); }
+        }
+        if (changed.length && !form.querySelector('.mv-keep-note')) {
+          var note = document.createElement('p'); note.className = 'mv-keep-note'; note.setAttribute('role', 'status');
+          note.appendChild(document.createTextNode(t('We kept what you typed here earlier. Check it, then save.') + ' '));
+          var reset = document.createElement('button'); reset.type = 'button'; reset.className = 'btn btn--ghost';
+          reset.textContent = t('Clear the form');
+          reset.addEventListener('click', function () { form.reset(); clear(form); controls(form).forEach(function (c) { c.dispatchEvent(new Event('change', {bubbles: true})); }); forget(form); });
+          note.appendChild(reset);
+          var box = summaryFor(form);
+          box.insertAdjacentElement('afterend', note);
+        }
+        return changed.length > 0;
+      }
+      function wireKeep(form) {
+        if (form.__mvKeep) return; form.__mvKeep = true;
+        var name = form.getAttribute('data-mv-keep');
+        var done = document.querySelectorAll('[data-mv-keep-done]');
+        for (var i = 0; i < done.length; i++) {
+          if ((done[i].getAttribute('data-mv-keep-done') || '').split(/\s+/).indexOf(name) >= 0) { forget(form); return wireSave(form); }
+        }
+        restore(form);
+        wireSave(form);
+      }
+      function wireSave(form) {
+        form.addEventListener('input', function () { if (!form.__mvRestoring) save(form); });
+        form.addEventListener('change', function () { if (!form.__mvRestoring) save(form); });
+      }
+      function wire(root) {
+        Array.prototype.forEach.call((root || document).querySelectorAll('form[data-mv-validate]'), function (form) { form.noValidate = true; });
+        Array.prototype.forEach.call((root || document).querySelectorAll('form[data-mv-keep]'), wireKeep);
+        // Errors the server rendered: the summary takes focus once, on load.
+        var shown = (root || document).querySelector('[data-mv-error-summary]:not([hidden])');
+        if (shown && shown.querySelector('a, p')) { setTitle(true); shown.focus(); }
+      }
+      // A summary link moves focus into its field (opening any closed
+      // section first) with the field's label in view.
+      document.addEventListener('click', function (event) {
+        var link = event.target && event.target.closest && event.target.closest('[data-mv-error-summary] a[href^="#"]');
+        if (!link) return;
+        var c = document.getElementById(decodeURIComponent(link.getAttribute('href').slice(1)));
+        if (!c) return;
+        event.preventDefault();
+        var disclosure = c.closest('details');
+        while (disclosure) { disclosure.open = true; disclosure = disclosure.parentElement && disclosure.parentElement.closest('details'); }
+        var label = c.labels && c.labels[0];
+        if (label && label.scrollIntoView) label.scrollIntoView({block: 'center'});
+        c.focus();
+      });
+      // Runs before the page's own submit handlers (capture), so a confirm
+      // dialog or a request never starts while a field still needs fixing.
+      document.addEventListener('submit', function (event) {
+        var form = event.target;
+        if (!(form instanceof HTMLFormElement) || !form.hasAttribute('data-mv-validate')) return;
+        if (!validate(form)) { event.preventDefault(); event.stopImmediatePropagation(); }
+      }, true);
+      // A field that is being fixed loses its error at once; the summary stays until the next submit.
+      function fixing(event) {
+        var c = event.target;
+        if (c && c.form && c.getAttribute && c.getAttribute('aria-invalid') === 'true' && c.form.hasAttribute('data-mv-validate') &&
+            (!c.validity || c.validity.valid)) unmarkField(c);
+      }
+      document.addEventListener('input', fixing);
+      document.addEventListener('change', fixing);
+      window.mvFieldErrors = {validate: validate, show: show, fail: fail, clear: clear, restore: restore, forget: forget, wire: wire};
+      wire(document);
+    })();
+
     // Collapsible sidebar groups. Chat-first: groups start COLLAPSED so the
     // nav isn't a wall of every page — the group holding the active page is
     // always forced open, and any group the user pins open persists per-group
