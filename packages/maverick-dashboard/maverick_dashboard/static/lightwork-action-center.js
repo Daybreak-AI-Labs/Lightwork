@@ -7,7 +7,7 @@
   const coverage = document.getElementById("ac-coverage"), previous = document.getElementById("ac-previous");
   const next = document.getElementById("ac-next"), page = document.getElementById("ac-page");
   let model = null, offset = 0, busy = false, generation = 0, expired = false;
-  const labels = {connection_attention:"Your connections needing attention",task_attention:"Your task questions and recovery",approval:"Approvals",flow_approval:"Flow approvals",signoff:"Sign-offs",assessment:"Assessments",project_review:"Project reviews",vendor_reconciliation:"Actions to double-check in other apps"};
+  const labels = {connection_attention:"Your connections needing attention",task_attention:"Your task questions and recovery",approval:"Approvals",flow_approval:"Flow approvals",signoff:"Result approvals",assessment:"Assessments",project_review:"Project reviews",vendor_reconciliation:"Actions to double-check in other apps"};
   const ACTIONS = {"jira.create":"Create a Jira issue"};
   const OBSERVATIONS = {
     execution_attempt: { recorded: "Lightwork recorded the attempt" },

@@ -62,7 +62,7 @@ test('owner shares an exact captured result and assigned colleague reviews it wi
   // Sharing asks for an in-page confirmation that names the reviewer.
   const share=page.getByRole('dialog',{name:'Share exactly the captured result shown above with browser-colleague?'});
   await share.getByRole('button',{name:'Share for review',exact:true}).click();const packet=await (await sent).json();
-  await expect(page.locator('#pr-status')).toContainText('Sent for review. No task was run or signed off.');
+  await expect(page.locator('#pr-status')).toContainText('Sent for review. No task was started or approved.');
   const reviewer=await browser.newContext({baseURL,viewport:{width:320,height:800},extraHTTPHeaders:{Origin:baseURL,'X-Browser-Principal':'browser-colleague'}});
   try {
     const review=await reviewer.newPage();review.on('dialog',dialog=>dialog.accept());

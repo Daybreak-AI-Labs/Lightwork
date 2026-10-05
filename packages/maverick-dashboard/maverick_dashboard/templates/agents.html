@@ -1257,7 +1257,7 @@
         // "Require approval to finish": gate the final step (or add a review step).
         if (window.__afApprovalOn && window.__afApprovalOn()) {
           if (steps.length) { if (!steps[steps.length - 1].gate) steps[steps.length - 1].gate = 'review'; }
-          else steps.push({ name: 'Final review', instruction: 'Human sign-off before finishing.', tools: [], gate: 'review' });
+          else steps.push({ name: 'Final review', instruction: 'A person approves the result before it is finished.', tools: [], gate: 'review' });
         }
         return steps;
       }
@@ -1464,7 +1464,7 @@
         {% if editable %}<p><a href="#agent-autonomy" id="jc-autonomy-open">Review independence settings</a></p>{% endif %}
       </div>
       <div class="jc-cards" id="jc-stats"></div>
-      <p class="muted" id="jc-stats-note">Finishing a run does not prove the result was useful. Approved deliverables require a person's sign-off; this card does not estimate savings or return on investment without customer evidence.</p>
+      <p class="muted" id="jc-stats-note">Finishing a task does not prove the result was useful. A result that needs approval counts only after a person approves it; this card does not estimate savings or return on investment without customer evidence.</p>
       <div class="jc-sec"><h3>Cost level</h3>
         <div class="jc-tier">
           <span class="jc-band" id="jc-band"></span>
@@ -1530,9 +1530,9 @@
       chips(el('jc-tools'), (jd.tools||[]).map(function(t){ return window.mvHuman?mvHuman(t):t; }));
       chips(el('jc-guard'), jd.guardrails, 'deny');
       el('jc-stats').innerHTML =
-        stat(Number(sc.runs)||0, 'Runs') +
-        stat(Number(sc.completed)||0, 'Finished runs') +
-        stat(Number(sc.delivered)||0, 'Approved deliverables') +
+        stat(Number(sc.runs)||0, 'Tasks') +
+        stat(Number(sc.completed)||0, 'Finished tasks') +
+        stat(Number(sc.delivered)||0, 'Approved results') +
         stat(money(sc.cost), 'AI cost');
       var band=ct.band||'unknown';
       var b=el('jc-band'); b.className='jc-band '+band; b.textContent=ct.model?(ct.label||band)+' cost':'Model unavailable';

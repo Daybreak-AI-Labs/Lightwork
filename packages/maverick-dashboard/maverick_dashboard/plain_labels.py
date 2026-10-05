@@ -147,7 +147,7 @@ FEATURE_HELP = {
     "outcome_measurement": "Compare how long work took before and after Lightwork, using your own numbers.",
     "commitment_viability": "See whether reported capacity and stock can cover two accepted orders, and what needs a decision before an option closes.",
     "guided_onboarding": "Offer a step-by-step path to your first finished piece of work.",
-    "action_center": "Collect approvals, sign-offs and reviews waiting for you in one list.",
+    "action_center": "Collect approvals and reviews waiting for you in one list.",
     "draft_recovery": "Keep a private, encrypted copy of unfinished work so it survives a closed tab.",
     "support_center": "Let administrators prepare a support report to send to the Lightwork team. Nothing is sent automatically.",
     "record_search": "Find vendors, evidence, assessments, tasks and reports by name.",

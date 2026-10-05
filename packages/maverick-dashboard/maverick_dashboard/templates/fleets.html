@@ -12,7 +12,7 @@
                      in <a href="/approvals">Approvals</a> and every decision
                      is listed below.' | safe) %}
     {{ state('Current state', (fleets | length) ~ (' team' if fleets | length == 1 else ' teams'),
-             badge=((pending_count ~ ' awaiting sign-off') if pending_count
+             badge=((pending_count ~ ' awaiting approval') if pending_count
                     else 'nothing waiting'),
              badge_class='warn' if pending_count else 'ok',
              copy='Create a team, give its agents tasks, and review every

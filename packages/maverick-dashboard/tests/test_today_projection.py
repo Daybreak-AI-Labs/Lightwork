@@ -85,4 +85,4 @@ def test_today_lists_what_waits_on_this_person_and_only_counts_the_shared_queue(
     # module or a source that loaded fine says nothing.
     assert [(c["kind"], c["status"]) for c in out["coverage"]] == [
         ("approval", "unavailable"), ("signoff", "partial")]
-    assert [c["label"] for c in out["coverage"]] == ["Approvals", "Sign-offs"]
+    assert [c["label"] for c in out["coverage"]] == ["Approvals", "Result approvals"]

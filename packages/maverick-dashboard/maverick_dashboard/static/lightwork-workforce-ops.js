@@ -186,7 +186,7 @@
         d.can_change_things_while_drafting
           ? plural(d.can_change_things_while_drafting, 'agent or specialist', 'agents and specialists') + ' that should only draft can reach tools that change things. Review these below.'
           : 'No agent or specialist that only drafts can reach tools that change things.',
-        members(d.sign_off_enforced) + ' must have a person sign off their work' +
+        members(d.sign_off_enforced) + ' must have a person approve their work' +
           (d.sign_off_only_asked ? '; ' + plural(d.sign_off_only_asked, 'more') + ' only ask for it in their instructions.' : '.'),
         members(d.extra_refusals) + ' refuse extra kinds of requests for their field; ' +
           members(d.with_deliverable) + ' produce a defined piece of work.',

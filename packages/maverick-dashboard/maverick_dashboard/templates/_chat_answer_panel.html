@@ -55,7 +55,7 @@
               <a class="btn btn--ghost" href="/api/v1/goals/{{ goal.id }}/deliverable.csv">{{ ui("Download for hand-off (CSV)") }}</a>
             {% endif %}
           {% elif goal.status == 'done' and can_operate %}
-            <p class="signoff__prompt">{{ ui('A manager must approve this before it is acted on.' if deliverable.gate == 'approval' else 'A reviewer must sign off before this is acted on.') }}</p>
+            <p class="signoff__prompt">{{ ui('A manager must approve this before it is acted on.' if deliverable.gate == 'approval' else 'A reviewer must approve this before it is acted on.') }}</p>
             <textarea lang="und" dir="auto" data-user-content id="signoff-note" class="input" rows="2" placeholder="Optional review note…" aria-label="Review note"></textarea>
             <div class="signoff__actions">
               <button id="signoff-approve" class="btn btn--primary" type="button" data-decision="approved">{{ ui("Approve") }}</button>
@@ -63,7 +63,7 @@
             </div>
             <p id="signoff-msg" role="status" aria-live="polite" class="muted" style="min-height: 1em; margin: var(--space-2) 0 0;"></p>
           {% else %}
-            <p class="signoff__prompt muted">{% if goal.status == 'done' %}An authorized task owner must review this result before sharing.{% else %}{{ ui('Approval opens when the result is finished.' if deliverable.gate == 'approval' else 'Sign-off opens when the result is finished.') }}{% endif %}</p>
+            <p class="signoff__prompt muted">{% if goal.status == 'done' %}An authorized task owner must review this result before sharing.{% else %}{{ ui('Approval opens when the result is finished.') }}{% endif %}</p>
           {% endif %}
         </div>
       {% endif %}
@@ -71,7 +71,7 @@
         {% if goal.status in ('blocked', 'failed') %}
         <p><a class="btn btn--ghost" href="/tasks/{{ goal.id }}/diagnostics">{{ ui("Review safe task diagnostics") }}</a> · <a class="btn btn--ghost" href="/help?task={{ goal.id }}#issue-report">{{ ui("Prepare support report") }}</a></p>
         {% endif %}
-        {# Always-available thumbs up/down (unlike the gated sign-off above): any
+        {# Always-available thumbs up/down (unlike the gated approval above): any
            finished result can be rated, and the verdict grounds a real outcome
            into the learning loop. #}
         {% if can_operate %}<div id="feedback" class="feedback" role="group" aria-label="{{ ut('Rate this result') }}" lang="{{ ul('Rate this result') }}">

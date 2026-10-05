@@ -109,7 +109,7 @@
     el("outcome-timeline").replaceChildren();
     const decision=packet.status==="approved"?"Review accepted for this captured version":packet.status==="changes_requested"?"Changes requested from the owner":packet.status==="cancelled"?"Review withdrawn":"Review decision pending";
     const outcome=node("li",decision);if(packet.stale)outcome.append("; ",node("span","the source has changed since capture"));
-    el("outcome-timeline").append(outcome,node("li","Next owner: {name}",{name:who(packet.status==="pending"?packet.reviewer:packet.owner)}),node("li","Task execution and deliverable sign-off: separate decisions; this packet grants neither."),node("li","External delivery and verification: not established by this review packet."));
+    el("outcome-timeline").append(outcome,node("li","Next owner: {name}",{name:who(packet.status==="pending"?packet.reviewer:packet.owner)}),node("li","Starting the task and approving its result are separate steps. This review allows neither."),node("li","External delivery and verification: not established by this review packet."));
     el("owner-task").replaceChildren();if(packet.owner===model.principal){
       const link=node("a","Open your task to decide its next step");link.href="/chat/goal/"+encodeURIComponent(packet.snapshot.goal_id);el("owner-task").append(link);
       if(packet.status==="changes_requested"||packet.stale){
@@ -156,7 +156,7 @@
     if(resubmission){if(Number(el("project").value)!==resubmission.project_id)throw problem("Choose the original project for this resubmission.");payload.previous_packet_id=resubmission.id;payload.change_summary=el("change-summary").value;if(!payload.change_summary.trim())throw problem("Explain what changed before resubmitting.");}
     if(!payload.reviewer||!payload.note.trim()||!Number.isFinite(payload.due_at))throw problem("Choose a reviewer, future due date and review note.");
     if(!(await ask("Share exactly the captured result shown above with {name}?","Share for review",{name:who(payload.reviewer)})))return;
-    const saved=await api("/projects/"+el("project").value+"/packets",{method:"POST",body:JSON.stringify(payload)});savedRequestNote=el("note").value;resubmission=null;el("change-summary").value="";el("resubmit").hidden=true;resetReference("send");await refresh();packet=saved;renderPacket();status("Sent for review. No task was run or signed off.");
+    const saved=await api("/projects/"+el("project").value+"/packets",{method:"POST",body:JSON.stringify(payload)});savedRequestNote=el("note").value;resubmission=null;el("change-summary").value="";el("resubmit").hidden=true;resetReference("send");await refresh();packet=saved;renderPacket();status("Sent for review. No task was started or approved.");
   });});
   el("respond").addEventListener("submit",event=>{event.preventDefault();action(async()=>{
     if(!packet||packetUnavailable)throw problem("Open a review first.");const kind=el("action").value,note=el("response-note").value;
