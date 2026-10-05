@@ -1111,14 +1111,14 @@
         rm.type = 'button';
         rm.className = 'btn btn--ghost btn--danger';
         rm.setAttribute('aria-label', translated('Delete the schedule for {name}',{name:s.title||translated('Untitled task')}));
-        productText(rm,'Delete');
+        productText(rm,'Delete schedule');
         rm.addEventListener('click', function () { cancelSchedule(s.id, li); });
         li.appendChild(span); li.appendChild(rm);
         schedList.appendChild(li);
       });
     }
     async function cancelSchedule(id, li) {
-      if (!(await mvConfirm('Delete this schedule? It will stop running.', { okText: 'Delete', productCopy:true }))) return;
+      if (!(await mvConfirm('Delete this schedule? It will stop running.', { okText: 'Delete schedule', productCopy:true }))) return;
       try {
         var resp = await fetch('/api/v1/schedules/' + encodeURIComponent(id), { method: 'DELETE' });
         if (resp.ok) { if (li) li.remove(); mvToast(translated('Schedule deleted')); } else { mvFail(resp, 'delete the schedule'); }
@@ -1217,14 +1217,14 @@
         rm.type = 'button';
         rm.className = 'btn btn--ghost btn--danger';
         rm.setAttribute('aria-label', translated('Delete the start {name}',{name:t.name}));
-        productText(rm,'Delete');
+        productText(rm,'Delete start');
         rm.addEventListener('click', function () { deleteTrigger(t.name, li); });
         li.appendChild(span); li.appendChild(rm);
         trigList.appendChild(li);
       });
     }
     async function deleteTrigger(name, li) {
-      if (!(await mvConfirm('Delete {name}? Other apps will no longer be able to start this workflow.', { okText: 'Delete', productCopy:true,values:{name:name} }))) return;
+      if (!(await mvConfirm('Delete {name}? Other apps will no longer be able to start this workflow.', { okText: 'Delete start', productCopy:true,values:{name:name} }))) return;
       try {
         var resp = await fetch('/api/v1/triggers/' + encodeURIComponent(name), { method: 'DELETE' });
         if (resp.ok) {

@@ -1249,12 +1249,62 @@
     if (level) await showPreview(level.closest('.settings-all-row'), level);
   });
 
+  // ---- what an approval threshold would have needed --------------------------
+  // Report only, from the recorded approval checks (approval_threshold_preview).
+  function count(n, one, many) { return n + ' ' + (n === 1 ? one : many); }
+  function approvalPreview(box, data) {
+    var days = data.days || 30, lead = document.createElement('p');
+    if (!data.enough) {
+      var title = document.createElement('strong');
+      title.textContent = 'Not enough recorded checks yet:';
+      lead.appendChild(title);
+      if (data.recording_started_at) {
+        var when = document.createElement('time');
+        when.setAttribute('data-mv-time', String(data.recording_started_at));
+        when.setAttribute('data-mv-time-mode', 'date');
+        when.textContent = new Date(data.recording_started_at * 1000).toLocaleDateString(undefined, {day: 'numeric', month: 'short', year: 'numeric'});
+        lead.appendChild(document.createTextNode(' recording started '));
+        lead.appendChild(when);
+        lead.appendChild(document.createTextNode('; a preview needs ' + days + ' days' + (data.reason === 'count'
+          ? ' and at least ' + data.minimum + ' checks (' + data.checks + ' so far in the last ' + days + ' days).' : '.')));
+      } else {
+        lead.appendChild(document.createTextNode(' none have been recorded; a preview needs ' + days + ' days.'));
+      }
+      box.appendChild(lead);
+      if (data.recording_on === false) {
+        var off = document.createElement('p');
+        off.className = 'muted';
+        off.textContent = 'Keep a record of approval checks is off, so no new checks are recorded.';
+        box.appendChild(off);
+      }
+      if (window.mvFormatTimes) window.mvFormatTimes(box);
+    } else {
+      var needed = data.actions
+        ? count(data.actions, 'action', 'actions') + ' by ' + (data.agents === 1 ? '1 agent or specialist' : data.agents + ' agents and specialists')
+        : 'no actions';
+      lead.textContent = 'In the last ' + days + ' days, ' + needed + ' would have needed approval at this level.' +
+        (data.refused ? ' ' + data.refused + ' would have been refused.' : '');
+      box.appendChild(lead);
+      var recorded = data.recorded || {}, basis = document.createElement('p');
+      basis.className = 'muted';
+      basis.textContent = 'Counted from the ' + count(data.checks, 'approval check', 'approval checks') + ' recorded in that time: ' +
+        (recorded.asked || 0) + ' went to a person, ' + (recorded.allowed || 0) + ' went ahead without asking and ' +
+        (recorded.refused || 0) + ' were refused. An action someone chose to always allow still goes ahead.';
+      box.appendChild(basis);
+    }
+    var only = document.createElement('p');
+    var strong = document.createElement('strong');
+    strong.textContent = 'Preview only. Nothing changes until you save.';
+    only.appendChild(strong);
+    box.appendChild(only);
+  }
+
   // ---- what saving a choice would also change -------------------------------
   async function showPreview(row, select) {
     var box = row.querySelector('[data-preview]');
     if (!box) return;
     box.textContent = '';
-    if (!select.value) return;
+    if (!select.value && !select.hasAttribute('data-preview-any')) return;
     box.textContent = 'Working out what this changes…';
     try {
       var response = await window.fetch(select.getAttribute('data-preview-url') + '?value=' +
@@ -1267,6 +1317,7 @@
         box.textContent = data && typeof data.message === 'string' ? data.message : errorText(response, 'work out what this changes');
         return;
       }
+      if (data.kind === 'approval_checks') { approvalPreview(box, data); return; }
       var lead = document.createElement('p');
       lead.textContent = (data.items || []).length
         ? 'Saving this also changes:' : 'Saving this changes nothing else: every setting it covers already matches.';

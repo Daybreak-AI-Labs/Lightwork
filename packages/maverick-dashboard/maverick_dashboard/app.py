@@ -6522,6 +6522,7 @@ def savings_page(request: Request, days: int = 90) -> HTMLResponse:
         request,
         "savings.html",
         {
+            "spend_recorded_at": _newest_cost_at(_world(), value_view["owner"]),
             "days": days,
             "cfg": cfg,
             "report": savings_mod.to_dict(report),
@@ -6553,9 +6554,11 @@ def billing_page(request: Request, format: str = "", period: str = "", receipt_o
     owner = goal_owner_filter(request)
     episodes = iter_episodes(w, owner=owner, finished_only=True)
     months: dict[str, dict] = {}
+    newest_cost_at = None  # the "Spending updated" label: the newest finished attempt
     for e in episodes:
         if not e.ended_at:
             continue
+        newest_cost_at = max(newest_cost_at or e.ended_at, e.ended_at)
         m = datetime.fromtimestamp(e.started_at, timezone.utc).strftime("%Y-%m")
         b = months.setdefault(
             m, {"period": m, "cost": 0.0, "unknown_cost_runs": 0, "input_tokens": 0, "output_tokens": 0, "runs": 0}
@@ -6658,6 +6661,7 @@ def billing_page(request: Request, format: str = "", period: str = "", receipt_o
             "series": series,
             "usage_receipts": receipts,
             "usage_receipt_error": receipt_error,
+            "spend_recorded_at": newest_cost_at,
             "invoice_admin": has_global_permission(request, "admin"),
             "invoice_workspaces": _invoice_workspaces(tenant, tenant_label),
         },
@@ -13593,7 +13597,8 @@ async def goal_builder_page(request: Request) -> HTMLResponse:
     )
 
 
-_BUILDER_MODES = (("", "Describe it", "/workflow-builder"), ("steps", "Steps", "/workflow-builder?mode=steps"))
+# "Step by step", not "Steps": the editor's own view switch already says "Steps".
+_BUILDER_MODES = (("", "Describe it", "/workflow-builder"), ("steps", "Step by step", "/workflow-builder?mode=steps"))
 _FLOW_ID = re.compile(r"[A-Za-z0-9_-]{1,120}")
 
 

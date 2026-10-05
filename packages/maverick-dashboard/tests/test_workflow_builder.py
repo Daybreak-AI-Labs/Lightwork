@@ -974,3 +974,17 @@ def test_extract_document_refuses_unsupported_empty_and_oversize(monkeypatch, tm
     for name, body in [("procedure.exe", b"data"), ("empty.txt", b""), ("large.txt", b"x" * 512001)]:
         response = _client().post("/api/v1/workflows/extract-source", files={"file": (name, body)})
         assert response.status_code == 422
+
+
+def test_the_two_delete_buttons_say_what_they_delete_in_every_language():
+    from pathlib import Path
+
+    from maverick_dashboard import i18n_journeys
+    page = (Path(__file__).resolve().parents[1] / "maverick_dashboard" / "templates" / "workflow_builder.html").read_text(encoding="utf-8")
+    assert "productText(rm,'Delete');" not in page and "okText: 'Delete'," not in page
+    assert page.count("productText(rm,'Delete schedule');") == 1
+    assert page.count("productText(rm,'Delete start');") == 1
+    assert "okText: 'Delete schedule'" in page and "okText: 'Delete start'" in page
+    for label in ("Delete schedule", "Delete start"):
+        for lang in i18n_journeys.TRANSLATION_LANGS:
+            assert i18n_journeys.entry(label, lang)[1] == lang, (label, lang)

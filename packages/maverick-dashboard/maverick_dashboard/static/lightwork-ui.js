@@ -1208,6 +1208,15 @@
           status.setAttribute('data-mv-save-status', '');
           form.appendChild(status);
         }
+        if (form.getAttribute('data-mv-save') === 'background' && typeof window.fetch === 'function') {
+          event.preventDefault();
+          if (form._mvSaving) return;   // one save at a time; the first is still on its way
+          say(status, 'Saving…');
+          if (button) button.setAttribute('aria-busy', 'true');
+          form._mvSaveButton = button;
+          send(form, button, status);
+          return;
+        }
         say(status, 'Saving…');
         if (button) button.setAttribute('aria-busy', 'true');
         form._mvSaveButton = button;
@@ -1220,6 +1229,92 @@
           clear(form, form._mvSaveButton);
         });
       });
+
+      // <form data-mv-save="background"> saves without leaving the page until
+      // the save is done, so nothing typed is lost when it fails. The same
+      // request as the plain form (same address, same fields, same-origin
+      // cookies), asking for a plain JSON error instead of an error page:
+      //   saved, with a next page  -> that page (it says "Saved.")
+      //   saved, with a result     -> data-mv-save-show="id": the element with
+      //                               that id is replaced by the answer's copy
+      //   needs a fresh sign-in    -> the sign-in, which comes back to this page
+      //                               (data-mv-keep restores what was typed)
+      //   anything else            -> the form's error summary (mvFieldErrors),
+      //                               every value kept; offline and an expired
+      //                               sign-in say so in plain words
+      // data-mv-save-what="save the limit" words the failure.
+      var hooks = window.mvBackgroundSave = {navigate: function (url) { window.location.assign(url); }};
+      function returnHere(link) {
+        try {
+          var url = new URL(link, window.location.href);
+          if (url.origin !== window.location.origin) return null;
+          if (url.searchParams.has('return_to')) url.searchParams.set('return_to', window.location.pathname + window.location.search);
+          return url.pathname + url.search;
+        } catch (_) { return null; }
+      }
+      function failed(form, button, status, failure, payload) {
+        form._mvSaving = false;
+        clear(form, button);
+        var what = form.getAttribute('data-mv-save-what') || 'save this';
+        var fields = window.mvFieldErrors, business = payload && window.mvBusinessError ? window.mvBusinessError(payload) : null;
+        if (fields && business && business.field_errors) {
+          var errors = Object.keys(business.field_errors).filter(function (name) { return form.elements[name]; })
+            .map(function (name) { return {field: name, message: business.field_errors[name]}; });
+          var kept = window.LightworkI18n ? window.LightworkI18n.text('What you entered is still here.') : 'What you entered is still here.';
+          fields.show(form, errors, {message: errors.length ? '' : business.message + ' ' + kept});
+        } else if (fields) {
+          fields.fail(form, failure, what);
+        } else if (window.mvFail) {
+          window.mvFail(failure, what);
+        }
+      }
+      function showResult(form, id, html) {
+        var fresh = new DOMParser().parseFromString(html, 'text/html').getElementById(id);
+        var here = document.getElementById(id);
+        if (!fresh || !here) return false;
+        var copy = document.importNode(fresh, true);
+        here.replaceWith(copy);
+        if (window.mvFormatTimes) window.mvFormatTimes(copy);
+        var landing = copy.querySelector('[tabindex="-1"]') || copy;
+        if (landing.focus) landing.focus();
+        return true;
+      }
+      async function send(form, button, status) {
+        form._mvSaving = true;
+        var action = button && button.hasAttribute('formaction') ? button.formAction : form.action;
+        var data = new FormData(form);
+        if (button && button.name) data.append(button.name, button.value);
+        var response, payload = null;
+        try {
+          response = await window.fetch(action, {method: 'POST', body: new URLSearchParams(data),
+            credentials: 'same-origin', headers: {Accept: 'application/json'}});
+        } catch (error) {
+          return failed(form, button, status, error, null);
+        }
+        var fields = window.mvFieldErrors;
+        if (response.ok) {
+          if (fields) { fields.clear(form); fields.forget(form); }
+          var show = form.getAttribute('data-mv-save-show');
+          if (!response.redirected && show && showResult(form, show, await response.text())) {
+            form._mvSaving = false;
+            clear(form, button);
+            form.reset();
+            form.dispatchEvent(new CustomEvent('mv:saved', {bubbles: true}));
+            return;
+          }
+          // The page the server sent us to shows "Saved."; a page drawn for
+          // this request alone is drawn again from the same address.
+          return response.redirected ? hooks.navigate(response.url) : window.location.reload();
+        }
+        try { payload = await response.clone().json(); } catch (_) { payload = null; }
+        var reauthenticate = response.headers.get('X-Reauthenticate') || (payload && payload.reauthenticate);
+        var signIn = response.status === 403 && reauthenticate && returnHere(reauthenticate);
+        if (signIn) {
+          say(status, 'Sign in again to continue…');
+          return hooks.navigate(signIn);
+        }
+        failed(form, button, status, {status: response.status, detail: payload && payload.detail}, payload);
+      }
     })();
 
     // Required fields say so beside their label: one small "Required" for

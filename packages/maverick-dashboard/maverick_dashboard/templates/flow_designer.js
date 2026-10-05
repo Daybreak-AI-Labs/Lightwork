@@ -179,8 +179,12 @@
     });
   }
   function canonicalizeSavedFlow(id) {
-    var path = '/flows/designer/' + encodeURIComponent(id);
-    if (window.location.pathname !== path || window.location.search) {
+    // The workflow builder's Steps mode keeps the saved flow in its own address,
+    // so a reload, Back and Copilot's flow controls stay on this tab.
+    var path = window.location.pathname === '/workflow-builder'
+      ? '/workflow-builder?mode=steps&flow=' + encodeURIComponent(id)
+      : '/flows/designer/' + encodeURIComponent(id);
+    if (window.location.pathname + window.location.search !== path) {
       window.history.replaceState(window.history.state, '', path);
     }
     canvas.setAttribute('data-flow-id', id);

@@ -496,10 +496,28 @@
       const rowButtons = Array.from(document.querySelectorAll(
         'article.approval-item[data-id="' + id + '"] button.approval-btn'));
       const originalDisabled = rowButtons.map(function(b) { return b.disabled; });
+      let busyLine = null;
       function restoreDisabledStates() {
         rowButtons.forEach(function(b, index) {
           b.disabled = originalDisabled[index];
         });
+        btn.removeAttribute('aria-busy');
+        if (busyLine) busyLine.textContent = '';
+      }
+      // Feedback on the card itself the moment the decision is sent (as forms
+      // say "Saving…"); the page's status line below may be out of view.
+      function showBusy(text) {
+        const cell = item0 && item0.querySelector('.approval-actions');
+        if (!cell) return;
+        busyLine = cell.querySelector('[data-approval-busy]');
+        if (!busyLine) {
+          busyLine = document.createElement('span');
+          busyLine.className = 'muted'; busyLine.setAttribute('role', 'status');
+          busyLine.setAttribute('data-approval-busy', '');
+          cell.appendChild(busyLine);
+        }
+        busyLine.textContent = text;
+        btn.setAttribute('aria-busy', 'true');
       }
       const body = {};
       if (action === 'approve' && item0 && isHighRisk(item0)) {
@@ -535,6 +553,7 @@
         body.rationale = revisionRationale;
       }
       rowButtons.forEach(function(b) { b.disabled = true; });
+      showBusy(action === 'approve' ? 'Approving…' : action === 'deny' ? 'Rejecting…' : 'Sending back…');
       say((action === 'approve' ? 'Approving ' :
         action === 'deny' ? 'Rejecting ' : 'Sending back ') + label + '…');
       try {

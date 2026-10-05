@@ -684,6 +684,8 @@ def _row(setting: catalog.Setting, layers: dict[str, Any]) -> dict[str, Any]:
         row["segment_at"] = catalog.workspace_address_parts(value)[1] if state["known"] else -1
     if setting.preview:
         row["preview_url"] = f"{API_PATH}/preview/{setting.id}"
+        # The approval-threshold preview also covers the default (empty) choice.
+        row["preview_any"] = setting.preview == "approval_checks"
     if setting.control == "table":
         if setting.choices_from == "tools":
             row["choices"] = []  # long list: the page loads it when needed
@@ -1690,6 +1692,15 @@ async def catalog_preview(request: Request, setting_id: str, value: str = "") ->
 
     headers = {"Cache-Control": "no-store"}
     setting = catalog.BY_ID.get(setting_id)
+    if setting is not None and setting.preview == "approval_checks":
+        # The approval threshold: what the recorded checks would have needed (report only).
+        from . import approval_threshold_preview
+        try:
+            shown = await run_in_threadpool(approval_threshold_preview.preview, value)
+        except ValueError as exc:
+            return JSONResponse({"detail": str(exc), "message": str(exc)}, status_code=422,
+                                headers=headers)
+        return JSONResponse(shown, headers=headers)
     if setting is None or setting.preview != "governance_level":
         message = "This setting has nothing to preview."
         return JSONResponse({"detail": message, "message": message}, status_code=404,

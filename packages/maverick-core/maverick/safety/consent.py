@@ -251,12 +251,20 @@ def _installation_mode(risk: str | None = None) -> str:
     env = os.environ.get("MAVERICK_CONSENT_MODE")
     if env:
         return env.strip().lower()
+    return installation_mode_for(_configured_mode(), risk)
+
+
+def installation_mode_for(configured: str, risk: str | None = None) -> str:
+    """The mode an action at ``risk`` gets when ``[safety] consent_mode`` is
+    ``configured`` ("" when unset) and no environment variable overrides it.
+    The approval-threshold preview asks this for a choice not yet saved; the
+    gate asks it for the saved one, so both always agree."""
     # The same choice made in the dashboard (``[safety] consent_mode``); the
-    # environment variable above still wins. A value this module does not know
+    # environment variable still wins. A value this module does not know
     # fails closed to asking a person.
-    configured = _configured_mode()
+    configured = str(configured or "").strip().lower()
     if configured:
-        return configured
+        return configured if configured in _CONSENT_MODES else "ask"
     # Enterprise mode flips the default to 'ask' so destructive actions are gated
     # (a person decides; headless runs are denied) when handling sensitive data.
     try:
@@ -1623,6 +1631,7 @@ __all__ = [
     "require_operation_consent",
     "require_person",
     "grant_persistent",
+    "installation_mode_for",
     "revoke",
     "list_grants",
 ]

@@ -321,3 +321,32 @@ def test_copilot_shared_teaching_forms_pin_the_current_step_and_flow_revision(mo
             overview["flow"]["revision"] = "changed"
             assert client.post(BASE + "/prepare", json=body).status_code == 409
             overview["flow"]["revision"] = "current-2"
+
+
+def _listed(rows):
+    return sorted((row["id"], row["available"], row.get("blocked", "")) for row in rows)
+
+
+def test_the_workflow_builder_steps_mode_offers_the_same_flow_actions(monkeypatch):
+    """/workflow-builder?mode=steps&flow=<id> is the designer's editor: Copilot
+    offers the same Run, Turn off, Delete and Harden there, through the same
+    adapters, native calls and checks. Without a saved flow nothing is offered."""
+    client, state = _harness(monkeypatch)
+    flow_actions = {"learning.workflow_run", "learning.workflow_harden",
+                    "learning.workflow_turn_off", "learning.workflow_delete"}
+    with client:
+        designer = client.post(BASE + "/catalog", json={"page": PAGE, "selection": SELECTION}).json()
+        steps = client.post(BASE + "/catalog", json={"page": "/workflow-builder", "selection": SELECTION}).json()
+        assert flow_actions <= {row["id"] for row in designer["operations"]}
+        assert _listed(steps["operations"]) == _listed(designer["operations"])
+        item = next(row for row in steps["operations"] if row["id"] == "learning.workflow_run")
+        prepared = client.post(BASE + "/prepare", json={"page": "/workflow-builder", "selection": SELECTION,
+            "operation": item["id"], "context": steps["context"], "revision": item["revision"], "arguments": {}})
+        assert prepared.status_code == 200 and prepared.json()["details"]["flow_id"] == "owned"
+        # Describe-it mode (no saved flow): no flow action is listed, not even as unavailable.
+        empty = client.post(BASE + "/catalog", json={"page": "/workflow-builder", "selection": {}}).json()
+        assert not flow_actions & {row["id"] for row in empty["operations"]}
+        # Access is still the native check: a flow this person may not open is never offered.
+        state["allowed"] = False
+        denied = client.post(BASE + "/catalog", json={"page": "/workflow-builder", "selection": SELECTION}).json()
+        assert not flow_actions & {row["id"] for row in denied["operations"]}

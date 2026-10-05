@@ -208,6 +208,25 @@ def checks_since(world: Any, since: float, *, limit: int = 10_000) -> list[dict]
              "agent": r["agent"], "outcome": r["outcome"]} for r in rows]
 
 
-__all__ = ["DEFAULT_RETENTION_DAYS", "OUTCOMES", "checks_since", "enabled", "outcome_for",
-           "prune", "record_check", "record_decision", "retention_days",
-           "validate_retention_days"]
+def tally_since(world: Any, since: float) -> list[dict]:
+    """This workspace's checks at or after ``since``, counted by risk, agent
+    and outcome: ``{risk, agent, outcome, checks}``. Bounded by the few risk
+    levels and outcomes times the agents and specialists, whatever the volume."""
+    rows = _rows(world, "SELECT risk, agent, outcome, COUNT(*) AS checks FROM approval_checks"
+                        " WHERE workspace = ? AND checked_at >= ? GROUP BY risk, agent, outcome",
+                 (_workspace(), float(since)))
+    return [{"risk": r["risk"], "agent": r["agent"], "outcome": r["outcome"], "checks": int(r["checks"])}
+            for r in rows]
+
+
+def first_check_at(world: Any) -> float | None:
+    """When this workspace's oldest kept check was recorded, or None."""
+    rows = _rows(world, "SELECT MIN(checked_at) AS first FROM approval_checks WHERE workspace = ?",
+                 (_workspace(),))
+    first = rows[0]["first"] if rows else None
+    return None if first is None else float(first)
+
+
+__all__ = ["DEFAULT_RETENTION_DAYS", "OUTCOMES", "checks_since", "enabled", "first_check_at",
+           "outcome_for", "prune", "record_check", "record_decision", "retention_days",
+           "tally_since", "validate_retention_days"]

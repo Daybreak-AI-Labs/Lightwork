@@ -1,7 +1,8 @@
 // The optional ease-of-use survey ([analytics] usability_survey). Loaded only
 // when it is on and someone is signed in. It never opens a dialog or moves
 // focus: the quarterly survey and the one question after a common task are
-// panels at the top of the page, and "Not now" hides them for the quarter.
+// panels after the page's own content -- added below it, so nothing already
+// on screen moves when one arrives -- and "Not now" hides them for the quarter.
 (function () {
   'use strict';
   var API = '/api/v1/usability-survey';
@@ -46,7 +47,7 @@
     var status = el('p', 'muted');
     status.setAttribute('role', 'status');
     box._status = status;
-    main.insertBefore(box, main.firstChild);
+    main.appendChild(box);
     return box;
   }
   function radios(name, legend, labels, start) {
@@ -156,7 +157,7 @@
     form.appendChild(row);
     box.appendChild(form);
     box.appendChild(box._status);
-    box._status.textContent = 'One optional question about ' + label + ' is at the top of the page.';
+    box._status.textContent = 'One optional question about ' + label + ' is at the end of this page.';
     later.addEventListener('click', function () { skip(box, 'seq:' + task, 'this task'); });
     form.addEventListener('submit', async function (event) {
       event.preventDefault();

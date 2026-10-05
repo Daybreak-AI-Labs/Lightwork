@@ -39,6 +39,6 @@ def prepare(request, selection, _arguments):
 
 def entries():
     return (Adapter("learning.workflow_explanation", "Explain this learned workflow", "learning",
-                    "/workflows", ("/flows/designer/*", "/flows/*/runs/*"), EmptyInput,
+                    "/workflows", ("/flows/designer/*", "/workflow-builder", "/flows/*/runs/*"), EmptyInput,
                     snapshot, prepare,
                     aliases=("why can this workflow run", "explain this learned workflow", "show learning evidence", "why did this workflow run")),)

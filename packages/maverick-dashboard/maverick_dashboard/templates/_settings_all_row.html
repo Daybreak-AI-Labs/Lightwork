@@ -37,7 +37,7 @@
       </label>
     {% elif s.control == 'select' %}
       <select class="select" id="{{ cid }}" data-input aria-describedby="{{ cid }}-help"
-              {% if s.preview_url %}data-preview-url="{{ s.preview_url }}"{% endif %}>
+              {% if s.preview_url %}data-preview-url="{{ s.preview_url }}"{% if s.preview_any %} data-preview-any{% endif %}{% endif %}>
         {% for c in s.choices %}
         <option value="{{ c.value }}" {% if c.value == s.value %}selected{% endif %}>{{ c.label }}</option>
         {% endfor %}

@@ -1278,6 +1278,10 @@ def users_set_role(
     except rbac.RecoveryAuthorityError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
+        from .product_errors import background_save, product_error
+        if background_save(request):
+            message = "Choose a person and a role from the lists."
+            raise product_error(422, "role_invalid", message, field_errors={"role": message}) from exc
         raise HTTPException(status_code=400, detail="invalid principal or role") from exc
     return RedirectResponse("/users?saved=set", status_code=303)
 
@@ -1368,6 +1372,21 @@ def users_delete_custom_role(
     return RedirectResponse("/users?saved=role_deleted", status_code=303)
 
 
+def _invite_refusal(reason: str) -> HTTPException:
+    """An invite the store refused, in words for the person who typed it."""
+    from .product_errors import product_error
+    if "email" in reason:
+        message = "Enter a full email address. For example: name@company.com."
+        return product_error(422, "invite_email", message, field_errors={"email": message})
+    if "role" in reason:
+        message = "Choose a role from the list."
+        return product_error(422, "invite_role", message, field_errors={"role": message})
+    if "too many" in reason:
+        return product_error(409, "invite_full", "There are too many invitations waiting. "
+                             "Cancel some you no longer need, then try again.")
+    return product_error(422, "invite_invalid", "The invitation could not be created. Check the details and try again.")
+
+
 @router.post("/users/invite", response_class=HTMLResponse)
 def users_invite(request: Request, email: str = Form(...),
                  role: str = Form(...)) -> HTMLResponse:
@@ -1386,6 +1405,9 @@ def users_invite(request: Request, email: str = Form(...),
     try:
         inv, token = invites.create_invite(email, role, created_by=invited_by)
     except ValueError as exc:
+        from .product_errors import background_save
+        if background_save(request):
+            raise _invite_refusal(str(exc)) from exc
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     link = str(request.base_url).rstrip("/") + f"/auth/invite/{token}"
     _admin_audit(request, "invite_created", email=inv.email, role=getattr(inv, "role", role))
@@ -1666,6 +1688,22 @@ def _limit_redirect(saved: str = "", error: str = "") -> RedirectResponse:
     return RedirectResponse(f"/spending-limits?{query}", status_code=303)
 
 
+# The form field each refusal is about, for a save made in the background.
+_LIMIT_ERROR_FIELDS = {"amount": "amount", "period": "period", "person": "principal"}
+
+
+def _limit_error(request: Request, code: str) -> RedirectResponse:
+    """A refused limit: the page with its message, or, for a background save,
+    the same message tied to its field (nothing typed is lost)."""
+    from .product_errors import background_save, product_error
+    if not background_save(request):
+        return _limit_redirect(error=code)
+    message = _LIMIT_ERRORS.get(code, _LIMIT_ERRORS["amount"])
+    field = _LIMIT_ERROR_FIELDS.get(code)
+    raise product_error(422, f"spending_limit_{code}", message,
+                        field_errors={field: message} if field else None)
+
+
 @router.post("/spending-limits/workspace")
 def spending_limits_workspace(request: Request, choice: str = Form("none"),
                               amount: str = Form(""), period: str = Form("month")) -> RedirectResponse:
@@ -1680,7 +1718,7 @@ def spending_limits_workspace(request: Request, choice: str = Form("none"),
             return _limit_redirect("workspace_cleared")
         spending_limits.set_workspace_limit(amount, period, actor=actor)
     except spending_limits.SpendingLimitError as exc:
-        return _limit_redirect(error=exc.code)
+        return _limit_error(request, exc.code)
     return _limit_redirect("workspace")
 
 
@@ -1698,7 +1736,7 @@ def spending_limits_default(request: Request, choice: str = Form("none"),
             return _limit_redirect("default_cleared")
         spending_limits.set_default_limit(amount, period, actor=actor)
     except spending_limits.SpendingLimitError as exc:
-        return _limit_redirect(error=exc.code)
+        return _limit_error(request, exc.code)
     return _limit_redirect("default")
 
 
@@ -1717,5 +1755,5 @@ def spending_limits_person(request: Request, principal: str = Form(""),
             return _limit_redirect("person_cleared")
         spending_limits.set_user_limit(principal, amount, period, actor=actor)
     except spending_limits.SpendingLimitError as exc:
-        return _limit_redirect(error=exc.code)
+        return _limit_error(request, exc.code)
     return _limit_redirect("person")

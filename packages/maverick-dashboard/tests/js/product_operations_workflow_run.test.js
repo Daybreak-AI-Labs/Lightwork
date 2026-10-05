@@ -15,7 +15,7 @@ function setup(release = "a".repeat(64), config = {}) {
   const dom = new JSDOM('<aside id="mv-copilot"><section id="mv-product-operations">' +
     '<p id="mv-product-operation-status"></p><div id="mv-product-operation-buttons"></div>' +
     '<div id="mv-product-operation-form"></div></section></aside>',
-  {url: "http://testserver/flows/designer/owned"});
+  {url: config.url || "http://testserver/flows/designer/owned"});
   const calls = [], launched = [];
   const catalog = {schema: 1, selection: {kind: "flow", id: "owned"}, context: "c".repeat(64),
     checked_at: 1, operations: [{id: "learning.workflow_run", label: "Run this published workflow",
@@ -88,4 +88,25 @@ test("the status line never says controls change nothing when one opens a form o
   writes.window.LightworkProductOperations.open(); await turn();
   assert.match(writes.document.querySelector('#mv-product-operation-status').textContent,
     /Changes require a separate review and confirmation/);
+});
+
+test("the workflow builder's Steps mode offers the same flow control for the flow it has open", async () => {
+  const ui = setup("a".repeat(64), {url: "http://testserver/workflow-builder?mode=steps&flow=owned"});
+  ui.window.LightworkProductOperations.open(); await turn();
+  assert.deepEqual(ui.calls[0].body, {page: "/workflow-builder", selection: {kind: "flow", id: "owned"}});
+  ui.document.querySelector('#mv-product-operation-buttons button').click(); await turn(); await turn();
+  assert.deepEqual(ui.calls.at(-1).body.selection, {kind: "flow", id: "owned"});
+  const launch = Array.from(ui.document.querySelectorAll('#mv-product-operation-form button'))
+    .find(button => button.textContent === 'Enter workflow inputs');
+  launch.click(); await turn();
+  assert.deepEqual(ui.launched, [['owned', 'a'.repeat(64)]]);
+});
+
+test("describing a new workflow, or a malformed flow address, selects no flow", async () => {
+  for (const url of ["http://testserver/workflow-builder", "http://testserver/workflow-builder?mode=steps",
+                     "http://testserver/workflow-builder?mode=steps&flow=..%2Fetc"]) {
+    const ui = setup("a".repeat(64), {url});
+    ui.window.LightworkProductOperations.open(); await turn();
+    assert.deepEqual(ui.calls[0].body.selection, {}, url);
+  }
 });

@@ -288,7 +288,9 @@ class Setting:
     # the fingerprint out from what is installed here (settings_fingerprints).
     fingerprint_of: str = ""
     # A preview the page shows before saving (``governance_level``: the
-    # settings a governance level changes; settings_governance_level).
+    # settings a governance level changes; settings_governance_level.
+    # ``approval_checks``: what the recorded approval checks would have
+    # needed at the chosen level; approval_threshold_preview).
     preview: str = ""
 
     @property
