@@ -7123,22 +7123,7 @@ async def agents_page(request: Request) -> HTMLResponse:
             agent for agent in list_agents()
             if allowed is None or set(agent["suites"]) <= allowed
         ]
-        # Datalist values are what the browser returns to the input. Give each
-        # visible choice an unambiguous value even when two packs have the same
-        # description or their names look identical after humanizing them.
-        picker_values: set[str] = set()
-        for agent in agents:
-            name = agent["name"]
-            base = f"{agent.get('description') or _idfmt.humanize(name)} · {_idfmt.humanize(name)}"
-            value = base
-            if value in picker_values:
-                value = f"{base} ({name})"
-            suffix = 2
-            while value in picker_values:
-                value = f"{base} ({name}, {suffix})"
-                suffix += 1
-            agent["picker_label"] = value
-            picker_values.add(value)
+        _assign_picker_labels(agents)
         if editable:
             rejected_agents = [
                 view for name in sorted(rejected_workspace_domains())
@@ -7163,6 +7148,27 @@ async def agents_page(request: Request) -> HTMLResponse:
          "selected": selected, "editable": editable, "creating": creating,
          "can_set_model_cost_tier": has_global_permission(request, "admin")},
     )
+
+
+def _assign_picker_labels(agents: list[dict]) -> None:
+    """Give each specialist an unambiguous picker label, even when two packs
+    share a description or their names look identical after humanizing."""
+    picker_values: set[str] = set()
+    for agent in agents:
+        name = agent["name"]
+        base = f"{agent.get('description') or _idfmt.humanize(name)} · {_idfmt.humanize(name)}"
+        value = base
+        if value in picker_values:
+            value = f"{base} ({name})"
+        suffix = 2
+        while value in picker_values:
+            value = f"{base} ({name}, {suffix})"
+            suffix += 1
+        agent["picker_label"] = value
+        picker_values.add(value)
+
+
+_PICKER_READINESS_ORDER = {"action_ready": 0, "needs_setup": 1}
 
 
 def _picker_rank(query: str, label: str, name: str) -> int | None:
@@ -7202,21 +7208,25 @@ async def agents_picker(request: Request, q: str = "", setup: bool = False, limi
         roster = list_agents()
     except Exception as exc:  # noqa: BLE001 - the page says the list is unavailable
         raise HTTPException(status_code=503, detail="The specialist list is unavailable. Try again.") from exc
+    visible = [agent for agent in roster if allowed is None or set(agent["suites"]) <= allowed]
+    _assign_picker_labels(visible)
     ranked = []
-    for position, agent in enumerate(roster):
-        if allowed is not None and not set(agent["suites"]) <= allowed:
-            continue
+    for position, agent in enumerate(visible):
         readiness = agent.get("readiness") or {}
-        ready = readiness.get("state") == "action_ready"
+        state = readiness.get("state")
+        ready = state == "action_ready"
         if not ready and not setup:
             continue
-        label = (agent.get("description") or _idfmt.humanize(agent["name"])) + (" (custom)" if agent.get("is_override") else "")
+        label = agent["picker_label"] + (" (custom)" if agent.get("is_override") else "")
         rank = _picker_rank(query, label, agent["name"])
         if rank is not None:
-            ranked.append((rank, position, {"name": agent["name"], "label": label, "ready": ready,
-                                            "readiness": readiness.get("label", "")}))
-    ranked.sort(key=lambda row: row[:2])
-    return {"items": [row[2] for row in ranked[:limit]], "total": len(ranked), "limit": limit}
+            # Best text match first; within it, specialists that can start, then
+            # those needing setup, then those whose setup check is unavailable.
+            ranked.append((rank, _PICKER_READINESS_ORDER.get(state, 2), position,
+                           {"name": agent["name"], "label": label, "ready": ready,
+                            "readiness": readiness.get("label", "")}))
+    ranked.sort(key=lambda row: row[:3])
+    return {"items": [row[3] for row in ranked[:limit]], "total": len(ranked), "limit": limit}
 
 
 @app.get("/assessments", response_class=HTMLResponse)

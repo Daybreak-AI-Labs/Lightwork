@@ -70,9 +70,14 @@ def test_chat_composer_markup_is_server_rendered_for_people_who_keep_drafts(clie
     assert 'name="lightwork-draft-context"' in body
     _assert_composer_wrapped(body, 'action="/chat/send"')
     assert body.count("data-draft-host") == 1
-    # The panel's own styles load with the page, not after the composer paints.
+    # The panel's own styles load with the page, not after the composer paints:
+    # they are part of the one shell stylesheet in the head.
     head = body.split("</head>", 1)[0]
-    assert "lightwork-draft-recovery.css" in head
+    assert "/static/lightwork.css" in head
+    from pathlib import Path
+    css = (Path(__file__).resolve().parents[1] / "maverick_dashboard" / "static" / "lightwork.css").read_text(encoding="utf-8")
+    recovery = (Path(__file__).resolve().parents[1] / "maverick_dashboard" / "static" / "lightwork-draft-recovery.css").read_text(encoding="utf-8")
+    assert recovery.strip() in css
 
 
 def test_task_reply_composer_markup_is_server_rendered(client, monkeypatch):

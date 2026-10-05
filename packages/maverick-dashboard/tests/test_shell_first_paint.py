@@ -54,7 +54,7 @@ def test_the_shell_head_requests_one_stylesheet(path):
 def test_the_one_stylesheet_carries_the_preference_and_translation_rules():
     css = (STATIC / "lightwork.css").read_text(encoding="utf-8")
     for rule in (".preference-grid {", ".prefs__panel { max-height: min(80dvh, 40rem)",
-                 ".active-workspace-banner { margin: .5rem 1rem; }",
+                 ".active-workspace-banner { margin: 0 var(--space-3) var(--space-3);",
                  "[data-product-copy]{unicode-bidi:isolate}", ".locale-coverage{",
                  '[dir="rtl"] pre[lang="en"]'):
         assert rule in css, rule

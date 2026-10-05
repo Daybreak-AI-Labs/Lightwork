@@ -76,7 +76,9 @@ def test_search_matches_the_words_people_see(client):
     target = next(agent for agent in roster if agent["readiness"]["state"] == "action_ready" and agent["description"])
     found = client.get("/agents/picker", params={"q": target["description"].upper()}).json()
     assert found["items"][0]["name"] == target["name"]
-    assert found["items"][0]["label"] == target["description"] + (" (custom)" if target["is_override"] else "")
+    # The label is the page's unambiguous "description · name" (custom packs marked).
+    assert found["items"][0]["label"].startswith(target["description"] + " · ")
+    assert found["items"][0]["label"].endswith(" (custom)") == bool(target["is_override"])
     # The exact pack name works too, as the old picker allowed.
     by_name = client.get("/agents/picker", params={"q": target["name"]}).json()
     assert target["name"] in [item["name"] for item in by_name["items"]]

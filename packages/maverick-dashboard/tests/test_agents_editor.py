@@ -50,13 +50,18 @@ class TestRosterAndView:
         ])
         response = client.get("/agents")
         assert response.status_code == 200
-        picker = response.text.split('<datalist id="agent-picker-list">', 1)[1].split("</datalist>", 1)[0]
-        assert picker.index('data-name="ready_pack"') < picker.index('data-name="blocked_pack"')
-        assert picker.index('data-name="blocked_pack"') < picker.index('data-name="unknown_pack"')
-        assert 'value="Ready specialist · Ready pack" data-name="ready_pack"' in picker
-        assert 'value="Ready specialist · Ready pack (ready-pack)" data-name="ready-pack"' in picker
-        assert " disabled" not in picker
+        # The picker searches /agents/picker (the page no longer ships every
+        # specialist): ready ones first, setup recovery still discoverable.
+        assert "Show specialists that need setup" in response.text
         assert "2 can start · 1 needs setup · 1 needs a setup check" in response.text
+        items = client.get("/agents/picker", params={"setup": "1"}).json()["items"]
+        names = [item["name"] for item in items]
+        assert names.index("ready_pack") < names.index("blocked_pack") < names.index("unknown_pack")
+        labels = {item["name"]: item["label"] for item in items}
+        assert labels["ready_pack"] == "Ready specialist · Ready pack"
+        assert labels["ready-pack"] == "Ready specialist · Ready pack (ready-pack)"
+        ready_only = client.get("/agents/picker").json()["items"]
+        assert {item["name"] for item in ready_only} == {"ready_pack", "ready-pack"}
 
     def test_unknown_setup_check_has_recovery_link(self, monkeypatch):
         from maverick import domain_edit

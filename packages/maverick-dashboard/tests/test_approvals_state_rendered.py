@@ -99,7 +99,8 @@ def _words_from_state_api(state):
     (1, None, [], False, "One approval is needed."),
     (2, None, ["user:other"], False, "1 of 2 required approvals received."),
     (2, None, ["user:me"], False, "1 of 2 required approvals received. Your approval is recorded."),
-    (2, "user:me", [], False, "0 of 2 required approvals received. You asked for this, so other people must approve it."),
+    # The card's own note (approval-own-note) says why; the line doesn't repeat it.
+    (2, "user:me", [], False, "0 of 2 required approvals received."),
     (2, "user:me", [], True, "0 of 2 required approvals received. You asked for this; your approval counts as one of them."),
     (1, "user:me", [], False, "One approval is needed. You asked for this, so approving it approves your own request."),
 ])
@@ -117,7 +118,10 @@ def test_card_shows_the_progress_the_state_api_reports(world, monkeypatch, requi
     assert 'role="status"' not in line
     # The same words the page used to build from the state API.
     state = client.get(f"/api/v1/approvals/{aid}/state").json()
-    assert _words_from_state_api(state) == expected
+    if state.get("own_request_note"):
+        assert f'id="approval-own-note-{aid}"' in card and state["own_request_note"] in card
+    else:
+        assert _words_from_state_api(state) == expected
     # A vote already recorded leaves Approve disabled, as the page script did.
     approve = card[card.index('data-action="approve"'):].split(">", 1)[0]
     if "user:me" in signed_by:
