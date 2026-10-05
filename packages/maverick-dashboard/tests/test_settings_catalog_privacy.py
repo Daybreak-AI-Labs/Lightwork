@@ -126,6 +126,8 @@ SAMPLES: dict[str, object] = {
     "consent_preferences.storage.backend": "postgres",
     "consent_preferences.storage.dsn": "postgresql://consent@db.example.com:5432/consent",  # pragma: allowlist secret
     "consent_preferences.storage.dsn_secret_ref": "$ACME_CONSENT_DSN",  # pragma: allowlist secret
+    # Letting the person who asked approve their own risky request loosens it.
+    "approval.separate_approver": "never",
 }
 
 # Other settings a switch needs before the module's reader accepts it.
@@ -729,13 +731,35 @@ def test_compliance_profiles_follow_the_saved_list(audit_rows):
 
 def test_dashboard_approval_wait_reads_the_setting_and_env_wins(monkeypatch, audit_rows):
     from maverick.safety.consent import _dashboard_timeout
+    from maverick_dashboard import settings_catalog as catalog
 
-    assert _dashboard_timeout() == 300.0
+    # Risky steps wait 30 minutes by default (it was 5).
+    assert _dashboard_timeout() == 1800.0
+    assert catalog.BY_ID["approval.dashboard_wait_seconds"].default == 1800
     assert _save({"approval.dashboard_wait_seconds": 2}).status_code == 200
     assert _dashboard_timeout() == 120.0
     monkeypatch.setenv("MAVERICK_CONSENT_DASHBOARD_TIMEOUT", "45")
     assert _dashboard_timeout() == 45.0
     assert _rows(client.get(API).json())["approval.dashboard_wait_seconds"]["locked"] is True
+
+
+def test_who_approves_a_risky_request_reads_the_setting_and_env_wins(monkeypatch, audit_rows):
+    from maverick.safety.dual_control import SEPARATE_APPROVER_MODES, separate_approver_mode
+    from maverick_dashboard import settings_catalog as catalog
+
+    monkeypatch.delenv("MAVERICK_SEPARATE_APPROVER", raising=False)
+    row = catalog.BY_ID["approval.separate_approver"]
+    assert row.default == separate_approver_mode() == "when_available"
+    assert tuple(value for value, _label in row.choices) == SEPARATE_APPROVER_MODES
+    assert _save({"approval.separate_approver": "always"}).status_code == 200
+    assert separate_approver_mode() == "always"
+    # Letting people approve their own risky requests weakens a protection.
+    assert _save({"approval.separate_approver": "never"}).status_code == 409
+    assert _save({"approval.separate_approver": "never"}, confirm=True).status_code == 200
+    assert separate_approver_mode() == "never"
+    monkeypatch.setenv("MAVERICK_SEPARATE_APPROVER", "when_available")
+    assert separate_approver_mode() == "when_available"
+    assert _rows(client.get(API).json())["approval.separate_approver"]["locked"] is True
 
 
 def test_a_module_page_value_survives_a_catalog_save(audit_rows):

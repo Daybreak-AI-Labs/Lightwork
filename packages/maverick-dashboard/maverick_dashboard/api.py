@@ -204,6 +204,7 @@ from .approval_decisions import (  # noqa: F401 -- re-exported for tests
     _deliver_approval_audit_event,
     _record_vote_or_raise,
     _require_acknowledgement,
+    _require_separate_approver,
     _safe_action_label,
     require_current_decision_card,
     undo_from_dashboard,
@@ -15219,6 +15220,7 @@ async def approve_approval(request: Request, approval_id: int) -> Response:
     world = _world()
     _require_settings_decider(request, world, approval_id, who, approving=True)
     _require_current_decision_card(world, approval_id, request)
+    _require_separate_approver(world, approval_id, who)
     _require_acknowledgement(world, approval_id, payload, who, channel="dashboard")
     event = _record_vote_or_raise(world, approval_id, "approved", who)
     return _approval_decision_response(
@@ -15434,19 +15436,22 @@ def approval_state(request: Request, approval_id: int) -> dict:
     require_permission(request, "operate")
     from .content_access import require_approval_content
     require_approval_content(request, approval_id)
-    st = _world().approval_state(approval_id)
-    if st is None:
+    world = _world()
+    st = world.approval_state(approval_id)
+    approval = world.get_approval(approval_id)
+    if st is None or approval is None:
         raise HTTPException(status_code=404, detail="no such approval")
-    from maverick.safety.dual_control import allow_self_approval
+    from .approval_decisions import own_request_note
 
     who = _supervisor(request)
     own = bool(st.get("requested_by")) and st.get("requested_by") == who
+    # What is actually enforced: the person who asked may approve unless
+    # someone else must (the separate-approver rule for a high-risk request,
+    # or two-person approval without self-approval); the note says why.
+    note = own_request_note(world, approval, who) if own else ""
     return {**st, "your_approval_recorded": who in st.get("approvers", []),
-            # What is actually enforced: one approver may be the person who
-            # asked; under two-person approval their vote counts only when
-            # [security] allow_self_approval is on.
-            "requested_by_you": own,
-            "self_approval_counts": int(st.get("approvals_required") or 1) <= 1 or allow_self_approval()}
+            "requested_by_you": own, "self_approval_counts": not note,
+            "own_request_note": note}
 
 
 @router.post("/approvals/{approval_id}/claim")

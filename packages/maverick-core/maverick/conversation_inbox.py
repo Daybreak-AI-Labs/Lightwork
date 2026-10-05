@@ -27,13 +27,19 @@ MODES = ("guidance", "queue", "independent")
 MAX_BYTES = 4 * 1024 * 1024
 MAX_FILES = 10
 MAX_ITEMS = 1000
+# People can add guidance, queue the next message or start separate work while
+# a task runs unless an administrator turned it off ([conversation_inbox]
+# enabled = false, in the organization or workspace settings). An explicit
+# "off" always stands.
+ENABLED_DEFAULT = True
 
 
 def policy():
     cfg = config.load_config().get("conversation_inbox", {})
     global_cfg = config.load_global_config().get("conversation_inbox", {})
     enabled = (not config.config_source_errors(include_tenant=True)
-               and global_cfg.get("enabled", False) is True and cfg.get("enabled", False) is True)
+               and global_cfg.get("enabled", ENABLED_DEFAULT) is True
+               and cfg.get("enabled", ENABLED_DEFAULT) is True)
     modes = [mode for mode in MODES if cfg.get(mode, True) is True and global_cfg.get(mode, True) is True]
     ceiling = global_cfg.get("max_pending", 20)
     pending = cfg.get("max_pending", 20)

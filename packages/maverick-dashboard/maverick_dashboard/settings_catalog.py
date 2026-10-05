@@ -516,15 +516,16 @@ SETTINGS: tuple[Setting, ...] = (
       env=("MAVERICK_SECURE_DEFAULT",),
       warning="Record signing, encryption and other protections that rely on this will turn off."),
     S("security", "approvals_required", "People needed to approve risky actions",
-      "How many different people must approve a high-risk action. One means a single approver, "
-      "who may be the person who asked. With two or more, the person who asked doesn't count "
-      "unless people may approve their own requests.",
+      "How many different people must approve a high-risk action. One means a single approver; "
+      "whether that may be the person who asked is set by Who approves a risky action someone "
+      "asked for. With two or more, the person who asked doesn't count unless people may approve "
+      "their own requests.",
       "number", "Security", 1, "maverick.safety.dual_control", minimum=1, maximum=5, integer=True,
       unit="people", weaker="lower", env=("MAVERICK_APPROVALS_REQUIRED",),
       warning="Fewer people will need to approve risky actions."),
     S("security", "allow_self_approval", "Let people approve their own requests",
       "When two or more people must approve, let the person who asked count as one of them. "
-      "With a single approver, the person who asked can always approve their own request.",
+      "With a single approver, Who approves a risky action someone asked for decides instead.",
       "toggle", "Security", False, "maverick.safety.dual_control", weaker=True,
       env=("MAVERICK_ALLOW_SELF_APPROVAL",),
       warning="The person who asked will count as one of the approvers."),

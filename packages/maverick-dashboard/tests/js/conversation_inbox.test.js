@@ -79,3 +79,11 @@ test('localized guidance review preserves exact employee text, attachments and a
  assert.equal(review.querySelector('img'),null);assert.equal(p.calls.filter(call=>call.options.method==='PATCH').length,0);
  p.dom.window.close();
 });
+
+test('during a run the composer says in plain words what each kind of message will do',async()=>{const p=page();await tick();p.api.updateComposer({asking:false,running:true,status:'active'});const chooser=p.doc.getElementById('conversation-send-mode'),explanation=p.doc.getElementById('conversation-send-explanation');assert.equal(p.doc.getElementById('conversation-send-options').hidden,false);
+  const said={};for(const mode of ['guidance','queue','independent']){chooser.value=mode;p.api.updateComposer({asking:false,running:true,status:'active'});said[mode]=explanation.textContent;}
+  assert.match(said.guidance,/reads it at its next safe point/);assert.match(said.guidance,/doesn't start a new task/);
+  assert.match(said.queue,/starts when the current task finishes/);assert.match(said.independent,/separate task now/);
+  for(const text of Object.values(said))assert.doesNotMatch(text,/billable|runner|consumes|snapshot/);p.dom.window.close();});
+test('an explicit workspace off says plainly that sending during a task is off',async()=>{const p=page({...state(),enabled:false});await tick();assert.equal(p.api.available,false);assert.equal(p.api.disabledByPolicy,true);assert.match(p.doc.getElementById('conversation-inbox-status').textContent,/^Sending messages during a task is turned off for this workspace\./);p.dom.window.close();});
+test('the plain explanation is translated',async()=>{const english="Lightwork saves this note for the current task. You check it once more, then the task reads it at its next safe point. It doesn't start a new task or undo steps already done.";const p=page(state(),null,{[english]:{text:'Note enregistrée.',lang:'fr'}});await tick();p.doc.getElementById('conversation-send-mode').value='guidance';p.api.updateComposer({asking:false,running:true,status:'active'});assert.equal(p.doc.getElementById('conversation-send-explanation').textContent,'Note enregistrée.');p.dom.window.close();});

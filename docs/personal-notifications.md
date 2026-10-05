@@ -4,7 +4,11 @@ Your preferences links to **Your notifications**. In-app alerts (the bell) are
 on by default: `[notifications] personal_alerts` is treated as on unless an
 administrator sets it to `false`, and an explicit `false` always stays off.
 Out of the box a named account hears when its tasks finish (or do not finish),
-need an answer or need attention, and when an approval waits on it. With
+need an answer or need attention, and when an approval waits on it. When a
+risky step has waited 10 minutes on the Approvals page with no decision, each
+person who could decide it in Lightwork gets one reminder in the bell, and the
+approval card says "Reminder sent" (`maverick_dashboard.approval_reminders`;
+in-app only, never email, Slack or Teams). With
 personal preferences on (the default), people can choose immediate alerts, a
 daily digest, event subscriptions, a time zone, quiet hours, project watches
 and temporary task mutes. Installation administrators can turn in-app alerts

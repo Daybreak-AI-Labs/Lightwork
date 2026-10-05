@@ -104,6 +104,11 @@ def _projection(request, actor: str, *, world=None) -> tuple[list[dict], list[di
             sources.append({"ref": f"approval:{approval.id}", "version": str(approval.requested_at),
                             "category": "needs-decision", "title": "Assigned approval", "label": "Needs your decision",
                             "href": f"/approvals#approval-{approval.id}", "goal_id": None, "project_id": None})
+        # Ten minutes without a decision: one reminder for each person who
+        # could decide the request in Lightwork.
+        from .approval_reminders import reminder_sources
+
+        sources.extend(reminder_sources(world, actor, suites=suites))
         from .flow_approval_inbox import pending_for_observer, pending_for_request
 
         flow_approvals = (pending_for_observer(actor) if request is None

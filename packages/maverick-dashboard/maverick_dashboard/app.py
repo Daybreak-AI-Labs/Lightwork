@@ -8709,16 +8709,28 @@ def _approval_source(provenance: str | None) -> str | None:
     return None
 
 
-def _approval_viewer_context(request: Request | None) -> dict:
-    """Who is looking at the queue, so a card can say "your own request"
-    exactly when the enforced rule treats it as one."""
+def _approval_viewer_context(request: Request | None, approvals: list) -> dict:
+    """Who is looking at the queue, so a card can say "your own request", and
+    -- when the enforced rules keep that person from approving it (someone
+    else must, or under two-person approval their vote doesn't count) -- why.
+    Also which waiting requests have had their one reminder sent."""
     if request is None:
-        return {"approval_viewer": "", "self_approval_allowed": False}
-    from maverick.safety.dual_control import allow_self_approval
-
+        return {"approval_viewer": "", "own_request_notes": {}, "approval_reminders": set()}
     from .api import _supervisor
+    from .approval_decisions import own_request_note
+    from .approval_reminders import reminder_sent
 
-    return {"approval_viewer": _supervisor(request), "self_approval_allowed": allow_self_approval()}
+    viewer = _supervisor(request)
+    world = _world()
+    notes = {}
+    reminders = set()
+    for approval in approvals:
+        note = own_request_note(world, approval, viewer)
+        if note:
+            notes[approval.id] = note
+        if reminder_sent(world, approval):
+            reminders.add(approval.id)
+    return {"approval_viewer": viewer, "own_request_notes": notes, "approval_reminders": reminders}
 
 
 def _approval_progress(approvals: list, request: Request) -> dict:
@@ -8735,6 +8747,7 @@ def _approval_progress(approvals: list, request: Request) -> dict:
     from maverick.safety.dual_control import allow_self_approval
 
     from .api import _supervisor
+    from .approval_decisions import own_request_note
 
     who = _supervisor(request)
     world = _world()
@@ -8755,7 +8768,10 @@ def _approval_progress(approvals: list, request: Request) -> dict:
         elif state.get("requested_by") and state.get("requested_by") == who:
             # The words follow what is enforced: one approver may be the person
             # who asked; under two-person approval their vote may not count.
-            if required > 1 and not allow_self_approval():
+            # When another approver must decide, the card already says why.
+            if own_request_note(world, approval, who):
+                pass
+            elif required > 1 and not allow_self_approval():
                 words.append("You asked for this, so other people must approve it.")
             elif required <= 1:
                 words.append("You asked for this, so approving it approves your own request.")
@@ -8830,7 +8846,7 @@ def _approval_queue_context(approvals: list, request: Request | None = None) -> 
         "approval_scopes": approval_scopes,
         "assessment_ids": assessment_ids,
         "approval_progress": _approval_progress(approvals, request) if request is not None else {},
-        **_approval_viewer_context(request),
+        **_approval_viewer_context(request, approvals),
     }
 
 

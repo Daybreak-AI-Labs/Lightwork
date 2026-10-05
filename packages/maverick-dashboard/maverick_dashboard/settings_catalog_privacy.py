@@ -1033,8 +1033,9 @@ def _other_rows(S) -> tuple:
                   "before high-risk actions, may stop applying."),
         S("approval", "dashboard_wait_seconds", "Wait for a dashboard approval up to",
           "How long an agent waits for someone to approve a risky action on the Approvals "
-          "page. With no answer in time, the action is refused.", "number", "Safety",
-          5 * _MINUTE, "maverick.safety.consent", subgroup="Approvals", minimum=1, maximum=60,
+          "page. After 10 minutes the people who can decide get one in-app reminder. With "
+          "no answer in time, the action is refused.", "number", "Safety",
+          30 * _MINUTE, "maverick.safety.consent", subgroup="Approvals", minimum=1, maximum=60,
           integer=True, scale=_MINUTE, unit="minutes",
           env=("MAVERICK_CONSENT_DASHBOARD_TIMEOUT",)),
         S("approval", "undo_grace_seconds", "Allow undo after a decision for",
@@ -1053,6 +1054,22 @@ def _other_rows(S) -> tuple:
           warning="High-risk actions can be approved with a single click, without "
                   "restating what they will do.",
           env=("MAVERICK_APPROVAL_REQUIRE_ACKNOWLEDGEMENT",)),
+        S("approval", "separate_approver", "Who approves a risky action someone asked for",
+          "Whether the person who asked for a high or critical risk action may approve it "
+          "themselves. By default someone else must, whenever another person can decide "
+          "it; where nobody else can, the person who asked may approve it and the record "
+          "says so. Always means someone else, even if the request then waits until it "
+          "expires and the action is refused.", "select", "Safety", "when_available",
+          "maverick.safety.dual_control", subgroup="Approvals",
+          choices=(("when_available", "Someone else, when another approver is available (default)"),
+                   ("always", "Always someone else"),
+                   ("never", "The person who asked may approve it")),
+          weaker=True, order=("always", "when_available", "never"),
+          env=("MAVERICK_SEPARATE_APPROVER",),
+          aliases="self approval approve own request second approver four eyes "
+                  "segregation of duties",
+          warning="People will be able to approve high-risk actions they asked for "
+                  "themselves while someone else could decide them."),
     )
 
 

@@ -1281,15 +1281,20 @@ def pick_signed_skills() -> dict[str, Any]:
 
 
 def pick_approvals() -> dict[str, Any]:
-    """``[approval]``: the undo window and the high-risk confirmation.
+    """``[approval]``: the undo window, the high-risk confirmation and who
+    approves a risky action the requester asked for.
 
     The Approvals page is the human-in-command loop: a decision can be undone
-    for ``undo_grace_seconds`` (the agent waits that long before acting) and
-    approving a high or critical risk request needs an explicit confirmation.
+    for ``undo_grace_seconds`` (the agent waits that long before acting),
+    approving a high or critical risk request needs an explicit confirmation,
+    and ``separate_approver`` says whether someone other than the person who
+    asked must approve it (default: whenever another approver is available).
     """
     console.print()
     console.print(
-        "[dim]Risky actions wait on the Approvals page for a person. A decision "
+        "[dim]Risky actions wait on the Approvals page for a person for up to 30 "
+        "minutes; after 10 minutes the people who can decide get one in-app "
+        "reminder, and with no decision in time the action is refused. A decision "
         "can be undone for a short while; the agent only acts once that window "
         "has passed.[/dim]"
     )
@@ -1302,9 +1307,19 @@ def pick_approvals() -> dict[str, Any]:
         "requests? (a ticked box for high, typing APPROVE for critical)",
         default=True,
     )
+    separate = _q_select(
+        "  Who approves a high or critical risk action someone asked for?",
+        [
+            "when_available - Someone else, whenever another approver is available (default).",
+            "always         - Always someone else, even if the request then waits and expires.",
+            "never          - The person who asked may approve it.",
+        ],
+        default="when_available - Someone else, whenever another approver is available (default).",
+    ).split()[0]
     return {
         "undo_grace_seconds": max(0, min(undo_seconds, 3600)),
         "require_acknowledgement": bool(require_ack),
+        "separate_approver": separate,
     }
 
 
@@ -5007,9 +5022,9 @@ def pick_advanced() -> dict[str, Any]:
             "Import previews every change and keeps current policy checks.", default=True,
         ),
         "allow_conversation_inbox": _q_confirm(
-            "Enable durable conversation guidance, queued messages and explicitly separate tasks while work is running? "
-            "Guidance requires review and a safe checkpoint; existing task ownership, permissions and spending limits remain enforced.",
-            default=False,
+            "Let people add guidance, queue their next message or start separate work while a task runs? On by default. "
+            "Guidance is reviewed and read at the task's next safe point; existing task ownership, permissions and spending limits remain enforced.",
+            default=True,
         ),
         "allow_personal_preferences": _q_confirm(
             "Allow account-scoped writing style, display preferences, pinned pages, saved task filters and daily work layout? "
@@ -7379,7 +7394,8 @@ def _cfg_core(
 def _cfg_approval(approval: dict[str, Any] | None) -> list[str]:
     if not approval:
         return []
-    # Approvals page: undo window (the agent waits it out) + high-risk confirmation.
+    # Approvals page: undo window (the agent waits it out), high-risk
+    # confirmation, and who approves a risky action the requester asked for.
     lines = ["", "[approval]"]
     for k, v in approval.items():
         _emit_kv(lines, k, v)
@@ -8929,6 +8945,9 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
         lines.extend(_feature_locks)
     if advanced.get("allow_conversation_inbox") is True:
         lines.extend(["", "[conversation_inbox]", "enabled = true", "guidance = true", "queue = true", "independent = true", "max_pending = 20"])
+    elif advanced.get("allow_conversation_inbox") is False:
+        # On by default, so only a deliberate "no" is written (and stays off).
+        lines.extend(["", "[conversation_inbox]", "enabled = false"])
     if advanced.get("tree_of_thought"):
         lines.append("")
         lines.append("[planning]")

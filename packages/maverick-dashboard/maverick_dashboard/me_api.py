@@ -100,13 +100,12 @@ def _require_bridge_identity(request: Request) -> tuple[str, str, str]:
 def _waiting_on(request: Request, world, principal: str, row: dict, *, can_decide: bool) -> str:
     """Who the request is really waiting on, by the rules that are enforced.
 
-    "you" / "you_own": this person can open and decide it (with one approver,
-    the person who asked may approve their own request); "others": they asked,
-    but under two-person approval other people must decide; "requester": it
-    belongs to a colleague's private task this person can't open.
+    "you" / "you_own": this person can open and decide it (the person who
+    asked may approve their own request); "others": they asked, but someone
+    else must decide (the separate-approver rule, or two-person approval);
+    "requester": it belongs to a colleague's private task this person can't open.
     """
-    from maverick.safety.dual_control import allow_self_approval
-
+    from .approval_decisions import own_request_note
     from .content_access import can_read_approval
 
     approval = world.get_approval(int(row["id"]))
@@ -117,8 +116,7 @@ def _waiting_on(request: Request, world, principal: str, row: dict, *, can_decid
         return "others" if own else "requester"
     if not own:
         return "you"
-    required = max(1, int(getattr(approval, "approvals_required", 1) or 1))
-    return "you_own" if required <= 1 or allow_self_approval() else "others"
+    return "others" if own_request_note(world, approval, principal) else "you_own"
 
 
 def _my_work(request: Request, principal: str) -> dict:

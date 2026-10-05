@@ -23,13 +23,16 @@
     {% set card = cards.get(a.id) if cards else None %}
     {% set card_status = card_statuses.get(a.id, 'legacy') if card_statuses else 'legacy' %}
     {% set scope_text = approval_scopes.get(a.id, '') if approval_scopes and approval_scopes.get(a.id) else 'The item described' %}
-    {# What is enforced: one approver may be the person who asked; under
-       two-person approval their vote counts only if self-approval is on. #}
+    {# What is enforced: the person who asked may approve their own request
+       unless someone else must (a high-risk request when another approver is
+       available, or always if so configured; under two-person approval
+       unless self-approval is on). The note says why. #}
     {% set own_request = approval_viewer|default('') and a.requested_by and a.requested_by == approval_viewer %}
     {% set own_vote_counts = (a.approvals_required or 1) <= 1 or self_approval_allowed|default(false) %}
     {# Approval progress comes with the page (app._approval_progress), plain
        text rather than one status request and announcement per card. #}
     {% set progress = approval_progress.get(a.id) if approval_progress else None %}
+    {% set own_note = own_request_notes.get(a.id, '') if own_request_notes else '' %}
     <article class="approval-item" data-id="{{ a.id }}" data-label="{{ action_label }}" data-risk="{{ a.risk }}"{% if own_request %} data-own-request="yes"{% endif %}
              data-scope="{{ scope_text }}"
              {% if card %}data-target="{{ card.target.label }}" data-spending="{{ _budget_text(card.budget) | trim }}" data-irreversible="{{ 'yes' if card.consequences.irreversible else 'no' }}"{% endif %}
@@ -38,6 +41,7 @@
       <div class="approval-item__head">
         <h2 class="approval-item__title" id="approval-title-{{ a.id }}">{{ action_label }}</h2>
         <span class="badge {{ 'blocked' if a.risk in ('high', 'critical') else 'pending' }} approval-risk">{{ a.risk | humanize }} risk</span>
+        {% if approval_reminders and a.id in approval_reminders %}<span class="badge pending approval-reminder">Reminder sent</span>{% endif %}
         <span class="badge approval-outcome" hidden></span>
       </div>
       <dl class="approval-item__meta">
@@ -85,9 +89,9 @@
         {% endif %}
       </div>
       <p class="approval-item__decided muted" hidden></p>
-      {% if own_request and not own_vote_counts %}<p class="muted approval-own-note">You asked for this, so other people must approve it.</p>{% endif %}
+      {% if own_note %}<p class="muted approval-own-note" id="approval-own-note-{{ a.id }}">{{ own_note }}</p>{% endif %}
       <div class="approval-actions">
-        <button type="button" class="btn approval-btn" data-id="{{ a.id }}" data-action="approve"{% if card %} data-binding="{{ card.binding_sha256 }}"{% endif %}{% if card_status in ('expired', 'invalid', 'legacy') %} disabled title="A new request is needed before this can be approved"{% elif own_request and not own_vote_counts %} disabled title="You asked for this, so other people must approve it."{% elif progress and progress.recorded %} disabled{% endif %}>Approve</button>
+        <button type="button" class="btn approval-btn" data-id="{{ a.id }}" data-action="approve"{% if card %} data-binding="{{ card.binding_sha256 }}"{% endif %}{% if card_status in ('expired', 'invalid', 'legacy') %} disabled title="A new request is needed before this can be approved"{% elif own_note %} disabled title="{{ own_note }}" aria-describedby="approval-own-note-{{ a.id }}"{% elif own_request and not own_vote_counts %} disabled title="You asked for this, so other people must approve it."{% elif progress and progress.recorded %} disabled{% endif %}>Approve</button>
         <button type="button" class="btn btn--ghost approval-btn" data-id="{{ a.id }}" data-action="deny">Reject</button>
         <button type="button" class="btn btn--ghost approval-btn" data-id="{{ a.id }}" data-action="revise">Send back for changes</button>
         {% if progress %}<p class="approval-quorum" data-approval-quorum-status="1">{{ progress.text }}</p>{% endif %}

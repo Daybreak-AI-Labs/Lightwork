@@ -120,18 +120,29 @@ scan_output     = true
 # (pay, delete, deploy, passwords, all customers, production ...) before it
 # starts. When set, tasks at or above this level wait on the dashboard's
 # Approvals page until a person approves them, and do not start if nobody
-# does within MAVERICK_CONSENT_DASHBOARD_TIMEOUT (300 s). It reads only the
+# does within [approval] dashboard_wait_seconds (1800 s). It reads only the
 # words: every action is still checked on its own once the task runs.
 # goal_risk_require_human = "high"   # never (default) | high | medium
 # goal_risk_floor         = "low"    # low (default) | medium | high
 
 [approval]
-# The Approvals page. A decision can be undone for this long; the agent
+# The Approvals page. A risky step waits this long for a decision (30
+# minutes; MAVERICK_CONSENT_DASHBOARD_TIMEOUT wins); after 10 minutes the
+# people who can decide get one in-app reminder, and with no decision in
+# time the step is refused. A request's card stays approvable for the wait,
+# at most an hour.
+dashboard_wait_seconds  = 1800
+# A decision can be undone for this long; the agent
 # only acts on an approval once the window has passed (0 = act at once,
 # no Undo). High and critical risk approvals need an explicit confirmation
 # (a ticked box; typing APPROVE for critical) unless switched off.
 undo_grace_seconds      = 30
 require_acknowledgement = true
+# Who approves a high or critical risk action someone asked for:
+# "when_available" (default) = someone else whenever another approver could
+# decide it, else the requester (recorded as a self-approval); "always" =
+# always someone else; "never" = the requester may approve it.
+separate_approver       = "when_available"
 
 [sandbox]
 backend = "local"                   # local | docker | ssh | podman | devcontainer | firecracker | kubernetes
