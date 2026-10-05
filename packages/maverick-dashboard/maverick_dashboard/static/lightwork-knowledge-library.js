@@ -62,14 +62,14 @@
     return b;
   }
   var jobsPanel = el("section"), jobsContext = "", pendingRebuild = null;
-  jobsPanel.setAttribute("aria-label", "Search index rebuild jobs"); panel.appendChild(jobsPanel);
+  jobsPanel.setAttribute("aria-label", "Search index rebuilds"); panel.appendChild(jobsPanel);
   async function refreshJobs() {
     if (!canAdmin) return;
-    var payload = await call("GET", "/reindex-jobs", undefined, "refresh rebuild jobs");
+    var payload = await call("GET", "/reindex-jobs", undefined, "refresh the rebuilds");
     if (jobsContext && jobsContext !== payload.context) { jobsPanel.replaceChildren(); pendingRebuild = null; throw new Error("Your workspace changed. Reload to review rebuilds."); }
-    jobsContext = payload.context; jobsPanel.replaceChildren(el("h3", "Search index rebuild jobs"));
+    jobsContext = payload.context; jobsPanel.replaceChildren(el("h3", "Search index rebuilds"));
     if (!payload.jobs.length) {
-      var title = "No rebuild jobs to show", body = "Rebuilds you start appear here with their progress and cost. Use Rebuild search index on a collection to start one. Archived operation receipts remain recorded.";
+      var title = "No rebuilds to show", body = "Rebuilds you start appear here with their progress and cost. Use Rebuild search index on a collection to start one. Archived operation receipts remain recorded.";
       jobsPanel.appendChild(window.mvEmpty ? window.mvEmpty(title, body, null, { compact: true }) : el("p", title + ". " + body));
     }
     payload.jobs.forEach(function(job) {
@@ -79,7 +79,7 @@
       if (["queued","running","publishing"].indexOf(job.state) >= 0) {
         ["cancel","resume"].forEach(function(action) {
           section.appendChild(button(action === "cancel" ? "Cancel at next safe boundary" : "Continue after an interruption", async function() {
-            if (!(await confirmed(action === "cancel" ? "Stop after the current batch? The live index stays unchanged unless its complete replacement already published." : "Continue this recorded job? Saved progress and current permissions will be checked. An active job will keep its single run.", "Confirm"))) return;
+            if (!(await confirmed(action === "cancel" ? "Stop after the current batch? The live index stays unchanged unless its complete replacement already published." : "Continue this rebuild? Saved progress and current permissions will be checked. A rebuild that is already running is not started twice.", "Confirm"))) return;
             await call("POST","/reindex-jobs/"+job.job_id+"/"+action,{context:jobsContext,confirmed:true},action + " rebuild"); await refreshJobs();
           },"btn btn--ghost"));
         });
@@ -105,7 +105,7 @@
       await call("POST", "/collections/" + encodeURIComponent(name) + "/reindex", pendingRebuild.body, "start rebuild");
       pendingRebuild = null; await refreshJobs();
     } catch(error) {
-      statusEl.textContent = "The start could not be confirmed. Refresh rebuild progress to locate the recorded job before starting again. " + error.message;
+      statusEl.textContent = "The start could not be confirmed. Refresh rebuild progress to find the recorded rebuild before starting again. " + error.message;
       await refreshJobs();
     }
   }

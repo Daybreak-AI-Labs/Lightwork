@@ -274,7 +274,7 @@ def _execute(kb, path, job, started, authority):
     current = preview(kb, job["collection"])
     rows = kb.store.read_collection(job["collection"], limit=job["limits"]["max_chunks"])
     if current["review"] != job["review"] or _rows_sha(rows) != job["source_sha"]:
-        _update(path, state="changed", message="The collection, model or limits changed. The old job will not overwrite it; begin a new review.")
+        _update(path, state="changed", message="The collection, model or limits changed. The old rebuild will not overwrite it; begin a new review.")
         return
     descriptor, fingerprint = identity(kb.embedder)
     shadow_path = path.with_suffix(".shadow")

@@ -454,7 +454,7 @@ def test_sealed_key_names_are_never_shown_or_audited(audit_rows):
     ({f"{_DEST}.enable": True, f"{_DEST}.enabled_providers": ["marketo"]}, "Marketo"),
     ({"privacy_automation.data_discovery.adapters.enable": True}, "Services to look in"),
     ({f"{_FIX}.enable": True}, "together"),
-    ({f"{_FIX}.scheduler.enable": True}, "Fix findings through approved jobs"),
+    ({f"{_FIX}.scheduler.enable": True}, "Fix findings through approved fixes"),
     ({f"{_FIX}.scheduler.jitter_seconds": 120}, "Random extra wait"),
     ({"privacy_automation.drop_management.scheduler_jitter_seconds": 3600},
      "must be less than"),

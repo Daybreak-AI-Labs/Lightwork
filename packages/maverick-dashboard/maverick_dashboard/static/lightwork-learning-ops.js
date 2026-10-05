@@ -342,12 +342,12 @@
   var STATES = { running: 'Running', stopping: 'Stopping', done: 'Finished', stopped: 'Stopped early', failed: 'Could not finish' };
   function loadJobs() {
     J.request(LO + '/jobs').then(function (d) {
-      if (!d.jobs.length) { fill('lo-jobs', el('p', 'No background jobs since Lightwork last started.', 'muted')); return; }
-      fill('lo-jobs', J.table(['Job', 'Started', 'Status'], d.jobs.map(function (j) {
+      if (!d.jobs.length) { fill('lo-jobs', el('p', 'No background tasks since Lightwork last started.', 'muted')); return; }
+      fill('lo-jobs', J.table(['Task', 'Started', 'Status'], d.jobs.map(function (j) {
         return [j.label, J.when(j.started_at), STATES[j.state] + (j.problem ? ': ' + j.problem : '')];
       })));
     }).catch(async function (failure) {
-      fill('lo-jobs', el('p', await J.problem(failure, 'load the background jobs')));
+      fill('lo-jobs', el('p', await J.problem(failure, 'load the background tasks')));
     });
   }
   var refresh = $('lo-jobs-refresh');

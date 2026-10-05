@@ -47,8 +47,8 @@
     for(const item of value.items.filter(row=>value.can_rebind&&row.kind==='discovery_source')){
       const repair=button('Rebind '+item.title,()=>mutate(repair,'/rebind-source',{...body(),source_id:item.id,source_revision:item.revision,operation_id:crypto.randomUUID().replace(/-/g,'')},'Rebind this exact source to the selected current credential? Its resource and evidence settings stay fixed. No scan or historical action starts.'));panel.append(repair);
     }
-    const capabilities=node('fieldset');capabilities.append(node('legend','Check the exact read your job needs'));
-    if(!value.capabilities.length)capabilities.append(node('p','This adapter has no fixed read-capability probe here. A general service check does not qualify task access. Use the dedicated source access check where available, or review the provider permissions for the declared job.'));
+    const capabilities=node('fieldset');capabilities.append(node('legend','Check the exact read your task needs'));
+    if(!value.capabilities.length)capabilities.append(node('p','This connection has no built-in read check here. A general service check does not prove a task can read the data. Use the source access check where available, or review the provider permissions for the task.'));
     for(const capability of value.capabilities){
       const row=node('div');row.append(node('h3',capability.label),node('p','Minimum access: '+capability.minimum_scope+'. No write permission is tested.'));
       const label=node('label',capability.resource_label),resource=node('input');resource.className='input';resource.maxLength=256;label.append(resource);row.append(label);

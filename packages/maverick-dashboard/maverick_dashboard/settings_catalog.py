@@ -575,13 +575,13 @@ SETTINGS: tuple[Setting, ...] = (
 
     # --------------------------------------------------------------- AI models
     S("routing", "cost_aware", "Pick the cheapest capable model",
-      "Use the least expensive model that can do each job well.",
+      "Use the least expensive model that can do each task well.",
       "toggle", "AI models", False, "maverick.cost.router"),
     S("routing", "verify_ensemble", "Double-check with a second AI service",
       "Confirm important answers with models from more than one provider.",
       "toggle", "AI models", False, "maverick.verifier"),
     S("routing", "energy_aware", "Prefer lower-energy models",
-      "Favour models that use less energy when they can do the job.",
+      "Favour models that use less energy when they can do the task.",
       "toggle", "AI models", False, "maverick.energy_aware_router"),
     S("routing", "allowed_providers", "AI services agents may use for these choices",
       "Limit automatic model choices to these AI services. Leave empty to allow any service you have connected.",

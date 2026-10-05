@@ -129,10 +129,10 @@
       });
       box.appendChild(summary);
       if (!data.stopped.length) return 'Nothing has stopped.';
-      box.appendChild(el('h3', null, 'Stopped jobs'));
+      box.appendChild(el('h3', null, 'Stopped tasks'));
       var table = el('table');
       var head = el('tr');
-      ['Job', 'Stopped', 'What to do'].forEach(function (h) { var th = el('th', null, h); th.scope = 'col'; head.appendChild(th); });
+      ['Task', 'Stopped', 'What to do'].forEach(function (h) { var th = el('th', null, h); th.scope = 'col'; head.appendChild(th); });
       var thead = el('thead'); thead.appendChild(head); table.appendChild(thead);
       var body = el('tbody');
       data.stopped.forEach(function (job) {

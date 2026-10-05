@@ -132,14 +132,14 @@ ROWS = [('Interface language', 'Langue de l’interface', 'Sprache der Oberfläc
   'Ihr erstes nützliches Ergebnis',
   '最初の役立つ結果',
   '你的第一个实用结果'),
- ('Choose a job, select evidence and decide how you will judge the result. Job choices never grant a role or '
-  'access. Practice examples remain distinct from real work.',
-  'Choisissez un travail, des éléments probants et vos critères de résultat. Ce choix n’accorde aucun rôle '
+ ('Choose a task, select evidence and decide how you will judge the result. Choosing a task never grants a role '
+  'or access. Practice examples remain distinct from real work.',
+  'Choisissez une tâche, des éléments probants et vos critères de résultat. Choisir une tâche n’accorde aucun rôle '
   'ni accès. Les exemples restent distincts du travail réel.',
-  'Wählen Sie eine Aufgabe, Belege und Kriterien für das Ergebnis. Die Auswahl erteilt keine Rolle oder '
+  'Wählen Sie eine Aufgabe, Belege und Kriterien für das Ergebnis. Die Auswahl einer Aufgabe erteilt keine Rolle oder '
   'Zugriffsrechte. Übungsbeispiele bleiben von echter Arbeit getrennt.',
-  '仕事と根拠を選び、結果の判断基準を決めます。選択しても役割やアクセス権は付与されません。練習用の例と実際の作業は区別されます。',
-  '选择工作、依据及结果评判标准。选择工作不会授予角色或访问权限，练习示例与真实工作保持区分。'),
+  'タスクと根拠を選び、結果の判断基準を決めます。タスクを選んでも役割やアクセス権は付与されません。練習用の例と実際の作業は区別されます。',
+  '选择任务、依据及结果评判标准。选择任务不会授予角色或访问权限，练习示例与真实工作保持区分。'),
  ('Installation checklist',
   'Liste de vérification de l’installation',
   'Installationscheckliste',
@@ -164,7 +164,6 @@ ROWS = [('Interface language', 'Langue de l’interface', 'Sprache der Oberfläc
   'Sie vor dem Start die Administration, die Anbietereinrichtung zu reparieren.',
   '設定されたタスク経路は準備ができていません。非公開の下書きは保存できます。開始前に管理者へ現在のプロバイダー設定の修復を依頼してください。',
   '已配置的任务路由尚未就绪。你可以先保存私密草稿；开始前请让管理员修复当前提供商设置。'),
- ('Job', 'Travail', 'Aufgabe', '仕事', '工作'),
  ('Data choice', 'Choix des données', 'Datenauswahl', 'データの選択', '数据选择'),
  ('Fictional practice example',
   'Exemple fictif d’entraînement',

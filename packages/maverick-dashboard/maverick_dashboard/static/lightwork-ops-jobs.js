@@ -112,18 +112,18 @@
     return new Promise(function (resolve) {
       var stop = null;
       function show(j) {
-        ui.status.textContent = j.state === 'failed' ? (j.problem || 'This job could not finish.') : STATE_TEXT[j.state] || '';
+        ui.status.textContent = j.state === 'failed' ? (j.problem || 'This task could not finish. Start it again, or check Settings for what stopped it.') : STATE_TEXT[j.state] || '';
         if (j.can_stop && !stop) {
           stop = el('button', 'Stop', 'btn btn--ghost');
           stop.type = 'button';
           stop.addEventListener('click', async function () {
-            if (!(await window.mvConfirm('Stop this job? It stops at the next safe point and keeps what it has already done.',
+            if (!(await window.mvConfirm('Stop this task? It stops at the next safe point and keeps what it has already done.',
               { okText: 'Stop' }))) return;
             stop.disabled = true;
             try {
               await request('/api/v1/learning-ops/jobs/' + encodeURIComponent(j.id) + '/stop', { method: 'POST', json: {} });
             } catch (failure) {
-              ui.status.textContent = await problem(failure, 'stop the job');
+              ui.status.textContent = await problem(failure, 'stop the task');
               stop.disabled = false;
             }
           });
@@ -141,7 +141,7 @@
             try {
               tick((await request('/api/v1/learning-ops/jobs/' + encodeURIComponent(j.id))).job);
             } catch (failure) {
-              ui.status.textContent = await problem(failure, 'check on the job');
+              ui.status.textContent = await problem(failure, 'check on the task');
               resolve(null);
             }
           }, POLL_MS);
