@@ -86,14 +86,77 @@
     </form>{% endif %}
   </section>
   <section class="panel"><h2>Employee content is private</h2><p>Administrator roles manage access and policy. They no longer open another employee's task text, files or chat by default. Existing employee-owned records use their recorded owner; unowned legacy work requires an explicit content review. Shared result packets keep their assigned reviewer access.</p><a class="btn" href="/content-access">Review or request content access</a></section>
-  <div class="section-head"><h2>People</h2></div>
+  <div class="section-head"><h2 id="people" tabindex="-1">People</h2></div>
+  {% set uf = users_filter | default({'q': '', 'role': '', 'active': false}) %}
+  {% set shown = users_shown | default(users) %}
+  {% if bulk_problem is defined %}
+  <div class="panel" role="alert" id="bulk-result" tabindex="-1"><strong>That didn't work.</strong> {{ bulk_problem }}</div>
+  {% endif %}
+  {% if bulk_confirm is defined %}
+  {% set bc = bulk_confirm %}
+  <section class="panel users-bulk-confirm" id="bulk-result" tabindex="-1" role="region" aria-labelledby="bulk-confirm-title">
+    <h3 id="bulk-confirm-title" class="users-subhead">Change the role of {{ bc.count }} {{ 'person' if bc.count == 1 else 'people' }} to {{ bc.role | role_label }}?</h3>
+    {% if bc.changed_since %}<p role="alert"><strong>The list changed since you confirmed.</strong> Review the people below again.</p>{% endif %}
+    <p class="muted users-help">{{ bc.role | role_label }}: {{ role_desc.get(bc.role, '') }} You can undo this from the report that follows.</p>
+    <ul class="users-list">
+      {% for principal in bc.people %}<li>{{ who(principal) }} <span class="muted">now {{ bc.current.get(principal, '') | role_label }}</span></li>{% endfor %}
+    </ul>
+    <form method="post" action="/users/bulk#bulk-result" class="users-row-form">
+      {{ workspace_binding() }}
+      {% for principal in bc.people %}<input type="hidden" name="principals" value="{{ principal }}" />{% endfor %}
+      <input type="hidden" name="role" value="{{ bc.role }}" />
+      <input type="hidden" name="scope" value="selected" />
+      <input type="hidden" name="confirmed" value="yes" />
+      <input type="hidden" name="expected_count" value="{{ bc.count }}" />
+      <button type="submit" class="btn">Yes, change {{ bc.count }} {{ 'person' if bc.count == 1 else 'people' }}</button>
+      <a class="btn btn--ghost" href="/users#people">Cancel</a>
+    </form>
+  </section>
+  {% endif %}
+  {% if bulk_report is defined %}
+  {% set br = bulk_report %}
+  {% set n_changed = br.rows | selectattr('outcome', 'equalto', 'changed') | list | length %}
+  {% set n_same = br.rows | selectattr('outcome', 'equalto', 'unchanged') | list | length %}
+  {% set n_refused = br.rows | selectattr('outcome', 'equalto', 'refused') | list | length %}
+  <section class="panel" id="bulk-result" tabindex="-1" role="status" aria-labelledby="bulk-report-title">
+    <h3 id="bulk-report-title" class="users-subhead">{{ 'Undone' if br.undone else 'Changed' }}: {{ n_changed }} {{ 'person' if n_changed == 1 else 'people' }}{% if n_same %}, {{ n_same }} already had that role{% endif %}{% if n_refused %}, {{ n_refused }} not changed{% endif %}</h3>
+    <table>
+      <caption class="sr-only">What changed for each person</caption>
+      <thead><tr><th scope="col">Person</th><th scope="col">Before</th><th scope="col">Now</th><th scope="col">Result</th></tr></thead>
+      <tbody>
+      {% for row in br.rows %}
+        <tr><td>{{ who(row.principal) }}</td>
+            <td>{{ row.before | role_label if row.before else 'Standard role' }}</td>
+            <td>{{ row.after | role_label if row.after else 'Standard role' }}</td>
+            <td>{% if row.outcome == 'changed' %}Changed{% elif row.outcome == 'unchanged' %}Already had it{% else %}Not changed: {{ row.reason }}{% endif %}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% if br.undo %}
+    <form method="post" action="/users/bulk/undo#bulk-result" class="users-row-form">
+      {{ workspace_binding() }}
+      {% for token in br.undo %}<input type="hidden" name="restore" value="{{ token }}" />{% endfor %}
+      <button type="submit" class="btn">{% if br.undo | length == 1 %}Undo this change{% else %}Undo these {{ br.undo | length }} changes{% endif %}</button>
+    </form>
+    {% endif %}
+  </section>
+  {% endif %}
   <div class="panel">
     {% if users %}
+    <form method="get" action="/users#people" class="users-row-form users-filter" role="search" aria-label="Find people">
+      <label>Find people <input class="input" type="search" name="q" value="{{ uf.q }}" placeholder="Name or email" autocomplete="off" /></label>
+      <label>Role <select class="select" name="has_role"><option value="">Any role</option>{% for r in roles %}<option value="{{ r }}"{% if r == uf.role %} selected{% endif %}>{{ r | role_label }}</option>{% endfor %}</select></label>
+      <button type="submit" class="btn">Filter</button>
+      {% if uf.active %}<a class="btn btn--ghost" href="/users#people">Clear filter</a>{% endif %}
+    </form>
+    <p class="muted users-help" id="people-count">Showing {{ shown | length }} of {{ users | length }} {{ 'person' if users | length == 1 else 'people' }}{% if uf.active %} matching the filter{% endif %}.</p>
+    {% if shown %}
     <table>
-      <thead><tr><th scope="col">Person</th><th scope="col">Role</th><th scope="col">Actions</th></tr></thead>
+      <thead><tr><th scope="col"><span class="sr-only">Select</span></th><th scope="col">Person</th><th scope="col">Role</th><th scope="col">Actions</th></tr></thead>
       <tbody>
-      {% for principal, role in users %}
+      {% for principal, role in shown %}
         <tr>
+          <td><input type="checkbox" name="principals" value="{{ principal }}" form="users-bulk" id="pick-{{ loop.index }}" data-bulk-pick /><label class="sr-only" for="pick-{{ loop.index }}">Select {{ name_of(principal) }}</label></td>
           <td>{{ who(principal) }}{% if principal == you %} <span class="muted">(you)</span>{% endif %}</td>
           <td>
             <form method="post" action="/users/set" class="users-row-form" id="role-form-{{ loop.index }}">
@@ -122,6 +185,24 @@
       {% endfor %}
       </tbody>
     </table>
+    <form method="post" action="/users/bulk#bulk-result" id="users-bulk" class="users-bulk">
+      {{ workspace_binding() }}
+      <input type="hidden" name="q" value="{{ uf.q }}" />
+      <input type="hidden" name="role_filter" value="{{ uf.role }}" />
+      <fieldset class="users-checks">
+        <legend>Change the role of several people</legend>
+        <label><input type="radio" name="scope" value="selected" checked /> The people I selected <span class="muted" data-bulk-count aria-live="polite"></span></label>
+        <label><input type="radio" name="scope" value="matching" /> All {{ shown | length }} {{ 'person' if shown | length == 1 else 'people' }} {{ 'matching the filter' if uf.active else 'in the list' }}</label>
+      </fieldset>
+      <label for="bulk-role">New role</label>
+      <select class="select" name="role" id="bulk-role" required aria-describedby="bulk-role-help">{{ role_options('', placeholder='Choose a role') }}</select>
+      {{ role_help('bulk-role-help') }}
+      <button type="submit" class="btn">Review change</button>
+      <p class="muted users-help">Nothing changes until you confirm the number of people on the next step.</p>
+    </form>
+    {% else %}
+    <p class="muted">No one matches this filter. <a href="/users#people">Clear the filter</a> to see everyone.</p>
+    {% endif %}
     {% else %}
     <p class="muted">No one has a specific role yet. People who sign in start as
       <strong>{{ default_role | role_label }}</strong>.
@@ -275,11 +356,36 @@
       {% if auth_on %}The link asks them to sign in with your company account and then gives them the role.
       {% else %}Opening the link signs them in with their email address.{% endif %}
       If email sending is set up, the link is also emailed to them.</p>
+    {% if invite_confirm is defined %}
+    {% set ic = invite_confirm %}
+    <section class="panel" id="invite-result" tabindex="-1" role="region" aria-labelledby="invite-confirm-title">
+      <h3 id="invite-confirm-title" class="users-subhead">Cancel {{ ic.invites | length }} invitation{{ '' if ic.invites | length == 1 else 's' }}?</h3>
+      {% if ic.changed_since %}<p role="alert"><strong>The list changed since you confirmed.</strong> Review the invitations below again.</p>{% endif %}
+      <p class="muted users-help">Their links stop working. This cannot be undone; you can send a new invitation instead.</p>
+      <ul class="users-list">{% for inv in ic.invites %}<li>{{ inv.email }} <span class="badge">{{ inv.role | role_label }}</span></li>{% endfor %}</ul>
+      <form method="post" action="/users/invite/bulk-revoke#invite-result" class="users-row-form">
+        {{ workspace_binding() }}
+        {% for inv in ic.invites %}<input type="hidden" name="invite_ids" value="{{ inv.id }}" />{% endfor %}
+        <input type="hidden" name="scope" value="selected" />
+        <input type="hidden" name="confirmed" value="yes" />
+        <input type="hidden" name="expected_count" value="{{ ic.invites | length }}" />
+        <button type="submit" class="btn btn--danger">Yes, cancel {{ ic.invites | length }} invitation{{ '' if ic.invites | length == 1 else 's' }}</button>
+        <a class="btn btn--ghost" href="/users#invite-email">Keep them</a>
+      </form>
+    </section>
+    {% endif %}
+    {% if invite_report is defined %}
+    <section class="panel" id="invite-result" tabindex="-1" role="status" aria-labelledby="invite-report-title">
+      <h3 id="invite-report-title" class="users-subhead">Cancelled {{ invite_report | selectattr('cancelled') | list | length }} invitation{{ '' if (invite_report | selectattr('cancelled') | list | length) == 1 else 's' }}</h3>
+      <ul class="users-list">{% for row in invite_report %}<li>{{ row.email }}: {{ 'Cancelled; the link no longer works.' if row.cancelled else 'Already gone (accepted, expired or cancelled earlier).' }}</li>{% endfor %}</ul>
+    </section>
+    {% endif %}
     {% if pending_invites %}
     <h3 class="users-subhead">Waiting to be accepted</h3>
     <ul class="users-list">
       {% for inv in pending_invites %}
       <li>
+        <input type="checkbox" name="invite_ids" value="{{ inv.id }}" form="invites-bulk" id="inv-pick-{{ loop.index }}" /><label class="sr-only" for="inv-pick-{{ loop.index }}">Select the invitation for {{ inv.email }}</label>
         <span class="users-grow">{{ inv.email }}</span>
         <span class="badge">{{ inv.role | role_label }}</span>
         <form method="post" action="/users/invite/revoke" class="users-inline"
@@ -291,6 +397,17 @@
       </li>
       {% endfor %}
     </ul>
+    {% if pending_invites | length > 1 %}
+    <form method="post" action="/users/invite/bulk-revoke#invite-result" id="invites-bulk" class="users-row-form">
+      {{ workspace_binding() }}
+      <fieldset class="users-checks">
+        <legend>Cancel several invitations</legend>
+        <label><input type="radio" name="scope" value="selected" checked /> The invitations I selected</label>
+        <label><input type="radio" name="scope" value="all" /> All {{ pending_invites | length }} waiting invitations</label>
+      </fieldset>
+      <button type="submit" class="btn btn--danger">Review cancellation</button>
+    </form>
+    {% endif %}
     {% endif %}
   </div>
   {% endif %}
@@ -544,6 +661,19 @@
       boxes.forEach(function (b) { b.addEventListener('change', sync); });
       sync();
     });
+    // Bulk changes: say how many are selected, and bring a confirmation or
+    // change report into view and focus so keyboard users land on it.
+    var bulkCount = document.querySelector('[data-bulk-count]');
+    var picks = Array.prototype.slice.call(document.querySelectorAll('[data-bulk-pick]'));
+    function syncPicks() {
+      if (!bulkCount) return;
+      var n = picks.filter(function (b) { return b.checked; }).length;
+      bulkCount.textContent = '(' + n + ' selected)';
+    }
+    picks.forEach(function (b) { b.addEventListener('change', syncPicks); });
+    syncPicks();
+    var bulkResult = document.getElementById('bulk-result') || document.getElementById('invite-result');
+    if (bulkResult) bulkResult.focus();
     document.querySelectorAll('[data-copy-target]').forEach(function (button) {
       button.addEventListener('click', function () {
         var field = document.getElementById(button.dataset.copyTarget);

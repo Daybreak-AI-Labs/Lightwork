@@ -68,7 +68,7 @@ def test_role_pickers_say_what_the_chosen_role_allows(client):
     # Every role picker points at a description of the chosen role.
     selects = re.findall(r'<select class="select" name="role"[^>]*>', page)
     selects += re.findall(r'<select id="wm-role"[^>]*>', page)
-    assert len(selects) == 3  # role change, give a role, workspace member
+    assert len(selects) == 4  # role change, give a role, change several people, workspace member
     for tag in selects:
         described_by = re.search(r'aria-describedby="([^"]+)"', tag).group(1).split()
         for target in described_by:
