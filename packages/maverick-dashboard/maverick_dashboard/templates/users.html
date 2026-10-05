@@ -236,7 +236,7 @@
   {% if invites_on %}
   <div class="section-head"><h2 id="invite-email">Invite someone by email</h2></div>
   <div class="panel">
-    <form method="post" action="/users/invite" class="users-row-form">
+    <form method="post" data-mv-save action="/users/invite" class="users-row-form">
       {{ workspace_binding() }}
       <label class="users-field users-grow">
         <span>Email address</span>
