@@ -166,6 +166,34 @@ test("jobs load as rows and kinds of change that are not set up are disabled", a
   } finally { ui.dom.window.close(); }
 });
 
+test('older jobs remain reachable and failed paging preserves the current rows', async () => {
+  const ui = await page();
+  try {
+    const original = ui.w.fetch;
+    let failOlder = false;
+    ui.w.fetch = async (url, init) => {
+      if (url.startsWith('/api/v1/consent/bulk-jobs?')) {
+        assert.match(url, /limit=50/);
+        if (url.includes('before_job_id=')) {
+          if (failOlder) throw new Error('read interrupted');
+          return reply(200, {jobs:[{...JOBS[0], operation:'clear_expiration'}], next_before_job_id:null});
+        }
+        return reply(200, {jobs:JOBS, next_before_job_id:'job-1'});
+      }
+      return original(url, init);
+    };
+    ui.d.getElementById('cbj-jobs-latest').click(); await flush();
+    assert.equal(ui.d.getElementById('cbj-jobs-older').hidden, false);
+    failOlder = true; ui.d.getElementById('cbj-jobs-older').click(); await flush();
+    assert.match(ui.d.getElementById('cbj-job-list').textContent, /Export consent records/);
+    failOlder = false; ui.d.getElementById('cbj-jobs-older').click(); await flush();
+    assert.match(ui.d.getElementById('cbj-job-list').textContent, /Remove end dates/);
+    assert.equal(ui.d.getElementById('cbj-jobs-older').hidden, true);
+    ui.d.getElementById('cbj-jobs-latest').click(); await flush();
+    assert.match(ui.d.getElementById('cbj-job-list').textContent, /Export consent records/);
+  } finally { ui.dom.window.close(); }
+});
+
 test("an export is built from ticked people, not typed items", async () => {
   const ui = await page();
   try {

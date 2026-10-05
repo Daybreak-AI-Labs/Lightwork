@@ -414,8 +414,9 @@
       if (!data.configured) box.appendChild(el('p', 'No hold-out record is set up, so there is nothing to check.', 'muted'));
       else if (!data.verified) box.appendChild(el('p', 'The hold-out record did not pass the check. It may be incomplete or changed. Ask your administrator to look into it.'));
       else {
-        box.appendChild(el('p', 'The hold-out record is complete and untouched: ' + plural(data.events, 'entry', 'entries') +
+        box.appendChild(el('p', 'The stored history checks match: ' + plural(data.events, 'entry', 'entries') +
           ', ' + plural(data.checks_used, 'test use', 'test uses') + ' recorded.'));
+        box.appendChild(el('p', 'This checks the local record. It does not establish independent custody or detect replacement of the whole history without a separately retained copy.', 'muted'));
         box.appendChild(technical([['Record', data.technical.ledger], ['Latest fingerprint', data.technical.latest_fingerprint]]));
       }
     } catch (failure) {
@@ -433,7 +434,7 @@
     div.appendChild(el('p', head));
     if (r.paused_for_calibration) div.appendChild(el('p', 'New lessons are paused until the quality checker is reliable again.', 'muted'));
     else if (r.promotion_gate_off) div.appendChild(el('p', 'Nothing new can be adopted until you turn on ' +
-      (r.gate_place || 'adopting proven improvements on the Learning page') + '.', 'muted'));
+      (r.gate_place || 'adopting reviewed improvements on the Learning page') + '.', 'muted'));
     if (r.new_lessons.length) {
       var ul = el('ul');
       r.new_lessons.forEach(function (ln) { ul.appendChild(el('li', ln)); });

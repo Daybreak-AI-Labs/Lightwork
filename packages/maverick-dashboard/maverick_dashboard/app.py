@@ -1504,6 +1504,10 @@ app.include_router(setup_guide.router)
 from .workflow_explanation import asset_router as workflow_explanation_assets  # noqa: E402
 
 app.include_router(workflow_explanation_assets)
+from . import local_flow_promotions  # noqa: E402
+
+app.include_router(local_flow_promotions.router)
+app.include_router(local_flow_promotions.asset_router)
 app.state.voice_setup = VoiceSetup()
 app.add_middleware(RecoveryOnlyMiddleware, dashboard_app=app)
 

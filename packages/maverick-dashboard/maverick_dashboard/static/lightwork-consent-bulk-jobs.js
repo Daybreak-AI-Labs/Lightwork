@@ -476,11 +476,21 @@
       if (job.failed_items) text += ", " + job.failed_items + " could not be changed";
       return text;
     }
-    async function refreshJobs() {
+    var jobsNext = null, jobsLoading = 0;
+    async function refreshJobs(before) {
+      before = typeof before === 'string' ? before : null;
+      var generation = ++jobsLoading, older = $('cbj-jobs-older'), latest = $('cbj-jobs-latest');
       var filter = $("cbj-state-filter").value;
+      if (older) older.disabled = true;
+      if (latest) latest.disabled = true;
       try {
-        var result = await api("?limit=200" + (filter ? "&state=" + encodeURIComponent(filter) : ""));
+        var result = await api("?limit=50" + (filter ? "&state=" + encodeURIComponent(filter) : "") +
+          (before ? '&before_job_id=' + encodeURIComponent(before) : ''));
+        if (generation !== jobsLoading) return;
         state.jobs = result.jobs || [];
+        jobsNext = result.next_before_job_id || null;
+        if (older) older.hidden = !jobsNext;
+        if ($('cbj-jobs-page')) $('cbj-jobs-page').textContent = before ? 'Older jobs. Select Latest jobs to return to new work.' : 'Latest jobs.';
         CW.table($("cbj-job-list"), state.jobs, {
           label: "Jobs", name: function (j) { return WHAT[j.operation] || CW.human(j.operation); },
           columns: [
@@ -499,7 +509,13 @@
           empty: { title: "No jobs yet.", body: "Start a bulk change to export or change many people’s consent records at once.", action: canAdmin ? { label: "Start a bulk change", run: openCreate } : null }
         });
       } catch (error) {
-        $("cbj-job-list").replaceChildren(CW.el("p", "danger-text", CW.errorText(error, "load the jobs")));
+        if (generation !== jobsLoading) return;
+        fail(error, 'load the jobs');
+      } finally {
+        if (generation === jobsLoading) {
+          if (older) older.disabled = false;
+          if (latest) latest.disabled = false;
+        }
       }
     }
 
@@ -974,6 +990,8 @@
 
     $("cbj-new").addEventListener("click", function (event) { CW.busy(event.currentTarget, openCreate); });
     $("cbj-state-filter").addEventListener("change", refreshJobs);
+    if ($('cbj-jobs-older')) $('cbj-jobs-older').addEventListener('click', function () { if (jobsNext) refreshJobs(jobsNext); });
+    if ($('cbj-jobs-latest')) $('cbj-jobs-latest').addEventListener('click', function () { refreshJobs(); });
     form.querySelectorAll("input[name=operation]").forEach(function (radio) { radio.addEventListener("change", syncForm); });
     form.elements.when.addEventListener("change", syncForm);
     form.elements.policy_key.addEventListener("change", fillPurposes);

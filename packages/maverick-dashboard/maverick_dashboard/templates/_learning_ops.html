@@ -23,7 +23,8 @@
   <div class="panel" id="lo-factory">
     <h3 class="lrn__section-h" id="lo-fa-h">Improve how new agents are built</h3>
     <p class="lrn__section-sub">Finds problems that keep showing up when new specialists are set up, and suggests
-      guidance for building the next ones. Guidance is only adopted with a results file that proves it helps.</p>
+      guidance for building the next ones. Adoption requires paired comparison results that pass the recorded
+      improvement checks. Review where the results came from before applying them.</p>
     {% if learning_can_manage %}
     <div class="lrn__actions">
       <label for="lo-fa-support">Only problems seen in at least</label>
@@ -33,9 +34,9 @@
       <button type="button" class="btn btn--ghost" id="lo-fa-preview">Show what it would change</button>
     </div>
     <div class="lrn__actions">
-      <label for="lo-fa-file">Results file that proves the guidance helps</label>
+      <label for="lo-fa-file">Paired comparison results file</label>
       <input type="file" id="lo-fa-file" class="input" accept=".json,application/json">
-      <button type="button" class="btn btn--primary" id="lo-fa-adopt">Adopt proven guidance</button>
+      <button type="button" class="btn btn--primary" id="lo-fa-adopt">Adopt reviewed guidance</button>
     </div>
     {% endif %}
     <p class="muted" id="lo-fa-status" role="status" aria-live="polite"></p>

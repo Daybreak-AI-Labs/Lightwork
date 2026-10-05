@@ -783,6 +783,8 @@ def _invoke_work(node: FlowNode, data: dict, ctx: _Ctx):
                 if applied:
                     # Execution agreement is not an independent correctness label.
                     return value, None
+                if node.learned_fallback is False:
+                    raise ValueError("These learned rules cannot answer this input. Review the examples before trying again.")
             return ctx.agent_fn(node, render(node.brief, data), data)
         if node.recipe_step is not None:
             return _invoke_recipe_action(node, data, ctx)
@@ -1008,7 +1010,7 @@ def _run_work(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
     explicit_indeterminate = False
     retries = min(max(0, node.retries), max_node_retries())
     high_risk_action = False
-    ambiguous_agent = node.kind == NODE_AGENT
+    ambiguous_agent = node.kind == NODE_AGENT and node.learned_fallback is not False
     if node.kind == NODE_AGENT:
         # An agent attempt may already have invoked a mutating tool before its
         # goal failed.  Without a replay ledger for the whole agent trajectory,

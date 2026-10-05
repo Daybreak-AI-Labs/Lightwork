@@ -243,7 +243,7 @@ def _projection(value: Mapping[str, Any]) -> dict[str, Any]:
                 )
             }
         )
-    return {
+    result = {
         "candidate_id": value.get("candidate_id"),
         "requested_by": value.get("requested_by"),
         "candidate_principal": value.get("candidate_principal"),
@@ -365,6 +365,21 @@ def _projection(value: Mapping[str, Any]) -> dict[str, Any]:
         ),
         "events": events,
     }
+    if target.get("state_schema") == "lightwork.rule-only-flow-release.v1":
+        from .local_flow_promotions import release_status
+        try:
+            result["local_release"] = release_status(manifest)
+        except Exception:
+            result["local_release"] = {"kind": "rule_only_workflow", "can_assess": False,
+                                      "evidence": "The current workflow release could not be verified. Refresh before deciding."}
+        # The native customer journey needs saved names, versions and decisions;
+        # exact commitments remain inside the canonical coordinator's record.
+        result = {key: result[key] for key in ("candidate_id", "requested_by", "candidate_principal", "state",
+                  "revision", "created_at", "updated_at", "local_release")}
+        result["review"] = {key: review.get(key) for key in ("reviewed_by", "approved", "reason_code", "note", "reviewed_at")} if review else None
+        result["block"] = {"detail": block.get("detail")} if block else None
+        result["events"] = [{key: item.get(key) for key in ("sequence", "state", "actor", "recorded_at")} for item in events]
+    return result
 
 
 @router.get("")
@@ -387,15 +402,28 @@ async def promotion_overview(
             "detail": "Install trusted study, target preset, artifact, policy, and deployment adapters before proposing candidates.",
         }
     rows = await _call(service.list, tenant, actor, limit=limit)
-    options = await _call(service.proposal_options, tenant, actor)
+    try:
+        options = await _call(service.proposal_options, tenant, actor)
+    except HTTPException as exc:
+        if exc.status_code != 503 or not getattr(request.app.state, "local_flow_promotions_installed", False):
+            raise
+        options = {"completed_runs": [], "target_presets": []}
+    run_choices = []
+    if getattr(request.app.state, "local_flow_promotions_installed", False) and options["completed_runs"]:
+        from .local_flow_promotions import _target_record, store
+        record = _target_record()
+        name = store.load_flow_snapshot(record["root"]).name
+        run_choices = [{"value": run_id, "label": name + " · saved version " + str(record["version"]) + " · successful practice"}
+                       for run_id in options["completed_runs"]]
     return {
         "context": context,
         "available": True,
         "can_manage": has_global_permission(request, "admin"),
         "can_propose": True,
         "completed_runs": options["completed_runs"],
+        "completed_run_choices": run_choices,
         "target_presets": options["target_presets"],
-        "items": [_projection(item) for item in rows],
+        "items": [{**_projection(item), "can_decide": actor not in {item.get("requested_by"), item.get("candidate_principal")}} for item in rows],
         "detail": "Every effect rechecks current reviewer, policy, lineage, artifact, and operator authority.",
     }
 
@@ -481,6 +509,13 @@ async def _transition(
 ):
     tenant, actor, _ = _binding(request, response, payload, administrator=True)
     function = getattr(_service(request), method)
+    if method == "assess_canary":
+        row = await _call(_service(request).inspect, tenant, actor, candidate_id)
+        if row.get("manifest", {}).get("target", {}).get("state_schema") == "lightwork.rule-only-flow-release.v1":
+            from .local_flow_promotions import release_status
+            report = await _call(release_status, row["manifest"])
+            if not report["can_assess"]:
+                raise HTTPException(409, "Complete a real run of this exact published release, then refresh before assessing its failure rate.")
     value = await _call(
         function,
         tenant,

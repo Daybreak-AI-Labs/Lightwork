@@ -234,10 +234,13 @@
     var detail = document.getElementById("elv-verdict-detail");
     var valid = result && result.receipt_valid === true;
     box.hidden = false;
-    verdict.dataset.valid = valid ? "true" : "false";
-    verdict.textContent = valid ? "The receipt contents match their recorded fingerprint." :
+    verdict.dataset.valid = valid && result.recorded_in_current_history === true ? "true" : "false";
+    verdict.textContent = valid ? (result.recorded_in_current_history === true
+      ? "This receipt matches a change in the current workspace history."
+      : "The receipt contents match their fingerprint, but no matching change was found in the current workspace history.") :
       "This receipt could not be confirmed. It may have been changed, or it is not a Lightwork receipt.";
-    detail.textContent = "Approval by a person: " + plain(APPROVAL, result && result.approval_status) +
+    detail.textContent = (result && result.checked_at && window.mvWhen ? "Checked " + window.mvWhen(result.checked_at) + ". " : "") +
+      "Approval by a person: " + plain(APPROVAL, result && result.approval_status) +
       ". A matching fingerprint alone does not prove who created this receipt or that the complete history is unchanged.";
   }
 

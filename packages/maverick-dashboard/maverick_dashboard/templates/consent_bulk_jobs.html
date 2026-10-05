@@ -46,6 +46,11 @@
       </div>
       {% if not bulk_jobs_can_admin %}<p class="muted">Only an administrator can start, run or cancel jobs.</p>{% endif %}
       <div id="cbj-job-list"><p class="muted">Loading jobs…</p></div>
+      <div class="cw-actions" aria-label="Job pages">
+        <button class="btn btn--ghost" type="button" id="cbj-jobs-latest">Latest jobs</button>
+        <button class="btn" type="button" id="cbj-jobs-older" hidden>Older jobs</button>
+        <span class="muted" id="cbj-jobs-page" role="status" aria-live="polite"></span>
+      </div>
       <div id="cbj-detail" class="cw-editor" hidden tabindex="-1">
         <h3 id="cbj-detail-title">Job details</h3>
         <div id="cbj-detail-body"></div>

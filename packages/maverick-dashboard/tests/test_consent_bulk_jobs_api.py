@@ -224,6 +224,15 @@ def test_export_run_progress_download_history_integrity_and_credits(environment)
     assert ("global", "admin") in state.permission_calls
     assert ("global", "audit") in state.permission_calls
 
+    later = client.post(f"{BASE}/exports", json={**_export_body(), "idempotency_key": "create-export-api-2"}).json()
+    first_page = client.get(BASE, params={"limit": 1}).json()
+    assert first_page["jobs"][0]["job_id"] == later["job_id"]
+    older_page = client.get(BASE, params={"limit": 1, "before_job_id": first_page["next_before_job_id"]}).json()
+    assert older_page["jobs"][0]["job_id"] == job["job_id"]
+    assert older_page["next_before_job_id"] is None
+    assert client.get(BASE, params={"before_job_id": "other-tenant-or-missing"}).status_code == 404
+    assert client.get(BASE, params={"before_job_id": "../../private"}).status_code == 422
+
 
 def test_edit_action_runs_existing_primitive_and_missing_mutation_fails_closed(environment) -> None:
     client, _state, _runtime, preferences = environment

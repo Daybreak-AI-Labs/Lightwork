@@ -108,10 +108,15 @@ def test_snapshot_is_digest_only_bounded_and_does_not_repair_source(
         assert downloaded.json()["receipt_sha256"] == entry["promotion_receipt_sha256"]
         checked = client.post(f"{BASE}/verify-receipt", json={"receipt": downloaded.text})
         assert checked.status_code == 200 and checked.json()["receipt_valid"] is True
+        assert checked.json()["recorded_in_current_history"] is True
         assert checked.json()["approval_status"] == "not_verifiable_without_private_binding"
         for private in (record.id, record.summary, record.approval_signature, "C:/private/path/never-expose"):
             assert private not in downloaded.text
     assert client.get(f"{BASE}/entries/{'0' * 64}/receipt").status_code == 404
+    other_receipt = build_promotion_receipt(_record(id="a-change-from-another-history"))
+    other = client.post(f"{BASE}/verify-receipt", json={"receipt": json.dumps(other_receipt)})
+    assert other.status_code == 200 and other.json()["receipt_valid"] is True
+    assert other.json()["recorded_in_current_history"] is False
     from maverick_dashboard import product_operations_learning_history as copilot
 
     monkeypatch.setattr(copilot, "require_permission", lambda request, permission: None)
@@ -193,6 +198,7 @@ def test_receipt_verification_is_digest_only_and_never_echoes_input(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     receipt = build_promotion_receipt(_record())
+    monkeypatch.setattr(api, "_promotion_ledger_source", lambda: (None, "not_present"))
     client = _client(monkeypatch)
 
     verified = client.post(
@@ -203,6 +209,7 @@ def test_receipt_verification_is_digest_only_and_never_echoes_input(
     body = verified.json()
     assert body["schema"] == api.RECEIPT_VERIFICATION_SCHEMA
     assert body["receipt_valid"] is True
+    assert body["recorded_in_current_history"] is False
     assert body["receipt_sha256"] == receipt["receipt_sha256"]
     assert body["approval_status"] in {
         "not_recorded",

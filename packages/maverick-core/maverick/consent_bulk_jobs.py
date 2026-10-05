@@ -367,6 +367,8 @@ class ConsentBulkJobStore:
                 );
                 CREATE INDEX IF NOT EXISTS consent_bulk_jobs_due
                     ON consent_bulk_jobs(tenant, state, scheduled_for, created_at);
+                CREATE INDEX IF NOT EXISTS consent_bulk_jobs_browse
+                    ON consent_bulk_jobs(tenant, created_at DESC, job_id DESC);
                 CREATE TABLE IF NOT EXISTS consent_bulk_items (
                     tenant TEXT NOT NULL,
                     job_id TEXT NOT NULL,
@@ -920,29 +922,33 @@ class ConsentBulkJobStore:
         *,
         state: str | None = None,
         limit: int = 100,
+        before_job_id: str | None = None,
     ) -> dict[str, Any]:
         tenant = _tenant(tenant_id)
         page_size = _integer(limit, "limit", 1, _MAX_READ_LIMIT)
         if state is not None and state not in _STATES:
             raise ConsentBulkJobValidationError("state is invalid")
         with self._connect() as connection:
-            if state is None:
-                rows = connection.execute(
-                    "SELECT job_id FROM consent_bulk_jobs WHERE tenant = ? "
-                    "ORDER BY created_at DESC, job_id DESC LIMIT ?",
-                    (tenant, page_size + 1),
-                ).fetchall()
-            else:
-                rows = connection.execute(
-                    "SELECT job_id FROM consent_bulk_jobs WHERE tenant = ? AND state = ? "
-                    "ORDER BY created_at DESC, job_id DESC LIMIT ?",
-                    (tenant, state, page_size + 1),
-                ).fetchall()
+            predicates, arguments = ["tenant = ?"], [tenant]
+            if state is not None:
+                predicates.append("state = ?")
+                arguments.append(state)
+            if before_job_id is not None:
+                anchor = self._job_row(connection, tenant, _text(before_job_id, "before_job_id"))
+                predicates.append("(created_at < ? OR (created_at = ? AND job_id < ?))")
+                arguments.extend((anchor["created_at"], anchor["created_at"], anchor["job_id"]))
+            rows = connection.execute(
+                "SELECT job_id FROM consent_bulk_jobs WHERE " + " AND ".join(predicates)
+                + " ORDER BY created_at DESC, job_id DESC LIMIT ?",
+                (*arguments, page_size + 1),
+            ).fetchall()
             jobs = [
                 self._job_row(connection, tenant, str(row["job_id"]))
                 for row in rows[:page_size]
             ]
-        return {"jobs": jobs, "truncated": len(rows) > page_size}
+        more = len(rows) > page_size
+        return {"jobs": jobs, "truncated": more,
+                "next_before_job_id": jobs[-1]["job_id"] if more and jobs else None}
 
     def cancel_job(
         self,

@@ -240,9 +240,20 @@ def _verify_receipt(body: VerifyReceiptIn) -> dict[str, Any]:
     # reports that limitation rather than treating a receipt digest as proof of
     # human approval.
     result = verify_promotion_receipt(receipt)
+    recorded = None
+    if result.receipt_valid:
+        ledger, state = _promotion_ledger_source()
+        # Check the entire native projection, not the newest 500 visible rows.
+        # A valid self-contained fingerprint alone is not a recorded change.
+        recorded = state == "available" and any(
+            entry.promotion_receipt_sha256 == result.receipt_sha256
+            for entry in project_evolution_ledger(ledger).entries
+        )
     return {
         "schema": RECEIPT_VERIFICATION_SCHEMA,
         **result.to_dict(),
+        "recorded_in_current_history": recorded,
+        "checked_at": time.time(),
     }
 
 
