@@ -43,6 +43,7 @@ def projection(request, *, day: str | None = None, goal_id: int | None = None):
     task_ids = set()
     if goal_id is not None:
         task_ids.add(goal_id)
+    stamps = []  # when each shown record last changed, for "Spending updated"
     try:
         total, unknown, count, unfinished = 0.0, 0, 0, 0
         for episode in iter_episodes(_app()._world(), owner=owner, since=start.timestamp(), until=end.timestamp()):
@@ -50,6 +51,7 @@ def projection(request, *, day: str | None = None, goal_id: int | None = None):
                 continue
             if episode.goal_id is not None:
                 task_ids.add(episode.goal_id)
+            stamps.append(episode.ended_at or episode.started_at)
             count += 1
             unfinished += episode.ended_at is None
             value = cost_provenance.amount(episode.cost_dollars)
@@ -98,6 +100,9 @@ def projection(request, *, day: str | None = None, goal_id: int | None = None):
                 group[row["basis"]] += amount
     result["provider_groups"] = [{"provider": key[0], "period": key[1], "currency": key[2], **value} for key, value in groups.items()]
     result["tasks_without_complete_receipt_evidence"] = unavailable
+    from maverick.spending_limits import spend_recorded_at
+    stamps.append(spend_recorded_at())
+    result["spend_recorded_at"] = max((stamp for stamp in stamps if stamp), default=None)
     result["ledgers"].append({"name": "Rated invoice and subscription", "state": "separate", "amount": None,
         "scope": "An employee episode total is not an invoice. Open Billing for your runtime statement; only authorized installation administrators can review workspace invoice rating and retained Stripe dispatch receipts. A configured Stripe price does not reveal its live fee amount locally.",
         "basis": "Subscription, taxes, credits, minimums and markup are not silently included in episode or reservation totals.", "href": "/billing"})

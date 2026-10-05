@@ -5,6 +5,8 @@
 {{ hero('', ui('Your budget before work starts'),
         lede=ui('Review policy ceilings, reserved allowance and upcoming work. This preview never raises a limit or starts a paid request.'),
         compact=true) }}
+{% from "_spend_freshness.html" import spend_freshness %}
+{{ spend_freshness(spend_recorded_at, live=true) }}
 <section class="panel" id="budget-guidance" data-goal="{{ goal_id or '' }}">
   <p><a href="/chat">{{ ui('Start a conversation') }}</a> · <a href="/automations">{{ ui('Manage schedules') }}</a> · <a href="/spend">{{ ui('Spend and cost evidence') }}</a></p>
   <form id="budget-preview-form" data-product-validation>

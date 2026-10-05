@@ -96,7 +96,9 @@ def _projection(request, *, max_dollars=None, max_wall_seconds=None, goal_id=Non
 def page(request: Request, goal_id: int | None = None):
     _actor(request)
     _goal(request, goal_id)
-    return _app().templates.TemplateResponse(request, "budget_guidance.html", {"goal_id": goal_id},
+    from maverick.spending_limits import spend_recorded_at
+    return _app().templates.TemplateResponse(request, "budget_guidance.html", {
+        "goal_id": goal_id, "spend_recorded_at": spend_recorded_at()},
         headers={"Cache-Control": "private, no-store"})
 
 

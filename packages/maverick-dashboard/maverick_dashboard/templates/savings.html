@@ -34,6 +34,8 @@
              copy='A directional estimate: it changes with the numbers below. For measured
                    results, run a workflow pilot.') }}
   {% endcall %}
+  {% from "_spend_freshness.html" import spend_freshness %}
+  {{ spend_freshness(spend_recorded_at) }}
   {# Whose tasks these numbers count, and on what assumptions (value_views). #}
   <p class="muted" id="sv-scope">{% if value_view.scope == 'workspace' %}These numbers cover the whole
     workspace, totals only. Task details are not shown here.{% else %}These numbers

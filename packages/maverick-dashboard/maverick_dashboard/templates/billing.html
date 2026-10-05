@@ -19,6 +19,8 @@
 <p class="page-subtitle">
   Recorded runtime costs for {{ tenant_label }}, from all accessible finished attempts, by UTC month. Figures use runtime pricing in USD; they are not reconciled provider invoices and exclude subscription fees and activity outside these attempts.
 </p>
+{% from "_spend_freshness.html" import spend_freshness %}
+{{ spend_freshness(spend_recorded_at) }}
 
 <div class="toolbar">
   <div class="section-head"><h2>This month — {{ month(current.period) }}</h2></div>
