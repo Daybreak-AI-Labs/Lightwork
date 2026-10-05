@@ -1931,11 +1931,11 @@ def _registered_page_context(path: str) -> CopilotPageContext | None:
     group = str(page.get("group") or "workspace")
     floor = str(page.get("floor") or "view")
     authority = {
-        "view": "You can read this page with viewing access. Changing records may require more access.",
-        "operate": "You need permission to run work to use this page's controls.",
-        "audit": "You need permission to review activity records to use this page.",
-        "admin": "You need installation administrator access to use this page.",
-    }.get(floor, "Lightwork checks your access before changing anything.")
+        "view": "Anyone who can open this page can look; some changes need more access.",
+        "operate": "Making changes here needs operator access.",
+        "audit": "This page is for people who review the audit record.",
+        "admin": "This page is for administrators.",
+    }.get(floor, "Lightwork checks your access again for every change.")
     return _ensure_read_only(
         CopilotPageContext(
             path=path,
@@ -1957,9 +1957,9 @@ def _registered_page_context(path: str) -> CopilotPageContext | None:
                 "After a change, check the result and saved record before relying on it.",
             ),
             suggested_questions=(
-                f"What can I inspect on {title}?",
-                "What access and setup does this page need?",
-                "What should I check after a change?",
+                f"What can I do on {title}?",
+                "Where do I start on this page?",
+                "What should I check before I rely on it?",
             ),
         )
     )
@@ -2119,6 +2119,8 @@ def public_context(
         order = ("view", "operate", "audit", "admin")
         result["caller_permissions"] = [item for item in order if item in permissions]
         result["authority_notice"] = _authority_notice(permissions)
+        result["intro"] = intro_for(context)
+        result["suggestions"] = suggestions_for(context, permissions)
     return result
 
 
@@ -2135,6 +2137,26 @@ def _plain_lines(lines: tuple[str, ...], fallback: str) -> str:
     """Keep useful page copy while avoiding implementation terms in replies."""
     selected = [line for line in lines if not _INTERNAL_COPY.search(line)]
     return " ".join(selected[:2]) if selected else fallback
+def intro_for(context: CopilotPageContext, *, changes_enabled: bool = False) -> str:
+    """One short line on what Copilot can do here, instead of a list of boundaries."""
+    lead = (f"I can explain {context.title}, answer questions about it and take you to the right control."
+            if context.path != "/" else
+            "I can explain this page, answer questions about it and take you to the right control.")
+    return lead + (" Changes always need your confirmation." if changes_enabled
+                   else " I don't change anything for you.")
+
+
+def suggestions_for(context: CopilotPageContext, permissions: frozenset[str]) -> list[str]:
+    """Three things people come to this page to do, phrased as tasks."""
+    from .copilot_tasks import tasks_for
+
+    tasks = [task.label for task in tasks_for(context.path, permissions)]
+    for question in context.suggested_questions:
+        if len(tasks) >= 3:
+            break
+        if question not in tasks:
+            tasks.append(question)
+    return tasks[:3]
 
 
 def built_in_reply(
@@ -2280,8 +2302,10 @@ __all__ = [
     "CopilotPageContext",
     "built_in_reply",
     "context_for_page",
+    "intro_for",
     "is_action_request",
     "model_claims_completed_action",
     "public_context",
     "sanitize_model_reply",
+    "suggestions_for",
 ]

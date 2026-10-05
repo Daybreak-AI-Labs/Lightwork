@@ -38,6 +38,13 @@
   .step--verify .step__icon { color: var(--warn); }
   .step--error .step__icon, .step--error .step__label { color: var(--danger); }
   .step--withheld .step__text { font-style: italic; }
+  .raw-trace { margin-top: var(--space-3); border-top: 1px solid var(--hairline); padding-top: var(--space-2); }
+  .raw-trace > summary { cursor: pointer; width: max-content; color: var(--muted); font-size: var(--text-xs); }
+  .raw-trace__note { margin: var(--space-2) 0; font-size: var(--text-xs); }
+  .raw-trace__list { margin: 0; padding-inline-start: 1.5em; max-height: 320px; overflow-y: auto; }
+  .raw-trace__list li { margin-bottom: var(--space-2); }
+  .raw-trace__meta { font-size: var(--text-xs); color: var(--muted); }
+  .raw-trace__text { margin: 2px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--font-mono); font-size: var(--text-xs); }
   .answer { margin-top: var(--space-4); font-size: var(--text-md); line-height: 1.7; color: var(--text); }
   /* Rendered prose (markdown from the model): chat-client typography. */
   .prose { font-family: inherit; overflow-wrap: anywhere; }
@@ -96,6 +103,15 @@
   .signoff__actions { display: flex; gap: var(--space-2); }
   .signoff textarea.input { width: 100%; margin-bottom: var(--space-3); }
 
+  /* What to know before relying on the answer: check, agent version, backup model. */
+  .answer-facts { margin-top: var(--space-3); display: grid; gap: var(--space-1); font-size: var(--text-sm); color: var(--muted); }
+  .answer-facts p { margin: 0; }
+  .answer-check__label { font-weight: var(--font-semibold); color: var(--text); margin-inline-end: var(--space-2); }
+  .answer-check[data-state="checked"] .answer-check__label { color: var(--accent); }
+  .answer-check[data-state="concerns"] .answer-check__label { color: var(--warn); }
+  .answer-fallback { border-inline-start: 3px solid var(--warn); padding-inline-start: var(--space-2); color: var(--text); }
+  .answer-agent__changes summary { cursor: pointer; width: max-content; }
+  .answer-agent__changes ul { margin: var(--space-1) 0 0; padding-inline-start: 1.25em; }
   /* Feedback: the always-available thumbs up/down on any finished result. */
   .feedback { margin-top: var(--space-3); display: flex; align-items: center; gap: var(--space-1); flex-wrap: wrap; }
   .feedback__q { font-size: var(--text-sm); }
@@ -106,6 +122,12 @@
   .more > summary::-webkit-details-marker { display: none; }
   .more[open] > summary { color: var(--text); }
   .feedback .btn.is-active { border-color: var(--accent); background: var(--surface-sunken); }
+  .feedback-reason { margin-top: var(--space-2); padding: var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-md); display: grid; gap: var(--space-2); max-width: 36rem; }
+  .feedback-reason__q { margin: 0; font-weight: var(--font-medium); }
+  .feedback-reason__chips { display: flex; flex-wrap: wrap; gap: var(--space-1); }
+  .feedback-reason__chip[aria-pressed="true"] { border-color: var(--accent); background: var(--surface-sunken); color: var(--text); }
+  .feedback-reason__label { font-size: var(--text-sm); color: var(--muted); }
+  .feedback-reason__actions { display: flex; gap: var(--space-2); }
 
   /* Artifacts: a goal's versioned, kind-tagged outputs. */
   .artifacts { margin-top: var(--space-5); }
@@ -432,6 +454,13 @@
         <p id="loading-placeholder" class="muted" aria-busy="true" style="margin: 0;">
           <span class="spinner" aria-hidden="true"></span> {{ ui('Working…') }}
         </p>
+        {# Each step above is narrated in plain words; the text Lightwork
+           recorded for it (prompts, tool output) stays here, folded away. #}
+        <details class="raw-trace" id="raw-trace" hidden>
+          <summary>{{ ui('Technical details') }}</summary>
+          <p class="muted raw-trace__note">{{ ui('The text recorded for each step, exactly as Lightwork saved it.') }}</p>
+          <ol class="raw-trace__list" id="raw-trace-list"></ol>
+        </details>
       </div>
     </details>
     <div id="qa-thread" class="qa" aria-live="polite">
@@ -726,10 +755,8 @@
       // the evidence gateway is on; the page folds those into a single line.
       const WITHHELD = new Set({{ (withheld_markers or [])|tojson }});
       const TOOL_LINE = /^tool=([\w.:-]+)\s*->\s*([\s\S]*)$/;
-      // The kernel's own planning trace ("role=orchestrator depth=0 brief=…")
-      // stays on screen for operators but out of the spoken log: the step's
-      // label already says "Planning".
-      const INTERNAL_TRACE = /^role=\S+ depth=\d+ brief=/;
+      const rawTraceList = document.getElementById('raw-trace-list');
+      const rawTrace = document.getElementById('raw-trace');
 
       function stepIcon(kind) {
         const span = document.createElement('span');
@@ -743,11 +770,6 @@
         path.setAttribute('stroke-width', '1.5'); path.setAttribute('stroke-linecap', 'round'); path.setAttribute('stroke-linejoin', 'round');
         svg.appendChild(path); span.appendChild(svg);
         return span;
-      }
-
-      function humanTool(name) {
-        const words = String(name || '').replace(/[_\-.:]+/g, ' ').trim();
-        return words ? words.charAt(0).toUpperCase() + words.slice(1) : 'a tool';
       }
 
       function setStatus(status) {
@@ -860,34 +882,69 @@
         return row;
       }
 
+      // The recorded text of each step (briefs, tool output, raw markdown) is
+      // kept under Technical details, never in the plain step list.
+      function recordRaw(e) {
+        if (!rawTraceList) return;
+        const item = document.createElement('li');
+        const meta = document.createElement('span');
+        meta.className = 'raw-trace__meta';
+        meta.textContent = String(e.kind || '') + ' · ' + String(e.agent || '');
+        meta.lang = 'und'; meta.dir = 'auto'; meta.dataset.userContent = '';
+        const body = document.createElement('pre');
+        body.className = 'raw-trace__text';
+        body.textContent = String(e.content || '');
+        body.lang = 'und'; body.dir = 'auto'; body.dataset.userContent = '';
+        item.append(meta, body);
+        rawTraceList.appendChild(item);
+        if (rawTrace) rawTrace.hidden = false;
+      }
+      // The server narrates each step in plain words (step_narration.py); an
+      // older payload without one still gets a plain kind label, never raw text.
+      function plainStep(e) {
+        const step = e && e.step && typeof e.step === 'object' ? e.step : null;
+        if (step && typeof step.text === 'string') return step;
+        return {text: KIND_LABELS[String(e.kind || '')] || 'Worked on a step', group: '', plural: '', hidden: false};
+      }
+      let lastStepRow = null;  // a run of the same step reads as one counted line
       function appendEvent(e) {
         // Internal trace bookkeeping isn't conversation content — skip it.
         if (e && (e.kind === 'trace_meta' || fmtAgent(e.agent) === 'system')) return;
         hidePlaceholder();
         const content = String(e.content || '');
-        stepCount += 1;
-        eventsEl.dataset.steps = String(stepCount);
+        recordRaw(e);
         if (WITHHELD.has(content.trim())) {
+          stepCount += 1;
+          eventsEl.dataset.steps = String(stepCount);
           const n = Number(eventsEl.dataset.withheld || 0) + 1;
           eventsEl.dataset.withheld = String(n);
           const text = cgText(n===1?'{count} step completed. Step details will appear when the answer is ready.':'{count} steps completed. Step details will appear when the answer is ready.',{count:cgNumber(n)});
           if (!withheldRow) withheldRow = stepRow('withheld', KIND_LABELS.withheld, text, '',true);
           else cgCopy(withheldRow.querySelector('.step__text'),text);
           eventsEl.appendChild(withheldRow);  // stays the latest line
+          lastStepRow = null;
           return;
         }
-        let kind = String(e.kind || 'observation');
-        let label = KIND_LABELS[kind] || (kind.charAt(0).toUpperCase() + kind.slice(1));
-        let text = content;
-        const tool = TOOL_LINE.exec(content);
-        if (tool) {
-          kind = 'observation';
-          label = tool[1] === 'ask_user' ? 'Asked you a question' : cgText('Used {tool}',{tool:humanTool(tool[1])});
-          text = tool[2].trim();
+        const step = plainStep(e);
+        if (step.hidden || !step.text) return;
+        stepCount += 1;
+        eventsEl.dataset.steps = String(stepCount);
+        const kind = String(e.kind || 'observation');
+        if (step.group && step.plural && lastStepRow && lastStepRow === eventsEl.lastElementChild &&
+            lastStepRow.dataset.group === step.group) {
+          const count = Number(lastStepRow.dataset.count || 1) + 1;
+          lastStepRow.dataset.count = String(count);
+          cgCopy(lastStepRow.querySelector('.step__label'), step.plural, {count: cgNumber(count)});
+          return;
         }
-        const row = stepRow(kind, label, text, fmtAgent(e.agent));
-        if (INTERNAL_TRACE.test(text)) row.querySelector('.step__text').setAttribute('aria-hidden', 'true');
+        // A helper's steps name the helper; the main agent's steps need no name.
+        const helper = !/-0-[0-9a-f]{6}$/.test(String(e.agent || '')) && typeof e.who === 'string' &&
+          e.who !== 'Lightwork' && step.text.indexOf(e.who) !== 0 ? e.who : '';
+        const row = stepRow(kind, step.text, '', helper);
+        row.dataset.group = step.group || '';
+        row.dataset.count = '1';
         eventsEl.appendChild(row);
+        lastStepRow = row;
       }
 
       document.addEventListener('lightwork:answer-panel-updated', function () {

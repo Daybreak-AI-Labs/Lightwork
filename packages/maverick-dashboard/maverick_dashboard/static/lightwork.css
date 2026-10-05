@@ -1369,6 +1369,9 @@
   color: var(--text); padding: .3rem .55rem; font: inherit; font-size: var(--text-xs);
   cursor: pointer; text-align: start; }
 .mv-copilot__prompt:hover { border-color: var(--brand-border); color: var(--brand-hi); }
+/* A Copilot link that opens a page and focuses one control. */
+.mv-copilot__goto { font-weight: var(--font-medium); }
+.mv-copilot-focus { outline: 3px solid var(--brand-hi); outline-offset: 2px; }
 .mv-copilot__msg { font-size: var(--text-sm); border-radius: var(--radius-md);
   padding: .45rem .65rem; max-width: 92%; }
 .mv-copilot__msg--user { justify-self: end; background: var(--brand);

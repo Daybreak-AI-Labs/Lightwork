@@ -14,7 +14,9 @@
   function cgErr(failure, action) { return window.mvErrorText(failure, action); }
   function dirty() {
     var editor = panel.querySelector('#edit-text'), note = panel.querySelector('#signoff-note');
-    return !!((editor && (editor.readOnly || editor.value !== editor.dataset.savedText)) || (note && note.value.trim()));
+    var comment = panel.querySelector('#feedback-note');
+    return !!((editor && (editor.readOnly || editor.value !== editor.dataset.savedText)) || (note && note.value.trim()) ||
+      (comment && comment.value.trim()));
   }
   function clearPrivate() {
     denied = true; generation++;
@@ -90,16 +92,59 @@
       }).then(function (j) {
         if (j && j.feedback && j.feedback.rating) show(j.feedback.rating);
       }).catch(function () {});
-      function submit(rating) {
+      // A thumbs-down offers an optional reason (chips plus a private comment)
+      // that is one tap to skip; the server says where the feedback went.
+      var reasonForm = panel.querySelector('#feedback-reason');
+      var reasonQ = panel.querySelector('#feedback-reason-q');
+      var note = panel.querySelector('#feedback-note');
+      var chosen = '';
+      function closeReasons() { if (reasonForm) reasonForm.hidden = true; chosen = ''; }
+      function openReasons(followUp) {
+        if (!reasonForm) return;
+        reasonForm.hidden = false;
+        reasonForm.querySelectorAll('[data-reason]').forEach(function (chip) { chip.setAttribute('aria-pressed', 'false'); });
+        chosen = '';
+        // After repeated rejections of this agent, one short open question instead.
+        if (followUp && reasonQ) { say(reasonQ, followUp.question); if (note) note.focus(); }
+        else { var first = reasonForm.querySelector('[data-reason]'); if (first) first.focus(); }
+      }
+      if (reasonForm) {
+        reasonForm.querySelectorAll('[data-reason]').forEach(function (chip) {
+          chip.addEventListener('click', function () {
+            chosen = chip.getAttribute('aria-pressed') === 'true' ? '' : chip.dataset.reason;
+            reasonForm.querySelectorAll('[data-reason]').forEach(function (other) {
+              other.setAttribute('aria-pressed', other.dataset.reason === chosen ? 'true' : 'false');
+            });
+          });
+        });
+        var skip = reasonForm.querySelector('#feedback-reason-skip');
+        if (skip) skip.addEventListener('click', function () { closeReasons(); if (down) down.focus(); });
+        reasonForm.addEventListener('submit', function (event) {
+          event.preventDefault();
+          var text = note ? note.value.trim() : '';
+          if (!chosen && !text) { closeReasons(); if (down) down.focus(); return; }
+          submit('down', {reason: chosen || null, note: text || null}, true);
+        });
+      }
+      function submit(rating, extra, explaining) {
         [up, down].forEach(function (b) { if (b) b.disabled = true; });
         msg.style.color = 'var(--muted)';
         say(msg, 'Recording…');
         fetch('/api/v1/goals/' + goalId + '/feedback', {
           method: 'POST', headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({rating: rating}),
+          body: JSON.stringify(Object.assign({rating: rating}, extra || {})),
         }).then(function (r) {
           [up, down].forEach(function (b) { if (b) b.disabled = false; });
-          if (r.ok) { show(rating); say(msg, "Feedback saved. Learning use follows your organization's policy."); return; }
+          if (r.ok) {
+            return r.json().catch(function () { return {}; }).then(function (j) {
+              show(rating);
+              say(msg, (j && typeof j.acknowledgement === 'string' && j.acknowledgement) ||
+                "Thanks. Your workspace's learning policy decides whether this is used to improve this agent.");
+              if (explaining) { if (note) note.value = ''; closeReasons(); if (down) down.focus(); }
+              else if (rating === 'down') openReasons(j && j.follow_up);
+              else closeReasons();
+            });
+          }
           return r.json().catch(function () { return {}; }).then(function (j) {
             msg.style.color = 'var(--danger)';
             window.mvRenderError(msg, r, 'save your feedback', j);

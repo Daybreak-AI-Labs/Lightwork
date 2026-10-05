@@ -15,6 +15,34 @@
       {% else %}
         <span class="sr-only" id="answer-result-label">{{ ui("Goal result") }}</span><div id="result" tabindex="0" aria-labelledby="answer-result-label" class="prose" data-markdown lang="und" dir="auto" data-user-content>{{ goal.result or '' }}</div>
       {% endif %}
+      {# How far to trust this answer, read from the task's own record:
+         whether the extra check reviewed it, which agent version answered,
+         and whether the backup model stood in (answer_checks.py). #}
+      {% if answer_check %}
+      <div class="answer-facts" id="answer-facts">
+        <p class="answer-check" id="answer-check" data-state="{{ answer_check.state }}">
+          <span class="answer-check__label">{{ ui(answer_check.label) }}</span><span class="answer-check__reason">{{ ui(answer_check.reason) }}</span>
+        </p>
+        {% if answer_fallback %}<p class="answer-fallback" id="answer-fallback">{{ ui('The backup AI model was used for this answer because the main one was unavailable.') }}</p>{% endif %}
+        {% if answer_agent %}
+        <p class="answer-agent" id="answer-agent">
+          {# Owner glossary: a built-in pack is a specialist; anything else is an agent. #}
+          {% if answer_agent.kind == 'specialist' %}{{ ui('Specialist: {agent}', agent=answer_agent.agent) }}{% else %}{{ ui('Agent: {agent}', agent=answer_agent.agent) }}{% endif %} ·
+          {% if answer_agent.updated_text %}{{ ui('updated {date}', date=answer_agent.updated_text) }}{% else %}{{ ui('no recorded changes') }}{% endif %}
+        </p>
+        {% if answer_agent.changed_since %}
+        <p class="answer-agent__since" id="answer-agent-since">{% if answer_agent.kind == 'specialist' %}{{ ui('This specialist has changed since this answer:') }}{% else %}{{ ui('This agent has changed since this answer:') }}{% endif %}
+          {% for row in answer_agent.changed_since %}{{ row.date_text }}, {{ row.changes | join('; ') }}{% if not loop.last %} · {% endif %}{% endfor %}</p>
+        {% endif %}
+        {% if answer_agent.changes %}
+        <details class="answer-agent__changes">
+          <summary>{% if answer_agent.kind == 'specialist' %}{{ ui('What changed in this specialist') }}{% else %}{{ ui('What changed in this agent') }}{% endif %}</summary>
+          <ul>{% for row in answer_agent.changes %}<li>{{ row.date_text }}: {{ row.changes | join('; ') }}</li>{% endfor %}</ul>
+        </details>
+        {% endif %}
+        {% endif %}
+      </div>
+      {% endif %}
       {% if deliverable and deliverable.gate %}
         <div class="signoff" id="signoff">
           {% if signoff %}
@@ -54,7 +82,22 @@
                   data-rating="down" aria-label="{{ ut('No, not useful') }}" lang="{{ ul('No, not useful') }}">👎</button>
           <span id="feedback-msg" role="status" aria-live="polite" class="muted"
                 style="min-height: 1em;"></span>
-        </div>{% endif %}
+        </div>
+        {# After a thumbs-down: an optional reason, one tap to skip. #}
+        <form id="feedback-reason" class="feedback-reason" hidden>
+          <p class="feedback-reason__q" id="feedback-reason-q">{{ ui('What was wrong? This is optional.') }}</p>
+          <div class="feedback-reason__chips" role="group" aria-labelledby="feedback-reason-q">
+            {% for key, label in feedback_reasons %}
+            <button type="button" class="btn btn--ghost feedback-reason__chip" data-reason="{{ key }}" aria-pressed="false">{{ ui(label) }}</button>
+            {% endfor %}
+          </div>
+          <label for="feedback-note" class="feedback-reason__label">{{ ui('Anything else? Your comment stays with this task.') }}</label>
+          <textarea id="feedback-note" class="input" rows="2" maxlength="500" lang="und" dir="auto" data-user-content></textarea>
+          <div class="feedback-reason__actions">
+            <button type="submit" class="btn" id="feedback-reason-send">{{ ui('Send') }}</button>
+            <button type="button" class="btn btn--ghost" id="feedback-reason-skip">{{ ui('Skip') }}</button>
+          </div>
+        </form>{% endif %}
         {% if goal.result %}<div class="answer-actions" role="group" aria-label="{{ ut('Answer actions') }}">
           <button id="copy-result" class="btn btn--ghost" type="button">{{ ui('Copy answer') }}</button>
           <button id="print-result" class="btn btn--ghost" type="button">{{ ui('Print conversation') }}</button>

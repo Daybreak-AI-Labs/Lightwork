@@ -14,6 +14,14 @@
   .cs-viewpoints p, .cs-viewpoints li { overflow-wrap: anywhere; }
   .cs-viewpoints__sides { display: grid; gap: var(--space-2); border: 1px solid var(--border); border-radius: var(--radius-md); padding: var(--space-3); }
   .cs-viewpoints__side { border-inline-start: 3px solid var(--border); padding-inline-start: var(--space-3); margin-block: var(--space-3); }
+  /* What Lightwork can do: example requests, then one plain limit. */
+  .cs-examples { width: 100%; max-width: 40rem; text-align: start; }
+  .cs-examples__title { margin: 0 0 var(--space-2); font-size: var(--text-sm); font-weight: var(--font-semibold); color: var(--muted); }
+  .cs-examples__list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-2); grid-template-columns: repeat(auto-fit, minmax(min(100%, 17rem), 1fr)); }
+  .cs-example { width: 100%; height: 100%; text-align: start; padding: var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-md); background: transparent; color: var(--text); font: inherit; font-size: var(--text-sm); line-height: 1.45; cursor: pointer; }
+  .cs-example:hover, .cs-example:focus-visible { border-color: var(--brand-border); }
+  .cs-examples__sample { margin: var(--space-3) 0 0; font-size: var(--text-sm); color: var(--muted); }
+  .cs-limits { max-width: 40rem; margin: 0; font-size: var(--text-sm); color: var(--muted); }
 </style>
 {% endblock %}
 
@@ -24,6 +32,16 @@
   </div>
   <h1 class="sr-only">{{ ui('Chat') }}</h1>
   <p class="cs-greet">{{ ui('What should Lightwork take on?') }}</p>
+  {% if can_create_goal and model_route_ready and chat_examples and chat_examples.examples %}
+  <section class="cs-examples" id="chat-examples" aria-labelledby="chat-examples-title">
+    <h2 class="cs-examples__title" id="chat-examples-title">{% if chat_examples.department %}{{ ui('Try one of these, picked for {department}', department=chat_examples.department) }}{% else %}{{ ui('Try one of these') }}{% endif %}</h2>
+    <ul class="cs-examples__list">
+      {% for text in chat_examples.examples %}<li><button type="button" class="cs-example">{{ ui(text) }}</button></li>{% endfor %}
+    </ul>
+    {% if chat_examples.sample %}<p class="cs-examples__sample">{{ ui('Or run a sample task on made-up files:') }} <a href="{{ chat_examples.sample.href }}">{{ ui(chat_examples.sample.label) }}</a></p>{% endif %}
+  </section>
+  {% endif %}
+  <p class="cs-limits" id="chat-limits">{{ ui(chat_limits) }}</p>
   {% if not model_route_ready %}
   <section class="panel" id="model-route-setup" role="status">
     <h2 style="margin-top:0">{{ ui('Connect an AI service to start') }}</h2>
@@ -86,7 +104,7 @@
   <fieldset class="composer__controls"{% if not model_route_ready or not can_create_goal %} disabled{% endif %}>
   <legend class="sr-only">{{ ui('Start governed AI work') }}</legend>
   <textarea
-    lang="und" dir="auto" data-user-content name="title"
+    lang="und" dir="auto" data-user-content name="title" id="composer-title"
     class="composer__field"
     rows="2"
     placeholder="{{ ut('Message Lightwork…') }}"
@@ -224,6 +242,28 @@
     } catch (e) {
       chatCopy(notice, 'The prepared template could not be verified in this workspace. Return to Templates and prepare it again.'); notice.hidden = false;
     } finally { title.removeEventListener('input', markTouched); description.removeEventListener('input', markTouched); }
+  })();
+
+  // An example request fills the empty message box for review; it never sends,
+  // and it never replaces something the person already typed.
+  (function () {
+    var field = document.querySelector('form.composer [name="title"]');
+    var hint = document.getElementById('composer-hint');
+    if (!field) return;
+    var lastExample = '';
+    document.querySelectorAll('.cs-example').forEach(function (button) {
+      button.addEventListener('click', function () {
+        var text = (button.textContent || '').trim();
+        if (field.value.trim() && field.value.trim() !== lastExample) {
+          if (hint) chatCopy(hint, 'Your message is kept. Clear it first to use an example.');
+          field.focus();
+          return;
+        }
+        field.value = text; lastExample = text;
+        field.dispatchEvent(new Event('input', {bubbles: true}));
+        field.focus();
+      });
+    });
   })();
 
   // The send button names what it will do for the chosen mode.

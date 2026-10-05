@@ -37,9 +37,10 @@ def entries(S, C, Column):
                         **extra, **common))
     from maverick.product_operation_families import FAMILIES
     result.append(S("copilot", "operation_families", "Actions available through Copilot",
-                    "Choose which registered native controls Copilot can open. Each change still requires "
-                    "current access, a fresh before-and-after review and explicit confirmation. Enable Copilot "
-                    "actions in Features first. A family with no adapter on a page adds no capability.",
+                    "Choose which registered native controls Copilot can open. Controls that only show "
+                    "current status work as soon as their family is chosen. Controls that change something "
+                    "also need Copilot actions turned on in Features, current access, a fresh before-and-after "
+                    "review and explicit confirmation. A family with no adapter on a page adds no capability.",
                     "multiselect", "People & access", ["learning"], "maverick_dashboard.product_operations",
                     subgroup="Copilot actions", max_items=len(FAMILIES),
                     choices=tuple((name, name.capitalize()) for name in FAMILIES),

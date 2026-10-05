@@ -4420,6 +4420,25 @@ class Agent:
             max_chars=_CHAT_LOW_RISK_MAX_CHARS,
         )
 
+    def _note_model_fallback(self, resp) -> None:
+        """Record once per backup model that provider failover answered a turn,
+        so the conversation can say the backup model was used."""
+        primary = getattr(resp, "fallback_from", None)
+        backup = getattr(resp, "served_model", None)
+        if not (isinstance(primary, str) and isinstance(backup, str) and primary and backup):
+            return
+        noted = getattr(self, "_fallbacks_noted", None)
+        if noted is None:
+            noted = self._fallbacks_noted = set()
+        if backup in noted:
+            return
+        noted.add(backup)
+        try:
+            self.ctx.blackboard.post(self.name, "model_fallback",
+                                     f"primary={primary} backup={backup}", provenance="system")
+        except Exception:  # pragma: no cover -- a notice never breaks the run
+            pass
+
     async def _complete_guarded(self, **kw):
         """Await an LLM completion, but ABORT the in-flight call when the
         wall-clock budget is exhausted or the killswitch trips — instead of
@@ -4778,6 +4797,7 @@ class Agent:
                 bb.post(self.name, "error", f"halted: {e}")
                 return AgentResult(error=f"halted: {e}", role=self.role, name=self.name,
                                    stop_kind="killswitch", stop_detail=str(e))
+            self._note_model_fallback(resp)
 
             # A provider token cutoff is not a completed answer, even if its
             # partial text already contains FINAL. Incomplete tool arguments
@@ -5352,6 +5372,10 @@ class Agent:
                                 self.ctx.last_verifier_confidence = verdict.confidence
                             except BudgetExceeded:
                                 verdict = None
+                                # Say so in the record: a check that started but
+                                # did not finish must never read as "checked".
+                                bb.post(self.name, "verify",
+                                        "verifier did not complete (budget)")
                             except Exception as e:  # pragma: no cover
                                 bb.post(self.name, "error", f"verifier failed: {e}")
                                 verdict = None

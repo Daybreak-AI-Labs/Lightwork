@@ -10687,12 +10687,32 @@ def post_feedback(request: Request, goal_id: int, payload: FeedbackIn) -> dict:
     who = _supervisor(request)
     from maverick_dashboard import goal_feedback_store
 
+    agent = g.domain or ""
+    previous = goal_feedback_store.latest_for_goal(goal_id, owner=g.owner or "")
     row = goal_feedback_store.record(
-        goal_id, g.owner or "", payload.rating, value=value, note=payload.note or "", by=who
+        goal_id, g.owner or "", payload.rating, value=value, note=payload.note or "", by=who,
+        reason=payload.reason or "", agent=agent,
     )
     observed = _ground_outcome(w, goal_id, value, kind="feedback")
+    follow_up = goal_feedback_store.should_follow_up(who, agent, previous=previous, rating=payload.rating)
     return {"feedback": row, "saved": True, "learning_observation": "recorded" if observed else "not_recorded",
-            "training_completed": False}
+            "training_completed": False,
+            "acknowledgement": _feedback_acknowledgement(observed, bool(payload.reason or payload.note), agent),
+            "follow_up": {"question": "What would make this better?"} if follow_up else None}
+
+
+def _feedback_acknowledgement(observed: bool, explained: bool, agent: str = "") -> str:
+    """Where feedback goes and how it is used, true to what just happened."""
+    from .agent_changelog import agent_kind
+
+    noun = agent_kind(agent)  # a built-in pack is a specialist; anything else is an agent
+    text = ("Thanks. Saved with this task and recorded as a learning signal. Your workspace's "
+            f"learning policy decides how it is used to improve this {noun}." if observed else
+            "Thanks. Saved with this task. It was not recorded as a learning signal, "
+            f"so it does not change this {noun}.")
+    if explained:
+        text += f" The administrators' summary shows counts and the reasons picked for this {noun}, not what you wrote."
+    return text
 
 
 @router.post("/goals/{goal_id}/deliverable/edit")
@@ -13663,7 +13683,10 @@ async def copilot_context_endpoint(request: Request, response: Response, page: s
         result["model_route_reason"] = reason
     from maverick.config import get_features
 
+    from .copilot_context import intro_for
+
     result["operations_enabled"] = get_features().get("copilot_operations") is True
+    result["intro"] = intro_for(context_for_page(page), changes_enabled=result["operations_enabled"])
     if not configured:
         result["provider_setup"] = _copilot_provider_setup(permissions, route_status)
     from .provider_readiness import public_verdict, workspace_readiness
@@ -13798,6 +13821,15 @@ async def copilot_endpoint(request: Request, payload: CopilotIn, response: Respo
                                        payload.selected_goal_id)
         return {**live, "page_context": public_context(context, permissions)}
 
+    # Something people come to this page to do: plain steps and a link that
+    # opens the page and focuses the control. Navigation only; nothing changes.
+    from .copilot_tasks import match as match_task
+    from .copilot_tasks import reply as task_reply
+
+    task = match_task(context.path, msg, permissions)
+    if task is not None:
+        return {**task_reply(task), "page_context": public_context(context, permissions)}
+
     # The browser offers only registered, reviewed operations before it asks
     # this read-only guide. A direct action request that reaches this endpoint
     # has no operation receipt and must never be delegated to a text model.
@@ -13914,8 +13946,8 @@ async def copilot_endpoint(request: Request, payload: CopilotIn, response: Respo
         "mode": "model",
         "model_output_verified": False,
         "warning": (
-            "Model-generated guidance is unverified; confirm readiness and outcomes "
-            "against live status, retained evidence, and authorized human review."
+            "This answer is from AI and unverified. Copilot hasn't changed anything; "
+            "check the page before you act on it."
         ),
         "page_context": public_context(context, permissions),
     })
@@ -14054,16 +14086,18 @@ async def save_agent_override(request: Request, name: str, payload: AgentOverrid
         previous = read_override(name)
         if payload.autonomy is None and "autonomy" in previous:
             raise OverrideConflict("This specialist has independence settings. Reload the editor before saving.")
+        before_view = resolved_view(name)
         if payload.autonomy is not None:
-            current = resolved_view(name)
-            before = (current or {}).get("autonomy", {}).get("pack", {})
+            before = (before_view or {}).get("autonomy", {}).get("pack", {})
             after = payload.autonomy.model_dump()
             if before != after:
                 await run_in_threadpool(
                     _record_agent_autonomy_intent, request, name, before, after)
-        return write_override(name, payload.model_dump(exclude_unset=True, exclude_none=True,
+        view = write_override(name, payload.model_dump(exclude_unset=True, exclude_none=True,
                                                        exclude={"expected_generation"}),
                               expected_generation=payload.expected_generation, return_view=True)
+        _record_agent_change(request, name, before_view, view)
+        return view
     except OverrideConflict as e:
         raise HTTPException(status_code=409, detail=str(e)) from e
     except ValueError as e:
@@ -14153,11 +14187,24 @@ async def delete_agent_override(request: Request, name: str, expected_generation
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e)) from e
     view = resolved_view(name)
+    if removed:
+        from . import agent_changelog
+
+        agent_changelog.record(name, ["Reset to the built-in version" if view else "Removed this agent"],
+                               by=caller_principal(request) or "")
     if view is None:
         if removed:
             return {"removed": True, "agent": None}
         raise HTTPException(status_code=404, detail=f"no such agent: {name!r}")
     return {"removed": removed, "agent": view}
+
+
+def _record_agent_change(request: Request, name: str, before: dict | None, after: dict | None) -> None:
+    """One plain-words changelog entry per saved agent change (who, when, what)."""
+    from . import agent_changelog
+
+    agent_changelog.record(name, agent_changelog.describe_agent_change(before, after),
+                           by=caller_principal(request) or "")
 
 
 # ---- JD hiring: map a job description onto the roster / draft a new pack ----
@@ -14379,11 +14426,18 @@ async def save_role_override(role: str, payload: RoleOverrideIn, request: Reques
     _require_role_editing(request)
     from maverick.role_edit import resolved_role, write_role_override
 
+    from . import agent_changelog
+
+    before = resolved_role(role)
     try:
         write_role_override(role, payload.model_dump(exclude_unset=True))
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e)) from e
-    return resolved_role(role)
+    after = resolved_role(role)
+    agent_changelog.record(agent_changelog.EVERY_AGENT,
+                           agent_changelog.describe_role_change(role, before, after),
+                           by=caller_principal(request) or "")
+    return after
 
 
 @router.delete("/roles/{role}/override")
@@ -14392,10 +14446,17 @@ async def delete_role_override(role: str, request: Request) -> dict:
     _require_role_editing(request)
     from maverick.role_edit import remove_role_override, resolved_role
 
+    from . import agent_changelog
+
+    before = resolved_role(role)
     removed = remove_role_override(role)
     view = resolved_role(role)
     if view is None:
         raise HTTPException(status_code=404, detail=f"no such role: {role!r}")
+    if removed:
+        agent_changelog.record(agent_changelog.EVERY_AGENT,
+                               agent_changelog.describe_role_change(role, before, view),
+                               by=caller_principal(request) or "")
     return {"removed": removed, "role": view}
 
 

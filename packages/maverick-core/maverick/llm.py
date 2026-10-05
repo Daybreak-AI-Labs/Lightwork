@@ -436,6 +436,10 @@ class LLMResponse:
     # this physical provider call.  None preserves the response contract when
     # no provider cap is configured or settlement publication is unavailable.
     provider_cost_receipt: dict[str, Any] | None = None
+    # Set only when provider failover answered with a model other than the one
+    # requested, so the conversation can say the backup model answered.
+    served_model: str | None = None
+    fallback_from: str | None = None
 
     def __post_init__(self):
         if self.thinking_blocks is None:
@@ -1242,6 +1246,18 @@ def _attempt_delta(on_delta):
     return on_delta
 
 
+def _mark_served(resp, served: str, requested: str):
+    """Record on a failover response that a backup model answered."""
+    if served != requested and isinstance(resp, LLMResponse):
+        resp.served_model = served
+        resp.fallback_from = requested
+    return resp
+
+
+async def _mark_served_async(pending, served: str, requested: str):
+    return _mark_served(await pending, served, requested)
+
+
 def _hedge_ms_for(on_delta) -> float | None:
     """A hedged backup would stream a second copy of the answer into the same
     callback, so a streaming call is never hedged."""
@@ -1974,14 +1990,14 @@ class LLM:
                 # cooling-down models; with no [provider_failover.policy] both
                 # collapse to the v1 behavior.
                 return failover([
-                    (m, (lambda m=m: self.complete(
+                    (m, (lambda m=m: _mark_served(self.complete(
                         system, messages, tools=tools, budget=budget,
                         max_tokens=max_tokens, thinking_budget=thinking_budget,
                         model=m, on_delta=_attempt_delta(on_delta), effort=effort,
                         tool_choice=tool_choice, _no_failover=True,
                         _provider_sequence=_provider_sequence,
                         dispatch_guard=dispatch_guard,
-                        max_physical_attempts=max_physical_attempts)))
+                        max_physical_attempts=max_physical_attempts), m, requested_model)))
                     for m in order_chain([requested_model, *_chain])
                 ], should_retry=policy_should_retry)
         provider, model_id = _parse_spec(requested_model)
@@ -2174,14 +2190,14 @@ class LLM:
             _chain = [require_model_allowed(candidate) for candidate in _chain]
             if _chain:
                 return await afailover([
-                    (m, (lambda m=m: self.complete_async(
+                    (m, (lambda m=m: _mark_served_async(self.complete_async(
                         system, messages, tools=tools, budget=budget,
                         max_tokens=max_tokens, thinking_budget=thinking_budget,
                         model=m, effort=effort, tool_choice=tool_choice,
                         on_delta=_attempt_delta(on_delta), _no_failover=True,
                         _provider_sequence=_provider_sequence,
                         dispatch_guard=dispatch_guard,
-                        max_physical_attempts=max_physical_attempts)))
+                        max_physical_attempts=max_physical_attempts), m, requested_model)))
                     for m in order_chain([requested_model, *_chain])
                 ], should_retry=policy_should_retry)
         provider, model_id = _parse_spec(requested_model)

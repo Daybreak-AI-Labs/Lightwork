@@ -284,6 +284,10 @@ from .run_status import status_label as _run_status_label  # noqa: E402
 templates.env.filters["approval_spending"] = _approval_spending
 
 templates.env.globals["run_status_label"] = _run_status_label
+# The optional reasons a thumbs-down offers (shared by the page and its live refresh).
+from .goal_feedback_store import REASONS as _FEEDBACK_REASONS  # noqa: E402
+
+templates.env.globals["feedback_reasons"] = list(_FEEDBACK_REASONS.items())
 # Plain labels for model ids, setting sources and sizes (administration pages).
 from . import plain_labels as _plain_labels  # noqa: E402
 
@@ -3809,8 +3813,23 @@ async def learning_page(request: Request) -> HTMLResponse:
         {
             "snap": _learning_snapshot(request),
             "learning_can_manage": has_global_permission(request, "admin"),
+            "agent_feedback": _agent_feedback_summary(),
         },
     )
+
+
+def _agent_feedback_summary() -> list[dict]:
+    """Ratings and picked reasons per agent for the administrator's Learning page."""
+    try:
+        from . import goal_feedback_store
+        from .agent_changelog import agent_title
+
+        rows = goal_feedback_store.summary_by_agent()
+        for row in rows:
+            row["title"] = agent_title(row["agent"])
+        return rows
+    except Exception:  # pragma: no cover -- the page renders without the summary
+        return []
 
 
 @app.get("/perf", response_class=HTMLResponse)
@@ -7153,12 +7172,25 @@ async def agents_page(request: Request) -> HTMLResponse:
             creating = False  # editing an existing agent wins over the new form
     except Exception:  # never 500 the page if the factory layer is unavailable
         agents = []
+    agent_changes: list = []
+    selected_kind = "agent"
+    if selected:
+        try:
+            from . import agent_changelog
+
+            agent_changes = agent_changelog.entries(selected["name"], limit=10)
+            selected_kind = agent_changelog.agent_kind(selected["name"])
+        except Exception:  # pragma: no cover -- the history is best effort
+            agent_changes = []
     return templates.TemplateResponse(
         request,
         "agents.html",
         {"agents": agents, "rejected_agents": rejected_agents,
          "selected": selected, "editable": editable, "creating": creating,
-         "can_set_model_cost_tier": has_global_permission(request, "admin")},
+         "can_set_model_cost_tier": has_global_permission(request, "admin"),
+         "agent_changes": agent_changes, "selected_kind": selected_kind,
+         # Names of the people who changed an agent are shown to administrators.
+         "show_change_authors": has_global_permission(request, "admin")},
     )
 
 
@@ -10033,8 +10065,24 @@ def chat_page(request: Request) -> HTMLResponse:
             "goal_max_wall_seconds": configured_max_wall_seconds(),
             "flows_enabled": flow.enabled(),
             "can_enable_flows": has_global_permission(request, "admin") and "MAVERICK_FLOWS" not in os.environ,
+            # What Lightwork can do (examples for the person's department) and
+            # one limit that is true in code.
+            "chat_examples": _chat_examples(request),
+            "chat_limits": _CHAT_LIMITS,
         },
     )
+
+
+def _chat_examples(request: Request) -> dict:
+    try:
+        from .chat_examples import examples_for
+
+        return examples_for(request)
+    except Exception:  # pragma: no cover -- the empty chat renders without examples
+        return {"department": None, "examples": [], "sample": None}
+
+
+from .chat_examples import LIMITS as _CHAT_LIMITS  # noqa: E402
 
 
 def _director_choices() -> list[dict]:
@@ -11837,6 +11885,7 @@ def chat_goal(request: Request, goal_id: int) -> HTMLResponse:
     from maverick.runner import configured_goal_ceiling_dollars
 
     from ._event_stream import TERMINAL_RUN_STATUSES
+    from .answer_checks import answer_facts
     from .answer_projection import version_for
 
     try:
@@ -11903,6 +11952,7 @@ def chat_goal(request: Request, goal_id: int) -> HTMLResponse:
             "signoff": signoff,
             "artifacts": artifacts,
             "answer_version": version_for(g, contract, signoff, artifacts),
+            **answer_facts(w, g, frozenset(_withheld_event_markers())),
             "projects": projects,
             "share_links": share_links,
             "withheld_markers": _withheld_event_markers(),
@@ -12335,10 +12385,15 @@ def trajectory_page(request: Request, goal_id: int) -> HTMLResponse:
         fork_enabled = session_tree.enabled()
     except Exception:  # pragma: no cover - branching is optional
         fork_enabled = False
+    from .step_narration import narrate, who
+
+    # Plain words for each step; the recorded text stays under Technical details.
+    steps = {e.id: narrate(e.kind, e.agent, e.content) for e in events}
+    agents = {e.agent: who(e.agent) for e in events}
     return templates.TemplateResponse(
         request,
         "trajectory.html",
-        {"goal": g, "events": events, "fork_enabled": fork_enabled,
+        {"goal": g, "events": events, "fork_enabled": fork_enabled, "steps": steps, "agents": agents,
          "can_operate": has_permission(request, "operate") and can_access_goal_principal(caller_principal(request), g)},
     )
 
@@ -12456,6 +12511,7 @@ def api_goal_events_legacy(
     limit: int = 200,
 ) -> dict:
     from ._event_stream import TERMINAL_RUN_STATUSES, event_page, replay_cursor
+    from .step_narration import event_payload
 
     w = _world()
     g = w.get_goal(goal_id)
@@ -12473,10 +12529,7 @@ def api_goal_events_legacy(
         "next_id": events[-1].id if events else since,
         "has_more": has_more,
         "terminal": g.status in TERMINAL_RUN_STATUSES and not has_more,
-        "events": [
-            {"id": e.id, "agent": e.agent, "kind": e.kind, "content": e.content, "ts": e.ts}
-            for e in events
-        ],
+        "events": [event_payload(e) for e in events],
     }
 
 

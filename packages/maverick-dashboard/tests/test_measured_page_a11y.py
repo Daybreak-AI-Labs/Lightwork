@@ -199,5 +199,7 @@ def test_status_roles_stay_off_text_that_never_changes():
 
 def test_the_kernel_planning_trace_is_kept_out_of_the_spoken_task_log():
     template = (TEMPLATES / "chat_goal.html").read_text(encoding="utf-8")
-    assert "const INTERNAL_TRACE = /^role=\\S+ depth=\\d+ brief=/;" in template
-    assert "if (INTERNAL_TRACE.test(text)) row.querySelector('.step__text').setAttribute('aria-hidden', 'true');" in template
+    # The main step list shows plain narration (stream P); the kernel's raw
+    # trace lives only in the folded "Technical details" list.
+    assert 'id="raw-trace-list"' in template and '<details class="raw-trace" id="raw-trace"' in template
+    assert "stepRow(kind, step.text, '', helper)" in template

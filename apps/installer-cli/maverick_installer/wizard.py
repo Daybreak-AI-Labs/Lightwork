@@ -5521,9 +5521,10 @@ def pick_advanced() -> dict[str, Any]:
             )
         ],
         "allow_copilot_operations": _q_confirm(
-            "Let Copilot open the native controls in your selected action families? "
-            "Changes require a fresh review and explicit confirmation. Native page "
-            "controls remain available when this is off.", default=False,
+            "Let Copilot open controls that change things in your selected action families? "
+            "Each change requires a fresh review and explicit confirmation. When this is off, "
+            "Copilot still opens pages, focuses controls and shows status, but changes nothing.",
+            default=False,
         ),
         "governed_pg_pool": _q_confirm(
             "Reuse one bounded Postgres connection for governed records? "
