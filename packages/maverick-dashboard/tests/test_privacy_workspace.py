@@ -230,7 +230,7 @@ def test_records_section_renders_all_four_types():
     assert "erase_command" not in page_text
     # The records tab strip carries the counts (the old hero stat tiles were
     # superseded by the live executive board).
-    assert 'data-tab="dsar"' in html and 'data-tab="ropa"' in html
+    assert 'data-mv-tab="dsar"' in html and 'data-mv-tab="ropa"' in html
 
 
 def test_records_section_hidden_when_disabled(monkeypatch, tmp_path):

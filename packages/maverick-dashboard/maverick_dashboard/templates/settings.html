@@ -47,11 +47,8 @@
       <input class="input" id="settings-search" type="search" maxlength="100"
              placeholder="Provider, budget, visibility…" aria-controls="settings-sections">
     </label>
-    <div class="mv-tabs settings-tabs" role="tablist" aria-label="Settings sections">
-      {% for key, label in settings_tabs %}
-      <button class="mv-tab" type="button" role="tab" data-settings-tab="{{ key }}" aria-selected="{{ 'true' if key == settings_group else 'false' }}" tabindex="{{ '0' if key == settings_group else '-1' }}">{{ label }}</button>
-      {% endfor %}
-    </div>
+    {% from "_tabs.html" import panel_tabs %}
+    {{ panel_tabs('Settings sections', settings_tabs, settings_group, id='settings', data='settings-tab', controls='settings-sections') }}
     <p class="muted" id="settings-filter-status" role="status" aria-live="polite"></p>
     <p class="settings-all-link">
       <a class="btn btn--ghost" href="/settings/all">All settings</a>
@@ -66,7 +63,7 @@
     {% for key, _label in settings_tabs %}#settings-sections[data-settings-active="{{ key }}"] [data-settings-group]:not([data-settings-group="{{ key }}"]){{ ',' if not loop.last }}
     {% endfor %}{ display: none; }
   </style>
-  <div id="settings-sections" data-settings-active="{{ settings_group }}">
+  <div id="settings-sections" data-settings-active="{{ settings_group }}" role="tabpanel" aria-labelledby="settings-tab-{{ settings_group }}">
   <script>
   // A link to /settings#settings-<group> (or an older section name) shows that
   // group, and selects its tab, from the first paint: the server cannot see
@@ -82,6 +79,7 @@
     var sections = document.getElementById('settings-sections');
     if (!wanted || !sections || sections.dataset.settingsActive === wanted) return;
     sections.dataset.settingsActive = wanted;
+    sections.setAttribute('aria-labelledby', 'settings-tab-' + wanted);
     Array.prototype.forEach.call(document.querySelectorAll('[data-settings-tab]'), function (tab) {
       var selected = tab.dataset.settingsTab === wanted;
       tab.setAttribute('aria-selected', selected ? 'true' : 'false');
@@ -972,7 +970,7 @@
     .settings-index > * { min-width: 0; }
     .settings-index h2, .settings-index p { margin: 0; }
     .settings-index label { display: grid; gap: var(--space-1); }
-    .settings-tabs { grid-column: 1 / -1; }
+    .settings-index > .mv-tabs { grid-column: 1 / -1; }
     #settings-filter-status { grid-column: 1 / -1; min-height: 1.3em; }
     .settings-all-link { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
     @media (max-width: 720px) { .settings-index { grid-template-columns: 1fr; } }
@@ -1008,6 +1006,7 @@
       active = groups.indexOf(group) === -1 ? 'general' : group;
       if (search) search.value = '';
       grouped.forEach(function (node) { node.hidden = node.dataset.settingsGroup !== active; });
+      if (sectionsRoot) sectionsRoot.setAttribute('aria-labelledby', 'settings-tab-' + active);
       tabs.forEach(function (tab) {
         var selected = tab.dataset.settingsTab === active;
         tab.setAttribute('aria-selected', selected ? 'true' : 'false');
@@ -1039,15 +1038,10 @@
       });
       if (filterStatus) filterStatus.textContent = visible ? visible + ' matching sections shown.' : 'No settings match “' + search.value.trim() + '”.';
     }
-    tabs.forEach(function (tab, position) {
+    // The shared tab bar (lightwork-tabs.js) gives the arrow, Home and End
+    // keys; they select through a click, so both arrive here.
+    tabs.forEach(function (tab) {
       tab.addEventListener('click', function () { selectGroup(tab.dataset.settingsTab, false, true); });
-      tab.addEventListener('keydown', function (event) {
-        var direction = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0;
-        if (!direction) return;
-        event.preventDefault();
-        var next = (position + direction + tabs.length) % tabs.length;
-        selectGroup(tabs[next].dataset.settingsTab, true, true);
-      });
     });
     if (search) search.addEventListener('input', applySearch);
     var requestedFocus = new URLSearchParams(window.location.search).get('focus');

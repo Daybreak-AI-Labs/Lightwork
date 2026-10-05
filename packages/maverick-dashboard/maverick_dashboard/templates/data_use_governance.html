@@ -9,12 +9,8 @@
 <div class="governance-workbench" id="dug-root" data-can-admin="{{ 'true' if du_admin else 'false' }}" data-enabled="{{ 'true' if du_on else 'false' }}" data-compiler="{{ 'true' if data_use_compiler_enabled else 'false' }}">
   {{ hero('Data governance', 'Data use rules',
           lede='Describe your data, record why it may be used, set rules for who can use it and how, and decide requests from projects that want to use it.') }}
-  <nav class="cw-nav" aria-label="Data use tools">
-    <div class="cw-nav__group">
-      <a class="btn btn--ghost" href="/data-use" aria-current="page">Data use rules</a>
-      <a class="btn btn--ghost" href="/data-use/providers">Snowflake and Databricks</a>
-    </div>
-  </nav>
+  {% from "_tabs.html" import sub_nav %}
+  {{ sub_nav('Data use tools', [('', [('/data-use', 'Data use rules'), ('/data-use/providers', 'Snowflake and Databricks')])], '/data-use') }}
   {% if not du_on %}
   {{ module_gate('data_use_governance', 'Data use rules',
                  detail='Keeps a record of your data, why it may be used and the rules that decide each request. Ask your data owner to agree before turning it on.',

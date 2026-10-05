@@ -11,12 +11,8 @@
      data-databricks="{{ 'true' if data_use_databricks_enabled and data_use_enforcement_enabled else 'false' }}">
   {{ hero('Data governance', 'Snowflake and Databricks',
           lede='Connect your Snowflake or Databricks tables, then apply the decisions from Data Use Rules there: hiding values, limiting rows and allowing or blocking access.') }}
-  <nav class="cw-nav" aria-label="Data use tools">
-    <div class="cw-nav__group">
-      <a class="btn btn--ghost" href="/data-use">Data use rules</a>
-      <a class="btn btn--ghost" href="/data-use/providers" aria-current="page">Snowflake and Databricks</a>
-    </div>
-  </nav>
+  {% from "_tabs.html" import sub_nav %}
+  {{ sub_nav('Data use tools', [('', [('/data-use', 'Data use rules'), ('/data-use/providers', 'Snowflake and Databricks')])], '/data-use/providers') }}
   {% if not data_use_enforcement_enabled %}
   {{ module_gate('data_use_governance.enforcement', 'Applying rules in your databases',
                  detail='Lets Lightwork change access settings in your connected Snowflake or Databricks account. Turn on the service you use as well.',

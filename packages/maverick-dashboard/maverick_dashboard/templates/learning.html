@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Learning · Lightwork{% endblock %}
 {% block content %}
+{% from "_tabs.html" import panel_tabs, tab_panel %}
 <style>
   .lrn :focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; border-radius: var(--radius-sm); }
   .lrn__section-h { font-size: var(--text-lg); margin: 0 0 var(--space-1); }
@@ -22,15 +23,12 @@
   #lrn-flows-on { scroll-margin-top: var(--space-7); }
   .lrn__actions { display: flex; gap: var(--space-3); align-items: center; flex-wrap: wrap; margin-bottom: var(--space-3); }
   .lrn [hidden] { display: none !important; }
-  .lrn__tabs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border: 1px solid var(--border); border-radius: var(--radius-md); padding: var(--space-1); margin-block: var(--space-3) var(--space-4); }
-  .lrn__tabs .mv-tab { min-width: 0; min-height: 3rem; margin: 0; padding-inline: var(--space-2); overflow-wrap: anywhere; }
   .lrn__pane { min-width: 0; }
   .lrn__next { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-block: var(--space-4); }
   .lrn__disclosure { margin-block: var(--space-4); }
   .lrn__disclosure > summary { padding-block: var(--space-2); font-weight: var(--font-semibold); cursor: pointer; }
   .lrn__disclosure[open] > summary { margin-bottom: var(--space-3); }
   @media (max-width: 640px) {
-    .lrn__tabs .mv-tab { font-size: var(--text-sm); line-height: 1.35; padding-inline: var(--space-1); }
     .lrn__row { flex-wrap: wrap; align-items: flex-start; padding: var(--space-3); gap: var(--space-2); }
     .lrn__row-main { flex-basis: calc(100% - 5rem); }
     .lrn__row > button { margin-inline-start: auto; }
@@ -71,13 +69,10 @@
   </p>
   {% endif %}
 
-  <div class="mv-tabs lrn__tabs glass-surface" role="tablist" aria-label="Learning sections">
-    <button type="button" class="mv-tab" id="learning-tab-overview" role="tab" aria-selected="true" aria-controls="learning-overview" tabindex="0" data-learning-tab="overview">Overview</button>
-    <button type="button" class="mv-tab" id="learning-tab-controls" role="tab" aria-selected="false" aria-controls="learning-controls" tabindex="-1" data-learning-tab="controls">Learning controls</button>
-    <button type="button" class="mv-tab" id="learning-tab-review" role="tab" aria-selected="false" aria-controls="learning-review" tabindex="-1" data-learning-tab="review">Review &amp; restore</button>
-  </div>
+  {{ panel_tabs('Learning sections', [('overview', 'Overview'), ('controls', 'Learning controls'), ('review', 'Review & restore')], 'overview',
+                data='learning-tab', tab_prefix='learning-tab-', panel_prefix='learning-') }}
 
-  <section id="learning-overview" class="lrn__pane" role="tabpanel" aria-labelledby="learning-tab-overview" tabindex="0">
+  <section class="lrn__pane" {{ tab_panel('overview', 'overview', tab_prefix='learning-tab-', panel_prefix='learning-') }} tabindex="0">
 
   <div class="bd-kpis" id="bd-kpis"></div>
 
@@ -140,7 +135,7 @@
   </div>
   </section>
 
-  <section id="learning-controls" class="lrn__pane" role="tabpanel" aria-labelledby="learning-tab-controls" tabindex="0" hidden>
+  <section class="lrn__pane" {{ tab_panel('controls', 'overview', tab_prefix='learning-tab-', panel_prefix='learning-') }} tabindex="0">
   <div class="lrn__moat">
     <strong>{{ snap.components_on }} of {{ snap.components_total }} core learning components are on.</strong>
     Every run through Lightwork can teach the workforce — from failures, from consolidation, and from the
@@ -406,7 +401,7 @@
   </details>
   </section>
 
-  <section id="learning-review" class="lrn__pane" role="tabpanel" aria-labelledby="learning-tab-review" tabindex="0" hidden>
+  <section class="lrn__pane" {{ tab_panel('review', 'overview', tab_prefix='learning-tab-', panel_prefix='learning-') }} tabindex="0">
 
   {% if learning_can_manage %}
   <section aria-labelledby="lrn-run-h">
@@ -943,18 +938,13 @@
         if (target !== pane) target.scrollIntoView({block: 'start'});
       }
     }
-    tabs.forEach(function (tab, index) {
-      function activate(name, focus) {
-        select(name, focus);
-        if (window.history && window.history.pushState) window.history.pushState(null, '', '#learning-' + name);
-      }
-      tab.addEventListener('click', function () { activate(tab.dataset.learningTab, false); });
-      tab.addEventListener('keydown', function (event) {
-        var position = event.key === 'ArrowRight' ? (index + 1) % tabs.length :
-          event.key === 'ArrowLeft' ? (index + tabs.length - 1) % tabs.length :
-          event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1 : -1;
-        if (position < 0) return;
-        event.preventDefault(); activate(tabs[position].dataset.learningTab, true);
+    // Each tab is a Back step (#learning-<name>). The shared tab bar
+    // (lightwork-tabs.js) gives the arrow, Home and End keys; they select
+    // through a click, so both arrive here.
+    tabs.forEach(function (tab) {
+      tab.addEventListener('click', function () {
+        select(tab.dataset.learningTab, false);
+        if (window.history && window.history.pushState) window.history.pushState(null, '', '#learning-' + tab.dataset.learningTab);
       });
     });
     window.addEventListener('hashchange', openHash);

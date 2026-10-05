@@ -59,14 +59,16 @@
   {% include "_upcoming_tasks.html" %}
 
   {% if goals %}
-  <div class="mv-tabs" role="group" aria-label="Show tasks">
-    <button type="button" class="mv-tab" data-g-filter="" aria-pressed="true">All</button>
-    <button type="button" class="mv-tab" data-g-filter="running active pending" aria-pressed="false">Running</button>
-    <button type="button" class="mv-tab" data-g-filter="blocked awaiting_approval" aria-pressed="false">Waiting for you</button>
-    <button type="button" class="mv-tab" data-g-filter="failed" aria-pressed="false">Failed</button>
-    <button type="button" class="mv-tab" data-g-filter="done" aria-pressed="false">Done</button>
-  </div>
-  <div class="g-list" id="run-list">
+  {% from "_tabs.html" import panel_tabs %}
+  {# The filter in the address (?status=failed) is selected from the first
+     paint; the page script then shows only its rows. #}
+  {% set g_status = (request.query_params.get('status') or '') if request is defined else '' %}
+  {% set g_filter = g_status if g_status in ('running', 'waiting', 'failed', 'done') else 'all' %}
+  {{ panel_tabs('Show tasks', [('all', 'All', ''), ('running', 'Running', 'running active pending'),
+                               ('waiting', 'Waiting for you', 'blocked awaiting_approval'),
+                               ('failed', 'Failed', 'failed'), ('done', 'Done', 'done')], g_filter,
+                id='g-filter', data='g-filter', controls='run-list') }}
+  <div class="g-list" id="run-list" role="tabpanel" aria-labelledby="g-filter-tab-{{ g_filter }}">
     {% for g in goals %}
     <div class="g-row" id="{{ g.id }}" data-status="{{ g.status }}">
       <span class="g-row__id">{{ (g.created_at | datetime) if g.created_at else '' }}</span>
@@ -216,7 +218,6 @@
     filterBtns.forEach(function (b) {
       b.addEventListener('click', function () {
         active = b.getAttribute('data-g-filter') || '';
-        filterBtns.forEach(function (x) { x.setAttribute('aria-pressed', x === b ? 'true' : 'false'); });
         applyFilter();
         writeAddress();
       });

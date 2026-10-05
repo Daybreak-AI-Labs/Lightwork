@@ -286,11 +286,10 @@
       })
       .catch(function (e) { tplStatus.textContent = e && e.name !== 'TypeError' && e.message ? e.message : plain(e, 'restore the original'); });
   });
-  // Client-side worklist filters.
+  // Client-side worklist filters (the shared tab bar marks the chosen one).
   var buttons = document.querySelectorAll('.pw-filters button[data-filter]');
   buttons.forEach(function (fb) {
     fb.addEventListener('click', function () {
-      buttons.forEach(function (b) { b.setAttribute('aria-pressed', b === fb ? 'true' : 'false'); });
       var f = fb.dataset.filter;
       document.querySelectorAll('#pw-table tbody tr').forEach(function (tr) {
         var show = f === 'all' ||

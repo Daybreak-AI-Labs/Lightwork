@@ -8,6 +8,8 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const {JSDOM} = require('jsdom');
+const {panelTabs, press} = require('./_tab_markup');
+const tabsScript = fs.readFileSync(path.resolve(__dirname, '../../maverick_dashboard/static/lightwork-tabs.js'), 'utf8');
 
 const template = fs.readFileSync(path.resolve(__dirname, '../../maverick_dashboard/templates/settings.html'), 'utf8');
 const earlyScript = (() => {
@@ -25,12 +27,13 @@ const pageScript = (() => {
 })();
 
 const GROUPS = ['general', 'models', 'integrations', 'controls', 'access', 'maintenance'];
+// The settings tab bar as _tabs.html panel_tabs renders it.
 function tabs(selected) {
-  return '<div role="tablist">' + GROUPS.map(group => `<button type="button" role="tab" data-settings-tab="${group}" ` +
-    `aria-selected="${group === selected ? 'true' : 'false'}" tabindex="${group === selected ? '0' : '-1'}">${group}</button>`).join('') + '</div>';
+  return panelTabs('Settings sections', GROUPS.map(group => [group, group]), selected,
+    {id: 'settings', data: 'settings-tab', controls: 'settings-sections'});
 }
 function sections(active) {
-  return `<div id="settings-sections" data-settings-active="${active}">` + GROUPS.map(group =>
+  return `<div id="settings-sections" data-settings-active="${active}" role="tabpanel" aria-labelledby="settings-tab-${active}">` + GROUPS.map(group =>
     `<div class="section-head" data-settings-group="${group}"><h2>${group}</h2></div><div class="panel" data-settings-group="${group}"><p data-settings-search-item>${group} setting</p></div>`).join('') + '</div>';
 }
 function load(hash, serverGroup = 'general') {
@@ -71,6 +74,8 @@ test('loading Settings without a fragment writes none', () => {
   const original = dom.window.history.replaceState.bind(dom.window.history);
   dom.window.history.replaceState = (state, title, url) => { writes.push(url); return original(state, title, url); };
   dom.window.eval(pageScript);
+  dom.window.eval(tabsScript);
+  dom.window.mvTabs.init();
   assert.deepEqual(writes, []);
   assert.equal(dom.window.location.hash, '');
   // Clearing a search returns to the group without writing one either.
@@ -84,6 +89,8 @@ test('loading Settings without a fragment writes none', () => {
 test('a deep link keeps its own address and still opens its group', () => {
   const dom = load('#features');
   dom.window.eval(pageScript);
+  dom.window.eval(tabsScript);
+  dom.window.mvTabs.init();
   assert.equal(dom.window.location.hash, '#features');
   assert.deepEqual(selectedTabs(dom.window.document), ['controls']);
   dom.window.close();
@@ -93,11 +100,21 @@ test('a person switching groups is remembered in the address', () => {
   const dom = load('');
   const doc = dom.window.document;
   dom.window.eval(pageScript);
+  dom.window.eval(tabsScript);
+  dom.window.mvTabs.init();
   doc.querySelector('[data-settings-tab="access"]').click();
   assert.equal(dom.window.location.hash, '#settings-access');
-  doc.querySelector('[data-settings-tab="access"]').dispatchEvent(new dom.window.KeyboardEvent('keydown', {key: 'ArrowRight', bubbles: true}));
+  press(dom.window, doc.querySelector('[data-settings-tab="access"]'), 'ArrowRight');
   assert.equal(dom.window.location.hash, '#settings-maintenance');
   assert.equal(doc.activeElement, doc.querySelector('[data-settings-tab="maintenance"]'));
+  assert.deepEqual(selectedTabs(doc), ['maintenance']);
+  assert.equal(doc.getElementById('settings-sections').getAttribute('aria-labelledby'), 'settings-tab-maintenance');
+  press(dom.window, doc.querySelector('[data-settings-tab="maintenance"]'), 'Home');
+  assert.equal(dom.window.location.hash, '#settings-general');
+  press(dom.window, doc.querySelector('[data-settings-tab="general"]'), 'ArrowLeft');
+  assert.equal(dom.window.location.hash, '#settings-maintenance', 'Left on the first tab wraps to the last');
+  press(dom.window, doc.querySelector('[data-settings-tab="maintenance"]'), 'End');
+  assert.deepEqual([...doc.querySelectorAll('[role="tab"]')].filter(tab => tab.tabIndex === 0).map(tab => tab.dataset.settingsTab), ['maintenance']);
   dom.window.close();
 });
 
@@ -105,6 +122,8 @@ test('the page script takes over the painted group without switching it', () => 
   const dom = load('#settings-access');
   const doc = dom.window.document;
   dom.window.eval(pageScript);
+  dom.window.eval(tabsScript);
+  dom.window.mvTabs.init();
   const root = doc.getElementById('settings-sections');
   assert.equal(root.hasAttribute('data-settings-active'), false, 'the tabs now drive the hidden attributes');
   const shown = new Set(Array.from(doc.querySelectorAll('[data-settings-group]')).filter(node => !node.hidden).map(node => node.dataset.settingsGroup));
