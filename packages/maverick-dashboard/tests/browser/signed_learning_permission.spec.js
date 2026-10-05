@@ -3,6 +3,7 @@ const {test, expect} = require('@playwright/test');
 test('accepted examples need separate permission, and withdrawal stops a learned flow before another action',
   async ({page, request, context, baseURL}) => {
     test.setTimeout(180000);
+    page.setDefaultTimeout(15000);
     const origin = new URL(baseURL).origin;
     await context.route('**/*', route => new URL(route.request().url()).origin === origin
       ? route.continue() : route.abort('blockedbyclient'));
@@ -14,6 +15,12 @@ test('accepted examples need separate permission, and withdrawal stops a learned
     const {flow_id: flowId, run_ids: runs, tools, calls: sourceCalls} = await setup.json();
     expect(runs).toHaveLength(2);
     expect(sourceCalls).toBe(4);
+
+    await page.goto('/settings#settings-features');
+    await expect(page.locator('#feature-copilot_operations input')).toBeVisible();
+    await page.locator('#feature-copilot_operations input').check();
+    await page.locator('form[action="/settings/features"] button[type="submit"]').click();
+    await expect(page.locator('form[action="/settings/features"] [data-save-status]')).toContainText('Saved');
 
     await page.goto('/workflows');
     await page.getByRole('link', {name: 'Learning examples'}).click();
@@ -64,7 +71,14 @@ test('accepted examples need separate permission, and withdrawal stops a learned
       await choice.check();
     }
     await expect(page.locator('#sg-runs button')).toHaveCount(2);
-    await page.locator('#rc-learn').click();
+    await page.locator('#mv-copilot-fab').click();
+    await page.locator('#mv-product-operation-buttons').getByRole('button', {name: 'Learn from reviewed runs', exact: true}).click();
+    await page.locator('#mv-operation-run_ids').selectOption(['0', '1']);
+    await page.locator('#mv-product-operation-form').getByRole('button', {name: 'Review change', exact: true}).click();
+    await page.locator('#mv-product-operation-form input[type="checkbox"]').check();
+    await page.locator('#mv-product-operation-form').getByRole('button', {name: 'Apply reviewed change', exact: true}).click();
+    await expect(page.locator('#mv-product-operation-form')).toContainText('Review the learned procedure');
+    await page.locator('#mv-copilot-close').click();
     await expect(page.locator('#rc-result')).toBeVisible();
     await expect(page.locator('#rc-summary')).toContainText('Learned from 2 runs');
     await page.locator('#rc-name').fill('Local learned procedure');

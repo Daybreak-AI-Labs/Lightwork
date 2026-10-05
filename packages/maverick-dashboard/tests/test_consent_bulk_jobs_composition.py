@@ -422,6 +422,22 @@ def test_executor_interoperates_with_real_consent_preference_authority(
     assert deleted["revision"] == 5
     assert deleted["status"] == "deleted"
 
+    # The workbench numbers each job's rows from item-1. Separate jobs for the
+    # same person must apply separately, while a resumed job retains its key.
+    jobs = bulk.ConsentBulkJobStore(tmp_path / "repeat-jobs.sqlite3", clock=lambda: NOW)
+    jobs.ensure_credit_account("tenant-a", initial_credits=2)
+    runtime = composition.ConsentBulkJobsRuntime("tenant-a", "operator", "e" * 64,
+        jobs, executor, "f" * 64, 5, lambda: NOW)
+    for revision, action in ((1, "grant"), (2, "deny")):
+        job = jobs.create_job("tenant-a", kind="mutation", operation="edit_preferences",
+            items=[{"item_id": "item-1", "profile_id": "profile-2", "expected_revision": revision,
+                    "policy_id": "policy-1", "policy_version": 1,
+                    "context": {"jurisdiction": "us", "country_code": "US", "asserted_source": "operator"},
+                    "choices": [{"purpose_id": "analytics", "action": action}]}],
+            actor_sha256="e" * 64, scheduled_for=None, idempotency_key=f"repeated-bulk-job-{revision}")
+        assert jobs.job_executor_scope("tenant-a", job["job_id"]) == "job"
+        assert runtime.run_job(job["job_id"])["state"] == "succeeded"
+
 
 def test_run_next_executes_one_bounded_export_job(tmp_path: Path) -> None:
     app = FastAPI()

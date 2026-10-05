@@ -100,7 +100,7 @@ def _safe_rating(v) -> float:
 def _safe_count(v) -> int:
     try:
         return max(0, int(v or 0))
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return 0
 
 
@@ -133,6 +133,8 @@ class CatalogEntry:
 
     @classmethod
     def from_dict(cls, kind: str, d: dict) -> CatalogEntry:
+        if not isinstance(d, dict):
+            raise CatalogError("catalog entry must be an object")
         # An inline-spec entry (e.g. MCP) is installable from `spec` alone, so
         # `source` is optional there; content kinds still require it.
         spec = d.get("spec") if isinstance(d.get("spec"), dict) else {}
@@ -147,7 +149,7 @@ class CatalogEntry:
             sha256=str(d.get("sha256", "")),
             author=str(d.get("author", "")),
             verified=bool(d.get("verified", False)),
-            install_count=int(d.get("install_count", 0) or 0),
+            install_count=_safe_count(d.get("install_count")),
             rating=_safe_rating(d.get("rating")),
             ratings_count=_safe_count(d.get("ratings_count")),
             spec=spec,
@@ -333,7 +335,8 @@ def load_catalog(
         for base in bases:
             url = f"{base.rstrip('/')}/{kind}/index.json"
             data = fetch(url)
-            if not data:
+            if not isinstance(data, dict) or not isinstance(data.get("entries", []), list):
+                log.info("catalog: skipping malformed index in %s", url)
                 continue
             for raw in data.get("entries", []):
                 try:

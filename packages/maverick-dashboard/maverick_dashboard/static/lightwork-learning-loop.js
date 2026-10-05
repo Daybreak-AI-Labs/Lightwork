@@ -177,15 +177,13 @@
   async function applyChange(p, b) {
     b.disabled = true;
     var pv = await preview(p);
-    b.disabled = false;
-    if (!pv) return;
+    if (!pv) { b.disabled = false; return; }
     showPreview(b, previewBox([['Now it says:', pv.now || '(nothing yet for this)'], ['After applying:', pv.after]]));
     if (!(await window.mvConfirm('Apply "' + p.title + '"? Agents follow the new text from their next task. Lightwork saves a restore point first, so you can undo it later.',
-      { okText: 'Apply change' }))) return;
-    b.disabled = true;
+      { okText: 'Apply change' }))) { b.disabled = false; return; }
     say('llp-ref-msg', 'Applying…');
     try {
-      await post('/refinements/' + encodeURIComponent(p.id) + '/apply');
+      await post('/refinements/' + encodeURIComponent(p.id) + '/apply', { revision: pv.revision, confirm: true });
       say('llp-ref-msg', 'Change applied. Agents use it from their next task.');
       await loadRefinements();
     } catch (failure) {
@@ -196,18 +194,21 @@
   async function undoChange(p, b) {
     b.disabled = true;
     var pv = await preview(p);
-    b.disabled = false;
-    if (!pv) return;
-    var also = pv.undo_also_removes || [];
-    showPreview(b, previewBox([['Removes:', pv.after]].concat(also.length ? [['Also removes, because they came later:', also.join('; ')]] : [])));
+    if (!pv) { b.disabled = false; return; }
+    var affected = pv.changes || [];
+    var lines = [];
+    affected.forEach(function (change) {
+      lines.push([change.title + ' · Current instructions:', change.before || '(nothing for this)']);
+      lines.push(['After restoring:', change.after || '(removed)']);
+    });
+    showPreview(b, previewBox(lines.length ? lines : [['The complete restore affects:', (pv.undo_also_removes || []).join('; ')]]));
     if (!(await window.mvConfirm('Undo "' + p.title + '"? Instructions go back to exactly how they were before it was applied' +
-      (also.length ? ', which also undoes ' + also.length + ' change' + (also.length === 1 ? '' : 's') + ' applied after it.' : '.'),
-      { okText: 'Undo change' }))) return;
-    b.disabled = true;
+      '. Review every change shown above; earlier instructions may return and later changes may be removed.',
+      { okText: 'Restore reviewed instructions' }))) { b.disabled = false; return; }
     say('llp-ref-msg', 'Undoing…');
     try {
-      await post('/refinements/' + encodeURIComponent(p.id) + '/revert');
-      say('llp-ref-msg', 'Change undone.');
+      await post('/refinements/' + encodeURIComponent(p.id) + '/revert', { revision: pv.revision, confirm: true });
+      say('llp-ref-msg', 'Reviewed instructions restored. The changes in use and their decision records have been refreshed.');
       await loadRefinements();
     } catch (failure) {
       say('llp-ref-msg', await problem(failure, 'undo the change'));

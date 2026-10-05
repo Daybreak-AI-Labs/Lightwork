@@ -614,7 +614,7 @@ def _apply_change(entry: dict) -> None:
 
 
 def apply(proposal_id: str, *, applied_by: str = "",
-          approval_id: int | None = None) -> dict:
+          approval_id: int | None = None, expected_revision: str | None = None) -> dict:
     """Apply one approved proposal, snapshotted and audited.
 
     Refuses unless the proposal is pending, its stored change still matches
@@ -632,6 +632,8 @@ def apply(proposal_id: str, *, applied_by: str = "",
 
     with _locked():
         store = _load_store()
+        if expected_revision is not None and _change_review_unlocked(proposal_id, store)["revision"] != expected_revision:
+            raise RefineError("the instruction review no longer matches the current state; review again")
         record = store["proposals"].get(str(proposal_id))
         if record is None:
             raise RefineError(f"unknown refinement proposal {proposal_id!r}")
@@ -702,7 +704,49 @@ def apply(proposal_id: str, *, applied_by: str = "",
 
 # ---- revert ---------------------------------------------------------------
 
-def revert(proposal_id: str, *, reverted_by: str = "") -> bool:
+def _change_review_unlocked(proposal_id: str, store: dict) -> dict:
+    """Exact overlay before/after, including everything a whole restore affects."""
+    record = store["proposals"].get(str(proposal_id))
+    if record is None:
+        raise RefineError(f"unknown refinement proposal {proposal_id!r}")
+    before = _load_refinements()
+    after = dict(before)
+    if record.get("status") == "applied":
+        from . import dreaming
+        from .file_lock import cross_process_lock
+        base = snapshots_dir()
+        with cross_process_lock(base / dreaming._SNAPSHOT_TRANSACTION, strict=True):
+            name = str(record.get("snapshot") or "")
+            if name not in dreaming.list_snapshots(base):
+                raise RefineError("the restore snapshot is no longer retained; refusing to undo")
+            directory = base / name
+            dreaming._harden_private_tree(directory)
+            path = directory / "refinements.json"
+            try:
+                after = json.loads(dreaming._read_stable_private_file(path)) if path.exists() else {}
+                if not isinstance(after, dict) or any(not isinstance(row, dict) for row in after.values()):
+                    raise ValueError("invalid overlay")
+            except (OSError, ValueError, UnicodeError) as exc:
+                raise RefineError("the restore snapshot is unreadable; refusing to undo") from exc
+    elif record.get("status") == "pending":
+        after[_key(record["target"], record["name"])] = {
+            "target": record["target"], "name": record["name"], "change": record["change"],
+            "proposal_id": record["id"], "digest": record["digest"],
+        }
+    material = {"proposal": record, "before": before, "after": after, "settings": _settings()}
+    revision = hashlib.sha256(json.dumps(material, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    changes = [{"key": key, "before": before.get(key), "after": after.get(key)}
+               for key in sorted(set(before) | set(after)) if before.get(key) != after.get(key)]
+    return {"revision": revision, "proposal": dict(record), "changes": changes, "after": after}
+
+
+def change_review(proposal_id: str) -> dict:
+    """Read a fresh, exact review without changing instructions or approvals."""
+    with _locked():
+        return _change_review_unlocked(proposal_id, _load_store())
+
+
+def revert(proposal_id: str, *, reverted_by: str = "", expected_revision: str | None = None) -> bool:
     """Restore the snapshot this proposal was applied over.
 
     Returns False when there is nothing applied to undo, so reverting twice is
@@ -719,6 +763,9 @@ def revert(proposal_id: str, *, reverted_by: str = "") -> bool:
         record = store["proposals"].get(str(proposal_id))
         if record is None or record.get("status") != "applied":
             return False
+        reviewed = _change_review_unlocked(proposal_id, store)
+        if expected_revision is not None and reviewed["revision"] != expected_revision:
+            raise RefineError("the instruction review no longer matches the current state; review again")
         snapshot = str(record.get("snapshot") or "")
         if snapshot not in dreaming.list_snapshots(snapshots_dir()):
             raise RefineError(
@@ -727,19 +774,36 @@ def revert(proposal_id: str, *, reverted_by: str = "") -> bool:
                 "automatically")
         try:
             _restore_snapshot(snapshot)
+            if _load_refinements() != reviewed["after"]:
+                raise RefineError("the restored instructions no longer match the reviewed snapshot; current state needs review")
         except Exception as e:
             raise RefineError(
                 f"restoring snapshot {snapshot!r} failed ({e}); the "
                 "refinement stays marked applied") from e
         record.update(status="reverted", reverted_at=time.time(),
                       reverted_by=str(reverted_by or "")[:200])
+        # A restore changes the complete overlay. Keep the decision list in
+        # agreement with the bytes actually restored, including later changes
+        # removed and earlier changes brought back by this restore point.
+        retained = {str(row.get("proposal_id") or "") for row in reviewed["after"].values()}
+        removed_proposals = []
+        for other in store["proposals"].values():
+            if other["id"] in retained:
+                other["status"] = "applied"
+            elif other.get("status") == "applied":
+                removed_proposals.append(other["id"])
+                other.update(status="reverted", reverted_at=record["reverted_at"],
+                             reverted_by=record["reverted_by"], reverted_with=record["id"])
         _save_store(store)
 
     from .audit import EventKind, audit_event
     audit_event(EventKind.LEARNING_UPDATE, agent="harness_refine",
                 content="harness_refinement_reverted", proposal=record["id"],
                 target=record["target"], name=record["name"],
-                snapshot=snapshot, reverted_by=record["reverted_by"])
+                snapshot=snapshot, reverted_by=record["reverted_by"],
+                restored_proposals=sorted(retained),
+                removed_proposals=sorted(set(removed_proposals) | {record["id"]}),
+                reviewed_state=reviewed["revision"])
     return True
 
 
@@ -747,4 +811,5 @@ __all__ = [
     "PROVENANCE", "TARGETS", "RefineError", "apply", "enabled",
     "list_proposals", "propose", "refinements", "refinements_path", "revert",
     "snapshots_dir", "store_path",
+    "change_review",
 ]

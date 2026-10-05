@@ -52,6 +52,8 @@
   var toolFilterCategory = ''; // '' = all; else browse one category in the picker
   var flowSchema = {};  // output key -> {type, keys[]} learned from real runs (nested pills)
   var toolQuery = '';   // the action search box's text
+  var toolResults = [], toolTotal = 0, toolNext = null, toolLoading = false, toolError = '';
+  var toolRequest = 0;
   var people = [];      // [{ref, label}] who can be asked to approve
   var savedFlows = [];  // [{id, name, inputs}] other saved flows (for "Run another flow")
   var flowNames = {};   // flow id -> name
@@ -928,7 +930,9 @@
         var catOpts = [{ v: '', t: 'All kinds of actions' }].concat(
           toolCategories.map(function (c) { return { v: c, t: human(c) }; }));
         var catSel = select(toolFilterCategory, catOpts, function (v) {
+          if (toolSearchTimer) clearTimeout(toolSearchTimer);
           toolFilterCategory = v;
+          toolQuery = '';
           loadTools('', v);
         });
         props.appendChild(field('Kind of action', catSel));
@@ -937,16 +941,25 @@
       var toolSearch = input(toolQuery, function (v) { toolQuery = v; scheduleToolSearch(v); }, 'Search actions, for example “Slack”');
       toolSearch.id = 'fd-tool-input';
       props.appendChild(field('Find an action', toolSearch));
-      var names = Object.keys(toolCatalog).filter(function (name) {
-        var meta = toolCatalog[name];
-        return !toolFilterCategory || meta.category === toolFilterCategory || name === n.tool;
-      }).sort(function (x, y) { return human(x).localeCompare(human(y)); });
+      var names = toolResults.slice();
       if (n.tool && names.indexOf(n.tool) < 0) names.unshift(n.tool);
       var toolOpts = [{ v: '', t: names.length ? 'Choose an action…' : 'No matching actions — try another search' }]
         .concat(names.map(function (name) { return { v: name, t: human(name) }; }));
       var toolSel = select(n.tool || '', toolOpts, function (v) { n.tool = v; render(); renderProps(); });
       toolSel.id = 'fd-tool-select';
       props.appendChild(field('Action', toolSel));
+      var toolStatus = hint(toolLoading ? 'Finding actions…' : toolError ||
+        (toolResults.length + ' of ' + toolTotal + ' actions shown.'));
+      toolStatus.setAttribute('role', 'status');
+      props.appendChild(toolStatus);
+      if (toolError || toolNext !== null) {
+        var moreTools = addButton(toolError ? 'Try again' : 'Show more actions', function () {
+          loadTools(toolQuery.trim().length >= 2 ? toolQuery.trim() : '', toolFilterCategory,
+            toolError ? (toolResults.length ? toolNext : 0) : toolNext);
+        });
+        moreTools.disabled = toolLoading;
+        props.appendChild(moreTools);
+      }
       var meta = toolCatalog[n.tool];
       if (meta && meta.description) { var th = document.createElement('p'); th.className = 'toolhint'; th.textContent = meta.description; props.appendChild(th); }
       n.params = n.params || {};
@@ -1069,6 +1082,7 @@
       props.appendChild(chWrap);
       props.appendChild(field('Stop waiting after', select(String(Math.round(n.expires_after || 0)), durationOptions(n.expires_after, 'Never — wait until someone decides'),
         function (v) { n.expires_after = parseFloat(v) || 0; render(); renderProps(); })));
+      if (!n.expires_after) props.appendChild(hint('This step keeps waiting. A review window lasts seven days; the owner can request a fresh review without repeating completed steps.'));
       if (n.expires_after) {
         props.appendChild(field('When time runs out', select(n.on_expire || '', stepChoices(n, 'Reject the request').map(function (o) {
           return o.v ? { v: o.v, t: 'Go to ' + o.t } : o;
@@ -2449,25 +2463,41 @@
     }
   }
 
-  function loadTools(q, category) {
+  function loadTools(q, category, offset) {
+    q = q || ''; category = category || ''; offset = offset || 0;
+    var request = ++toolRequest;
+    toolLoading = true; toolError = '';
+    if (!offset) { toolResults = []; toolTotal = 0; toolNext = null; }
+    if (selected) renderProps();
     var params = [];
     if (q) params.push('q=' + encodeURIComponent(q));
     if (category) params.push('category=' + encodeURIComponent(category));
+    if (offset) params.push('offset=' + offset);
     var url = '/api/v1/flows/tools' + (params.length ? ('?' + params.join('&')) : '');
-    apiFetch(url).then(function (r) { return r.ok ? r.json() : { tools: [] }; })
+    apiFetch(url).then(function (r) { if (!r.ok) throw r; return r.json(); })
       .then(function (j) {
+        if (request !== toolRequest) return;
         if (j.categories && j.categories.length) toolCategories = j.categories;
         // A search replaces the choices (keeping the step's current action).
         var keep = {};
-        if (q || category) {
+        if (!offset) {
           flow.nodes.forEach(function (n) { if (n.tool && toolCatalog[n.tool]) keep[n.tool] = toolCatalog[n.tool]; });
           toolCatalog = keep;
         }
         (j.tools || []).forEach(function (t) {
           toolCatalog[t.name] = { description: t.description || '', params: t.params || [], category: t.category || '' };
+          if (toolResults.indexOf(t.name) < 0) toolResults.push(t.name);
         });
+        toolTotal = Number.isInteger(j.total) ? j.total : toolResults.length;
+        toolNext = Number.isInteger(j.next_offset) ? j.next_offset : null;
+        toolLoading = false;
         if (selected) renderProps();
-      }).catch(function () {});
+      }).catch(function () {
+        if (request !== toolRequest) return;
+        toolLoading = false; toolNext = offset || null;
+        toolError = 'Could not load actions. Your current step is unchanged. Try again.';
+        if (selected) renderProps();
+      });
   }
   // Debounced registry search: typing in an action node's tool field searches
   // EVERY live connector (built-ins + enabled enterprise connectors), narrowed
@@ -2476,6 +2506,9 @@
   var toolSearchTimer = null;
   function scheduleToolSearch(q) {
     if (toolSearchTimer) clearTimeout(toolSearchTimer);
+    // A prior response must not replace the results for text just entered.
+    toolRequest++;
+    toolNext = null; toolLoading = true;
     toolSearchTimer = setTimeout(function () {
       loadTools((q || '').trim().length >= 2 ? q.trim() : '', toolFilterCategory);
     }, 250);

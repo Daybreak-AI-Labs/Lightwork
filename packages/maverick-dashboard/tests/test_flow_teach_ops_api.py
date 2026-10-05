@@ -107,6 +107,22 @@ def test_overview_lists_ai_steps_actions_and_refuses_others(env):
     assert env.client.get("/api/v1/flows/billing/teach", headers=_as("viewer")).status_code == 403
 
 
+def test_teaching_refuses_changed_flow_before_learning_but_accepts_current_form(env):
+    context = env.client.get("/api/v1/flows/billing/teach").json()["flow"]["context"]
+    changed_account = env.client.post("/api/v1/flows/billing/teach/rule/learn", json=RULE,
+                                      headers={"X-Lightwork-Teaching-Context": "0" * 64})
+    assert changed_account.status_code == 409 and "account changed" in changed_account.json()["detail"]
+    stale = env.client.post("/api/v1/flows/billing/teach/rule/learn", json=RULE,
+                           headers={"X-Lightwork-Flow-Version": str(env.flow.version + 1),
+                                    "X-Lightwork-Flow-Revision": env.flow.revision})
+    assert stale.status_code == 409 and "after review" in stale.json()["detail"]
+    current = env.client.post("/api/v1/flows/billing/teach/rule/learn", json=RULE,
+                             headers={"X-Lightwork-Flow-Version": str(env.flow.version),
+                                      "X-Lightwork-Flow-Revision": env.flow.revision,
+                                      "X-Lightwork-Teaching-Context": context})
+    assert current.status_code == 200 and current.json()["summary"]["examples"] == 4
+
+
 def test_learn_try_add_examples_attach_and_save_through_the_normal_save(env):
     learned = env.client.post("/api/v1/flows/billing/teach/rule/learn", json=RULE)
     assert learned.status_code == 200, learned.text
@@ -251,6 +267,32 @@ def test_example_inbox_does_not_present_storage_failure_as_no_examples(env, monk
     assert failed.status_code == 503
     assert "could not be checked" in failed.json()["detail"]
     assert "private store" not in failed.text
+    flow_failed = env.client.get("/api/v1/flows/billing/teach/examples")
+    assert flow_failed.status_code == 503 and "could not be checked" in flow_failed.json()["detail"]
+    assert "private store" not in flow_failed.text
+
+
+def test_copilot_reviewed_source_change_refuses_signed_issuance(monkeypatch):
+    from fastapi import HTTPException
+    from maverick_dashboard import api_flow_recipe_lineage as lineage
+    from maverick_dashboard import flow_teach_ops_api as teach
+
+    class Evidence:
+        def get(self, *_args):
+            return {"training_available": True, "revision": 4,
+                    "episode_sha256": "e" * 64, "grant_sha256": "g" * 64}
+
+        def export_signed(self, *_args, **_kwargs):
+            pytest.fail("A changed reviewed source must not reach the signer.")
+
+    context = SimpleNamespace(resource_owner="user:owner")
+    monkeypatch.setattr(teach, "_signed_ready", lambda _flags: True)
+    monkeypatch.setattr(teach, "_episode_service", lambda *_args, **_kwargs: (Evidence(), context))
+    monkeypatch.setattr(lineage, "_service", lambda _request: (None, context))
+    with pytest.raises(HTTPException) as error:
+        teach._gather_signed(None, "billing", ["one"], expected_runs={"one": {
+            "revision": 3, "episode": "e" * 64, "grant": "g" * 64}})
+    assert error.value.status_code == 409 and "after review" in error.value.detail
 
 
 def _key_trust(public_hex, issuer="caller-issuer"):

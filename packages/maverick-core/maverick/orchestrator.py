@@ -398,6 +398,21 @@ def _review_checkpoint_message(detail: str, goal_id: Any) -> str:
     )
 
 
+def _webhook_public_payload(event: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """Keep technical stop text in the run record, not an outbound callback."""
+    if event != "goal_finished" or payload.get("status") not in {"blocked", "failed"}:
+        return payload
+    from .stop_reasons import stop_payload
+
+    raw = payload.get("result")
+    stop = stop_payload(payload["status"], raw if isinstance(raw, str) else None)
+    if stop is None:  # pragma: no cover -- guarded by terminal status above
+        return payload
+    if stop["kind"] == "other":
+        stop["message"] = "The run stopped before finishing."
+    return {**payload, "result": stop["message"], "stop": stop}
+
+
 def _fire_webhook(event: str, payload: dict[str, Any]) -> None:
     """Emit a run-lifecycle webhook, never raising into the run loop.
 
@@ -409,7 +424,7 @@ def _fire_webhook(event: str, payload: dict[str, Any]) -> None:
         if twin.active():
             return  # a production twin replay is not a run anyone subscribed to
         from .webhooks import fire
-        fire(event, payload)
+        fire(event, _webhook_public_payload(event, payload))
     except Exception as e:  # pragma: no cover -- webhooks never block a run
         log.debug(
             "webhook %s skipped: %s",

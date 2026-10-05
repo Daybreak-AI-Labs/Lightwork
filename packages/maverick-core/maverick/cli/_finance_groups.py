@@ -100,32 +100,15 @@ def _run_self_harness_nightly(world) -> None:
         if not (self_harness.enabled() and st.get("auto_run")):
             return
         from .. import self_improvement_runner as si_runner
-        for mid, (rep, retired) in sorted(si_runner.run_self_harness_all_models().items()):
+        report = si_runner.run_nightly_self_harness(world)
+        if report:
             click.echo(
-                f"[self-harness] {mid}: mined={rep.mined} "
-                f"promoted={rep.promoted} demoted={len(rep.demoted)} "
-                f"retired={retired} relapsed={len(rep.relapsed)}")
-        # Cross-model transfer on the same beat (opt-in, [self_harness]
-        # transfer_auto): the tried-memory makes it near-free once caught up.
-        if st.get("transfer_auto"):
-            sweep = si_runner.run_self_harness_transfer_sweep()
-            for src in sorted(sweep):
-                for tgt in sorted(sweep[src]):
-                    res = sweep[src][tgt]
-                    if res.get("attempted"):
-                        click.echo(
-                            f"[self-harness transfer] {src} -> {tgt}: "
-                            f"attempted={len(res['attempted'])} "
-                            f"promoted={len(res['promoted'])}")
-        # Corpus bootstrapping on the same beat: run_corpus_harvest owns the
-        # whole policy (mode gate, corpus default, limits); ``mode`` is read
-        # here only to word the echo.
-        n = si_runner.run_corpus_harvest(world)
-        if n:
-            verb = ("merged into the corpus"
-                    if st.get("corpus_harvest") == "auto"
-                    else "staged for review")
-            click.echo(f"[self-harness corpus] {n} candidate case(s) {verb}")
+                f"[self-harness] models={report['models_reviewed']} "
+                f"mined={report['patterns_found']} "
+                f"promoted={report['improvements_adopted']} "
+                f"retired={report['improvements_retired']} "
+                f"held_back={report['reviews_held_back']} "
+                f"examples={report['examples_prepared']}")
     except Exception:  # pragma: no cover -- the harness must never break dreaming
         pass
 

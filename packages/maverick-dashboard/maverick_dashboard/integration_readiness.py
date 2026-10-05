@@ -443,6 +443,15 @@ def _valid_self_hosted_address(base_url: str) -> bool:
     )
 
 
+def _self_hosted_probe_address(name: str, base_url: str) -> str:
+    """Use the same server path as the provider's runtime client."""
+    if name == "ollama":
+        return base_url.rstrip("/").removesuffix("/v1")
+    if name in {"vllm", "tgi"}:
+        return base_url.rstrip("/").removesuffix("/v1") + "/v1"
+    return base_url
+
+
 def probe_provider(provider: str, provider_config: dict[str, Any]) -> dict[str, Any]:
     """Perform a bounded live authentication/readiness probe.
 
@@ -495,10 +504,10 @@ def probe_provider(provider: str, provider_config: dict[str, Any]) -> dict[str, 
                 "external_live_verified": False,
             },
         }
+    headers: dict[str, str] = {"Authorization": f"Bearer {key}"} if key else {}
     if name == "ollama":
         base_url = base_url or "http://127.0.0.1:11434"
         suffix = "api/tags"
-        headers: dict[str, str] = {}
     elif name in {"vllm", "tgi", "openai_compatible"}:
         if not base_url:
             env_names = {
@@ -517,7 +526,6 @@ def probe_provider(provider: str, provider_config: dict[str, Any]) -> dict[str, 
                 "evidence": {"kind": "live_status_probe"},
             }
         suffix = "models"
-        headers = {"Authorization": f"Bearer {key}"} if key else {}
     else:
         endpoint = (
             _append_endpoint(base_url, "models")
@@ -555,6 +563,7 @@ def probe_provider(provider: str, provider_config: dict[str, Any]) -> dict[str, 
                 "detail": "provider address must be an HTTP or HTTPS URL without sign-in details",
                 "evidence": {"kind": "live_status_probe"},
             }
+        base_url = _self_hosted_probe_address(name, base_url)
         endpoint = _append_endpoint(base_url, suffix)
     try:
         if name in _SELF_HOSTED_PROVIDERS:

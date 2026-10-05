@@ -3118,6 +3118,8 @@ no images without alt, axe violations limited to nine distinct rules).
 
 #### UX-188 · P2 · Bug · Connected-action category browsing hides the main apps: each category returns the first 50 tools alphabetically, so 'Communication' has no Slack/Teams/Email and 'CRM & Sales' has no Salesforce/HubSpot
 
+- **Current branch (2026-10-05):** Category browsing ranks the available starter actions first and returns a bounded page with a total and next-page position. The designer shows the count and a working Show more control; paging keeps the selected action and entered settings. Search responses cannot overwrite a newer query. Local authenticated route checks cover a 111-action category without omissions or duplicate pages; the actual template controller check covers loading another page while preserving entered work. Installed connector execution remains separate acceptance.
+
 - **Who / where:** workspace admin, evaluator · `GET /api/v1/flows/tools?category=…; designer 'Kind of action' select`
 - **User impact:** A user who narrows the picker to 'Communication' to find Slack gets 50 obscure vendors (A–R) and concludes Slack isn't supported.
 - **Evidence (reproduced):**
@@ -3195,6 +3197,8 @@ no images without alt, axe violations limited to nine distinct rules).
 - Source: U4-024, C5b-028
 
 #### UX-241 · P2 · Reliability · An approval set to 'Never — wait until someone decides' still gets a 7-day 'Decide by' deadline, after which it can no longer be approved and is never expired by the sweep (D7)
+
+- **Current branch (2026-10-05):** Open-ended pauses keep bounded seven-day review windows and now have Request fresh review in the run page and a typed Copilot action. The owner must explicitly request renewal; it validates the exact paused checkpoint, immutable active release, data, current access, credentials and spending authority, records the request and completion, and creates no continuation job. Timed gates cannot be renewed. Old decision bindings remain invalid. Native local checks exercise publication → pause → expired review → renewal → decision → completion, exact retry receipts, and refusal on ownership, publication, credential, checkpoint, deadline or audit failure. Template controller checks exercise the recovery button and duplicate clicks. Installed customer/browser acceptance remains separate.
 
 - **Who / where:** end user, workspace admin · `Approval step 'Stop waiting after' = Never; run page 'Decide by'`
 - **User impact:** A 'wait forever' approval silently becomes undecidable after a week and the run is stranded paused with no on-expire path.
@@ -3697,6 +3701,7 @@ no images without alt, axe violations limited to nine distinct rules).
 
 #### UX-623 · P3 · Ux · Provider card copy: 'Key saved saved here in Settings', and 'Key saved' shown when only a server address (no key) was entered
 
+- **October 5 current branch:** Self-hosted setup asks for the model server's address and a key only if the service requires one; Ollama no longer suggests obtaining a key. The effective address is shown separately from the blank replacement control, so a key-only save keeps its source. Native rotation also preserves an unchanged inherited address carried with a key/setup change. Settings and All settings remove URL sign-in material and extra parameters from their display, while the native save refuses such unusable replacements before changing a key. Local route/service checks cover sealed key rotation, effective routing after a server-address change, deliberate address replacement, safe projection and invalid-address refusal; provider acceptance remains a separate Test connection action.
 - **Who / where:** workspace admin · `/settings provider rows`
 - **User impact:** Stuttering copy and a false 'Key saved' badge on keyless local providers make the state hard to trust.
 - **Evidence (reproduced):**
@@ -3710,6 +3715,7 @@ no images without alt, axe violations limited to nine distinct rules).
 
 #### UX-624 · P3 · Ux · Self-hosted address field shows the Ollama placeholder 'http://localhost:11434' on the vLLM/OpenAI-compatible card
 
+- **October 5 current branch:** Ollama, vLLM, TGI and compatible gateways now show their own address examples. Current addresses remain visible above a blank replacement field; saving a key does not submit an address copied from another source. Ollama's root address and its `/v1` address now reach the same chat base; connection tests and model lists also preserve the configured server path and match the runtime endpoints for Ollama, vLLM and TGI. Local checks cover the rendered hints, real SDK endpoint construction and bounded requests to a loopback HTTP server, including redirect refusal.
 - **Who / where:** workspace admin, evaluator · `/settings vLLM card`
 - **User impact:** An evaluator copying the hint points vLLM at the Ollama port and gets a failed test.
 - **Evidence (code-verified):** packages/maverick-dashboard/maverick_dashboard/templates/settings.html:350-352 one placeholder for every base_url provider
@@ -6999,6 +7005,7 @@ no images without alt, axe violations limited to nine distinct rules).
 
 #### UX-214 · P2 · Bug · Settings toggle 'Look for improvements every night' does nothing on a dashboard-only deployment: the dashboard's nightly dream job never runs the self-harness
 
+- **October 5 implementation:** The dashboard now invokes the shared nightly improvement runner under each active tenant, including when dreaming itself is off. In-product schedule changes reconcile the live worker. Reviews share one evaluation allowance across the fleet, require a recorded start, respect the learning stop, and preserve metadata-only completed or stopped receipts. Learning shows the last result and held-back reviews. Local durable-schedule and runner checks pass; paid-provider and installed-customer qualification are separate.
 - **Who / where:** workspace admin, evaluator · `Settings > Memory & learning > Self-improving instructions > 'Look for improvements every night' ([self_harness] auto_run)`
 - **User impact:** An admin turns on nightly self-improvement in the dashboard (it even defaults on) and believes agents are coaching themselves; unless someone separately schedules the `maverick dream` CLI with cron, it never runs.
 - **Evidence (code-verified):**
@@ -7012,6 +7019,7 @@ no images without alt, axe violations limited to nine distinct rules).
 
 #### UX-231 · P2 · Reliability · One malformed entry in a skills/plugins catalog index hides the entire catalog (contrary to its own docstring)
 
+- **October 5 implementation:** Installation counts use the existing safe numeric parser, including overflow handling. Malformed index shapes and non-object entries are skipped without hiding valid entries or later indexes. Local catalog checks pass.
 - **Who / where:** workspace admin, developer · `catalog.load_catalog (skills, plugins, mcp, personas, templates); self-learning acquisition`
 - **User impact:** A single typo in a third-party or internal catalog (e.g. '1.2k' installs) makes every skill/plugin disappear from browsing and from self-learning.
 - **Evidence (reproduced):**

@@ -26,7 +26,8 @@
              copy='Work runs ' ~ where ~ '. Network access is ' ~ network ~
                   '. Allowed tools still need their connections and setup checked.') }}
   {% endcall %}
-  {% if can_open_page('/discovery') %}<p><a href="/discovery">See everything Lightwork can use here</a>: actions, tool servers, AI providers, chat channels and outside agents.</p>{% endif %}
+  {% if permission_tabs %}{% from "_tabs.html" import tab_bar, panel_attrs %}{{ tab_bar('Permissions views', permission_tabs, '') }}<div {{ panel_attrs('') }}>
+  {% elif can_open_page('/discovery') %}<p><a href="/discovery">See everything Lightwork can use here</a>: actions, tool servers, AI providers, chat channels and outside agents.</p>{% endif %}
 
   {% if perm.error %}
     <div class="panel" role="alert"><p>Some permission details could not be loaded. Reload the page to try again.</p>
@@ -477,4 +478,5 @@
       });
     })();
   </script>
+  {% if permission_tabs %}</div>{% endif %}
 {% endblock %}

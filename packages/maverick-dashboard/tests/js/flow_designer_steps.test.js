@@ -23,6 +23,7 @@ function pageHtml(options = {}) {
     .replace(/\{\{[^}]*\}\}/g, "")
     .replace('{% include "flow_designer_core.js" %}', () => raw(read("flow_designer_core.js")))
     .replace('{% include "flow_designer_inputs.js" %}', () => raw(read("flow_designer_inputs.js")))
+    .replace('{% include "flow_hardening_review.js" %}', () => raw(read("flow_hardening_review.js")))
     .replace('{% include "flow_designer.js" %}', () => raw(read("flow_designer.js")));
   return "<!doctype html><html><body><p id=\"fd-state\"></p>" + html + "</body></html>";
 }
@@ -35,7 +36,7 @@ function open(options = {}) {
       window.fetch = async (url, requestOptions) => {
         calls.push({ url, options: requestOptions });
         const body = url.startsWith("/api/v1/people/assignable") ? { items: [{ ref: "user:ana", label: "Ana Diaz" }] }
-          : url.startsWith("/api/v1/flows/tools") ? { tools: [{ name: "slack_post_message", description: "Post to Slack", params: ["channel_id", "text"], category: "chat" }], categories: ["chat"] }
+          : url.startsWith("/api/v1/flows/tools") ? (options.toolResponse ? options.toolResponse(url) : { tools: [{ name: "slack_post_message", description: "Post to Slack", params: ["channel_id", "text"], category: "chat" }], categories: ["chat"] })
           : url === "/api/v1/flows" ? { flows: [{ id: "onboard-customer", name: "Onboard a customer", inputs: [{ key: "customer_name", label: "Customer name" }] }] }
           : url.startsWith("/api/v1/flows/gallery") ? { flows: [] } : {};
         if (url.startsWith("/api/v1/flows/gallery") && options.galleryStatus === 403) {
@@ -171,6 +172,33 @@ test("an action step is chosen from a list and its settings are labelled boxes",
     const labels = Array.from(doc.querySelectorAll("#fd-props label")).map((l) => l.textContent);
     assert.ok(labels.includes("Channel id") || labels.includes("Channel ID"));
     assert.ok(!doc.getElementById("fd-props").textContent.includes("Params (JSON)"));
+  } finally { dom.window.close(); }
+});
+
+test("action browsing loads the next page without losing the selected action or entered settings", async () => {
+  const action = (name) => ({ name, description: name, params: ["text"], category: "chat" });
+  const { dom, w, doc, calls } = open({ toolResponse(url) {
+    return url.includes("offset=2")
+      ? { tools: [action("teams_message")], categories: ["chat"], total: 3, next_offset: null }
+      : { tools: [action("slack_post_message"), action("email")], categories: ["chat"], total: 3, next_offset: 2 };
+  } });
+  try {
+    await settle();
+    doc.getElementById("fd-steps-add-kind").value = "action";
+    Array.from(doc.querySelectorAll("#fd-simple-body button")).find((b) => b.textContent === "Add step").click();
+    const sel = doc.getElementById("fd-tool-select");
+    sel.value = "slack_post_message"; sel.dispatchEvent(new w.Event("change"));
+    const textLabel = Array.from(doc.querySelectorAll("#fd-props label")).find((label) => label.textContent === "Text");
+    const text = doc.getElementById(textLabel.htmlFor);
+    text.value = "Keep this message"; text.dispatchEvent(new w.Event("input"));
+    Array.from(doc.querySelectorAll("#fd-props button")).find((button) => button.textContent === "Show more actions").click();
+    await settle();
+    assert.ok(calls.some((call) => call.url.includes("offset=2")));
+    assert.equal(doc.getElementById("fd-tool-select").value, "slack_post_message");
+    assert.ok(Array.from(doc.getElementById("fd-tool-select").options).some((item) => item.value === "teams_message"));
+    assert.equal(w.__fdLiveFlow().nodes[0].params.text, "Keep this message");
+    assert.match(doc.getElementById("fd-props").textContent, /3 of 3 actions shown/);
+    assert.equal(Array.from(doc.querySelectorAll("#fd-props button")).some((button) => button.textContent === "Show more actions"), false);
   } finally { dom.window.close(); }
 });
 

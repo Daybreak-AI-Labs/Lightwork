@@ -511,7 +511,7 @@ def verify_flow_decision_attestation(
         raise ApprovalCardError("flow decision signature is untrusted")
 
 
-def require_current_paused_operation(
+def _checked_paused_operation(
     run,
     flow,
     *,
@@ -522,6 +522,7 @@ def require_current_paused_operation(
     decided_by: str = "",
     expired: bool = False,
     decision_attestation: object | None = None,
+    refresh: bool = False,
 ) -> dict:
     """Validate the exact persisted approval before core flow execution.
 
@@ -544,7 +545,7 @@ def require_current_paused_operation(
     try:
         card = (
             validate_approval_card((run.human or {}).get("approval_card"))
-            if expired
+            if expired or refresh
             else require_current_approval_card(
                 (run.human or {}).get("approval_card")
             )
@@ -642,7 +643,12 @@ def require_current_paused_operation(
             raise ApprovalCardError(
                 "approval operation changed; review the current operation"
             )
-        if expired:
+        if refresh:
+            if (run.status != "paused_approval" or run.resume_at is not None
+                    or paused.expires_after or time.time() < float(card["expires_at"])):
+                raise ApprovalCardError("only an expired open-ended approval can be refreshed")
+            require_current_flow_approver(decided_by)
+        elif expired:
             due_at = run.resume_at
             if (
                 type(due_at) not in (int, float)
@@ -671,9 +677,35 @@ def require_current_paused_operation(
         raise ApprovalCardError("approval card is stale or invalid") from exc
 
 
+def require_current_paused_operation(
+    run, flow, *, inputs: dict | None = None, expected_binding: str,
+    authority_binding_sha256: str = "", decision: str = "", decided_by: str = "",
+    expired: bool = False, decision_attestation: object | None = None,
+) -> dict:
+    """Check a decision or scheduled expiry before any continuation executes."""
+    return _checked_paused_operation(
+        run, flow, inputs=inputs, expected_binding=expected_binding,
+        authority_binding_sha256=authority_binding_sha256, decision=decision,
+        decided_by=decided_by, expired=expired, decision_attestation=decision_attestation,
+    )
+
+
+def review_expired_paused_approval(run, flow, *, decided_by: str) -> dict:
+    """Check an unchanged expired review without authorizing its continuation.
+
+    Only an open-ended pause is renewable. A timed-out gate must take its
+    declared expiry path. Integrity, execution data, credentials, budgets and
+    current owner authority must still match the original review exactly.
+    """
+    return _checked_paused_operation(
+        run, flow, expected_binding=paused_operation_binding(run),
+        decided_by=decided_by, refresh=True,
+    )
+
+
 __all__ = [
     "mint_token", "verify_token", "approval_links", "paused_operation_binding",
     "current_flow_runtime_authority", "require_current_flow_approver",
     "flow_decision_attestation_material", "verify_flow_decision_attestation",
-    "require_current_paused_operation",
+    "require_current_paused_operation", "review_expired_paused_approval",
 ]

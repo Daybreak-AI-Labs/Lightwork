@@ -11,11 +11,16 @@ from . import auth
 from . import specialist_test_sets as saved
 from . import workforce_ops_api as native
 from .draft_api import context_for
+from .plain_labels import pack_display_name
 from .product_operations import Adapter, Outcome, Preview, Snapshot, StrictInput
 
 
 class ChooseInput(StrictInput):
     specialist: str = Field(min_length=1, max_length=100)
+
+
+class RunInput(ChooseInput):
+    checks: list[str] = Field(min_length=1, max_length=saved.MAX_CASES_PER_RUN)
 
 
 class CreateInput(ChooseInput):
@@ -123,7 +128,36 @@ def create_execute(request, selection, arguments, prepared, operation_id):
 
 
 def run_snapshot(request, selection):
-    return _snapshot(request, selection, admin=True, paid=True)
+    state = _snapshot(request, selection, admin=True, paid=True)
+    from maverick.domain import available_domains
+
+    profiles = available_domains()
+    allowed = {name for name in profiles if auth.domain_suites_allowed(request, name)}
+    groups = saved.cases_for_specialists(allowed)
+    labels = {name: pack_display_name(name, profiles[name].persona, profiles[name].description) for name in groups}
+    names = sorted(groups, key=labels.get)
+    specialist = selection.get("specialist") if selection.get("specialist") in groups else next(iter(names), "")
+    chosen = groups.get(specialist, [])
+    return Snapshot(digest({"controls": state.revision, "cases": groups}), state.source,
+                    "Choose up to five saved questions for one bounded answer check. Review the questions before spending.",
+                    fields=[{"name": "specialist", "label": "Specialist", "kind": "select", "required": True,
+                             "value": specialist,
+                             "choices": [{"value": name, "label": labels[name]} for name in names]},
+                            {"name": "checks", "label": "Saved questions (choose up to 5)", "kind": "multiselect",
+                             "required": True, "depends_on": "specialist", "presentation": "checkboxes",
+                             "max_selections": saved.MAX_CASES_PER_RUN,
+                             "value": [row["id"] for row in chosen] if len(chosen) <= saved.MAX_CASES_PER_RUN else [],
+                             "choices": [{"value": row["id"], "label": row["task"]} for row in chosen],
+                             "choices_by": {name: [{"value": row["id"], "label": row["task"]} for row in rows]
+                                            for name, rows in groups.items()}}],
+                    blocked=state.blocked or ("Add an answer check in Workforce before checking answers." if not names else ""))
+
+
+def _chosen(name, checks):
+    try:
+        return saved.snapshot(name, checks)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
 
 
 def run_prepare(request, selection, arguments):
@@ -132,15 +166,33 @@ def run_prepare(request, selection, arguments):
     profile = native._test_profile(request, name)
     from maverick.llm import model_for_role
 
-    rows = saved.snapshot(name)
+    rows = _chosen(name, arguments["checks"])
     model = model_for_role(name)
     instructions = saved.instruction_digest(saved.answer_system(profile), model)
-    return Preview(f"Check {len(rows)} saved answers using the current specialist instructions and {model}. "
+    return Preview(f"Check {len(rows)} selected answers using the current specialist instructions and {model}. "
                    "At most $0.25 of model spend, no tools or outside systems, no automatic retry of uncertain calls.",
-                   [{"label": "Specialist", "after": native._name(name)},
-                    {"label": "Questions", "after": len(rows)},
+                   [{"label": "Specialist", "after": pack_display_name(name, profile.persona, profile.description)},
+                    {"label": "Questions", "after": "; ".join(row["task"] for row in rows)},
                     {"label": "Maximum spend", "after": "$0.25"}],
-                   {"cases_digest": digest(rows), "instructions": instructions, "model": model})
+                   {"cases_digest": digest(rows), "instructions": instructions, "model": model,
+                    "case_revisions": {row["id"]: row["revision"] for row in rows},
+                    "context": context_for(request)})
+
+
+def _match_original(request, name, prepared, row):
+    if (prepared["context"] != context_for(request) or row["specialist"] != name
+            or row["model"] != prepared["model"] or row["instruction_hash"] != prepared["instructions"]
+            or {case["id"]: case["revision"] for case in row["case_revisions"]} != prepared["case_revisions"]):
+        raise HTTPException(409, "The original run does not match these reviewed questions, instructions or workspace.")
+
+
+def _run_details(row):
+    return {"status": {"prepared": "Not sent yet", "running": "Checking answers", "done": "Finished",
+                       "stopped": "Stopped", "unknown": "Result needs review"}.get(row["state"], "Result needs review"),
+            "questions": "; ".join(case["task"] for case in row["case_snapshots"]),
+            "answers_checked": len(row["results"]), "passed": row["passed"],
+            "review_results": {"href": "/workforce?specialist=" + row["specialist"],
+                               "label": "Review answer results in Workforce"}}
 
 
 def run_recover(request, selection, arguments, prepared, operation_id):
@@ -149,30 +201,37 @@ def run_recover(request, selection, arguments, prepared, operation_id):
     row = saved.run_by_id(operation_id)
     if row is None or row["state"] == "prepared":
         return None
-    if row["specialist"] != arguments["specialist"]:
-        raise HTTPException(409, "The original run belongs to another specialist.")
+    _match_original(request, arguments["specialist"], prepared, row)
     return Outcome("replayed", "The original run was found. No paid request was repeated.",
-                   {"run": row, "href": "/workforce?specialist=" + row["specialist"]})
+                   _run_details(saved.public_run(row)))
 
 
 def run_execute(request, selection, arguments, prepared, operation_id):
+    auth.require_permission(request, "admin")
     name = arguments["specialist"]
     profile = native._test_profile(request, name)
     from maverick.llm import model_for_role
 
     existing = saved.run_by_id(operation_id)
-    if existing is not None and existing["specialist"] != name:
-        raise HTTPException(409, "The original run belongs to another specialist.")
+    if existing is not None:
+        _match_original(request, name, prepared, existing)
     if existing is not None and existing["state"] != "prepared":
         return Outcome("replayed", "The original run was found. No paid request was repeated.",
-                       {"run": existing, "href": "/workforce?specialist=" + name})
+                       _run_details(saved.public_run(existing)))
     model = model_for_role(name)
-    if (model != prepared["model"] or digest(saved.cases_for(name)) != prepared["cases_digest"]
+    rows = _chosen(name, arguments["checks"])
+    if (prepared["context"] != context_for(request) or model != prepared["model"] or digest(rows) != prepared["cases_digest"]
             or saved.instruction_digest(saved.answer_system(profile), model) != prepared["instructions"]):
         raise HTTPException(409, "The specialist or its tests changed. Review again before spending.")
-    started = native._start_customer_test_job(request, name, operation_id=operation_id)
+    started = native._start_customer_test_job(request, name, operation_id=operation_id,
+                                              case_ids=arguments["checks"], case_revisions=prepared["case_revisions"])
+    if started.get("replayed"):
+        return Outcome("replayed", "The original run was found. No paid request was repeated.",
+                       _run_details(started["run"]))
     return Outcome("queued", "The answer checks started. Open Workforce to see the exact results; no uncertain call is replayed.",
-                   {"job": started["job"], "href": "/workforce?specialist=" + name})
+                   {"status": "Checking selected answers", "questions": "; ".join(row["task"] for row in rows),
+                    "review_results": {"href": "/workforce?specialist=" + name,
+                                       "label": "Review answer results in Workforce"}})
 
 
 def entries():
@@ -185,6 +244,6 @@ def entries():
                 CreateInput, create_snapshot, create_prepare, create_execute, create_recover,
                 aliases=("add an answer check", "create specialist test")),
         Adapter("specialists.tests.run", "Check specialist answers", "models", "/workforce", pages,
-                ChooseInput, run_snapshot, run_prepare, run_execute, run_recover,
+                RunInput, run_snapshot, run_prepare, run_execute, run_recover,
                 aliases=("run specialist tests", "check specialist answers")),
     )

@@ -6,6 +6,7 @@
 {% block content %}
 <div class="governance-workbench" id="consent-bulk-jobs-shell"
      data-api-base="{{ api_base }}" data-copilot-page="{{ page_path }}"
+     data-request-context="{{ request_context }}"
      data-can-audit="{{ 'true' if bulk_jobs_can_audit else 'false' }}"
      data-can-admin="{{ 'true' if bulk_jobs_can_admin else 'false' }}">
   {{ hero('Consent operations', 'Bulk consent changes',
@@ -17,6 +18,11 @@
                  can_activate=bulk_jobs_can_admin) }}
   {% endif %}
   <p class="muted" id="cbj-readiness-detail" role="status" aria-live="polite">Checking whether bulk changes are available…</p>
+  <section class="panel" id="cbj-submission-recovery" hidden aria-labelledby="cbj-submission-title">
+    <h2 id="cbj-submission-title">Check your submitted job</h2>
+    <p id="cbj-submission-note" role="status">The submission result has not been confirmed. Check its saved record before starting another job.</p>
+    <button class="btn" type="button" id="cbj-check-submission">Check submitted job</button>
+  </section>
 
   <fieldset class="feature-gated-workbench" id="cbj-operations" disabled>
     <legend class="sr-only">Bulk consent changes</legend>
@@ -119,18 +125,33 @@
         <label>Run<select class="select" name="when"><option value="now">As soon as possible</option><option value="later">At a set time</option></select></label>
         <label data-when="later" hidden>Start at<input class="input" type="datetime-local" name="scheduled_for"></label>
         <div class="cw-actions">
-          <button class="btn btn--primary" type="submit">Start job</button>
+          <button class="btn btn--primary" type="submit">Review job</button>
           <button class="btn btn--ghost" type="button" data-cbj-close="cbj-create">Cancel</button>
         </div>
+        <section id="cbj-review" class="cw-wide panel" hidden tabindex="-1" aria-labelledby="cbj-review-title">
+          <h3 id="cbj-review-title">Review the selected changes</h3>
+          <p id="cbj-review-summary"></p>
+          <div class="table-scroll" style="max-height:24rem;overflow:auto">
+            <table><caption class="sr-only">Every record included in this job</caption>
+              <thead><tr><th scope="col">Person</th><th scope="col">What will happen</th></tr></thead>
+              <tbody id="cbj-review-rows"></tbody>
+            </table>
+          </div>
+          <div class="cw-actions" style="margin-top:var(--space-3)">
+            <button class="btn btn--primary" type="button" id="cbj-start-reviewed">Start reviewed job</button>
+            <button class="btn btn--ghost" type="button" id="cbj-edit-reviewed">Change selection</button>
+          </div>
+        </section>
       </fieldset>
     </form>
 
     <section class="panel" aria-labelledby="cbj-credit-title">
       <div class="section-head">
-        <h2 id="cbj-credit-title">Job allowance</h2>
+        <h2 id="cbj-credit-title">Record allowance</h2>
         <button class="btn" type="button" id="cbj-add-credits"{% if not bulk_jobs_can_admin %} disabled{% endif %}>Add to the allowance</button>
       </div>
       <p class="muted" id="cbj-credit-detail">Loading…</p>
+      <p class="muted">Each selected person or choice uses one allowance unit, even when many are included in one job.</p>
     </section>
 
     <section class="panel" aria-labelledby="cbj-upkeep-title">

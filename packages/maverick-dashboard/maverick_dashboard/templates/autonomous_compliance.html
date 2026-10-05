@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Autonomous Compliance · Lightwork{% endblock %}
+{% block title %}{{ 'Overview · Compliance' if tab_host else 'Autonomous Compliance' }} · Lightwork{% endblock %}
 {% block content %}
 <style>
   .acm-shell { max-width: 1180px; margin: 0 auto; padding: 1.25rem; }
@@ -18,7 +18,15 @@
   .acm-price { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 1rem; }
   .acm-price p { margin: 0; max-width: 44rem; }
 </style>
-<div class="acm-shell">
+{% if tab_host %}
+{% from "_tabs.html" import host_header, panel_attrs %}{{ host_header(tab_host) }}
+{% endif %}
+<div class="acm-shell"{% if tab_host %} {{ panel_attrs(tab_host.selected) }}{% endif %}>
+  {% if tab_host %}
+  <h2>Autonomous Compliance</h2>
+  <p class="muted">Compliance, run by governed agents: one product, six suites, one workforce.
+    {{ module_count }} tools in {{ suites | length }} areas. The labels are explained at the bottom of the page.</p>
+  {% else %}
   {% from "_hero.html" import hero %}
   {% call hero('Compliance, run by governed agents', 'Autonomous Compliance',
                subtitle='One product, six suites, one workforce',
@@ -31,6 +39,7 @@
              badge='Ready · Preview · Needs outside service', badge_class='info',
              copy='The labels are explained at the bottom of the page.') }}
   {% endcall %}
+  {% endif %}
 
   {% for suite in suites %}
   <section class="acm-suite" aria-labelledby="acm-suite-{{ suite.key }}">

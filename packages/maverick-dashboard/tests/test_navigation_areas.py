@@ -381,12 +381,12 @@ def test_exported_tree_files_match_the_registry():
 
 # -- Redirects and Home (areas mode only) ----------------------------------------
 
-def test_redirect_table_covers_report_section_five_except_the_two_awaiting_decisions():
+def test_redirect_table_covers_report_section_five_except_the_one_awaiting_a_decision():
     from maverick_dashboard import navigation_api
 
     olds = [old for old, _new, _ready, _why in navigation_api.REDIRECTS]
-    assert len(olds) == len(set(olds)) == 15
-    assert "/goal-builder" not in olds and "/flows/designer" not in olds
+    assert len(olds) == len(set(olds)) == 16
+    assert "/goal-builder" not in olds and "/flows/designer" in olds
     for old, new, ready, why in navigation_api.REDIRECTS:
         sample = old.replace("{id}", "7")
         if ready:

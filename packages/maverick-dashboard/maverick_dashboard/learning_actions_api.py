@@ -242,7 +242,8 @@ async def prove(request: Request, body: ProveIn) -> dict:
         raise HTTPException(status_code=422, detail="Those results cannot be compared.") from exc
     verdict = ("improved" if r.improved else
                "worse" if (r.significant and r.delta < 0) else "no_clear_change")
-    return {"verdict": verdict, "tasks": r.n, "before": round(r.baseline_mean, 4),
+    return {"evidence_kind": "supplied_paired_scores", "causal_claim_supported": False,
+            "verdict": verdict, "tasks": r.n, "before": round(r.baseline_mean, 4),
             "after": round(r.treatment_mean, 4), "change": round(r.delta, 4),
             "better": r.wins, "worse": r.losses, "same": r.ties}
 

@@ -67,13 +67,13 @@ def _systems(S) -> tuple:
           "Give a newly approved agent the catalog skills and tools its work needs. Each new "
           "tool still needs approval.", "toggle", group, True, "maverick.provision",
           subgroup=_LEARN),
-        S("self_learning", "distill_local", "Turn repeated successes into skills",
-          "Write a reusable skill from work that went well, on this server, without asking "
-          "an AI model.", "toggle", group, True, "maverick.skill.distillation_local",
+        S("self_learning", "distill_local", "Suggest skills from repeated successes",
+          "Prepare a reusable skill suggestion from completed work on this server, without "
+          "asking an AI model. Review and add it from Skills before future tasks use it.", "toggle", group, True, "maverick.skill.distillation_local",
           subgroup=_LEARN, env=("MAVERICK_DISTILL_LOCAL",)),
         S("self_learning", "auto_distill", "Let an AI model write skills from finished tasks",
           "After each finished task, an AI model writes a new saved skill from it straight "
-          "away, without the overnight checks.", "toggle", group, False,
+          "away, without the overnight checks. It cannot replace a saved or built-in skill.", "toggle", group, False,
           "maverick.orchestrator", subgroup=_LEARN, env=("MAVERICK_AUTO_DISTILL",),
           weaker=True,
           warning="An AI model will write new saved skills straight from finished tasks, and "
@@ -220,11 +220,11 @@ def _overnight(S) -> tuple:
         S("dreaming", "cron", "When overnight learning runs",
           "How often Lightwork reviews recent work to write lessons and skills.", "select",
           group, "0 */6 * * *", "maverick_dashboard.automation_queue", subgroup=_NIGHT,
-          choices=_EVERY, restart=True),
+          choices=_EVERY),
         S("data_engine", "cron", "When the improvement flywheel runs",
           "How often the flywheel looks for costly failures and tests fixes.", "select",
           group, "30 */6 * * *", "maverick_dashboard.automation_queue", subgroup=_NIGHT,
-          choices=_EVERY_HALF, restart=True),
+          choices=_EVERY_HALF),
         S("dreaming", "snapshots", "Save a restore point before learning",
           "Save what Lightwork knows before each learning run, so you can go back.",
           "toggle", group, True, "maverick.config", subgroup=_NIGHT, weaker=False,

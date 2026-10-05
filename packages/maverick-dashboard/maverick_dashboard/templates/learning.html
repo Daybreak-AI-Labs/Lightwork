@@ -21,24 +21,42 @@
   .lrn__enable-note { color: var(--muted); font-size: var(--text-sm); margin-top: var(--space-3); }
   #lrn-flows-on { scroll-margin-top: var(--space-7); }
   .lrn__actions { display: flex; gap: var(--space-3); align-items: center; flex-wrap: wrap; margin-bottom: var(--space-3); }
+  .lrn [hidden] { display: none !important; }
+  .lrn__tabs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border: 1px solid var(--border); border-radius: var(--radius-md); padding: var(--space-1); margin-block: var(--space-3) var(--space-4); }
+  .lrn__tabs .mv-tab { min-width: 0; min-height: 3rem; margin: 0; padding-inline: var(--space-2); overflow-wrap: anywhere; }
+  .lrn__pane { min-width: 0; }
+  .lrn__next { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-block: var(--space-4); }
+  .lrn__disclosure { margin-block: var(--space-4); }
+  .lrn__disclosure > summary { padding-block: var(--space-2); font-weight: var(--font-semibold); cursor: pointer; }
+  .lrn__disclosure[open] > summary { margin-bottom: var(--space-3); }
+  @media (max-width: 640px) {
+    .lrn__tabs .mv-tab { font-size: var(--text-sm); line-height: 1.35; padding-inline: var(--space-1); }
+    .lrn__row { flex-wrap: wrap; align-items: flex-start; padding: var(--space-3); gap: var(--space-2); }
+    .lrn__row-main { flex-basis: calc(100% - 5rem); }
+    .lrn__row > button { margin-inline-start: auto; }
+    .lrn__actions > label, .lrn__actions > select { max-width: 100%; }
+    #lrn-score-entry table { width: 100%; table-layout: fixed; }
+    #lrn-score-entry th, #lrn-score-entry td { padding-inline: var(--space-1); }
+    #lrn-score-entry th:first-child { width: 18%; }
+    #lrn-score-entry th:nth-child(2), #lrn-score-entry th:nth-child(3) { width: 26%; }
+    #lrn-score-entry input { width: 100% !important; min-width: 0; }
+    #lrn-score-entry .btn { min-width: 0; padding-inline: var(--space-1); font-size: var(--text-xs); }
+  }
 </style>
 
 {% from "_hero.html" import hero, state %}
 {% call hero('Self-improving workforce', 'Learning',
-             subtitle='Learn from completed work',
-             lede='The judgement your AI workforce accumulates as it runs —
-                   based on your recorded outcomes and kept within your workspace.
-                   Review what has been learned and manage the learning
-                   features below.') %}
+             subtitle='Guide how your workforce learns',
+             lede='Review what Lightwork has learned, choose how it improves,
+                   and restore earlier learning when you need to.') %}
   {{ state('Current state',
            snap.components_on ~ ' of ' ~ snap.components_total ~ ' core components on',
            badge='all core on' if snap.components_on == snap.components_total
                  else ('core partially on' if snap.components_on else 'core off'),
            badge_class='ok' if snap.components_on == snap.components_total
                        else ('warn' if snap.components_on else 'idle'),
-           copy='Every run can teach the workforce — from failures, from
-                 consolidation, and from the grounded outcomes of its own
-                 work. What it learns stays on this server.') }}
+           copy='Learning controls apply across this installation.
+                 Review results before relying on an improvement.') }}
 {% endcall %}
 
 <div class="lrn">
@@ -53,12 +71,59 @@
   </p>
   {% endif %}
 
+  <div class="mv-tabs lrn__tabs glass-surface" role="tablist" aria-label="Learning sections">
+    <button type="button" class="mv-tab" id="learning-tab-overview" role="tab" aria-selected="true" aria-controls="learning-overview" tabindex="0" data-learning-tab="overview">Overview</button>
+    <button type="button" class="mv-tab" id="learning-tab-controls" role="tab" aria-selected="false" aria-controls="learning-controls" tabindex="-1" data-learning-tab="controls">Learning controls</button>
+    <button type="button" class="mv-tab" id="learning-tab-review" role="tab" aria-selected="false" aria-controls="learning-review" tabindex="-1" data-learning-tab="review">Review &amp; restore</button>
+  </div>
+
+  <section id="learning-overview" class="lrn__pane" role="tabpanel" aria-labelledby="learning-tab-overview" tabindex="0">
+
   <div class="bd-kpis" id="bd-kpis"></div>
+
+  {% if snap.overnight %}
+  <section class="panel" aria-labelledby="lrn-night-h" style="margin-bottom:var(--space-4)">
+    <h2 id="lrn-night-h">Overnight improvement review</h2>
+    <p>{{ 'Scheduled reviews are on.' if snap.overnight.enabled else 'Scheduled reviews are off.' }}
+      <a href="/settings/all#self_harness.auto_run">Manage overnight learning</a></p>
+    <p role="status">
+    {% if snap.overnight.state == 'completed' %}
+      Last review: {{ snap.overnight.models_reviewed }} AI models reviewed,
+      {{ snap.overnight.patterns_found }} recurring patterns found,
+      {{ snap.overnight.improvements_adopted }} improvements adopted,
+      {{ snap.overnight.examples_prepared }} examples prepared.
+      {% if snap.overnight.inspection_only %}New improvements were inspected only; add reviewed examples on Learned before testing them.{% endif %}
+      {% if snap.overnight.reviews_held_back %}{{ snap.overnight.reviews_held_back }} reviews were held back by the configured learning checks.{% endif %}
+      {% if snap.overnight.transfer_held_back %}Sharing improvements between AI models needs separate approved checks and was held back.{% endif %}
+    {% elif snap.overnight.state == 'running' %}
+      A review started. Its completion has not yet been recorded.
+    {% elif snap.overnight.state == 'stopped' %}
+      The last review stopped before completion. Some completed changes may remain. Review Learned and the learning controls before the next review.
+    {% elif snap.overnight.state == 'unavailable' %}
+      The review history could not be loaded. Try reloading this page.
+    {% else %}
+      No scheduled improvement review has been recorded yet.
+    {% endif %}
+    {% if snap.overnight.when %}<time id="lrn-night-time" data-when="{{ snap.overnight.when }}"></time>{% endif %}
+    </p>
+    <a class="btn" href="/learned">Review learned improvements</a>
+  </section>
+  <script>
+    (function () {
+      var time = document.getElementById('lrn-night-time');
+      if (!time) return;
+      var date = new Date(Number(time.dataset.when) * 1000);
+      if (!Number.isFinite(date.getTime())) return;
+      time.dateTime = date.toISOString();
+      time.textContent = ' Recorded ' + date.toLocaleString() + '.';
+    })();
+  </script>
+  {% endif %}
 
   <div class="viz-grid">
     <div class="panel viz-card">
       <h2>Core learning components</h2>
-      <p class="viz-sub">See which learning features are on. Individual controls appear below.</p>
+      <p class="viz-sub">See which learning features are on. Manage them in Learning controls.</p>
       <div id="bd-systems"></div>
     </div>
     <div class="panel viz-card viz-card--wide">
@@ -68,6 +133,14 @@
     </div>
   </div>
 
+  <div class="lrn__next" aria-label="Next learning actions">
+    <a class="btn btn--primary" href="#learning-controls">Manage learning</a>
+    <a class="btn btn--ghost" href="#learning-review">Review results and saved points</a>
+    <a class="btn btn--ghost" href="/learned">Open learned improvements</a>
+  </div>
+  </section>
+
+  <section id="learning-controls" class="lrn__pane" role="tabpanel" aria-labelledby="learning-tab-controls" tabindex="0" hidden>
   <div class="lrn__moat">
     <strong>{{ snap.components_on }} of {{ snap.components_total }} core learning components are on.</strong>
     Every run through Lightwork can teach the workforce — from failures, from consolidation, and from the
@@ -117,9 +190,8 @@
   })();
   </script>
 
-  <section aria-labelledby="lrn-comp-h">
-    <div class="section-head"><h2 id="lrn-comp-h" class="lrn__section-h">Learning systems</h2></div>
-    <div class="panel">
+  <details class="panel lrn__disclosure" id="learning-systems">
+    <summary id="lrn-comp-h">Learning systems</summary>
       <p class="lrn__section-sub">What each system does, in plain language — and a switch to turn it
         on or off, right here. Changes apply immediately; turning a system off pauses it without
         losing anything it has already learned.</p>
@@ -202,8 +274,7 @@
         automatically becomes feedback your workforce learns from — see
         <a href="/workforce">Workforce</a> for what your teams have delivered, and
         <a href="/learned">Learned</a> for capabilities picked up along the way.</p>
-    </div>
-  </section>
+  </details>
   {# The per-component → switch-section map, derived from the shared registry
      (each component's config section), so the switch rows can say which
      systems they cover without surfacing config keys in the UI. #}
@@ -329,7 +400,13 @@
   })();
   </script>
 
-  {% include "_learning_ops.html" %}
+  <details class="panel lrn__disclosure" id="learning-system-tools">
+    <summary>Run or inspect a learning system</summary>
+    {% include "_learning_ops.html" %}
+  </details>
+  </section>
+
+  <section id="learning-review" class="lrn__pane" role="tabpanel" aria-labelledby="learning-tab-review" tabindex="0" hidden>
 
   {% if learning_can_manage %}
   <section aria-labelledby="lrn-run-h">
@@ -346,7 +423,7 @@
       <div id="lrn-dream-result" role="status" aria-live="polite"></div>
 
       <h3 class="lrn__section-h">Go back to a saved point</h3>
-      <p class="lrn__section-sub">Undo everything learned since a saved point. Saved points are made before each learning run.</p>
+      <p class="lrn__section-sub">Restore the learned information covered by a saved point. Completed work and changes in connected services are not undone.</p>
       <div class="lrn__actions">
         <label for="lrn-snapshot">Saved point</label>
         <select id="lrn-snapshot" class="select"><option value="">Loading…</option></select>
@@ -363,12 +440,22 @@
       </div>
       <div id="lrn-hindsight-result" role="status" aria-live="polite"></div>
 
-      <h3 class="lrn__section-h">Prove learning helps</h3>
-      <p class="lrn__section-sub">Choose a results file from your test run: the same tasks scored once with learning paused and once with it on.
-        Lightwork tells you whether learning made a real difference.</p>
+      <h3 class="lrn__section-h">Compare recorded results</h3>
+      <p class="lrn__section-sub">Enter two scores for each task, from 0 to 100 percent.
+        This compares your entries; it does not verify how tasks were assigned or prove that learning caused a difference.
+        For planned cases and reviewed outcomes, use <a href="/outcome-pilots">Workflow pilots</a>.</p>
+      <label for="lrn-score-source">Results source</label>
+      <select id="lrn-score-source" class="select"><option value="scores">Scores entered below</option><option value="file">Exported results file</option></select>
+      <div id="lrn-score-entry" style="margin-block:var(--space-3)">
+        <div class="table-scroll" style="max-width:100%;overflow:auto"><table>
+          <caption class="sr-only">Paired task scores, in percent</caption>
+          <thead><tr><th scope="col">Task</th><th scope="col">Before</th><th scope="col">After</th><th scope="col"><span class="sr-only">Remove</span></th></tr></thead>
+          <tbody id="lrn-score-rows"></tbody>
+        </table></div>
+        <button type="button" class="btn btn--ghost" id="lrn-score-add">Add task</button>
+      </div>
       <div class="lrn__actions">
-        <label for="lrn-prove-file">Results file</label>
-        <input type="file" id="lrn-prove-file" class="input" accept=".json,application/json">
+        <label id="lrn-score-file-label" hidden>Results file<input type="file" id="lrn-prove-file" class="input" accept=".json,application/json"></label>
         <button type="button" class="btn btn--ghost" id="lrn-prove">Check the results</button>
       </div>
       <div id="lrn-prove-result" role="status" aria-live="polite"></div>
@@ -433,7 +520,7 @@
       var sel = $('lrn-snapshot');
       if (!sel.value) { window.mvToast('There is no saved point to go back to yet.', { error: true }); return; }
       var label = sel.options[sel.selectedIndex].textContent;
-      if (!(await mvConfirm('Go back to the saved point from ' + label + '? Everything learned after it is removed.', { okText: 'Go back' }))) return;
+      if (!(await mvConfirm('Restore the learned information covered by the saved point from ' + label + '? Newer information in those learning stores will be replaced. Completed work and connected-service changes remain.', { okText: 'Go back' }))) return;
       ev.target.disabled = true;
       var d = await call('POST', '/api/v1/learning/rollback', { snapshot: sel.value }, 'go back to the saved point');
       ev.target.disabled = false;
@@ -452,32 +539,74 @@
       if (d.recorded) lines.push('Kept in the activity log.');
       show('lrn-hindsight-result', lines);
     });
+    var scoreSequence = 0;
+    function addScoreRow() {
+      var rows = $('lrn-score-rows');
+      if (rows.children.length >= 100) return;
+      var number = ++scoreSequence, row = document.createElement('tr');
+      var label = document.createElement('th'); label.scope = 'row'; label.textContent = number; row.appendChild(label);
+      ['Before', 'After'].forEach(function (title) {
+        var cell = document.createElement('td'), input = document.createElement('input');
+        input.type = 'number'; input.min = '0'; input.max = '100'; input.step = 'any'; input.required = true;
+        input.className = 'input'; input.style.width = '5rem'; input.setAttribute('aria-label', title + ' score for task ' + number);
+        cell.appendChild(input); row.appendChild(cell);
+      });
+      var cell = document.createElement('td'), remove = document.createElement('button');
+      remove.type = 'button'; remove.className = 'btn btn--ghost'; remove.textContent = 'Remove';
+      remove.setAttribute('aria-label', 'Remove task ' + number);
+      remove.addEventListener('click', function () { row.remove(); $('lrn-score-add').disabled = false; $('lrn-score-add').focus(); });
+      cell.appendChild(remove); row.appendChild(cell); rows.appendChild(row);
+      $('lrn-score-add').disabled = rows.children.length >= 100;
+    }
+    for (var i = 0; i < 3; i++) addScoreRow();
+    $('lrn-score-add').addEventListener('click', addScoreRow);
+    $('lrn-score-source').addEventListener('change', function () {
+      var fileMode = this.value === 'file';
+      $('lrn-score-entry').hidden = fileMode; $('lrn-score-file-label').hidden = !fileMode;
+    });
     $('lrn-prove').addEventListener('click', async function (ev) {
-      var input = $('lrn-prove-file');
-      var file = input.files && input.files[0];
-      if (!file) { show('lrn-prove-result', ['Choose a results file first.']); return; }
-      var data;
-      try { data = JSON.parse(await file.text()); } catch (e) { data = null; }
-      if (!data || !Array.isArray(data.baseline) || !Array.isArray(data.treatment)) {
-        show('lrn-prove-result', ['That file is not a results file Lightwork can read.']); return;
-      }
+      if (ev.target.disabled) return;
       ev.target.disabled = true;
-      var d = await call('POST', '/api/v1/learning/prove', { baseline: data.baseline, treatment: data.treatment }, 'check the results', 'lrn-prove-result');
-      ev.target.disabled = false;
-      if (!d) return;
-      var verdict = d.verdict === 'improved' ? 'Learning made a real improvement.' :
-        d.verdict === 'worse' ? 'Learning made results worse.' : 'There is no clear difference yet.';
-      show('lrn-prove-result', [verdict, 'Across ' + plural(d.tasks, 'task', 'tasks') + ': average score ' +
-        Math.round(d.before * 100) + '% with learning paused and ' + Math.round(d.after * 100) + '% with it on. ' +
-        d.better + ' got better, ' + d.worse + ' got worse, ' + d.same + ' stayed the same.']);
+      try {
+        var data;
+        if ($('lrn-score-source').value === 'file') {
+          var input = $('lrn-prove-file'), file = input.files && input.files[0];
+          if (!file) { show('lrn-prove-result', ['Choose an exported results file first.']); return; }
+          if (file.size > 256 * 1024) { show('lrn-prove-result', ['That results file is too large. Use a file smaller than 256 KB.']); return; }
+          try { data = JSON.parse(await file.text()); } catch (e) { data = null; }
+          if (!data || !Array.isArray(data.baseline) || !Array.isArray(data.treatment)) {
+            show('lrn-prove-result', ['That file is not a results file Lightwork can read.']); return;
+          }
+        } else {
+          data = { baseline: [], treatment: [] };
+          var rows = $('lrn-score-rows').querySelectorAll('tr');
+          if (!rows.length) { show('lrn-prove-result', ['Add at least one task.']); return; }
+          for (var r = 0; r < rows.length; r++) {
+            var scores = rows[r].querySelectorAll('input');
+            if (Array.from(scores).some(function (score) { return score.value.trim() === '' || !score.checkValidity(); })) {
+              show('lrn-prove-result', ['Enter both scores for every task, from 0 to 100 percent.']); scores[0].focus(); return;
+            }
+            data.baseline.push(Number(scores[0].value) / 100); data.treatment.push(Number(scores[1].value) / 100);
+          }
+        }
+        var d = await call('POST', '/api/v1/learning/prove', data, 'compare the results', 'lrn-prove-result');
+        if (!d) return;
+        var verdict = d.verdict === 'improved' ? 'The recorded scores are higher.' :
+          d.verdict === 'worse' ? 'The recorded scores are lower.' : 'There is no clear difference in the recorded scores.';
+        show('lrn-prove-result', [verdict, 'Across ' + plural(d.tasks, 'task', 'tasks') + ': average score ' +
+          Math.round(d.before * 100) + '% before and ' + Math.round(d.after * 100) + '% after. ' +
+          d.better + ' got better, ' + d.worse + ' got worse, ' + d.same + ' stayed the same.',
+          'This comparison does not establish that learning caused the difference.']);
+      } finally { ev.target.disabled = false; }
     });
     loadSnapshots();
   })();
   </script>
   {% endif %}
+  </section>
 
   {% if snap.flow_autonomy %}
-  <section aria-labelledby="lrn-auto-h">
+  <section aria-labelledby="lrn-auto-h" data-learning-group="controls">
     <div class="section-head"><h2 id="lrn-auto-h" class="lrn__section-h">Autonomous workflow self-improvement</h2></div>
     <div class="panel">
       <p class="lrn__section-sub" style="margin-bottom: var(--space-3);">
@@ -597,7 +726,7 @@
   {% endif %}
 
   {% if snap.dgm %}
-  <section aria-labelledby="lrn-dgm-h">
+  <section aria-labelledby="lrn-dgm-h" data-learning-group="controls">
     <div class="section-head"><h2 id="lrn-dgm-h" class="lrn__section-h">Experimental: let Lightwork try improving its own code</h2></div>
     <div class="panel">
       <p class="lrn__section-sub" style="margin-bottom: var(--space-3);">
@@ -684,7 +813,7 @@
     k.appendChild(B.kpi({ label: 'Human decisions', value: acc.human_decisions,
       sub: 'approvals: ' + B.fmt(acc.approvals) }));
     k.appendChild(B.kpi({ label: 'Learned capabilities', value: learned === null ? 'Not available' : learned,
-      sub: grounded === null ? 'Source-scoped counts are unavailable; no workspace total or zero is implied.' : B.fmt(grounded) + ' results checked against real outcomes' }));
+      sub: grounded === null ? 'A current count could not be confirmed.' : B.fmt(grounded) + ' results checked against real outcomes' }));
 
     B.donut(document.getElementById('bd-systems'), {
       segments: [
@@ -720,6 +849,7 @@
 })();
 </script>
 
+  <div data-learning-group="review">
   {# Per-specialist and per-agent ratings and the reasons people picked on a thumbs-down. Written
      comments stay with the person and their task, so they are not listed. #}
   <div class="section-head"><h2 id="agent-feedback-title">What people said about each specialist and agent</h2></div>
@@ -780,5 +910,57 @@
     .fa-technical { margin-top: var(--space-2); }
   </style>
   <script src="/static/lightwork-feature-actions.js" defer></script>
+  </div>
+
+  <script>
+  (function () {
+    var tabs = Array.from(document.querySelectorAll('[data-learning-tab]'));
+    var names = ['overview', 'controls', 'review'];
+    var panes = names.map(function (name) { return document.getElementById('learning-' + name); });
+    document.querySelectorAll('[data-learning-group]').forEach(function (group) {
+      var pane = document.getElementById('learning-' + group.dataset.learningGroup);
+      if (pane) pane.appendChild(group);
+    });
+    function select(name, focus) {
+      if (names.indexOf(name) < 0) name = 'overview';
+      tabs.forEach(function (tab) {
+        var chosen = tab.dataset.learningTab === name;
+        tab.setAttribute('aria-selected', chosen ? 'true' : 'false'); tab.tabIndex = chosen ? 0 : -1;
+        if (chosen && focus) tab.focus();
+      });
+      panes.forEach(function (pane) { pane.hidden = pane.id !== 'learning-' + name; });
+    }
+    function openHash() {
+      var hash;
+      try { hash = decodeURIComponent(window.location.hash.slice(1)); } catch (_) { hash = ''; }
+      var target = hash && document.getElementById(hash);
+      var pane = target && target.closest('[role="tabpanel"]');
+      select(pane ? pane.id.slice('learning-'.length) : 'overview', false);
+      if (target && pane) {
+        for (var parent = target.parentElement; parent && parent !== pane; parent = parent.parentElement)
+          if (parent.tagName === 'DETAILS') parent.open = true;
+        if (target.tagName === 'DETAILS') target.open = true;
+        if (target !== pane) target.scrollIntoView({block: 'start'});
+      }
+    }
+    tabs.forEach(function (tab, index) {
+      function activate(name, focus) {
+        select(name, focus);
+        if (window.history && window.history.pushState) window.history.pushState(null, '', '#learning-' + name);
+      }
+      tab.addEventListener('click', function () { activate(tab.dataset.learningTab, false); });
+      tab.addEventListener('keydown', function (event) {
+        var position = event.key === 'ArrowRight' ? (index + 1) % tabs.length :
+          event.key === 'ArrowLeft' ? (index + tabs.length - 1) % tabs.length :
+          event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1 : -1;
+        if (position < 0) return;
+        event.preventDefault(); activate(tabs[position].dataset.learningTab, true);
+      });
+    });
+    window.addEventListener('hashchange', openHash);
+    window.addEventListener('popstate', openHash);
+    openHash();
+  })();
+  </script>
 
 {% endblock %}

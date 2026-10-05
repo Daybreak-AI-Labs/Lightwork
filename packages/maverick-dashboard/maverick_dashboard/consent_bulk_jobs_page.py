@@ -70,6 +70,7 @@ def create_consent_bulk_jobs_page_router(
             )
         style_nonce = secrets.token_urlsafe(18)
         from .api import module_activation_enabled
+        from .draft_api import context_for
 
         response = templates.TemplateResponse(
             request,
@@ -77,6 +78,7 @@ def create_consent_bulk_jobs_page_router(
             {
                 "api_base": API_BASE,
                 "page_path": PAGE_PATH,
+                "request_context": context_for(request),
                 "csp_style_nonce": style_nonce,
                 "bulk_jobs_can_audit": has_global_permission(request, "audit"),
                 "bulk_jobs_can_admin": has_global_permission(request, "admin"),

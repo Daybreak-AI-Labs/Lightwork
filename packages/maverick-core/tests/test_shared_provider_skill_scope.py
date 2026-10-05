@@ -103,6 +103,50 @@ def test_scope_change_before_save_and_audit_failure_leave_no_skill(
         world.close()
 
 
+def test_automatic_distillation_cannot_replace_a_saved_skill(
+    tmp_path, fake_llm, make_llm_response, monkeypatch,
+):
+    world = WorldModel(tmp_path / "world.db")
+    shared_id = world.create_goal("shared task", owner="")
+    target = tmp_path / "skills"
+    target.mkdir()
+    path = target / "repeatable-check.md"
+    original = _VALID.replace("1. Check it.", "1. Follow the approved company procedure.")
+    path.write_text(original, encoding="utf-8")
+    receipts = []
+    monkeypatch.setattr(audit, "audit_event", lambda *args, **kwargs: receipts.append(args) or True)
+    fake_llm.scripted = [make_llm_response(text=_VALID)]
+    tokens = set_goal_context(goal_id=shared_id)
+    try:
+        result = skills.distill("shared task", "result", Blackboard(), fake_llm,
+                               skills_dir=target, source_world=world)
+    finally:
+        reset_goal_context(tokens)
+        world.close()
+    assert result is None
+    assert path.read_text(encoding="utf-8") == original
+    assert receipts == []
+
+
+def test_automatic_distillation_cannot_shadow_a_builtin_skill(
+    tmp_path, fake_llm, make_llm_response, monkeypatch,
+):
+    world = WorldModel(tmp_path / "world.db")
+    shared_id = world.create_goal("shared task", owner="")
+    target = tmp_path / "skills"
+    builtin = skills.Skill.parse(_VALID, tmp_path / "builtin.md")
+    monkeypatch.setattr(skills, "load_builtin_skills", lambda: [builtin])
+    fake_llm.scripted = [make_llm_response(text=_VALID)]
+    tokens = set_goal_context(goal_id=shared_id)
+    try:
+        assert skills.distill("shared task", "result", Blackboard(), fake_llm,
+                              skills_dir=target, source_world=world) is None
+    finally:
+        reset_goal_context(tokens)
+        world.close()
+    assert not list(target.glob("*.md"))
+
+
 def test_existing_private_provider_skill_is_retained_but_unavailable(
     tmp_path, monkeypatch,
 ):

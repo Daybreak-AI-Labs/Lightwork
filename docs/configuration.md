@@ -227,8 +227,11 @@ token = "${MAVERICK_DASHBOARD_TOKEN}"
 # every page in one of nine job-named areas (Home, Work, Agents, Rules &
 # safety, Privacy, Risk & compliance, Evidence & audit, Costs & value,
 # Settings) with local tabs and an "Area › Section" breadcrumb, and starts
-# each role from its own layout. Who may open a page never changes. Run the
-# tree test in docs/research/tree-test/ before switching everyone.
+# each role from its own layout. Who may open a page never changes. Pages
+# merged into another page's tab forward there (/run-tree opens Task replay's
+# Branches tab, /flows/designer the workflow builder's Steps mode) for anyone
+# that page admits; everyone else, and classic mode, keeps the old address.
+# Run the tree test in docs/research/tree-test/ before switching everyone.
 # navigation_personal = true lets each person choose for themselves in Your
 # preferences. Settings > All settings and the setup wizard set both.
 # navigation = "classic"
@@ -526,7 +529,17 @@ risk_limited = true              # require >=8 held-out
 # MAVERICK_SELF_HARNESS_REQUIRE_INDEPENDENT_CUSTODY=1 requests confirmatory
 # custody and currently fails closed on local/Windows deployments because the
 # controller account also administers the ledger and Docker daemon.
-auto_run = true                  # run the fleet cycle as part of `maverick dream`
+auto_run = true                  # run the fleet cycle on the dashboard's overnight
+#                                schedule, or as part of `maverick dream`.
+#                                Learning shows the last review receipt. The
+#                                dashboard starts this schedule even if dreaming
+#                                is off; UI changes apply without a restart.
+#                                One evaluation allowance is shared across the
+#                                fleet and an eligible transfer sweep. Reviews
+#                                remain inspection-only without evaluation cases
+#                                or authority for additional model calls. The
+#                                careful profile holds changes back without the
+#                                exact deployed prompt and independent checks.
 #   promote_as_canary = true     stage every promotion on probation
 #   relapse_failure_share = 0.5  re-probate a line whose recent outcomes turn bad
 #   metamorphic = true           reject lines overfit to exact goal wording
@@ -549,10 +562,11 @@ allow_mcp_acquisition = false # starting third-party MCP remains a separate opt-
 allow_provider_egress = false # extra learning-only model calls may cross providers
 preflight = true           # default uses a local redacted catalog match; the
                            # LLM needs-analysis call requires provider egress above
-distill_local = true
+distill_local = true       # stages a suggestion; review and add it from Skills
 auto_distill = false       # a model writes a recallable skill straight from each
                            #   finished run (untrusted run text: keep off unless
                            #   reviewed). MAVERICK_AUTO_DISTILL, when set, decides.
+                           #   Existing saved and built-in skills are never replaced.
 provision_packs = true     # equip a freshly-approved pack with the skills + tools
                            #   its workflow needs at creation time (capability
                            #   provisioning at pack-birth). Default on once

@@ -75,6 +75,7 @@
       <a class="btn btn--ghost" href="/compliance/obligations">Regulations and rules</a>
     </div>
   {% endcall %}
+  {% if compliance_tabs %}{% from "_tabs.html" import tab_bar, panel_attrs %}{{ tab_bar('Compliance views', compliance_tabs, '') }}<div {{ panel_attrs('') }}>{% endif %}
 
   <div id="cmp-status" class="muted" role="status" aria-live="polite"></div>
 
@@ -305,5 +306,6 @@
     <p class="muted" style="margin: 0;">This report shows which protections are switched on. It is not legal advice or a certificate of compliance. Full compliance also needs your own contracts, records and legal review.</p>
   </div>
   {% endif %}
+  {% if compliance_tabs %}</div>{% endif %}
   <script src="/static/lightwork-compliance.js" defer></script>
 {% endblock %}

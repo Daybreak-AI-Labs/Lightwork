@@ -166,10 +166,12 @@ def _adapter_modules():
         product_operations_devices,
         product_operations_diagnostics,
         product_operations_facts,
+        product_operations_flow_approval_recovery,
         product_operations_form_recovery,
         product_operations_identity,
         product_operations_knowledge,
         product_operations_learning_lessons,
+        product_operations_learning_program,
         product_operations_models,
         product_operations_notifications,
         product_operations_outcome_pilots,
@@ -186,6 +188,7 @@ def _adapter_modules():
         product_operations_task_views,
         product_operations_tasks,
         product_operations_today,
+        product_operations_workflow_explanation,
         product_operations_workflows,
     )
     return (
@@ -203,9 +206,11 @@ def _adapter_modules():
         product_operations_models,
         product_operations_diagnostics,
         product_operations_facts,
+        product_operations_flow_approval_recovery,
         product_operations_form_recovery,
         product_operations_knowledge,
         product_operations_learning_lessons,
+        product_operations_learning_program,
         product_operations_today,
         product_operations_activation,
         product_operations_devices,
@@ -218,6 +223,7 @@ def _adapter_modules():
         product_operations_specialist_tests,
         product_operations_conversation,
         product_operations_personal_data,
+        product_operations_workflow_explanation,
         product_operations_workflows,
     )
 
