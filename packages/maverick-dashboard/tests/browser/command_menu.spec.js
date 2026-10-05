@@ -167,11 +167,10 @@ test('pages are pinned and unpinned from the page and the command menu, reordere
 test('recent pages list where the person has been, never the page shown', async ({page}) => {
   await page.setViewportSize({width: 1280, height: 900});
   for (const path of ['/spend', '/savings', '/workforce']) {
-    // The page asks to be remembered once it has loaded (a keepalive request,
-    // so it completes even if the person moves on at once).
+    // The page asks to be remembered once it has loaded.
     const remembered = page.waitForResponse(response => new URL(response.url()).pathname === '/api/v1/navigation/recent');
     await ready(page, path);
-    expect((await remembered).status()).toBe(200);
+    expect((await (await remembered).json()).recorded).toBe(true);
   }
   await ready(page, '/overview');
   const recent = await page.locator('[data-nav-list="recent"] a').evaluateAll(links => links.map(link => link.getAttribute('href')));

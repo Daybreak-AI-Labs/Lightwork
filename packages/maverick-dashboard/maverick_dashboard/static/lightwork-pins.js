@@ -184,12 +184,15 @@
 
     // Remember this page for Recent pages. Nothing the person sees waits for
     // it, and a page that cannot be remembered says so quietly (recorded: false).
+    // The answer is read even though nothing uses it: a response left unread
+    // never finishes, so the page would never settle and leaving it would
+    // cancel the request.
     if (root.getAttribute("data-nav-record") !== null && current && typeof global.fetch === "function") {
       global.fetch("/api/v1/navigation/recent", {
-        method: "POST", credentials: "same-origin", cache: "no-store", keepalive: true,
+        method: "POST", credentials: "same-origin", cache: "no-store",
         headers: {"Content-Type": "application/json", "Accept": "application/json"},
         body: JSON.stringify({path: current, context: meta("lightwork-preference-context")}),
-      }).catch(function () {});
+      }).then(function (response) { return response.text(); }).catch(function () {});
     }
 
     var controller = {

@@ -33,9 +33,14 @@ function sidebar({ pinned = [["/goals", "Tasks"], ["/deliverables", "Results"]],
   const calls = [];
   const replies = [];
   window.fetch = (url, options = {}) => {
-    calls.push({ url: String(url), method: options.method || "GET", body: options.body ? JSON.parse(options.body) : null });
+    calls.push({ url: String(url), method: options.method || "GET", body: options.body ? JSON.parse(options.body) : null,
+      keepalive: options.keepalive === true });
     const reply = replies.shift() || { ok: true, json: { recorded: true } };
-    return Promise.resolve({ ok: reply.ok, status: reply.ok ? 200 : 403, json: async () => reply.json });
+    const call = calls[calls.length - 1];
+    call.read = false;
+    const read = (value) => { call.read = true; return value; };
+    return Promise.resolve({ ok: reply.ok, status: reply.ok ? 200 : 403,
+      json: async () => read(reply.json), text: async () => read(JSON.stringify(reply.json)) });
   };
   const toasts = [];
   window.mvToast = (message, options) => toasts.push([message, !!(options && options.error)]);
@@ -118,10 +123,15 @@ test("a refused change leaves the list as it was and says so", async () => {
   ui.dom.window.close();
 });
 
-test("an openable page is remembered for Recent pages, once, and only when asked", () => {
+test("an openable page is remembered for Recent pages, once, and only when asked", async () => {
   const recorded = sidebar();
   assert.deepEqual(recorded.calls.map((call) => [call.method, call.url, call.body]),
     [["POST", "/api/v1/navigation/recent", { path: "/overview", context: "ctx-1" }]]);
+  // The answer is read: in a browser an unread response never finishes, so
+  // the page never settles and navigating away cancels the request.
+  await recorded.flush(); await recorded.flush();
+  assert.equal(recorded.calls[0].read, true);
+  assert.equal(recorded.calls[0].keepalive, false);
   recorded.dom.window.close();
   const quiet = sidebar({ record: false });
   assert.deepEqual(quiet.calls, []);
