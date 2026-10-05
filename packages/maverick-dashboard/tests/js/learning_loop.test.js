@@ -4,6 +4,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const { JSDOM } = require("jsdom");
+const {shell} = require('./_shell');
 
 const source = fs.readFileSync(
   path.resolve(__dirname, "../../maverick_dashboard/static/lightwork-learning-loop.js"), "utf8");
@@ -65,6 +66,7 @@ function defaults() {
 async function fixture({ admin = true, answers = {}, confirm = true } = {}) {
   const dom = new JSDOM(page(admin), { url: "https://lightwork.example/learned", runScripts: "outside-only" });
   const { window } = dom;
+  shell(window);
   const calls = [];
   const table = Object.assign(defaults(), answers);
   window.mvErrorText = (failure, action) => `Could not ${action}.`;

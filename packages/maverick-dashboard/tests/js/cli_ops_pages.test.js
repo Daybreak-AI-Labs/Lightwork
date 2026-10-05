@@ -21,7 +21,7 @@ function slice(template, start, end) {
   return text.slice(from, to + end.length);
 }
 
-async function page(markup, script, reply, { confirm = true, shell = false } = {}) {
+async function page(markup, script, reply, { confirm = true, shell = true } = {}) {
   const dom = new JSDOM('<main>' + strip(markup) + '</main>', { url: 'https://app.example/x', runScripts: 'outside-only' });
   const w = dom.window, calls = [], asked = [];
   // shell: the page script uses the shell's shared helpers (mvFetchJSON,
@@ -251,7 +251,7 @@ test('a run at its first approval is kept as an example with plain, editable dat
   });
   t.after(() => ui.w.close());
   assert.equal(ui.$('lx-enroll').hidden, false);
-  assert.match(ui.$('lx-describe').textContent, /hasn’t seen what “lookup” gives back yet/);
+  assert.match(ui.$('lx-describe').textContent, /hasn’t seen what “lookup” gives back yet/i);
   assert.equal(ui.d.querySelectorAll('#lx-describe select').length, 5, 'every part has a kind chosen from a list');
   const groups = Array.from(ui.d.querySelectorAll('#lx-describe fieldset'));
   const result = groups.find(g => /gives back/.test(g.querySelector('legend').textContent));

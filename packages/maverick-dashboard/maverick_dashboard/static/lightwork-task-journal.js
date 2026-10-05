@@ -29,13 +29,10 @@
     ['list', 'preview', 'undo'].forEach(id => { $(id).disabled = state; });
   }
   async function call(path, body) {
-    const response = await fetch(base + path, {
-      method: body ? 'POST' : 'GET', credentials: 'same-origin', cache: 'no-store',
-      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-      body: body ? JSON.stringify(Object.assign({ context: context }, body)) : undefined
+    const data = await window.mvFetchJSON(base + path, {
+      method: body ? 'POST' : 'GET', cache: 'no-store',
+      body: body ? Object.assign({ context: context }, body) : undefined
     });
-    if (!response.ok) throw response;
-    const data = await response.json();
     if (!data || typeof data !== 'object') throw new Error('unreadable');
     if (typeof data.context === 'string' && /^[a-f0-9]{64}$/.test(data.context)) context = data.context;
     return data;

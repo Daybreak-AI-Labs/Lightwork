@@ -34,13 +34,8 @@
       headers['X-Lightwork-Flow-Revision'] = current.revision;
       if (current.context) headers['X-Lightwork-Teaching-Context'] = current.context;
     }
-    const response = await fetch(path, {
-      method: method || (body === undefined ? 'GET' : 'POST'), credentials: 'same-origin', cache: 'no-store',
-      headers: headers,
-      body: body === undefined ? undefined : JSON.stringify(body)
-    });
-    if (!response.ok) throw response;
-    return response.json();
+    return window.mvFetchJSON(path, {method: method || (body === undefined ? 'GET' : 'POST'), cache: 'no-store',
+      headers: headers, body: body});
   }
   function syncNextActions() {
     const readyRecipe = Boolean(state.recipe) && !state.busy;

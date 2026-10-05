@@ -104,11 +104,7 @@
   }
 
   function load() {
-    return fetch(api + '/schedules?limit=100', { credentials: 'same-origin' })
-      .then(function (response) {
-        if (!response.ok) throw response;
-        return response.json();
-      })
+    return window.mvFetchJSON(api + '/schedules?limit=100')
       .then(function (data) {
         var items = Array.isArray(data && data.items) ? data.items : [];
         render(items);
@@ -120,16 +116,8 @@
   }
 
   function post(path, body) {
-    return fetch(api + path, {
-      method: 'POST',
-      credentials: 'same-origin',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body || {})
-    }).then(function (response) {
-      if (!response.ok) throw response;
-      return response.json();
-    });
-  }
+    return window.mvFetchJSON(api + path, { method: 'POST', body: body || {} });
+}
 
   async function cancel(row, button) {
     var ok = await window.mvConfirm(

@@ -4,6 +4,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const { JSDOM } = require("jsdom");
+const {shell} = require('./_shell');
 
 const source = fs.readFileSync(
   path.resolve(__dirname, "../../maverick_dashboard/static/lightwork-ops-jobs.js"), "utf8");
@@ -12,6 +13,7 @@ function fixture(answers, { confirm = true } = {}) {
   const dom = new JSDOM(`<button id="go">Go</button><p id="status"></p><div id="out"></div>`,
     { url: "https://lightwork.example/learning", runScripts: "outside-only" });
   const { window } = dom;
+  shell(window);
   const calls = [];
   window.mvErrorText = (failure, action) => `Could not ${action}.`;
   window.mvPlainDetail = (d) => (typeof d === "string" && /^[A-Z].*\.$/.test(d) ? d : "");

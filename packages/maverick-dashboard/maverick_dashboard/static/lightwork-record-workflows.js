@@ -30,23 +30,12 @@
     return 'Could not ' + action + '. Please try again.';
   }
 
-  // One JSON request. A non-OK answer is thrown as the Response itself so the
-  // caller can turn it into a plain sentence with errorText().
+  // One JSON request (mvFetchJSON). A refusal rejects with the shared plain
+  // sentence; an empty answer is an empty record.
   function call(method, url, body) {
-    var opts = { method: method || 'GET', credentials: 'same-origin', headers: { Accept: 'application/json' } };
-    if (body !== undefined && body !== null) {
-      opts.headers['Content-Type'] = 'application/json';
-      opts.body = JSON.stringify(body);
-    }
-    return global.fetch(url, opts).then(function (response) {
-      if (!response.ok) throw response;
-      if (response.status === 204) return {};
-      return response.text().then(function (text) {
-        if (!text) return {};
-        try { return JSON.parse(text); } catch (e) { var err = new Error('Request failed: the server returned an invalid JSON response.'); err.name = 'ParseError'; throw err; }
-      });
-    });
-  }
+    return global.mvFetchJSON(url, { method: method || 'GET', body: body === null ? undefined : body })
+      .then(function (data) { return data || {}; });
+}
 
   function randomPart(length) {
     var alphabet = 'abcdefghijklmnopqrstuvwxyz0123456789';
@@ -164,12 +153,10 @@
 
   // Server-side fingerprint of an uploaded file (nothing is stored).
   function fingerprint(file) {
-    return global.fetch('/api/v1/compliance/fingerprint', {
-      method: 'POST', credentials: 'same-origin',
-      headers: { 'Content-Type': 'application/octet-stream', Accept: 'application/json' },
-      body: file,
-    }).then(function (r) { if (!r.ok) throw r; return r.json(); });
-  }
+    return global.mvFetchJSON('/api/v1/compliance/fingerprint', {
+      method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: file,
+    });
+}
 
   // Ask for a file with a hidden picker; resolves to the File or null.
   function pickFile(accept) {

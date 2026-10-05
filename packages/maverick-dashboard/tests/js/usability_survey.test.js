@@ -2,6 +2,7 @@
 'use strict';
 const {test} = require('node:test'), assert = require('node:assert/strict');
 const fs = require('node:fs'), path = require('node:path'), {JSDOM} = require('jsdom');
+const {shell} = require('./_shell');
 const settle = async () => { for (let i = 0; i < 10; i++) await new Promise(resolve => setImmediate(resolve)); };
 const source = fs.readFileSync(path.resolve(__dirname, '../../maverick_dashboard/static/lightwork-usability-survey.js'), 'utf8');
 const ITEMS = Array.from({length: 10}, (_, i) => 'Statement ' + (i + 1));
@@ -18,6 +19,7 @@ function load({offerSus = true, offerSeq = true, fail = false} = {}) {
       roles: [{value: 'approver', label: 'I approve or reject requests'}],
       tasks: [{value: 'decide_approval', label: 'approve or reject a request'}]})};
   };
+  shell(dom.window);
   dom.window.eval(source);
   return {window: dom.window, document: dom.window.document, calls};
 }

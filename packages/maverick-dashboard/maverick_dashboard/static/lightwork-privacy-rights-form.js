@@ -19,10 +19,8 @@
     text(el, window.mvErrorText ? window.mvErrorText(failure, action) : 'Could not ' + action + '. Please try again.');
   }
   function call(method, url, body) {
-    var opts = { method: method, credentials: 'same-origin', headers: { Accept: 'application/json' } };
-    if (body !== undefined) { opts.headers['Content-Type'] = 'application/json'; opts.body = JSON.stringify(body); }
-    return fetch(url, opts).then(function (r) { if (!r.ok) throw r; return r.status === 204 ? null : r.json(); });
-  }
+    return window.mvFetchJSON(url, { method: method, body: body });
+}
   function el(tag, attrs, children) {
     var node = doc.createElement(tag);
     Object.keys(attrs || {}).forEach(function (k) {

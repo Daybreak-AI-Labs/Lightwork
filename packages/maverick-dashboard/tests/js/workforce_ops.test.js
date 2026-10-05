@@ -4,6 +4,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const { JSDOM } = require("jsdom");
+const {shell} = require('./_shell');
 
 const read = (name) => fs.readFileSync(path.resolve(__dirname, "../../maverick_dashboard/static/" + name), "utf8");
 const jobs = read("lightwork-ops-jobs.js");
@@ -42,6 +43,7 @@ function defaults(admin) {
 async function fixture(markup, { admin = true, inventory = {}, responses = {} } = {}) {
   const dom = new JSDOM(markup, { url: "https://lightwork.example/workforce", runScripts: "outside-only" });
   const { window } = dom;
+  shell(window);
   const calls = [];
   const table = defaults(admin);
   Object.assign(table["/api/v1/workforce-ops/inventory"], inventory);

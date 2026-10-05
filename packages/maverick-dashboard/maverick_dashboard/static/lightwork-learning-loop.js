@@ -23,32 +23,19 @@
   // A failed request as one plain sentence. Our own refusals (409) carry a
   // sentence written for people; everything else uses the shared wording.
   async function problem(failure, action) {
-    if (failure && failure.status === 409 && typeof failure.json === 'function') {
-      try {
-        var body = await failure.json();
-        if (body && typeof body.detail === 'string' && body.detail.length < 240) return body.detail;
-      } catch (e) { /* fall through */ }
-    }
+    var plain = failure && failure.status === 409 && window.mvPlainDetail ? window.mvPlainDetail(failure.detail) : '';
+    if (plain) return plain;
     if (failure && failure.status === 403 && action.indexOf('see') === 0) {
       return 'Only administrators and auditors can ' + action + '.';
     }
     return typeof window.mvErrorText === 'function' ? window.mvErrorText(failure, action) : 'Could not ' + action + '.';
   }
   function get(path) {
-    return fetch(API + path, { credentials: 'same-origin' }).then(function (r) {
-      if (!r.ok) throw r;
-      return r.json();
-    });
-  }
+    return window.mvFetchJSON(API + path);
+}
   function post(path, body) {
-    return fetch(API + path, {
-      method: 'POST', credentials: 'same-origin',
-      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {})
-    }).then(function (r) {
-      if (!r.ok) throw r;
-      return r.json();
-    });
-  }
+    return window.mvFetchJSON(API + path, {method: 'POST', body: body || {}});
+}
   function technical(pairs) {
     var box = el('details');
     box.appendChild(el('summary', null, 'Technical details'));
@@ -154,9 +141,7 @@
   // will say, or which later changes an undo also removes.
   async function preview(p) {
     try {
-      var r = await fetch('/api/v1/learning-ops/refinements/' + encodeURIComponent(p.id) + '/preview', { credentials: 'same-origin' });
-      if (!r.ok) throw r;
-      return await r.json();
+      return await window.mvFetchJSON('/api/v1/learning-ops/refinements/' + encodeURIComponent(p.id) + '/preview');
     } catch (failure) {
       say('llp-ref-msg', await problem(failure, 'show what would change'));
       return null;

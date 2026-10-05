@@ -13,10 +13,8 @@
     return window.mvErrorText ? window.mvErrorText(failure, action) : 'Could not ' + action + '. Please try again.';
   }
   async function get(path) {
-    var response = await window.fetch(path, {credentials: 'same-origin', cache: 'no-store'});
-    if (!response.ok) throw response;
-    return response.json();
-  }
+    return window.mvFetchJSON(path, {cache: 'no-store'});
+}
   function table(headers, rows) {
     var t = el('table'), head = el('tr');
     headers.forEach(function (h) { var th = el('th', null, h); th.scope = 'col'; head.appendChild(th); });

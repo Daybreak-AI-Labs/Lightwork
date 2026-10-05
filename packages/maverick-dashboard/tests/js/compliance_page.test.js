@@ -4,6 +4,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const { JSDOM } = require("jsdom");
+const {shell} = require('./_shell');
 
 const source = fs.readFileSync(path.resolve(__dirname, "../../maverick_dashboard/static/lightwork-compliance.js"), "utf8");
 const html = `<div id="cmp-status"></div>
@@ -22,6 +23,7 @@ const json = (value, status = 200) => new Response(JSON.stringify(value), { stat
 async function fixture({ confirm = true, reply } = {}) {
   const dom = new JSDOM(html, { url: "https://lightwork.example/compliance", runScripts: "outside-only" });
   const { window } = dom;
+  shell(window);
   const calls = [];
   const confirms = [];
   window.mvConfirm = async (message) => { confirms.push(message); return confirm; };

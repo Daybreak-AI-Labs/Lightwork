@@ -51,19 +51,17 @@
     return function (failure) { say(id, failure && failure.plain ? failure.message : errorText(failure, action)); };
   }
 
-  function request(path, options) {
-    var settings = Object.assign({ credentials: "same-origin", headers: { Accept: "application/json" } }, options || {});
-    if (settings.body) { settings.headers["Content-Type"] = "application/json"; }
-    return fetch(apiBase + path, settings);
+  // The page's requests carry a JSON string body; mvFetchJSON sends it as is.
+  function settingsFor(options) {
+    var settings = Object.assign({}, options || {});
+    if (settings.body) { settings.headers = Object.assign({ "Content-Type": "application/json" }, settings.headers); }
+    return settings;
   }
   async function json(path, options) {
-    var response = await request(path, options);
-    if (!response.ok) { throw response; }
-    return response.json();
+    return window.mvFetchJSON(apiBase + path, settingsFor(options));
   }
   async function text(path, options) {
-    var response = await request(path, options);
-    if (!response.ok) { throw response; }
+    var response = await window.mvFetchJSON(apiBase + path, Object.assign(settingsFor(options), { raw: true }));
     return { text: await response.text(), response: response };
   }
 
@@ -290,9 +288,7 @@
 
   async function turnOnSigning() {
     if (!(await window.mvConfirm("Sign every entry in the activity record so any later change can be detected? New entries are signed after Lightwork restarts.", { okText: "Turn on" }))) { return; }
-    var response = await fetch("/api/v1/compliance/switches/signed_audit", { method: "POST", credentials: "same-origin", headers: { Accept: "application/json" } });
-    if (!response.ok) { throw response; }
-    var data = await response.json();
+    var data = await window.mvFetchJSON("/api/v1/compliance/switches/signed_audit", { method: "POST" });
     say("rcp-signing-msg", data.active ? "Signing is on." : "Saved. Signing starts after Lightwork restarts.");
     await loadStatus();
   }

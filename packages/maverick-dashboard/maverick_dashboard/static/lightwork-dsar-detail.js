@@ -20,14 +20,12 @@
   }
   // A refused change carries a plain sentence saying what is missing; show it.
   function failPlain(failure, action) {
-    if (!failure || typeof failure.json !== 'function' || (failure.status !== 422 && failure.status !== 409)) {
+    if (!failure || (failure.status !== 422 && failure.status !== 409)) {
       fail(failure, action); return;
     }
-    failure.json().then(function (body) {
-      var plain = window.mvPlainDetail ? window.mvPlainDetail(body && body.detail) : '';
-      if (plain) say('Could not ' + action + '. ' + plain); else fail(failure, action);
-    }, function () { fail(failure, action); });
-  }
+    var plain = window.mvPlainDetail ? window.mvPlainDetail(failure.detail) : '';
+    if (plain) say('Could not ' + action + '. ' + plain); else fail(failure, action);
+}
   function ask(message, okText) {
     return window.mvConfirm ? window.mvConfirm(message, { okText: okText }) : Promise.resolve(false);
   }
@@ -35,13 +33,8 @@
     return window.mvForm ? window.mvForm(title, fields, { okText: okText }) : Promise.resolve(null);
   }
   function call(method, url, body) {
-    var opts = { method: method, credentials: 'same-origin', headers: { Accept: 'application/json' } };
-    if (body !== undefined) {
-      opts.headers['Content-Type'] = 'application/json';
-      opts.body = JSON.stringify(body);
-    }
-    return fetch(url, opts).then(function (r) { if (!r.ok) throw r; return r.json(); });
-  }
+    return window.mvFetchJSON(url, {method: method, body: body});
+}
   function reloadSoon() { setTimeout(function () { location.reload(); }, 700); }
   function human(v) { return window.mvHuman ? window.mvHuman(v) : String(v); }
   function on(id, handler) { var el = $(id); if (el) el.addEventListener('click', handler); }
@@ -215,10 +208,9 @@
       if (!ok) return;
       button.disabled = true;
       try {
-        var response = await fetch(base + encodeURIComponent(requestId) + '/export', {
-          method: 'POST', credentials: 'same-origin', cache: 'no-store'
+        var response = await window.mvFetchJSON(base + encodeURIComponent(requestId) + '/export', {
+          method: 'POST', cache: 'no-store', raw: true
         });
-        if (!response.ok) throw response;
         var url = URL.createObjectURL(await response.blob());
         var link = doc.createElement('a');
         link.href = url; link.download = requestId + '-data.json';
