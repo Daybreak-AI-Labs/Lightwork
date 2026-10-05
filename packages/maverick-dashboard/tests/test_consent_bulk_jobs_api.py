@@ -147,6 +147,28 @@ def _edit_body() -> dict[str, object]:
     }
 
 
+def test_exact_reviewed_part_cannot_advance_another_part_and_run_next_ignores_no_revision(environment):
+    from dataclasses import replace
+
+    client, _state, runtime, preferences = environment
+    bounded = replace(runtime, worker_batch_size=1)
+    client.app.state.consent_bulk_jobs_runtime_factory = lambda **_kwargs: bounded
+    body = _export_body(items=[{"item_id": f"item-{n}", "profile_id": f"profile-{n}"} for n in (1, 2)])
+    job = client.post(BASE + "/exports", json=body).json()
+    run_path = BASE + "/" + job["job_id"] + "/run"
+    reviewed = {"expected_revision":job["revision"]}
+    first = client.post(run_path, json=reviewed)
+    assert first.status_code == 200 and first.json()["processed_items"] == 1
+    assert first.json()["state"] == "running"
+    assert client.post(run_path, json=reviewed).status_code == 409
+    assert client.get(BASE + "/" + job["job_id"]).json()["processed_items"] == 1
+    assert preferences.calls == ["export_profile"]
+    assert client.post(BASE + "/worker/run-next", json=reviewed).status_code == 422
+    second = client.post(run_path, json={"expected_revision":first.json()["revision"]})
+    assert second.status_code == 200 and second.json()["state"] == "succeeded"
+    assert preferences.calls == ["export_profile", "export_profile"]
+
+
 def test_status_is_store_free_bounded_and_reports_partial_executors(environment) -> None:
     client, state, _runtime, _preferences = environment
 

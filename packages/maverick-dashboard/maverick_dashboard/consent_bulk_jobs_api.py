@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import math
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, HTTPException, Query, Request, Response
@@ -204,6 +205,27 @@ class WorkerControlIn(_StrictModel):
     pass
 
 
+class JobPartIn(_StrictModel):
+    expected_revision: StrictInt | None = Field(default=None, ge=1, le=2**31 - 1)
+
+
+@dataclass(frozen=True)
+class ConsentJobState:
+    job: dict
+    part_limit: int
+    now: float
+
+
+@dataclass(frozen=True)
+class ConsentJobControls:
+    """The native authorized job controls, shared with typed Copilot actions."""
+
+    state: Callable
+    run_part: Callable
+    cancel_future: Callable
+    download_result: Callable
+
+
 class RecoveryIn(_StrictModel):
     limit: StrictInt = Field(default=100, ge=1, le=500)
 
@@ -349,11 +371,11 @@ def create_consent_bulk_jobs_router(  # noqa: C901, PLR0915
         )
         return readiness
 
-    async def composition(request: Request):
+    def composition_state(request: Request):
         from .consent_bulk_jobs_composition import ConsentBulkJobsRuntime
 
         tenant = _tenant_id()
-        readiness = await run_in_threadpool(probes, request, tenant)
+        readiness = probes(request, tenant)
         if not readiness["enabled"]:
             raise HTTPException(status_code=403, detail="consent bulk jobs are disabled")
         if not readiness["ready"]:
@@ -368,8 +390,7 @@ def create_consent_bulk_jobs_router(  # noqa: C901, PLR0915
             deps.runtime_factory,
         )
         try:
-            runtime = await run_in_threadpool(
-                factory,  # type: ignore[arg-type]
+            runtime = factory(  # type: ignore[operator]
                 tenant_id=tenant,
                 principal_ref=principal,
                 request=request,
@@ -397,9 +418,12 @@ def create_consent_bulk_jobs_router(  # noqa: C901, PLR0915
             )
         return _ops(), tenant, runtime
 
-    async def call(ops, function, *args, **kwargs):
+    async def composition(request: Request):
+        return await run_in_threadpool(composition_state, request)
+
+    def call_state(ops, function, *args, **kwargs):
         try:
-            return await run_in_threadpool(function, *args, **kwargs)
+            return function(*args, **kwargs)
         except ops.ConsentBulkJobNotFound as exc:
             raise HTTPException(status_code=404, detail="consent bulk job was not found") from exc
         except ops.ConsentBulkJobConflict as exc:
@@ -432,6 +456,9 @@ def create_consent_bulk_jobs_router(  # noqa: C901, PLR0915
                 detail="consent bulk-job operation failed",
             ) from exc
 
+    async def call(ops, function, *args, **kwargs):
+        return await run_in_threadpool(call_state, ops, function, *args, **kwargs)
+
     def require_audit(request: Request) -> None:
         require_permission(request, "view")
         require_global_permission(request, "audit")
@@ -447,6 +474,32 @@ def create_consent_bulk_jobs_router(  # noqa: C901, PLR0915
                 status_code=503,
                 detail="the requested consent bulk-job executor is unavailable",
             )
+
+    def job_state(request: Request, job_id: str) -> ConsentJobState:
+        require_audit(request)
+        ops, tenant, runtime = composition_state(request)
+        job = call_state(ops, runtime.store.get_job, tenant, job_id)
+        return ConsentJobState(job, runtime.worker_batch_size, runtime.clock())
+
+    def run_part(request: Request, job_id: str, expected_revision: int | None = None) -> dict:
+        require_admin(request)
+        ops, _tenant, runtime = composition_state(request)
+        return call_state(ops, runtime.run_job, job_id,
+                          **({"expected_revision": expected_revision} if expected_revision is not None else {}))
+
+    def cancel_future(request: Request, job_id: str, body: RevisionIn) -> dict:
+        require_admin(request)
+        ops, tenant, runtime = composition_state(request)
+        return call_state(ops, runtime.store.cancel_job, tenant, job_id,
+                          expected_revision=body.expected_revision, idempotency_key=body.idempotency_key)
+
+    def download_result(request: Request, job_id: str) -> dict:
+        require_audit(request)
+        ops, tenant, runtime = composition_state(request)
+        return call_state(ops, runtime.store.download_artifact, tenant, job_id)
+
+    controls = ConsentJobControls(job_state, run_part, cancel_future, download_result)
+    router.consent_job_controls = controls
 
     @router.get("/status")
     async def status(request: Request, response: Response) -> dict[str, Any]:
@@ -554,9 +607,7 @@ def create_consent_bulk_jobs_router(  # noqa: C901, PLR0915
         response: Response,
         job_id: ObjectPath,
     ) -> dict[str, Any]:
-        require_audit(request)
-        ops, tenant, runtime = await composition(request)
-        result = await call(ops, runtime.store.get_job, tenant, job_id)
+        result = (await run_in_threadpool(controls.state, request, job_id)).job
         _secure(response)
         return result
 
@@ -588,16 +639,7 @@ def create_consent_bulk_jobs_router(  # noqa: C901, PLR0915
         job_id: ObjectPath,
         body: RevisionIn,
     ) -> dict[str, Any]:
-        require_admin(request)
-        ops, tenant, runtime = await composition(request)
-        result = await call(
-            ops,
-            runtime.store.cancel_job,
-            tenant,
-            job_id,
-            expected_revision=body.expected_revision,
-            idempotency_key=body.idempotency_key,
-        )
+        result = await run_in_threadpool(controls.cancel_future, request, job_id, body)
         _secure(response)
         return result
 
@@ -606,12 +648,9 @@ def create_consent_bulk_jobs_router(  # noqa: C901, PLR0915
         request: Request,
         response: Response,
         job_id: ObjectPath,
-        body: WorkerControlIn,
+        body: JobPartIn,
     ) -> dict[str, Any]:
-        del body
-        require_admin(request)
-        ops, _tenant, runtime = await composition(request)
-        result = await call(ops, runtime.run_job, job_id)
+        result = await run_in_threadpool(controls.run_part, request, job_id, body.expected_revision)
         _secure(response)
         return result
 
@@ -630,9 +669,7 @@ def create_consent_bulk_jobs_router(  # noqa: C901, PLR0915
 
     @router.get("/{job_id}/download")
     async def download(request: Request, job_id: ObjectPath) -> Response:
-        require_audit(request)
-        ops, tenant, runtime = await composition(request)
-        artifact = await call(ops, runtime.store.download_artifact, tenant, job_id)
+        artifact = await run_in_threadpool(controls.download_result, request, job_id)
         try:
             encoded = json.dumps(
                 artifact,
@@ -783,6 +820,11 @@ def create_consent_bulk_jobs_router(  # noqa: C901, PLR0915
 
 
 router = create_consent_bulk_jobs_router()
+
+
+def job_controls() -> ConsentJobControls:
+    """Return the same trusted closures used by the installed native routes."""
+    return router.consent_job_controls
 
 __all__ = [
     "ConsentBulkJobsDependencies",

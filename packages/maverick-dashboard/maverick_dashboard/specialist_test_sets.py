@@ -142,7 +142,7 @@ def snapshot(specialist: str, selected_ids: list[str] | None = None) -> list[dic
 
 
 def reserve_run(specialist: str, model: str, instruction_hash: str, cases: list[dict],
-                actor: str, identity: str) -> dict:
+                actor: str, identity: str, *, comparison: dict | None = None) -> dict:
     """Persist a reviewed operation before starting a background worker."""
     def mutate(db):
         prior = db["runs"].get(identity)
@@ -150,7 +150,8 @@ def reserve_run(specialist: str, model: str, instruction_hash: str, cases: list[
         if prior is not None:
             if (prior["specialist"] != specialist or prior["model"] != model
                     or prior["instruction_hash"] != instruction_hash
-                    or prior["case_revisions"] != revisions):
+                    or prior["case_revisions"] != revisions or prior.get("comparison") != comparison
+                    or prior["actor"] != actor):
                 raise ValueError("This reviewed operation no longer matches its original test run.")
             return dict(prior), False
         if len(db["runs"]) >= _MAX_RUNS:
@@ -166,6 +167,8 @@ def reserve_run(specialist: str, model: str, instruction_hash: str, cases: list[
                "finished_at": None, "state": "prepared", "results": [], "total": len(cases),
                "passed": 0, "spent_dollars": 0.0, "case_revisions": revisions,
                "case_snapshots": [dict(c) for c in cases]}
+        if comparison:
+            row.update(comparison=dict(comparison), total=len(cases) * 2)
         db["runs"][identity] = row
         return dict(row), True
     return _with_store(mutate)
@@ -210,7 +213,7 @@ def append_result(run_id: str, result: dict, spent_dollars: float) -> None:
         row = db["runs"].get(run_id)
         if row is None or row["state"] != "running":
             raise ValueError("The original test run is no longer available. No call was replayed.")
-        if any(r["case_id"] == result["case_id"] for r in row["results"]):
+        if any((r["case_id"], r.get("variant", "current")) == (result["case_id"], result.get("variant", "current")) for r in row["results"]):
             raise ValueError("This answer already has a result. No call was replayed.")
         row["results"].append(result)
         row["passed"] = sum(bool(r.get("passed")) for r in row["results"])

@@ -20,7 +20,8 @@
   var testCases = [];
   var testLiveEnabled = false;
   var editingCase = null;
-  function runStorageKey(specialist) { return 'lightwork-specialist-answer-run:' + specialist; }
+  var testBaseline = '', testInstructions = '', testContext = '', testLoad = 0, comparisonReview = null;
+  function runStorageKey(specialist) { return 'lightwork-specialist-answer-run:' + testContext + ':' + specialist; }
   function pendingRun(specialist) {
     try { return window.sessionStorage.getItem(runStorageKey(specialist)); } catch (error) { return null; }
   }
@@ -32,7 +33,38 @@
     try {
       window.sessionStorage.removeItem(runStorageKey(specialist));
       window.sessionStorage.removeItem(runStorageKey(specialist) + ':cases');
+      window.sessionStorage.removeItem(runStorageKey(specialist) + ':payload');
     } catch (error) { /* no browser storage */ }
+  }
+  function pendingRunPayload(specialist) {
+    try { return JSON.parse(window.sessionStorage.getItem(runStorageKey(specialist) + ':payload') || 'null'); }
+    catch (_) { return null; }
+  }
+  function clearComparisonReview() { comparisonReview = null; $('wo-compare-review').hidden = true; }
+  function comparisonAnswers(run) {
+    var nodes = [el('p', 'Recorded cost: $' + Number(run.spent_dollars || 0).toFixed(6) + '. The same model and fixed question versions were used. No instructions were changed.', 'muted')];
+    if (run.baseline_current === false || run.questions_current === false)
+      nodes.push(el('p', 'The current instructions or saved questions have changed. This is a historical comparison; review a new comparison before making a decision.', 'muted'));
+    nodes.push(el('p', 'Phrase checks are literal. A source check detects a reference marker, not a verified source. These results do not establish correctness or business improvement.', 'muted'));
+    (run.case_snapshots || []).forEach(function (question) {
+      var section = el('section'); section.appendChild(el('h4', question.task)); section.appendChild(el('p', testCriteria(question), 'muted'));
+      var pair = el('div', null, 'wo-test-grid');
+      ['current', 'proposed'].forEach(function (variant) {
+        var card = el('div', null, 'wo-answer-card'), answer = run.results.find(function (r) { return r.case_id === question.id && r.variant === variant; });
+        card.appendChild(el('h5', variant === 'current' ? 'Current instructions' : 'Proposed instructions'));
+        card.appendChild(el('p', answer ? answer.answer : 'Not checked.', 'wo-answer-text'));
+        if (answer) {
+          var labels = {includes:'Required phrases', excludes:'Forbidden phrases', refusal:'Refusal', citation:'Source marker', empty_answer:'Answer present'};
+          card.appendChild(el('p', Object.keys(answer.checks).map(function (key) { return (labels[key] || 'Answer check') + ': ' + (answer.checks[key] === 1 ? 'Passed' : 'Needs review'); }).join(' · ')));
+          card.appendChild(el('p', 'Recorded answer cost: $' + Number(answer.spent_dollars || 0).toFixed(6), 'muted'));
+        }
+        pair.appendChild(card);
+      });
+      section.appendChild(pair); nodes.push(section);
+    });
+    var instructions = el('details'); instructions.appendChild(el('summary', 'Instructions used'));
+    ['current', 'proposed'].forEach(function (variant) { instructions.appendChild(el('h4', variant === 'current' ? 'Current instructions' : 'Proposed instructions')); instructions.appendChild(el('p', run.comparison[variant + '_instructions'], 'wo-answer-text')); });
+    nodes.push(instructions); return nodes;
   }
   function newRunId() {
     if (!window.crypto || !window.crypto.getRandomValues || !window.sessionStorage) return null;
@@ -71,6 +103,8 @@
   function renderTests(data) {
     testCases = data.cases || [];
     testLiveEnabled = !!data.live_enabled;
+    testBaseline = data.baseline_revision || ''; testInstructions = data.current_instructions || ''; testContext = data.context || '';
+    $('wo-test-current-instructions').textContent = testInstructions;
     var list = [];
     if (!testCases.length) list.push(el('p', 'No answer checks yet. Add one below.', 'muted'));
     else {
@@ -123,6 +157,15 @@
           : r.state === 'prepared' ? 'Not started' : 'Result uncertain after ' + r.results.length + ' answers';
       box.appendChild(el('summary', J.when(r.started_at) + ' · ' + state));
       if (r.message) box.appendChild(el('p', r.message));
+      if (r.comparison) {
+        var questionCount = r.case_snapshots.length;
+        var currentPassed = r.results.filter(function (answer) { return answer.variant === 'current' && answer.passed; }).length;
+        var proposedPassed = r.results.filter(function (answer) { return answer.variant === 'proposed' && answer.passed; }).length;
+        box.querySelector('summary').textContent = J.when(r.started_at) + ' · Instruction comparison · ' + (r.state === 'done'
+          ? 'Current: ' + currentPassed + '/' + questionCount + ' passed · Proposed: ' + proposedPassed + '/' + questionCount + ' passed' : state);
+        comparisonAnswers(r).forEach(function (node) { box.appendChild(node); });
+        return box;
+      }
       box.appendChild(el('p', 'Model: ' + r.model + '. Recorded cost: ' + J.money(r.spent_dollars) +
         '. Each check used the specialist instructions shown by this version; no actions or company knowledge were used.', 'muted'));
       if (r.results.length) box.appendChild(J.table(['Question', 'Answer', 'Result'], r.results.map(function (answer) {
@@ -133,6 +176,10 @@
   }
   async function loadCustomerTests() {
     var specialist = $('wo-test-specialist').value;
+    var generation = ++testLoad;
+    clearComparisonReview(); $('wo-compare-instructions').value = '';
+    testCases = []; testBaseline = ''; testInstructions = ''; testContext = '';
+    $('wo-test-current-instructions').textContent = ''; fill('wo-test-history', null); updateRunAvailability();
     clearTestEditor();
     if (!specialist) {
       fill('wo-tests-list', el('p', 'Choose a specialist to see its answer checks.', 'muted'));
@@ -143,16 +190,19 @@
     $('wo-test-status').textContent = 'Loading answer checks…';
     try {
       var data = await J.request(API + '/test-suite/customer?specialist=' + encodeURIComponent(specialist));
+      if (generation !== testLoad || specialist !== $('wo-test-specialist').value) return;
       $('wo-test-status').textContent = '';
       renderTests(data);
-    } catch (failure) { $('wo-test-status').textContent = await J.problem(failure, 'load the answer checks'); }
+    } catch (failure) { if (generation === testLoad) $('wo-test-status').textContent = await J.problem(failure, 'load the answer checks'); }
   }
   function selectedTestIds() {
     return Array.from(document.querySelectorAll('#wo-tests-list .wo-test-choice:checked'), function (box) { return box.value; });
   }
   function updateRunAvailability() {
+    clearComparisonReview();
     var count = selectedTestIds().length;
-    $('wo-test-run').disabled = !testLiveEnabled || !count || count > 5;
+    $('wo-test-run').disabled = !$('wo-test-specialist').value || (!pendingRun($('wo-test-specialist').value) && (!testLiveEnabled || !count || count > 5));
+    $('wo-compare-review-button').disabled = !testLiveEnabled || !count || count > 5 || !!pendingRun($('wo-test-specialist').value);
     if (testCases.length > 5) $('wo-test-status').textContent = count > 5
       ? 'Choose no more than 5 checks for one run.' : count ? '' : 'Choose up to 5 checks to run.';
   }
@@ -297,15 +347,14 @@
         return null;
       }
     }
-    async function launch(specialist, id, caseIds) {
+    async function launch(specialist, id, caseIds, reviewedPayload) {
       var revisions = {};
       caseIds.forEach(function (caseId) {
         var found = testCases.find(function (c) { return c.id === caseId; });
         if (found) revisions[caseId] = found.revision;
       });
-      var started = await J.request(API + '/test-suite/customer/run',
-        {method: 'POST', json: {specialist: specialist, operation_id: id,
-          case_ids: caseIds, case_revisions: revisions}});
+      var body = reviewedPayload || {specialist: specialist, operation_id: id, case_ids: caseIds, case_revisions: revisions};
+      var started = await J.request(API + '/test-suite/customer/' + (body.proposed_instructions ? 'compare' : 'run'), {method: 'POST', json: body});
       if (started.run) {
         await readOriginal(specialist, id);
         return;
@@ -325,15 +374,15 @@
     $('wo-test-run').addEventListener('click', async function () {
       var specialist = $('wo-test-specialist').value;
       var selected = selectedTestIds();
-      if (!specialist || !selected.length || selected.length > 5) return;
       var id = pendingRun(specialist);
+      if (!specialist || (!id && (!selected.length || selected.length > 5))) return;
       var button = $('wo-test-run'); button.disabled = true;
       try {
         if (id) {
           var original = await readOriginal(specialist, id);
           if (original && original.state === 'prepared' && await window.mvConfirm(
             'No provider call started for this request. Try starting the same request?', {okText: 'Try original request'})) {
-            await launch(specialist, id, pendingRunCases(specialist));
+            await launch(specialist, id, pendingRunCases(specialist), pendingRunPayload(specialist));
           }
           return;
         }
@@ -366,6 +415,48 @@
       $('wo-test-run-status').textContent = 'The original request reference was cleared. Review Previous checks before starting another.';
       $('wo-test-run').textContent = 'Check answers';
       $('wo-test-new-run').hidden = true;
+      updateRunAvailability();
+    });
+    $('wo-compare-form').addEventListener('input', clearComparisonReview);
+    $('wo-compare-form').addEventListener('submit', function (event) {
+      event.preventDefault();
+      var ids = selectedTestIds(), specialist = $('wo-test-specialist').value, proposed = $('wo-compare-instructions').value;
+      if (!testBaseline || !testContext || !ids.length || ids.length > 5 || pendingRun(specialist)) return;
+      var selected = testCases.filter(function (row) { return ids.includes(row.id); }), revisions = {};
+      selected.forEach(function (row) { revisions[row.id] = row.revision; });
+      comparisonReview = {specialist:specialist, case_ids:ids, case_revisions:revisions, proposed_instructions:proposed,
+        baseline_revision:testBaseline, expected_context:testContext};
+      var pair = el('div', null, 'wo-test-grid');
+      [['Current instructions', testInstructions], ['Proposed instructions', proposed]].forEach(function (item) {
+        var card = el('div', null, 'wo-answer-card'); card.appendChild(el('h4', item[0])); card.appendChild(el('p', item[1], 'wo-answer-text')); pair.appendChild(card);
+      });
+      fill('wo-compare-reviewed', [J.table(['Question', 'Passing answer'], selected.map(function (row) { return [row.task, testCriteria(row)]; })), pair]);
+      $('wo-compare-review').hidden = false; $('wo-compare-review').focus();
+    });
+    $('wo-compare-edit').addEventListener('click', function () { clearComparisonReview(); $('wo-compare-instructions').focus(); });
+    $('wo-compare-start').addEventListener('click', async function () {
+      var reviewed = comparisonReview, button = $('wo-compare-start');
+      if (!reviewed || pendingRun(reviewed.specialist)) return;
+      if (!(await window.mvConfirm('Compare these two instruction versions on the reviewed questions? At most $0.25 total. No instructions will change and uncertain paid requests will not be repeated.', {okText:'Start comparison'}))) return;
+      if (comparisonReview !== reviewed) return;
+      button.disabled = true;
+      var id = newRunId();
+      try {
+        if (!id) throw new Error('No safe request reference');
+        var body = Object.assign({operation_id:id}, reviewed);
+        window.sessionStorage.setItem(runStorageKey(reviewed.specialist), id);
+        window.sessionStorage.setItem(runStorageKey(reviewed.specialist) + ':cases', JSON.stringify(reviewed.case_ids));
+        window.sessionStorage.setItem(runStorageKey(reviewed.specialist) + ':payload', JSON.stringify(body));
+        clearComparisonReview();
+        await launch(reviewed.specialist, id, reviewed.case_ids, body);
+      } catch (failure) {
+        var problem = await J.problem(failure, 'compare the instructions');
+        var found = id ? await readOriginal(reviewed.specialist, id) : null;
+        if (!found && failure && [400, 409, 422].includes(failure.status)) {
+          clearPendingRun(reviewed.specialist); await loadCustomerTests();
+          $('wo-test-run-status').textContent = problem + ' Review the current instructions and questions before trying again.';
+        } else $('wo-test-run-status').textContent = problem;
+      } finally { button.disabled = false; updateRunAvailability(); }
     });
     loadTestSpecialists();
   }

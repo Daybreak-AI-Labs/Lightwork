@@ -1452,6 +1452,7 @@ from .channel_check_api import router as channel_check_router  # noqa: E402
 from .dsar_export_handoff_api import router as dsar_export_handoff_router  # noqa: E402
 from .feature_actions_api import page_router as feature_actions_page_router  # noqa: E402
 from .feature_actions_api import router as feature_actions_router  # noqa: E402
+from .flow_action_fields import router as flow_action_fields_router  # noqa: E402
 from .mcp_presets import router as mcp_presets_router  # noqa: E402
 from .page_assets import router as page_assets_router  # noqa: E402
 from .provider_spending_api import router as provider_spending_router  # noqa: E402
@@ -1476,6 +1477,7 @@ app.include_router(feature_actions_page_router)
 app.include_router(tax_actions_router)
 app.include_router(channel_check_router)
 app.include_router(dsar_export_handoff_router)
+app.include_router(flow_action_fields_router)
 app.include_router(teams_links_router)
 app.include_router(page_assets_router)
 app.include_router(mcp_presets_router)
@@ -1508,6 +1510,10 @@ from . import local_flow_promotions  # noqa: E402
 
 app.include_router(local_flow_promotions.router)
 app.include_router(local_flow_promotions.asset_router)
+from . import instruction_capture_api  # noqa: E402
+
+app.include_router(instruction_capture_api.router)
+app.include_router(instruction_capture_api.page_router)
 app.state.voice_setup = VoiceSetup()
 app.add_middleware(RecoveryOnlyMiddleware, dashboard_app=app)
 

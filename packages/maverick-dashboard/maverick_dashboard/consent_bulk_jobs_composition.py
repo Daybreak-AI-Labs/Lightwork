@@ -421,7 +421,7 @@ class ConsentBulkJobsRuntime:
     def operation_capabilities(self) -> dict[str, bool]:
         return self.executor.capabilities()
 
-    def run_job(self, job_id: str) -> dict[str, Any]:
+    def run_job(self, job_id: str, *, expected_revision: int | None = None) -> dict[str, Any]:
         scope = self.store.job_executor_scope(self.tenant_id, job_id)
 
         def execute(operation: str, item: Mapping[str, Any]) -> Mapping[str, Any]:
@@ -435,6 +435,7 @@ class ConsentBulkJobsRuntime:
             worker_sha256=self.worker_sha256,
             executor=execute,
             batch_size=self.worker_batch_size,
+            **({"expected_revision": expected_revision} if expected_revision is not None else {}),
         )
 
     def run_next(self) -> dict[str, Any]:

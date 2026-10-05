@@ -78,6 +78,13 @@ class SpecialistRunIn(BaseModel):
     case_revisions: dict[str, int] = Field(min_length=1, max_length=5)
 
 
+class SpecialistCompareIn(SpecialistRunIn):
+    case_ids: list[str] = Field(min_length=1, max_length=5)
+    proposed_instructions: str = Field(min_length=8, max_length=6000)
+    baseline_revision: str = Field(pattern=r"^[a-f0-9]{64}$")
+    expected_context: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+
 def _audit(request: Request, action: str, **detail: Any) -> None:
     from maverick.audit import AuditRefused, EventKind, audit_event
 
@@ -225,19 +232,106 @@ def _test_profile(request: Request, name: str):
 @router.get("/test-suite/specialists")
 async def test_specialists(request: Request) -> dict:
     require_permission(request, "view")
-    from maverick.domain import available_domains
-    names = sorted(name for name in available_domains() if domain_suites_allowed(request, name))
-    return {"specialists": [{"value": name, "label": _name(name)} for name in names]}
+    from .plain_labels import pack_display_name
+    profiles = _test_profiles(request)
+    return {"specialists": [{"value": name, "label": pack_display_name(name, profile.persona, profile.description)}
+                           for name, profile in sorted(profiles.items())]}
+
+
+def _test_profiles(request: Request) -> dict:
+    from maverick.domain import available_domains, suites_for_domain
+
+    from .auth import caller_suites
+    profiles = available_domains()
+    allowed = caller_suites(request)
+    return {name: profile for name, profile in profiles.items()
+            if allowed is None or suites_for_domain(name, profile) <= allowed}
 
 
 @router.get("/test-suite/customer")
 async def customer_tests(request: Request, specialist: str = Query(max_length=100)) -> dict:
     require_permission(request, "view")
-    _test_profile(request, specialist)
+    profile = _test_profile(request, specialist)
+    from maverick.llm import model_for_role
+
     from . import specialist_test_sets as saved
-    return {"specialist": specialist, "cases": await run_in_threadpool(saved.cases_for, specialist),
-            "runs": await run_in_threadpool(saved.runs_for, specialist),
-            "live_enabled": _live_tests_enabled()}
+    from .draft_api import context_for
+    revision = saved.instruction_digest(saved.answer_system(profile), model_for_role(specialist))
+    cases = await run_in_threadpool(saved.cases_for, specialist)
+    runs = await run_in_threadpool(saved.runs_for, specialist)
+    for run in runs:
+        _current_test_result(run, revision, cases)
+    return {"specialist": specialist, "cases": cases,
+            "runs": runs, "current_instructions": profile.persona, "baseline_revision": revision,
+            "context": context_for(request), "live_enabled": _live_tests_enabled()}
+
+
+def _current_test_result(row, current_revision, cases):
+    if row.get("comparison"):
+        current = {case["id"]: case["revision"] for case in cases}
+        row["baseline_current"] = row["instruction_hash"] == current_revision
+        row["questions_current"] = all(current.get(case["id"]) == case["revision"] for case in row["case_revisions"])
+    return row
+
+
+def _match_test_comparison(row, actor, proposed, baseline, revisions):
+    old = row.get("comparison") or {}
+    if (row["actor"] != actor or old.get("proposed_instructions") != proposed
+            or row["instruction_hash"] != baseline
+            or {case["id"]: case["revision"] for case in row["case_revisions"]} != revisions):
+        raise HTTPException(409, "This request no longer matches its original person, questions or instructions. No paid call was repeated.")
+
+
+def _comparison_systems(profile, model, system, proposed, baseline):
+    from dataclasses import replace
+
+    from . import specialist_test_sets as saved
+    if proposed is None:
+        return {"current":system}, None
+    if baseline != saved.instruction_digest(system, model):
+        raise HTTPException(409, "The specialist instructions or model changed. Refresh and review the comparison before spending.")
+    if not 8 <= len(proposed.strip()) <= 6000 or proposed.strip() == profile.persona.strip():
+        raise HTTPException(422, "Write different proposed instructions of between 8 and 6,000 characters.")
+    other = saved.answer_system(replace(profile, persona=proposed))
+    return {"current":system, "proposed":other}, {"current_instructions":profile.persona,
+        "proposed_instructions":proposed, "proposed_instruction_hash":saved.instruction_digest(other, model)}
+
+
+def _perform_answer_tests(job, *, specialist, model, instruction_hash, cases, actor,
+                          operation_id, systems, comparison, budget, guard):
+    from maverick.llm import LLM
+
+    from . import specialist_test_sets as saved
+    run, created = saved.begin_run(specialist, model, instruction_hash, cases, actor, identity=operation_id)
+    if not created:
+        return {"run": run}
+    llm = LLM(model)
+    final_state, message = "done", ""
+    try:
+        for index, case in enumerate(cases):
+            variants = (["proposed", "current"] if index % 2 else ["current", "proposed"]) if comparison else ["current"]
+            for variant in variants:
+                try:
+                    guard(job)
+                except Exception:  # noqa: BLE001 -- refuse before the next dispatch
+                    final_state, message = "stopped", "The questions, instructions, access or spending allowance changed. No further answers were requested."
+                    break
+                before = budget.dollars
+                answer = llm.complete(systems[variant], [{"role": "user", "content": case["task"]}],
+                                      tools=None, budget=budget, max_tokens=64 if comparison else 128,
+                                      _no_failover=True, max_physical_attempts=1,
+                                      dispatch_guard=lambda: guard(job))
+                result = saved.grade(case, answer.text)
+                if comparison:
+                    result.update(variant=variant, spent_dollars=round(max(0.0, budget.dollars-before), 6))
+                saved.append_result(run["id"], result, budget.dollars)
+            if final_state == "stopped":
+                break
+    except Exception:  # noqa: BLE001 -- provider dispatch may have been billable
+        final_state = "unknown"
+        message = ("A check could not finish. A provider call may have been billed; "
+                   "no request was replayed. Review the completed answers and provider accounting.")
+    return {"run": saved.finish_run(run["id"], final_state, budget.dollars, message)}
 
 
 def _live_tests_enabled() -> bool:
@@ -302,19 +396,29 @@ async def remove_customer_test(request: Request, body: SpecialistCaseDelete) -> 
 
 def _start_customer_test_job(request: Request, specialist: str, *, operation_id: str | None = None,
                              case_ids: list[str] | None = None,
-                             case_revisions: dict[str, int] | None = None) -> dict:
+                             case_revisions: dict[str, int] | None = None,
+                             proposed_instructions: str | None = None,
+                             baseline_revision: str | None = None,
+                             expected_context: str | None = None) -> dict:
     require_permission(request, "admin")
     profile = _test_profile(request, specialist)
     from maverick import model_tests
-    from maverick.llm import LLM, model_for_role
+    from maverick.llm import model_for_role
 
     from . import learning_jobs
     from . import specialist_test_sets as saved
+    from .auth import caller_principal
+    from .draft_api import context_for
+    actor = caller_principal(request) or "local administrator"
+    if proposed_instructions is not None and expected_context != context_for(request):
+        raise HTTPException(409, "Your account or workspace changed. Reload and review the comparison before spending.")
     if operation_id:
         existing = saved.run_by_id(operation_id)
         if existing is not None:
             if existing["specialist"] != specialist:
                 raise HTTPException(status_code=409, detail="That test request belongs to another specialist.")
+            if existing.get("comparison") or proposed_instructions is not None:
+                _match_test_comparison(existing, actor, proposed_instructions, baseline_revision, case_revisions)
             if existing["state"] != "prepared":
                 return {"run": saved.public_run(existing), "replayed": True}
     try:
@@ -331,6 +435,7 @@ def _start_customer_test_job(request: Request, specialist: str, *, operation_id:
     model = model_for_role(specialist)
     system = saved.answer_system(profile)
     instruction_hash = saved.instruction_digest(system, model)
+    systems, comparison = _comparison_systems(profile, model, system, proposed_instructions, baseline_revision)
     from .learning_ops_api import _budget
     budget = _budget("specialist_eval")
     for key, ceiling in (("max_dollars", .25), ("max_input_tokens", 10000),
@@ -347,46 +452,27 @@ def _start_customer_test_job(request: Request, specialist: str, *, operation_id:
         require_permission(request, "admin")
         current = _test_profile(request, specialist)
         model_tests.policy()
+        if comparison and expected_context != context_for(request):
+            raise ValueError("The reviewed account or workspace changed. No further answers were sent.")
         if (model_for_role(specialist) != model
                 or saved.instruction_digest(saved.answer_system(current), model) != instruction_hash):
             raise ValueError("This specialist or its model changed. No further tests were sent.")
+        if comparison and {case["id"]: case["revision"] for case in saved.snapshot(specialist, case_ids)} != case_revisions:
+            raise ValueError("A selected question changed. No further comparison answers were sent.")
         if job.cancelled:
             raise ValueError("Stopped before the next answer check.")
         budget.check()
 
     def _run(job) -> dict:
-        run, created = saved.begin_run(specialist, model, instruction_hash, cases,
-                                       getattr(job, "started_by", ""), identity=operation_id)
-        if not created:
-            return {"run": run}
-        llm = LLM(model)
-        final_state, message = "done", ""
-        try:
-            for case in cases:
-                if job.cancelled:
-                    final_state = "stopped"
-                    break
-                _guard(job)
-                # A tool-free, single-attempt request tests answer quality only;
-                # it cannot change customer systems or silently fail over.
-                answer = llm.complete(system, [{"role": "user", "content": case["task"]}],
-                                      tools=None, budget=budget, max_tokens=128,
-                                      _no_failover=True, max_physical_attempts=1,
-                                      dispatch_guard=lambda: _guard(job))
-                saved.append_result(run["id"], saved.grade(case, answer.text), budget.dollars)
-        except Exception:  # noqa: BLE001 -- provider dispatch may have been billable
-            final_state = "unknown"
-            message = ("A check could not finish. A provider call may have been billed; "
-                       "no request was replayed. Review the completed answers and provider accounting.")
-        result = saved.finish_run(run["id"], final_state, budget.dollars, message)
-        return {"run": result}
+        return _perform_answer_tests(job, specialist=specialist, model=model,
+            instruction_hash=instruction_hash, cases=cases, actor=actor, operation_id=operation_id,
+            systems=systems, comparison=comparison, budget=budget, guard=_guard)
 
     _audit(request, "specialist_test_run", specialist=specialist,
-           cases=len(cases), model=model, max_dollars=budget.max_dollars)
+           cases=len(cases), model=model, max_dollars=budget.max_dollars, comparison=comparison is not None)
     if operation_id:
-        from .auth import caller_principal
         saved.reserve_run(specialist, model, instruction_hash, cases,
-                          caller_principal(request) or "local administrator", operation_id)
+                          actor, operation_id, comparison=comparison)
     return start_job(request, "specialist_answer_test", "Checking specialist answers", _run,
                      needs_global=False, cancellable=True, on_cancel=learning_jobs.stop_budget(budget))
 
@@ -395,6 +481,14 @@ def _start_customer_test_job(request: Request, specialist: str, *, operation_id:
 def run_customer_tests(request: Request, body: SpecialistRunIn) -> dict:
     return _start_customer_test_job(request, body.specialist, operation_id=body.operation_id,
                                     case_ids=body.case_ids, case_revisions=body.case_revisions)
+
+
+@router.post("/test-suite/customer/compare")
+def compare_customer_tests(request: Request, body: SpecialistCompareIn) -> dict:
+    return _start_customer_test_job(request, body.specialist, operation_id=body.operation_id,
+        case_ids=body.case_ids, case_revisions=body.case_revisions,
+        proposed_instructions=body.proposed_instructions, baseline_revision=body.baseline_revision,
+        expected_context=body.expected_context)
 
 
 @router.get("/test-suite/customer/run/{operation_id}")
@@ -406,8 +500,14 @@ def customer_test_run_status(request: Request, operation_id: str) -> dict:
     row = saved.run_by_id(operation_id)
     if row is None:
         raise HTTPException(status_code=404, detail="No saved answer check has this request reference.")
-    _test_profile(request, row["specialist"])
-    return {"run": saved.public_run(row)}
+    profile = _test_profile(request, row["specialist"])
+    from maverick.llm import model_for_role
+
+    from .auth import caller_principal
+    if row.get("comparison") and row["actor"] != (caller_principal(request) or "local administrator"):
+        raise HTTPException(403, "This comparison belongs to another person. Open Previous checks for workspace history.")
+    revision = saved.instruction_digest(saved.answer_system(profile), model_for_role(row["specialist"]))
+    return {"run": _current_test_result(saved.public_run(row), revision, saved.cases_for(row["specialist"]))}
 
 
 # ---- tasks coming due (forward) -----------------------------------------------------

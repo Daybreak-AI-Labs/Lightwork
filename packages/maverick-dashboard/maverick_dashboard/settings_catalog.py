@@ -2145,6 +2145,10 @@ _POLICY: tuple[Setting, ...] = (
       minimum=2, maximum=30, integer=True, unit="days"),
 
     # ------------------------------------ self-improving instructions (learning)
+    S("instruction_capture", "enable", "Record instructions from authorized tasks",
+      "Allow a person to record the instructions Lightwork gives the AI connection on one task's next successful call started after consent. "
+      "Each task needs separate consent. This local installation keeps private instruction text; recording does not start work or enable learning.",
+      "toggle", "Memory & learning", False, "maverick.instruction_capture", subgroup="Recorded instructions"),
     S("self_harness", "risk_limited", "Use the careful improvement profile",
       "Improvements to agent instructions must pass unseen tests, repeated checks and a trial "
       "on a small share of work before they are used.", "toggle", "Memory & learning", True,

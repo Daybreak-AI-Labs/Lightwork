@@ -2095,6 +2095,8 @@ class LLM:
 
                 with observe_physical_attempts(_provider_tracker):
                     _resp = client.complete(**kwargs)
+                from .instruction_capture import record_dispatch
+                record_dispatch(_price_spec, system)
                 return _resp
         except BaseException as _exc:
             _provider_error = _exc
@@ -2286,6 +2288,8 @@ class LLM:
                                 max_tokens=max_tokens, thinking_budget=thinking_budget,
                                 model=model_id, **_ekw,
                             )
+                        from .instruction_capture import record_dispatch
+                        record_dispatch(_price_spec, system)
                         return response
                     finally:
                         tracker.finalize(response, sys.exc_info()[1])

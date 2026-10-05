@@ -298,3 +298,23 @@ test("cancelling a job confirms and carries its version", async () => {
     assert.equal(sent.body.expected_revision, 4);
   } finally { ui.dom.window.close(); }
 });
+
+test('a lost cancellation response reads recorded cancellation without submitting again', async () => {
+  const ui = await page();
+  try {
+    const original = ui.w.fetch;
+    let attempts = 0, reads = 0;
+    const recorded = { ...JOBS[0], revision: 5, cancel_requested: true, state: 'running' };
+    ui.w.fetch = async (url, init = {}) => {
+      if (url.endsWith('/job-1/cancel')) { attempts++; throw new Error('lost after cancellation'); }
+      if (url.endsWith('/job-1')) { reads++; return reply(200, recorded); }
+      if (url.startsWith('/api/v1/consent/bulk-jobs?')) return reply(200, { jobs: [recorded] });
+      return original(url, init);
+    };
+    ui.button('Cancel').click(); await flush();
+    assert.equal(attempts, 1); assert.equal(reads, 1);
+    assert.match(ui.d.getElementById('cbj-operation-status').textContent, /Cancellation is already recorded/);
+    assert.match(ui.d.getElementById('cbj-job-list').textContent, /Cancelling/);
+    assert.equal(ui.button('Cancel'), undefined);
+  } finally { ui.dom.window.close(); }
+});

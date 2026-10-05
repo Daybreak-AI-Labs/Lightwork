@@ -4,12 +4,22 @@
   var panel = document.getElementById('mv-copilot'), host = document.getElementById('mv-product-operations');
   var status = document.getElementById('mv-product-operation-status'), buttons = document.getElementById('mv-product-operation-buttons');
   var formHost = document.getElementById('mv-product-operation-form');
+  var search = document.getElementById('mv-product-operation-search'), noMatches = document.getElementById('mv-product-operation-empty');
   if (!panel || !host || !status || !buttons || !formHost) return;
   var root = '/api/v1/copilot/product-operations', generation = 0, busy = false, catalog = null, selected = null;
   var uncertainty = '', overrideSelection = null, pendingRequests = new Set();
   function cancelRequests() { pendingRequests.forEach(function (controller) { controller.abort(); }); pendingRequests.clear(); }
   function node(tag, text, parent) { var element = document.createElement(tag); if (text !== undefined) element.textContent = String(text); if (parent) parent.appendChild(element); return element; }
   function clear(element) { element.replaceChildren(); }
+  function filterControls() {
+    var query = search ? search.value.trim().toLocaleLowerCase() : '', found = 0;
+    buttons.querySelectorAll('button').forEach(function (control) {
+      control.hidden = !control.textContent.toLocaleLowerCase().includes(query);
+      if (!control.hidden) found += 1;
+    });
+    if (noMatches) noMatches.hidden = !query || found > 0;
+  }
+  if (search) search.addEventListener('input', filterControls);
   function button(text, parent, handler) { var control = node('button', text, parent); control.type = 'button'; control.className = 'btn btn--ghost'; control.addEventListener('click', handler); return control; }
   function context() {
     if (overrideSelection) return overrideSelection;
@@ -76,9 +86,15 @@
       if (typeof item.href === 'string' && typeof item.label === 'string' && safeLocalHref(item.href)) {
         var local = node('a', item.label, target); local.href = item.href; local.className = 'btn btn--ghost'; return;
       }
+      if (Array.isArray(item)) {
+        var ordered = node('ol', undefined, target);
+        item.slice(0, 35).forEach(function (entry) { append(node('li', undefined, ordered), entry, depth + 1); });
+        return;
+      }
       var list = node('dl', undefined, target);
       Object.entries(item).slice(0, 35).forEach(function (entry) {
-        node('dt', Array.isArray(item) ? String(Number(entry[0]) + 1) : entry[0].replace(/_/g, ' '), list);
+        var label = entry[0].replace(/_/g, ' ');
+        node('dt', label.charAt(0).toUpperCase() + label.slice(1), list);
         append(node('dd', undefined, list), entry[1], depth + 1);
       });
     }
@@ -109,10 +125,11 @@
         control.dataset.available = item.available === true ? 'true' : 'false'; control.disabled = busy || !item.available;
         if (item.blocked) control.title = item.blocked;
       });
+      filterControls();
       status.textContent = uncertainty || 'Current controls for this page. Changes require a separate review and confirmation.';
       return fresh;
     } catch (error) {
-      if (active(started)) { catalog = null; clear(buttons); clear(formHost); selected = null; host.hidden = false; status.textContent = error.message; }
+      if (active(started)) { catalog = null; clear(buttons); clear(formHost); selected = null; host.hidden = false; if (noMatches) noMatches.hidden = true; status.textContent = error.message; }
       return null;
     }
   }

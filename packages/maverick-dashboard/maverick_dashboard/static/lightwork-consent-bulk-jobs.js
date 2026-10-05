@@ -353,6 +353,14 @@
     var state = { status: null, jobs: [], credit: null, profiles: [], profileCache: new Map(), chosen: new Set(), policies: [], identifiers: [], receipts: [],
       peoplePages: [null], peoplePage: 0, nextPeople: null, chosenReceipts: new Set(), receiptPeopleKey: "", nextReceipt: null };
     var peopleGeneration = 0, selectionGeneration = 0, receiptsGeneration = 0, peopleSearchTimer = null, privatePeopleCleared = false;
+    var selectedJobId = null, detailGeneration = 0;
+    function selectJob(job) {
+      var id = job ? job.job_id : null;
+      if (id === selectedJobId) return;
+      selectedJobId = id;
+      document.dispatchEvent(new CustomEvent('lightwork:copilot-selection', {detail:{selection:
+        id ? {kind:'consent_bulk_job', id:id} : null}}));
+    }
     var WHAT = {
       export_receipts: "Export consent records", edit_preferences: "Change choices", delete_subject: "Erase stored identifiers",
       change_identifier_type: "Change how people are identified", reactivate: "Bring back earlier choices", clear_expiration: "Remove end dates"
@@ -441,7 +449,10 @@
         delete shell.dataset.operationInFlight;
       });
     }
-    document.querySelectorAll("[data-cbj-close]").forEach(function (b) { b.addEventListener("click", function () { $(b.dataset.cbjClose).hidden = true; }); });
+    document.querySelectorAll("[data-cbj-close]").forEach(function (b) { b.addEventListener("click", function () {
+      $(b.dataset.cbjClose).hidden = true;
+      if (b.dataset.cbjClose === 'cbj-detail') { detailGeneration += 1; selectJob(null); }
+    }); });
 
     async function refreshStatus() {
       operations.disabled = true;
@@ -502,8 +513,14 @@
           ],
           actions: [
             { label: "Details", run: function (j, b) { CW.busy(b, function () { return showDetail(j); }); } },
+            { label: "Ask Copilot", run: function (j, b) { CW.busy(b, async function () {
+              await showDetail(j);
+              var panel = $('mv-copilot'), launch = $('mv-copilot-fab');
+              if (selectedJobId === j.job_id && panel && panel.hidden && launch) launch.click();
+            }); } },
             { label: "Download", when: function (j) { return j.operation === "export_receipts" && j.state === "succeeded"; }, run: function (j) { global.location.assign(apiBase + "/" + encodeURIComponent(j.job_id) + "/download"); } },
             { label: "Run now", kind: "primary", when: function (j) { return canAdmin && (j.state === "queued" || j.state === "running"); }, run: function (j, b) { handle(b, function (disableControls) { return runJob(j, disableControls); }); } },
+            { label: "Run one part", when: function (j) { return canAdmin && (j.state === 'queued' || j.state === 'running') && !j.cancel_requested; }, run: function (j, b) { handle(b, function (disableControls) { return runPart(j, disableControls); }); } },
             { label: "Cancel", kind: "danger", when: function (j) { return canAdmin && (j.state === "queued" || j.state === "running") && !j.cancel_requested; }, run: function (j, b) { handle(b, function (disableControls) { return cancelJob(j, disableControls); }); } }
           ],
           empty: { title: "No jobs yet.", body: "Start a bulk change to export or change many people’s consent records at once.", action: canAdmin ? { label: "Start a bulk change", run: openCreate } : null }
@@ -519,13 +536,17 @@
       }
     }
 
-    async function showDetail(job) {
+    async function showDetail(job, focus) {
+      var generation = ++detailGeneration;
       var body = $("cbj-detail-body");
       $("cbj-detail-title").textContent = WHAT[job.operation] || "Job details";
       body.replaceChildren(CW.el("p", "muted", "Loading…"));
       $("cbj-detail").hidden = false;
       try {
+        var current = await api('/' + encodeURIComponent(job.job_id));
         var history = await api("/" + encodeURIComponent(job.job_id) + "/history?limit=50");
+        if (generation !== detailGeneration) return;
+        job = current; selectJob(job);
         body.replaceChildren();
         CW.facts(body, [
           ["Status", (STATE_LABELS[job.state] || [CW.human(job.state)])[0]],
@@ -571,8 +592,25 @@
         }
         older.addEventListener('click', function () { loadHistory(history.next_before_sequence); });
         latest.addEventListener('click', function () { loadHistory(null); });
-        CW.open($("cbj-detail"), null);
-      } catch (error) { body.replaceChildren(CW.el("p", "danger-text", CW.errorText(error, "load the job details"))); }
+        if (focus !== false) CW.open($("cbj-detail"), null);
+      } catch (error) {
+        if (generation !== detailGeneration) return;
+        selectJob(null); body.replaceChildren(CW.el("p", "danger-text", CW.errorText(error, "load the job details")));
+      }
+    }
+    async function runPart(job, disableControls) {
+      if (!(await CW.confirm('Run one part of this reviewed job? It may change or erase consent information. Remaining parts do not start automatically, and completed changes stay applied.', 'Run one part'))) return;
+      disableControls();
+      try {
+        var result = await api('/' + encodeURIComponent(job.job_id) + '/run', {method:'POST', body:{expected_revision:job.revision}});
+        say(result.state === 'succeeded' || result.state === 'failed' ? 'The job finished. ' + progressText(result) + '.'
+          : 'One part finished. ' + progressText(result) + '. Review the job before continuing.');
+      } catch (error) {
+        try {
+          var current = await api('/' + encodeURIComponent(job.job_id));
+          say('No additional part was started. Saved progress: ' + progressText(current) + '. Review the job before continuing.', true);
+        } catch (_) { fail(error, 'check the saved job progress'); }
+      } finally { await Promise.all([refreshJobs(), refreshCredit()]); }
     }
     async function runJob(job, disableControls) {
       if (!(await CW.confirm("Run this reviewed job to completion? It may change or delete people’s consent records. Keep this page open. You can pause before the next part; completed changes stay applied.", "Run now"))) return;
@@ -616,8 +654,19 @@
     async function cancelJob(job, disableControls) {
       if (!(await CW.confirm("Cancel this job? Changes already made are not undone.", "Cancel job"))) return;
       disableControls();
-      try { await api("/" + encodeURIComponent(job.job_id) + "/cancel", { method: "POST", body: { expected_revision: job.revision, idempotency_key: CW.reference() } }); say("Job cancelled."); await refreshJobs(); }
-      catch (error) { fail(error, "cancel the job"); }
+      try {
+        await api("/" + encodeURIComponent(job.job_id) + "/cancel", { method: "POST", body: { expected_revision: job.revision, idempotency_key: CW.reference() } });
+        say("Cancellation recorded. Completed changes stay applied.");
+      } catch (error) {
+        try {
+          var current = await api('/' + encodeURIComponent(job.job_id));
+          say(current.cancel_requested ? 'Cancellation is already recorded. Completed changes stay applied.'
+            : 'The cancellation could not be confirmed. Saved progress: ' + progressText(current) + '. Review the job before deciding what to do next.', !current.cancel_requested);
+        } catch (_) { fail(error, 'check whether cancellation was recorded'); }
+      } finally {
+        await refreshJobs();
+        if (selectedJobId === job.job_id && !$('cbj-detail').hidden) showDetail({job_id:job.job_id}, false);
+      }
     }
 
     // ----- Start a bulk change -----
@@ -654,6 +703,7 @@
       state.profileCache.forEach(function (_profile, id) { if (!keep.has(id)) state.profileCache.delete(id); });
     }
     function clearPrivatePeople() {
+      detailGeneration += 1; selectJob(null);
       privatePeopleCleared = true;
       selectionGeneration += 1;
       peopleGeneration += 1; state.profiles = []; state.profileCache.clear(); state.chosen.clear();
@@ -1094,7 +1144,16 @@
         $("cbj-credit-detail").textContent = "";
         return null;
       }
-      return Promise.all([refreshJobs(), refreshCredit()]);
+      return Promise.all([refreshJobs(), refreshCredit()]).then(function () {
+        var selected = new URLSearchParams(global.location.search).get('job');
+        if (selected && ID_PATTERN.test(selected)) showDetail({job_id:selected});
+      });
+    });
+    document.addEventListener('lightwork:product-operation-complete', function (event) {
+      if (event.detail && /^consent\.jobs\./.test(event.detail.operation || '')) {
+        refreshJobs(); refreshCredit();
+        if (selectedJobId && !$('cbj-detail').hidden) showDetail({job_id:selectedJobId}, false);
+      }
     });
   });
 })(typeof window !== "undefined" ? window : this);

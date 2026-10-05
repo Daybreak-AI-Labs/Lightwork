@@ -1107,6 +1107,7 @@ class ConsentBulkJobStore:
         worker_sha256: str,
         executor: Callable[[str, Mapping[str, Any]], Mapping[str, Any]],
         batch_size: int = 100,
+        expected_revision: int | None = None,
     ) -> dict[str, Any]:
         """Claim a due job and execute one bounded batch.
 
@@ -1120,12 +1121,16 @@ class ConsentBulkJobStore:
         job = _text(job_id, "job_id")
         worker = _digest(worker_sha256, "worker_sha256")
         batch = _integer(batch_size, "batch_size", 1, 500)
+        revision = (_integer(expected_revision, "expected_revision", 1, 2**31 - 1)
+                    if expected_revision is not None else None)
         if not callable(executor):
             raise TypeError("bulk-job executor must be callable")
         now = self._now()
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
             try:
+                if revision is not None and self._job_row(connection, tenant, job)["revision"] != revision:
+                    raise ConsentBulkJobConflict("bulk-job revision changed before this part started")
                 claimed = self._claim(
                     connection,
                     tenant=tenant,

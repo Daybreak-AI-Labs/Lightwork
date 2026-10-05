@@ -75,6 +75,13 @@
   .fd-recipe-inputs .mv-confirm__row { flex-shrink: 0; flex-wrap: wrap; padding-top: var(--space-2); }
   .fd-recipe-inputs [aria-invalid="true"] { border-color: var(--danger); }
   .fd__props input, .fd__props select { width: 100%; }
+  .fd-action-group { min-width: 0; margin-block: var(--space-3); padding: var(--space-3);
+    border: 1px solid var(--glass-border); border-radius: var(--radius-md); background: var(--glass-soft); }
+  .fd-action-group legend { font-weight: var(--font-semibold); overflow-wrap: anywhere; }
+  .fd-action-group .btn { width: auto; margin-block: var(--space-2); }
+  .fd-action-group label:has(input[type="checkbox"]) { display: flex; gap: var(--space-2); align-items: center; }
+  .fd-action-group input[type="checkbox"] { width: auto; }
+  .fd-action-group [aria-invalid="true"] { border-color: var(--danger); }
   .fd__empty { color: var(--muted); font-size: var(--text-sm); }
   .fd__msg { font-size: var(--text-sm); color: var(--muted); }
   /* node cards (SVG) */
@@ -473,6 +480,7 @@
 <script>
 {% include "flow_designer_inputs.js" %}
 </script>
+<script>{% include "flow_designer_action_fields.js" %}</script>
 <script src="{{ asset('lightwork-flow-retirement.js') }}"></script>
 <script>{% include "flow_hardening_review.js" %}</script>
 <script>

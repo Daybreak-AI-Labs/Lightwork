@@ -62,6 +62,16 @@ Its copy separates stored-chain consistency from human approval and an independe
 history copy. This does not establish external anchoring, measured improvement,
 customer qualification, or a new research mechanism; the status counts stay unchanged.
 
+The next October 5 batch adds frozen current/proposed specialist instruction
+comparisons through ordinary questions and typed Copilot, plus owner-consented
+instruction recording from actual native AI calls. Historical instruction
+records have review, download, withdrawal and uncertain-receipt recovery;
+recording makes no additional model call. Paired specialist checks bind the
+exact instructions, model and chosen case versions before spending. These
+close concrete operating gaps in F04/F05, but neither literal answer checks nor
+recorded instructions establish causal customer lift or the proposed research
+mechanisms. The status counts stay unchanged.
+
 | ID | Status | Present code and exact remaining boundary |
 | --- | --- | --- |
 | F01 | Partial product support | [Outcome pilots](https://github.com/Daybreak-AI-Labs/Lightwork/blob/1c27445dda93e21e2eb38ef2dde5193646832da8/packages/maverick-dashboard/maverick_dashboard/outcome_pilots.py#L1-L26), [outcome accounting](https://github.com/Daybreak-AI-Labs/Lightwork/blob/1c27445dda93e21e2eb38ef2dde5193646832da8/packages/maverick-core/maverick/outcome_accounting.py#L1-L8), and [candidate promotion](https://github.com/Daybreak-AI-Labs/Lightwork/blob/1c27445dda93e21e2eb38ef2dde5193646832da8/packages/maverick-core/maverick/candidate_promotion.py#L1-L15) cover separate stages. The source does not establish one completed customer-owned path from selected work through measured result and recovery. October 5 adds a stock installed release adapter for bounded taught-rule workflows on a single-computer installation. Its native UI and Copilot bind exact practice, owner authorization, independent review, publication, actual release-run failure checks and retained-rule restoration. Practice establishes readiness, not measured accuracy or business lift; connected actions, nested workflows, shared-storage qualification and the general measured-result path remain open. Custom deployment composition still refuses missing adapters: [composition refuses its absence](https://github.com/Daybreak-AI-Labs/Lightwork/blob/1c27445dda93e21e2eb38ef2dde5193646832da8/packages/maverick-dashboard/maverick_dashboard/candidate_promotion_composition.py#L281-L315). |

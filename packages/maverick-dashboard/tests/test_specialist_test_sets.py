@@ -343,3 +343,60 @@ def test_copilot_named_subset_runs_native_bounded_worker_and_recovers_exact_rece
     assert len(calls) == 3 and recovered.json()["details"]["answers_checked"] == 3
     assert recovered.json()["details"]["questions"] == "; ".join(rows[index]["task"] for index in (3, 7, 12))
     assert "case_revisions" not in str(recovered.json()["details"]) and operation not in str(recovered.json()["details"])
+
+
+@pytest.mark.parametrize("uncertain", [False, True])
+def test_instruction_comparison_freezes_both_versions_recovers_and_marks_stale(client, monkeypatch, audit_rows, uncertain):
+    app, tmp = client
+    from maverick import config, llm
+    from maverick_dashboard import auth, rbac
+    from maverick_dashboard import specialist_test_sets as saved
+
+    (tmp / "config.toml").write_text("[models]\ncapability_tests = true\n", encoding="utf-8")
+    config.reset_config_cache()
+    actor = {"name":"user:reviewer"}
+    monkeypatch.setattr(auth, "caller_principal", lambda request:actor["name"])
+    rbac.set_role(actor["name"], "admin")
+    row = app.post(API + "/customer", json=_case()).json()["case"]
+    current = app.get(API + "/customer", params={"specialist":"finance_ap"}).json()
+    calls = []
+
+    def answer(self, system, messages, **kwargs):
+        kwargs["dispatch_guard"]()
+        assert kwargs["tools"] is None and kwargs["max_physical_attempts"] == 1 and kwargs["_no_failover"] is True
+        assert kwargs["max_tokens"] == 64 and kwargs["budget"].max_dollars <= .25
+        calls.append(system)
+        kwargs["budget"].dollars += .001  # explicitly synthetic provider charge
+        kwargs["budget"].check()
+        if uncertain and len(calls) == 2:
+            raise TimeoutError("Synthetic provider outcome unknown")
+        return llm.LLMResponse(text="Check the duplicate before approval.", thinking=None, tool_calls=[], stop_reason="end_turn")
+
+    monkeypatch.setattr(llm.LLM, "complete", answer)
+    body = {"specialist":"finance_ap", "operation_id":"1"*32, "case_ids":[row["id"]],
+            "case_revisions":{row["id"]:1}, "proposed_instructions":"Proposed: require duplicate review before invoice approval.",
+            "baseline_revision":current["baseline_revision"], "expected_context":current["context"]}
+    assert app.post(API + "/customer/compare", json={**body, "baseline_revision":"0"*64}).status_code == 409
+    assert app.post(API + "/customer/compare", json={**body, "expected_context":"0"*64}).status_code == 409
+    assert calls == []
+    job = _wait(app, app.post(API + "/customer/compare", json=body))
+    result = job["result"]["run"]
+    assert result["state"] == ("unknown" if uncertain else "done") and len(calls) == 2
+    assert result["comparison"]["current_instructions"] == current["current_instructions"]
+    assert result["comparison"]["proposed_instructions"] == body["proposed_instructions"]
+    assert result["instruction_hash"] == body["baseline_revision"]
+    assert result["spent_dollars"] == .002
+    assert [answer["variant"] for answer in result["results"]] == (["current"] if uncertain else ["current", "proposed"])
+    assert all(answer["spent_dollars"] == .001 for answer in result["results"])
+    assert app.post(API + "/customer/compare", json=body).json()["replayed"] is True and len(calls) == 2
+    assert app.post(API + "/customer/compare", json={**body, "proposed_instructions":"A different proposal should not replay."}).status_code == 409
+    saved.save_case("finance_ap", {**_case(), "task":"Updated invoice question for this saved check?"}, identity=row["id"], expected_revision=1)
+    historical = app.get(API + "/customer/run/" + body["operation_id"]).json()["run"]
+    assert historical["baseline_current"] is True and historical["questions_current"] is False
+    assert app.post(API + "/customer/compare", json=body).json()["replayed"] is True and len(calls) == 2
+    assert app.post(API + "/customer/compare", json={**body, "operation_id":"2"*32}).status_code == 409
+    assert app.get(API + "/customer", params={"specialist":"finance_ap"}).json()["baseline_revision"] == body["baseline_revision"]
+    actor["name"] = "user:other-reviewer"
+    rbac.set_role(actor["name"], "admin")
+    assert app.get(API + "/customer/run/" + body["operation_id"]).status_code == 403
+    assert app.post(API + "/customer/compare", json=body).status_code == 409 and len(calls) == 2

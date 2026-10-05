@@ -24,7 +24,7 @@ function defaults(admin) {
     "/api/v1/workforce-ops/test-suite": { cases: 4, specialists: 3, problems: 0, technical: [],
       list: [{ specialist: "Payroll", task: "Run payroll", expects: ["refuses"] }] },
     "/api/v1/workforce-ops/test-suite/specialists": { specialists: [{ value: "finance_ap", label: "Accounts payable" }] },
-    "/api/v1/workforce-ops/test-suite/customer": { live_enabled: true, cases: [{
+    "/api/v1/workforce-ops/test-suite/customer": { live_enabled: true, context:"b".repeat(64), baseline_revision:"c".repeat(64), current_instructions:"Check invoices safely before approval.", cases: [{
       id: "a".repeat(32), specialist: "finance_ap", revision: 1, task: "Could these invoices be duplicates?",
       includes: ["duplicate"], excludes: ["payment sent"], refusal: false, citation: false
     }], runs: [] },
@@ -175,6 +175,29 @@ test("an uncertain paid check reads its original result without posting another 
   assert.equal(ui.calls.filter((c) => c.url === "/api/v1/workforce-ops/test-suite/customer/run" && c.method === "POST").length, 1);
   assert.ok(ui.calls.some((c) => c.url && c.url.startsWith("/api/v1/workforce-ops/test-suite/customer/run/") && c.method === "GET"));
   assert.match(ui.doc.getElementById("wo-test-run-status").textContent, /Original result still uncertain/);
+});
+
+test("instruction comparison reviews exact questions and recovers an uncertain request without spending again", async (t) => {
+  const ui = await fixture(partial("_workforce_ops.html"), {responses:{
+    "/api/v1/workforce-ops/test-suite/customer/compare":{job:{id:"compare-1", state:"done", can_stop:false,
+      result:{run:{state:"unknown", total:2, passed:1, message:"Comparison outcome uncertain."}}}},
+    "/api/v1/workforce-ops/test-suite/customer/run/*":{run:{state:"unknown", total:2, passed:1, message:"Original comparison result remains uncertain."}}
+  }});
+  t.after(() => ui.window.close());
+  const select=ui.doc.getElementById("wo-test-specialist");select.value="finance_ap";select.dispatchEvent(new ui.window.Event("change"));await ui.settle();
+  ui.doc.getElementById("wo-compare-instructions").value="Always check for duplicate invoices before approval.";
+  const review=()=>ui.doc.getElementById("wo-compare-form").dispatchEvent(new ui.window.Event("submit",{cancelable:true}));
+  review();assert.equal(ui.doc.getElementById("wo-compare-review").hidden,false);
+  assert.match(ui.doc.getElementById("wo-compare-reviewed").textContent,/Current instructionsCheck invoices safely/);
+  assert.equal(ui.calls.some(c=>c.url.endsWith("/compare")),false);
+  const choice=ui.doc.querySelector(".wo-test-choice");choice.click();assert.equal(ui.doc.getElementById("wo-compare-review").hidden,true);
+  choice.click();review();ui.doc.getElementById("wo-compare-start").click();await ui.settle();
+  const submitted=ui.calls.filter(c=>c.url=== "/api/v1/workforce-ops/test-suite/customer/compare");assert.equal(submitted.length,1);
+  const body=JSON.parse(submitted[0].body);assert.equal(body.baseline_revision,"c".repeat(64));assert.equal(body.expected_context,"b".repeat(64));
+  assert.deepEqual(body.case_revisions,{["a".repeat(32)]:1});
+  ui.doc.getElementById("wo-test-run").click();await ui.settle();
+  assert.equal(ui.calls.filter(c=>c.url==="/api/v1/workforce-ops/test-suite/customer/compare").length,1);
+  assert.match(ui.doc.getElementById("wo-test-run-status").textContent,/Original comparison result remains uncertain/);
 });
 
 test("tasks coming due list overdue first with links and waiting questions", async (t) => {
