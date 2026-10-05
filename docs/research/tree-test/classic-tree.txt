@@ -1,0 +1,157 @@
+Work
+	My data
+	Your account
+	Your preferences
+	Today
+	Code
+	My work
+	Workflow pilots
+	Promise reviews
+	Project team reviews
+	Selected deliverable bundles
+	Task handoffs
+	Action Center
+	Get started
+	Chat
+	My companion
+	Tasks
+	Task builder
+	Task map
+	Projects
+	Results
+	Agent Factory
+	Roles
+	Workforce
+	Workflows
+	Flow designer
+	Workflow builder
+	Automations
+	Teams
+	Help and diagnostics
+	Your notifications
+	My background work
+	My conversations
+	Your first useful result
+	Project workspaces
+	Your paired devices
+	Permission requests
+Insights
+	Content access
+	Workflow readiness
+	Overview
+	Ekko
+	Oversight
+	Discovery
+	Branches
+	Spend
+	Savings
+	Autonomous Shoring
+	Billing
+	Providers
+	Flow results
+	Knowledge
+	Learning
+	Learned
+	Video walkthroughs
+	Facts
+	3D plan view
+	Your budget
+	Compare cost records
+	Provider spending
+Governance
+	Autonomous Compliance
+	Approvals
+	Agent controls
+	Security & GRC
+	Lightwork threat check
+	Threat monitoring
+	Security readiness report
+	AI assurance
+	AI governance
+	Financial risk
+	Test a safety rule
+	Redaction check
+	Safety
+	Assessments
+	Compliance
+	No-code GRC studio
+	Policy links
+	Find which controls apply
+	Turn scope into tasks
+	Continuous evidence
+	Regulations and rules
+	Compartments
+	Activity log
+	Trust Receipts
+	Safety monitoring
+	Learning history
+	Task replay
+	Agent Trust
+Privacy
+	Privacy
+	Find personal data
+	Privacy law research
+	Privacy requests
+	Send people their data
+	Privacy notices
+	Data use rules
+	Snowflake and Databricks
+	California DROP requests
+Consent
+	Consent & Preferences
+	Banner and preference center
+	Banner experiments
+	Send choices to other systems
+	Website and app keys
+	Mobile app consent
+	Preference questions
+	Find people by preference
+	Bulk consent changes
+	Website banner settings
+	Opt out everywhere
+	App tracking checks
+	Tracker scans
+	Disclosure suggestions
+	Trust center access
+AI oversight
+	Governance assistants
+	Governance Inventory
+	AI evidence analysis
+	Suggested assessment answers
+	AI system tasks
+	Outside agents
+Third parties
+	AI vendor onboarding
+	Contracts and engagements
+	Executive Vendor Reports
+	Third-party intelligence
+	Third-Party Lifecycle
+	Third-Party Collaboration
+	Partner fleet
+Administration
+	Permissions
+	Connections
+	Document vault
+	Workspace recovery
+	Settings
+	Employee companions
+	Users
+	Sessions
+	Spending limits
+	Workspaces
+	Choose a workspace
+Library
+	Skills
+	Skill store
+	Templates
+	Tools
+	Response styles
+	Channels
+Advanced tools
+	Benchmarks
+	Performance diagnostics
+	Cortex memory diagnostics
+	Plugins
+	Tool servers
+	Cache
+	Embedded analytics
