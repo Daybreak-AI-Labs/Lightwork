@@ -96,27 +96,52 @@
   {% endif %}
 
   {% if groups %}
-  <div class="section-head"><h2>Needs attention</h2></div>
+  <div class="section-head"><h2 id="cmp-attention" tabindex="-1">Needs attention</h2></div>
   <div class="panel">
+    <p class="muted mv-freshness" data-mv-freshness style="margin-top: 0;">Checked {{ checked_at | datetime }}, live from your workspace each time this page opens.</p>
+    {% if owner_saved %}<p role="status" data-mv-toast="Owner and due date saved."><strong>Saved.</strong> Owner and due date saved, and written to the activity record.</p>{% endif %}
+    {% if owner_error %}<p role="alert"><strong>That didn't work.</strong> {{ owner_error }}</p>{% endif %}
     {% if attention %}
-    <p class="muted" style="margin-top: 0;">Each row is a protection that is not switched on yet. Use the button to fix it.</p>
+    <p class="muted" style="margin-top: 0;">Each row is a protection that is not switched on yet. Give it an owner and a due date, then follow the steps.</p>
     <div class="cmp-table">
       <table>
         <thead>
           <tr>
             <th scope="col">Protection</th>
-            <th scope="col">Rule</th>
             <th scope="col">What it means</th>
+            <th scope="col">Owner and due date</th>
+            <th scope="col">Steps to fix it</th>
             <th scope="col">What to do</th>
           </tr>
         </thead>
         <tbody>
         {% for label, c in attention %}
           {% set g = guide_for(c) %}
+          {% set o = owners.get(c.control) %}
           <tr>
-            <td>{{ c.control }} <span class="muted">· {{ label }}</span></td>
-            <td>{{ c.regulation }}</td>
+            <td>{{ c.control }} <span class="muted">· {{ label }} · {{ c.regulation }}</span></td>
             <td>{{ g.about }}</td>
+            <td>
+              {% if o and o.owner %}{{ (o.owner | identity).name }}{% else %}<span class="muted">No owner yet</span>{% endif %}
+              {% if o and o.due %}<br>Due {{ o.due | datetime('date') }}{% if owner_overdue(o) %} <span class="badge blocked">Overdue</span>{% endif %}{% else %}<br><span class="muted">No due date</span>{% endif %}
+              {% if o and o.set_by %}<br><span class="muted">Set by {{ (o.set_by | identity).name }}, {{ o.set_at | datetime }}</span>{% endif %}
+              {% if can_admin %}
+              <form method="post" action="/compliance/owners" class="cmp-row" style="margin-top: var(--space-2);">
+                <input type="hidden" name="control" value="{{ c.control }}" />
+                <label for="cmp-owner-{{ loop.index }}">Owner
+                  <select id="cmp-owner-{{ loop.index }}" name="owner" class="select">
+                    <option value="">No owner</option>
+                    {% for principal, name in owner_people %}<option value="{{ principal }}"{% if o and o.owner == principal %} selected{% endif %}>{{ name }}</option>{% endfor %}
+                  </select>
+                </label>
+                <label for="cmp-due-{{ loop.index }}">Due date
+                  <input id="cmp-due-{{ loop.index }}" type="date" name="due" class="input" value="{{ o.due if o else '' }}" />
+                </label>
+                <button type="submit" class="btn btn--ghost" aria-label="Save owner and due date for {{ c.control }}">Save</button>
+              </form>
+              {% endif %}
+            </td>
+            <td><ol class="cmp-list">{% for step in owner_steps(g, can_global_admin=can_global_admin) %}<li>{{ step }}</li>{% endfor %}</ol></td>
             <td>{{ action_button(c, g) }}</td>
           </tr>
         {% endfor %}

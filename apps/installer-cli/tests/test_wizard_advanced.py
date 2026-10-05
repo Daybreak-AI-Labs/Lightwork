@@ -1288,3 +1288,22 @@ def test_bounded_rebuild_setting_is_written_by_knowledge_wizard():
     from maverick_installer.wizard import _cfg_knowledge
     cfg = tomllib.loads("\n".join(_cfg_knowledge({"enable": True, "reindex_jobs": True})))
     assert cfg["knowledge"]["reindex_jobs"] is True
+
+
+def test_spending_alerts_keep_their_default_unless_changed(tmp_path, monkeypatch):
+    def section(answer, **extra):
+        cfg = _write(tmp_path, monkeypatch, {"spending_alert_at": answer, **extra})
+        return tomllib.loads(cfg).get("spending_limits")
+
+    assert section("50, 75, 100") is None  # the default needs no line
+    assert section("") is None
+    assert section("lots") is None  # unreadable keeps the default, never turns alerts off
+    assert section("90, 80") == {"alert_at": [80, 90]}
+    assert section("none") == {"alert_at": []}
+    # The section the kernel reads: spending_alerts.alert_at() follows it.
+    monkeypatch.setenv("MAVERICK_CONFIG", str(tmp_path / "config.toml"))
+    section("80%, 90", spending_workspace_monthly="200")
+    from maverick import config, spending_alerts
+    config.reset_config_cache()
+    assert spending_alerts.alert_at() == [80, 90]
+    config.reset_config_cache()

@@ -1000,6 +1000,7 @@ def _users_context(request: Request) -> dict:
         # grants to a workspace administrator. Invitation labels and pending
         # links are limited to workspaces they currently administer.
         from . import invites
+        from .access_explanations import role_descriptions
         from .identity_format import role_label
 
         try:
@@ -1034,6 +1035,7 @@ def _users_context(request: Request) -> dict:
             "workspace_role_options": workspace_role_options,
             "workspace_roles": workspace_role_options.get(wm_tenant, []),
             "workspace_member_count": len(member_rosters.get(wm_tenant, {})),
+            "role_descriptions": role_descriptions(),
             "bootstrap_admins": [], "auth_on": True, "default_role": rbac.default_role(),
             "you": auth.caller_principal(request),
             "saved": ("Workspace invitation revoked."
@@ -1092,7 +1094,7 @@ def _users_context(request: Request) -> dict:
     labels = _invite_labels(all_invites)
     grants = suite_grants.list_grants()
     people = _people(role_map, labels, [*grants, *bootstrap, *_signed_in_principals()])
-    from .access_explanations import standard_role
+    from .access_explanations import role_descriptions, standard_role
     from .first_login_defaults import preview as first_login_preview
     from .identity_format import role_label
     defaults = set(default_suites) if default_suites is not None else None
@@ -1105,6 +1107,7 @@ def _users_context(request: Request) -> dict:
         "global_admin": True,
         "first_login": first_login_preview(),
         "role_permissions": {r: sorted(rbac.permissions_for(r)) for r in rbac.known_roles()},
+        "role_descriptions": role_descriptions(),
         "channel_links": channel_links,
         "people": people,
         "people_labels": {p["principal"]: p["label"] for p in people},
@@ -1114,6 +1117,7 @@ def _users_context(request: Request) -> dict:
             for principal, suites in grants.items()
         },
         "users": sorted(role_map.items()),
+        **_people_filter(request, role_map, labels),
         "standard_roles": {principal: standard_role(principal) for principal in role_map},
         "roles": rbac.known_roles(),
         "workspace_roles": rbac.known_roles(),
@@ -1145,12 +1149,118 @@ def _users_context(request: Request) -> dict:
     }
 
 
+def _people_filter(request: Request, role_map: dict, labels: dict) -> dict:
+    """The People list's filter (``?q=`` text, ``?has_role=``) and the rows it shows."""
+    from .users_bulk import matching
+    query = str(request.query_params.get("q", ""))[:200]
+    role_filter = str(request.query_params.get("has_role", ""))[:100]
+    shown = set(matching(role_map, labels, query, role_filter))
+    return {"users_filter": {"q": query, "role": role_filter, "active": bool(query.strip() or role_filter)},
+            "users_shown": [(p, r) for p, r in sorted(role_map.items()) if p in shown]}
+
+
+def _bulk_page(request: Request, **extra) -> HTMLResponse:
+    """The Users page with a bulk confirmation, change report or problem."""
+    context = _users_context(request)
+    context.update(extra)
+    return _app().templates.TemplateResponse(request, "users.html", context,
+                                             headers={"Cache-Control": "private, no-store"})
+
+
+@router.post("/users/bulk", response_class=HTMLResponse)
+def users_bulk_role(
+    request: Request, role: str = Form(""), scope: str = Form("selected"),
+    principals: list[str] = Form(default=[]), q: str = Form(""), role_filter: str = Form(""),
+    confirmed: str = Form(""), expected_count: int = Form(0),
+) -> HTMLResponse:
+    """Change the role of several people: first a confirmation that states the
+    count, then (``confirmed=yes``) the change and a report that can be undone."""
+    auth.require_global_permission(request, "admin")
+    _app()._require_same_origin(request)
+    from . import invites, rbac, users_bulk
+    try:
+        labels = _invite_labels(invites.list_invites())
+    except Exception:  # noqa: BLE001 -- labels only help the text filter
+        labels = {}
+    people = users_bulk.targets(rbac.list_users(), labels, scope=scope, chosen=principals,
+                                query=q, role_filter=role_filter)
+    problem = ""
+    if not rbac.is_known_role(role.strip()):
+        problem = "Choose the new role."
+    elif not people:
+        problem = "Select at least one person, or choose everyone matching the filter."
+    elif len(people) > users_bulk.MAX_PEOPLE:
+        problem = f"Change at most {users_bulk.MAX_PEOPLE} people at once. Narrow the filter first."
+    if problem:
+        return _bulk_page(request, bulk_problem=problem)
+    role = role.strip()
+    if confirmed != "yes" or expected_count != len(people):
+        changed_since = confirmed == "yes"
+        return _bulk_page(request, bulk_confirm={
+            "people": people, "role": role, "count": len(people), "changed_since": changed_since,
+            "current": rbac.list_users()})
+    step_up.require_recent_mfa(request, "change_role")
+    from maverick.authority_effects import authority_effect_fence
+
+    with authority_effect_fence():
+        auth.require_global_permission(request, "admin")
+        report = users_bulk.apply(people, role, actor=auth.caller_principal(request) or "local")
+    return _bulk_page(request, bulk_report={"rows": report, "undo": users_bulk.undo_tokens(report),
+                                            "undone": False})
+
+
+@router.post("/users/bulk/undo", response_class=HTMLResponse)
+def users_bulk_undo(request: Request, restore: list[str] = Form(default=[])) -> HTMLResponse:
+    """Put the people from a bulk change back on the roles they had before."""
+    auth.require_global_permission(request, "admin")
+    _app()._require_same_origin(request)
+    step_up.require_recent_mfa(request, "change_role")
+    from maverick.authority_effects import authority_effect_fence
+
+    from . import users_bulk
+    with authority_effect_fence():
+        auth.require_global_permission(request, "admin")
+        report = users_bulk.undo(restore, actor=auth.caller_principal(request) or "local")
+    return _bulk_page(request, bulk_report={"rows": report, "undo": [], "undone": True})
+
+
 @router.get("/users", response_class=HTMLResponse)
 def users_page(request: Request) -> HTMLResponse:
     """Admin: manage dashboard user roles (admin / operator / auditor / viewer)."""
     auth.require_permission(request, "admin")
     return _app().templates.TemplateResponse(request, "users.html",
                                              _users_context(request))
+
+
+@router.get("/users/access", response_class=HTMLResponse)
+def users_access_page(request: Request, person: str = "") -> HTMLResponse:
+    """Admin: what one person can do and which rule allows each thing.
+
+    Read-only. Global administrators only: the answer reads the installation
+    roster, every workspace membership and the department grants."""
+    auth.require_global_permission(request, "admin")
+    principal = person.strip()
+    if not principal.startswith("user:") or len(principal) > 1024:
+        raise HTTPException(status_code=404, detail="Choose a person on the Users page to check their access.")
+    from . import effective_access, invites, rbac, suite_grants
+    try:
+        labels = _invite_labels(invites.list_invites())
+    except Exception:  # noqa: BLE001 -- an unreadable invite store only loses the email label
+        labels = {}
+    try:
+        known = (principal in rbac.list_users() or principal in labels
+                 or suite_grants.get_grant(principal) is not None
+                 or auth.is_dashboard_admin(principal)
+                 or principal in _signed_in_principals(limit=10_000))
+    except Exception:  # noqa: BLE001 -- the roster note is advisory
+        known = True
+    from maverick.oidc import oidc_enabled
+    from maverick.proxy_auth import proxy_auth_enabled
+    auth_on = auth.caller_principal(request) is not None or oidc_enabled() or proxy_auth_enabled()
+    return _app().templates.TemplateResponse(request, "user_access.html", {
+        "report": effective_access.person(principal), "name": labels.get(principal, ""),
+        "known": known, "auth_on": auth_on,
+    }, headers={"Cache-Control": "private, no-store"})
 
 
 @router.post("/users/set")
@@ -1382,6 +1492,31 @@ def users_workspace_invite_revoke(
     return RedirectResponse("/users?saved=workspace_invite_revoked", status_code=303)
 
 
+@router.post("/users/invite/bulk-revoke", response_class=HTMLResponse)
+def users_invite_bulk_revoke(
+    request: Request, scope: str = Form("selected"), invite_ids: list[str] = Form(default=[]),
+    confirmed: str = Form(""), expected_count: int = Form(0),
+) -> HTMLResponse:
+    """Cancel several pending invitations: confirm the count, then a report."""
+    auth.require_global_permission(request, "admin")
+    _app()._require_same_origin(request)
+    from . import invites
+    pending = [i for i in invites.list_invites() if i.pending]
+    chosen = {i.strip() for i in invite_ids if i and i.strip()}
+    picked = pending if scope == "all" else [i for i in pending if i.id in chosen]
+    if not picked:
+        return _bulk_page(request, bulk_problem="Select at least one waiting invitation.")
+    if confirmed != "yes" or expected_count != len(picked):
+        return _bulk_page(request, invite_confirm={"invites": picked, "changed_since": confirmed == "yes"})
+    report = []
+    for inv in picked:
+        cancelled = invites.revoke_invite(inv.id)
+        if cancelled:
+            _admin_audit(request, "invite_revoked", invite_id=inv.id)
+        report.append({"email": inv.email, "cancelled": cancelled})
+    return _bulk_page(request, invite_report=report)
+
+
 @router.post("/users/suites/set")
 async def users_set_suites(request: Request) -> RedirectResponse:
     """Scope a user to a set of departments (global admin only).
@@ -1447,8 +1582,14 @@ _LIMIT_ERRORS = {
 
 
 @router.get("/spending-limits", response_class=HTMLResponse)
-def spending_limits_page(request: Request, saved: str = "", error: str = "") -> HTMLResponse:
-    """Admin: workspace and per-person spending limits (none by default)."""
+def spending_limits_page(request: Request, saved: str = "", error: str = "",
+                         preview: str = "", amount: str = "", period: str = "",
+                         principal: str = "") -> HTMLResponse:
+    """Admin: workspace and per-person spending limits (none by default).
+
+    ``?preview=workspace|default|person`` with an amount and period replays
+    the last 30 days of finished tasks against that limit, report-only:
+    nothing is saved until the administrator presses Save."""
     auth.require_permission(request, "admin")
     from maverick import spending_limits
     from maverick.paths import current_tenant_id
@@ -1476,8 +1617,12 @@ def spending_limits_page(request: Request, saved: str = "", error: str = "") -> 
         organization_cap = float(record.max_daily_dollars) if record else 0.0
     except Exception:  # noqa: BLE001 -- the organization cap is informational here
         pass
+    replay, replay_error = _limit_preview(preview, amount, period, principal)
     return _app().templates.TemplateResponse(request, "spending_limits.html", {
         "view": view,
+        "alert_at": _alert_points(),
+        "preview": replay, "preview_error": replay_error,
+        "draft": {"scope": preview, "amount": amount, "period": period, "principal": principal},
         "periods": [(p, spending_limits.PERIOD_LABELS[p]) for p in spending_limits.PERIODS],
         "workspace_periods": [(p, spending_limits.PERIOD_LABELS[p])
                               for p in spending_limits.WORKSPACE_PERIODS],
@@ -1487,6 +1632,32 @@ def spending_limits_page(request: Request, saved: str = "", error: str = "") -> 
         "error": _LIMIT_ERRORS.get(error, ""),
         "load_error": load_error,
     })
+
+
+def _limit_preview(scope: str, amount: str, period: str, principal: str) -> tuple[dict | None, str]:
+    """The report-only replay for a proposed limit, or a plain error."""
+    if scope not in ("workspace", "default", "person"):
+        return None, ""
+    from maverick import spending_limits
+    from maverick.spending_limit_preview import preview
+    try:
+        return preview(scope, amount, period, principal=principal, world=_app()._world()), ""
+    except spending_limits.SpendingLimitError as exc:
+        return None, _LIMIT_ERRORS.get(exc.code, _LIMIT_ERRORS["amount"])
+    except Exception:  # noqa: BLE001 -- the preview is advice; say it is unavailable
+        return None, "The task history could not be read, so there is no preview. Saving still works."
+
+
+def _alert_points() -> str:
+    """The spending-alert percentages in words ("50%, 75% and 100%"), or ""."""
+    from maverick.spending_alerts import alert_at
+    try:
+        points = [f"{p}%" for p in alert_at()]
+    except Exception:  # noqa: BLE001 -- unreadable settings keep the default points
+        points = ["50%", "75%", "100%"]
+    if len(points) < 2:
+        return "".join(points)
+    return ", ".join(points[:-1]) + " and " + points[-1]
 
 
 def _limit_redirect(saved: str = "", error: str = "") -> RedirectResponse:

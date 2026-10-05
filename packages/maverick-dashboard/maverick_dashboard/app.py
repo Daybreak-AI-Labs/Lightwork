@@ -4382,6 +4382,18 @@ def facts_page(request: Request) -> HTMLResponse:
     })
 
 
+def _newest_cost_at(w, owner) -> float | None:
+    """When the newest task cost in this view was recorded, for the Spend
+    page's "Spending updated" label (None when there is none)."""
+    try:
+        newest = w.list_episodes(limit=1, owner=owner)
+    except Exception:  # noqa: BLE001 -- no label beats a made-up one
+        return None
+    if not newest:
+        return None
+    return newest[0].ended_at or newest[0].started_at
+
+
 @app.get("/spend", response_class=HTMLResponse)
 def spend_page(request: Request) -> HTMLResponse:
     require_unscoped_board(request)
@@ -4421,7 +4433,7 @@ def spend_page(request: Request) -> HTMLResponse:
         "spend.html",
         {"episodes": episodes, "total": w.total_spend(owner=value_view["owner"]),
          "goal_titles": goal_titles, "csv_months": months, "episode_provenance": episode_provenance,
-         "value_view": value_view},
+         "value_view": value_view, "spend_recorded_at": _newest_cost_at(w, value_view["owner"])},
     )
 
 
@@ -6957,8 +6969,16 @@ async def external_agent_scorecard(request: Request, agent_id: str) -> HTMLRespo
     except xa.ExternalAgentsError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
     can_manage = xa.enabled() and xa.entitled() and has_permission(request, "admin")
+    access = None
+    try:
+        from .effective_access import outside_agent
+
+        access = outside_agent(agent_id)
+    except Exception:  # noqa: BLE001 -- the access check is read-only help
+        log.warning("outside agent access check unavailable", exc_info=True)
     return templates.TemplateResponse(
-        request, "external_agent_detail.html", {"a": detail, "can_manage": can_manage}
+        request, "external_agent_detail.html",
+        {"a": detail, "can_manage": can_manage, "access": access},
     )
 
 
@@ -7195,6 +7215,14 @@ async def agents_page(request: Request) -> HTMLResponse:
             selected_kind = agent_changelog.agent_kind(selected["name"])
         except Exception:  # pragma: no cover -- the history is best effort
             agent_changes = []
+    access = None
+    if selected:
+        try:
+            from .effective_access import agent as agent_access
+
+            access = agent_access(selected["name"], selected)
+        except Exception:  # noqa: BLE001 -- the access check is read-only help
+            log.warning("specialist or agent access check unavailable", exc_info=True)
     return templates.TemplateResponse(
         request,
         "agents.html",
@@ -7203,7 +7231,8 @@ async def agents_page(request: Request) -> HTMLResponse:
          "can_set_model_cost_tier": has_global_permission(request, "admin"),
          "agent_changes": agent_changes, "selected_kind": selected_kind,
          # Names of the people who changed an agent are shown to administrators.
-         "show_change_authors": has_global_permission(request, "admin")},
+         "show_change_authors": has_global_permission(request, "admin"),
+         "access": access},
     )
 
 
@@ -7793,7 +7822,61 @@ async def compliance_page(request: Request) -> HTMLResponse:
     view["can_admin"] = has_permission(request, "admin")
     view["can_operate"] = has_permission(request, "operate")
     view["can_global_admin"] = has_global_permission(request, "admin")
+    view.update(_compliance_owner_view(request, view["can_admin"]))
     return templates.TemplateResponse(request, "compliance.html", view)
+
+
+def _compliance_owner_view(request: Request, can_admin: bool) -> dict:
+    """Owners, due dates and steps for protections that need action, plus
+    when the report was checked (it is computed live for this page)."""
+    import datetime as _dt
+
+    from . import compliance_owners
+    try:
+        owners = compliance_owners.load()
+    except Exception:  # noqa: BLE001 -- the report still shows without owners
+        owners = {}
+    people: list[tuple[str, str]] = []
+    if can_admin:
+        try:
+            from .rbac import list_users
+            people = [(p, _idfmt.humanize_principal(p).name) for p in sorted(list_users())]
+        except Exception:  # noqa: BLE001 -- a free choice is still offered below
+            people = []
+    return {"owners": owners, "owner_people": people, "checked_at": time.time(),
+            "owner_steps": compliance_owners.steps_for, "owner_overdue": compliance_owners.overdue,
+            "today": _dt.date.today().isoformat(),
+            "owner_saved": request.query_params.get("owner_saved") == "1",
+            "owner_error": {"control": "Choose a protection from the list.", "owner": "Choose an owner.",
+                            "due": "Choose a due date."}.get(request.query_params.get("owner_error", ""), "")}
+
+
+@app.post("/compliance/owners")
+async def compliance_set_owner(request: Request) -> RedirectResponse:
+    """Set the owner and due date of a protection that needs action. Workspace
+    administrators only; each change is written to the activity record."""
+    require_permission(request, "admin")
+    _require_same_origin(request)
+    from urllib.parse import urlencode
+
+    from . import compliance_owners
+    from .audit_actions_api import _audit_event
+    form = await request.form()
+    control = str(form.get("control", ""))
+    owner = str(form.get("owner", ""))
+    due = str(form.get("due", ""))
+    try:
+        from maverick.compliance import compliance_report
+        known = {c.control for c in compliance_report()}
+        entry = compliance_owners.save(control, owner=owner, due=due,
+                                       actor=caller_principal(request) or "local", known=known)
+    except compliance_owners.OwnerError as exc:
+        code = "due" if "date" in str(exc) else "owner" if "owner" in str(exc) else "control"
+        return RedirectResponse("/compliance?" + urlencode({"owner_error": code}) + "#cmp-attention",
+                                status_code=303)
+    _audit_event(request, "compliance_control_owner_set", control=control.strip(),
+                 owner=entry["owner"], due=entry["due"])
+    return RedirectResponse("/compliance?owner_saved=1#cmp-attention", status_code=303)
 
 
 @app.get("/compliance/policy-links", response_class=HTMLResponse)

@@ -689,6 +689,13 @@ SETTINGS: tuple[Setting, ...] = (
       "The most text, in tokens, one person's tasks may use in a day. Zero means no limit.",
       "number", "Spending & limits", 0, "maverick.quotas", minimum=0, maximum=10000000000,
       integer=True, unit="tokens per day", env=("MAVERICK_QUOTA_MAX_TOKENS_PER_DAY",)),
+    S("spending_limits", "alert_at", "Spending limit alerts",
+      "Percentages of a workspace or per-person spending limit at which administrators, and the "
+      "person for their own limit, get an in-app alert. Each one alerts once per day or month. "
+      "Leave the list empty for no alerts; the limits still stop paid work at 100 percent.",
+      "list", "Spending & limits", [50, 75, 100], "maverick.spending_alerts",
+      max_items=10, max_length=4, item_label="Percent", item_hint="75",
+      item_error="a whole number from 1 to 100"),
     S("swarm", "max_total_spawns", "Helper agents per task",
       "The most helper agents one task may create.",
       "number", "Spending & limits", 64, "maverick.config", minimum=1, maximum=1000,
@@ -2450,6 +2457,12 @@ def coerce(setting: Setting, value: object) -> object:
     ``None`` is only accepted for numbers without a default (meaning "no
     limit"), which callers treat as removing the dashboard value.
     """
+    if setting.id == "spending_limits.alert_at":
+        from maverick.spending_alerts import validate_alert_at
+        try:
+            return validate_alert_at(value)
+        except ValueError as exc:
+            raise SettingError(str(exc)) from exc
     if setting.id == "budget.warning_thresholds":
         try:
             return settings_catalog_budget_guidance.thresholds(value)

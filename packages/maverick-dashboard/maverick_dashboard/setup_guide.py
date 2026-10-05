@@ -49,7 +49,8 @@ STEPS: tuple[tuple[str, str, str, tuple[str, ...], str], ...] = (
     ("channels", "Chat channels", "The chat apps people can give work from.", ("channels",), "/channels"),
     ("safety", "Safety", "How carefully requests and actions are screened.", ("safety",), ""),
     ("signed_skills", "Signed skills", "Whether only signed skills may be added.", ("skills",), ""),
-    ("budget", "Spending", "The most one task may spend.", ("budget",), ""),
+    ("budget", "Spending", "The most one task may spend, and when spending alerts arrive.",
+     ("budget", "spending_limits"), ""),
     ("approvals", "Approvals", "How long a decision can be undone, the confirmation for risky requests, "
      "and who approves a risky action someone asked for.", ("approval",), ""),
     ("sandbox", "Protected work area", "Where agent commands run and what they may reach.", ("sandbox",), ""),
