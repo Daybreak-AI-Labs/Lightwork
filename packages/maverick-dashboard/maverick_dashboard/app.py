@@ -7623,7 +7623,61 @@ async def compliance_page(request: Request) -> HTMLResponse:
     view["can_admin"] = has_permission(request, "admin")
     view["can_operate"] = has_permission(request, "operate")
     view["can_global_admin"] = has_global_permission(request, "admin")
+    view.update(_compliance_owner_view(request, view["can_admin"]))
     return templates.TemplateResponse(request, "compliance.html", view)
+
+
+def _compliance_owner_view(request: Request, can_admin: bool) -> dict:
+    """Owners, due dates and steps for protections that need action, plus
+    when the report was checked (it is computed live for this page)."""
+    import datetime as _dt
+
+    from . import compliance_owners
+    try:
+        owners = compliance_owners.load()
+    except Exception:  # noqa: BLE001 -- the report still shows without owners
+        owners = {}
+    people: list[tuple[str, str]] = []
+    if can_admin:
+        try:
+            from .rbac import list_users
+            people = [(p, _idfmt.humanize_principal(p).name) for p in sorted(list_users())]
+        except Exception:  # noqa: BLE001 -- a free choice is still offered below
+            people = []
+    return {"owners": owners, "owner_people": people, "checked_at": time.time(),
+            "owner_steps": compliance_owners.steps_for, "owner_overdue": compliance_owners.overdue,
+            "today": _dt.date.today().isoformat(),
+            "owner_saved": request.query_params.get("owner_saved") == "1",
+            "owner_error": {"control": "Choose a protection from the list.", "owner": "Choose an owner.",
+                            "due": "Choose a due date."}.get(request.query_params.get("owner_error", ""), "")}
+
+
+@app.post("/compliance/owners")
+async def compliance_set_owner(request: Request) -> RedirectResponse:
+    """Set the owner and due date of a protection that needs action. Workspace
+    administrators only; each change is written to the activity record."""
+    require_permission(request, "admin")
+    _require_same_origin(request)
+    from urllib.parse import urlencode
+
+    from . import compliance_owners
+    from .audit_actions_api import _audit_event
+    form = await request.form()
+    control = str(form.get("control", ""))
+    owner = str(form.get("owner", ""))
+    due = str(form.get("due", ""))
+    try:
+        from maverick.compliance import compliance_report
+        known = {c.control for c in compliance_report()}
+        entry = compliance_owners.save(control, owner=owner, due=due,
+                                       actor=caller_principal(request) or "local", known=known)
+    except compliance_owners.OwnerError as exc:
+        code = "due" if "date" in str(exc) else "owner" if "owner" in str(exc) else "control"
+        return RedirectResponse("/compliance?" + urlencode({"owner_error": code}) + "#cmp-attention",
+                                status_code=303)
+    _audit_event(request, "compliance_control_owner_set", control=control.strip(),
+                 owner=entry["owner"], due=entry["due"])
+    return RedirectResponse("/compliance?owner_saved=1#cmp-attention", status_code=303)
 
 
 @app.get("/compliance/policy-links", response_class=HTMLResponse)
