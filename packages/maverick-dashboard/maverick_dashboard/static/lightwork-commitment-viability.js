@@ -76,8 +76,10 @@
     let data;
     try {
       data = await window.mvFetchJSON('/api/v1/commitment-reviews' + path, {method, cache:'no-store', body, plainDetail:true,
-        headers:{'Content-Type':'application/json','X-Lightwork-Commitment-Context':context}, onAccess:forget, messages:{422:'Check the entered values and try again.'}}, method === 'GET' ? 'load the saved reviews' : 'save the review');
+        headers:{'Content-Type':'application/json','X-Lightwork-Commitment-Context':context}, onAccess:forget,
+        messages:{422:'Check the entered values and try again.', offline:'The connection was interrupted. Refresh saved reviews before trying again.'}}, method === 'GET' ? 'load the saved reviews' : 'save the review');
     } catch (error) {
+      if (error.unreadable) throw new Error('The current saved result could not be read. Refresh before trying again.');
       if (error.status === 409 && typeof error.detail === 'string' && error.detail.includes('account or workspace')) forget();
       throw error;
     }

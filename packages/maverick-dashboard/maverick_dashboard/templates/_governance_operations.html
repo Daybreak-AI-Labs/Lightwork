@@ -1251,7 +1251,8 @@
   };
   // One JSON request through the shell's mvFetchJSON: one plain sentence per
   // failure, never a status code or server wording.
-  const request = (path, options = {}, action = "finish that") => window.mvFetchJSON(prefix + path, options, action);
+  const request = (path, options = {}, action = "finish that") => window.mvFetchJSON(prefix + path,
+    {...options, messages: {offline: "Could not reach the server — check your connection and try again."}}, action);
   const sendJson = (path, method, body, action) => request(path, {
     method,
     headers: {"Content-Type": "application/json"},

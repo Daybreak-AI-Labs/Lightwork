@@ -577,8 +577,9 @@
       //   raw           resolve to the response itself (a download), unread.
       //   messages      the page's own sentence for a status it knows more
       //                 about ({409: 'This changed since the list loaded…'},
-      //                 or timeout: for the deadline); every other failure
-      //                 gets mvErrorText's words.
+      //                 timeout: for the deadline, or offline: when the
+      //                 server cannot be reached); every other failure gets
+      //                 mvErrorText's words.
       var OWN_OPTIONS = ['timeout', 'onAccess', 'accessStatuses', 'plainDetail', 'raw', 'messages'];
       function fetchFailure(failure, action, opts) {
         var plain = opts.plainDetail && typeof window.mvPlainDetail === 'function' ? window.mvPlainDetail(failure.detail) : '';
@@ -639,8 +640,8 @@
         try { response = await (expired ? Promise.race([fetch(url, options), expired]) : fetch(url, options)); }
         catch (cause) {
           clearTimeout(timer);
-          var waited = timedOut && own.messages && own.messages.timeout;
-          var offline = new Error(waited || window.mvErrorText(cause, action));
+          var said = own.messages && (timedOut ? own.messages.timeout : own.messages.offline);
+          var offline = new Error(said || window.mvErrorText(cause, action));
           // Same name as the cause (TypeError, AbortError), so passing this
           // error to mvErrorText or mvFieldErrors.fail gives the same words.
           offline.status = 0; offline.cause = cause; offline.name = (cause && cause.name) || 'Error';

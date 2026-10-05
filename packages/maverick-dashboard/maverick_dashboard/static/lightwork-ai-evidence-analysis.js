@@ -80,7 +80,7 @@ function plainError(status, action) {
 async function apiRequest(path, options = {}, action = "finish this") {
   try {
     return await window.mvFetchJSON(`${apiBase}${path}`, {
-      cache: "no-store", redirect: "error", referrerPolicy: "no-referrer", ...options,
+      cache: "no-store", credentials: "same-origin", redirect: "error", referrerPolicy: "no-referrer", ...options,
       // The server's own detail stays out of the sentence: it is kept as technical text.
       messages: { 409: `Could not ${action}. This changed since you opened it. Refresh the page and try again.` },
     }, action);

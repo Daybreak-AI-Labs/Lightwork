@@ -289,6 +289,17 @@ test("messages keep a page's own sentence for a status it knows more about", asy
   w.close();
 });
 
+test("messages.offline keeps a page's own sentence when the server cannot be reached", async () => {
+  const w = load();
+  const messages = { offline: "Could not reach the server — check your connection and try again." };
+  w.fetch = async () => { throw new TypeError("Failed to fetch"); };
+  await assert.rejects(w.mvFetchJSON("/a", { messages }, "save"), { message: messages.offline, status: 0, name: "TypeError" });
+  const plain = await w.mvFetchJSON("/a", {}, "save").catch((error) => error);
+  assert.notEqual(plain.message, messages.offline, "without the option the shared sentence is used");
+  assert.equal(plain.message, w.mvErrorText(new TypeError("Failed to fetch"), "save"));
+  w.close();
+});
+
 test("raw returns the response itself for a download, and still rejects plainly", async () => {
   const w = load();
   const file = respond(200, "csv,data");
