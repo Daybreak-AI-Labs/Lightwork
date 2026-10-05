@@ -142,8 +142,15 @@ def test_create_is_idempotent_and_rebinding_is_rejected(tmp_path: Path) -> None:
         "idempotency_key": "export-request-0002",
     }
     first = store.create_job("tenant-a", **kwargs)
+    now[0] += 60
     replay = store.create_job("tenant-a", **kwargs)
     assert replay == first
+    assert store.created_job_for_request("tenant-a", idempotency_key=kwargs["idempotency_key"],
+                                         actor_sha256=kwargs["actor_sha256"]) == first
+    assert store.created_job_for_request("tenant-a", idempotency_key=kwargs["idempotency_key"],
+                                         actor_sha256=_digest("another operator")) is None
+    assert store.created_job_for_request("tenant-b", idempotency_key=kwargs["idempotency_key"],
+                                         actor_sha256=kwargs["actor_sha256"]) is None
     assert store.credit_detail("tenant-a")["reserved"] == 1
     with pytest.raises(ConsentBulkJobConflict, match="different content"):
         store.create_job(

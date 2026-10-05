@@ -13,6 +13,7 @@ import secrets
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -266,8 +267,9 @@ def _worker_digest(tenant_id: str, instance_nonce: bytes) -> str:
     ).hexdigest()
 
 
-def _idempotency(operation: str, item_id: object) -> str:
-    digest = hashlib.sha256(f"{operation}:{item_id}".encode()).hexdigest()
+def _idempotency(operation: str, item_id: object, job_id: str = "") -> str:
+    identity = f"{job_id}:{operation}:{item_id}" if job_id else f"{operation}:{item_id}"
+    digest = hashlib.sha256(identity.encode()).hexdigest()
     return f"bulk-item-{digest}"
 
 
@@ -330,10 +332,11 @@ class ConsentBulkExecutor:
         self,
         operation: str,
         item: Mapping[str, Any],
+        *, job_id: str = "",
     ) -> Mapping[str, Any]:
         tenant = self.tenant_id
         profile = str(item["profile_id"])
-        key = _idempotency(operation, item["item_id"])
+        key = _idempotency(operation, item["item_id"], job_id)
         if operation == "export_receipts":
             if "after_sequence" in item:
                 return self._required("export_receipts")(
@@ -420,11 +423,12 @@ class ConsentBulkJobsRuntime:
         return self.executor.capabilities()
 
     def run_job(self, job_id: str) -> dict[str, Any]:
+        scope = self.store.job_executor_scope(self.tenant_id, job_id)
         return self.store.run_job(
             self.tenant_id,
             job_id,
             worker_sha256=self.worker_sha256,
-            executor=self.executor,
+            executor=partial(self.executor, job_id=job_id if scope == "job" else ""),
             batch_size=self.worker_batch_size,
         )
 

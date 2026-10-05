@@ -30,7 +30,7 @@ const waiting = (updated, reviewOnly = false) => ({ status: "paused_approval", c
   approval_binding_sha256: "a".repeat(64), human: { approval_card: card, choices: [], form: [] } });
 const finished = { status: "completed", cursor: "end", updated: 3, nodes: {}, data: {} };
 
-async function mount(runs, post, { stream = false } = {}) {
+async function mount(runs, post, { stream = false, refresh = null } = {}) {
   const dom = new JSDOM("<!doctype html><body>" + markup + "</body>",
     { url: "http://localhost/flows/orders/runs/run-42", runScripts: "outside-only" });
   const calls = [], timers = [];
@@ -43,13 +43,15 @@ async function mount(runs, post, { stream = false } = {}) {
   };
   dom.window.fetch = async (url, options = {}) => {
     const method = options.method || "GET";
-    calls.push({ url, method });
+    calls.push({ url, method, body: options.body });
     if (method === "POST") return post();
+    if (url.endsWith("/approval-refresh") && refresh) return reply(200, refresh);
     if (url === "/api/v1/flows/orders") return reply(200, {
       id: "orders", name: "Orders", start: "gate", nodes: [{ id: "gate", kind: "approval" }] });
     if (url === "/api/v1/flows/runs/run-42") return reply(200, runs[Math.min(reads++, runs.length - 1)]);
     return reply(404, {});
   };
+  dom.window.mvConfirm = async () => true;
   dom.window.eval(script);
   await settle();
   const document = dom.window.document;
@@ -87,6 +89,32 @@ test("a refused approval restores the decision controls", async () => {
   assert.match(ui.message(), /request changed/i);
   assert.equal(ui.buttons().find(button => button.textContent === "Approve").disabled, false);
   ui.dom.window.close();
+});
+
+test("an expired open-ended review can be renewed once without retrying the workflow", async () => {
+  const expired = {...waiting(1), approval_card_status: "expired", approval_binding_sha256: "", human: {}};
+  const ui = await mount([expired, waiting(2)], () => reply(200, {status: "ready", message: "The fresh review is ready."}),
+    {refresh: {binding: "b".repeat(64), summary: "Pay invoice", message: "This does not approve or repeat work."}});
+  const renew = ui.buttons().find(button => button.textContent === "Request fresh review");
+  assert.ok(renew);
+  renew.click(); renew.click();
+  await settle();
+  const writes = ui.calls.filter(call => call.method === "POST");
+  assert.equal(writes.length, 1);
+  assert.ok(writes[0].url.endsWith("/approval-refresh"));
+  assert.deepEqual(JSON.parse(writes[0].body), {binding: "b".repeat(64), confirmed: true});
+  assert.ok(ui.buttons().some(button => button.textContent === "Approve"));
+  assert.ok(!ui.calls.some(call => call.url.includes("/retry") || call.url.includes("/resume")));
+  ui.dom.window.close();
+});
+
+test("a timed-out or assigned approval offers no renewal that could extend its deadline", async () => {
+  for (const changed of [{resume_at: 1234}, {approval_review_only: true}]) {
+    const run = {...waiting(1), approval_card_status: "expired", ...changed};
+    const ui = await mount([run], () => assert.fail("must not submit"));
+    assert.ok(!ui.buttons().some(button => button.textContent === "Request fresh review"));
+    ui.dom.window.close();
+  }
 });
 
 test("an assigned reviewer never sees the old vote return from a stale stream snapshot", async () => {

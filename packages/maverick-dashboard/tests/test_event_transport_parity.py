@@ -136,6 +136,37 @@ async def test_polling_terminal_only_after_replay_is_drained(event_world, surfac
 
 
 @pytest.mark.asyncio
+async def test_customer_activity_is_plain_across_transports_and_retains_durable_evidence(event_world):
+    goal_id = _goal(event_world, n=0, status="blocked")
+    raw = [
+        ("plan", "role=orchestrator depth=0 brief=INTERNAL PROMPT ## Prior failures"),
+        ("observation", "private model scratch text"),
+        ("observation", "tool=ask_user -> <tool_output tool='ask_user'>QUEUED question #2</tool_output>"),
+        ("error", "RuntimeError: private diagnostic C:\\server\\secret.log"),
+        ("finding", "The invoice matches the approved purchase order."),
+    ]
+    for kind, content in raw:
+        event_world.append_event(goal_id, "reviewer", kind, content)
+    event_world.set_goal_status(goal_id, "blocked", "Stopped: the assistant ran into an error. maverick resume 7")
+    outputs = []
+    for route in (api.goal_events, dashboard.api_goal_events_legacy):
+        value = await run_in_threadpool(route, _request(), goal_id)
+        outputs.append(json.dumps(value.model_dump() if hasattr(value, "model_dump") else value))
+    for route in (api.goal_events_stream, dashboard.api_goal_events_stream):
+        response = await route(_request(), goal_id)
+        outputs.append("".join([frame async for frame in response.body_iterator]))
+    socket = Socket()
+    await dashboard.run_events_firehose(socket, goal_id, principal=None)
+    outputs.append(json.dumps(socket.frames))
+    for output in outputs:
+        assert "Requested more information from you." in output
+        assert "The invoice matches the approved purchase order." in output
+        for marker in ("INTERNAL PROMPT", "private model scratch", "tool_output", "QUEUED", "private diagnostic", "maverick resume"):
+            assert marker not in output
+    assert [(e.kind, e.content) for e in event_world.goal_events(goal_id)] == raw
+
+
+@pytest.mark.asyncio
 async def test_goal_waiting_for_an_answer_is_held_open_only_by_the_rest_poll(event_world, monkeypatch):
     """UX-068 transport contract (docs/api.md): a goal parked on a question is
     ``blocked``. GET /api/v1/goals/{id}/events says so with ``terminal: false``

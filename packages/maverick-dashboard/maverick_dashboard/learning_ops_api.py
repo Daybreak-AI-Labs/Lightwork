@@ -494,19 +494,28 @@ async def set_up_hold_out(request: Request, body: ConfirmIn) -> dict:
 
 def _refine_preview(proposal_id: str) -> dict:
     from maverick import harness_refine
-    rows = harness_refine.list_proposals()
-    row = next((p for p in rows if str(p.get("id") or p.get("proposal_id")) == proposal_id), None)
-    if row is None:
-        raise HTTPException(status_code=404, detail="That suggestion no longer exists. Refresh the page.")
-    same = [r for r in harness_refine.refinements(target=row.get("target"))
-            if r.get("name") == row.get("name")]
-    applied_at = row.get("applied_at") or 0
-    later = [p for p in rows if p.get("status") == "applied" and (p.get("applied_at") or 0) > applied_at]
+
+    from .learning_loop_api import _refine_problem
+    try:
+        review = harness_refine.change_review(proposal_id)
+    except harness_refine.RefineError as exc:
+        if "unknown refinement proposal" in str(exc):
+            raise HTTPException(404, "That suggestion no longer exists. Refresh the page.") from exc
+        raise _refine_problem(exc) from exc
+    row = review["proposal"]
+    changes = [{"title": _clip(str((change["after"] or change["before"]).get("name") or "").replace("-", " "), 96),
+                "before": (change["before"] or {}).get("change") or "",
+                "after": (change["after"] or {}).get("change") or ""}
+               for change in review["changes"]]
+    selected = next((change for change in review["changes"]
+                     if change["key"] == harness_refine._key(row["target"], row["name"])), {})
     return {"title": _clip(str(row.get("name") or "").replace("-", " ").replace("_", " "), 96),
-            "now": _clip(same[0].get("change"), 2000) if same else "",
-            "after": _clip(row.get("change"), 2000),
-            "undo_also_removes": [_clip(str(p.get("name") or "").replace("-", " "), 96)
-                                  for p in later][:20] if row.get("status") == "applied" else []}
+            "revision": review["revision"], "status": row.get("status"),
+            "now": (selected.get("before") or {}).get("change") or "",
+            "after": (selected.get("after") or {}).get("change") or "",
+            "changes": changes,
+            "undo_also_removes": [change["title"] for change in changes if change["before"] and not change["after"]]
+            if row.get("status") == "applied" else []}
 
 
 @router.get("/refinements/{proposal_id}/preview")

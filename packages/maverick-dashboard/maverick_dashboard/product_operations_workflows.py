@@ -6,10 +6,10 @@ from urllib.parse import quote
 
 from fastapi import HTTPException, Response
 from maverick.governed_operations import digest
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from . import api as native
-from .product_operations import Adapter, EmptyInput, Outcome, Preview, Snapshot
+from .product_operations import Adapter, EmptyInput, Outcome, Preview, Snapshot, StrictInput
 
 
 def _flow_id(selection):
@@ -312,6 +312,152 @@ def examples_prepare(request, selection, _arguments):
     return Preview(state.summary, native=state.details)
 
 
+class TeachRunsInput(StrictInput):
+    run_ids: list[str] = Field(min_length=2, max_length=32)
+    tools: list[str] = Field(min_length=1, max_length=8)
+    style: str = Field(pattern="^(plain|transforms|choices)$")
+    max_operations: int = Field(default=2, ge=1, le=4)
+
+
+def _teaching_state(request, selection):
+    from maverick.config import get_flows
+
+    from . import flow_teach_ops_api as teach
+
+    flow_id = _flow_id(selection)
+    overview = teach.flow_teach_overview(request, flow_id)
+    examples = teach.reviewed_examples(request, flow_id)
+    ready = [row for row in examples["runs"] if row["can_learn"] is True]
+    return overview, examples, ready, teach._signed_ready(get_flows())
+
+
+def teach_snapshot(request, selection):
+    from .identity_format import humanize
+    from .plain_labels import datetime_text
+
+    overview, examples, ready, signed = _teaching_state(request, selection)
+    revision = digest([overview, examples, signed])
+    blocked = ("Signed learning is not ready. Ask an administrator to check Learning in Settings." if not signed else
+               "Choose and review at least two examples, then allow them for learning from their run pages."
+               if len(ready) < 2 else "This flow has no actions to learn. Add actions in the designer first."
+               if not overview["tools"] else "")
+    return Snapshot(revision, "Current reviewed examples and learning permissions",
+                    "Learn a new procedure from your chosen examples. Lightwork creates signed copies of their existing permissions. "
+                    "You then review, name and save the draft; approval, publishing and running stay separate.",
+                    details={"flow": overview["flow"]["name"], "ready_examples": len(ready)},
+                    fields=[{"name": "run_ids", "label": "Reviewed examples", "kind": "multiselect", "required": True,
+                             "choices": [{"value": row["run_id"], "label": "Example " + str(index + 1) +
+                                          (" · " + datetime_text(row["started"], seconds=True) if row["started"] else "")}
+                                         for index, row in enumerate(ready)]},
+                            {"name": "tools", "label": "Actions the new procedure may use", "kind": "multiselect",
+                             "required": True, "value": overview["tools"][:8],
+                             "choices": [{"value": tool, "label": humanize(tool)} for tool in overview["tools"]]},
+                            {"name": "style", "label": "What to learn", "kind": "select", "required": True, "value": "plain",
+                             "choices": [{"value": "plain", "label": "The same actions with details from inputs and earlier results"},
+                                         {"value": "transforms", "label": "The same actions with simple calculations"},
+                                         {"value": "choices", "label": "One shared action, then a choice between two actions"}]},
+                            {"name": "max_operations", "label": "Operations per calculation", "kind": "select", "value": 2,
+                             "choices": [{"value": value, "label": str(value)} for value in range(1, 5)]}],
+                    blocked=blocked)
+
+
+def teach_prepare(request, selection, arguments):
+    from .identity_format import humanize
+    from .plain_labels import datetime_text
+
+    overview, _examples, ready, _signed = _teaching_state(request, selection)
+    runs = {row["run_id"]: row for row in ready}
+    if (len(set(arguments["run_ids"])) != len(arguments["run_ids"])
+            or not set(arguments["run_ids"]) <= runs.keys()
+            or len(set(arguments["tools"])) != len(arguments["tools"])
+            or not set(arguments["tools"]) <= set(overview["tools"])):
+        raise HTTPException(409, "Choose distinct current examples and actions from this flow.")
+    selected = [runs[run] for run in arguments["run_ids"]]
+    return Preview("Prepare a learned procedure from these exact permitted examples. No new learning permission is granted, "
+                   "and no flow is approved, saved, published or started.",
+                   changes=[{"item": "Reviewed example", "effect": datetime_text(row["started"], seconds=True) or
+                             "Selected reviewed run"} for row in selected] +
+                           [{"item": "Allowed action", "effect": humanize(tool)} for tool in arguments["tools"]],
+                   native={"flow_id": _flow_id(selection), "runs": {row["run_id"]: {
+                       "revision": row["revision"], "episode": row["episode"], "grant": row["grant"]} for row in selected}})
+
+
+def teach_execute(request, selection, arguments, prepared, _operation):
+    from . import flow_teach_ops_api as teach
+
+    flow_id = _flow_id(selection)
+    if prepared.get("flow_id") != flow_id or set(prepared.get("runs", {})) != set(arguments["run_ids"]):
+        raise HTTPException(409, "The chosen examples changed. Review them again.")
+    try:
+        result = teach.learn_reviewed_recipe(request, flow_id, teach.RecipeLearnIn(**arguments),
+                                            expected_runs=prepared["runs"])
+    except PermissionError as exc:
+        raise HTTPException(403, "Learning is turned off or no longer allowed here.") from exc
+    except (ValueError, TypeError, KeyError, RecursionError) as exc:
+        raise HTTPException(400, teach._plain(exc, "Lightwork couldn't learn a flow from these examples. Check them and try again.")) from exc
+    return Outcome("confirmed", "The learned procedure is ready to review on Teach. Name it and make its draft when you are ready.",
+                   {"flow_id": flow_id, "recipe": result, "saved": False, "published": False})
+
+
+def _teaching_form_snapshot(request, selection, mode):
+    from . import flow_teach_ops_api as teach
+
+    flow_id = _flow_id(selection)
+    overview = teach.flow_teach_overview(request, flow_id)
+    current = overview["flow"]
+    step = next((row for row in overview["steps"] if row["id"] == selection.get("node_id")), None)
+    blocked = ""
+    if mode == "recipe_refine":
+        _overview, examples, ready, signed = _teaching_state(request, selection)
+        blocked = ("Signed learning is not ready. Ask an administrator to check Learning in Settings." if not signed else
+                   "Review and allow another example for learning before adding it." if not ready else "")
+        revision = digest([overview, examples, signed])
+        summary = "Add selected reviewed examples to the learned procedure currently open on Teach. Its earlier signed examples remain part of the result."
+    else:
+        revision = digest(overview)
+        blocked = ("Choose a ready AI step on Teach first." if not step or not step["ready"] else
+                   "This step has no saved learned rule. Teach, attach and save its first rule before refining it."
+                   if mode == "rule_refine" and not step["rule"] else
+                   "The current rule could not be read. Teach a replacement rule before saving it."
+                   if mode == "rule_refine" and step["rule"].get("unreadable") else "")
+        summary = ("Learn a rule from the labelled input and answer examples on Teach." if mode == "rule_teach" else
+                   "Add the labelled examples on Teach to the selected saved rule. Its earlier examples are kept.")
+    return Snapshot(revision, "Current saved flow and selected teaching step", summary,
+                    {"flow_id": flow_id, "version": current["version"], "revision": current["revision"],
+                     "context": current.get("context"), "node_id": step["id"] if step else None, "mode": mode}, blocked=blocked)
+
+
+def recipe_refine_snapshot(request, selection):
+    return _teaching_form_snapshot(request, selection, "recipe_refine")
+
+
+def rule_teach_snapshot(request, selection):
+    return _teaching_form_snapshot(request, selection, "rule_teach")
+
+
+def rule_refine_snapshot(request, selection):
+    return _teaching_form_snapshot(request, selection, "rule_refine")
+
+
+def _teaching_form_prepare(request, selection, mode):
+    state = _teaching_form_snapshot(request, selection, mode)
+    if state.blocked:
+        raise HTTPException(409, state.blocked)
+    return Preview(state.summary + " Review the current form values before learning; saving and publishing stay separate.", native=state.details)
+
+
+def recipe_refine_prepare(request, selection, _arguments):
+    return _teaching_form_prepare(request, selection, "recipe_refine")
+
+
+def rule_teach_prepare(request, selection, _arguments):
+    return _teaching_form_prepare(request, selection, "rule_teach")
+
+
+def rule_refine_prepare(request, selection, _arguments):
+    return _teaching_form_prepare(request, selection, "rule_refine")
+
+
 def entries():
     return (Adapter("learning.workflow_run", "Run this published workflow", "learning", "/flows/designer",
                     ("/flows/designer/*",), EmptyInput, snapshot, prepare,
@@ -327,4 +473,16 @@ def entries():
                     aliases=("delete this flow", "remove this flow")),
             Adapter("learning.examples_review", "Check recent learning examples", "learning", "/learning/examples",
                     ("/learning/examples",), EmptyInput, examples_snapshot, examples_prepare,
-                    aliases=("which examples need review", "show learning examples")))
+                    aliases=("which examples need review", "show learning examples")),
+            Adapter("learning.workflow_teach", "Learn from reviewed runs", "learning", "/workflows",
+                    ("/flows/*/teach",), TeachRunsInput, teach_snapshot, teach_prepare, teach_execute,
+                    aliases=("teach this flow", "learn from these runs", "learn from reviewed runs")),
+            Adapter("learning.workflow_refine", "Improve the learned procedure", "learning", "/workflows",
+                    ("/flows/*/teach",), EmptyInput, recipe_refine_snapshot, recipe_refine_prepare,
+                    aliases=("add reviewed runs", "refine this procedure", "improve the learned procedure")),
+            Adapter("learning.rule_teach", "Teach the selected step", "learning", "/workflows",
+                    ("/flows/*/teach",), EmptyInput, rule_teach_snapshot, rule_teach_prepare,
+                    aliases=("learn a rule", "teach this step", "teach the selected step")),
+            Adapter("learning.rule_refine", "Improve the selected rule", "learning", "/workflows",
+                    ("/flows/*/teach",), EmptyInput, rule_refine_snapshot, rule_refine_prepare,
+                    aliases=("add rule examples", "refine this rule", "improve the selected rule")))

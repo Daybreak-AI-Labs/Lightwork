@@ -379,7 +379,8 @@ def test_refinement_preview_shows_before_and_after(client):
     assert pv["now"] == "" and pv["after"] == "Confirm the quote first." and pv["undo_also_removes"] == []
     approval = harness_refine.list_proposals()[0]["approval_id"]
     open_world().decide_approval(approval, "approved", decided_by="security@corp.test")
-    assert client.post(f"/api/v1/learning-loop/refinements/{pid}/apply").status_code == 200
+    assert client.post(f"/api/v1/learning-loop/refinements/{pid}/apply",
+                       json={"revision": pv["revision"], "confirm": True}).status_code == 200
     second = dict(change, change="Confirm the quote and the date first.")
     pid2 = client.post("/api/v1/learning-loop/refinements", json=second).json()["proposal"]["id"]
     assert client.get(f"{LO}/refinements/{pid2}/preview").json()["now"] == "Confirm the quote first."

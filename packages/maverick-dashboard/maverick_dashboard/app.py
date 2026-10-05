@@ -766,6 +766,7 @@ def _help_context(request: Request) -> dict:
 templates.context_processors.append(_help_context)
 templates.env.globals.setdefault("help_topic", None)
 templates.env.globals.setdefault("support_status_page_url", "")
+templates.env.globals.setdefault("help_menu_text", False)
 templates.env.globals.setdefault("service_status", None)
 # Requestless renders cannot prove authority; the request processor supplies
 # permitted destinations, including full navigation in verified local mode.
@@ -1554,6 +1555,9 @@ for _ops_module in (billing_ops_api, insights_ops_api, installation_ops_api, sup
     app.include_router(_ops_module.asset_router)
 app.include_router(process_ops_api.router)
 app.include_router(setup_guide.router)
+from .workflow_explanation import asset_router as workflow_explanation_assets  # noqa: E402
+
+app.include_router(workflow_explanation_assets)
 app.state.voice_setup = VoiceSetup()
 app.add_middleware(RecoveryOnlyMiddleware, dashboard_app=app)
 
@@ -9588,7 +9592,7 @@ async def run_events_firehose(
 
     from fastapi import WebSocketDisconnect
 
-    from ._event_stream import TERMINAL_RUN_STATUSES, replay_cursor
+    from ._event_stream import TERMINAL_RUN_STATUSES, event_payload, replay_cursor
     from .auth import websocket_authorized
 
     if not websocket_authorized(websocket, principal):
@@ -9624,15 +9628,7 @@ async def run_events_firehose(
             events = await run_in_threadpool(w.goal_events, goal_id, since_id=last, limit=500)
             for e in events:
                 last = e.id
-                await websocket.send_json(
-                    {
-                        "id": e.id,
-                        "agent": e.agent,
-                        "kind": e.kind,
-                        "content": e.content,
-                        "ts": e.ts,
-                    }
-                )
+                await websocket.send_json(event_payload(e))
             g = await run_in_threadpool(w.get_goal, goal_id)
             if g is None or (g.status in TERMINAL_RUN_STATUSES and len(events) < 500):
                 await websocket.send_json(
@@ -12672,8 +12668,7 @@ def api_goal_events_legacy(
     since: int = 0,
     limit: int = 200,
 ) -> dict:
-    from ._event_stream import TERMINAL_RUN_STATUSES, event_page, replay_cursor
-    from .step_narration import event_payload
+    from ._event_stream import TERMINAL_RUN_STATUSES, _chat_event_dict, event_page, replay_cursor
 
     w = _world()
     g = w.get_goal(goal_id)
@@ -12684,14 +12679,15 @@ def api_goal_events_legacy(
 
     since = replay_cursor(since)
     events, has_more = event_page(w, goal_id, since, limit)
+    stop = stop_payload(g.status, g.result)
     return {
         "status": g.status,
-        "result": g.result or "",
-        "stop": stop_payload(g.status, g.result),
+        "result": stop["message"] if stop else g.result or "",
+        "stop": stop,
         "next_id": events[-1].id if events else since,
         "has_more": has_more,
         "terminal": g.status in TERMINAL_RUN_STATUSES and not has_more,
-        "events": [event_payload(e) for e in events],
+        "events": [_chat_event_dict(e) for e in events],
     }
 
 

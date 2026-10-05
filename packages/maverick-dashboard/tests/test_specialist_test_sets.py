@@ -233,18 +233,113 @@ def test_copilot_reads_creates_and_starts_only_one_reviewed_run(client, monkeypa
     assert len(saved.cases_for("finance_ap")) == 1
     read = actions.read_prepare(request, {}, {"specialist": "finance_ap"})
     assert len(read.native["cases"]) == 1 and "duplicate" in read.native["cases"][0]["must_mention"]
-    run_review = actions.run_prepare(request, {}, {"specialist": "finance_ap"})
+    run_args = {"specialist": "finance_ap", "checks": [created.details["test"]["id"]]}
+    run_review = actions.run_prepare(request, {}, run_args)
     calls = []
 
-    def started(_request, specialist, *, operation_id):
+    def started(_request, specialist, *, operation_id, case_ids, case_revisions):
         calls.append((specialist, operation_id))
+        assert case_ids == run_args["checks"] and case_revisions == {case_ids[0]: 1}
         saved.begin_run(specialist, run_review.native["model"], run_review.native["instructions"],
-                        saved.snapshot(specialist), "user:reviewer", identity=operation_id)
+                        saved.snapshot(specialist, case_ids), "user:reviewer", identity=operation_id)
         return {"job": {"id": "job-1", "state": "running"}}
 
     monkeypatch.setattr(actions.native, "_start_customer_test_job", started)
-    first = actions.run_execute(request, {}, {"specialist": "finance_ap"}, run_review.native, "c" * 32)
-    found = actions.run_recover(request, {}, {"specialist": "finance_ap"}, run_review.native, "c" * 32)
+    first = actions.run_execute(request, {}, run_args, run_review.native, "c" * 32)
+    found = actions.run_recover(request, {}, run_args, run_review.native, "c" * 32)
     assert first.status == "queued" and found.status == "replayed"
     assert calls == [("finance_ap", "c" * 32)]
     assert [row["verb"] for row in audit_rows if row.get("verb") == "specialist_test_save"] == ["specialist_test_save"]
+
+
+def test_copilot_named_subset_runs_native_bounded_worker_and_recovers_exact_receipt(client, monkeypatch, audit_rows):
+    app, tmp = client
+    from cryptography.fernet import Fernet
+    from maverick import config, llm
+    from maverick_dashboard import auth, rbac
+    from maverick_dashboard import product_operations as ops
+    from maverick_dashboard import product_operations_specialist_tests as actions
+    from maverick_dashboard import specialist_test_sets as saved
+
+    (tmp / "config.toml").write_text("[models]\ncapability_tests = true\n"
+                                    "[features]\ncopilot_operations = true\n"
+                                    '[copilot]\noperation_families = ["models"]\n', encoding="utf-8")
+    config.reset_config_cache()
+    actor = {"name": "user:reviewer"}
+    monkeypatch.setattr(auth, "caller_principal", lambda request: actor["name"])
+    rbac.set_role(actor["name"], "admin")
+    monkeypatch.setattr(ops, "adapters", lambda: {entry.id: entry for entry in actions.entries()})
+    codec = Fernet(Fernet.generate_key())
+    monkeypatch.setattr(ops.crypto_at_rest, "seal_to_str", lambda value: "sealed:" + codec.encrypt(value.encode()).decode())
+    monkeypatch.setattr(ops.crypto_at_rest, "is_sealed_str", lambda value: value.startswith("sealed:"))
+    monkeypatch.setattr(ops.crypto_at_rest, "unseal_from_str", lambda value: codec.decrypt(value[7:].encode()).decode())
+    rows = [saved.save_case("finance_ap", {"task": f"Invoice question {index}: what should we check?",
+            "includes": ["duplicate"], "excludes": [], "refusal": False, "citation": False}) for index in range(20)]
+    calls = []
+
+    def answer(self, system, messages, **kwargs):
+        calls.append(messages[0]["content"])
+        assert kwargs["budget"].max_dollars <= .25 and kwargs["tools"] is None
+        assert kwargs["max_physical_attempts"] == 1 and kwargs["_no_failover"] is True
+        kwargs["dispatch_guard"]()
+        return llm.LLMResponse(text="Check for duplicate before approval.", thinking=None,
+                               tool_calls=[], stop_reason="end_turn")
+
+    monkeypatch.setattr(llm.LLM, "complete", answer)
+    base = "/api/v1/copilot/product-operations"
+    selected = [rows[index]["id"] for index in (3, 7, 12)]
+
+    def prepare(checks):
+        catalog = app.post(base + "/catalog", json={"page": "/workforce"}).json()
+        item = next(row for row in catalog["operations"] if row["id"] == "specialists.tests.run")
+        assert item["available"], item
+        assert item["fields"][0]["kind"] == "select"
+        questions = item["fields"][1]
+        assert questions["kind"] == "multiselect" and questions["depends_on"] == "specialist"
+        assert [choice["label"] for choice in questions["choices_by"]["finance_ap"]] == [row["task"] for row in rows]
+        assert questions["value"] == []
+        return app.post(base + "/prepare", json={"page": "/workforce", "operation": item["id"],
+            "context": catalog["context"], "revision": item["revision"],
+            "arguments": {"specialist": "finance_ap", "checks": checks}})
+
+    assert prepare([row["id"] for row in rows[:6]]).status_code == 422
+    assert prepare([selected[0], selected[0]]).status_code == 409
+    assert prepare(["e" * 32]).status_code == 409
+    review = prepare(selected)
+    assert review.status_code == 200, review.text
+    assert review.json()["changes"][1]["after"] == "; ".join(rows[index]["task"] for index in (3, 7, 12))
+    payload = {"token": review.json()["token"], "confirmed": True}
+    assert calls == []
+    assert app.post(base + "/execute", json={**payload, "confirmed": False}).status_code == 400
+    # A different administrator cannot spend from another actor's sealed review.
+    actor["name"] = "user:other-reviewer"
+    rbac.set_role(actor["name"], "admin")
+    assert app.post(base + "/execute", json=payload).status_code == 409 and calls == []
+    actor["name"] = "user:reviewer"
+    # Exact selected versions are rechecked before the native spending admission.
+    rows[7] = saved.save_case("finance_ap", {key: rows[7][key] for key in (
+        "task", "includes", "excludes", "refusal", "citation")}, identity=rows[7]["id"], expected_revision=1)
+    assert app.post(base + "/execute", json=payload).status_code == 409 and calls == []
+    review = prepare(selected)
+    assert review.status_code == 200, review.text
+    payload["token"] = review.json()["token"]
+    started = app.post(base + "/execute", json=payload)
+    assert started.status_code == 200, started.text
+    assert started.json()["status"] == "queued"
+    operation = started.json()["operation_id"]
+    deadline = time.time() + 15
+    while saved.run_by_id(operation)["state"] in {"prepared", "running"}:
+        assert time.time() < deadline
+        time.sleep(.05)
+    receipt = saved.run_by_id(operation)
+    assert receipt["state"] == "done" and receipt["total"] == 3 and receipt["actor"] == "user:reviewer"
+    assert receipt["case_revisions"] == [{"id": rows[index]["id"], "revision": rows[index]["revision"]}
+                                         for index in (3, 7, 12)]
+    assert calls == [rows[index]["task"] for index in (3, 7, 12)]
+    # Changing current checks never turns recovery into another paid request.
+    saved.delete_case("finance_ap", rows[3]["id"], 1)
+    recovered = app.post(base + "/execute", json=payload)
+    assert recovered.status_code == 200 and recovered.json()["status"] == "replayed"
+    assert len(calls) == 3 and recovered.json()["details"]["answers_checked"] == 3
+    assert recovered.json()["details"]["questions"] == "; ".join(rows[index]["task"] for index in (3, 7, 12))
+    assert "case_revisions" not in str(recovered.json()["details"]) and operation not in str(recovered.json()["details"])

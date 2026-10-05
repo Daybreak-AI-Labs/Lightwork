@@ -58,6 +58,25 @@ def install(app, world, tenant, principal):
             world.set_goal_status(chat_goal_id, "blocked", result="provider connection refused")
         return {"synthetic": True, "provider_calls": 0}
 
+    @app.post("/__browser_fixture/chat/{chat_goal_id}/activity", include_in_schema=False)
+    async def fixture_chat_activity(chat_goal_id: int):
+        with tenant_scope(tenant=tenant):
+            world.append_event(chat_goal_id, "orchestrator", "plan",
+                               "role=orchestrator depth=0 brief=INTERNAL PROMPT ## Prior failures")
+            world.append_event(chat_goal_id, "orchestrator", "observation", "private model scratch text")
+            world.append_event(chat_goal_id, "orchestrator", "observation",
+                               "tool=ask_user -> <tool_output tool='ask_user'>QUEUED question #2</tool_output>")
+            world.append_event(chat_goal_id, "reviewer", "finding", "The invoice matches the purchase order.")
+            world.set_goal_status(chat_goal_id, "done", result="The invoice matches the purchase order.")
+        return {"synthetic": True, "provider_calls": 0}
+
+    @app.post("/__browser_fixture/chat/{chat_goal_id}/pilot-prepared", include_in_schema=False)
+    async def fixture_chat_pilot_prepared(chat_goal_id: int):
+        with tenant_scope(tenant=tenant):
+            world.set_goal_status(chat_goal_id, "blocked", result=(
+                "Prepared for a workflow pilot. Start this task after the pilot plan is frozen."))
+        return {"synthetic": True, "provider_calls": 0}
+
     @app.post("/__browser_fixture/chat/{chat_goal_id}/specialist-setup-fail", include_in_schema=False)
     async def fixture_chat_specialist_setup_fail(chat_goal_id: int):
         with tenant_scope(tenant=tenant):

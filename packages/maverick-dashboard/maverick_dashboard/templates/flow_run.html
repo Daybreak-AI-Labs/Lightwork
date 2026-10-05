@@ -55,6 +55,7 @@
   <div class="fr__error" id="fr-error" role="alert" hidden></div>
   <div class="fr__actions" id="fr-actions"></div>
   <span class="fr__msg" id="fr-msg" role="status" aria-live="polite"></span>
+  {% if not request.query_params.get('approval_review') %}{% include "_workflow_explanation.html" %}{% endif %}
 
   {% if learning_example_panel %}<section class="panel fr__example" id="le-card" aria-labelledby="le-title"
            data-flow-id="{{ flow_id }}" data-run-id="{{ run_id }}" data-draft-recovery="off">
@@ -338,8 +339,12 @@
       }
       if (card) renderApprovalCard(card);
       if (!canDecide) {
-        addText(box, 'p', 'This request can’t be decided yet because its details could not be checked. Reload the page to get the latest details. If it still can’t be decided, run the flow again so it asks afresh.');
-        btn('Reload', true, function () { window.location.reload(); });
+        var refreshable = run.approval_card_status === 'expired' && run.resume_at == null && !run.approval_review_only;
+        addText(box, 'p', refreshable
+          ? 'The review window has closed. Request a fresh review of this paused work, then check its details before deciding. Completed steps stay completed.'
+          : 'This request can’t be decided yet because its details could not be checked. Reload to check its current work, access and deadline.');
+        if (refreshable) btn('Request fresh review', true, requestFreshApproval);
+        btn('Reload', !refreshable, function () { window.location.reload(); });
       }
       if (run.prompt) { var p = document.createElement('span'); p.className = 'fr__msg'; p.textContent = '“' + run.prompt + '” '; box.appendChild(p); }
       if (node.assignee) { var as = document.createElement('span'); as.className = 'fr__msg'; as.textContent = '· asked of ' + node.assignee.replace(/^[a-z]+:/, '') + ' '; box.appendChild(as); }
@@ -456,6 +461,25 @@
     }
   }
 
+  function requestFreshApproval() {
+    sendOnce(function (done) {
+      var url = '/api/v1/flows/runs/' + encodeURIComponent(runId) + '/approval-refresh';
+      function checked(response) {
+        return response.json().catch(function () { return {}; }).then(function (value) {
+          if (!response.ok) throw new Error(typeof value.detail === 'string' ? value.detail : 'Could not request a fresh review. Reopen the run and try again.');
+          return value;
+        });
+      }
+      api(url).then(checked).then(async function (review) {
+        if (!window.mvConfirm || !(await window.mvConfirm(review.summary + '\n\n' + review.message, {okText: 'Request fresh review'}))) {
+          done(true); return;
+        }
+        var result = await api(url, {method: 'POST', body: JSON.stringify({binding: review.binding, confirmed: true})}).then(checked);
+        done(true); say(result.message); poll(0);
+        window.dispatchEvent(new CustomEvent('lightwork:product-state-changed'));
+      }).catch(function (error) { done(true); say(error.message || 'Could not request a fresh review. Reopen the run.'); });
+    });
+  }
   function resume(decision, inputs, approvalBinding, decidedRun) {
     sendOnce(function (done) {
       api('/api/v1/flows/runs/' + encodeURIComponent(runId) + '/resume',

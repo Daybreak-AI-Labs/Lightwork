@@ -1190,7 +1190,8 @@ def run_self_harness_cycle(  # noqa: C901 - one fail-closed orchestration bounda
     retire: bool = True, retire_after_days: float | None = None,
     held_in=None, held_out=None, score_with=None, score_without=None,
     propose_fn=None, controller=None, evaluation_system: str | None = None,
-    work_item_id: str | None = None,
+    work_item_id: str | None = None, raise_errors: bool = False,
+    evaluation_budget=None,
     **pass_kwargs,
 ):
     """One full DRIVER cycle -- a governed learning pass THEN stale-line
@@ -1225,7 +1226,8 @@ def run_self_harness_cycle(  # noqa: C901 - one fail-closed orchestration bounda
         # A/B, the domain-scoped quads, and the metamorphic paraphraser
         # together, so the operator's cap bounds the whole cycle, not each
         # evaluator.
-        eval_budget = _eval_budget(st) if st is not None else None
+        eval_budget = (evaluation_budget if evaluation_budget is not None
+                       else _eval_budget(st) if st is not None else None)
         # Resolve evaluator identities once and reuse those exact values for
         # holdout authorization and construction. Re-resolving a role between
         # those steps creates a TOCTOU gap: the ledger can authorize judge A
@@ -1457,7 +1459,7 @@ def run_self_harness_cycle(  # noqa: C901 - one fail-closed orchestration bounda
     except Exception as exc:  # pragma: no cover -- maintenance stays best-effort
         from .llm import ModelNotAllowedError
 
-        if isinstance(exc, ModelNotAllowedError):
+        if isinstance(exc, ModelNotAllowedError) or raise_errors:
             raise
         log.debug("self-harness cycle failed", exc_info=True)
         from . import self_harness
@@ -1616,7 +1618,7 @@ def _memo_paraphraser(fn):
     return _para
 
 
-def _transfer_context(st: dict, corpus_path: str):
+def _transfer_context(st: dict, corpus_path: str, *, evaluation_budget=None):
     """The shared per-sweep transfer state: ``(eval_for_target, validate_kwargs)``.
 
     ``eval_for_target`` caches each target's corpus-built quad (so a fleet
@@ -1630,7 +1632,7 @@ def _transfer_context(st: dict, corpus_path: str):
             "snapshots and a separately budgeted holdout authorizer")
     if not _learning_provider_egress_enabled():
         return (lambda _model: None), _validation_floors(st)
-    budget = _eval_budget(st)
+    budget = evaluation_budget if evaluation_budget is not None else _eval_budget(st)
     judge_unknown = bool(st.get("metamorphic"))
     cache: dict[str, tuple | None] = {}
 
@@ -1710,7 +1712,8 @@ def run_self_harness_transfer(source_model: str, *, targets=None,
         return {}
 
 
-def run_self_harness_transfer_sweep(*, controller=None) -> dict:
+def run_self_harness_transfer_sweep(*, controller=None, evaluation_budget=None,
+                                   work_item_id: str | None = None) -> dict:
     """Fleet-wide transfer: every configured role model as source in turn,
     all sources sharing ONE transfer context (evaluator cache, budget pot,
     floors). The tried-memory keeps steady-state spend near zero -- only lines
@@ -1725,13 +1728,14 @@ def run_self_harness_transfer_sweep(*, controller=None) -> dict:
         corpus_path = st.get("eval_corpus")
         if not corpus_path:
             return out
-        context = _transfer_context(st, corpus_path)
+        context = _transfer_context(st, corpus_path, evaluation_budget=evaluation_budget)
         fleet = harness_fleet_models()
         for m in fleet:
             # run_transfer skips the source itself -- no pre-filter needed.
             rep = run_self_harness_transfer(
                 m, targets=fleet,
-                corpus_path=corpus_path, controller=controller, _context=context)
+                corpus_path=corpus_path, controller=controller, _context=context,
+                work_item_id=work_item_id)
             if any(r.get("attempted") for r in rep.values()):
                 out[m] = rep
     except Exception:  # pragma: no cover -- a sweep never perturbs a run
@@ -1889,6 +1893,67 @@ def harness_fleet_models() -> list[str]:
     return sorted(models)
 
 
+def nightly_self_harness_enabled() -> bool:
+    """The shared scheduler/CLI gate; invalid policy never starts learning."""
+    from . import self_harness
+
+    settings = self_harness.settings()
+    return bool(self_harness.enabled() and settings.get("auto_run")
+                and settings.get("_config_valid", True))
+
+
+def run_nightly_self_harness(world) -> dict:
+    """Run the configured nightly loop under the same gates as a manual pass.
+
+    Only aggregate counts enter the activity record; customer examples, model
+    instructions and candidate lessons stay in their governed stores. An
+    unrecordable start cannot authorize unattended changes.
+    """
+    if not nightly_self_harness_enabled():
+        return {}
+    from . import self_harness
+    from .audit import EventKind, audit_event
+    from .learning_guard import check_learning_halt
+
+    check_learning_halt("self-harness", "nightly")
+    operation = uuid.uuid4().hex
+
+    def record(phase, **values):
+        if not audit_event(EventKind.LEARNING_UPDATE, agent="self_harness_nightly",
+                           phase=phase, operation=operation, **values):
+            raise RuntimeError("Nightly learning could not be recorded")
+
+    record("started")
+    try:
+        settings = self_harness.settings()
+        budget = _eval_budget(settings)
+        results = run_self_harness_all_models(
+            raise_errors=True, evaluation_budget=budget,
+            work_item_id=f"self-harness-nightly:{operation}")
+        reports = [report for report, _retired in results.values()]
+        summary = {
+            "models_reviewed": len(reports),
+            "patterns_found": sum(report.mined for report in reports),
+            "improvements_adopted": sum(report.promoted for report in reports),
+            "improvements_retired": sum(retired for _report, retired in results.values()),
+            "reviews_held_back": sum(bool(report.skipped or report.frozen
+                                         or not report.gate_enabled) for report in reports),
+        }
+        if settings.get("transfer_auto") and not settings.get("risk_limited"):
+            run_self_harness_transfer_sweep(
+                evaluation_budget=budget, work_item_id=f"self-harness-nightly:{operation}")
+        summary["transfer_held_back"] = bool(settings.get("transfer_auto")
+                                             and settings.get("risk_limited"))
+        summary["examples_prepared"] = run_corpus_harvest(world, raise_errors=True)
+        summary["inspection_only"] = (not bool(settings.get("eval_corpus"))
+                                      or not _learning_provider_egress_enabled())
+        record("completed", **summary)
+        return summary
+    except Exception:
+        record("stopped")
+        raise
+
+
 def run_self_harness_all_models(*, limit: int = 500, retire: bool = True,
                                 should_stop: Callable[[], bool] | None = None, **cycle_kwargs):
     """Run a self-harness cycle for EVERY distinct configured role model, so
@@ -1917,6 +1982,8 @@ def run_self_harness_all_models(*, limit: int = 500, retire: bool = True,
     except Halted:
         raise
     except Exception:  # pragma: no cover -- a fleet sweep never perturbs a run
+        if cycle_kwargs.get("raise_errors"):
+            raise
         log.debug("self-harness all-models cycle failed", exc_info=True)
     return out
 
@@ -1927,4 +1994,5 @@ __all__ = [
     "run_self_harness_cycle", "run_self_harness_all_models", "harness_fleet_models",
     "run_self_harness_transfer", "run_self_harness_transfer_sweep",
     "run_corpus_harvest",
+    "nightly_self_harness_enabled", "run_nightly_self_harness",
 ]

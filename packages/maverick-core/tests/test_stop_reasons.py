@@ -87,12 +87,13 @@ def test_provider_problems_link_to_the_ai_provider_keys(raw):
 @pytest.mark.parametrize("raw", [
     "provider_error:authentication", "provider_error:model_not_found",
     "provider_error:connection", "provider_error:configuration",
+    "provider_error:rate_limit", "provider_error:unavailable",
     "provider not ready: OPENAI_API_KEY is not set",
 ])
 def test_every_ai_connection_stop_opens_the_provider_keys_with_the_row_focused(raw):
     stop = explain_stop(raw)
     assert stop.link == AI_PROVIDER_KEYS
-    assert stop.link_label == "Open AI provider keys" or stop.link_label == "Connect an AI service"
+    assert stop.link_label in {"Open AI provider keys", "Connect an AI service", "Check AI connection"}
     assert "/connections" not in stop.link
 
 
@@ -159,6 +160,27 @@ def test_plain_kernel_sentences_pass_through_and_technical_ones_do_not():
     assert stop.kind == "internal_error"
     assert "/home/user" not in stop.message and "RuntimeError" not in stop.message
     assert stop.technical == technical
+
+
+@pytest.mark.parametrize("raw", [
+    "Stopped: the assistant ran into an error and couldn't finish.\nDetail: private failure\n"
+    "You can try again with: maverick resume 7\n[100 input tokens, $0.03 cap]",
+    "Paused: waiting for you to answer 1 question.\nAnswer with: maverick answer 3",
+    "Paused: the assistant said it needs more information, but no question was filed. "
+    "You can resume with `maverick resume 7`.",
+])
+def test_stopped_task_never_shows_terminal_instructions_or_usage_dump(raw):
+    stop = explain_stop(raw)
+    assert stop.message and stop.action
+    assert "maverick" not in stop.message + stop.action
+    assert "input tokens" not in stop.message + stop.action
+    assert "private failure" not in stop.message + stop.action
+
+
+def test_prepared_pilot_has_a_distinct_start_state():
+    stop = explain_stop("Prepared for a workflow pilot. Start this task after the pilot plan is frozen.")
+    assert stop.kind == "pilot_prepared"
+    assert stop.link == "/outcome-pilots"
 
 
 def test_empty_result_is_a_generic_stop_with_no_technical_text():

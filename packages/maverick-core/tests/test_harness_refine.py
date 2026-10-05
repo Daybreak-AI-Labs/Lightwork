@@ -347,6 +347,36 @@ def test_revert_of_the_first_refinement_empties_the_overlay():
     assert not hr.refinements_path().exists()
 
 
+def test_reviewed_restore_refuses_new_changes_and_reconciles_whole_overlay():
+    _configure("enable = true\nrequire_approval = false")
+    first = hr.propose(_observation())
+    hr.apply(first["id"])
+    reviewed = hr.change_review(first["id"])
+    second = hr.propose(_observation(name="check-deadline", change="Check the deadline first."))
+    hr.apply(second["id"])
+    with pytest.raises(hr.RefineError, match="instruction review no longer matches"):
+        hr.revert(first["id"], expected_revision=reviewed["revision"])
+    assert len(hr.refinements()) == 2
+    fresh = hr.change_review(first["id"])
+    assert len(fresh["changes"]) == 2 and fresh["after"] == {}
+    assert hr.revert(first["id"], expected_revision=fresh["revision"])
+    assert hr.refinements() == []
+    assert {row["id"] for row in hr.list_proposals(status="reverted")} == {first["id"], second["id"]}
+
+
+def test_reviewed_restore_shows_and_brings_back_overwritten_instructions():
+    _configure("enable = true\nrequire_approval = false")
+    first = hr.propose(_observation())
+    hr.apply(first["id"])
+    second = hr.propose(_observation(change="Check both quote approval and delivery date."))
+    hr.apply(second["id"])
+    review = hr.change_review(second["id"])
+    assert review["changes"][0]["before"]["change"] == second["change"]
+    assert review["changes"][0]["after"]["change"] == first["change"]
+    assert hr.revert(second["id"], expected_revision=review["revision"])
+    assert hr.refinements()[0]["proposal_id"] == first["id"]
+
+
 # ---- listing --------------------------------------------------------------
 
 def test_list_proposals_filters_by_status():

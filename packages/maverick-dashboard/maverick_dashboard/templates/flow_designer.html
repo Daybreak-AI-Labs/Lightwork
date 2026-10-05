@@ -448,6 +448,8 @@
   </div>
 </div>
 
+{% if flow_id %}{% include "_workflow_explanation.html" %}{% endif %}
+
 <!-- Outside all view-specific containers: the same conversation is available
      from the default Steps view and the advanced Canvas. -->
 <aside id="fd-chat" class="fd__chat" aria-labelledby="fd-chat-title" hidden>

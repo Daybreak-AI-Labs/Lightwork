@@ -107,6 +107,10 @@ class CreateExportJobIn(_StrictModel):
     idempotency_key: IdempotencyKey
 
 
+class CheckSubmissionIn(_StrictModel):
+    idempotency_key: IdempotencyKey
+
+
 class ActionItemIn(_StrictModel):
     item_id: OpaqueId
     profile_id: OpaqueId
@@ -511,6 +515,17 @@ def create_consent_bulk_jobs_router(  # noqa: C901, PLR0915
         )
         _secure(response)
         return result
+
+    @router.post("/requests/check")
+    async def check_submission(
+        request: Request, response: Response, body: CheckSubmissionIn,
+    ) -> dict[str, Any]:
+        require_admin(request)
+        ops, tenant, runtime = await composition(request)
+        job = await call(ops, runtime.store.created_job_for_request, tenant,
+                         idempotency_key=body.idempotency_key, actor_sha256=runtime.actor_sha256)
+        _secure(response)
+        return {"found": job is not None, "job": job}
 
     @router.get("")
     async def list_jobs(

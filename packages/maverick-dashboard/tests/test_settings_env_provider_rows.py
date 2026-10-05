@@ -142,6 +142,120 @@ def test_a_key_saved_here_replaces_the_environment_key_and_clearing_returns(monk
     assert row["api_key_source"].startswith("environment:")
 
 
+def test_provider_form_key_rotation_preserves_the_server_address_source(monkeypatch):
+    _env_openai_compatible(monkeypatch)
+    from maverick import config
+    from maverick.llm import LLM
+    from maverick_dashboard import admin_pages, settings_store
+
+    # Discovery is a separate network operation, not evidence of a saved key.
+    monkeypatch.setattr(admin_pages, "_refresh_models_quietly", lambda _name: None)
+    client = TestClient(
+        __import__("maverick_dashboard.app", fromlist=["app"]).app,
+        headers={"Origin": "http://testserver"},
+    )
+    page = client.get("/settings").text
+    field = re.search(r'<input[^>]*id="provider-url-openai_compatible"[^>]*>', page).group()
+    assert 'value=""' in field
+    assert "Leave blank to keep the address above" in page
+    replacement = "dashboard-replacement-5678"  # pragma: allowlist secret
+    response = client.post("/settings/providers", data={
+        "provider": "openai_compatible", "api_key": replacement, "base_url": "",
+    }, follow_redirects=False)
+    assert response.status_code == 303, response.text
+    saved = settings_store.load_overlay()["providers"]["openai_compatible"]
+    assert "base_url" not in saved
+    assert replacement not in config.dashboard_overrides_path().read_text(encoding="utf-8")
+    monkeypatch.setenv("OPENAI_COMPATIBLE_BASE_URL", "https://moved.example.test/v1")
+    config.reset_config_cache()
+    route = LLM()._provider_client_config("openai_compatible")
+    assert route.base_url == "https://moved.example.test/v1"
+    assert route.api_key == replacement
+
+
+def test_native_key_rotation_does_not_freeze_a_carried_forward_address(monkeypatch):
+    _env_openai_compatible(monkeypatch)
+    from maverick import config
+    from maverick_dashboard import settings_store
+
+    settings_store.rotate_provider(
+        "openai_compatible", api_key="replacement-5678", base_url=_ENV_URL,
+    )
+    assert "base_url" not in settings_store.load_overlay()["providers"]["openai_compatible"]
+    assert config.provider_configuration_state("openai_compatible")["base_url_source"].startswith("environment:")
+    settings_store.rotate_provider("openai_compatible", base_url="https://chosen.example.test/v1")
+    assert config.provider_configuration_state("openai_compatible")["base_url_source"] == "dashboard"
+    monkeypatch.setenv("OPENAI_COMPATIBLE_BASE_URL", "https://moved.example.test/v1")
+    config.reset_config_cache()
+    assert config.provider_configuration_state("openai_compatible")["base_url"] == "https://chosen.example.test/v1"
+
+
+def test_provider_address_sign_in_material_is_not_displayed_or_prefilled(monkeypatch):
+    _env_openai_compatible(monkeypatch)
+    monkeypatch.setenv("OPENAI_COMPATIBLE_BASE_URL",
+                       "https://user:private-password@llm.example.test/v1?token=private-token#private-fragment")
+    from maverick import config
+
+    config.reset_config_cache()
+    row = _rows()["openai_compatible"]
+    assert row["base_url"] == _ENV_URL
+    assert row["base_url_needs_repair"] is True
+    client = TestClient(
+        __import__("maverick_dashboard.app", fromlist=["app"]).app,
+        headers={"Origin": "http://testserver"},
+    )
+    page = client.get("/settings").text
+    assert "private-password" not in page and "private-token" not in page and "private-fragment" not in page
+    assert "Enter a clean server address below" in page
+    catalog = client.get("/api/v1/settings/catalog?group=integrations")
+    assert catalog.status_code == 200
+    assert not any(word in catalog.text for word in ("private-password", "private-token", "private-fragment"))
+    address = next(row for group in catalog.json()["groups"] for row in group["settings"]
+                   if row["id"] == "providers.openai_compatible.base_url")
+    assert address["value"] == _ENV_URL
+
+
+@pytest.mark.parametrize("address", [
+    "https://user:private-password@llm.example.test/v1",
+    "https://llm.example.test/v1?token=private-token",
+    "http://localhost:bad-port/v1",
+])
+def test_provider_rejects_an_unusable_address_before_rotating_the_key(monkeypatch, address):
+    _env_openai_compatible(monkeypatch)
+    from maverick import config
+    from maverick_dashboard import settings_store
+
+    client = TestClient(
+        __import__("maverick_dashboard.app", fromlist=["app"]).app,
+        headers={"Origin": "http://testserver"},
+    )
+    response = client.post("/settings/providers", data={
+        "provider": "openai_compatible", "api_key": "new-key-5678", "base_url": address,
+    }, follow_redirects=False)
+    assert response.status_code == 400, response.text
+    assert "use the key field for access" in response.json()["detail"]
+    assert not config.dashboard_overrides_path().exists()
+    assert not settings_store.load_overlay().get("providers")
+
+
+def test_self_hosted_setup_hints_match_the_service_and_keyless_model(monkeypatch):
+    client = TestClient(
+        __import__("maverick_dashboard.app", fromlist=["app"]).app,
+        headers={"Origin": "http://testserver"},
+    )
+    page = client.get("/settings").text
+
+    def block(name):
+        return page.split(f'id="provider-{name}"', 1)[1].split('<div class="provider-row"', 1)[0]
+
+    assert "No key yet" not in block("ollama")
+    assert "Where do I get a key?" not in block("ollama")
+    assert "Server access key (if required)" in block("ollama")
+    assert 'placeholder="http://localhost:11434"' in block("ollama")
+    assert 'placeholder="http://localhost:8000/v1"' in block("vllm")
+    assert 'placeholder="http://localhost:8080/v1"' in block("tgi")
+
+
 def test_all_settings_shows_effective_server_fallback_and_safe_replacement(monkeypatch):
     _env_openai_compatible(monkeypatch)
     from maverick import config

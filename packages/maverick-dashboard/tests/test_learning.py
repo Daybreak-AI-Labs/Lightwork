@@ -32,8 +32,8 @@ def test_learning_api_reports_governed_components_on_and_dgm_off_by_default(
     keys = {c["key"] for c in data["components"]}
     assert {"consequence", "reflexion", "dreaming", "capture", "data_engine"} <= keys
     assert data["components_total"] == len(data["components"])
-    assert all(c["on"] is True for c in data["components"])
-    assert data["components_on"] == data["components_total"]
+    assert all(c["on"] is (c["key"] != "budget_tuning") for c in data["components"])
+    assert data["components_on"] == data["components_total"] - 1
     assert data["dgm"]["requested"] is False
     assert data["dgm"]["state"] == "off"
     assert data["dgm"]["research_only"] is True
@@ -180,7 +180,7 @@ def test_enable_all_learning_flips_every_component(tmp_path, monkeypatch):
     self = _isolate(tmp_path, monkeypatch)  # noqa: F841 (world not needed here)
     reset_config_cache()
     total = client.get("/api/v1/learning").json()["components_total"]
-    assert client.get("/api/v1/learning").json()["components_on"] == total
+    assert client.get("/api/v1/learning").json()["components_on"] == total - 1
     r = client.post("/api/v1/learning", json={"enabled": False})
     assert r.status_code == 200 and r.json()["components_on"] == 0
     assert client.get("/api/v1/learning").json()["components_on"] == 0
@@ -296,7 +296,7 @@ def test_learning_page_hides_flow_autonomy_when_engine_off(tmp_path, monkeypatch
 def test_learning_page_has_enable_button(tmp_path, monkeypatch):
     _isolate(tmp_path, monkeypatch)
     t = client.get("/learning").text
-    assert 'id="lrn-enable"' in t and "Turn core learning off" in t
+    assert 'id="lrn-enable"' in t and "Turn core learning on" in t
 
 
 def test_dgm_is_a_separate_acknowledged_research_toggle(tmp_path, monkeypatch):

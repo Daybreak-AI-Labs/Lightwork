@@ -671,14 +671,17 @@ class ConsentBulkJobStore:
             raise ConsentBulkJobValidationError("bulk-job item identifiers must be unique")
         actor = _digest(actor_sha256, "actor_sha256")
         now = self._now()
-        scheduled = _timestamp(scheduled_for, "scheduled_for", allow_none=True) or now
+        requested_schedule = _timestamp(scheduled_for, "scheduled_for", allow_none=True)
+        scheduled = requested_schedule or now
         key_sha = self._idempotency(idempotency_key)
         request = {
             "kind": kind,
             "operation": operation,
             "items": normalized,
             "actor_sha256": actor,
-            "scheduled_for": scheduled,
+            # Hash the submitted choice, not the clock used to start immediate
+            # work. Otherwise an identical retry always conflicts a moment later.
+            "scheduled_for": requested_schedule,
         }
         request_sha = _sha256(request, maximum=max(_MAX_JSON_BYTES, len(normalized) * _MAX_ITEM_BYTES))
         credits = len(normalized)
@@ -758,6 +761,7 @@ class ConsentBulkJobStore:
                     payload={
                         "kind": kind,
                         "operation": operation,
+                        "executor_scope": "job",
                         "total_items": len(normalized),
                         "scheduled_for": scheduled,
                         "request_sha256": request_sha,
@@ -808,6 +812,48 @@ class ConsentBulkJobStore:
         job = _text(job_id, "job_id")
         with self._connect() as connection:
             return self._job_row(connection, tenant, job)
+
+    def job_executor_scope(self, tenant_id: str, job_id: str) -> str:
+        """Preserve earlier jobs' effect keys while isolating new jobs' keys."""
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT payload_json FROM consent_bulk_events WHERE tenant = ? AND job_id = ? "
+                "AND event_type = 'job.created' ORDER BY sequence LIMIT 1",
+                (_tenant(tenant_id), _text(job_id, "job_id")),
+            ).fetchone()
+            if row is None:
+                raise ConsentBulkJobNotFound("bulk job admission is unavailable")
+            event = _loads(row["payload_json"], "job admission")
+            scope = event.get("executor_scope", "legacy") if isinstance(event, dict) else None
+            if scope not in {"legacy", "job"}:
+                raise ConsentBulkJobError("bulk job execution scope is invalid")
+            return scope
+
+    def created_job_for_request(
+        self, tenant_id: str, *, idempotency_key: str, actor_sha256: str,
+    ) -> dict[str, Any] | None:
+        """Read an actor's original submission without creating or running work."""
+        tenant = _tenant(tenant_id)
+        key = self._idempotency(idempotency_key)
+        actor = _digest(actor_sha256, "actor_sha256")
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT result_json FROM consent_bulk_idempotency "
+                "WHERE tenant = ? AND namespace = 'jobs.create' AND key_sha256 = ?",
+                (tenant, key),
+            ).fetchone()
+            if row is None:
+                return None
+            original = _loads(row["result_json"], "idempotency result")
+            if not isinstance(original, dict):
+                raise ConsentBulkJobError("stored idempotency result is invalid")
+            if not hmac.compare_digest(str(original.get("actor_sha256", "")), actor):
+                return None
+            try:
+                return self._job_row(connection, tenant, _text(original.get("job_id"), "job_id"))
+            except ConsentBulkJobNotFound:
+                # The immutable admission remains after a retained job is purged.
+                return {**original, "retained": False}
 
     def list_jobs(
         self,

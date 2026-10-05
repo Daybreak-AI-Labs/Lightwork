@@ -238,6 +238,7 @@
           && (reviewedOperation || (body.episode_sha256 === expected.episode_sha256
             && body.review_sha256 === expected.review_sha256))) {
         prepared = null; display(body, '');
+        window.dispatchEvent(new Event('lightwork:product-state-changed'));
       } else {
         reconcile = result.status === 409
           ? 'The example changed while you were reviewing it. Your reason is kept. Review the refreshed status and confirm again if appropriate.'

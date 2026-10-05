@@ -13,7 +13,7 @@
   const STATUS = { accepted: 'Reviewed and accepted', awaiting_review: 'Waiting for review', rejected: 'Not accepted',
     withdrawn: 'No longer used', expired: 'Expired', none: 'Not collected as an example' };
   const state = { overview: null, flow: null, artifact: null, recipe: null, pkg: null, bundles: [], trust: null,
-    question: null, draft: null, draftMode: null, busy: false };
+    question: null, draft: null, draftMode: null, busy: false, ruleStep: null };
 
   function make(tag, cls, text) {
     const node = document.createElement(tag);
@@ -26,10 +26,17 @@
   function failText(failure, what) {
     return typeof window.mvErrorText === 'function' ? window.mvErrorText(failure, what) : 'Could not ' + what + '. Please try again.';
   }
-  async function api(path, body, method) {
+  async function api(path, body, method, source) {
+    const headers = { 'Content-Type': 'application/json', Accept: 'application/json' };
+    const current = source || (state.overview && state.overview.flow);
+    if (body !== undefined && path.startsWith('/api/v1/flows/' + enc + '/teach/') && current && current.version && current.revision) {
+      headers['X-Lightwork-Flow-Version'] = String(current.version);
+      headers['X-Lightwork-Flow-Revision'] = current.revision;
+      if (current.context) headers['X-Lightwork-Teaching-Context'] = current.context;
+    }
     const response = await fetch(path, {
       method: method || (body === undefined ? 'GET' : 'POST'), credentials: 'same-origin', cache: 'no-store',
-      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      headers: headers,
       body: body === undefined ? undefined : JSON.stringify(body)
     });
     if (!response.ok) throw response;
@@ -53,7 +60,7 @@
     state.busy = true;
     root.setAttribute('aria-busy', 'true');
     syncNextActions();
-    try { await action(); } catch (failure) { say(failText(failure, what), statusId); }
+    try { return await action(); } catch (failure) { say(failText(failure, what), statusId); return { status: 'unconfirmed' }; }
     finally { state.busy = false; root.setAttribute('aria-busy', 'false'); syncNextActions(); }
   }
   function readJsonFile(file) {
@@ -140,7 +147,7 @@
     } else {
       control = make('input', 'input');
       control.type = kind === 'integer' ? 'number' : 'text';
-      if (kind === 'integer') control.step = '1';
+      if (kind === 'integer') { control.step = '1'; control.required = true; }
       control.value = value == null ? '' : String(value);
     }
     control.dataset.kind = kind;
@@ -150,7 +157,10 @@
   }
   function readValue(control) {
     if (control.dataset.kind === 'boolean') return control.value === 'true';
-    if (control.dataset.kind === 'integer') { const n = Number(control.value); return Number.isSafeInteger(n) ? n : null; }
+    if (control.dataset.kind === 'integer') {
+      if (!control.value.trim()) return null;
+      const n = Number(control.value); return Number.isSafeInteger(n) ? n : null;
+    }
     return control.value;
   }
   function exampleRow(values) {
@@ -175,6 +185,16 @@
       return { inputs: inputs, output: readValue(row.querySelector('[data-answer]')) };
     });
   }
+  function examplesReady() {
+    for (const control of $('tr-examples').querySelectorAll('[data-input],[data-answer]')) {
+      if (!control.checkValidity()) {
+        control.reportValidity(); control.focus();
+        say('Complete the highlighted example value before learning.');
+        return false;
+      }
+    }
+    return true;
+  }
   function renderExamples() {
     const kept = examples();
     $('tr-examples').replaceChildren();
@@ -182,6 +202,7 @@
   }
   function showRule(artifact, summary) {
     state.artifact = artifact;
+    state.ruleStep = selectedStep();
     $('tr-summary').textContent = summary.rules + (summary.rules === 1 ? ' rule fits' : ' rules fit') + ' your '
       + summary.examples + (summary.examples === 1 ? ' example.' : ' examples.')
       + (summary.rules > 1 ? ' Where they disagree, the step asks its assistant.' : '');
@@ -210,6 +231,9 @@
   function stepInfo() { return (state.overview && state.overview.steps || []).find(s => s.id === selectedStep()); }
   function showCurrent() {
     const step = stepInfo();
+    document.dispatchEvent(new CustomEvent('lightwork:copilot-selection', { detail: {
+      selection: Object.assign({ kind: 'flow', id: flowId }, step ? { node_id: step.id } : {})
+    } }));
     $('tr-current-actions').hidden = !(step && step.rule);
     if (!step) { $('tr-current').textContent = ''; return; }
     $('tr-current').textContent = !step.ready ? 'This step needs instructions and a place to keep its answer before it can learn a rule.'
@@ -241,21 +265,27 @@
   $('tr-add-input').addEventListener('click', () => { if ($('tr-inputs').children.length < 6) { inputRow({}); renderExamples(); } });
   $('tr-add-example').addEventListener('click', () => { if ($('tr-examples').children.length < 64) exampleRow(null); });
   $('tr-output').addEventListener('change', renderExamples);
-  $('tr-learn').addEventListener('click', () => guarded('learn from these examples', async () => {
+  async function learnRuleFromFields(source) {
+    if (!examplesReady()) return { status: 'needs_input', message: 'Complete the highlighted example value on Teach before learning.' };
     const style = document.querySelector('input[name="tr-style"]:checked').value;
     const result = await api('/api/v1/flows/' + enc + '/teach/rule/learn', {
       inputs: declarations(), output_kind: $('tr-output').value, examples: examples(), constants: constants(),
       combined: style === 'combined', max_operations: Number($('tr-ops').value) || 3
-    });
+    }, undefined, source);
     showRule(result.artifact, result.summary);
     say('Learned. Try some inputs, then use the rule in the step.');
-  }));
-  $('tr-more').addEventListener('click', () => guarded('add these examples', async () => {
+    return { status: 'learned' };
+  }
+  $('tr-learn').addEventListener('click', () => guarded('learn from these examples', () => learnRuleFromFields()));
+  async function refineRuleFromFields(source) {
     if (!state.artifact) return;
-    const result = await api('/api/v1/flows/' + enc + '/teach/rule/add-examples', { artifact: state.artifact, examples: examples() });
+    if (!examplesReady()) return { status: 'needs_input', message: 'Complete the highlighted example value on Teach before adding it.' };
+    const result = await api('/api/v1/flows/' + enc + '/teach/rule/add-examples', { artifact: state.artifact, examples: examples() }, undefined, source);
     showRule(result.artifact, result.summary);
     say('Added. The earlier examples were kept.');
-  }));
+    return { status: 'learned' };
+  }
+  $('tr-more').addEventListener('click', () => guarded('add these examples', () => refineRuleFromFields()));
   $('tr-try-go').addEventListener('click', () => guarded('try the rule', async () => {
     if (!state.artifact) return;
     const inputs = {};
@@ -273,7 +303,7 @@
     const result = await api('/api/v1/flows/' + enc + '/teach/rule/remove', { node_id: selectedStep() });
     offerSave(result.draft, result.note, 'update');
   }));
-  $('tr-use-current').addEventListener('click', () => guarded('load the current rule', async () => {
+  async function loadCurrentRule() {
     const flow = await api('/api/v1/flows/' + enc);
     const node = (flow.nodes || []).find ? (flow.nodes || []).find(n => n.id === selectedStep()) : (flow.nodes || {})[selectedStep()];
     const artifact = node && node.learned_operator && node.learned_operator.artifact;
@@ -287,7 +317,9 @@
     showRule(artifact, { rules: (artifact.candidates || []).length || 1, examples: artifact.example_count || 0,
       inputs: Object.keys(spec.inputs || {}).sort().map(n => ({ name: n, kind: spec.inputs[n].type })) });
     say('The current rule is loaded. Add examples to improve it, or try it.');
-  }));
+    return { status: 'ready' };
+  }
+  $('tr-use-current').addEventListener('click', () => guarded('load the current rule', loadCurrentRule));
 
   // ---- questions about unclear cases (existing reviewed-question routes) -----------
   if ($('tq-ask')) {
@@ -342,10 +374,16 @@
       ? (run.grant ? ' · Learning permission ended' : ' · Allow learning from its run page first') : '';
     label.append(box, ' ' + when + ' · ' + (STATUS[run.status] || human(run.status)) + permission);
     item.append(label);
+    const review = make('a', 'btn btn--ghost', 'Open run and learning review');
+    review.href = '/flows/' + enc + '/runs/' + encodeURIComponent(run.run_id);
+    review.target = '_blank'; review.rel = 'noopener';
+    review.setAttribute('aria-label', 'Open run and learning review in a new tab');
+    item.append(review);
     return item;
   }
   function checked(name) { return Array.from(document.querySelectorAll('input[name="' + name + '"]:checked')).map(b => b.value); }
   async function loadRuns() {
+    const selected = checked('rc-run');
     const data = await api('/api/v1/flows/' + enc + '/teach/examples');
     state.runs = data.runs || [];
     if ($('rc-runs')) {
@@ -353,6 +391,7 @@
       if (!data.available) $('rc-runs').append(make('p', 'muted', data.message || 'Reviewed examples aren’t available.'));
       else if (!state.runs.length) $('rc-runs').append(make('p', 'muted', 'This flow has no runs yet. Run it, then review runs as examples.'));
       state.runs.forEach(run => $('rc-runs').append(runRow(run, 'rc-run', run.can_learn)));
+      $('rc-runs').querySelectorAll('input[name="rc-run"]').forEach(box => { box.checked = !box.disabled && selected.includes(box.value); });
     }
     $('sg-runs').replaceChildren();
     const signable = root.dataset.lineage === '1' ? state.runs.filter(r => r.can_sign) : [];
@@ -376,6 +415,9 @@
     $('rc-ops-wrap').hidden = $('rc-style').value === 'plain';
   }
   if ($('rc-learn')) {
+    if ($('rc-refresh')) $('rc-refresh').addEventListener('click', () => guarded('refresh reviewed examples', async () => {
+      await loadRuns(); say('The current example list is ready. Your learning result is kept.');
+    }));
     $('rc-style').addEventListener('change', syncRecipeStyle);
     $('rc-learn').addEventListener('click', () => guarded('learn from these runs', async () => {
       const runs = checked('rc-run');
@@ -386,11 +428,7 @@
         style: $('rc-style').value, max_operations: Number($('rc-ops').value) || 2 });
       showRecipe(result);
     }));
-    $('rc-more').addEventListener('click', () => guarded('add these runs', async () => {
-      const runs = checked('rc-run');
-      if (!state.recipe || !runs.length) { say('Choose the runs to add.'); return; }
-      showRecipe(await api('/api/v1/flows/' + enc + '/teach/recipe/refine', { package: state.recipe, run_ids: runs }));
-    }));
+    $('rc-more').addEventListener('click', () => guarded('add these runs', () => refineRecipeFromFields()));
     $('rc-draft').addEventListener('click', () => guarded('make the new flow', async () => {
       const name = $('rc-name').value.trim();
       if (!name) { say('Name the new flow first.'); $('rc-name').focus(); return; }
@@ -419,6 +457,73 @@
     if (!$('rc-name').value) $('rc-name').value = (state.overview && state.overview.flow.name ? state.overview.flow.name + ' (learned)' : 'Learned flow');
     say('Learned. Name the new flow and make it, or add more runs.');
   }
+  async function refineRecipeFromFields(source) {
+    const runs = checked('rc-run');
+    if (!state.recipe || !runs.length) { say('Open a learned procedure and choose the additional runs to add.'); return { status: 'needs_input' }; }
+    const expected = {};
+    for (const id of runs) {
+      const row = (state.runs || []).find(item => item.run_id === id);
+      if (!row || !row.can_learn) { say('A chosen example is no longer available. Refresh its review.'); return { status: 'unconfirmed' }; }
+      expected[id] = { revision: row.revision, episode: row.episode, grant: row.grant };
+    }
+    showRecipe(await api('/api/v1/flows/' + enc + '/teach/recipe/refine',
+      { package: state.recipe, run_ids: runs, expected_runs: expected }, undefined, source));
+    await loadRuns();
+    return { status: 'learned' };
+  }
+  window.LightworkFlowTeach = {
+    showTeachingInputs: function (mode) {
+      const target = $(mode === 'recipe_refine' ? 'rc-runs' : 'tr-examples');
+      if (!target) return;
+      target.scrollIntoView({ block: 'center', behavior: 'auto' });
+      const input = target.querySelector('input,select,textarea');
+      if (input) input.focus();
+    },
+    showRuleReview: function () {
+      if (!state.artifact) return;
+      $('tr-result').scrollIntoView({ block: 'center', behavior: 'auto' });
+      const input = $('tr-try').querySelector('input,select,textarea');
+      if (input) input.focus();
+    },
+    perform: async function (review) {
+      const current = state.overview && state.overview.flow;
+      if (!review || !['recipe_refine', 'rule_teach', 'rule_refine'].includes(review.mode) || review.flow_id !== flowId || !current || current.version !== review.version ||
+          current.revision !== review.revision || (review.context && current.context !== review.context) ||
+          (review.mode !== 'recipe_refine' && selectedStep() !== review.node_id))
+        return { status: 'stale', message: 'The selected flow or step changed. Refresh Copilot before continuing.' };
+      if (state.draft) return { status: 'needs_input', message: 'Save or cancel your current draft before preparing another learning result.' };
+      const what = review.mode === 'recipe_refine' ? 'add these runs' : review.mode === 'rule_refine' ? 'add these examples' : 'learn from these examples';
+      return guarded(what, async () => {
+        if (review.mode === 'rule_refine' && (!state.artifact || state.ruleStep !== review.node_id)) {
+          await loadCurrentRule();
+          $('tr-examples').scrollIntoView({ block: 'center', behavior: 'auto' });
+          return { status: 'needs_input', message: 'The saved rule is loaded. Enter the additional examples on Teach, then use this control again.' };
+        }
+        const ok = typeof window.mvConfirm === 'function' && await window.mvConfirm(
+          review.mode === 'recipe_refine' ? 'Add the selected reviewed runs to the current learned procedure? Its earlier signed sources are kept. Nothing is saved or published.' :
+            'Learn from the current labelled examples on Teach? Review their inputs and answers first. Nothing is saved or published.',
+          { okText: review.mode === 'rule_teach' ? 'Learn rule' : 'Add examples' });
+        if (!ok) return { status: 'cancelled' };
+        return review.mode === 'recipe_refine' ? refineRecipeFromFields(review) :
+          review.mode === 'rule_refine' ? refineRuleFromFields(review) : learnRuleFromFields(review);
+      });
+    },
+    acceptRecipe: async function (selectedFlow, result) {
+      if (selectedFlow !== flowId || state.busy || !$('rc-result') || !result ||
+          state.draft || !result.package || !result.summary || result.approved !== false) return false;
+      if (state.recipe && (typeof window.mvConfirm !== 'function' || !await window.mvConfirm(
+        'Replace the current unsaved learning result with this one? Saved flows are unchanged.',
+        { okText: 'Review this result' }))) return false;
+      if (state.busy || state.draft) return false;
+      showRecipe(result);
+      return true;
+    },
+    showRecipeReview: function () {
+      if (!state.recipe || !$('rc-name')) return;
+      $('rc-result').scrollIntoView({ block: 'center', behavior: 'auto' });
+      $('rc-name').focus();
+    }
+  };
 
   // ---- signed examples ------------------------------------------------------------------
   async function addBundle(bundle, label) {
@@ -522,6 +627,10 @@
   }
 
   // ---- start ---------------------------------------------------------------------------
+  if ($('ft-refresh')) $('ft-refresh').addEventListener('click', () => guarded('refresh the flow', async () => {
+    await loadOverview(); await loadRuns();
+    say('The flow and examples are refreshed. Review the current step before continuing; your unsaved learning result is kept.');
+  }));
   inputRow({ name: 'amount', kind: 'integer', min: 0, max: 1000 });
   renderExamples();
   syncRecipeStyle();

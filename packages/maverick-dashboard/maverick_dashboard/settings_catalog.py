@@ -2180,7 +2180,8 @@ _POLICY: tuple[Setting, ...] = (
       "maverick.config", subgroup="Self-improving instructions", partial_default=False,
       weaker=False, warning="Improvements to agent instructions could be adopted on weaker evidence."),
     S("self_harness", "auto_run", "Look for improvements every night",
-      "Each night, look for recurring mistakes and test a fix for them.", "toggle",
+      "Review recurring mistakes on the overnight learning schedule. Improvements are "
+      "adopted only when the configured checks pass. See the last review on Learning.", "toggle",
       "Memory & learning", True, "maverick.config", subgroup="Self-improving instructions",
       partial_default=False),
     S("self_harness", "eval_budget_dollars", "Most to spend testing improvements",

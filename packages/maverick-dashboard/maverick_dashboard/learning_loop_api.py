@@ -83,6 +83,11 @@ class WithdrawLessonIn(BaseModel):
     confirm: Literal[True]
 
 
+class ReviewDecisionIn(BaseModel):
+    revision: str = Field(pattern=r"^[0-9a-f]{64}$")
+    confirm: Literal[True]
+
+
 def _clip(value: Any, size: int = _MAX_TEXT) -> str:
     text = " ".join(str(value or "").split())
     return text if len(text) <= size else text[: size - 1] + "…"
@@ -110,6 +115,8 @@ def _slug(title: str) -> str:
 def _refine_problem(exc: Exception) -> HTTPException:
     """A kernel refusal as one plain sentence (never the kernel's wording)."""
     text = str(exc).lower()
+    if "stays marked applied" in text or "may be half-written" in text or "current state needs review" in text:
+        return HTTPException(503, "The instruction change could not be fully confirmed. Refresh current instructions and ask an administrator to review recovery before starting work.")
     rules = (
         ("is off", f"Suggested instruction changes are turned off. Turn on {_refine_switch_place()} first."),
         ("injection screen", "Part of this text reads like an instruction to ignore Lightwork's rules, "
@@ -248,39 +255,55 @@ async def propose_refinement(request: Request, body: ProposeIn) -> dict:
     return {"proposal": view, "needs_approval": bool(out.get("approval_id"))}
 
 
-@router.post("/refinements/{proposal_id}/apply")
-async def apply_refinement(request: Request, proposal_id: str) -> dict:
+def change_current_refinement(request: Request, proposal_id: str, revision: str, *, undo: bool) -> dict:
+    """Shared current-state decision for the native review and Copilot."""
     require_global_permission(request, "admin")
     if not _PROPOSAL_ID.fullmatch(proposal_id):
         raise HTTPException(status_code=404, detail="That suggestion no longer exists. Refresh the page.")
     from maverick import harness_refine
+    from maverick.audit import AuditRefused
     from maverick.learning_guard import Halted
     actor = _actor(request)
     try:
-        out = await run_in_threadpool(_bound(
-            request, lambda: harness_refine.apply(proposal_id, applied_by=actor)))
+        if undo:
+            undone = _bound(request, lambda: harness_refine.revert(
+                proposal_id, reverted_by=actor, expected_revision=revision))()
+            if not undone:
+                raise HTTPException(409, "There is nothing to undo for this change. Refresh the current instructions.")
+            return {"reverted": True}
+        out = _bound(request, lambda: harness_refine.apply(
+            proposal_id, applied_by=actor, expected_revision=revision))()
     except Halted as exc:
         raise HTTPException(status_code=409, detail=_HALTED) from exc
+    except AuditRefused as exc:
+        raise HTTPException(503, "The instruction result could not be fully recorded. Refresh current instructions before another decision.") from exc
     except harness_refine.RefineError as exc:
+        if "instruction review no longer matches" in str(exc):
+            raise HTTPException(409, "The instructions changed after review. Refresh and review the full change again.") from exc
         raise _refine_problem(exc) from exc
     return {"proposal": _proposal_view(out)}
 
 
-@router.post("/refinements/{proposal_id}/revert")
-async def revert_refinement(request: Request, proposal_id: str) -> dict:
+async def _review_decision(request: Request, proposal_id: str, body: ReviewDecisionIn | None, *, undo: bool) -> dict:
+    from .app import _require_same_origin
+    _require_same_origin(request)
     require_global_permission(request, "admin")
     if not _PROPOSAL_ID.fullmatch(proposal_id):
         raise HTTPException(status_code=404, detail="That suggestion no longer exists. Refresh the page.")
-    from maverick import harness_refine
-    actor = _actor(request)
-    try:
-        undone = await run_in_threadpool(_bound(
-            request, lambda: harness_refine.revert(proposal_id, reverted_by=actor)))
-    except harness_refine.RefineError as exc:
-        raise _refine_problem(exc) from exc
-    if not undone:
-        raise HTTPException(status_code=409, detail="There is nothing to undo for this change.")
-    return {"reverted": True}
+    if body is None:
+        raise HTTPException(422, "Open the current instruction review and confirm it before deciding.")
+    return await run_in_threadpool(lambda: change_current_refinement(
+        request, proposal_id, body.revision, undo=undo))
+
+
+@router.post("/refinements/{proposal_id}/apply")
+async def apply_refinement(request: Request, proposal_id: str, body: ReviewDecisionIn | None = None) -> dict:
+    return await _review_decision(request, proposal_id, body, undo=False)
+
+
+@router.post("/refinements/{proposal_id}/revert")
+async def revert_refinement(request: Request, proposal_id: str, body: ReviewDecisionIn | None = None) -> dict:
+    return await _review_decision(request, proposal_id, body, undo=True)
 
 
 # ---- self-harness read-outs ---------------------------------------------

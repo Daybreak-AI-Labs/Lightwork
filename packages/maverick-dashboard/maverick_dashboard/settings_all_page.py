@@ -196,6 +196,11 @@ def _resolve_provider_field(setting: catalog.Setting, layers: dict[str, Any]) ->
     from maverick import config
     from maverick.config_resets import apply_to_base
 
+    from .settings_store import provider_address_display
+
+    def public_value(value):
+        return bool(value) if setting.secret else provider_address_display(value)[0]
+
     name = setting.section.removeprefix("providers.")
     env_map = (config.PROVIDER_KEY_ENV_MAP if setting.key == "api_key"
                else config.PROVIDER_BASE_URL_ENV_MAP)
@@ -220,11 +225,11 @@ def _resolve_provider_field(setting: catalog.Setting, layers: dict[str, Any]) ->
             # are a fallback: a dashboard value takes precedence at runtime.
             return {"source": source, "locked": False,
                     "source_text": "Set when Lightwork starts · save here to replace it",
-                    "value": bool(value) if setting.secret else value, "known": True}
+                    "value": public_value(value), "known": True}
     if value is None:
         return {"source": "default", "locked": False, "value": _default_of(setting), "known": True}
     return {"source": source, "locked": source == "deployment",
-            "value": bool(value) if setting.secret else value, "known": True}
+            "value": public_value(value), "known": True}
 
 
 def _has_partial_default(setting: catalog.Setting) -> bool:
@@ -1569,6 +1574,11 @@ def _catalog_update_locked(request: Request, body: CatalogUpdate, full: bool=Fal
             settings_governance_level.turn_on(learning, actor)
         except (RuntimeError, OSError) as exc:
             raise HTTPException(status_code=503, detail='The settings were saved, but the learning systems for this level could not be turned on. Turn them on from the Learning page.') from exc
+    if any(path[0] in {"dreaming", "data_engine", "self_harness", "flows", "automation_events"}
+           for path in writes):
+        from .automation_queue import refresh_runtime
+
+        refresh_runtime(request)
     state = _saved_state(before, asked)
     return JSONResponse({'changed': [c['setting'].id for c in changes], 'restart': any(c['setting'].restart for c in changes), **state}, headers={'Cache-Control': 'no-store'})
 
