@@ -386,6 +386,8 @@
       }
       if (dialog.open && typeof dialog.close === "function") {
         dialog.close();
+        // The close event arrives later; settle now so a quick Ctrl+K reopens.
+        onClosed();
       } else {
         dialog.removeAttribute("open");
         onClosed();
@@ -705,7 +707,8 @@
       event.preventDefault();
       if (mode) leaveList(false); else closeFinder();
     });
-    dialog.addEventListener("close", onClosed);
+    // A late close event must not undo a reopen that already happened.
+    dialog.addEventListener("close", function () { if (!dialog.open) onClosed(); });
     dialog.addEventListener("keydown", function (event) {
       if (event.isComposing) return;
       if (event.key === "Escape") {
