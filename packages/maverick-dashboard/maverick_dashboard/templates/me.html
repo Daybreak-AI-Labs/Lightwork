@@ -35,7 +35,7 @@
           <td><span class="badge {{ 'blocked' if a.risk in ('high', 'critical') else 'pending' }}">{{ a.risk_label }}</span></td>
           <td>{{ a.spending }}</td>
           <td>{% if a.decide_by %}{{ a.decide_by | datetime }}{% else %}No deadline{% endif %}{% if a.status == 'expired' %} <span class="badge blocked">Expired</span>{% endif %}</td>
-          <td>{{ {'you': 'You', 'you_own': 'You (your own request)', 'requester': 'The person who asked'}.get(a.waiting_on, 'Other people') }}</td>
+          <td>{{ {'you': 'You', 'you_own': 'You (your own request)', 'you_chat': 'You (decide in Slack or Teams)', 'requester': 'The person who asked'}.get(a.waiting_on, 'Other people') }}</td>
         </tr>
       {% endfor %}
       </tbody>

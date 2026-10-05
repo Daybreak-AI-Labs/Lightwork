@@ -9024,6 +9024,14 @@ def approvals_page(request: Request) -> HTMLResponse:
     pending = list(world.pending_approvals())
     approvals = [row for row in pending if can_read_approval(request, row, world)]
     flow_approvals = pending_for_request(request)
+    # Requests from colleagues' private tasks: a card with only who asked,
+    # the action and its risk, the agent or specialist and the expiry.
+    from .api import _supervisor
+    from .approval_private_cards import private_cards
+
+    readable = {row.id for row in approvals}
+    private = private_cards(world, [row for row in pending if row.id not in readable],
+                            _supervisor(request) or "")
     return templates.TemplateResponse(
         request,
         "approvals.html",
@@ -9032,12 +9040,25 @@ def approvals_page(request: Request) -> HTMLResponse:
             "flow_approvals": flow_approvals["items"],
             "flow_approval_coverage": flow_approvals["coverage"],
             "private_count": len(pending) - len(approvals),
+            "private_cards": private,
+            "viewer_role": _approval_viewer_role(request),
             # Link to Content access only when asking for a card read is on.
             "content_access_on": content_access.enabled(),
             **_approval_queue_context(approvals, request),
         },
         headers={"Cache-Control": "private, no-store"},
     )
+
+
+def _approval_viewer_role(request: Request) -> str:
+    """The viewer's role name in this workspace, for "why you see this"."""
+    from . import auth as _auth
+    from .api import _supervisor
+
+    try:
+        return _auth.role_for_principal(_supervisor(request) or "") or ""
+    except Exception:  # an unreadable roster names no role
+        return ""
 
 
 def _recent_governance_holds(limit: int = 10) -> list[dict]:

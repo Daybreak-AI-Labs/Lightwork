@@ -103,7 +103,8 @@ def _waiting_on(request: Request, world, principal: str, row: dict, *, can_decid
     "you" / "you_own": this person can open and decide it (the person who
     asked may approve their own request); "others": they asked, but someone
     else must decide (the separate-approver rule, or two-person approval);
-    "requester": it belongs to a colleague's private task this person can't open.
+    "requester": it belongs to a colleague's private task this person can't open;
+    "you_chat": private here, but this person may decide it in Slack or Teams.
     """
     from .approval_decisions import own_request_note
     from .content_access import can_read_approval
@@ -113,7 +114,12 @@ def _waiting_on(request: Request, world, principal: str, row: dict, *, can_decid
         return "others"
     own = bool(principal) and approval.requested_by == principal
     if not can_decide or not can_read_approval(request, approval, world):
-        return "others" if own else "requester"
+        if own:
+            return "others"
+        from .approval_private_cards import decides_in_chat
+
+        # Private here, but the rules let this person decide it in chat.
+        return "you_chat" if can_decide and decides_in_chat(approval, principal) else "requester"
     if not own:
         return "you"
     return "others" if own_request_note(world, approval, principal) else "you_own"
@@ -134,7 +140,7 @@ def _my_work(request: Request, principal: str) -> dict:
         row["waiting_on"] = _waiting_on(request, world, principal, row, can_decide=can_decide)
     # "Things that need you" counts only the requests this person can decide.
     digest["counts"]["approvals"] = sum(
-        1 for row in digest["approvals"] if row["waiting_on"] in ("you", "you_own"))
+        1 for row in digest["approvals"] if row["waiting_on"] in ("you", "you_own", "you_chat"))
     try:
         links = channel_identities.links_for(principal)
     except channel_identities.ChannelIdentityError:
