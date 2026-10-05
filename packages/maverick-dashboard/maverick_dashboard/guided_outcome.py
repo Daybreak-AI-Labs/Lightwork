@@ -12,8 +12,8 @@ from .auth import (
 
 PLANS = {
     "deliverable": {"label":"Review a completed AI deliverable", "suite":None,
-        "prepare":"Choose a specialist whose deliverable requires sign-off, and describe a small task with clear acceptance criteria.",
-        "prepare_href":"/agents", "prepare_label":"Choose a specialist",
+        "prepare":"Choose an agent or specialist whose result requires approval, and describe a small task with clear acceptance criteria.",
+        "prepare_href":"/agents", "prepare_label":"Choose an agent or specialist",
         "work":"Run the task, check the output and supporting evidence, and request corrections when needed.",
         "work_href":"/chat", "work_label":"Start the task",
         "review":"Record an explicit approval on the current completed deliverable. A finished run alone does not complete this path.",

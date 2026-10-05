@@ -380,7 +380,7 @@
     const data = await request('/sources');
     sources = data.items; $('op-source-coverage').textContent = data.coverage.map(c => (c.kind === 'goal' ? 'Pending tasks' : 'Vendor intake') + ': ' + c.status).join(' · ');
     if ($('op-specialist')) {
-      const selected = $('op-specialist').value; $('op-specialist').replaceChildren(new Option('Choose a specialist',''));
+      const selected = $('op-specialist').value; $('op-specialist').replaceChildren(new Option('Choose an agent or specialist',''));
       (data.specialists || []).forEach(s => $('op-specialist').append(new Option(s.label,s.domain))); $('op-specialist').value = selected;
     }
     $('op-planned-cases').querySelectorAll('select').forEach(select => {

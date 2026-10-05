@@ -35,4 +35,10 @@ ROWS = [
 ('Readable text ready','Texte lisible prêt','Lesbarer Text bereit','読めるテキストを準備済み','可读文本已就绪'),
 ('Still being read','Lecture en cours','Wird noch gelesen','読み取り中','仍在读取'),
 ('Could not be read ({status})','Lecture impossible ({status})','Konnte nicht gelesen werden ({status})','読み取れませんでした（{status}）','无法读取（{status}）'),
+('Need another route?','Besoin d’une autre solution ?','Brauchen Sie einen anderen Weg?','別の方法が必要ですか？','需要其他方式吗？'),
+('Browse agents and specialists','Parcourir les agents et les spécialistes','Agenten und Spezialisten durchsuchen','エージェントと専門エージェントを見る','浏览智能体和专用智能体'),
+('or','ou','oder','または','或'),
+('start a different task','démarrer une autre tâche','eine andere Aufgabe starten','別のタスクを開始','开始其他任务'),
+("This task won't switch to another agent or specialist on its own.",'Cette tâche ne passera pas d’elle-même à un autre agent ou spécialiste.','Diese Aufgabe wechselt nicht von selbst zu einem anderen Agenten oder Spezialisten.','このタスクが別のエージェントや専門エージェントに自動で切り替わることはありません。','此任务不会自行切换到其他智能体或专用智能体。'),
+('Check setup again','Vérifier à nouveau la configuration','Einrichtung erneut prüfen','設定をもう一度確認','再次检查设置'),
 ]

@@ -138,15 +138,15 @@ def _approve(profile, plan, docs: list[tuple[str, bytes]], actor: str, principal
     try:
         saved_path = Path(save_profile(profile, approved=True))
     except PermissionError:
-        return {"saved": False, "message": "This installation's plan doesn't include new specialists, so it wasn't saved."}
+        return {"saved": False, "message": "This installation's plan doesn't include new agents, so it wasn't saved."}
     except FileExistsError:
-        return {"saved": False, "message": "A specialist with this name already exists. Open it from the list or use a different name."}
+        return {"saved": False, "message": "An agent or specialist with this name already exists. Open it from the list or use a different name."}
     except (ValueError, OSError):
-        return {"saved": False, "message": "This specialist could not be saved. Check its name and try again."}
+        return {"saved": False, "message": "This agent could not be saved. Check its name and try again."}
     try:
         if profile.name not in available_domains():
             saved_path.unlink(missing_ok=True)
-            return {"saved": False, "message": "This specialist did not pass its final setup check. Nothing was added."}
+            return {"saved": False, "message": "This agent did not pass its final setup check. Nothing was added."}
         audit_event("business_agent_approved", agent="dashboard", actor=actor,
                     agent_name=profile.name, documents=len(docs))
     except AuditRefused:
@@ -154,7 +154,7 @@ def _approve(profile, plan, docs: list[tuple[str, bytes]], actor: str, principal
         return {"saved": False, "message": "The activity log couldn't record this approval, so nothing was saved."}
     except Exception:
         saved_path.unlink(missing_ok=True)
-        return {"saved": False, "message": "This specialist could not be confirmed. Nothing was added."}
+        return {"saved": False, "message": "This agent could not be confirmed. Nothing was added."}
     loaded, note = 0, ""
     with tempfile.TemporaryDirectory(prefix="lw-onboard-") as folder:
         paths = []
@@ -168,7 +168,7 @@ def _approve(profile, plan, docs: list[tuple[str, bytes]], actor: str, principal
             if kb is None:
                 note = ("Company documents are turned off, so the documents weren't loaded. An administrator can turn "
                         "them on in settings." if problem == "disabled"
-                        else "The documents couldn't be loaded right now, so the specialist has no document memory yet.")
+                        else "The documents couldn't be loaded right now, so the agent has no document memory yet.")
             else:
                 spec = IntakeSpec(name=profile.name, doc_paths=paths)
                 loaded = attach_docs_to_profile(spec, profile, kb)
@@ -239,13 +239,16 @@ def start_business_agent_draft(request: Request, body: DraftIn) -> dict:
     _guard(request)
     name = body.name.strip()
     if not name:
-        raise HTTPException(422, "Enter a name for the new specialist.")
+        raise HTTPException(422, "Enter a name for the new agent.")
     candidate = _slug(name)
     if candidate in available_domains() or (user_dir() / f"{candidate}.toml").exists():
+        from .agent_changelog import agent_kind
+
+        kind = agent_kind(candidate)  # owner glossary: built-in packs are specialists
         raise HTTPException(
             409,
-            f"A specialist called “{name}” already exists. Choose another name for the new specialist. "
-            "The existing specialist and its safeguards have not changed.",
+            f"{'A specialist' if kind == 'specialist' else 'An agent'} called “{name}” already exists. "
+            f"Choose another name for the new agent. The existing {kind} and its safeguards have not changed.",
         )
     use_ai = body.use_ai
     if use_ai:
@@ -272,7 +275,7 @@ async def approve_business_agent(request: Request, job_id: str, confirm: bool = 
 
     _guard(request)
     if confirm is not True:
-        raise HTTPException(409, "Confirm that you reviewed this specialist and want to add it.")
+        raise HTTPException(409, "Confirm that you reviewed this agent and want to add it.")
     if len(documents) > MAX_DOCS:
         raise HTTPException(413, f"Attach at most {MAX_DOCS} documents.")
     docs, total = [], 0

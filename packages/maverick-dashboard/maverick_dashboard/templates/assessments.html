@@ -67,21 +67,21 @@
   {% from "_hero.html" import hero, state %}
   {% call hero('Governance', 'Assessments',
                subtitle='Continuous review',
-               lede='Privacy, security and AI-risk reviews of every agent
-                     and flow. Lightwork drafts each review from what the
-                     agent or flow is allowed to do; a person approves each
+               lede='Privacy, security and AI-risk reviews of every agent,
+                     specialist and flow. Lightwork drafts each review from what
+                     each one is allowed to do; a person approves each
                      part, and anything that changes later is flagged for a
                      fresh review.') %}
     {{ state('Current state', 'Checked every day',
              badge='automatic', badge_class='ok',
-             copy='Every agent and flow is re-checked daily; anything that
+             copy='Every agent, specialist and flow is re-checked daily; anything that
                    changed since it was approved shows up under Needs
                    attention.') }}
   {% endcall %}
 
   <div class="as-bar">
     <span class="pill" id="as-due-count" title="Subjects needing attention">—</span>
-    <button class="btn btn--ghost" type="button" id="as-sweep" title="Re-check every agent and flow now for changes — the same check that runs automatically each day">Re-check everything now</button>
+    <button class="btn btn--ghost" type="button" id="as-sweep" title="Re-check every agent, specialist and flow now for changes — the same check that runs automatically each day">Re-check everything now</button>
     <span class="as-bar__spacer"></span>
     <a class="btn btn--ghost" href="/api/v1/assessments/export?format=csv" id="as-export-csv">Download spreadsheet</a>
   </div>
@@ -106,16 +106,16 @@
         <div class="as-card__title">Assess a subject</div>
         {% if agents|length > 12 %}
         <label class="as-field">
-          <span>Find an agent</span>
+          <span>Find an agent or specialist</span>
           <input class="input" type="search" id="as-agent-filter" autocomplete="off"
                  placeholder="Type part of a name or department" aria-describedby="as-agent-filter-count">
           <span class="muted" id="as-agent-filter-count" role="status" aria-live="polite" style="font-size: var(--text-sm);"></span>
         </label>
         {% endif %}
         <label class="as-field">
-          <span>Agent</span>
-          <select id="as-agent" aria-label="Agent to assess" data-typeahead data-typeahead-placeholder="Type an agent or department name…">
-            <option value="">{{ 'Choose an agent…' if agents else 'No agents yet' }}</option>
+          <span>Agent or specialist</span>
+          <select id="as-agent" aria-label="Agent or specialist to assess" data-typeahead data-typeahead-placeholder="Type a name or department…">
+            <option value="">{{ 'Choose an agent or specialist…' if agents else 'No agents or specialists yet' }}</option>
             {% for group in agents|groupby('group') %}<optgroup label="{{ group.grouper }}">
               {% for a in group.list %}<option value="{{ a.name }}">{{ a.label }}</option>{% endfor %}
             </optgroup>{% endfor %}
@@ -172,7 +172,7 @@
     var selected = picker.options[picker.selectedIndex];
     if (selected && selected.disabled) picker.value = '';
     count.textContent = words.length
-      ? (shown ? shown + (shown === 1 ? ' agent matches.' : ' agents match.') : 'No agents match. Try other words.')
+      ? (shown ? shown + (shown === 1 ? ' match.' : ' matches.') : 'Nothing matches. Try other words.')
       : '';
   }
   filter.addEventListener('input', function () {
@@ -184,7 +184,7 @@
   'use strict';
   var LENS_LABEL = { privacy: 'Privacy', security: 'Security', ai_risk: 'AI risk' };
   var STATUS_LABEL = { draft: 'Draft', in_review: 'In review', needs_review: 'Needs review', reviewed: 'Reviewed' };
-  var KIND_LABEL = { agent: 'Agent', flow: 'Flow' };
+  var KIND_LABEL = { agent: 'Agent or specialist', flow: 'Flow' };
   var SEVERITY_LABEL = { low: 'Low', medium: 'Medium', high: 'High' };
   var CADENCE = [[0, 'Never'], [90, 'Every 3 months'], [180, 'Every 6 months'], [365, 'Every year']];
   function statusLabel(value) {
@@ -269,7 +269,7 @@
   }
 
   function renderList(items) {
-    if (!items.length) { listEl.innerHTML = '<div class="as-empty">No assessments yet. Choose an agent or flow under Assess a subject and press Run assessment.</div>'; return; }
+    if (!items.length) { listEl.innerHTML = '<div class="as-empty">No assessments yet. Choose an agent, specialist or flow under Assess a subject and press Run assessment.</div>'; return; }
     listEl.innerHTML = '';
     items.forEach(function (a) {
       var b = document.createElement('button');

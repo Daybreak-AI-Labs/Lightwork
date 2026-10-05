@@ -518,7 +518,7 @@ def test_cross_suite_fork_is_hidden_from_compartments_without_both_grants(monkey
     _as(monkeypatch, "user:aero")
     response = c.get("/compartments", params={"q": "Private cross-suite sentinel"})
     assert response.status_code == 200
-    assert "No specialists match this search" in response.text
+    assert "No agents or specialists match this search" in response.text
 
 
 def test_cross_suite_fork_requires_both_grants_on_agent_and_deliverable_views(

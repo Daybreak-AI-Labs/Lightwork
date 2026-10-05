@@ -44,7 +44,7 @@ _TOOLS: dict[str, tuple[str, str]] = {
     "spawn_swarm": ("Asked several helpers to work on parts of it at once",
                     "ask several helpers to work on parts of it"),
     # The roster it spawns from includes customer-built agents (owner glossary).
-    "spawn_specialist": ("Asked a specialist or agent for help", "ask a specialist or agent for help"),
+    "spawn_specialist": ("Asked an agent or specialist for help", "ask an agent or specialist for help"),
     "delegate_to_agent": ("Handed part of the work to another agent",
                           "hand part of the work to another agent"),
     "send_to_agent": ("Sent a message to another agent", "send a message to another agent"),

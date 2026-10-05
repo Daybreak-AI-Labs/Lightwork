@@ -20,7 +20,7 @@ test("a matching specialist name is explained before any draft is shown", async 
   t.after(() => dom.window.close());
   const w = dom.window;
   const calls = [];
-  const detail = "A specialist called “HR Screening” already exists. Choose another name for the new specialist. The existing specialist and its safeguards have not changed.";
+  const detail = "A specialist called “HR Screening” already exists. Choose another name for the new agent. The existing specialist and its safeguards have not changed.";
   w.fetch = async (url, options) => {
     calls.push({ url, options });
     return { ok: false, status: 409, json: async () => ({ detail }) };

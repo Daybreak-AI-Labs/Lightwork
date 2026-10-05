@@ -198,9 +198,9 @@ def prepare_task(request, body, context):
     if profile is None or any(
         not suite_allowed(request, suite) for suite in suites_for_domain(domain, profile)
     ):
-        raise PermissionError("Choose an enabled specialist in your permitted departments.")
+        raise PermissionError("Choose an agent or specialist that is turned on in your permitted departments.")
     if not any(s["domain"] == domain and s.get("gate") for s in _deliverable_specs()):
-        raise ValueError("Choose a specialist whose deliverable requires sign-off.")
+        raise ValueError("Choose an agent or specialist whose result requires approval.")
     world, actor = _world(), caller_principal(request) or ""
     channel, key = "outcome-pilot-preparation", digest([context, body["operation_id"]])
 

@@ -886,7 +886,7 @@ def lint_profile(profile: DomainProfile) -> tuple[list[str], list[str]]:
         return type_errors, warnings
     if not profile.allow_tools:
         errors.append("allow_tools is empty: an empty allowlist grants ALL "
-                      "tools -- name the tools this specialist needs")
+                      "tools -- name the tools this pack needs")
     if profile.max_risk is None:
         errors.append("max_risk is unset: the pack has no risk ceiling")
     elif profile.max_risk not in _VALID_RISKS:
@@ -906,7 +906,7 @@ def lint_profile(profile: DomainProfile) -> tuple[list[str], list[str]]:
         warnings.append("description is empty (the roster shows it to "
                         "operators and the orchestrator)")
     if not profile.knowledge_sources:
-        warnings.append("no knowledge_sources: the specialist can't ground "
+        warnings.append("no knowledge_sources: the pack can't ground "
                         "answers in company documents")
     if not profile.deny_tools:
         warnings.append("no deny_tools: consider explicitly denying the "

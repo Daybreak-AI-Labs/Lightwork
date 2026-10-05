@@ -650,7 +650,7 @@ SETTINGS: tuple[Setting, ...] = (
       "Show a microphone button in Chat that turns spoken requests into text.",
       "toggle", "AI models", True, "maverick_dashboard.api", env=("MAVERICK_VOICE_COMMANDS",)),
     S("domains", "discipline", "Department working rules",
-      "Give each department's specialists their department's working rules.",
+      "Give each department's agents and specialists their department's working rules.",
       "toggle", "AI models", True, "maverick.config"),
 
     # ------------------------------------------------------- Spending & limits
@@ -761,7 +761,7 @@ SETTINGS: tuple[Setting, ...] = (
       weaker=True, order=("3", "2", "1", "0"),
       warning="Agents will rely on less trusted memory, including content from outside sources."),
     S("domains", "memory", "Share department lessons",
-      "Give specialists the lessons their department has learned.",
+      "Give agents and specialists the lessons their department has learned.",
       "toggle", "Memory & learning", True, "maverick.config"),
     S("cortex", "enable", "Company memory",
       "One governed place to look up knowledge, skills, lessons and past decisions, with every look-up recorded.",

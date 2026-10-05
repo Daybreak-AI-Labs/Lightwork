@@ -67,7 +67,7 @@
         {% if fleet.agents %}
           <table style="margin-top: 0.75rem;">
             <thead><tr>
-              <th scope="col">Agent</th><th scope="col">Job role</th>
+              <th scope="col">Agent or specialist</th><th scope="col">Job role</th>
               <th scope="col">What it does</th><th scope="col">Can it start?</th>
             </tr></thead>
             <tbody>
@@ -87,7 +87,7 @@
           <form class="fleet-run-form fl-run" data-fleet="{{ fleet.name }}">
             <label>Give it to
               <select class="input" name="agent" required>
-                <option value="">Choose an agent</option>
+                <option value="">Choose an agent or specialist</option>
                 {% for agent in fleet.agents %}
                   {% set check = specialist_readiness.get(agent.domain) if agent.domain else none %}
                   <option value="{{ agent.name }}"{% if check and check.state != 'action_ready' %} disabled{% endif %} data-typical="{{ typical_cost_text(typical_costs.get(fleet.name ~ '/' ~ agent.name)) | striptags }}">{{ agent.name|humanize }} ({{ agent.role|role_label if agent.role else 'no role' }}){% if check %} · {{ check.label }}{% endif %}</option>
@@ -96,15 +96,15 @@
             </label>
             <label class="fl-grow">Task
               <input class="input" name="prompt" type="text" maxlength="4000"
-                     placeholder="What should this agent do?" />
+                     placeholder="What should it do?" />
             </label>
             <button type="submit" class="btn btn--primary"{% if not fleet_can_start[fleet.name] %} disabled{% endif %}>Start task</button>
             <span class="fleet-run-msg muted" role="status" aria-live="polite"></span>
           </form>
-          <p class="muted fl-typical" aria-live="polite">Choose an agent to see what its past runs usually cost.</p>
+          <p class="muted fl-typical" aria-live="polite">Choose an agent or specialist to see what its past runs usually cost.</p>
           {% if workspace_limit %}<p class="muted fl-remaining">The whole workspace has {{ workspace_limit.remaining | money }} left of {{ workspace_limit.limit.amount | money }} {{ 'today' if workspace_limit.limit.period == 'day' else 'this month' }}.</p>{% endif %}
-          <p class="muted fl-help">Specialist status checks required actions. Connections, permissions and the AI service are checked when work starts.</p>
-          {% if not fleet_can_start[fleet.name] %}<p class="muted">No specialist on this team passed the action check. Review setup above, then return to this team.</p>{% endif %}
+          <p class="muted fl-help">“Can it start?” checks required actions. Connections, permissions and the AI service are checked when work starts.</p>
+          {% if not fleet_can_start[fleet.name] %}<p class="muted">No one on this team passed the action check. Review setup above, then return to this team.</p>{% endif %}
         {% else %}
           <p class="muted" style="margin-bottom: 0;">No agents on this team yet.</p>
         {% endif %}
@@ -218,7 +218,7 @@
         if (typical && pick) pick.addEventListener('change', function() {
           const option = pick.options[pick.selectedIndex];
           typical.textContent = option && option.dataset.typical ? option.dataset.typical
-            : 'Choose an agent to see what its past runs usually cost.';
+            : 'Choose an agent or specialist to see what its past runs usually cost.';
         });
         form.addEventListener('submit', async function(e) {
           e.preventDefault();

@@ -791,7 +791,7 @@ def domain_suites_allowed(request: Request, domain: str | None) -> bool:
     except Exception as exc:
         # An unreadable pack or grant policy is not evidence of access.  Keep
         # the server error out of customer responses without releasing data.
-        raise HTTPException(status_code=503, detail="specialist access policy is temporarily unavailable") from exc
+        raise HTTPException(status_code=503, detail="Access rules for agents and specialists are unavailable right now. Try again in a moment.") from exc
 
 
 BOARD_SCOPE_DETAIL = (

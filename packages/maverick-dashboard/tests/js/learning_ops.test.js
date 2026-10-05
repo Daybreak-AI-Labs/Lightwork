@@ -147,7 +147,7 @@ test("the agent-building preview lists guidance in a table", async (t) => {
   t.after(() => ui.window.close());
   ui.doc.getElementById("lo-fa-preview").click();
   await ui.settle();
-  assert.match(ui.doc.getElementById("lo-fa-out").textContent, /Add a deny list\.3 specialists/);
+  assert.match(ui.doc.getElementById("lo-fa-out").textContent, /Add a deny list\.3 agents/);
 });
 
 test("learned page tools: clash check, hold-out set-up and a previewed import", async (t) => {

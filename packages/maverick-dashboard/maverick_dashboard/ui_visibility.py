@@ -1109,7 +1109,7 @@ PAGES: tuple[dict, ...] = (
     },
     {
         "path": "/trust",
-        "label": "Agent Trust",
+        "label": "Agent trust",
         "group": "Govern",
         "icon": "agents",
         "floor": "view",

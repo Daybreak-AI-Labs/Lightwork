@@ -722,12 +722,12 @@
 
   {# Per-specialist and per-agent ratings and the reasons people picked on a thumbs-down. Written
      comments stay with the person and their task, so they are not listed. #}
-  <div class="section-head"><h2 id="agent-feedback-title">What people said about each specialist and agent</h2></div>
+  <div class="section-head"><h2 id="agent-feedback-title">What people said about each agent and specialist</h2></div>
   <section class="panel" id="agent-feedback" aria-labelledby="agent-feedback-title">
     {% if agent_feedback %}
     <div class="fa-scroll">
       <table>
-        <thead><tr><th scope="col">Specialist or agent</th><th scope="col">Useful</th><th scope="col">Not useful</th><th scope="col">Reasons picked</th><th scope="col">Most recent reasons</th></tr></thead>
+        <thead><tr><th scope="col">Agent or specialist</th><th scope="col">Useful</th><th scope="col">Not useful</th><th scope="col">Reasons picked</th><th scope="col">Most recent reasons</th></tr></thead>
         <tbody>
         {% for row in agent_feedback %}
           <tr>
@@ -743,7 +743,7 @@
     </div>
     <p class="muted">Counts use each person's latest rating of an answer. People can add a written comment to a thumbs-down; it stays with them and their task and is not shown here.</p>
     {% else %}
-    <p class="muted">No one has rated an answer yet. When people press thumbs up or down on an answer, each specialist's and agent's ratings and the reasons they picked appear here.</p>
+    <p class="muted">No one has rated an answer yet. When people press thumbs up or down on an answer, each agent's and specialist's ratings and the reasons they picked appear here.</p>
     {% endif %}
   </section>
 

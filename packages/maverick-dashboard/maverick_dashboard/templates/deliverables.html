@@ -30,7 +30,7 @@
   {% endif %}
   <div class="section-head">
     <h2>Finished work</h2>
-    <a class="btn btn--ghost" href="/deliverables?role=all">Browse what specialists can produce</a>
+    <a class="btn btn--ghost" href="/deliverables?role=all">Browse what agents and specialists can produce</a>
   </div>
   {% if recent_results %}
     <div class="card-grid">
@@ -73,9 +73,9 @@
              (produced | length ~ ' result' ~ ('' if produced | length == 1 else 's') ~ ' produced') if has_results else 'No results yet',
              badge=(awaiting | length ~ ' awaiting sign-off') if awaiting else ('clear' if has_results else 'Nothing run yet'),
              badge_class='warn' if awaiting else ('ok' if has_results else 'idle'),
-             copy=('Each deliverable names what it is, who it\'s for, and
-                   whether it needs a sign-off before it is acted on.') if has_results
-                  else 'Results appear here as your AI teams finish work. The specialists themselves are listed in Agent Factory.') }}
+             copy=('Each result names what it is, who it\'s for, and
+                   whether it needs approval before it is acted on.') if has_results
+                  else 'Results appear here as your AI teams finish work. The agents and specialists themselves are listed in Agent Factory.') }}
   {% endcall %}
 
   {% if showing_mine %}

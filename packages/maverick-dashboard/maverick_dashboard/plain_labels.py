@@ -131,7 +131,7 @@ FEATURE_LABELS = {
     "skills": "Skills library",
     "world_model": "Shared memory across tasks",
     "streaming": "Show replies as they are written",
-    "pack_editing": "Edit specialist teams",
+    "pack_editing": "Edit agents and specialists",
     "role_editing": "Edit agent roles",
     "scheduling": "Scheduled workflows",
     "triggers": "Start workflows from other apps",
@@ -158,7 +158,7 @@ FEATURE_HELP = {
 
 # The core agent roles, as a title and one line on what each does.
 AGENT_ROLES = {
-    "orchestrator": ("Planner", "Breaks a task into steps and hands each step to the right specialist."),
+    "orchestrator": ("Planner", "Breaks a task into steps and hands each step to the right agent or specialist."),
     "researcher": ("Researcher", "Finds and reads sources, and gathers the facts a task needs."),
     "coder": ("Coder", "Writes and changes code."),
     "coding": ("Coding assistant", "Helps with smaller coding steps inside a larger task."),

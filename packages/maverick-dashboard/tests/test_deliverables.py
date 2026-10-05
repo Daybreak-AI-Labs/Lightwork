@@ -182,7 +182,7 @@ class TestDeliverablesPage:
         t = client.get("/deliverables").text
         assert "Draft a welcome email" in t
         assert f'href="/chat/goal/{gid}"' in t
-        assert "Browse what specialists can produce" in t
+        assert "Browse what agents and specialists can produce" in t
         assert "13-week cash forecast" not in t
         # A role link still narrows the specialist catalog.
         assert "Tax provision" in client.get("/deliverables?role=tax_analyst").text

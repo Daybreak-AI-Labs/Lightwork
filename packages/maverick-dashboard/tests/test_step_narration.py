@@ -20,7 +20,7 @@ BRIEF = ("role=orchestrator depth=0 brief=Top-level goal: Summarize last quarter
     ("observation", ROOT, "tool=ask_user -> What quarter do you mean?", "Asked you a question"),
     ("observation", ROOT, "tool=spawn_subagent -> researcher finished", "Asked a helper to take on part of the work"),
     # enabled_domains() includes customer-built agents, so this is not always a specialist.
-    ("observation", ROOT, "tool=spawn_specialist -> done", "Asked a specialist or agent for help"),
+    ("observation", ROOT, "tool=spawn_specialist -> done", "Asked an agent or specialist for help"),
     ("observation", ROOT, "tool=web_search -> 10 results", "Searched the web"),
     ("observation", ROOT, "tool=shell -> ERROR: shell command was not approved; no command was run",
      "Tried to run a command, but it did not work"),

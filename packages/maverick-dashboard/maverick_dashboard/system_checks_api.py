@@ -251,7 +251,7 @@ _FEATURE_NAMES = {
     "fleet_memory": "Shared fleet memory",
     "siem_export": "Security log export",
     "advanced_evolve": "Advanced self-improvement",
-    "custom_pack_factory": "Custom specialist teams",
+    "custom_pack_factory": "Custom agents",
     "multi_tenant": "Multiple workspaces",
 }
 

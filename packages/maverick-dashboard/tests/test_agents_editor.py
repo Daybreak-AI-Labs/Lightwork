@@ -52,7 +52,7 @@ class TestRosterAndView:
         assert response.status_code == 200
         # The picker searches /agents/picker (the page no longer ships every
         # specialist): ready ones first, setup recovery still discoverable.
-        assert "Show specialists that need setup" in response.text
+        assert "Show those that need setup" in response.text
         assert "2 can start · 1 needs setup · 1 needs a setup check" in response.text
         items = client.get("/agents/picker", params={"setup": "1"}).json()["items"]
         names = [item["name"] for item in items]
@@ -319,7 +319,7 @@ class TestOverrideLifecycle:
         state = rejected_override_view(name)
         assert state and state["generation"] and state["is_builtin"]
         page = client.get("/agents").text
-        assert "Specialists paused for setup review" in page
+        assert "Agents and specialists paused for setup review" in page
         assert f'data-name="{name}"' in page
         assert f'data-generation="{state["generation"]}"' in page
         assert "Restore original setup" in page
@@ -349,7 +349,7 @@ class TestOverrideLifecycle:
 
         state = rejected_override_view("custom_bad")
         assert state and not state["is_builtin"]
-        assert "Remove unavailable specialist" in client.get("/agents").text
+        assert "Remove unavailable agent" in client.get("/agents").text
         response = client.delete("/api/v1/agents/custom_bad/override", params={
             "expected_generation": state["generation"],
         })

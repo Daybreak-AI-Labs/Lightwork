@@ -213,7 +213,7 @@ ROWS = [
     ("Safety monitoring", "Surveillance de la sécurité", "Sicherheitsüberwachung", "安全性の監視", "安全监控"),
     ("Learning history", "Historique d’apprentissage", "Lernverlauf", "学習履歴", "学习历史"),
     ("Task replay", "Relecture de tâche", "Aufgabenwiedergabe", "タスクの再生", "任务回放"),
-    ("Agent Trust", "Confiance dans les agents", "Agentenvertrauen", "エージェントの信頼", "智能体信任"),
+    ("Agent trust", "Confiance dans les agents", "Agentenvertrauen", "エージェントの信頼", "智能体信任"),
     ("Outside agents", "Agents externes", "Externe Agenten", "外部エージェント", "外部智能体"),
     ("Skills", "Compétences", "Fähigkeiten", "スキル", "技能"),
     ("Skill store", "Boutique de compétences", "Skill-Katalog", "スキルストア", "技能商店"),

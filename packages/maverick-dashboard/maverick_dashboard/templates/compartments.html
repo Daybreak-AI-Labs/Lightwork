@@ -3,23 +3,23 @@
 {% block content %}
   {% from "_hero.html" import hero, state %}
   {% call hero('Agent factory', 'Compartments',
-               subtitle='Each specialist in its own protected space',
-               lede='Each specialist agent works in its own protected space with
+               subtitle='Each agent and specialist in its own protected space',
+               lede='Each agent and specialist works in its own protected space with
                      only the tools and information it needs. If one is misused
                      during a task, Lightwork shuts it off without affecting the others.') %}
     {{ state('Current state',
-             domain_page.catalog_total ~ ' specialist' ~ ('' if domain_page.catalog_total == 1 else 's'),
+             domain_page.catalog_total ~ (' agent or specialist' if domain_page.catalog_total == 1 else ' agents and specialists'),
              badge='Protected' if domain_page.catalog_total else 'None yet',
              badge_class='ok' if domain_page.catalog_total else 'idle',
-             copy='Shutting off a misused specialist happens automatically during a task.
-                   To stop a specialist from using a tool at all, change it in the Agent Factory
+             copy='Shutting off a misused agent or specialist happens automatically during a task.
+                   To stop one from using a tool at all, change it in the Agent Factory
                    or block the tool on the Permissions page.') }}
   {% endcall %}
   <div class="panel{% if not domain_page.catalog_total %} empty{% endif %}">
     {% if domain_page.catalog_total %}
-      <form method="get" action="/compartments" aria-label="Search specialists" class="cmp-search">
+      <form method="get" action="/compartments" aria-label="Search agents and specialists" class="cmp-search">
         <label for="domain-query" class="cmp-field">
-          <span>Search specialists</span>
+          <span>Search agents and specialists</span>
           <input class="input" id="domain-query" name="q" type="search"
                  maxlength="128" value="{{ domain_page.query }}"
                  placeholder="Name or what it does" />
@@ -36,9 +36,9 @@
       <p class="muted" role="status">
         {% if domain_page.returned %}
           Showing {{ domain_page.first }}–{{ domain_page.last }} of
-          {{ domain_page.filtered_total }} matching specialists
+          {{ domain_page.filtered_total }} matching agents and specialists
         {% else %}
-          Showing 0 of {{ domain_page.filtered_total }} matching specialists
+          Showing 0 of {{ domain_page.filtered_total }} matching agents and specialists
         {% endif %}
         ({{ domain_page.catalog_total }} in total).
       </p>
@@ -46,10 +46,10 @@
     {% if domains %}
     <table>
       <thead><tr>
-        <th scope="col">Specialist</th>
-        <th scope="col">Protected Space</th>
-        <th scope="col">Made By</th>
-        <th scope="col">Highest Risk</th>
+        <th scope="col">Agent or specialist</th>
+        <th scope="col">Protected space</th>
+        <th scope="col">Made by</th>
+        <th scope="col">Highest risk</th>
         <th scope="col">Tools</th>
         <th scope="col">Information</th>
         <th scope="col">Actions</th>
@@ -71,7 +71,7 @@
                 {%- if d.output.gate %} · needs {{ d.output.gate | humanize }} sign-off{% endif -%}
               </div>
             {% endif %}
-            {% if d.persona %}<details class="muted cmp-wide"><summary>Technical details</summary><p>Instructions the agent follows:</p><p>{{ d.persona }}</p></details>{% endif %}
+            {% if d.persona %}<details class="muted cmp-wide"><summary>Technical details</summary><p>Instructions it follows:</p><p>{{ d.persona }}</p></details>{% endif %}
           </td>
           <td><span class="badge">{{ d.compartment | humanize }}</span></td>
           <td class="muted">{{ 'Built-in' if d.authoring == 'manual' else 'Created in Agent Factory' }}</td>
@@ -88,16 +88,16 @@
       </tbody>
     </table>
     {% elif domain_page.catalog_total %}
-      <p class="muted">No specialists match this search. <a class="btn btn--ghost" href="/compartments">Show all</a></p>
+      <p class="muted">No agents or specialists match this search. <a class="btn btn--ghost" href="/compartments">Show all</a></p>
     {% else %}
       <div class="mv-empty">
-        <p class="mv-empty__title">No specialists yet</p>
+        <p class="mv-empty__title">No agents or specialists yet</p>
         <p class="mv-empty__body">Each department you add gets its own protected specialists.</p>
         <p><a class="btn btn--primary" href="/agents">Open the Agent Factory</a></p>
       </div>
     {% endif %}
     {% if domain_page.page_count > 1 %}
-      <nav aria-label="Specialist pages" class="cmp-pages">
+      <nav aria-label="Result pages" class="cmp-pages">
         {% if domain_page.page > 1 %}
           <a class="btn btn--ghost"
              href="/compartments?q={{ domain_page.query | urlencode }}&amp;per_page={{ domain_page.per_page }}&amp;page={{ domain_page.page - 1 }}">Previous</a>

@@ -37,7 +37,7 @@ def _read(path) -> dict:
     if (not isinstance(value, dict) or value.get("schema") != 1
             or not isinstance(value.get("cases"), dict)
             or not isinstance(value.get("runs"), dict)):
-        raise ValueError("The saved specialist tests cannot be read. Nothing was changed.")
+        raise ValueError("The saved answer checks cannot be read. Nothing was changed.")
     return value
 
 
@@ -69,7 +69,7 @@ def save_case(specialist: str, fields: dict, *, identity: str | None = None,
             raise ValueError("This test changed. Refresh it before saving again.")
         if not prior and (len(cases) >= _MAX_ALL_CASES or sum(
                 c["specialist"] == specialist for c in cases.values()) >= MAX_CASES_PER_SPECIALIST):
-            raise ValueError("This specialist's test list is full. Remove an old test before adding another.")
+            raise ValueError("This test list is full. Remove an old test before adding another.")
         now = time.time()
         row = {"id": identity or uuid.uuid4().hex, "specialist": specialist,
                **fields, "revision": (prior["revision"] + 1 if prior else 1),
@@ -89,7 +89,7 @@ def save_once(specialist: str, fields: dict, identity: str) -> dict:
             return dict(prior), False
         if len(db["cases"]) >= _MAX_ALL_CASES or sum(
                 c["specialist"] == specialist for c in db["cases"].values()) >= MAX_CASES_PER_SPECIALIST:
-            raise ValueError("This specialist's test list is full. Remove an old test before adding another.")
+            raise ValueError("This test list is full. Remove an old test before adding another.")
         now = time.time()
         row = {"id": identity, "specialist": specialist, **fields,
                "revision": 1, "created_at": now, "updated_at": now}
@@ -117,7 +117,7 @@ def delete_case(specialist: str, identity: str, expected_revision: int) -> None:
 def snapshot(specialist: str, selected_ids: list[str] | None = None) -> list[dict]:
     rows = cases_for(specialist)
     if not rows:
-        raise ValueError("Add at least one test before running this specialist.")
+        raise ValueError("Add at least one test before running the checks.")
     if selected_ids:
         if len(selected_ids) > MAX_CASES_PER_RUN or len(set(selected_ids)) != len(selected_ids):
             raise ValueError(f"Choose between 1 and {MAX_CASES_PER_RUN} different checks.")
@@ -166,7 +166,7 @@ def begin_run(specialist: str, model: str, instruction_hash: str, cases: list[di
         if identity and identity in db["runs"]:
             prior = db["runs"][identity]
             if prior["specialist"] != specialist:
-                raise ValueError("This reviewed operation already belongs to another specialist.")
+                raise ValueError("This reviewed request already belongs to another agent or specialist.")
             if prior["state"] == "prepared":
                 prior.update(state="running", started_at=time.time())
                 return (dict(prior), True), True

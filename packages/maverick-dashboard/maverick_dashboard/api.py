@@ -1603,7 +1603,7 @@ def _require_enabled_specialist(request: Request, domain: str) -> None:
 
     profile = enabled_domains().get(domain)
     if profile is None:
-        raise HTTPException(status_code=400, detail=f"unknown specialist: {domain!r}")
+        raise HTTPException(status_code=400, detail=f"unknown agent or specialist: {domain!r}")
     for suite in suites_for_domain(domain, profile):
         require_suite(request, suite)
 
@@ -1828,7 +1828,7 @@ def _source_analysis_selection(request: Request, payload: GoalIn):
         return None
     from maverick.knowledge_task_context import SourceContextUnavailable, validate_selection
     if payload.template or payload.domain or payload.director_profile or payload.params:
-        raise HTTPException(422, "Selected knowledge is available only for a source analysis task, without specialist tools or workflow execution.")
+        raise HTTPException(422, "Selected knowledge is available only for a source analysis task, without agent or specialist tools or workflow execution.")
     if not (request.headers.get("Idempotency-Key") or "").strip():
         raise HTTPException(422, "Keep one request identity for this source analysis and reconcile it before retrying.")
     from .draft_api import context_for
@@ -12389,8 +12389,8 @@ def pack_editing_denial(request: Request) -> str | None:
 
     if not get_features().get("pack_editing", True):
         return (
-            "Specialist editing is disabled by this installation's policy. "
-            "Ask an installation administrator to enable it."
+            "Editing agents and specialists is turned off by this installation's policy. "
+            "Ask an installation administrator to turn it on."
         )
     return None
 
@@ -13981,8 +13981,19 @@ def _autonomy_auto_risks(policy: dict) -> list[str]:
                 policy.get(risk) or policy.get("default")) == "auto"]
 
 
-def _autonomy_auto_graduation_reason(risks: list[str]) -> str:
-    return ("This specialist is set to Act on its own for " + ", ".join(risks)
+def _kind_word(name: str) -> str:
+    """"specialist" for a built-in pack, "agent" for anything else (owner glossary)."""
+    from .agent_changelog import agent_kind
+
+    return agent_kind(name)
+
+
+def _this_one(name: str) -> str:
+    return "This " + _kind_word(name)
+
+
+def _autonomy_auto_graduation_reason(risks: list[str], name: str = "") -> str:
+    return (_this_one(name) + " is set to Act on its own for " + ", ".join(risks)
             + " actions. Its overall approval record cannot prove those actions are safe. "
             "Set each of those levels to Ask or lower before ending supervision.")
 
@@ -13998,7 +14009,7 @@ def _agent_autonomy_errors(name: str, payload: AgentOverrideIn) -> list[str]:
     if view and view["autonomy"]["config_override"]:
         if payload.autonomy.model_dump() == view["autonomy"]["pack"]:
             return []  # preserve the existing pack setting during another edit
-        return ["A server-configured independence policy controls this specialist. Remove it before editing here."]
+        return ["A server-configured independence policy controls this " + _kind_word(name) + ". Remove it before editing here."]
     auto_risks = _autonomy_auto_risks(payload.autonomy.model_dump())
     if not payload.autonomy.onboarding and auto_risks:
         return [_autonomy_auto_graduation_reason(auto_risks)]
@@ -14007,13 +14018,13 @@ def _agent_autonomy_errors(name: str, payload: AgentOverrideIn) -> list[str]:
     if not levels_enabled():
         return ["Turn on per-agent independence levels before ending supervision."]
     if view is None:
-        return ["A new specialist must start under supervision."]
+        return ["A new agent must start under supervision."]
     try:
         verdict = graduation_status(name, _world().list_approvals(limit=5000))
     except Exception:
-        return ["The specialist's approval record is unavailable. Keep supervision on and retry."]
+        return ["The approval record for this " + _kind_word(name) + " is unavailable. Keep supervision on and try again."]
     if not verdict.graduated:
-        return ["This specialist has not yet earned graduation from its approval record."]
+        return [_this_one(name) + " has not yet earned graduation from its approval record."]
     return []
 
 
@@ -14082,10 +14093,10 @@ async def save_agent_override(request: Request, name: str, payload: AgentOverrid
         if errors:
             raise ValueError("; ".join(errors))
         if payload.autonomy is not None and payload.expected_generation is None:
-            raise OverrideConflict("Reload the specialist before changing independence settings.")
+            raise OverrideConflict("Reload the " + _kind_word(name) + " before changing independence settings.")
         previous = read_override(name)
         if payload.autonomy is None and "autonomy" in previous:
-            raise OverrideConflict("This specialist has independence settings. Reload the editor before saving.")
+            raise OverrideConflict(_this_one(name) + " has independence settings. Reload the editor before saving.")
         before_view = resolved_view(name)
         if payload.autonomy is not None:
             before = (before_view or {}).get("autonomy", {}).get("pack", {})
@@ -14122,15 +14133,15 @@ async def graduate_agent(request: Request, name: str, payload: AgentGraduationIn
 
     view = await run_in_threadpool(resolved_view, name)
     if view is None:
-        raise HTTPException(status_code=404, detail="No such specialist.")
+        raise HTTPException(status_code=404, detail="No such agent or specialist.")
     if view["generation"] != payload.expected_generation:
-        raise HTTPException(status_code=409, detail="This specialist changed. Refresh before granting independence.")
+        raise HTTPException(status_code=409, detail=_this_one(name) + " changed. Refresh before granting independence.")
     if not levels_enabled():
         raise HTTPException(status_code=409, detail="Turn on per-agent independence levels first.")
     if view["autonomy"]["config_override"]:
-        raise HTTPException(status_code=409, detail="A server-configured policy controls this specialist.")
+        raise HTTPException(status_code=409, detail="A server-configured policy controls this " + _kind_word(name) + ".")
     if not view["autonomy"]["onboarding"]:
-        raise HTTPException(status_code=409, detail="This specialist is already out of supervision.")
+        raise HTTPException(status_code=409, detail=_this_one(name) + " is already out of supervision.")
     auto_risks = _autonomy_auto_risks(view["autonomy"]["pack"])
     if auto_risks:
         raise HTTPException(status_code=409, detail=_autonomy_auto_graduation_reason(auto_risks))
@@ -14140,7 +14151,7 @@ async def graduate_agent(request: Request, name: str, payload: AgentGraduationIn
     except Exception as exc:
         raise HTTPException(status_code=503, detail="The approval record could not be checked.") from exc
     if not verdict.graduated:
-        raise HTTPException(status_code=409, detail="This specialist has not earned graduation yet.")
+        raise HTTPException(status_code=409, detail=_this_one(name) + " has not earned graduation yet.")
     patch = await run_in_threadpool(read_override, name)
     after = dict(view["autonomy"]["pack"])
     after["onboarding"] = False
@@ -14173,10 +14184,10 @@ async def delete_agent_override(request: Request, name: str, expected_generation
     try:
         current = read_override(name)
         if expected_generation is None:
-            raise OverrideConflict("Reload the specialist before resetting its settings.")
+            raise OverrideConflict("Reload the " + _kind_word(name) + " before resetting its settings.")
         view_before = resolved_view(name) or rejected_override_view(name)
         if view_before and view_before["generation"] != expected_generation:
-            raise OverrideConflict("This specialist changed. Reload its latest version before resetting it.")
+            raise OverrideConflict(_this_one(name) + " changed. Reload its latest version before resetting it.")
         if current or (view_before and "is_builtin" in view_before):
             await run_in_threadpool(
                 _record_agent_reset_intent, request, name,
@@ -15779,7 +15790,7 @@ def run_fleet_agent(
             raise HTTPException(
                 status_code=400,
                 detail=(
-                    "This specialist isn't available right now: its department "
+                    _this_one(agent.domain) + " isn't available right now: its department "
                     "may be switched off, or it was removed. Switch the "
                     "department back on or deploy it again, then try again."
                 ),
@@ -15789,8 +15800,8 @@ def run_fleet_agent(
         if readiness["state"] != "action_ready":
             raise HTTPException(
                 status_code=409,
-                detail=("This specialist needs setup before it can start. "
-                        "Open Specialists to review its required actions, then try again."),
+                detail=(_this_one(agent.domain) + " needs setup before it can start. "
+                        "Open Agent Factory to review its required actions, then try again."),
             )
         cap = domain_capability(prof, cap, agent_principal)
     max_dollars = requested_goal_dollars(payload.max_dollars)

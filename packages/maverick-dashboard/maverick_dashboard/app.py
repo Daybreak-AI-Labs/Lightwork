@@ -7307,7 +7307,7 @@ async def agents_picker(request: Request, q: str = "", setup: bool = False, limi
     try:
         roster = list_agents()
     except Exception as exc:  # noqa: BLE001 - the page says the list is unavailable
-        raise HTTPException(status_code=503, detail="The specialist list is unavailable. Try again.") from exc
+        raise HTTPException(status_code=503, detail="The list of agents and specialists is unavailable. Try again.") from exc
     visible = [agent for agent in roster if allowed is None or set(agent["suites"]) <= allowed]
     _assign_picker_labels(visible)
     ranked = []
@@ -7367,7 +7367,7 @@ def assessments_page(request: Request) -> HTMLResponse:
                 getattr(prof, "persona", ""),
                 getattr(prof, "description", ""),
             )
-            a["group"] = department_title(a["suite"]) if a.get("suite") else "Other agents"
+            a["group"] = department_title(a["suite"]) if a.get("suite") else "Other agents and specialists"
         agents.sort(key=lambda a: (a["group"].casefold(), a["label"].casefold(), a["name"]))
     except Exception:  # never 500 the page if the factory layer is unavailable
         agents = []
@@ -9197,7 +9197,7 @@ def fleets_page(request: Request) -> HTMLResponse:
                 profile = catalog.get(domain)
                 if profile is None:
                     specialist_readiness[domain] = {
-                        "state": "needs_setup", "label": "Specialist no longer available",
+                        "state": "needs_setup", "label": "No longer available",
                         "fix_url": "/agents", "missing_tools": [],
                     }
                 else:

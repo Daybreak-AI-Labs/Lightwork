@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% from "_hero.html" import hero, state %}
-{% block title %}Agent Trust · Lightwork{% endblock %}
+{% block title %}Agent trust · Lightwork{% endblock %}
 {% block head_extra %}
 <style{% if csp_style_nonce is defined %} nonce="{{ csp_style_nonce }}"{% endif %}>
   .tr-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr)); gap: var(--space-3); }
@@ -14,7 +14,7 @@
 {% block content %}
 {% set risk_word = {'low': 'Low-risk only', 'medium': 'Up to medium risk', 'high': 'Any risk', 'unbounded': 'Any risk'} %}
 {% set direction_word = {'inbound': 'It may contact us', 'outbound': 'We may contact it', 'both': 'Both ways'} %}
-{% call hero('Security', 'Agent Trust',
+{% call hero('Security', 'Agent trust',
              lede='Choose which outside AI agents may work with Lightwork, and what each one may do, see and spend.') %}
   {{ state('Blocking unlisted agents',
            'On' if enforced else 'Off',
@@ -71,7 +71,7 @@
 </div>
 {% endif %}
 
-<div class="section-head"><h2>Outside Agents</h2>
+<div class="section-head"><h2>Outside agents</h2>
   {% if can_admin %}<button type="button" class="btn btn--primary" data-tr-new>Add an agent</button>{% endif %}
 </div>
 <div class="panel">
@@ -135,7 +135,7 @@
 </div>
 
 {% if can_admin %}
-<div class="section-head"><h2 id="tr-form-title">Add an Outside Agent</h2></div>
+<div class="section-head"><h2 id="tr-form-title">Add an outside agent</h2></div>
 <div class="panel">
   <form id="trust-add" aria-labelledby="tr-form-title">
     <input type="hidden" name="id" value="">

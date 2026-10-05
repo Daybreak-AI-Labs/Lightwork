@@ -1,6 +1,6 @@
-// Agents page: "Set up a specialist for your business". Drafts a specialist
+// Agents page: "Set up an agent for your business". Drafts an agent
 // from a description (nothing is saved), shows it plainly for review, then
-// adds it with its documents after a confirmation. The drafted specialist
+// adds it with its documents after a confirmation. The drafted agent
 // stays on the server; approval refers to the draft, never re-sends it.
 (() => {
   'use strict';
@@ -31,7 +31,7 @@
         if (editorStatus) editorStatus.textContent = label;
       }
     }
-  } catch (_) { /* Private browsing may disable session storage; the specialist still opens. */ }
+  } catch (_) { /* Private browsing may disable session storage; the agent still opens. */ }
   function failText(failure, what) {
     return typeof window.mvErrorText === 'function' ? window.mvErrorText(failure, what) : 'Could not ' + what + '. Please try again.';
   }
@@ -80,9 +80,9 @@
     event.preventDefault();
     if (busy) return;
     const name = $('name').value.trim();
-    if (!name) { say('Enter a name for the new specialist.'); $('name').focus(); return; }
+    if (!name) { say('Enter a name for the new agent.'); $('name').focus(); return; }
     lock(true); $('review').hidden = true; job = null;
-    say('Drafting the specialist. Nothing is saved yet…');
+    say('Drafting the agent. Nothing is saved yet…');
     try {
       const response = await fetch(base + '/draft', {
         method: 'POST', credentials: 'same-origin', cache: 'no-store', headers: { 'Content-Type': 'application/json' },
@@ -90,7 +90,7 @@
       });
       if (!response.ok) {
         const conflict = response.status === 409 ? await response.json().catch(() => ({})) : null;
-        say(conflict && typeof conflict.detail === 'string' ? conflict.detail : failText(response, 'draft the specialist'));
+        say(conflict && typeof conflict.detail === 'string' ? conflict.detail : failText(response, 'draft the agent'));
         if (conflict) $('name').focus();
         return;
       }
@@ -102,7 +102,7 @@
       job = started.job;
       review(result.agent, result.with_ai === true);
       say('Review the draft below. Nothing is saved until you add it.');
-    } catch (error) { say(failText(error, 'draft the specialist')); }
+    } catch (error) { say(failText(error, 'draft the agent')); }
     finally { lock(false); $('status').focus(); }
   });
   $('discard').addEventListener('click', () => { job = null; $('review').hidden = true; say('The draft was discarded. Nothing was saved.'); });
@@ -111,24 +111,24 @@
     const files = Array.from($('docs').files || []);
     if (files.length > 10) { say('Choose at most 10 documents.'); return; }
     const ok = typeof window.mvConfirm === 'function' && await window.mvConfirm(
-      'Add this specialist for everyone in this workspace? It can start work within the limits shown.' + (files.length ? ' The documents you chose are loaded into its memory.' : ''),
-      { okText: 'Add specialist' });
+      'Add this agent for everyone in this workspace? It can start work within the limits shown.' + (files.length ? ' The documents you chose are loaded into its memory.' : ''),
+      { okText: 'Add agent' });
     if (!ok) return;
-    lock(true); say('Adding the specialist…');
+    lock(true); say('Adding the agent…');
     try {
       const form = new FormData();
       form.append('confirm', 'true');
       files.forEach(file => form.append('documents', file));
       const response = await fetch(base + '/' + job + '/approve', { method: 'POST', credentials: 'same-origin', cache: 'no-store', body: form });
-      if (!response.ok) { say(failText(response, 'add the specialist')); return; }
+      if (!response.ok) { say(failText(response, 'add the agent')); return; }
       const started = await response.json();
       const data = await wait(started.job, 'approve');
       const result = data.result || {};
-      if (result.saved !== true) { say(result.message || 'The specialist wasn’t added.'); return; }
+      if (result.saved !== true) { say(result.message || 'The agent wasn’t added.'); return; }
       job = null; $('review').hidden = true;
       try { sessionStorage.setItem(addedKey, JSON.stringify(result)); } catch (_) { /* Open it anyway. */ }
       window.location.assign('/agents?name=' + encodeURIComponent(result.name) + '#agent-form');
-    } catch (error) { say(failText(error, 'add the specialist')); }
+    } catch (error) { say(failText(error, 'add the agent')); }
     finally { lock(false); $('status').focus(); }
   });
 })();

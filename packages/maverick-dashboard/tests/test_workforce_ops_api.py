@@ -195,7 +195,7 @@ def test_pages_show_the_new_controls_in_plain_words(client):
         assert f'id="{control}"' in page, control
     own = page.split('id="wo-root"', 1)[1]
     visible = re.sub(r"<[^>]+>", " ", re.sub(r"<style[\s\S]*?</style>|<script[\s\S]*?</script>", " ", own))
-    assert "What each specialist can do" in visible
+    assert "What each agent and specialist can do" in visible
     assert not _BANNED.search(visible), _BANNED.search(visible)
     tasks = client.get("/goals").text
     assert 'id="wo-upcoming-root"' in tasks and 'id="wo-up-days"' in tasks

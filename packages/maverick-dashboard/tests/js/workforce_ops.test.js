@@ -70,8 +70,8 @@ test("the inventory reads plainly and flags specialists to review", async (t) =>
   const ui = await fixture(partial("_workforce_ops.html"));
   t.after(() => ui.window.close());
   const inv = ui.doc.getElementById("wo-inv").textContent;
-  assert.match(inv, /40 specialists in 3 departments/);
-  assert.match(inv, /1 specialist that should only draft can reach tools that change things/);
+  assert.match(inv, /40 agents and specialists in 3 departments/);
+  assert.match(inv, /1 agent or specialist that should only draft can reach tools that change things/);
   assert.match(inv, /Invoice drafter.*send payment/);
   assert.equal(ui.doc.getElementById("wo-inv-suite").options.length, 2);
   assert.equal(ui.doc.getElementById("wo-lint-run").closest("section").hidden, false);
@@ -81,12 +81,12 @@ test("the inventory reads plainly and flags specialists to review", async (t) =>
 test("the inventory lists the independence split only when the levels are on", async (t) => {
   const on = await fixture(partial("_workforce_ops.html"));
   t.after(() => on.window.close());
-  assert.match(on.doc.getElementById("wo-inv").textContent, /Independence: Watch only 1, Suggest 30, Ask before acting 8, Act on their own 1\. 12 specialists still supervised/);
+  assert.match(on.doc.getElementById("wo-inv").textContent, /Independence: Watch only 1, Suggest 30, Ask before acting 8, Act on their own 1\. 12 agents and specialists still supervised/);
 
   const off = await fixture(partial("_workforce_ops.html"), { inventory: { levels_enabled: false } });
   t.after(() => off.window.close());
   const text = off.doc.getElementById("wo-inv").textContent;
-  assert.match(text, /Independence levels are turned off, so every specialist follows the same approval rules\./);
+  assert.match(text, /Independence levels are turned off, so every agent and specialist follows the same approval rules\./);
   assert.doesNotMatch(text, /Suggest 30|Ask before acting 8|still supervised/);
 });
 
@@ -96,7 +96,7 @@ test("the setup check runs as a job and lists what to fix", async (t) => {
   ui.doc.getElementById("wo-lint-run").click();
   await ui.settle();
   const out = ui.doc.getElementById("wo-lint-out").textContent;
-  assert.match(out, /Checked 40 specialists: 1 problem to fix and 2 things that could be better/);
+  assert.match(out, /Checked 40 agents and specialists: 1 problem to fix and 2 things that could be better/);
   assert.match(out, /It has no limit on how risky its actions may be/);
 });
 
