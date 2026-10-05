@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% from "_hero.html" import hero %}
-{% block title %}Governance Inventory - Lightwork{% endblock %}
+{% block title %}Governance inventory - Lightwork{% endblock %}
 {% block head_extra %}
 <style nonce="{{ csp_style_nonce }}">
   .sgi-row,.sgi-actions{align-items:center;display:flex;flex-wrap:wrap;gap:.6rem}
@@ -16,7 +16,7 @@
 {% endblock %}
 {% block content %}
 <div id="sgi-root" data-api-base="{{ api_base }}" data-copilot-page="{{ page_path }}" data-can-operate="{{ 'true' if inventory_can_operate else 'false' }}" data-can-audit="{{ 'true' if inventory_can_audit else 'false' }}" data-can-admin="{{ 'true' if inventory_can_admin else 'false' }}">
-  {% call hero('Governance', 'Governance Inventory',
+  {% call hero('Governance', 'Governance inventory',
                lede='One list of the records and links across AI governance, consent, data use, privacy, technology risk and third parties. Each entry points back to its source; the source content itself is not copied here.',
                title_id='sgi-title') %}
     <div class="hero-statebox" aria-live="polite">
@@ -58,12 +58,12 @@
         </div>
       </form>
       <p class="muted" id="sgi-records-note" role="status" aria-live="polite">Records appear when the inventory is ready.</p>
-      <div class="sgi-table-wrap"><table><thead><tr><th scope="col">Type</th><th scope="col">Source</th><th scope="col">Entries</th><th scope="col">First Seen</th><th scope="col">Last Activity</th><th scope="col">Latest Change</th><th scope="col">Links</th></tr></thead><tbody id="sgi-entity-rows"><tr><td colspan="7">No records yet.</td></tr></tbody></table></div>
+      <div class="sgi-table-wrap"><table><thead><tr><th scope="col">Type</th><th scope="col">Source</th><th scope="col">Entries</th><th scope="col">First seen</th><th scope="col">Last activity</th><th scope="col">Latest change</th><th scope="col">Links</th></tr></thead><tbody id="sgi-entity-rows"><tr><td colspan="7">No records yet.</td></tr></tbody></table></div>
       <p><button class="btn btn--ghost" id="sgi-more-entities" type="button" hidden>Show more records</button></p>
     </section>
 
     <section class="panel" aria-labelledby="sgi-links-title">
-      <h2 id="sgi-links-title" class="sgi-flush-top">Links Between Records</h2>
+      <h2 id="sgi-links-title" class="sgi-flush-top">Links between records</h2>
       <div class="sgi-fields">
         <label for="sgi-relation">Link type<select class="select" id="sgi-relation"><option value="">All link types</option></select></label>
       </div>
@@ -74,7 +74,7 @@
     </section>
 
     <section class="panel" aria-labelledby="sgi-history-title">
-      <div class="sgi-row sgi-row--split"><h2 id="sgi-history-title" class="sgi-flush">Saved Versions</h2><button class="btn btn--ghost" id="sgi-load-snapshots" type="button">Refresh list</button></div>
+      <div class="sgi-row sgi-row--split"><h2 id="sgi-history-title" class="sgi-flush">Saved versions</h2><button class="btn btn--ghost" id="sgi-load-snapshots" type="button">Refresh list</button></div>
       <div class="sgi-table-wrap"><table><thead><tr><th scope="col">Saved On</th><th scope="col">Version</th><th scope="col">Status</th><th scope="col">Records</th><th scope="col">Check</th></tr></thead><tbody id="sgi-snapshot-rows"><tr><td colspan="5">No saved versions yet.</td></tr></tbody></table></div>
     </section>
 

@@ -820,12 +820,12 @@ def test_change_preview_simulates_and_plans_without_changing_anything(client, mo
 # ---- pages ------------------------------------------------------------------
 
 @pytest.mark.parametrize("path, words", [
-    ("/skills", ("Check this skill", "How Your Skills Are Doing", "Find skills that rarely help")),
-    ("/plugins", ("Approved Versions", "Pin current versions", "How Often Add-on Tools Are Used",
+    ("/skills", ("Check this skill", "How your skills are doing", "Find skills that rarely help")),
+    ("/plugins", ("Approved versions", "Pin current versions", "How often add-on tools are used",
                   "Download starter plugin")),
     ("/mcp", ("Find more tool servers", "exactly what it starts or connects to")),
-    ("/connections", ("Systems Lightwork May Change", "Preview this change")),
-    ("/templates", ("Share Your Ratings", "Download ratings")),
+    ("/connections", ("Systems Lightwork may change", "Preview this change")),
+    ("/templates", ("Share your ratings", "Download ratings")),
 ])
 def test_pages_carry_the_new_controls_in_plain_words(client, monkeypatch, path, words):
     from test_support.plain_language import developer_terms, visible_text

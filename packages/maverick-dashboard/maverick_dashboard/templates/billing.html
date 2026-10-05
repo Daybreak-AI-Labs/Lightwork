@@ -77,7 +77,7 @@
     <thead>
       <tr>
         <th scope="col">Month</th><th scope="col">Charges</th>
-        <th scope="col">Tasks Run</th><th scope="col">AI Usage (Tokens)</th><th scope="col">Statement</th>
+        <th scope="col">Tasks run</th><th scope="col">AI usage (tokens)</th><th scope="col">Statement</th>
       </tr>
     </thead>
     <tbody>
@@ -220,7 +220,7 @@
   {% elif usage_receipts['items'] %}
   <div class="bill-scroll"><table>
     <caption>Adjustments, newest first</caption>
-    <thead><tr><th scope="col">Person</th><th scope="col">Counted So Far</th><th scope="col">Last Update</th><th scope="col">Details</th></tr></thead>
+    <thead><tr><th scope="col">Person</th><th scope="col">Counted so far</th><th scope="col">Last update</th><th scope="col">Details</th></tr></thead>
     <tbody>{% for receipt in usage_receipts['items'] %}
       {% set who = receipt.principal | identity %}
       <tr><td>{{ who.name }}{% if who.detail and who.detail != 'Email' %} <span class="muted">({{ who.detail }})</span>{% endif %}</td>

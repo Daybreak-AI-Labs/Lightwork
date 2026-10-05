@@ -935,7 +935,7 @@ SETTINGS: tuple[Setting, ...] = (
       "Run a bounded dashboard observer for explicitly enrolled named accounts. It rechecks current identity and owned work, observes changes about every 30 seconds, and releases eligible digests while the dashboard is running.",
       "toggle", "Integrations", False, "maverick_dashboard.personal_notification_scheduler"),
     S("notifications", "personal_external", "Allow personal alerts to verified private conversations",
-      "Let people opt into Slack or Telegram private delivery using their explicitly verified My Data identities. Requires background observation, current membership and channel allowlists; organization webhook destinations are never reused.",
+      "Let people opt into Slack or Telegram private delivery using their explicitly verified My data identities. Requires background observation, current membership and channel allowlists; organization webhook destinations are never reused.",
       "toggle", "Integrations", False, "maverick.personal_notification_delivery"),
     S("notifications", "personal_dashboard_url", "Dashboard address for personal notification links",
       "The HTTPS origin people use to sign in, without a path, query or credentials. Messages say why each alert was sent, what it needs and by when, with authenticated links, and never include task text.",

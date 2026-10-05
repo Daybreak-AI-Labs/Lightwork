@@ -201,7 +201,7 @@
     questionsBox.textContent = "";
     templateForm.reset();
     templateForm.hidden = false;
-    document.getElementById("tpl-template-form-title").textContent = from ? "New Version of " + words(from.title_ref) : "New Questionnaire";
+    document.getElementById("tpl-template-form-title").textContent = from ? "New Version of " + words(from.title_ref) : "New questionnaire";
     templateForm.elements.namedItem("title").value = from ? words(from.title_ref) : "";
     templateForm.elements.namedItem("title").disabled = !!from;
     (from ? from.questions : [null]).forEach(addQuestion);
@@ -344,7 +344,7 @@
     if (!template) { box.appendChild(el("p", "muted", "The questionnaire for this assessment could not be found.")); return; }
     var mine = Object.keys(a.assignments || {}).some(function (k) { return a.assignments[k] === state.me; });
     box.appendChild(el("p", "muted", mine ? "You can answer the questions assigned to you." :
-      "The questions are answered by " + words(a.assignments[Object.keys(a.assignments)[0]]) + ". Send them an invitation from the Third-Party Collaboration page."));
+      "The questions are answered by " + words(a.assignments[Object.keys(a.assignments)[0]]) + ". Send them an invitation from the Third-party collaboration page."));
     R.table(box.appendChild(el("div")), [
       { label: "Question", value: function (q) { return words(q.prompt_ref); } },
       { label: "Area", value: function (q) { return words(q.domain); } },

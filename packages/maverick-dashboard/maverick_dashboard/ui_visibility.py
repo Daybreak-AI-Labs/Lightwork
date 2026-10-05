@@ -296,7 +296,7 @@ PAGES: tuple[dict, ...] = (
     # exception desk — the Shoring P&L (Savings) sits underneath it.
     {
         "path": "/shoring",
-        "label": "Autonomous Shoring",
+        "label": "Autonomous shoring",
         "aliases": "Hand a team's work to Lightwork",
         "group": "Observe",
         "icon": "fleets",
@@ -420,7 +420,7 @@ PAGES: tuple[dict, ...] = (
     # heads the Govern group as the front door to the compliance surface.
     {
         "path": "/autonomous-compliance",
-        "label": "Autonomous Compliance",
+        "label": "Autonomous compliance",
         "group": "Govern",
         "icon": "compliance",
         "floor": "view",
@@ -519,7 +519,7 @@ PAGES: tuple[dict, ...] = (
     # tracker observations, and downstream preference synchronization.
     {
         "path": "/consent",
-        "label": "Consent & Preferences",
+        "label": "Consent and preferences",
         "group": "Consent",
         "icon": "check",
         "floor": "operate",
@@ -714,7 +714,7 @@ PAGES: tuple[dict, ...] = (
     },
     {
         "path": "/governance/inventory",
-        "label": "Governance Inventory",
+        "label": "Governance inventory",
         "group": "AI oversight",
         "icon": "overview",
         "floor": "view",
@@ -806,7 +806,7 @@ PAGES: tuple[dict, ...] = (
     },
     {
         "path": "/third-party/executive-reports",
-        "label": "Executive Vendor Reports",
+        "label": "Executive vendor reports",
         "group": "Third parties",
         "icon": "shield",
         "floor": "view",
@@ -826,7 +826,7 @@ PAGES: tuple[dict, ...] = (
     },
     {
         "path": "/third-party/lifecycle",
-        "label": "Third-Party Lifecycle",
+        "label": "Third-party lifecycle",
         "group": "Third parties",
         "icon": "shield",
         "floor": "operate",
@@ -836,7 +836,7 @@ PAGES: tuple[dict, ...] = (
     },
     {
         "path": "/third-party/collaboration",
-        "label": "Third-Party Collaboration",
+        "label": "Third-party collaboration",
         "group": "Third parties",
         "icon": "shield",
         "floor": "operate",
@@ -1068,7 +1068,7 @@ PAGES: tuple[dict, ...] = (
     # verify one offline. Audit floor, like the log it draws from.
     {
         "path": "/audit/receipts",
-        "label": "Trust Receipts",
+        "label": "Trust receipts",
         "group": "Govern",
         "icon": "audit",
         "floor": "audit",

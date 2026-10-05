@@ -339,7 +339,7 @@
     if (!S.vendors.length) { say(formStatus, "Add the vendor on the Third-party Intelligence page first; contracts are linked to those vendors."); }
     F("record_kind").disabled = !!r;
     F("vendor_id").disabled = !!r;
-    document.getElementById("tpc-editor-title").textContent = r ? "Edit " + words(r.title_ref) : "Add a Contract or Engagement";
+    document.getElementById("tpc-editor-title").textContent = r ? "Edit " + words(r.title_ref) : "Add a contract or engagement";
     if (r) {
       var l = r.lifecycle || {};
       F("record_kind").value = r.record_kind;

@@ -83,7 +83,7 @@ def create_autonomous_compliance_page_router(
 
     if not isinstance(templates, Jinja2Templates):
         raise TypeError(
-            "Autonomous Compliance page requires a Jinja template authority"
+            "Autonomous compliance page requires a Jinja template authority"
         )
     router = APIRouter(tags=["autonomous-compliance"])
 
@@ -95,7 +95,7 @@ def create_autonomous_compliance_page_router(
             for key in request.query_params
         ):
             raise HTTPException(
-                status_code=404, detail="Autonomous Compliance unavailable"
+                status_code=404, detail="Autonomous compliance unavailable"
             )
         from maverick import compliance_catalog as catalog
 

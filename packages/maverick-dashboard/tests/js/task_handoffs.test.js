@@ -40,7 +40,7 @@ test('workspace change clears the selected private preview',async()=>{
  p.set(async()=>({ok:true,status:200,json:async()=>({context:'other',items:[]})}));p.doc.getElementById('handoff-refresh').click();await tick();
  assert.equal(p.doc.getElementById('handoff-detail').hidden,true);assert.equal(p.doc.getElementById('handoff-content').textContent,'');p.dom.window.close();
 });
-test('My Data deep link reads the exact current handoff without starting or accepting work',async()=>{
+test('My data deep link reads the exact current handoff without starting or accepting work',async()=>{
  const p=page('','?open=HOF-one');p.set(async()=>p.json({handoff:row}));await tick();
  assert.equal(p.doc.getElementById('handoff-detail').hidden,false);
  assert.equal(p.calls.at(-1).url,'/api/v1/task-handoffs/HOF-one');

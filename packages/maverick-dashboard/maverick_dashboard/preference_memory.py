@@ -15,12 +15,12 @@ def describe(request):
     if not principal or not personal_identity.principal_current(principal):
         return result
     if config.config_source_errors(include_tenant=True):
-        result["message"] = "Current administrator memory policy could not be confirmed. Open My Data after configuration is restored."
+        result["message"] = "Current administrator memory policy could not be confirmed. Open My data after configuration is restored."
         return result
     allowed = config.get_dreaming().get("user_notes") is True
     result["policy"] = "Personal recall allowed within your choices" if allowed else "Personal recall disabled by administrator policy"
     if not personal_identity.enabled():
-        result["message"] = "My Data controls are disabled. Ask an administrator to enable Personal data controls. Previously saved personal recall restrictions remain enforced."
+        result["message"] = "My data controls are disabled. Ask an administrator to enable Personal data controls. Previously saved personal recall restrictions remain enforced."
         return result
     try:
         scopes = personal_memory.owned_scopes(principal)
@@ -44,7 +44,7 @@ def describe(request):
             return result
         result.update(available=True, scopes=rows,
                       sharing="One explicitly chosen verified source supplies shared preferences" if selected else "Channel-only preferences",
-                      message="These choices apply only to your verified account scopes. Use My Data to narrow recall, inspect sources, reset sharing to channel-only, or change an individual channel choice. Tools, companion policy and retention remain separate.")
+                      message="These choices apply only to your verified account scopes. Use My data to narrow recall, inspect sources, reset sharing to channel-only, or change an individual channel choice. Tools, companion policy and retention remain separate.")
     except (ValueError, OSError, RuntimeError):
-        result["message"] = "Saved personal memory choices could not be confirmed. Open My Data to review current state before changing them."
+        result["message"] = "Saved personal memory choices could not be confirmed. Open My data to review current state before changing them."
     return result

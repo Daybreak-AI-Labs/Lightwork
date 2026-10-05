@@ -47,7 +47,7 @@ def test_page_shows_install_section_when_allowlisted(tmp_path, monkeypatch):
     monkeypatch.setattr("maverick.plugins.installable_plugins", lambda: ["acme-maverick-tools"])
     t = client.get("/plugins").text
     assert "acme-maverick-tools" in t
-    assert "Install a Plugin" in t
+    assert "Install a plugin" in t
     # Approvals are a checklist of the current list plus one new-name field.
     assert 'type="checkbox" name="names" value="acme-maverick-tools" checked' in t
     assert "<textarea" not in t
