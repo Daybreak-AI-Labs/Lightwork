@@ -650,6 +650,17 @@ async def release_retention_hold(
     return {"context": context, **result}
 
 
+def page_available(request: Request) -> bool:
+    """Whether the Knowledge page would open for this person: the same entry
+    check as the page itself (switched on, ``operate``, a named account and a
+    selected workspace)."""
+    try:
+        _binding(request, Response())
+    except HTTPException:
+        return False
+    return True
+
+
 _PAGE_HEADERS = {
     "Cache-Control": "no-store, private, max-age=0",
     "Pragma": "no-cache",
@@ -672,12 +683,47 @@ _PAGE_HEADERS = {
 }
 
 
+_KNOWLEDGE_TABS = (("", "Search", PAGE_PATH), ("diagnostics", "Diagnostics", PAGE_PATH + "?tab=diagnostics"))
+
+
+def _with_page_headers(page: Response, nonce: str) -> Response:
+    for name, value in _PAGE_HEADERS.items():
+        if name == "Content-Security-Policy":
+            value = value.replace("style-src 'self'", f"style-src 'self' 'nonce-{nonce}'")
+        page.headers[name] = value
+    return page
+
+
+async def _diagnostics_tab(request: Request, tabs) -> Response:
+    """The Diagnostics tab: everything the /cortex page shows, under the
+    same checks (the page policy for /cortex and its ``view`` floor)."""
+    from .app import templates
+    from .cortex_page import console_context
+
+    require_permission(request, "view")
+    nonce = secrets.token_urlsafe(18)
+    context = {**await console_context(request), "csp_style_nonce": nonce, "page_path": PAGE_PATH,
+               "tab_host": {"title": "Knowledge", "label": "Knowledge views", "tabs": tabs, "selected": "diagnostics",
+                            "lede": "Find knowledge you can use now, and check how each knowledge source is doing."}}
+    return _with_page_headers(templates.TemplateResponse(request, "cortex.html", context), nonce)
+
+
 @page_router.get(PAGE_PATH, response_class=HTMLResponse, include_in_schema=False)
 async def knowledge_access_page(request: Request, response: Response):
-    if any(key not in {"theme", "density", "font", "lang"} for key in request.query_params):
+    if any(key not in {"theme", "density", "font", "lang", "tab"} for key in request.query_params):
+        raise HTTPException(404, "Knowledge access page unavailable")
+    tab = request.query_params.get("tab", "")
+    if tab not in ("", "diagnostics"):
         raise HTTPException(404, "Knowledge access page unavailable")
     tenant, actor, context = _binding(request, response)
     from .app import templates
+    from .navigation_api import areas_on, may_open
+
+    tabs = list(_KNOWLEDGE_TABS) if may_open(request, "/cortex") else None
+    if tab == "diagnostics":
+        if tabs is None:
+            raise HTTPException(403, "this page is not enabled for your role")
+        return await _diagnostics_tab(request, tabs)
 
     purpose_state = "available"
     try:
@@ -702,13 +748,10 @@ async def knowledge_access_page(request: Request, response: Response):
             "knowledge_purpose_state": purpose_state,
             "knowledge_api_base": API_BASE,
             "csp_style_nonce": nonce,
+            "knowledge_tabs": tabs if areas_on(request) else None,
         },
     )
-    for name, value in _PAGE_HEADERS.items():
-        if name == "Content-Security-Policy":
-            value = value.replace("style-src 'self'", f"style-src 'self' 'nonce-{nonce}'")
-        page.headers[name] = value
-    return page
+    return _with_page_headers(page, nonce)
 
 
 @page_router.get(JS_PATH, include_in_schema=False)

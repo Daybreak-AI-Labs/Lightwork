@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Flow designer · Lightwork{% endblock %}
+{% block title %}{{ 'Steps · Workflow builder' if builder_modes else 'Flow designer' }} · Lightwork{% endblock %}
 {% block content %}
 {% from "_back_link.html" import back_link with context %}
 <style>
@@ -242,7 +242,7 @@
 
 {% from "_hero.html" import hero, state %}
 <div class="fd-hero">
-  {% call hero('Your AI workforce', 'Flow designer',
+  {% call hero('Your AI workforce', 'Workflow builder' if builder_modes else 'Flow designer',
                subtitle='Draft · test · publish',
                lede='Describe the work in plain English, choose Draft, and
                      review the steps before saving or publishing.') %}
@@ -256,7 +256,8 @@
   {% endcall %}
 </div>
 
-<div class="fd" data-view="steps" data-flow-engine-on="{{ 'true' if flows_enabled else 'false' }}" data-can-manage-flows="{{ 'true' if can_manage_flows else 'false' }}">
+{% if builder_modes %}{% from "_tabs.html" import tab_bar, panel_attrs %}{{ tab_bar('Workflow builder modes', builder_modes, 'steps') }}{% endif %}
+<div class="fd" data-view="steps" data-flow-engine-on="{{ 'true' if flows_enabled else 'false' }}" data-can-manage-flows="{{ 'true' if can_manage_flows else 'false' }}"{% if builder_modes %} {{ panel_attrs('steps') }}{% endif %}>
   <p>{{ back_link('/workflows', 'Workflows') }}</p>
   <p class="muted">{{ ui('Connector credentials belong in Connections. Older flows using secret expressions must be reviewed before they can run; saved definitions and grants are not changed automatically.') }} <a href="/connections">{{ ui('Connections') }}</a></p>
   <!-- Header: name, the Steps/Canvas switch, and the primary actions. -->

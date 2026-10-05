@@ -754,6 +754,11 @@ def _docs_context(request: Request) -> dict:
 templates.context_processors.append(_docs_context)
 templates.env.globals.setdefault("docs_home", "https://daybreak-ai-labs.github.io/Lightwork/")
 templates.env.globals.setdefault("docs_learn_more", None)
+# A page's tab bar (templates/_tabs.html) and a hosted page's header: absent
+# unless the page's handler passes them.
+for _tab_value in ("tab_host", "builder_modes", "map_views", "replay_tabs", "outside_agent_tabs",
+                   "permission_tabs", "compliance_tabs", "knowledge_tabs"):
+    templates.env.globals.setdefault(_tab_value, None)
 
 
 def _help_context(request: Request) -> dict:
@@ -6879,19 +6884,52 @@ async def audit_binder_page(request: Request, days: int = 90) -> HTMLResponse:
     )
 
 
+def _replay_tabs(request: Request, goal_id: int | None) -> list[tuple[str, str, str]]:
+    """Task replay's views this person may open: Replay, then Branches (the
+    /run-tree page) and Video (the /walkthroughs page) under the same access
+    those pages check. The selected task carries over to Branches."""
+    from .navigation_api import may_open
+
+    task = f"goal={goal_id}" if goal_id is not None else ""
+    tabs = [("", "Replay", "/replay" + (f"?{task}" if task else ""))]
+    if may_open(request, "/run-tree"):
+        tabs.append(("branches", "Branches", "/replay?tab=branches" + (f"&{task}" if task else "")))
+    if may_open(request, "/walkthroughs"):
+        tabs.append(("video", "Video", "/replay?tab=video"))
+    return tabs
+
+
 @app.get("/replay", response_class=HTMLResponse)
-def replay_page(request: Request) -> HTMLResponse:
+def replay_page(request: Request, tab: str = "") -> HTMLResponse:
     """Flight recorder: reconstruct a run's action timeline from the signed
     audit log, verify the tamper-evident chain, and offer an evidence export.
 
     With no ``?goal=<id>`` it lists recent runs (owner-scoped) to pick from.
+    ``?tab=branches`` and ``?tab=video`` show the Branches and Video views
+    (the /run-tree and /walkthroughs pages) to people who may open those.
     """
     from maverick.world_model import close_world_if_owned, open_world
 
     from .control_plane import build_replay
+    from .navigation_api import areas_on
 
     raw = (request.query_params.get("goal") or "").strip()
     goal_id = int(raw) if raw.isdigit() else None
+    tabs = _replay_tabs(request, goal_id)
+    if tab in ("branches", "video"):
+        if tab not in {key for key, _label, _href in tabs}:
+            raise HTTPException(status_code=403, detail="this page is not enabled for your role")
+        if tab == "branches":
+            context = {**_run_tree_context(request), "branches_href": "/replay?tab=branches&"}
+        else:
+            context = _walkthroughs_context(request)
+        context["tab_host"] = {
+            "title": "Task replay", "label": "Task replay views", "tabs": tabs, "selected": tab,
+            "lede": "See everything a task did, step by step, check that the record hasn't been altered, "
+                    "and download evidence for auditors."}
+        return templates.TemplateResponse(
+            request, "run_tree.html" if tab == "branches" else "walkthroughs.html", context)
+    replay_tabs = tabs if len(tabs) > 1 and areas_on(request) else None
     w = open_world()
     try:
         if goal_id is None:
@@ -6899,7 +6937,7 @@ def replay_page(request: Request) -> HTMLResponse:
             return templates.TemplateResponse(
                 request,
                 "replay.html",
-                {"goal": None, "goals": goals, "replay": None},
+                {"goal": None, "goals": goals, "replay": None, "replay_tabs": replay_tabs},
             )
         goal = w.get_goal(goal_id)
         if goal is None:
@@ -6909,7 +6947,7 @@ def replay_page(request: Request) -> HTMLResponse:
         return templates.TemplateResponse(
             request,
             "replay.html",
-            {"goal": goal, "goals": None, "replay": replay},
+            {"goal": goal, "goals": None, "replay": replay, "replay_tabs": replay_tabs},
         )
     finally:
         try:
@@ -6918,10 +6956,22 @@ def replay_page(request: Request) -> HTMLResponse:
             pass
 
 
-@app.get("/trust", response_class=HTMLResponse)
-def trust_page(request: Request) -> HTMLResponse:
+@app.get("/trust", response_class=HTMLResponse, response_model=None)
+def trust_page(request: Request) -> HTMLResponse | RedirectResponse:
     """Agent Trust Plane: the cross-agent permission graph -- every external
-    agent allowed to interact, with its tool/risk/budget ceilings + lifecycle."""
+    agent allowed to interact, with its tool/risk/budget ceilings + lifecycle.
+    In areas navigation it is Outside agents' Access tab."""
+    from .navigation_api import areas_redirect
+
+    moved = areas_redirect(request)
+    if moved is not None:
+        return moved
+    return templates.TemplateResponse(request, "trust.html", _trust_context(request))
+
+
+def _trust_context(request: Request) -> dict:
+    """Agent Trust: which outside agents may work with Lightwork, and what
+    each may do, see and spend (/trust, and Outside agents' Access tab)."""
     from .control_plane import _discover_tools, trust_overview
     from .trust_page_api import managed_ids
     from .ui_choices_api import work_area_choices
@@ -6939,16 +6989,32 @@ def trust_page(request: Request) -> HTMLResponse:
             _world(), [s for a in context.get("agents", []) for s in a["data_scopes"]]),
         "can_admin": has_permission(request, "admin"),
     })
-    return templates.TemplateResponse(request, "trust.html", context)
+    return context
+
+
+_OUTSIDE_AGENT_TABS = (("", "Agents", "/external-agents"), ("access", "Access", "/external-agents?tab=access"))
 
 
 @app.get("/external-agents", response_class=HTMLResponse)
-async def external_agents_page(request: Request) -> HTMLResponse:
+async def external_agents_page(request: Request, tab: str = "") -> HTMLResponse:
     """Bring-your-own-agent console: enroll agents built on other platforms
     (Agentforce, Bedrock, Copilot Studio, custom), mint their credentials,
-    and watch their governed runs/spend land on the Operating Record."""
+    and watch their governed runs/spend land on the Operating Record.
+    ``?tab=access`` shows Agent Trust (the /trust page) to people who may
+    open it."""
     from maverick import external_agents as xa
 
+    from .navigation_api import areas_on, may_open
+
+    tabs = list(_OUTSIDE_AGENT_TABS) if may_open(request, "/trust") else None
+    if tab == "access":
+        if tabs is None:
+            raise HTTPException(status_code=403, detail="this page is not enabled for your role")
+        context = await run_in_threadpool(_trust_context, request)
+        context["tab_host"] = {
+            "title": "Outside agents", "label": "Outside agents views", "tabs": tabs, "selected": "access",
+            "lede": "Choose which outside AI agents may work with Lightwork, and what each one may do, see and spend."}
+        return templates.TemplateResponse(request, "trust.html", context)
     enabled = xa.enabled()
     entitled = xa.entitled()
 
@@ -6966,6 +7032,7 @@ async def external_agents_page(request: Request) -> HTMLResponse:
             "agents": xa.roster(),
             "platforms": xa.PLATFORMS,
             "surfaces": xa.TOKEN_SURFACES,
+            "outside_agent_tabs": tabs if areas_on(request) else None,
         },
     )
 
@@ -6995,12 +7062,17 @@ async def external_agent_scorecard(request: Request, agent_id: str) -> HTMLRespo
     )
 
 
-@app.get("/discovery", response_class=HTMLResponse)
-async def discovery_page(request: Request) -> HTMLResponse:
+@app.get("/discovery", response_class=HTMLResponse, response_model=None)
+async def discovery_page(request: Request) -> HTMLResponse | RedirectResponse:
     """Inventory every governable surface the deployment exposes (tools, MCP
-    servers, providers, channels, external agents)."""
+    servers, providers, channels, external agents). In areas navigation it
+    is the Permissions page's Inventory tab."""
     from .control_plane import discovery_overview
+    from .navigation_api import areas_redirect
 
+    moved = areas_redirect(request)
+    if moved is not None:
+        return moved
     return templates.TemplateResponse(
         request, "discovery.html", {"discovery": discovery_overview()}
     )
@@ -7695,15 +7767,27 @@ def oversight_page(request: Request) -> HTMLResponse:
     )
 
 
-@app.get("/run-tree", response_class=HTMLResponse)
-def run_tree_page(request: Request) -> HTMLResponse:
+@app.get("/run-tree", response_class=HTMLResponse, response_model=None)
+def run_tree_page(request: Request) -> HTMLResponse | RedirectResponse:
     """Counterfactual review: the runs that were forked, and their branches.
 
     Read-only. Forking happens on the run itself; this is where a reviewer
     reads what the agent chose against what the alternative did, under one
     root. Owner-scoped like the goal listings, and fail-soft: an unreadable
-    lineage sidecar renders the empty state, never a 500.
+    lineage sidecar renders the empty state, never a 500. In areas navigation
+    it is Task replay's Branches tab (/replay?tab=branches).
     """
+    from .navigation_api import areas_redirect
+
+    moved = areas_redirect(request)
+    if moved is not None:
+        return moved
+    return templates.TemplateResponse(request, "run_tree.html", _run_tree_context(request))
+
+
+def _run_tree_context(request: Request) -> dict:
+    """The Branches view: tasks with branches, one task's branch tree and
+    the branch controls (/run-tree, and Task replay's Branches tab)."""
     from maverick import session_tree
 
     owner_filter = goal_owner_filter(request)
@@ -7731,19 +7815,16 @@ def run_tree_page(request: Request) -> HTMLResponse:
         ]
     except Exception:  # pragma: no cover - the picker is best-effort
         recent = []
-    return templates.TemplateResponse(
-        request,
-        "run_tree.html",
-        {
-            "enabled": bool(cfg.get("enable")),
-            "max_depth": cfg.get("max_depth"),
-            "roots": rows,
-            "tree": tree,
-            "recent": recent,
-            "can_operate": has_permission(request, "operate"),
-            "can_admin": has_permission(request, "admin"),
-        },
-    )
+    return {
+        "enabled": bool(cfg.get("enable")),
+        "max_depth": cfg.get("max_depth"),
+        "roots": rows,
+        "tree": tree,
+        "recent": recent,
+        "can_operate": has_permission(request, "operate"),
+        "can_admin": has_permission(request, "admin"),
+        "branches_href": "/run-tree?",
+    }
 
 
 @app.get("/safety", response_class=HTMLResponse)
@@ -7823,16 +7904,37 @@ def _compliance_view(framework: str) -> dict:
     }
 
 
+_COMPLIANCE_TABS = (("", "Coverage", "/compliance"), ("overview", "Overview", "/compliance?tab=overview"))
+
+
 @app.get("/compliance", response_class=HTMLResponse)
-async def compliance_page(request: Request) -> HTMLResponse:
+async def compliance_page(request: Request, tab: str = "") -> HTMLResponse:
     """Auditor-ready control-coverage report (GDPR + EU AI Act + US frameworks).
 
     Org/system-level posture (like /safety), grouped by framework. The
     ``?framework=eu|us|all`` query param mirrors ``maverick compliance``.
     Control coverage only -- not a legal attestation. Fail-soft to an empty
-    state so a missing core install never 500s the console.
+    state so a missing core install never 500s the console. ``?tab=overview``
+    shows the Autonomous Compliance landing to people who may open it.
     """
+    from .navigation_api import areas_on, may_open
+
+    tabs = list(_COMPLIANCE_TABS) if may_open(request, "/autonomous-compliance") else None
+    if tab == "overview":
+        if tabs is None:
+            raise HTTPException(status_code=403, detail="this page is not enabled for your role")
+        require_permission(request, "view")  # the landing's own check
+        from .autonomous_compliance_page import landing_context, with_landing_headers
+
+        context = landing_context()
+        context["tab_host"] = {
+            "kicker": "Governance", "title": "Compliance", "subtitle": "What is covered and what still needs doing",
+            "label": "Compliance views", "tabs": tabs, "selected": "overview",
+            "lede": "Everything you need to run your compliance program, in six areas. Pick a card to open "
+                    "that part of Lightwork. Each card says whether it is ready to use today."}
+        return with_landing_headers(templates.TemplateResponse(request, "autonomous_compliance.html", context))
     view = _compliance_view(request.query_params.get("framework") or "all")
+    view["compliance_tabs"] = tabs if areas_on(request) else None
     from .compliance_controls_api import RETENTION_FIELDS, guide_for
 
     view["guide_for"] = guide_for
@@ -8811,6 +8913,9 @@ def _permissions_tool_page(
     return result
 
 
+_PERMISSION_TABS = (("", "Permissions", "/permissions"), ("inventory", "Inventory", "/permissions?tab=inventory"))
+
+
 @app.get("/permissions", response_class=HTMLResponse)
 async def permissions_page(
     request: Request,
@@ -8818,8 +8923,25 @@ async def permissions_page(
     state: str = Query(default="all"),
     page: int = Query(default=1, ge=1),
     per_page: int = Query(default=50, ge=1, le=100),
+    tab: str = Query(default="", max_length=32),
 ) -> HTMLResponse:
-    """What Lightwork can do — tools, capabilities, channels, data flow."""
+    """What Lightwork can do — tools, capabilities, channels, data flow.
+    ``?tab=inventory`` shows everything Lightwork can use here (the
+    /discovery page) to people who may open it."""
+    from .navigation_api import areas_on, may_open
+
+    tabs = list(_PERMISSION_TABS) if may_open(request, "/discovery") else None
+    if tab == "inventory":
+        if tabs is None:
+            raise HTTPException(status_code=403, detail="this page is not enabled for your role")
+        from .control_plane import discovery_overview
+
+        return templates.TemplateResponse(request, "discovery.html", {
+            "discovery": discovery_overview(),
+            "tab_host": {"kicker": "Governance", "title": "Permissions", "subtitle": "What Lightwork can do",
+                         "label": "Permissions views", "tabs": tabs, "selected": "inventory",
+                         "lede": "Everything Lightwork can use here and keep under your rules: actions, connected "
+                                 "tool servers, AI providers, channels and outside agents."}})
     perm = _permissions_tool_page(
         _permissions_snapshot(),
         q=q,
@@ -8834,6 +8956,7 @@ async def permissions_page(
             "perm": perm,
             "permissions_can_manage_sandbox": has_global_permission(request, "admin"),
             "permissions_can_manage_tools": has_global_permission(request, "operate"),
+            "permission_tabs": tabs if areas_on(request) else None,
         },
     )
 
@@ -12887,6 +13010,7 @@ async def shell_copilot_js() -> FileResponse:
 @app.get("/static/lightwork-ai-cloud-agent-governance.js")
 @app.get("/static/lightwork-governance-agents.js")
 @app.get("/static/lightwork-knowledge-library.js")
+@app.get("/static/lightwork-tabs.js")
 async def in_app_ui_asset(request: Request) -> FileResponse:
     """Serve only the explicitly registered in-app form assets."""
     name = request.url.path.rsplit("/", 1)[-1]
@@ -13311,20 +13435,33 @@ async def shell_font(name: str) -> FileResponse:
     )
 
 
+_MAP_VIEWS = (("", "Flat map", "/graph-editor"), ("3d", "3D view", "/graph-editor?view=3d"))
+
+
 @app.get("/graph-editor", response_class=HTMLResponse)
-def graph_editor_page(request: Request) -> HTMLResponse:
+def graph_editor_page(request: Request, view: str = "") -> HTMLResponse:
     """Visual graph editor: the goal forest as an editable SVG node graph.
 
     Layout comes from the server (GET /api/v1/goal-tree); the page JS only
-    draws and posts edits (retitle / re-parent / add child)."""
+    draws and posts edits (retitle / re-parent / add child). ``?view=3d``
+    shows the same forest in 3D (the 3D plan view's page, under the task
+    map), for people who may open the 3D plan view."""
     from .goal_tree import forest_html, goal_nodes
+    from .navigation_api import areas_on, may_open
 
+    show_3d = may_open(request, "/plan-tree-3d")
+    if view == "3d" and not show_3d:
+        raise HTTPException(status_code=403, detail="this page is not enabled for your role")
     nodes = goal_nodes(_world(), owner=goal_owner_filter(request))
-    return templates.TemplateResponse(
-        request,
-        "graph_editor.html",
-        {"node_count": len(nodes), "fallback_html": forest_html(nodes)},
-    )
+    # The views bar is areas navigation's; the classic page keeps its 3D link.
+    context = {"node_count": len(nodes), "fallback_html": forest_html(nodes),
+               "map_views": list(_MAP_VIEWS) if show_3d and areas_on(request) else None}
+    if view == "3d":
+        context["tab_host"] = {"title": "Task map", "label": "Task map views", "tabs": list(_MAP_VIEWS),
+                               "selected": "3d",
+                               "lede": "Your tasks and their smaller steps as a 3D map you can move around."}
+        return templates.TemplateResponse(request, "plan_tree_3d.html", context)
+    return templates.TemplateResponse(request, "graph_editor.html", context)
 
 
 @app.get("/goal-builder", response_class=HTMLResponse)
@@ -13337,12 +13474,19 @@ async def goal_builder_page(request: Request) -> HTMLResponse:
     )
 
 
+_BUILDER_MODES = (("", "Describe it", "/workflow-builder"), ("steps", "Steps", "/workflow-builder?mode=steps"))
+_FLOW_ID = re.compile(r"[A-Za-z0-9_-]{1,120}")
+
+
 @app.get("/workflow-builder", response_class=HTMLResponse)
 async def workflow_builder_page(
     request: Request,
     template: str | None = None,
     edit: str | None = None,
     edit_agent: str | None = None,
+    mode: str = "",
+    flow: str = "",
+    from_template: str = "",
 ) -> HTMLResponse:
     """AI workflow builder: draft a reusable workflow from a brief or an
     uploaded document, edit it, then save it as a runnable template.
@@ -13352,9 +13496,25 @@ async def workflow_builder_page(
     re-drafting it. ``?edit=<name>`` rehydrates the full template editor so Save
     overwrites it; ``?edit_agent=<name>`` rehydrates the playbook editor for an
     existing agent (round-tripping override fields the builder can't show, so
-    editing can't silently clear them). An unknown name yields no prefill."""
+    editing can't silently clear them). An unknown name yields no prefill.
+
+    ``?mode=steps`` is the step-by-step editor (the flow designer's, with its
+    drafting, canvas, testing, publishing and assistant) for people who may
+    open the flow designer; ``&flow=<id>`` opens a saved flow in it and
+    ``&from_template=<name>`` starts from a saved template, as the designer
+    does. Flows save through the same /api/v1/flows calls either way."""
     from maverick.config import get_features
 
+    from .navigation_api import areas_on, may_open
+
+    modes = list(_BUILDER_MODES) if may_open(request, "/flows/designer") else None
+    if mode == "steps":
+        if modes is None:
+            raise HTTPException(status_code=403, detail="this page is not enabled for your role")
+        flow_id = flow if _FLOW_ID.fullmatch(flow) else ""
+        context = _flow_designer_context(request, flow_id, from_template)
+        context["builder_modes"] = modes
+        return templates.TemplateResponse(request, "flow_designer.html", context)
     feats = get_features()
     prefill = None
     edit_prefill = None
@@ -13438,6 +13598,7 @@ async def workflow_builder_page(
             "edit_prefill": edit_prefill,
             "edit_agent_prefill": edit_agent_prefill,
             "edit_agent_denied": edit_agent_denied,
+            "builder_modes": modes if areas_on(request) else None,
         },
     )
 
@@ -13602,7 +13763,7 @@ async def connections_page(request: Request) -> HTMLResponse:
 )
 async def flow_designer_page(
     request: Request, flow_id: str = "", from_template: str = ""
-) -> HTMLResponse:
+) -> Response:
     """The visual flow designer -- a canvas node editor + the natural-language
     drafter + the copilot chat. Talks to the /api/v1/flows endpoints; the
     flow-engine gate is enforced there, so the page renders even when flows are
@@ -13611,7 +13772,21 @@ async def flow_designer_page(
     ``?from_template=<name>`` opens a saved TEMPLATE as its equivalent
     single-agent flow (the IR's degenerate case) -- the bridge from the text
     workflow builder into the graph designer: start from what you had, then add
-    branches/approvals/loops around it."""
+    branches/approvals/loops around it. In areas navigation a new flow starts
+    in the workflow builder's Steps mode; a saved flow keeps its address."""
+    from .navigation_api import areas_redirect
+
+    moved = areas_redirect(request)
+    if moved is not None:
+        return moved
+    return templates.TemplateResponse(
+        request, "flow_designer.html", _flow_designer_context(request, flow_id, from_template))
+
+
+def _flow_designer_context(request: Request, flow_id: str, from_template: str) -> dict:
+    """The flow designer's editor: the flow to open (or a template seed) and
+    the engine and management switches (/flows/designer, and the workflow
+    builder's Steps mode)."""
     from maverick import flow as _flow
 
     seed_flow = None
@@ -13629,14 +13804,12 @@ async def flow_designer_page(
             seed_flow = seed.to_dict()
         except (ValueError, FileNotFoundError):
             seed_flow = None  # unknown template -> a blank canvas, not a 500
-    return templates.TemplateResponse(
-        request, "flow_designer.html", {
-            "flow_id": flow_id,
-            "seed_flow": seed_flow,
-            "flows_enabled": _flow.enabled(),
-            "can_manage_flows": has_global_permission(request, "admin") and "MAVERICK_FLOWS" not in os.environ,
-        }
-    )
+    return {
+        "flow_id": flow_id,
+        "seed_flow": seed_flow,
+        "flows_enabled": _flow.enabled(),
+        "can_manage_flows": has_global_permission(request, "admin") and "MAVERICK_FLOWS" not in os.environ,
+    }
 
 
 @app.get("/flows/{flow_id}/runs/{run_id}", response_class=HTMLResponse)
@@ -13768,13 +13941,25 @@ async def benchmarks_page(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(request, "benchmarks.html", snap)
 
 
-@app.get("/walkthroughs", response_class=HTMLResponse)
-def walkthroughs_page(request: Request) -> HTMLResponse:
+@app.get("/walkthroughs", response_class=HTMLResponse, response_model=None)
+def walkthroughs_page(request: Request) -> HTMLResponse | RedirectResponse:
     """Locally exported run walkthrough videos (no external hosting).
 
     Lists the MP4s under the walkthroughs dir with native <video> embeds and
     a captions track when the export produced one. The export itself is
-    POST /api/v1/goals/{id}/walkthrough (replay-to-MP4 machinery)."""
+    POST /api/v1/goals/{id}/walkthrough (replay-to-MP4 machinery). In areas
+    navigation it is Task replay's Video tab (/replay?tab=video)."""
+    from .navigation_api import areas_redirect
+
+    moved = areas_redirect(request)
+    if moved is not None:
+        return moved
+    return templates.TemplateResponse(request, "walkthroughs.html", _walkthroughs_context(request))
+
+
+def _walkthroughs_context(request: Request) -> dict:
+    """The Video view: exported walkthrough videos the person may open and
+    the finished tasks they may turn into one."""
     from .api import _walkthroughs_dir
 
     d = _walkthroughs_dir()
@@ -13809,11 +13994,7 @@ def walkthroughs_page(request: Request) -> HTMLResponse:
         for g in _world().list_goals(owner=goal_owner_filter(request), limit=100, order="desc")
         if g.status not in {"pending", "running"}
     ]
-    return templates.TemplateResponse(
-        request,
-        "walkthroughs.html",
-        {"items": items, "runs": runs},
-    )
+    return {"items": items, "runs": runs}
 
 
 _WALKTHROUGH_NAME_RE = re.compile(r"^goal-(\d+)\.(mp4|vtt)$")
@@ -13850,16 +14031,20 @@ async def walkthrough_media(request: Request, name: str) -> FileResponse:
     return FileResponse(path, media_type=media)
 
 
-@app.get("/plan-tree-3d", response_class=HTMLResponse)
-def plan_tree_3d_page(request: Request) -> HTMLResponse:
+@app.get("/plan-tree-3d", response_class=HTMLResponse, response_model=None)
+def plan_tree_3d_page(request: Request) -> HTMLResponse | RedirectResponse:
     """The goal forest in 3D (vanilla WebGL; no three.js, no CDN).
 
     Progressive enhancement: without WebGL (or JS) the server-rendered text
     tree IS the page — it is also always present in a <details> for screen
     readers. WebXR shows an "Enter VR" button only when the browser reports
-    support."""
+    support. In areas navigation it lives at /graph-editor?view=3d."""
     from .goal_tree import forest_html, goal_nodes
+    from .navigation_api import areas_redirect
 
+    moved = areas_redirect(request)
+    if moved is not None:
+        return moved
     nodes = goal_nodes(_world(), owner=goal_owner_filter(request))
     return templates.TemplateResponse(
         request,
