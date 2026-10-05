@@ -3,12 +3,12 @@
 {% block content %}
   <p class="panel">This is the audit metadata view. Private prompts, task text and tool inputs are withheld from display, search and downloads. Projected downloads are not the original signed audit bytes. <a href="/content-access">Review specific content access</a>.</p>
   <style>
-    .aud-detail { display: flex; flex-direction: column; gap: 2px; max-width: 46rem; }
+    .aud-detail { display: flex; flex-direction: column; gap: var(--space-0-5); max-width: 46rem; }
     .aud-kv { display: grid; grid-template-columns: 9rem 1fr; gap: var(--space-2); align-items: baseline; }
     .aud-k { color: var(--muted); font-size: var(--text-sm); }
     .aud-v { font-size: var(--text-sm); word-break: break-word; min-width: 0; }
     .aud-obligation .aud-k { color: var(--accent); }
-    .aud-sig summary { cursor: pointer; color: var(--muted); font-size: var(--text-sm); min-height: 24px; padding-block: 2px; }
+    .aud-sig summary { cursor: pointer; color: var(--muted); font-size: var(--text-sm); min-height: 24px; padding-block: var(--space-0-5); }
     .aud-sig .aud-protect { margin: var(--space-2) 0 var(--space-1); }
     .aud-more { display: flex; flex-wrap: wrap; gap: var(--space-3); margin: var(--space-3) 0 0; }
     .aud-hash { font-size: var(--text-xs); word-break: break-all; color: var(--muted); font-family: var(--font-mono, monospace); }

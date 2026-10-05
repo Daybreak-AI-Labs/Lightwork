@@ -4,9 +4,9 @@
 {% from "_back_link.html" import back_link with context %}
 <style>
   .gl-wrap { position: relative; }
-  #gl3d { width: 100%; height: 560px; display: block; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; touch-action: none; }
-  #node-info { position: absolute; top: 0.75rem; inset-inline-end: 0.75rem; max-width: 280px; background: var(--surface-1); border: 1px solid var(--border); border-radius: 6px; padding: 0.6rem 0.8rem; font-size: 0.85rem; display: none; }
-  #vr-btn { display: none; margin-top: 0.5rem; padding: 0.45rem 1rem; background: var(--surface-1); color: var(--text); border: 1px solid var(--border); border-radius: 6px; cursor: pointer; }
+  #gl3d { width: 100%; height: 560px; display: block; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-sm); touch-action: none; }
+  #node-info { position: absolute; top: 0.75rem; inset-inline-end: 0.75rem; max-width: 280px; background: var(--surface-1); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 0.6rem 0.8rem; font-size: 0.85rem; display: none; }
+  #vr-btn { display: none; margin-top: 0.5rem; padding: 0.45rem 1rem; background: var(--surface-1); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius-sm); cursor: pointer; }
   .tree { font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
   .tree ul { list-style: none; padding-inline-start: 1.5rem; border-inline-start: 1px solid var(--border); margin: 0; }
   .tree > ul { padding-inline-start: 0; border-inline-start: 0; }

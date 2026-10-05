@@ -282,7 +282,7 @@
     .ch-result:empty { display: none; }
     .ch-result--ok { color: var(--success); }
     .ch-result--failed { color: var(--danger); }
-    .ch-spinner { width: 0.9rem; height: 0.9rem; border: 2px solid var(--border); border-top-color: var(--brand); border-radius: 50%; animation: ch-spin 0.8s linear infinite; }
+    .ch-spinner { width: 0.9rem; height: 0.9rem; border: 2px solid var(--border); border-top-color: var(--brand); border-radius: var(--radius-round); animation: ch-spin 0.8s linear infinite; }
     @keyframes ch-spin { to { transform: rotate(360deg); } }
     @media (prefers-reduced-motion: reduce) { .ch-spinner { animation: none; } }
   </style>

@@ -98,7 +98,7 @@
     .cs-product a:focus-visible, .cs-product .navgrp__toggle:focus-visible { outline: 2px solid var(--brand); outline-offset: -2px; }
     .cs-account { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); padding: var(--space-3) var(--space-2) var(--space-1); border-top: 1px solid var(--hairline); margin-top: var(--space-2); }
     .cs-workspace { margin: var(--space-2) var(--space-2) 0; font-size: var(--text-sm); overflow-wrap: anywhere; }
-    .cs-avatar { flex: none; width: 28px; height: 28px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; background: var(--surface-2); color: var(--text); }
+    .cs-avatar { flex: none; width: 28px; height: 28px; border-radius: var(--radius-round); display: inline-flex; align-items: center; justify-content: center; background: var(--surface-2); color: var(--text); }
     .cs-avatar svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
     .cs-account a { color: var(--muted); font-size: var(--text-sm); }
     a.cs-avatar:hover { color: var(--text); text-decoration: none; }
@@ -157,7 +157,7 @@
     .composer__hint { flex: 1; min-width: 0; color: var(--muted); font-size: var(--text-xs); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .composer__icon, .ask__icon {
       flex: none; display: inline-flex; align-items: center; justify-content: center;
-      width: 34px; height: 34px; border: 1px solid var(--border); border-radius: 50%;
+      width: 34px; height: 34px; border: 1px solid var(--border); border-radius: var(--radius-round);
       background: transparent; color: var(--muted); cursor: pointer; transition: color 0.14s ease, border-color 0.14s ease;
     }
     .composer__icon:hover, .ask__icon:hover { color: var(--text); border-color: var(--border-strong); }
@@ -170,7 +170,7 @@
     .composer__mode:hover { color: var(--text); border-color: var(--border-strong); }
     .composer__send, .ask__send {
       flex: none; display: inline-flex; align-items: center; justify-content: center;
-      width: 36px; height: 36px; border: 0; border-radius: 50%; cursor: pointer;
+      width: 36px; height: 36px; border: 0; border-radius: var(--radius-round); cursor: pointer;
       background: var(--brand); color: var(--brand-fg); transition: background 0.14s ease, transform 0.14s ease;
     }
     .composer__send:hover, .ask__send:hover { background: var(--brand-hi); transform: translateY(-1px); }
