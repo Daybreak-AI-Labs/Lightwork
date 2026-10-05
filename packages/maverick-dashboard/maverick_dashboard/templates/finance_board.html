@@ -230,7 +230,7 @@
       });
     }
   }).catch(function (e) {
-    $('fb-stamp').textContent = window.mvErrorText ? window.mvErrorText(e, 'load the finance overview') : 'Could not load the finance overview.';
+    $('fb-stamp').textContent = window.mvErrorText ? window.mvErrorText(e, 'load the finance overview') : 'Could not load the finance overview. Refresh the page and try again.';
   });
   }
   $('fb-refresh').addEventListener('click', load);

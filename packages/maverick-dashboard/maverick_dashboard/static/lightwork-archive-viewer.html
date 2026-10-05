@@ -18,7 +18,7 @@
       const raw = await file.text(), data = JSON.parse(raw);
       if (!data || data.v !== 1 || !data.goal || !Array.isArray(data.events) || !Array.isArray(data.episodes)) throw new Error('This file is not a supported version 1 Lightwork archive. Keep the original and use a compatible viewer.');
       if (data.events.length > 10001 || data.episodes.length > 201) throw new Error('This archive exceeds the supported record count. Keep the original and use a compatible viewer.');
-      let integrity = 'Integrity could not be checked for this legacy file.';
+      let integrity = 'Integrity could not be checked for this legacy file. Export a new copy to get a checked file.';
       if (data.manifest) {
         if (data.manifest.event_count !== data.events.length || data.manifest.episode_count !== data.episodes.length) throw new Error('The archive record counts do not match its manifest. Keep the original and obtain a new export.');
         if (data.manifest.hash_encoding === 'json-prefix-v1') {

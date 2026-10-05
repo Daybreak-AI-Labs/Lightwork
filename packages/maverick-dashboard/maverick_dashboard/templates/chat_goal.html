@@ -997,7 +997,7 @@
           const r = await fetch('/api/v1/goals/' + goalId + '/open_questions', {credentials: 'same-origin', cache: 'no-store', signal: control.signal});
           if (!r.ok || r.redirected) {
             if (r.status === 401 || r.status === 403 || r.redirected) { currentQuestionId = null; questionText.textContent = ''; questionPanel.style.display = 'none'; }
-            throw new Error(r.status === 401 || r.redirected ? 'Sign in again to load this question.' : r.status === 403 ? 'Access to this question is no longer available.' : 'Could not refresh the question. Last shown question may be out of date.');
+            throw new Error(r.status === 401 || r.redirected ? 'Sign in again to load this question.' : r.status === 403 ? 'Access to this question is no longer available.' : 'Could not refresh the question. Last shown question may be out of date. Refresh the page and try again.');
           }
           const j = await r.json();
           if (!Array.isArray(j.open_questions)) throw new Error('The question response could not be read. Retry loading it.');
@@ -1032,7 +1032,7 @@
           syncComposer();
         } catch (e) {
           questionsFresh = false;
-          cgCopy(status,e.name === 'AbortError' ? 'Loading the question timed out. Your draft has been kept.' : (e.message || 'Could not load the question. Your draft has been kept.'));
+          cgCopy(status,e.name === 'AbortError' ? 'Loading the question timed out. Your draft has been kept.' : (e.message || 'Could not load the question. Your draft has been kept. Refresh the page and try again.'));
           retry.hidden = false;
         } finally { clearTimeout(timeout); questionLoading = false; syncComposer(); }
       }
@@ -1486,7 +1486,7 @@
             if (done) { polling = false; return; }
           } catch (_) {
             pollFailures++;
-            showStreamError('Updates are unavailable. The task may still be running. Your draft has been kept.');
+            showStreamError('Updates are unavailable. The task may still be running. Your draft has been kept. Refresh the page to see the latest.');
             document.getElementById('stream-retry').hidden = false;
             if (pollFailures >= MAX_POLL_FAILURES) { polling = false; return; }
           } finally { clearTimeout(timeout); }

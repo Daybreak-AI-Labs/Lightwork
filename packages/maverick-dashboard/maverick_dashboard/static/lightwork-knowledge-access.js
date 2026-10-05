@@ -302,7 +302,7 @@
         (boundary && eligibility.actor !== boundary.actor) ||
         (boundary && boundary.authorizationSha256 &&
           eligibility.actor_authorization_sha256 !== boundary.authorizationSha256)) {
-      throw failure("The knowledge response failed its source eligibility contract.");
+      throw failure("The knowledge answer included a source it may not use, so it is not shown. Refresh the page and try again.");
     }
     var history = boundedArray(value.correction_history, "correction history", 50).map(rightsRequest);
     var constraints = boundedArray(source.usage_constraints, "usage constraints", 32).map(function (entry) {
@@ -584,13 +584,13 @@
           (typeof payload.next_cursor !== "string" || !payload.next_cursor.length || payload.next_cursor.length > 2048)) ||
         (payload.complete && (payload.next_cursor !== null || payload.incomplete_reasons.length)) ||
         (!payload.complete && !payload.incomplete_reasons.length)) {
-      throw failure("The knowledge search response failed validation.");
+      throw failure("The knowledge search results could not be checked. Refresh the page and try again.");
     }
     var boundary = {purpose: requestedPurpose, action: "read", actor: actor,
       authorizationSha256: payload.actor_authorization_sha256};
     var clean = payload.items.map(function (entry) { return item(entry, boundary); });
     if (typeof payload.count !== "number" || payload.count !== clean.length) {
-      throw failure("The knowledge search result count did not match its records.");
+      throw failure("The knowledge search results were incomplete. Refresh the page and try again.");
     }
     results.textContent = "";
     currentItems = clean;
@@ -722,7 +722,7 @@
         actor: actor
       });
       if (!sameReference(clean.reference, exact)) {
-        throw failure("The detail response did not match the selected source version.");
+        throw failure("The detail response did not match the selected source version. Refresh the page and try again.");
       }
       renderDetail(clean);
       announce("Source detail is current and ready for review.", false);
@@ -738,11 +738,11 @@
     if (payload.schema !== "lightwork.knowledge-rights-requests.v1" ||
         !Array.isArray(payload.items) || payload.items.length > 250 ||
         typeof payload.can_review !== "boolean") {
-      throw failure("The rights-request response failed validation.");
+      throw failure("The rights-request list could not be checked. Refresh the page and try again.");
     }
     var clean = payload.items.map(canReview ? rightsRequest : feedback);
     if (payload.count !== clean.length) {
-      throw failure("The rights-request count did not match its records.");
+      throw failure("The rights-request list was incomplete. Refresh the page and try again.");
     }
     if (payload.archived !== undefined && payload.archived !== archivedView) {
       throw failure("The request view changed. Refresh to see its current status.");
@@ -762,7 +762,7 @@
       overfilled = used > maximum;
       if (showReady) {
         showReady.disabled = !canArchive;
-        showReady.title = canArchive ? "" : "Finished-request archiving is unavailable on shared storage.";
+        showReady.title = canArchive ? "" : "Finished-request archiving is unavailable on shared storage. Ask your administrator if you need it.";
       }
       capacityNote.textContent = !canArchive && used >= maximum ?
         "The active request list is full. Archiving is unavailable on this installation. Ask an administrator to review capacity; requests and evidence remain in place." :
@@ -1161,7 +1161,7 @@
             await loadRequests();
             announce("The finished request is retained in the archive. Its source restrictions remain in force.", true);
           } catch (error) {
-            announce(error.message || "Could not archive this request. It remains in the active list.", true, error);
+            announce(error.message || "Could not archive this request. It remains in the active list. Try again.", true, error);
           } finally { setBusy(false); }
         });
         card.appendChild(archive);
@@ -1187,7 +1187,7 @@
     if (recoveryScan) {
       if (payload.next_cursor !== null &&
           (typeof payload.next_cursor !== "string" || payload.next_cursor.length > 128 || !payload.next_cursor)) {
-        throw failure("The recovery scan cursor failed validation.");
+        throw failure("The next page of the recovery scan could not be checked. Refresh the page and try again.");
       }
       recoveryCursor = payload.next_cursor;
     } else recoveryCursor = null;
@@ -1320,7 +1320,7 @@
             source.content_sha256 !== clean[index].source.content_sha256 ||
             source.approval_sha256 !== clean[index].eligibility.approval_sha256 ||
             !SHA.test(source.content_sha256) || !SHA.test(source.approval_sha256)) {
-          throw failure("The knowledge export authority evidence did not match its source versions.");
+          throw failure("The knowledge export did not match its source versions. Refresh the page and try again.");
         }
       });
       var boundEvidence = {
@@ -1339,7 +1339,7 @@
         })
       };
       if ((await sha256(canonicalJson(boundEvidence))) !== evidence.binding_sha256) {
-        throw failure("The knowledge export authority binding did not match its evidence.");
+        throw failure("The knowledge export did not match its evidence. Refresh the page and try again.");
       }
       var blob = new Blob([JSON.stringify(payload, null, 2)], {type: "application/json"});
       var url = URL.createObjectURL(blob);
@@ -1400,7 +1400,7 @@
         await loadRequests();
         announce("Your request is recorded for independent administrator review. Source access and training policy are unchanged.", true);
       } catch (error) {
-        announce((error.message || "Could not send the request.") + " Your answers are still here, so you can try again.", true, error);
+        announce((error.message || "Could not send the request. Try again.") + " Your answers are still here, so you can try again.", true, error);
       } finally {
         setBusy(false);
       }
@@ -1513,7 +1513,7 @@
 
   loadRequests().catch(function (error) {
     requests.textContent = "";
-    var note = node("p", "muted", error.message || "Requests are not available right now.");
+    var note = node("p", "muted", error.message || "Requests are not available right now. Try again in a minute.");
     if (error && error.technical) { note.dataset.technical = error.technical; }
     requests.appendChild(note);
   });

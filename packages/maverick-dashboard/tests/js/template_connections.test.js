@@ -19,7 +19,7 @@ test('workspace switch refuses late private results',async()=>{
  assert.equal(dom.window.document.querySelector('select').options.length,0);assert.ok(!dom.window.document.body.textContent.includes('private'));dom.window.close();
 });
 test('unavailable or malformed response is retryable, never a valid empty account list',async()=>{
- let broken=true;const dom=page(async()=>broken?{ok:false,status:503,json:async()=>({})}:response([]));await tick();const select=dom.window.document.querySelector('select');assert.equal(select.validationMessage,'Account selection is unavailable.');assert.equal(dom.window.document.querySelector('button').disabled,false);
+ let broken=true;const dom=page(async()=>broken?{ok:false,status:503,json:async()=>({})}:response([]));await tick();const select=dom.window.document.querySelector('select');assert.equal(select.validationMessage,'Account selection is unavailable. Refresh the page and try again.');assert.equal(dom.window.document.querySelector('button').disabled,false);
  broken=false;dom.window.document.querySelector('button').click();await tick();assert.equal(select.value,'');assert.equal(select.options.length,1);dom.window.close();
 });
 

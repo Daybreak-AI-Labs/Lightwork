@@ -66,7 +66,7 @@
       });
       table.append(body); box.append(table);
     } catch (e) {
-      counts.textContent = window.mvErrorText ? mvErrorText(e, 'load background work') : 'Could not load background work.';
+      counts.textContent = window.mvErrorText ? mvErrorText(e, 'load background work') : 'Could not load background work. Refresh the page and try again.';
     }
   }
   document.getElementById('ac-queue-refresh').addEventListener('click', load);

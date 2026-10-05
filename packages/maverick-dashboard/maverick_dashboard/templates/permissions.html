@@ -159,7 +159,7 @@
           location.reload();
         });
       }).catch(function (e) {
-        err.textContent = (e && e.message) || 'Could not reach the server.';
+        err.textContent = (e && e.message) || 'Could not reach the server. Check your connection and try again.';
       }).finally(function () {
         switching = false;
         controls.forEach(function (state) {

@@ -164,17 +164,17 @@
         fail(component + ' complete comparison is missing evidence.');
       }
       if (component === 'Cost') {
-        if (!CURRENCY.test(result.currency || '')) fail('Comparison currency is invalid.');
+        if (!CURRENCY.test(result.currency || '')) fail('Comparison currency is invalid. Refresh the page and try again.');
         money(result.baseline_total, 'Comparison baseline total');
         money(result.delivered_total, 'Comparison delivered total');
       }
     }
     if (result.measured_positive_roi === true && result.status !== 'measured') {
-      fail('Positive measured ROI classification is invalid.');
+      fail('Positive measured ROI classification is invalid. Refresh the page and try again.');
     }
     if (component === 'Cost' && result.measured_positive_roi !== undefined) {
       if (typeof result.measured_positive_roi !== 'boolean') {
-        fail('Positive measured ROI flag is invalid.');
+        fail('Positive measured ROI flag is invalid. Refresh the page and try again.');
       }
       if (result.measured_positive_roi && (
         result.roi_percent === null || decimal(result.roi_percent).units <= 0n
@@ -248,7 +248,7 @@
     const report = object(value, 'Cohort value report');
     if (report.schema !== expectedSchema || report.context !== context || report.reconciles !== true ||
         report.pilot_id !== pilotSelector.value) {
-      fail('The cohort report did not match this account and workspace.');
+      fail('The cohort report did not match this account and workspace. Refresh the page and try again.');
     }
     text(report.plan_version, 'Pilot plan version', 64);
     text(report.admission_manifest_sha256, 'Admission manifest', 64);
@@ -260,11 +260,11 @@
     if (binding.acceptance_contract_ref !==
           'outcome-pilot:' + report.pilot_id + ':' + report.plan_version ||
         !/^[a-f0-9]{64}$/.test(binding.record_ids_sha256 || '')) {
-      fail('The cohort report contract is invalid.');
+      fail('The cohort report contract is invalid. Refresh the page and try again.');
     }
     const admitted = count(report.admitted, 'Admitted denominator', MAX_CASES);
     if (count(binding.record_count, 'Bound cohort count', MAX_CASES) !== admitted) {
-      fail('The cohort report does not match its admission manifest.');
+      fail('The cohort report does not match its admission manifest. Refresh the page and try again.');
     }
     if (expectedSchema === 'lightwork.outcome-value-export.v1') {
       if (!/^[a-f0-9]{64}$/.test(report.cohort_sha256 || '') ||
@@ -294,7 +294,7 @@
       const item = object(value, 'Cohort case');
       const outcome = object(item.outcome, 'Cohort outcome');
       if (typeof outcome.id !== 'string' || !ID.test(outcome.id) || ids.has(outcome.id)) {
-        fail('Cohort case identity is invalid.');
+        fail('Cohort case identity is invalid. Refresh the page and try again.');
       }
       ids.add(outcome.id);
       text(outcome.admission_id, 'Admission identity', 512);
@@ -305,16 +305,16 @@
       }
       count(outcome.revision, 'Outcome revision');
       if (!['active', 'cancelled', 'completed', 'failed'].includes(outcome.disposition)) {
-        fail('Outcome disposition is invalid.');
+        fail('Outcome disposition is invalid. Refresh the page and try again.');
       }
       const technical = object(outcome.technical_outcome, 'Technical outcome');
       if (!['verified', 'failed', 'unresolved'].includes(technical.status)) {
-        fail('Technical outcome status is invalid.');
+        fail('Technical outcome status is invalid. Refresh the page and try again.');
       }
       text(technical.reason, 'Technical outcome reason', 1000);
       const business = object(outcome.business_outcome, 'Business outcome');
       if (!['accepted', 'rejected', 'unresolved'].includes(business.status)) {
-        fail('Business outcome status is invalid.');
+        fail('Business outcome status is invalid. Refresh the page and try again.');
       }
       text(business.reason, 'Business outcome reason', 1000);
       const outcomeCosts = object(outcome.costs, 'Case delivered cost');
@@ -323,11 +323,11 @@
       caseFailedAttempts += count(
         outcomeCosts.failed_attempt_count, 'Case failed attempts', 5000,
       );
-      if (typeof outcomeCosts.complete !== 'boolean') fail('Case cost coverage is invalid.');
+      if (typeof outcomeCosts.complete !== 'boolean') fail('Case cost coverage is invalid. Refresh the page and try again.');
       if (!outcomeCosts.complete) caseIncompleteCosts += 1;
       count(item.value_revision, 'Value revision');
       if (!CATEGORIES.includes(item.category) || item.category !== outcomeCategory(outcome)) {
-        fail('Cohort case category is invalid.');
+        fail('Cohort case category is invalid. Refresh the page and try again.');
       }
       derivedCategories[item.category] += 1;
       const timestamps = object(item.timestamps, 'Case timestamps');
@@ -341,13 +341,13 @@
       ].forEach(([key, label]) => timestamp(timestamps[key], label, true));
       const itemComparison = object(item.comparison, 'Case comparison');
       const cost = object(itemComparison.cost, 'Case cost comparison');
-      if (!COMPARISON.has(cost.status)) fail('Case cost comparison is invalid.');
+      if (!COMPARISON.has(cost.status)) fail('Case cost comparison is invalid. Refresh the page and try again.');
       if (cost.status === 'unavailable' && (cost.net_savings !== null || cost.roi_percent !== null)) {
         fail('Incomplete case comparison exposed ROI.');
       }
       if (cost.overflow !== undefined) {
         if (typeof cost.overflow !== 'boolean' || (cost.overflow && cost.status !== 'unavailable')) {
-          fail('Case cost comparison overflow is invalid.');
+          fail('Case cost comparison overflow is invalid. Refresh the page and try again.');
         }
       }
       if (cost.reason !== undefined) text(cost.reason, 'Case cost comparison reason', 1000);
@@ -359,11 +359,11 @@
         money(baseline.value, 'Case baseline amount');
         money(delivered.amount, 'Case delivered amount');
         if (!CURRENCY.test(baseline.currency) || delivered.currency !== baseline.currency) {
-          fail('Case comparison currency is invalid.');
+          fail('Case comparison currency is invalid. Refresh the page and try again.');
         }
       }
       const human = object(itemComparison.human_effort, 'Case human-time comparison');
-      if (!COMPARISON.has(human.status)) fail('Case human-time comparison is invalid.');
+      if (!COMPARISON.has(human.status)) fail('Case human-time comparison is invalid. Refresh the page and try again.');
       if ((human.status === 'unavailable') !== (human.minutes_saved === null)) {
         fail('Case human-time comparison is incomplete.');
       }
@@ -373,13 +373,13 @@
       );
       if (new Set(missingComponents).size !== missingComponents.length ||
           missingComponents.some(component => !MISSING_COMPONENTS.has(component))) {
-        fail('Missing case components are invalid.');
+        fail('Missing case components are invalid. Refresh the page and try again.');
       }
       if (typeof itemComparison.measured_positive_roi !== 'boolean' ||
           itemComparison.measured_positive_roi !== (
             cost.status === 'measured' && cost.roi_percent !== null &&
             decimal(cost.roi_percent).units > 0n && human.status === 'measured'
-          )) fail('Case positive measured ROI classification is invalid.');
+          )) fail('Case positive measured ROI classification is invalid. Refresh the page and try again.');
       if (human.status === 'unavailable' && cost.status !== 'unavailable') {
         fail('A case with incomplete human-time evidence exposed ROI.');
       }
@@ -389,7 +389,7 @@
         const baselineHuman = object(baseline.human_effort, 'Current baseline human time');
         if (!['observed', 'estimated', 'unknown'].includes(baselineCost.basis) ||
             !['observed', 'estimated', 'unknown'].includes(baselineHuman.basis)) {
-          fail('Current baseline basis is invalid.');
+          fail('Current baseline basis is invalid. Refresh the page and try again.');
         }
         money(baselineCost.value, 'Current baseline cost value', true);
         money(baselineHuman.value, 'Current baseline human-time value', true);
@@ -399,7 +399,7 @@
           }
           text(baselineCost.unknown_reason, 'Unknown baseline cost reason', 1000);
         } else if (baselineCost.value === null || !CURRENCY.test(baselineCost.currency || '')) {
-          fail('Current baseline currency is invalid.');
+          fail('Current baseline currency is invalid. Refresh the page and try again.');
         }
         if (baselineHuman.basis === 'unknown') {
           if (baselineHuman.value !== null) fail('Unknown baseline human time exposed a value.');
@@ -432,7 +432,7 @@
     const overflow = new Set(array(
       costs.aggregate_overflow_currencies, 'Aggregate overflow currencies', 100,
     ).map(code => {
-      if (!CURRENCY.test(code)) fail('Aggregate overflow currency is invalid.');
+      if (!CURRENCY.test(code)) fail('Aggregate overflow currency is invalid. Refresh the page and try again.');
       return code;
     }));
     if (overflow.size !== costs.aggregate_overflow_currencies.length) {
@@ -448,7 +448,7 @@
       fail('Cohort cost counts do not reconcile to admitted cases.');
     }
     if (typeof costs.complete !== 'boolean' || typeof costs.allocation_assumptions_explicit !== 'boolean') {
-      fail('Cost coverage flags are invalid.');
+      fail('Cost coverage flags are invalid. Refresh the page and try again.');
     }
     if (costs.complete && (
       costs.incomplete_records !== 0 || overflow.size || !costs.allocation_assumptions_explicit
@@ -486,12 +486,12 @@
         (report.commercial_records_complete && (
           renewals.length !== renewalCount || expansions.length !== expansionCount
         )) || renewals.length > renewalCount || expansions.length > expansionCount) {
-      fail('Commercial record coverage is invalid.');
+      fail('Commercial record coverage is invalid. Refresh the page and try again.');
     }
     if (!report.commercial_records_complete && report.scope_complete) {
       fail('Incomplete commercial evidence claimed a complete cohort.');
     }
-    if (typeof report.scope_complete !== 'boolean') fail('Cohort scope is invalid.');
+    if (typeof report.scope_complete !== 'boolean') fail('Cohort scope is invalid. Refresh the page and try again.');
     return {report, cases, costs, aggregate, commercial};
   }
 
@@ -689,27 +689,27 @@
   function validatePilotPage(value, requestedCursor) {
     const payload = object(value, 'Pilot list');
     if (payload.context !== context || typeof payload.partial !== 'boolean') {
-      fail('The pilot list did not match this account and workspace.');
+      fail('The pilot list did not match this account and workspace. Refresh the page and try again.');
     }
     const page = object(payload.page, 'Pilot page');
     if (Object.keys(page).sort().join('\u0000') !== 'has_more\u0000next_cursor' ||
         typeof page.has_more !== 'boolean' || payload.partial !== page.has_more) {
-      fail('The pilot page is invalid.');
+      fail('The pilot page is invalid. Refresh the page and try again.');
     }
     let nextCursor = '';
     if (page.has_more) {
       if (typeof page.next_cursor !== 'string' || !PAGE_CURSOR.test(page.next_cursor) ||
           page.next_cursor === requestedCursor) {
-        fail('The pilot page cursor is invalid.');
+        fail('The pilot page cursor is invalid. Refresh the page and try again.');
       }
       nextCursor = page.next_cursor;
     } else if (page.next_cursor !== null) {
-      fail('The pilot page cursor is invalid.');
+      fail('The pilot page cursor is invalid. Refresh the page and try again.');
     }
     const items = array(payload.items, 'Pilot list', MAX_CASES).map(itemValue => {
       const item = object(itemValue, 'Pilot');
       if (typeof item.id !== 'string' || !PILOT_ID.test(item.id)) {
-        fail('A pilot identity is invalid.');
+        fail('A pilot identity is invalid. Refresh the page and try again.');
       }
       return {id: item.id, title: text(item.title, 'Pilot title', 200)};
     });
@@ -842,7 +842,7 @@
       statusHost.textContent = 'Evidence saved and the exact pilot cohort was recalculated.';
     } catch (error) {
       statusHost.textContent = error instanceof ProjectionError
-        ? error.message : 'The evidence could not be saved. Your entries remain in the form.';
+        ? error.message : 'The evidence could not be saved. Your entries remain in the form. Try again.';
     } finally {
       button.disabled = false;
     }
@@ -1038,7 +1038,7 @@
       statusHost.textContent = 'Value evidence report downloaded.';
     } catch (error) {
       statusHost.textContent = error instanceof ProjectionError
-        ? error.message : 'The complete report could not be verified or downloaded.';
+        ? error.message : 'The complete report could not be verified or downloaded. Try again.';
     } finally {
       exportButton.disabled = !cohort || !cohort.report.scope_complete;
     }

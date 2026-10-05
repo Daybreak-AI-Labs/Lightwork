@@ -57,7 +57,7 @@ test("jobs load as rows and kinds of change that are not set up are disabled", a
   try {
     assert.equal(ui.d.getElementById("cbj-operations").disabled, false);
     assert.match(ui.d.getElementById("cbj-job-list").textContent, /Export consent records.*2.*0 of 2 done.*Waiting/);
-    assert.match(ui.d.getElementById("cbj-credit-detail").textContent, /7 jobs can still be started/);
+    assert.match(ui.d.getElementById("cbj-credit-detail").textContent, /7 bulk changes can still be started/);
     assert.match(ui.d.getElementById("cbj-readiness-detail").textContent, /not set up yet: change how people are identified/);
     assert.equal(ui.d.querySelector("input[name=operation][value=reactivate]").disabled, true);
   } finally { ui.dom.window.close(); }

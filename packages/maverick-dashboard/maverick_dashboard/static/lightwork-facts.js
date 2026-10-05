@@ -26,7 +26,7 @@
     if (response.status === 401 || response.status === 403) {
       clearPrivate(); var denied=new Error('Access changed. Sign in or choose an authorized workspace.'); denied.accessChanged=true; throw denied;
     }
-    if (!response.ok) { var failure = new Error('The request could not be completed. Your draft is preserved.'); failure.status = response.status; throw failure; }
+    if (!response.ok) { var failure = new Error('The request could not be completed. Your draft is preserved. Try again.'); failure.status = response.status; throw failure; }
     if (response.status === 204) return null;
     var payload = await response.json();
     if (payload.context !== context) { clearPrivate(); var changed=new Error('Your account or workspace changed. Reload to continue.'); changed.accessChanged=true; throw changed; }

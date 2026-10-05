@@ -1605,8 +1605,8 @@
       });
       setStatus("ai-literacy-load-status", `${rows.length} training requirement(s) shown.`);
     } catch (error) {
-      clear(target); emptyRow(target, 4, "Training requirements could not be loaded. No coverage conclusion is shown.");
-      setStatus("ai-literacy-load-status", plainMessage(error, "Training records are not available right now."));
+      clear(target); emptyRow(target, 4, "Training requirements could not be loaded. No coverage conclusion is shown. Refresh the page and try again.");
+      setStatus("ai-literacy-load-status", plainMessage(error, "Training records are not available right now. Try again in a minute."));
     }
   };
   const literacyPerson = byId("ai-literacy-person-query");
@@ -1697,8 +1697,8 @@
       if (!rows.length) emptyRow(target, 5, "No serious incidents are being tracked. Use “Start tracking an incident” below when one happens. This does not show that none occurred.");
       setStatus("article-73-load-status", `${rows.length} incident(s) shown.`);
     } catch (error) {
-      clear(target); emptyRow(target, 5, "Incidents could not be loaded. No deadline conclusion is shown.");
-      setStatus("article-73-load-status", plainMessage(error, "Incident is not available right now."));
+      clear(target); emptyRow(target, 5, "Incidents could not be loaded. No deadline conclusion is shown. Refresh the page and try again.");
+      setStatus("article-73-load-status", plainMessage(error, "Incident is not available right now. Try again in a minute."));
     }
   };
   const incidentDetail = byId("article-73-detail-query");
@@ -1799,8 +1799,8 @@
         : "No cost sources are turned on yet. An administrator can connect AWS, Azure, Google Cloud or OpenAI in Settings.");
     } catch (error) {
       const target = byId("ai-cost-collector-result");
-      if (target) target.textContent = "Cost sources could not be loaded. No conclusion about which providers are covered is shown.";
-      setStatus("ai-cost-collector-status", plainMessage(error, "Cost collection is not available right now."));
+      if (target) target.textContent = "Cost sources could not be loaded. No conclusion about which providers are covered is shown. Refresh the page and try again.";
+      setStatus("ai-cost-collector-status", plainMessage(error, "Cost collection is not available right now. Try again in a minute."));
     }
   };
   if (costCollectorForm) costCollectorForm.addEventListener("submit", event => {
@@ -1828,8 +1828,8 @@
       const result = await request(path, {}, "load the cost report"); showProjection("ai-cost-roi-result", result);
       setStatus("ai-cost-roi-status", "Report shown. Measured costs and estimates are labelled separately.");
     } catch (error) {
-      const target = byId("ai-cost-roi-result"); if (target) target.textContent = "The cost report could not be loaded. No financial conclusion is shown.";
-      setStatus("ai-cost-roi-status", plainMessage(error, "Cost reports are not available right now."));
+      const target = byId("ai-cost-roi-result"); if (target) target.textContent = "The cost report could not be loaded. No financial conclusion is shown. Refresh the page and try again.";
+      setStatus("ai-cost-roi-status", plainMessage(error, "Cost reports are not available right now. Try again in a minute."));
     }
   };
   if (costForm) costForm.addEventListener("submit", event => {
@@ -1925,10 +1925,10 @@
       );
     } catch (error) {
       clear(policyTarget); clear(exceptionTarget); clear(evaluationTarget);
-      emptyRow(policyTarget, 4, "Rules could not be loaded. No policy-coverage conclusion is shown.");
+      emptyRow(policyTarget, 4, "Rules could not be loaded. No policy-coverage conclusion is shown. Refresh the page and try again.");
       emptyRow(exceptionTarget, 5, "Exceptions could not be loaded. Refresh the page and try again. No authorization conclusion is shown.");
-      emptyRow(evaluationTarget, 5, "Saved checks could not be loaded. No validation conclusion is shown.");
-      setStatus("ai-policy-management-load-status", plainMessage(error, "AI use rules are not available right now."));
+      emptyRow(evaluationTarget, 5, "Saved checks could not be loaded. No validation conclusion is shown. Refresh the page and try again.");
+      setStatus("ai-policy-management-load-status", plainMessage(error, "AI use rules are not available right now. Try again in a minute."));
     }
   };
   const policyRecordQuery = byId("ai-policy-record-query");
@@ -2134,7 +2134,7 @@
         signals.forEach(item => select.appendChild(new Option(`${words(item.signal_code || item.category)} (${displayTime(item.observed_at)})`, item.signal_id || item.id)));
       });
     } else {
-      emptyRow(target, 6, "Signals could not be loaded. No monitoring-coverage conclusion is shown.");
+      emptyRow(target, 6, "Signals could not be loaded. No monitoring-coverage conclusion is shown. Refresh the page and try again.");
     }
     if (scoreResult.status === "fulfilled") {
       const revision = findRevision(scoreResult.value);
@@ -2296,8 +2296,8 @@
       setStatus("ai-explainability-list-status", `${rows.length} explanation(s) shown.`);
     } catch (error) {
       clear(target);
-      emptyRow(target, 5, "Explanations could not be loaded. No explainability-coverage conclusion is shown.");
-      setStatus("ai-explainability-list-status", plainMessage(error, "Explanations are not available right now."));
+      emptyRow(target, 5, "Explanations could not be loaded. No explainability-coverage conclusion is shown. Refresh the page and try again.");
+      setStatus("ai-explainability-list-status", plainMessage(error, "Explanations are not available right now. Try again in a minute."));
     }
   };
   const explanationList = byId("ai-explainability-list");
@@ -2394,8 +2394,8 @@
       setStatus("ai-insurability-list-status", `${rows.length} profile(s) shown.`);
     } catch (error) {
       clear(target);
-      emptyRow(target, 6, "Insurer profiles could not be loaded. No insurer-readiness conclusion is shown.");
-      setStatus("ai-insurability-list-status", plainMessage(error, "Insurer profiles are not available right now."));
+      emptyRow(target, 6, "Insurer profiles could not be loaded. No insurer-readiness conclusion is shown. Refresh the page and try again.");
+      setStatus("ai-insurability-list-status", plainMessage(error, "Insurer profiles are not available right now. Try again in a minute."));
     }
   };
   const insurabilityList = byId("ai-insurability-list");
@@ -2427,7 +2427,7 @@
       downloadRecord(result, "lightwork-insurer-profile.json");
       setStatus("ai-insurability-detail-status", "Download ready. It was approved by a second person. It does not mean an insurer accepted it.");
     } catch (error) {
-      setStatus("ai-insurability-detail-status", plainMessage(error, "The profile could not be downloaded."));
+      setStatus("ai-insurability-detail-status", plainMessage(error, "The profile could not be downloaded. Try again."));
     } finally {
       insurabilityExport.disabled = false; insurabilityExport.removeAttribute("aria-busy");
     }
@@ -2560,8 +2560,8 @@
       if (!rows.length) emptyRow(target, 5, "No readiness cases yet. Use “Start and fill in a readiness case” below to begin.");
       setStatus("ai-conformity-list-status", `${rows.length} readiness case(s) shown.`);
     } catch (error) {
-      clear(target); emptyRow(target, 5, "Readiness cases could not be loaded. No legal or certification conclusion is shown.");
-      setStatus("ai-conformity-list-status", plainMessage(error, "Launch readiness is not available right now."));
+      clear(target); emptyRow(target, 5, "Readiness cases could not be loaded. No legal or certification conclusion is shown. Refresh the page and try again.");
+      setStatus("ai-conformity-list-status", plainMessage(error, "Launch readiness is not available right now. Try again in a minute."));
     }
   };
   const conformityList = byId("ai-conformity-list");
@@ -2590,7 +2590,7 @@
       downloadRecord(result, "lightwork-launch-readiness.json");
       setStatus("ai-conformity-detail-status", "Package downloaded. It is not a signed declaration, a CE mark or proof that anyone outside accepted it.");
     } catch (error) {
-      setStatus("ai-conformity-detail-status", plainMessage(error, "The package could not be downloaded."));
+      setStatus("ai-conformity-detail-status", plainMessage(error, "The package could not be downloaded. Try again."));
     } finally {
       conformityExport.disabled = false; conformityExport.removeAttribute("aria-busy");
     }
@@ -2738,8 +2738,8 @@
       if (!rows.length) emptyRow(target, 6, "No packages of this kind yet. Use “Prepare a package” below to start one.");
       setStatus("ai-regulated-package-list-status", `${rows.length} package(s) shown.`);
     } catch (error) {
-      clear(target); emptyRow(target, 6, "Packages could not be loaded. No compliance or acceptance conclusion is shown.");
-      setStatus("ai-regulated-package-list-status", plainMessage(error, "Evidence packages are not available right now."));
+      clear(target); emptyRow(target, 6, "Packages could not be loaded. No compliance or acceptance conclusion is shown. Refresh the page and try again.");
+      setStatus("ai-regulated-package-list-status", plainMessage(error, "Evidence packages are not available right now. Try again in a minute."));
     }
   };
   const regulatedList = byId("ai-regulated-package-list");
@@ -2764,7 +2764,7 @@
       const result = await request(`${regulatedPackageBase(String(fields.get("plane")))}/${encodeURIComponent(packageId)}/export${query}`, {}, "download the package");
       showProjection("ai-regulated-package-result", result); downloadRecord(result, "lightwork-evidence-package.json");
       setStatus("ai-regulated-package-detail-status", "Package downloaded. It is not a decision, a model approval, a filing or proof that a regulator accepted it.");
-    } catch (error) { setStatus("ai-regulated-package-detail-status", plainMessage(error, "The package could not be downloaded.")); }
+    } catch (error) { setStatus("ai-regulated-package-detail-status", plainMessage(error, "The package could not be downloaded. Try again.")); }
     finally { regulatedExport.disabled = false; regulatedExport.removeAttribute("aria-busy"); }
   });
   const regulatedPrepare = regulatedPrepareForm;
@@ -2821,8 +2821,8 @@
       if (!rows.length) emptyRow(target, 5, "No figures prepared yet. Use “Prepare figures to share” below if you want to take part.");
       setStatus("ai-benchmark-list-status", `${rows.length} set(s) of figures shown.`);
     } catch (error) {
-      clear(target); emptyRow(target, 5, "Shared figures could not be loaded. No network, cohort, or coverage conclusion is shown.");
-      setStatus("ai-benchmark-list-status", plainMessage(error, "Comparisons are not available right now."));
+      clear(target); emptyRow(target, 5, "Shared figures could not be loaded. No network, cohort, or coverage conclusion is shown. Refresh the page and try again.");
+      setStatus("ai-benchmark-list-status", plainMessage(error, "Comparisons are not available right now. Try again in a minute."));
     }
   };
   const benchmarkList = byId("ai-benchmark-list");
@@ -2852,7 +2852,7 @@
       downloadRecord(result, "lightwork-shared-figures.json");
       setStatus("ai-benchmark-detail-status", "Figures downloaded. This does not prove they were sent, kept anonymous or included in a comparison.");
     } catch (error) {
-      setStatus("ai-benchmark-detail-status", plainMessage(error, "The figures could not be downloaded."));
+      setStatus("ai-benchmark-detail-status", plainMessage(error, "The figures could not be downloaded. Try again."));
     } finally {
       benchmarkExport.disabled = false; benchmarkExport.removeAttribute("aria-busy");
     }
@@ -2945,8 +2945,8 @@
       if (!rows.length) emptyRow(target, 5, "No comparison reports received yet. When the comparison service sends you one, add its file below.");
       setStatus("ai-benchmark-report-list-status", `${rows.length} comparison report(s) shown.`);
     } catch (error) {
-      clear(target); emptyRow(target, 5, "Comparison reports could not be loaded. No cohort or privacy conclusion is shown.");
-      setStatus("ai-benchmark-report-list-status", plainMessage(error, "Comparison reports are not available right now."));
+      clear(target); emptyRow(target, 5, "Comparison reports could not be loaded. No cohort or privacy conclusion is shown. Refresh the page and try again.");
+      setStatus("ai-benchmark-report-list-status", plainMessage(error, "Comparison reports are not available right now. Try again in a minute."));
     }
   };
   const benchmarkReportList = byId("ai-benchmark-report-list");
@@ -2991,8 +2991,8 @@
       if (!rows.length) emptyRow(target, 5, "No sensors yet. Use “Add or change a sensor” below to add one.");
       setStatus("ai-discovery-sensor-list-status", `${rows.length} sensor(s) shown.`);
     } catch (error) {
-      clear(target); emptyRow(target, 5, "Sensors could not be loaded. No live-sensor or completeness conclusion is shown.");
-      setStatus("ai-discovery-sensor-list-status", plainMessage(error, "Discovery sensors are not available right now."));
+      clear(target); emptyRow(target, 5, "Sensors could not be loaded. No live-sensor or completeness conclusion is shown. Refresh the page and try again.");
+      setStatus("ai-discovery-sensor-list-status", plainMessage(error, "Discovery sensors are not available right now. Try again in a minute."));
     }
   };
   const discoverySensorList = byId("ai-discovery-sensor-list");
@@ -3091,8 +3091,8 @@
       if (!rows.length) emptyRow(target, 5, "Nothing recorded yet. No discovery-completeness conclusion is shown.");
       setStatus("ai-discovery-observation-list-status", `${rows.length} observation(s) shown.`);
     } catch (error) {
-      clear(target); emptyRow(target, 5, "Observations could not be loaded. No live collection or completeness conclusion is shown.");
-      setStatus("ai-discovery-observation-list-status", plainMessage(error, "Observations are not available right now."));
+      clear(target); emptyRow(target, 5, "Observations could not be loaded. No live collection or completeness conclusion is shown. Refresh the page and try again.");
+      setStatus("ai-discovery-observation-list-status", plainMessage(error, "Observations are not available right now. Try again in a minute."));
     }
   };
   const discoveryObservationList = byId("ai-discovery-observation-list");
@@ -3239,8 +3239,8 @@
         ? `${configured.size} of ${supported.length} service(s) connected for reading.`
         : "No services are connected yet. An administrator can connect Microsoft Entra, Okta or Microsoft Purview in Settings.");
     } catch (error) {
-      clear(target); emptyRow(target, 4, "Connections could not be checked. No provider-configuration conclusion is shown.");
-      setStatus("ai-identity-governance-status-message", plainMessage(error, "Connections are not available right now."));
+      clear(target); emptyRow(target, 4, "Connections could not be checked. No provider-configuration conclusion is shown. Refresh the page and try again.");
+      setStatus("ai-identity-governance-status-message", plainMessage(error, "Connections are not available right now. Try again in a minute."));
     }
   };
   const identityGovernanceStatus = byId("ai-identity-governance-status");
@@ -3272,7 +3272,7 @@
           : "Scheduled reading is off. Nothing is read automatically."
       );
     } catch (error) {
-      setStatus("ai-identity-governance-scheduler-status", plainMessage(error, "Scheduled reading is not available right now."));
+      setStatus("ai-identity-governance-scheduler-status", plainMessage(error, "Scheduled reading is not available right now. Try again in a minute."));
     }
   };
   const identityGovernanceScheduler = byId("ai-identity-governance-scheduler");
@@ -3291,7 +3291,7 @@
       const failures = Array.isArray(result.failures) ? result.failures.length : 0;
       setStatus("ai-identity-governance-scheduler-status", `${Number(result.provider_count) || 0} scheduled reading(s) run; ${failures} could not finish. Nothing was changed in the services.`);
     } catch (error) {
-      setStatus("ai-identity-governance-scheduler-status", plainMessage(error, "The scheduled reading could not run."));
+      setStatus("ai-identity-governance-scheduler-status", plainMessage(error, "The scheduled reading could not run. Try again in a minute."));
     } finally {
       identityGovernanceSchedulerRun.disabled = false;
       identityGovernanceSchedulerRun.removeAttribute("aria-busy");
@@ -3307,7 +3307,7 @@
       const result = await request("/identity-governance/controls/status", {}, "check the controls");
       showProjection("ai-identity-control-result", result);
       const ready = result.runtime_attached === true;
-      const writes = result.provider_writes === true ? "Data label changes can be applied." : "Data label changes cannot be applied right now.";
+      const writes = result.provider_writes === true ? "Data label changes can be applied." : "Data label changes cannot be applied right now. Try again in a minute.";
       setStatus("ai-identity-control-status-message", ready
         ? `The controls are ready. ${writes}`
         : "The controls are not set up for this workspace yet. Ask whoever runs Lightwork to turn them on.");
@@ -3437,7 +3437,7 @@
       showProjection("ai-identity-control-result", result);
       const kept = result.mapping_registry_retained === true
         ? "This result was saved, so you can prepare data label changes with it."
-        : "This result could not be saved, so it cannot be used for data label changes.";
+        : "This result could not be saved, so it cannot be used for data label changes. Try again.";
       setStatus("ai-identity-control-evaluate-status", `Shown. ${kept} A permission Lightwork does not recognise grants nothing.`);
     });
   });
@@ -3549,7 +3549,7 @@
       const ready = value => (value === "available" || value === "supported" ? "ready" : "not set up");
       setStatus("ai-media-provenance-capabilities-status", `Checking tool: ${ready(result.verification?.status)}. Signing tool: ${ready(result.signing?.status)}. An administrator connects these tools in Settings.`);
     } catch (error) {
-      setStatus("ai-media-provenance-capabilities-status", plainMessage(error, "Media checks are not available right now."));
+      setStatus("ai-media-provenance-capabilities-status", plainMessage(error, "Media checks are not available right now. Try again in a minute."));
     }
   };
   const mediaProvenanceCapabilities = byId("ai-media-provenance-capabilities");
@@ -3572,8 +3572,8 @@
       if (!rows.length) emptyRow(target, 5, "No media records yet. Use “Check a media file” below to add one. No provenance-coverage conclusion is shown.");
       setStatus("ai-media-provenance-list-status", `${rows.length} media record(s) shown.`);
     } catch (error) {
-      clear(target); emptyRow(target, 5, "Media records could not be loaded. No provenance-coverage conclusion is shown.");
-      setStatus("ai-media-provenance-list-status", plainMessage(error, "Media records are not available right now."));
+      clear(target); emptyRow(target, 5, "Media records could not be loaded. No provenance-coverage conclusion is shown. Refresh the page and try again.");
+      setStatus("ai-media-provenance-list-status", plainMessage(error, "Media records are not available right now. Try again in a minute."));
     }
   };
   const mediaProvenanceList = byId("ai-media-provenance-list");
@@ -3603,7 +3603,7 @@
       downloadRecord(result, "lightwork-ai-media-provenance.json");
       setStatus("ai-media-provenance-detail-status", "Record downloaded. It does not contain the media file and is not a certification.");
     } catch (error) {
-      setStatus("ai-media-provenance-detail-status", plainMessage(error, "The record could not be downloaded."));
+      setStatus("ai-media-provenance-detail-status", plainMessage(error, "The record could not be downloaded. Try again."));
     } finally {
       mediaProvenanceExport.disabled = false; mediaProvenanceExport.removeAttribute("aria-busy");
     }
@@ -3799,7 +3799,7 @@
         : `Send attempted. It counts as delivered only once ${destination} confirms it received the record.`);
       await loadGrcEvents();
     } catch (error) {
-      setStatus("grc-outbound-sync-status", plainMessage(error, "The record could not be sent."));
+      setStatus("grc-outbound-sync-status", plainMessage(error, "The record could not be sent. Try again."));
     } finally {
       grcSync.disabled = false; grcSync.removeAttribute("aria-busy");
     }
@@ -3824,8 +3824,8 @@
       if (!rows.length) emptyRow(target, 5, "Nothing has been sent yet. Choose a record above and select Preview. This does not show whether ServiceNow or Archer is connected.");
       setStatus("grc-outbound-events-status", `${rows.length} recent send(s) shown.`);
     } catch (error) {
-      clear(target); emptyRow(target, 5, "Recent sends could not be loaded. No delivery conclusion is shown.");
-      setStatus("grc-outbound-events-status", plainMessage(error, "Sending to ServiceNow or Archer is not available right now."));
+      clear(target); emptyRow(target, 5, "Recent sends could not be loaded. No delivery conclusion is shown. Refresh the page and try again.");
+      setStatus("grc-outbound-events-status", plainMessage(error, "Sending to ServiceNow or Archer is not available right now. Try again in a minute."));
     }
   };
 

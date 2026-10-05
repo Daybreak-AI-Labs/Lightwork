@@ -118,12 +118,12 @@
         response = await fetch('/api/v1/research-files/fingerprint', {method: 'POST', credentials: 'same-origin',
           headers: {'Content-Type': 'application/octet-stream'}, body: file});
       } catch (error) {
-        if (state) state.textContent = window.mvErrorText ? window.mvErrorText(error, 'read the file') : 'Could not read the file.';
+        if (state) state.textContent = window.mvErrorText ? window.mvErrorText(error, 'read the file') : 'Could not read the file. Choose the file again, or try a different file.';
         return;
       }
       if (!response.ok) {
         if (state) state.textContent = response.status === 413 ? 'That file is too large. Ask your administrator to record it for you.' :
-          (window.mvErrorText ? window.mvErrorText(response, 'read the file') : 'Could not read the file.');
+          (window.mvErrorText ? window.mvErrorText(response, 'read the file') : 'Could not read the file. Choose the file again, or try a different file.');
         return;
       }
       const body = await response.json();

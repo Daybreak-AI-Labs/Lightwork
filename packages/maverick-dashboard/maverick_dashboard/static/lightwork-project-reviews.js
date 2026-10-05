@@ -58,7 +58,7 @@
   async function action(work){
     if(busy||expired)return;busy=true;
     const controls=Array.from(root.querySelectorAll("button,input,textarea,select"));const previous=controls.map(item=>item.disabled);controls.forEach(item=>item.disabled=true);
-    try{await work();}catch(error){if(error.productSource)status(error.productSource);else if(error.message)user(el("status"),error.message);else status("The action could not be completed. Your input has been kept.");}
+    try{await work();}catch(error){if(error.productSource)status(error.productSource);else if(error.message)user(el("status"),error.message);else status("The action could not be completed. Your input has been kept. Try again.");}
     finally{controls.forEach((item,index)=>item.disabled=previous[index]);busy=false;permissions();}
   }
   function renderInbox(){

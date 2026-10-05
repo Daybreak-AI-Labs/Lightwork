@@ -10,7 +10,7 @@
     const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),30000);
     try{const response=await fetch(base+path,{method:body?'POST':'GET',headers:{'X-Lightwork-Bundle-Context':context,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined,signal:controller.signal,redirect:'error'});
       if(response.status===401||response.status===403){clearPrivate();throw new Error('Access changed. Sign in and reload before continuing.');}
-      const value=await response.json();if(!response.ok){if(response.status===404){$('detail').hidden=true;$('detail-files').replaceChildren();selected=null;}if(value.detail?.code==='context_changed')clearPrivate();const error=new Error(value.detail?.message||'The operation could not be confirmed. Your saved bundle is unchanged.');error.status=response.status;throw error;}
+      const value=await response.json();if(!response.ok){if(response.status===404){$('detail').hidden=true;$('detail-files').replaceChildren();selected=null;}if(value.detail?.code==='context_changed')clearPrivate();const error=new Error(value.detail?.message||'The operation could not be confirmed. Your saved bundle is unchanged. Refresh the page and try again.');error.status=response.status;throw error;}
       if(value.context!==context){clearPrivate();throw new Error('Your account or workspace changed. Reload this page.');}return value;
     }finally{clearTimeout(timer);}
   }

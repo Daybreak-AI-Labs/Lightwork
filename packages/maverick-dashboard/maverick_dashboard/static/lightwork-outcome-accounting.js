@@ -267,7 +267,7 @@
     if (
       typeof pricing.confidence !== 'number' || !Number.isFinite(pricing.confidence) ||
       pricing.confidence < 0 || pricing.confidence > 1
-    ) fail('Pricing confidence is invalid.');
+    ) fail('Pricing confidence is invalid. Refresh the page and try again.');
     boolean(pricing.verified, 'Pricing verification');
     opaque(pricing.rate_card_version, 'Rate-card version', 256, false);
     opaque(pricing.evidence_id, 'Pricing evidence identity', 256, false);
@@ -365,18 +365,18 @@
     )) fail('Cost evidence assurance does not reconcile.');
     event.pricing_evidence = validatePricingEvidence(event.pricing_evidence);
     if (event.pricing_evidence && event.pricing_evidence.currency !== event.currency) {
-      fail('Pricing evidence does not match the cost currency.');
+      fail('Pricing evidence does not match the cost currency. Refresh the page and try again.');
     }
     if (
       event.pricing_evidence &&
       ((!event.pricing_evidence.verified && event.basis === 'observed') || event.amount === null)
-    ) fail('Pricing evidence does not match the cost basis.');
+    ) fail('Pricing evidence does not match the cost basis. Refresh the page and try again.');
     event.budget_reconciliation = validateReconciliation(event.budget_reconciliation);
     if (
       event.budget_reconciliation && event.budget_reconciliation.final_amount !== null &&
       (event.budget_reconciliation.final_amount !== event.amount ||
        event.budget_reconciliation.currency !== event.currency)
-    ) fail('Reservation settlement does not match the cost event.');
+    ) fail('Reservation settlement does not match the cost event. Refresh the page and try again.');
     return event;
   }
 
@@ -413,7 +413,7 @@
     if (
       report.schema !== 'lightwork.outcome-accounting-portfolio.v1' ||
       report.context !== context || report.reconciles !== true
-    ) fail('Outcome accounting did not match this account and workspace.');
+    ) fail('Outcome accounting did not match this account and workspace. Refresh the page and try again.');
     const admitted = count(report.admitted, 'Admission count', MAX_PAGE);
     const categoryNames = ['accepted', 'rejected', 'failed', 'cancelled', 'unresolved'];
     const categories = object(report.categories, 'Outcome categories');
@@ -434,7 +434,7 @@
     const costs = object(report.costs, 'Portfolio costs');
     const knownTotals = totals(costs.known_totals, 'Recorded cost totals');
     const overflows = overflowCurrencies(costs.aggregate_overflow_currencies, 'Cost aggregate overflow');
-    if (knownTotals.some(([code]) => overflows.includes(code))) fail('Recorded cost totals are invalid.');
+    if (knownTotals.some(([code]) => overflows.includes(code))) fail('Recorded cost totals are invalid. Refresh the page and try again.');
     const totalsComplete = boolean(costs.totals_complete, 'Cost total completeness');
     if (totalsComplete !== (overflows.length === 0)) fail('Cost total completeness does not reconcile.');
     const incomplete = count(costs.incomplete_records, 'Incomplete cost count', MAX_PAGE + 1);
@@ -447,10 +447,10 @@
     ) fail('Portfolio cost coverage does not reconcile.');
 
     const page = object(report.page, 'Outcome accounting page');
-    if (count(page.limit, 'Accounting page limit', 200) !== MAX_PAGE) fail('Outcome accounting page did not match this request.');
+    if (count(page.limit, 'Accounting page limit', 200) !== MAX_PAGE) fail('Outcome accounting page did not match this request. Refresh the page and try again.');
     const returnedCursor = page.cursor === null ? '' : cursor(page.cursor, 'Accounting cursor', false);
     if (returnedCursor !== requestedCursor || typeof page.has_more !== 'boolean') {
-      fail('Outcome accounting page did not match this request.');
+      fail('Outcome accounting page did not match this request. Refresh the page and try again.');
     }
     boolean(page.scope_complete, 'Accounting scope coverage');
     count(page.scanned_records, 'Scanned record count', 501);
@@ -459,7 +459,7 @@
     }
     const following = page.has_more
       ? cursor(page.next_cursor, 'Next accounting cursor', false)
-      : (page.next_cursor === null ? null : fail('Next accounting cursor is invalid.'));
+      : (page.next_cursor === null ? null : fail('Next accounting cursor is invalid. Refresh the page and try again.'));
     return {
       report, admitted, categoryNames, categoryValues, records, costs, knownTotals,
       overflows, incomplete, incompleteRecords: records.filter(record => !record.costs.complete).length,
@@ -477,7 +477,7 @@
     text(row.summary, 'Observation summary', 4000, false);
     timestamp(row.observed_at, 'Observation time', false);
     timestamp(row.valid_until, 'Observation expiry', true);
-    if (row.valid_until !== null && row.valid_until <= row.observed_at) fail('Observation expiry is invalid.');
+    if (row.valid_until !== null && row.valid_until <= row.observed_at) fail('Observation expiry is invalid. Refresh the page and try again.');
     if (row.correction_of !== null) identifier(row.correction_of, 'Observation correction');
     text(row.actor, 'Observation actor', 4096, false);
     boolean(row.current, 'Current observation state');
@@ -516,13 +516,13 @@
   function validateDetail(data, summary) {
     const detail = object(data, 'Outcome detail');
     if (detail.context !== context || detail.id !== summary.id) {
-      fail('Outcome detail did not match this account, workspace, and record.');
+      fail('Outcome detail did not match this account, workspace, and record. Refresh the page and try again.');
     }
     identifier(detail.id, 'Outcome detail identity');
     const revision = count(detail.revision, 'Outcome detail revision', Number.MAX_SAFE_INTEGER);
     if (revision < summary.revision) fail('Outcome detail is older than the visible record.');
     if (detail.work_item_id !== summary.work_item_id || detail.owner_id !== summary.owner_id) {
-      fail('Outcome detail did not match this account, workspace, and record.');
+      fail('Outcome detail did not match this account, workspace, and record. Refresh the page and try again.');
     }
     opaque(detail.admission_id, 'Detail admission identity', 512, false);
     opaque(detail.work_item_id, 'Detail work item identity', 512, false);
@@ -543,7 +543,7 @@
       contract.schema_version !== 1 || contract.id !== detail.id ||
       contract.owner_id !== detail.owner_id || contract.work_item_id !== detail.work_item_id ||
       contract.revision !== detail.revision
-    ) fail('Outcome detail provenance did not match the record.');
+    ) fail('Outcome detail provenance did not match the record. Refresh the page and try again.');
     opaque(contract.tenant_id, 'Outcome contract tenant', 256, false);
     const contractCost = object(contract.cost, 'Outcome contract cost');
     enumeration(contractCost.state, 'Outcome contract cost state', new Set(['exact', 'unknown']));

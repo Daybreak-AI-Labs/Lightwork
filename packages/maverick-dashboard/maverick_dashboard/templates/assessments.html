@@ -415,7 +415,7 @@
       .then(function (result) {
         if (!result.ok) {
           pageMessage('', false);
-          detailMessage(responseDetail(result, 'Could not reload the latest assessment.'), true);
+          detailMessage(responseDetail(result, 'Could not reload the latest assessment. Refresh the page and try again.'), true);
           return;
         }
         renderDetail(result.data);
@@ -494,7 +494,7 @@
           pageMessage('Everything was re-checked.', false);
           reload();
         } else {
-          pageMessage(responseDetail(res, 'Could not re-check everything.'), true);
+          pageMessage(responseDetail(res, 'Could not re-check everything. Try again.'), true);
         }
       })
       .catch(function () {

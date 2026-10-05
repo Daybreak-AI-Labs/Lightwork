@@ -310,7 +310,7 @@
       try {
         var state = await call(base + '/client/export/' + encodeURIComponent(job), 'GET');
         if (state.state === 'ready') { done(null, base + '/client/export/' + encodeURIComponent(job) + '/download'); return; }
-        if (state.state === 'failed') { done(state.message || 'The export could not be prepared.'); return; }
+        if (state.state === 'failed') { done(state.message || 'The export could not be prepared. Try again.'); return; }
       } catch (failure) { done(await plainFailure(failure, 'prepare the download')); return; }
       if (tries > 400) { done('The export is taking too long. Try again later.'); return; }
       setTimeout(poll, 3000);

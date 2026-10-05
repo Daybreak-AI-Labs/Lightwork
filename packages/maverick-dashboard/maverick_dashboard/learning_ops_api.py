@@ -647,7 +647,7 @@ def _modify_reason(reason: str) -> str:
     for needle, sentence in _MODIFY_REFUSALS:
         if needle in text:
             return sentence
-    return "The experiment could not run. Nothing was changed."
+    return "The experiment could not run. Nothing was changed. Try again."
 
 
 @router.post("/self-modify/run")

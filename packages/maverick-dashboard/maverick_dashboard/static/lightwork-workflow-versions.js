@@ -17,7 +17,7 @@
       const response=await fetch('/api/v1/workflows/'+encodeURIComponent(name)+path,{method:body?'POST':'GET',headers:{'Content-Type':'application/json'},body:body?JSON.stringify({...body,context}):undefined,cache:'no-store',signal:controller.signal});
       const data=await response.json().catch(()=>({}));
       if(response.status===401){clear();throw new Error('Sign in before continuing.');}
-      if(!response.ok)throw new Error(typeof data.detail==='string'?data.detail:'The workflow review could not be completed.');
+      if(!response.ok)throw new Error(typeof data.detail==='string'?data.detail:'The workflow review could not be completed. Try again.');
       return data;
     }finally{clearTimeout(timer);}
   }

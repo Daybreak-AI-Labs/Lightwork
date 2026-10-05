@@ -92,13 +92,13 @@
     protected_containment: "This agent is isolated. An administrator must end the isolation first.",
     dependency_unavailable: "Part of Lightwork needed for this is not available right now. Try again in a minute.",
     not_applied: "The change did not take effect.",
-    containment_failed: "The agent could not be fully isolated.",
-    schedule_unavailable: "The automatic end of isolation could not be scheduled.",
+    containment_failed: "The agent could not be fully isolated. Try again.",
+    schedule_unavailable: "The automatic end of isolation could not be scheduled. End the isolation yourself when it is no longer needed.",
     concurrent_containment: "Someone else changed this agent at the same time. Check the list and try again.",
     already_released: "This agent was already released from isolation.",
     superseded: "A newer isolation replaced this one, so it was left in place.",
-    release_failed: "The isolation could not be ended.",
-    action_error: "The change could not be completed.",
+    release_failed: "The isolation could not be ended. Try again.",
+    action_error: "The change could not be completed. Try again.",
     concurrent_halt: "Someone else changed the emergency stop at the same time. Check its state and try again.",
     idempotent_replay: "This exact change had already been applied.",
     recovered: "An earlier unfinished change was completed."
@@ -321,7 +321,7 @@
           ? "It was recorded in the history."
           : payload.audit_written === false
             ? "Warning: it was not recorded in the history."
-            : "Lightwork could not confirm it was recorded in the history.");
+            : "Lightwork could not confirm it was recorded in the history. Refresh the page to see the latest.");
       }
     }
     var announced = parts.map(function (part) {
@@ -1264,7 +1264,7 @@
     document.getElementById("acp-health-title").textContent =
       "Checking your agents…";
     document.getElementById("acp-health-detail").textContent =
-      "Actions are unavailable until Lightwork has confirmed the current state.";
+      "Actions are unavailable until Lightwork has confirmed the current state. Refresh the page to see the latest.";
     planeRequested += 1;
     if (!planeRefreshPromise) {
       planeRefreshPromise = drainPlaneRefreshes().finally(function () {

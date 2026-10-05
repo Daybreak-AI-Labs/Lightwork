@@ -187,7 +187,7 @@
       try {
         var data = await request('/api/v1/goals/' + encodeURIComponent(goal) + '/recorded-steps?kind=' + encodeURIComponent(kind.value));
         if (!data.recording) { say(status, 'Step-by-step recording is turned off, so this task has no recording. Whoever installed Lightwork can turn it on.'); return; }
-        if (data.damaged) { say(status, 'The recording for this task failed its integrity check, so it is not shown.'); return; }
+        if (data.damaged) { say(status, 'The recording for this task failed its integrity check, so it is not shown. Ask an administrator to check the recording.'); return; }
         if (!filled && data.kinds.length) {
           data.kinds.forEach(function (k) { option(kind, k, human(k)); });
           kind.disabled = false;

@@ -156,7 +156,7 @@
           body: JSON.stringify({ section: section, enabled: true })
         });
         if (!r.ok) {
-          var why = r.status === 409 ? "This is controlled by your installation settings, so it cannot be turned on here."
+          var why = r.status === 409 ? "This is controlled by your installation settings, so it cannot be turned on here. Ask your administrator to turn it on."
             : window.mvErrorText(r, "turn this on");
           if (msg) { msg.textContent = why; }
           btn.disabled = false; btn.removeAttribute("aria-busy");

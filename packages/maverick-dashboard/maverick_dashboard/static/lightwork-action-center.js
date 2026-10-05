@@ -145,7 +145,7 @@
     if (!model.items.length) {
       const partial = model.coverage.some(source=>source.status !== "current" && source.status !== "disabled");
       const empty = node("div", undefined, "mv-empty");
-      empty.append(node("p", partial ? "No items are visible in this filter. Some sources are incomplete or unavailable." : "You're all caught up.", "mv-empty__title"));
+      empty.append(node("p", partial ? "No items are visible in this filter. Some sources are incomplete or unavailable; refresh the page or choose another filter." : "You're all caught up.", "mv-empty__title"));
       const filtered = form.elements.view.value !== "active" || form.elements.kind.value !== "all" || form.elements.assignment.value !== "all";
       if (filtered) {
         const all = node("button", "Show everything", "btn"); all.type = "button";

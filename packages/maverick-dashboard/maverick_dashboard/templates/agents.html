@@ -239,7 +239,7 @@
           if (!result.removed) throw new Error('No saved setup was removed. Refresh to check its status.');
           window.location.href = builtIn ? '/agents?name=' + encodeURIComponent(name) : '/agents';
         } catch (error) {
-          status.textContent = error.message || (builtIn ? 'Could not restore this specialist.' : 'Could not remove this agent.');
+          status.textContent = error.message || (builtIn ? 'Could not restore this specialist. Refresh the page and try again.' : 'Could not remove this agent. Refresh the page and try again.');
           button.disabled = false;
           button.removeAttribute('aria-busy');
         }
@@ -754,7 +754,7 @@
             + (readiness.state === 'needs_setup'
               ? 'Needs setup' + (readiness.missing_labels && readiness.missing_labels.length
                 ? ': ' + esc(readiness.missing_labels.join(', ')) : '') + '.'
-              : 'Setup could not be checked.')
+              : 'Setup could not be checked. Refresh the page and try again.')
             + ' <a href="' + esc(fix) + '">Review setup</a> before assigning work.</div>';
           return '<div class="panel" style="margin: 0.5rem 0; padding: 0.6rem 0.8rem;">'
             + '<div style="display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap;">'

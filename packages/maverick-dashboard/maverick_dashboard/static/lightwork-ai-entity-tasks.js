@@ -160,7 +160,7 @@
       throw new Error("Choose a type of task.");
     }
     if (["low", "medium", "high", "critical"].indexOf(payload.priority) === -1) {
-      throw new Error("Priority is invalid.");
+      throw new Error("Priority is invalid. Choose a priority from the list.");
     }
     var assignee = String(fields.assignee_ref || "").trim();
     if (assignee) payload.assignee_ref = identifier(assignee, "The person assigned");
@@ -178,7 +178,7 @@
     var status = String(fields.status || "");
     if (status) {
       if (["open", "in_progress", "blocked", "resolved", "dismissed"].indexOf(status) === -1) {
-        throw new Error("Status is invalid.");
+        throw new Error("Status is invalid. Choose a status from the list.");
       }
       payload.status = status;
       changes += 1;
@@ -186,7 +186,7 @@
     var priority = String(fields.priority || "");
     if (priority) {
       if (["low", "medium", "high", "critical"].indexOf(priority) === -1) {
-        throw new Error("Priority is invalid.");
+        throw new Error("Priority is invalid. Choose a priority from the list.");
       }
       payload.priority = priority;
       changes += 1;
@@ -199,7 +199,7 @@
       payload.assignee_ref = null;
       changes += 1;
     } else if (assigneeAction !== "keep") {
-      throw new Error("Assignee update action is invalid.");
+      throw new Error("Assignee update action is invalid. Refresh the page and try again.");
     }
     var collaboratorAction = String(fields.collaborator_action || "keep");
     if (collaboratorAction === "replace") {
@@ -209,7 +209,7 @@
       payload.collaborator_refs = [];
       changes += 1;
     } else if (collaboratorAction !== "keep") {
-      throw new Error("Collaborator update action is invalid.");
+      throw new Error("Collaborator update action is invalid. Refresh the page and try again.");
     }
     var dueAction = String(fields.due_action || "keep");
     if (dueAction === "set") {
@@ -219,7 +219,7 @@
       payload.due_at = null;
       changes += 1;
     } else if (dueAction !== "keep") {
-      throw new Error("Due date update action is invalid.");
+      throw new Error("Due date update action is invalid. Refresh the page and try again.");
     }
     if (changes === 0) throw new Error("Select at least one change to save. Nothing was changed.");
     return payload;
@@ -508,7 +508,7 @@
     } catch (error) {
       clear(taskList);
       listCount.textContent = "0 tasks";
-      listStatus.textContent = error && error.message ? error.message : "Couldn't load tasks.";
+      listStatus.textContent = error && error.message ? error.message : "Couldn't load tasks. Refresh the page and try again.";
       throw error;
     }
   }
@@ -576,7 +576,7 @@
       }
     } catch (error) {
       readiness.textContent = "Unavailable";
-      readinessDetail.textContent = error && error.message ? error.message : "Couldn't check availability.";
+      readinessDetail.textContent = error && error.message ? error.message : "Couldn't check availability. Refresh the page and try again.";
       setMark("Unavailable", "failed");
       // The list never started; say so instead of "Loading tasks…".
       listStatus.textContent = typeof window.mvErrorText === "function"
@@ -594,7 +594,7 @@
       purge.textContent = count ? "Delete expired tasks (" + count + ")" : "Delete expired tasks";
       return count;
     } catch (error) {
-      summary.textContent = error && error.message ? error.message : "Couldn't count expired tasks.";
+      summary.textContent = error && error.message ? error.message : "Couldn't count expired tasks. Refresh the page and try again.";
       return 0;
     }
   }

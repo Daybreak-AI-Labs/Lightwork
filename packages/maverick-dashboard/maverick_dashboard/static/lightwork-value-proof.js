@@ -322,7 +322,7 @@
         box.textContent = '';
         if (kind === 'record') {
           box.appendChild(el('p', !out.intact
-            ? 'This file could not be confirmed. It may have been changed, or it is not a signed Lightwork record.'
+            ? 'This file could not be confirmed. It may have been changed, or it is not a signed Lightwork record. Ask for the original file.'
             : (out.from_this_installation
               ? 'This record is intact and was signed by this Lightwork installation. It holds ' + plural(out.records, 'decision', 'decisions') + '.'
               : 'The signature is valid for the key in this file, but who signed it has not been verified. Obtain the publisher’s key through a trusted channel before relying on its origin.')));
@@ -332,8 +332,8 @@
               ? 'This learning statement is intact and was signed by the installation whose key you gave.'
               : 'This learning statement is intact and was signed by this Lightwork installation.')
             : (keyFile
-              ? 'This learning statement could not be confirmed with that key. It may have been changed or signed by someone else.'
-              : 'This learning statement could not be confirmed against this installation. It may have been changed or signed elsewhere.')));
+              ? 'This learning statement could not be confirmed with that key. It may have been changed or signed by someone else. Check that you chose the right key.'
+              : 'This learning statement could not be confirmed against this installation. It may have been changed or signed elsewhere. Ask for the original file.')));
           if (out.claims.length) {
             var ul = el('ul');
             out.claims.forEach(function (c) { ul.appendChild(el('li', c.claim + ': ' + c.result)); });

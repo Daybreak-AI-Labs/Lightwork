@@ -6,7 +6,7 @@
       headers:{'Content-Type':'application/json'}, body:body ? JSON.stringify(body) : undefined});
     var data = await response.json();
     if (!response.ok) {
-      var error = new Error(typeof data.message === 'string' ? data.message : typeof data.detail === 'string' ? data.detail : 'This change could not be reviewed. Your draft is kept.');
+      var error = new Error(typeof data.message === 'string' ? data.message : typeof data.detail === 'string' ? data.detail : 'This change could not be reviewed. Your draft is kept. Try again.');
       error.data = data; error.status = response.status; throw error;
     }
     return data;

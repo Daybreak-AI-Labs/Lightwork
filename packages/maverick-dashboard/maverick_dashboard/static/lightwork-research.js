@@ -170,7 +170,7 @@
         settingsDirty = true;
         syncControls();
       } catch (error) {
-        state.textContent = window.mvErrorText ? window.mvErrorText(error, 'read the file') : 'Could not read the file.';
+        state.textContent = window.mvErrorText ? window.mvErrorText(error, 'read the file') : 'Could not read the file. Choose the file again, or try a different file.';
       }
     });
     fileLabel.append(file, state);
@@ -192,7 +192,7 @@
     if (!settings) return;
     const available = settings.writable === true && sha(settings.settings_sha256);
     byId('research-settings-readiness').textContent = settings.source === 'operator_overlay' ?
-      'This setup is managed by your IT team and cannot be changed here.' : available ?
+      'This setup is managed by your IT team and cannot be changed here. Ask your IT team to change it.' : available ?
       (settings.valid ? 'The saved setup is complete.' :
         'The saved setup is incomplete. Fill in every field, or turn experiments off.') :
       'The setup cannot be saved right now. Ask your IT team to check the installation settings.';
@@ -474,7 +474,7 @@
     try {
       await refresh();
     } catch (_) {
-      throw new Error('The program finished, but the list could not be refreshed. Its result is shown below.');
+      throw new Error('The program finished, but the list could not be refreshed. Its result is shown below; refresh the page to update the list.');
     }
     selectedReview = completedReview;
     renderReviewDetail(completedReview);

@@ -26,7 +26,7 @@
     const friendly=action=>window.mvErrorText?window.mvErrorText(response,action):'Could not '+action+'. Please try again.';
     if(response.status>=500)throw new Error('The intake service is unavailable. Your answers are kept; try again.');
     const raw=await response.text();if(new TextEncoder().encode(raw).length>2*1024*1024)throw new Error('The intake response is too large. Narrow the draft search.');
-    let data;try{data=JSON.parse(raw);}catch(_){throw new Error('The intake response could not be read. Your unsaved answers are still here.');}
+    let data;try{data=JSON.parse(raw);}catch(_){throw new Error('The intake response could not be read. Your unsaved answers are still here. Refresh the page and try again.');}
     if(!response.ok){const detail=typeof data.detail==='string'?data.detail:'';
       if(response.status===409&&/account or workspace changed/i.test(detail)){lock();throw new Error('The account or workspace changed. Reload AI business intake.');}
       else if(response.status===409)conflicted=true;

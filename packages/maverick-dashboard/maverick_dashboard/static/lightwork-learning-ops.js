@@ -148,7 +148,7 @@
     var job = await J.run(LO + '/self-modify/run', { method: 'POST', json: { objective: objective, cycles: cycles, confirm: true } },
       ui('lo-sm', 'start the practice rounds', function (d) {
         var out = [];
-        if (!d.ran) out.push(el('p', d.problem || 'The experiment could not run. Nothing was changed.'));
+        if (!d.ran) out.push(el('p', d.problem || 'The experiment could not run. Nothing was changed. Try again.'));
         else out.push(el('p', 'Tested ' + plural(d.tested, 'change') + ' across ' + plural(d.rounds.length, 'round') + '. Spent ' + J.money(d.spent) + '.'));
         if (d.rounds.length) out.push(J.technical(d.rounds.map(function (r, i) {
           return 'Round ' + (i + 1) + ': ' + r.ideas + ' idea(s), ' + r.tested + ' tested' + (r.note ? ' — ' + r.note : '');

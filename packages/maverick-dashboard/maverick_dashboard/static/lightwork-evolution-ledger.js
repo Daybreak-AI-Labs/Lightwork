@@ -37,7 +37,7 @@
     dashboard_projects_only_digest_only_promotion_history: "This page shows fingerprints and outcomes only, never the learned content itself.",
     dreaming_hindsight_and_runtime_proof_sources_are_not_exposed_here: "Overnight learning runs and learning checks are shown on the Learning page, not here.",
     receipt_integrity_is_not_a_human_approval_verification: "An intact receipt shows the record was not changed. It does not by itself prove who approved it.",
-    human_approval_signature_not_verifiable_from_receipt: "A person’s approval signature cannot be checked from the receipt alone.",
+    human_approval_signature_not_verifiable_from_receipt: "A person’s approval signature cannot be checked from the receipt alone. Open the approval in Lightwork to check it.",
     approval_signature_requires_private_binding_verification: "Confirming the approval needs private records that stay on the server.",
     workspace_snapshot_digest_not_recorded: "Some older records do not include a fingerprint of the workspace.",
     runtime_artifact_binding_not_recorded: "Some older records do not name the exact files that changed."
@@ -208,7 +208,7 @@
     box.hidden = false;
     verdict.dataset.valid = valid ? "true" : "false";
     verdict.textContent = valid ? "This receipt is intact: it has not been changed since it was made." :
-      "This receipt could not be confirmed. It may have been changed, or it is not a Lightwork receipt.";
+      "This receipt could not be confirmed. It may have been changed, or it is not a Lightwork receipt. Ask for the original file.";
     detail.textContent = "Approval by a person: " + plain(APPROVAL, result && result.approval_status) + ".";
   }
 

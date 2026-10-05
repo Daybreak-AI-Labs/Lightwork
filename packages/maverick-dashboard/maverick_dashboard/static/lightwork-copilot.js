@@ -357,7 +357,7 @@
           forgetRecent(); input.value = ""; clear(log);
         }
         catalog = null; clear(operationButtons); operations.hidden = false;
-        operationStatus.textContent = 'Actions are unavailable here. Your unsent question is kept unless access changed.';
+        operationStatus.textContent = 'Actions are unavailable here. Your unsent question is kept unless access changed. Refresh the page to see the latest.';
         if (hadContext || actionHost.contains(document.getElementById('le-card'))) current.invalidate();
         return null;
       }
@@ -429,7 +429,7 @@
     fab.setAttribute("aria-expanded", "true");
     pageTriggers.forEach(function (trigger) { trigger.setAttribute("aria-expanded", "true"); });
     loadContext();
-    verifyScope(generation).catch(function () { note.textContent = "Current workspace could not be checked. Your draft will not be sent until access is confirmed."; });
+    verifyScope(generation).catch(function () { note.textContent = "Current workspace could not be checked. Your draft will not be sent until access is confirmed. Refresh the page and try again."; });
     loadOperations(generation);
     if (window.LightworkProductOperations) window.LightworkProductOperations.open();
     input.focus();

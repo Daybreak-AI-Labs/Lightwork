@@ -114,7 +114,7 @@
     busy = true;
     try {
       var response = await fetch('/api/v1/preferences' + (thread ? '?thread=' + encodeURIComponent(thread) : ''), {cache:'no-store'});
-      if (!response.ok) throw new Error('Current preferences could not be read. Your draft remains available.');
+      if (!response.ok) throw new Error('Current preferences could not be read. Your draft remains available. Refresh the page and try again.');
       var current = await response.json(), draft = Object.assign({}, changes);
       if (current.context !== model.context) throw new Error('Your account or workspace changed. Save this draft separately before reloading.');
       var locked = Object.keys(draft).filter(function (key) { return current.locked.indexOf(key) !== -1; });
@@ -123,7 +123,7 @@
       locked.forEach(function (key) { delete draft[key]; });
       model = current; render(); applyDraft(draft);
       window.LightworkI18n ? window.LightworkI18n.set(status, 'Current values loaded. Review and save your remaining draft when ready.') : copy(status,'Current values loaded. Review and save your remaining draft when ready.');
-    } catch (failure) { copy(status,knownError(failure,'Current preferences could not be read. Your draft remains available.')); }
+    } catch (failure) { copy(status,knownError(failure,'Current preferences could not be read. Your draft remains available. Refresh the page and try again.')); }
     finally { busy = false; renderPins(); }
   });
   form.addEventListener('submit', async function (event) {
@@ -167,12 +167,12 @@
     if (busy) return; busy = true; profileBusy(true);
     try {
       var response = await fetch('/api/v1/preferences/profile', {cache:'no-store'}), data = await response.json();
-      if (!response.ok) throw new Error(typeof data.detail === 'string' ? data.detail : 'Profile could not be exported.');
+      if (!response.ok) throw new Error(typeof data.detail === 'string' ? data.detail : 'Profile could not be exported. Try again.');
       var url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], {type:'application/json'}));
       var link = document.createElement('a'); link.href = url; link.download = 'lightwork-personal-style-profile.json'; link.click();
       setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
       copy(profileStatus,'Saved preferences exported. Unsaved drafts were excluded.');if(data.excluded.length)appendCopy(profileStatus,'Credential-like guidance was omitted: {fields}.',{fields:data.excluded.map(fieldLabel).join(', ')});
-    } catch (error) { copy(profileStatus,knownError(error,'Profile could not be exported.')); }
+    } catch (error) { copy(profileStatus,knownError(error,'Profile could not be exported. Try again.')); }
     finally { busy = false; profileBusy(false); }
   });
   if (importButton) importButton.addEventListener('click', async function () {
@@ -186,12 +186,12 @@
     try {
       var response = await fetch('/api/v1/preferences/profile/import', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({profile:JSON.parse(await file.text())})});
       var data = await response.json();
-      if (!response.ok) throw new Error(typeof data.detail === 'string' ? data.detail : 'This profile could not be loaded.');
+      if (!response.ok) throw new Error(typeof data.detail === 'string' ? data.detail : 'This profile could not be loaded. Refresh the page and try again.');
       if (data.state.context !== model.context) throw new Error('Your account or workspace changed. Reload before importing.');
       model = data.state; render(); applyDraft(data.changes);
       copy(profileStatus,'Profile loaded as a personal draft. Review the before/after changes and save when ready.');
       form.inert = false; form.querySelector('[type="submit"]').focus();
-    } catch (error) { copy(profileStatus,knownError(error,'This profile could not be loaded.')); }
+    } catch (error) { copy(profileStatus,knownError(error,'This profile could not be loaded. Refresh the page and try again.')); }
     finally { busy = false; profileBusy(false); form.inert = false; renderPins(); }
   });
   window.addEventListener('beforeunload', function (event) { if (Object.keys(changes).length) { event.preventDefault(); event.returnValue = ''; } });

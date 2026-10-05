@@ -171,7 +171,7 @@
     api("POST", "/provider-runtime/sources/" + encodeURIComponent(s.source_id) + "/readiness").then(function (d) {
       say(d.ready ? "The connection is ready. Lightwork will try it on the next collection." : "The connection isn't ready yet. Ask your IT team to check the connection key.");
     }, function (f) {
-      say(f && f.status === 403 ? "This source isn't approved for watching for changes, so it can't be collected automatically." : R.errorText(f, "test the connection"));
+      say(f && f.status === 403 ? "This source isn't approved for watching for changes, so it can't be collected automatically. Collect it by hand, or ask an administrator to approve it." : R.errorText(f, "test the connection"));
     });
   }
   function recordSnapshot(s) {

@@ -684,7 +684,7 @@
     k.appendChild(B.kpi({ label: 'Human decisions', value: acc.human_decisions,
       sub: 'approvals: ' + B.fmt(acc.approvals) }));
     k.appendChild(B.kpi({ label: 'Learned capabilities', value: learned === null ? 'Not available' : learned,
-      sub: grounded === null ? 'Source-scoped counts are unavailable; no workspace total or zero is implied.' : B.fmt(grounded) + ' results checked against real outcomes' }));
+      sub: grounded === null ? 'Source-scoped counts are unavailable; no workspace total or zero is implied. Refresh the page and try again.' : B.fmt(grounded) + ' results checked against real outcomes' }));
 
     B.donut(document.getElementById('bd-systems'), {
       segments: [

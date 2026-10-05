@@ -133,7 +133,7 @@ def _update_preferences(request: Request, body: PreferenceUpdate) -> JSONRespons
         if key in {"theme", "font", "density", "language", "interface_language", "text_size", "glass"}:
             _check_display(key, value)
         if key == "start_page" and (not isinstance(value, str) or value not in destinations):
-            raise HTTPException(403, "That starting page is not available to your account.")
+            raise HTTPException(403, "That starting page is not available to your account. Choose another starting page.")
         if key == "favorites" and (not isinstance(value, list) or any(not isinstance(item, str) or item not in destinations for item in value)):
             raise HTTPException(403, "Only currently available pages can be pinned.")
         if key == "today_cards" and (not isinstance(value, list) or any(not isinstance(item, str) or item not in {"tasks", "decisions", "recent", "schedules", "templates"} for item in value)):

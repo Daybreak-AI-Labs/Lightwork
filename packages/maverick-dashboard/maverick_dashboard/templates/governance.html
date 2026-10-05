@@ -722,7 +722,7 @@
       });
       status("gov-attention-status", "Alerts refreshed.");
     }
-    catch (error) { status("gov-attention-status", error.message || "Alerts could not be refreshed."); }
+    catch (error) { status("gov-attention-status", error.message || "Alerts could not be refreshed. Refresh the page and try again."); }
     finally { refreshAttention.disabled = false; }
   });
   const grcRun = document.getElementById("gov-grc-run");

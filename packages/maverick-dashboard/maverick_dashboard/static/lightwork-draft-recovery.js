@@ -168,10 +168,10 @@
       if (!response.ok) {
         var error = new Error(response.status === 409
           ? 'A newer recovery copy was saved from another tab or window. Review it before continuing.'
-          : failText(response, 'save the recovery copy', 'Recovery storage could not confirm this request.'));
+          : failText(response, 'save the recovery copy', 'Recovery storage could not confirm this request. Refresh the page and try again.'));
         error.status = response.status; throw error;
       }
-      if (!data || data.context !== context || data.slot !== slot || !Number.isInteger(data.revision) || data.revision < 0 || !Object.prototype.hasOwnProperty.call(data, 'payload') || (data.payload !== null && (typeof data.payload !== 'object' || Array.isArray(data.payload)))) throw new Error('The recovery copy could not be verified for this workspace.');
+      if (!data || data.context !== context || data.slot !== slot || !Number.isInteger(data.revision) || data.revision < 0 || !Object.prototype.hasOwnProperty.call(data, 'payload') || (data.payload !== null && (typeof data.payload !== 'object' || Array.isArray(data.payload)))) throw new Error('The recovery copy could not be verified for this workspace. Refresh the page and try again.');
       assertSafe(data.payload); return data;
     }
     async function initialize() {
@@ -193,7 +193,7 @@
       pendingOperation = operation;
       try {
         var data = await call('PUT', operation);
-        if (data.revision !== operation.expected_revision + 1 || !same(data.payload, operation.payload)) throw new Error('The saved recovery copy did not match the submitted draft.');
+        if (data.revision !== operation.expected_revision + 1 || !same(data.payload, operation.payload)) throw new Error('The saved recovery copy did not match the submitted draft. Try again.');
         revision = data.revision; remote = data.payload; pendingOperation = null; failed = false; lastSaved = JSON.stringify(operation.payload);
         status.textContent = data.payload ? 'Recovery copy saved. You control when this work is saved, run, or published.' : 'Recovery copy discarded. Your editor contents have been kept.';
         return true;
@@ -235,7 +235,7 @@
         }
         if (before !== JSON.stringify(read())) { status.textContent = 'Your newer editor changes have been kept. Review again before continuing.'; return; }
         await action(candidate);
-      } catch (error) { status.textContent = error.message || 'Could not restore this copy. Current work has been kept.'; }
+      } catch (error) { status.textContent = error.message || 'Could not restore this copy. Current work has been kept. Try again.'; }
       finally { running = false; controls(); }
     }
     async function restoreCopy() {

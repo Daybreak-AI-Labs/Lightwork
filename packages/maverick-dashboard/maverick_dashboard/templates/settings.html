@@ -1194,7 +1194,7 @@
             });
           }
         } catch (failure) {
-          status.textContent = failure.message || (window.mvErrorText ? window.mvErrorText(failure, 'save this section') : 'Could not save this section. Your draft is kept.');
+          status.textContent = failure.message || (window.mvErrorText ? window.mvErrorText(failure, 'save this section') : 'Could not save this section. Your draft is kept. Try again.');
         } finally {
           controls.forEach(function (item) { item[0].disabled = item[1]; });
           delete form.dataset.saving;

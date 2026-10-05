@@ -231,7 +231,7 @@
       body.expected_pointer_revision = pointer ? pointer.revision : 0;
       return { path: base + "publish", body: body };
     }
-    throw problem("That action is not available.");
+    throw problem("That action is not available. Refresh the page to see the latest.");
   }
 
   function buildRollbackRequest(row, pointer, reason, opId) {
@@ -508,7 +508,7 @@
       operations.disabled = true;
       statusMark.className = "badge failed";
       statusMark.textContent = "Not available";
-      readiness.textContent = "The studio could not be reached.";
+      readiness.textContent = "The studio could not be reached. Check your connection and try again.";
       readinessDetail.textContent = plainError(error, "check the studio");
       settleLoaders(plainError(error, "load your blueprints"));
     }
@@ -1224,7 +1224,7 @@
             var verified = await request("/operations/recovery/backups/" + encodeURIComponent(item.backup_id));
             outcome.className = "badge " + (verified.verified === true ? "ok" : "failed");
             outcome.textContent = verified.verified === true ? "Intact" : "Could not confirm";
-            report(verified.verified === true ? "The backup from " + when(item.created_at) + " is intact." : "Could not confirm the backup is intact.", verified);
+            report(verified.verified === true ? "The backup from " + when(item.created_at) + " is intact." : "Could not confirm the backup is intact. Refresh the page and try again.", verified);
           } catch (error) {
             outcome.className = "badge failed"; outcome.textContent = "Could not confirm";
             fail(error, "check the backup");

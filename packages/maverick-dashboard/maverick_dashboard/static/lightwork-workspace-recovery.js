@@ -167,7 +167,7 @@
     if (typeof detail === "string" && detail.length <= 400 && /^[A-Z]/.test(detail)
       && !/[_{}<>\[\]]|HTTP|Traceback|Error:/.test(detail)) return detail;
     if (window.mvErrorText) return window.mvErrorText(response, "complete this recovery step");
-    return "Recovery could not complete this step.";
+    return "Recovery could not complete this step. Try again.";
   }
   function list(id, items) {
     get(id).replaceChildren();
@@ -184,7 +184,7 @@
       restore_pending: "A restore onto this new installation was interrupted. Recover it here before attempting another restore.",
       reconciliation_required: "Restored files are held while you review queued and possibly external work below.",
       completed: "The most recent new-install recovery and restored-work review completed.",
-      unavailable: bootstrap.detail || "New-installation recovery status is unavailable. Remain in recovery mode.",
+      unavailable: bootstrap.detail || "New-installation recovery status is unavailable. Remain in recovery mode and refresh the page in a minute.",
     };
     get("bootstrap-status").textContent = messages[bootstrap.state] || "New-installation recovery is still protected. Refresh before continuing.";
   }

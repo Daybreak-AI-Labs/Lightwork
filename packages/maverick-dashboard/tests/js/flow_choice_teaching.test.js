@@ -130,7 +130,7 @@ test("a stale server rejection stays visible without claiming the route resumed"
 test("network failure reports unavailable resume rather than success", async () => {
   const ui = fixture(run(), { error: "disconnected" });
   await ui.click("Choose queue_review");
-  assert.equal(ui.messages.at(-1), "Could not resume.");
+  assert.equal(ui.messages.at(-1), "Could not resume. Refresh the page and try again.");
   assert.deepEqual(ui.polls, []);
 });
 

@@ -157,7 +157,7 @@
         const response = await fetch('/api/v1/assess/bulk-import', {
           method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ csv: csv })
         });
-        if (!response.ok) throw new Error(window.mvErrorText ? window.mvErrorText(response, 'start the assessment') : 'Could not start the assessment.');
+        if (!response.ok) throw new Error(window.mvErrorText ? window.mvErrorText(response, 'start the assessment') : 'Could not start the assessment. Try again.');
         const data = await response.json(), row = data && data.created && data.created[0];
         if (!data || data.created_count !== 1 || data.error_count !== 0 || !Array.isArray(data.created) || data.created.length !== 1 || !row || typeof row.id !== 'string' || !row.id || row.subject !== name || row.type !== kind) {
           throw new Error('The assessment could not be confirmed. Refresh the worklist before trying again.');

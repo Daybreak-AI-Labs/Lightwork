@@ -35,8 +35,8 @@ function page(t, answer) {
 test("refused access-code lists say so in both tables and release the responses", async t => {
   const h = page(t, (url, released) => ({ok: false, status: 403, body: {cancel: async () => { released.push(url); }}}));
   await h.settle();
-  assert.equal(h.text("ai-vendor-portal-invitations"), "Access codes could not be loaded.");
-  assert.equal(h.text("ai-vendor-portal-submissions"), "Answers could not be loaded.");
+  assert.equal(h.text("ai-vendor-portal-invitations"), "Access codes could not be loaded. Refresh the page and try again.");
+  assert.equal(h.text("ai-vendor-portal-submissions"), "Answers could not be loaded. Refresh the page and try again.");
   assert.equal(h.text("ai-vendor-portal-status"), "Could not load the access codes. Ask an administrator. (403)");
   assert.equal(h.released.length, 2);
 });

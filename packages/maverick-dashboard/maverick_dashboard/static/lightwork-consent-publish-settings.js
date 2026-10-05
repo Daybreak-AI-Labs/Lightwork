@@ -76,7 +76,7 @@
         result.push({ jurisdiction: left, reconsent_after_days: integer(right, "Reconsent days", 1, 3650) });
       } else {
         if (!commonTrackers.has(left) || !analyticsCategories.has(right) || seen.has(left)) {
-          throw failure("field_invalid", "Analytics category assignments are invalid or duplicated.");
+          throw failure("field_invalid", "Analytics category assignments are invalid or duplicated. Give each tracker one category, then save again.");
         }
         seen.add(left);
         result.push({ tracker: left, category: right });
@@ -90,7 +90,7 @@
     if (!Array.isArray(value)) throw failure("field_invalid", "Common trackers must be a list.");
     const result = [...new Set(value)];
     if (result.length !== value.length || result.length > commonTrackers.size || result.some((item) => !commonTrackers.has(item))) {
-      throw failure("field_invalid", "Common trackers are invalid or duplicated.");
+      throw failure("field_invalid", "Common trackers are invalid or duplicated. Remove the repeated trackers, then save again.");
     }
     return result.sort();
   }
@@ -104,10 +104,10 @@
       throw failure("field_invalid", "Every category assignment must name an enabled common tracker.");
     }
     if (!new Set(["strict", "lax", "none"]).has(value.cookie_same_site)) {
-      throw failure("field_invalid", "Cookie SameSite policy is invalid.");
+      throw failure("field_invalid", "Cookie SameSite policy is invalid. Choose Lax, Strict or None.");
     }
     if (!new Set(["host_only", "property_domain"]).has(value.cookie_domain_separation)) {
-      throw failure("field_invalid", "Cookie domain separation is invalid.");
+      throw failure("field_invalid", "Cookie domain separation is invalid. Choose an option from the list.");
     }
     const refresh = value.automatic_refresh_seconds === "" || value.automatic_refresh_seconds === null || value.automatic_refresh_seconds === undefined
       ? null : integer(value.automatic_refresh_seconds, "Automatic refresh seconds", 30, 86400);

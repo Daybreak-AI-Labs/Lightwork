@@ -149,7 +149,7 @@
           d.open + ' open · ' + (d.closing_soon || 0) + ' closing this week' +
           (d.overdue ? ' · ' + d.overdue + ' already overdue' : '');
       }).catch(function (e) {
-        document.getElementById('pv-dsar-msg').textContent = window.mvErrorText ? mvErrorText(e, 'load the request deadlines') : 'Could not load the request deadlines.';
+        document.getElementById('pv-dsar-msg').textContent = window.mvErrorText ? mvErrorText(e, 'load the request deadlines') : 'Could not load the request deadlines. Refresh the page and try again.';
       });
       fetch('/api/v1/privacy/transfer-map').then(okJson).then(function (d) {
         const box = document.getElementById('pv-transfer');
@@ -180,7 +180,7 @@
         }
       }).catch(function (e) {
         const box = document.getElementById('pv-transfer');
-        box.textContent = window.mvErrorText ? mvErrorText(e, 'load the transfer map') : 'Could not load the transfer map.';
+        box.textContent = window.mvErrorText ? mvErrorText(e, 'load the transfer map') : 'Could not load the transfer map. Refresh the page and try again.';
       });
     })();
   </script>
@@ -290,7 +290,7 @@
             (d.error_count ? ', ' + d.error_count + ' vendor(s) skipped' : '') + '. Reloading…';
           setTimeout(function () { location.reload(); }, 900);
         } catch (e) {
-          msg.textContent = window.mvErrorText ? mvErrorText(e, 'queue the assessments') : 'Could not queue the assessments.';
+          msg.textContent = window.mvErrorText ? mvErrorText(e, 'queue the assessments') : 'Could not queue the assessments. Try again.';
         } finally { btn.disabled = false; }
       });
     })();

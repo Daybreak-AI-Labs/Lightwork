@@ -454,7 +454,7 @@ window.LWBoard = (function () {
             clearInterval(poll);
             return;
           }
-          var why = window.mvErrorText ? window.mvErrorText(e, 'load the board') : 'Could not load the board.';
+          var why = window.mvErrorText ? window.mvErrorText(e, 'load the board') : 'Could not load the board. Refresh the page and try again.';
           stamp(why + (updated ? ' Previous view retained: ' + updated + '.' : '') + ' Trying again in a minute.');
         }).finally(function () { clearTimeout(timeout); if (request === generation) active = null; });
     }
