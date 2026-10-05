@@ -348,7 +348,7 @@
       }
       var cands = data.graduation_candidates || [];
       if (!cands.length) {
-        box.appendChild(el('p', 'muted', 'No agent or specialist has earned more independence yet. They qualify after a run of approved work.'));
+        box.appendChild(el('p', 'muted', 'No agent or specialist has earned more independence yet. They qualify after a series of approved tasks.'));
         return;
       }
       box.appendChild(el('h3', null, 'Ready for more independence'));

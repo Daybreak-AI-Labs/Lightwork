@@ -164,7 +164,7 @@
         fill('vp-comp', el('p', 'Not enough repeated tasks yet. This appears once the same kind of task has run several times.', 'muted'));
         return;
       }
-      fill('vp-comp', table(['Kind of task', 'Runs', 'Cost change', 'Success change', 'Verdict'], d.task_types.map(function (t) {
+      fill('vp-comp', table(['Kind of task', 'Tasks', 'Cost change', 'Success change', 'Verdict'], d.task_types.map(function (t) {
         return [t.name, String(t.runs), pct(t.cost_change_pct), pct(t.success_change * 100),
           t.improving ? 'Getting cheaper and no less reliable' : 'Not improving yet'];
       })));
@@ -174,10 +174,10 @@
     var win = $('vp-window');
     return get('/departments' + (win ? '?window=' + encodeURIComponent(win.value) : '')).then(function (d) {
       if (!d.departments.length) {
-        fill('vp-dept', el('p', 'No department has enough runs yet to show a trend.', 'muted'));
+        fill('vp-dept', el('p', 'No department has enough tasks yet to show a trend.', 'muted'));
         return;
       }
-      fill('vp-dept', table(['Department', 'Runs', 'Cost per task then', 'Cost per task now', 'Verdict'], d.departments.map(function (x) {
+      fill('vp-dept', table(['Department', 'Tasks', 'Cost per task then', 'Cost per task now', 'Verdict'], d.departments.map(function (x) {
         return [x.name, String(x.runs), money(x.cost_before), money(x.cost_now), x.improving ? 'Getting cheaper' : 'Not yet'];
       })));
     }).catch(failed('vp-dept', 'load the department results'));

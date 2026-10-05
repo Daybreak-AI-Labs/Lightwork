@@ -7,9 +7,9 @@
 #}
 {% macro typical_cost_text(tc) -%}
 {%- if tc and tc.enough -%}
-Past runs usually cost {{ tc.low | money }} to {{ tc.high | money }}, {{ tc.median | money }} in the middle (based on {{ tc.runs }} finished {{ 'task' if tc.runs == 1 else 'tasks' }} in this workspace). This is past spending, not a prediction.
+Past tasks usually cost {{ tc.low | money }} to {{ tc.high | money }}, {{ tc.median | money }} in the middle (based on {{ tc.runs }} finished {{ 'task' if tc.runs == 1 else 'tasks' }} in this workspace). This is past spending, not a prediction.
 {%- elif tc -%}
-Not enough past runs to estimate yet: {{ tc.runs }} of the {{ tc.min_runs }} finished tasks needed.
+Not enough past tasks to estimate yet: {{ tc.runs }} of the {{ tc.min_runs }} finished tasks needed.
 {%- else -%}
 Past costs could not be read.
 {%- endif -%}

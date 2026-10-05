@@ -91,7 +91,7 @@
         <td>{% for t in a.deny_tools %}{{ t | humanize }}{% if not loop.last %}, {% endif %}{% else %}—{% endfor %}</td>
         <td><span class="badge {{ 'failure' if a.max_risk in ('high', 'unbounded') else '' }}">{{ risk_word.get(a.max_risk, a.max_risk | humanize) }}</span></td>
         <td>
-          {% if a.max_dollars is not none %}{{ a.max_dollars | money }} per run{% else %}No limit{% endif %}
+          {% if a.max_dollars is not none %}{{ a.max_dollars | money }} per task{% else %}No limit{% endif %}
           {% if a.max_wall_seconds is not none %} · {{ ((a.max_wall_seconds / 60) | round(1)) | string | replace('.0', '') }} min{% endif %}
         </td>
         <td>{% for s in a.data_scopes %}{{ s | humanize }}{% if not loop.last %}, {% endif %}{% else %}None{% endfor %}</td>
@@ -199,7 +199,7 @@
     </div>
     <p class="muted" id="tr-form-msg" role="status" aria-live="polite"></p>
   </form>
-  <p class="muted" style="font-size: var(--text-sm); margin: var(--space-3) 0 0;">Changes take effect on each agent's next run.</p>
+  <p class="muted" style="font-size: var(--text-sm); margin: var(--space-3) 0 0;">Changes take effect on each agent's next task.</p>
 </div>
 {% endif %}
 

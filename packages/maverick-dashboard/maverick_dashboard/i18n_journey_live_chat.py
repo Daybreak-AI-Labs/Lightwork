@@ -21,7 +21,7 @@ ROWS = [
 ('Stopped','Arrêté','Gestoppt','停止済み','已停止'),
 ('Complete','Terminé','Abgeschlossen','完了','已完成'),
 ('Uploading','Importation','Wird hochgeladen','アップロード中','正在上传'),
-('The run stopped before producing a result.','L’exécution s’est arrêtée avant de produire un résultat.','Die Ausführung wurde vor der Erstellung eines Ergebnisses gestoppt.','結果を作成する前に実行が停止しました。','运行在产出结果前已停止。'),
+('The task stopped before producing a result.','La tâche s’est arrêtée avant de produire un résultat.','Die Aufgabe wurde vor der Erstellung eines Ergebnisses gestoppt.','結果を作成する前にタスクが停止しました。','任务在产出结果前已停止。'),
 ('{count} step completed. Step details will appear when the answer is ready.','{count} étape terminée. Les détails apparaîtront lorsque la réponse sera prête.','{count} Schritt abgeschlossen. Details werden angezeigt, sobald die Antwort bereit ist.','{count}手順が完了しました。回答ができると詳細が表示されます。','已完成{count}个步骤。回答就绪后将显示步骤详情。'),
 ('{count} steps completed. Step details will appear when the answer is ready.','{count} étapes terminées. Les détails apparaîtront lorsque la réponse sera prête.','{count} Schritte abgeschlossen. Details werden angezeigt, sobald die Antwort bereit ist.','{count}手順が完了しました。回答ができると詳細が表示されます。','已完成{count}个步骤。回答就绪后将显示步骤详情。'),
 ('Asked you a question','Une question vous a été posée','Hat Ihnen eine Frage gestellt','質問しました','已向您提问'),

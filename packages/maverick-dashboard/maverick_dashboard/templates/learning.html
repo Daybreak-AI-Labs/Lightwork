@@ -36,7 +36,7 @@
                  else ('core partially on' if snap.components_on else 'core off'),
            badge_class='ok' if snap.components_on == snap.components_total
                        else ('warn' if snap.components_on else 'idle'),
-           copy='Every run can teach the workforce — from failures, from
+           copy='Every task can teach the workforce — from failures, from
                  consolidation, and from the grounded outcomes of its own
                  work. What it learns stays on this server.') }}
 {% endcall %}
@@ -70,7 +70,7 @@
 
   <div class="lrn__moat">
     <strong>{{ snap.components_on }} of {{ snap.components_total }} core learning components are on.</strong>
-    Every run through Lightwork can teach the workforce — from failures, from consolidation, and from the
+    Every task in Lightwork can teach the workforce — from failures, from consolidation, and from the
     recorded outcomes of its own work. Review each feature below to decide which ones to use.
     <div style="margin-top: var(--space-3); display:flex; gap: var(--space-3); align-items:center;">
       <button type="button" id="lrn-enable" class="btn btn--primary"

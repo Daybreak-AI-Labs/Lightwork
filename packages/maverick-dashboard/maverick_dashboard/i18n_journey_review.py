@@ -483,25 +483,25 @@ ROWS = [('Review note', 'Note de révision', 'Prüfnotiz', 'レビューのメ�
   'wiederhergestellt werden.',
   '今後のタスクは事前のコピーなしでファイルを変更するため、その変更をこのページで元に戻すことはできません。以前のタスクで保存したコピーは残り、引き続きここで復元できます。',
   '未来任务更改文件前将不再保存副本，因此无法从此页面还原其更改。此前任务已保存的副本仍会保留，并可继续在此恢复。'),
- ("Only files changed by this task's own file tools on this computer. Up to 100 files per run, 8 MB each and "
+ ("Only files changed by this task's own file tools on this computer. Up to 100 files per task, 8 MB each and "
   '32 MB in total. Long previews may be shortened, but every file is fully checked before it is put back. '
   'Stop this task, and any other task using the same folder, before restoring. If a restore is interrupted, '
-  "you can retry exactly the same restore. Tasks run on another computer, and very old runs, can't be "
+  "you can retry exactly the same restore. Tasks run on another computer, and very old tasks, can't be "
   'restored here.',
   'Uniquement les fichiers modifiés par les outils de fichiers de cette tâche sur cet ordinateur : 100 '
-  'fichiers par exécution, 8 Mo chacun et 32 Mo au total. Les longs aperçus peuvent être abrégés, mais '
+  'fichiers par tâche, 8 Mo chacun et 32 Mo au total. Les longs aperçus peuvent être abrégés, mais '
   'chaque fichier est intégralement vérifié avant restauration. Arrêtez cette tâche et toute autre tâche '
   'utilisant le même dossier avant de restaurer. Une restauration interrompue peut être reprise à '
-  'l’identique. Les tâches exécutées ailleurs et les très anciennes exécutions ne sont pas restaurables ici.',
+  'l’identique. Les tâches exécutées ailleurs et les très anciennes tâches ne sont pas restaurables ici.',
   'Nur Dateien, die die eigenen Dateiwerkzeuge dieser Aufgabe auf diesem Computer geändert haben: höchstens '
-  '100 Dateien pro Lauf, je 8 MB und insgesamt 32 MB. Lange Vorschauen können gekürzt sein; jede Datei wird '
+  '100 Dateien pro Aufgabe, je 8 MB und insgesamt 32 MB. Lange Vorschauen können gekürzt sein; jede Datei wird '
   'vor der Wiederherstellung vollständig geprüft. Stoppen Sie vorher diese Aufgabe und andere Aufgaben im '
-  'selben Ordner. Eine unterbrochene Wiederherstellung kann exakt wiederholt werden. Läufe auf anderen '
-  'Computern und sehr alte Läufe sind hier nicht wiederherstellbar.',
-  'このコンピューターで、このタスク自身のファイルツールが変更したファイルだけが対象です。1回の実行につき最大100ファイル、各8 MB、合計32 '
-  'MBです。長いプレビューは省略される場合がありますが、復元前に各ファイル全体を確認します。復元前に、このタスクと同じフォルダーを使う他のタスクを停止してください。中断した復元は同じ内容で再試行できます。他のコンピューターでの実行や古すぎる実行は、ここでは復元できません。',
-  '仅限此任务自身的文件工具在此计算机上更改的文件。每次运行最多100个文件，每个8 MB，总计32 '
-  'MB。较长预览可能被缩短，但恢复前会完整检查每个文件。恢复前请停止此任务及使用同一文件夹的其他任务。如果恢复中断，可以重试完全相同的恢复。在其他计算机运行的任务和过旧的运行无法在此恢复。'),
+  'selben Ordner. Eine unterbrochene Wiederherstellung kann exakt wiederholt werden. Aufgaben auf anderen '
+  'Computern und sehr alte Aufgaben sind hier nicht wiederherstellbar.',
+  'このコンピューターで、このタスク自身のファイルツールが変更したファイルだけが対象です。1つのタスクにつき最大100ファイル、各8 MB、合計32 '
+  'MBです。長いプレビューは省略される場合がありますが、復元前に各ファイル全体を確認します。復元前に、このタスクと同じフォルダーを使う他のタスクを停止してください。中断した復元は同じ内容で再試行できます。他のコンピューターで実行したタスクや古すぎるタスクは、ここでは復元できません。',
+  '仅限此任务自身的文件工具在此计算机上更改的文件。每个任务最多100个文件，每个8 MB，总计32 '
+  'MB。较长预览可能被缩短，但恢复前会完整检查每个文件。恢复前请停止此任务及使用同一文件夹的其他任务。如果恢复中断，可以重试完全相同的恢复。在其他计算机运行的任务和过旧的任务无法在此恢复。'),
  ("See each file in this task's work folder as it was before the task first changed it, next to how it is "
   "now. Lightwork keeps only those two points, so in-between versions can't be compared. Looking changes "
   'nothing.',

@@ -172,7 +172,7 @@
           {label: "Experiment", value: nameOf},
           {label: "Status", value: function (x) { var s = STATES[x.state] || [CW.human(x.state), "idle"]; return CW.badge(s[0], s[1]); }},
           {label: "Versions", value: function (x) { return x.definition.variants.map(layoutOf).join(" vs "); }},
-          {label: "Runs", value: function (x) { return CW.when(x.definition.starts_at) + " to " + CW.when(x.definition.ends_at); }},
+          {label: "Dates", value: function (x) { return CW.when(x.definition.starts_at) + " to " + CW.when(x.definition.ends_at); }},
         ],
         actions: [
           {label: "Approve", when: function (x) { return can.admin && x.state === "draft"; }, run: function (x, b) { lifecycle(x, "approve", b); }},

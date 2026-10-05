@@ -101,7 +101,7 @@
             <button type="submit" class="btn btn--primary"{% if not fleet_can_start[fleet.name] %} disabled{% endif %}>Start task</button>
             <span class="fleet-run-msg muted" role="status" aria-live="polite"></span>
           </form>
-          <p class="muted fl-typical" aria-live="polite">Choose an agent or specialist to see what its past runs usually cost.</p>
+          <p class="muted fl-typical" aria-live="polite">Choose an agent or specialist to see what its past tasks usually cost.</p>
           {% if workspace_limit %}<p class="muted fl-remaining">The whole workspace has {{ workspace_limit.remaining | money }} left of {{ workspace_limit.limit.amount | money }} {{ 'today' if workspace_limit.limit.period == 'day' else 'this month' }}.</p>{% endif %}
           <p class="muted fl-help">“Can it start?” checks required actions. Connections, permissions and the AI service are checked when work starts.</p>
           {% if not fleet_can_start[fleet.name] %}<p class="muted">No one on this team passed the action check. Review setup above, then return to this team.</p>{% endif %}
@@ -218,7 +218,7 @@
         if (typical && pick) pick.addEventListener('change', function() {
           const option = pick.options[pick.selectedIndex];
           typical.textContent = option && option.dataset.typical ? option.dataset.typical
-            : 'Choose an agent or specialist to see what its past runs usually cost.';
+            : 'Choose an agent or specialist to see what its past tasks usually cost.';
         });
         form.addEventListener('submit', async function(e) {
           e.preventDefault();

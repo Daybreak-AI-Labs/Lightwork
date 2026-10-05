@@ -3698,7 +3698,7 @@ def public_demo(request: Request) -> HTMLResponse:
         "</style></head><body>"
         "<header><p class='eyebrow'>read-only public snapshot</p>"
         "<h1>Lightwork demo</h1>"
-        "<p>This page intentionally shows only seeded demo-owned finished runs. "
+        "<p>This page intentionally shows only seeded demo-owned finished tasks. "
         "Operator state, audit logs, spend, facts, plugins, permissions, and "
         "the rest of the authenticated dashboard are not proxied publicly.</p>"
         "</header><main class='grid'>"

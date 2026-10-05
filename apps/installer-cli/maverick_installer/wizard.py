@@ -5491,7 +5491,7 @@ def pick_advanced() -> dict[str, Any]:
             default="50, 75, 100",
         ),
         "typical_cost_min_runs": _q_text(
-            "Show what an agent's or specialist's past runs usually cost beside the task "
+            "Show what an agent's or specialist's past tasks usually cost beside the task "
             "form once it has finished this many tasks (2 to 1000). It is recorded history, "
             "never a prediction.",
             default="10",

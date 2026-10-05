@@ -823,7 +823,7 @@
         haltCard.dataset.stopKind = s.kind || '';
         const haltTitle = document.getElementById('halt-title');
         if (haltTitle) cgCopy(haltTitle,setup ? "Can't start" : 'Lightwork stopped');
-        haltReasonEl.textContent = s.message || 'The run stopped before producing a result.';
+        haltReasonEl.textContent = s.message || 'The task stopped before producing a result.';
         const actionText = document.getElementById('halt-action-text');
         const actionLink = document.getElementById('halt-action-link');
         if (actionText) actionText.textContent = s.action || '';
