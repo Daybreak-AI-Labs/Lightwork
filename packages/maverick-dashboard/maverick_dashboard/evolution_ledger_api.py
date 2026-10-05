@@ -16,11 +16,13 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Annotated, Any
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi import Path as PathParam
 from maverick.evolution_ledger import (
     EVOLUTION_LEDGER_SCHEMA,
     EvolutionLedgerError,
     project_evolution_ledger,
+    promotion_receipt_for_entry,
     verify_promotion_receipt,
 )
 from pydantic import BaseModel, ConfigDict, StringConstraints
@@ -244,6 +246,14 @@ def _verify_receipt(body: VerifyReceiptIn) -> dict[str, Any]:
     }
 
 
+def _recorded_receipt(entry_sha256: str) -> dict[str, Any]:
+    ledger, state = _promotion_ledger_source()
+    result = promotion_receipt_for_entry(ledger, entry_sha256) if state == "available" else None
+    if result is None:
+        raise HTTPException(404, "That recorded receipt is unavailable. Refresh Learning history.")
+    return result
+
+
 async def _call(function: Callable[..., Any], *args: Any) -> Any:
     try:
         return await run_in_threadpool(function, *args)
@@ -252,12 +262,12 @@ async def _call(function: Callable[..., Any], *args: Any) -> Any:
     except EvolutionLedgerError as exc:
         raise HTTPException(
             status_code=503,
-            detail="evolution ledger is unavailable or did not verify",
+            detail="Learning history is unavailable or its stored checks did not match. Select Refresh before relying on it.",
         ) from exc
     except (OSError, RuntimeError) as exc:
         raise HTTPException(
             status_code=503,
-            detail="evolution ledger is unavailable",
+            detail="Learning history is unavailable. Select Refresh; if it keeps failing, ask your administrator to check it.",
         ) from exc
 
 
@@ -277,6 +287,19 @@ def create_evolution_ledger_router() -> APIRouter:
     async def verify_receipt(request: Request, body: VerifyReceiptIn) -> dict[str, Any]:
         require_permission(request, "audit")
         return await _call(_verify_receipt, body)
+
+    @router.get("/entries/{entry_sha256}/receipt")
+    async def download_receipt(
+        request: Request, entry_sha256: str = PathParam(pattern=r"^[0-9a-f]{64}$"),
+    ) -> Response:
+        require_permission(request, "audit")
+        if request.query_params:
+            raise HTTPException(404, "Recorded receipt unavailable")
+        receipt = await _call(_recorded_receipt, entry_sha256)
+        return Response(json.dumps(receipt, sort_keys=True, separators=(",", ":")), media_type="application/json",
+                        headers={"Cache-Control": "no-store, private, max-age=0", "Pragma": "no-cache",
+                                 "X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-referrer",
+                                 "Content-Disposition": f'attachment; filename="learning-receipt-{entry_sha256[:16]}.json"'})
 
     return router
 

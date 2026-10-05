@@ -662,6 +662,7 @@ def create_consent_bulk_jobs_router(  # noqa: C901, PLR0915
         response: Response,
         job_id: ObjectPath,
         limit: int = Query(default=100, ge=1, le=500),
+        before_sequence: int | None = Query(default=None, ge=1, le=2**63 - 1),
     ) -> dict[str, Any]:
         require_audit(request)
         ops, tenant, runtime = await composition(request)
@@ -671,6 +672,7 @@ def create_consent_bulk_jobs_router(  # noqa: C901, PLR0915
             tenant,
             job_id,
             limit=limit,
+            before_sequence=before_sequence,
         )
         _secure(response)
         return result

@@ -2,7 +2,11 @@
 {% from "_hero.html" import hero %}
 {% from "_module_gate.html" import module_gate %}
 {% block title %}Bulk consent changes · Lightwork{% endblock %}
-{% block head_extra %}<link rel="stylesheet" href="/static/lightwork-consent-workbench.css">{% endblock %}
+{% block head_extra %}<link rel="stylesheet" href="/static/lightwork-consent-workbench.css">
+<style>
+  #cbj-people label, #cbj-selected-people label, #cbj-receipts label, #cbj-selected-receipts label { max-width:100%; overflow-wrap:anywhere; align-items:flex-start; }
+  #cbj-people input, #cbj-selected-people input, #cbj-receipts input, #cbj-selected-receipts input { flex-shrink:0; }
+</style>{% endblock %}
 {% block content %}
 <div class="governance-workbench" id="consent-bulk-jobs-shell"
      data-api-base="{{ api_base }}" data-copilot-page="{{ page_path }}"
@@ -67,14 +71,21 @@
 
         <fieldset class="cw-wide" data-for="people"><legend>2. Choose the people</legend>
           <div class="cw-toolbar">
-            <label>Find<input class="input" type="search" id="cbj-people-search" placeholder="Search by reference"></label>
+            <label>Find<input class="input" type="search" id="cbj-people-search" maxlength="128" placeholder="Type part of a person reference"></label>
+            <button class="btn btn--ghost" type="button" id="cbj-find-people">Find people</button>
             <button class="btn btn--ghost" type="button" id="cbj-select-shown">Select all shown</button>
             <button class="btn btn--ghost" type="button" id="cbj-clear-people">Clear</button>
             <label>Or upload a list<input class="input" type="file" id="cbj-people-file" accept=".csv,.txt,text/csv,text/plain"></label>
           </div>
           <p class="muted" id="cbj-people-help">Tick the people to include. A list file has one person reference per line.</p>
           <div class="cw-checks" id="cbj-people"></div>
+          <div class="cw-toolbar" aria-label="People pages">
+            <button class="btn btn--ghost" type="button" id="cbj-people-prev" disabled>Previous people</button>
+            <p class="muted" id="cbj-people-page" role="status" aria-live="polite"></p>
+            <button class="btn btn--ghost" type="button" id="cbj-people-next" disabled>Next people</button>
+          </div>
           <p class="muted" id="cbj-people-count" role="status" aria-live="polite">No one selected.</p>
+          <details><summary id="cbj-selected-title">Selected people</summary><div class="cw-checks" id="cbj-selected-people"></div></details>
         </fieldset>
 
         <fieldset class="cw-wide" data-for="identifiers" hidden><legend>2. Upload the people and their new identifiers</legend>
@@ -118,7 +129,16 @@
         <fieldset class="cw-wide" data-for="receipts" hidden><legend>3. Choose the choices to change</legend>
           <button class="btn btn--ghost" type="button" id="cbj-load-receipts">Show the chosen people’s choices</button>
           <p class="muted">Looking at people’s records is logged in their access history.</p>
+          <div id="cbj-receipt-pages" hidden>
+            <label>Person<select class="select" id="cbj-receipt-person"></select></label>
+            <div class="cw-toolbar" aria-label="Choice pages">
+              <button class="btn btn--ghost" type="button" id="cbj-receipt-latest">Latest choices</button>
+              <button class="btn btn--ghost" type="button" id="cbj-receipt-older" disabled>Older choices</button>
+              <p class="muted" id="cbj-receipt-page" role="status" aria-live="polite"></p>
+            </div>
+          </div>
           <div class="cw-checks" id="cbj-receipts"></div>
+          <details><summary id="cbj-selected-receipts-title">Selected choices</summary><div class="cw-checks" id="cbj-selected-receipts"></div></details>
           <label data-for="reactivate" hidden>Bring back on<input class="input" type="datetime-local" name="reactivation_at"></label>
         </fieldset>
 

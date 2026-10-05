@@ -8,10 +8,11 @@ tracker governance, enforcement decisions, and replayable downstream sync.
 from __future__ import annotations
 
 import hashlib
+import hmac
 from dataclasses import asdict, is_dataclass
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from starlette.concurrency import run_in_threadpool
 
@@ -116,6 +117,21 @@ class CreateProfileIn(_StrictModel):
     identity_kind: Literal["known", "anonymous"]
     subject_sha256: str = Field(..., pattern=_SHA256_PATTERN)
     idempotency_key: str = Field(..., min_length=1, max_length=192)
+
+
+class LookupProfilesIn(_StrictModel):
+    profile_ids: list[str] = Field(..., min_length=1, max_length=100)
+
+
+def _profile_context(request: Request, *, continuation: bool = False) -> str:
+    from .draft_api import context_for
+
+    current = context_for(request)
+    expected = request.headers.get("X-Lightwork-Profile-Context")
+    if ((expected is not None and (len(expected) != 64 or not expected.isascii() or not hmac.compare_digest(expected, current)))
+            or (continuation and expected is None)):
+        raise HTTPException(409, "Your account or workspace changed. Reload the page before choosing people.")
+    return current
 
 
 class LinkProfilesIn(_StrictModel):
@@ -359,14 +375,27 @@ async def publish_policy(request: Request, body: PublishPolicyIn) -> dict:
 async def list_profiles(
     request: Request,
     limit: int | None = Query(None, ge=1, le=500),
+    after: str | None = Query(None, pattern=_ID_PATTERN),
+    search: str = Query("", max_length=128),
 ) -> dict:
     require_permission(request, "operate")
     ops = _ops()
     tenant_id = _tenant_id()
     limit = _page(limit, "profile_page_size", 100)
-    return _jsonable(
-        await _call(ops, _store(tenant_id).list_profiles, tenant_id, limit=limit)
-    )
+    context = _profile_context(request, continuation=after is not None)
+    result = await _call(ops, _store(tenant_id).list_profiles, tenant_id, limit=limit,
+                         after=after, search=search)
+    return _jsonable({**result, "context": context})
+
+
+@router.post("/profiles/lookup")
+async def lookup_profiles(request: Request, body: LookupProfilesIn) -> dict:
+    require_permission(request, "operate")
+    ops = _ops()
+    tenant_id = _tenant_id()
+    context = _profile_context(request)
+    result = await _call(ops, _store(tenant_id).lookup_profiles, tenant_id, body.profile_ids)
+    return _jsonable({**result, "context": context})
 
 
 @router.post("/profiles", status_code=201)
@@ -526,15 +555,19 @@ async def ingest_privacy_signal(
 @router.get("/profiles/{profile_id}/export")
 async def export_profile(
     request: Request,
+    response: Response,
     profile_id: str,
     access_purpose: str = Query(..., min_length=1, max_length=160),
     receipt_limit: int | None = Query(None, ge=1, le=500),
+    before_sequence: int | None = Query(None, ge=1),
 ) -> dict:
     require_permission(request, "operate")
     ops = _ops()
     tenant_id = _tenant_id()
     receipt_limit = _page(receipt_limit, "receipt_page_size", 500)
-    return _jsonable(
+    context = _profile_context(request, continuation=before_sequence is not None)
+    response.headers["X-Lightwork-Profile-Context"] = context
+    result = _jsonable(
         await _call(
             ops,
             _store(tenant_id).export_profile,
@@ -543,8 +576,10 @@ async def export_profile(
             actor_sha256=_actor_sha256(request),
             access_purpose=access_purpose,
             receipt_limit=receipt_limit,
+            before_sequence=before_sequence,
         )
     )
+    return result
 
 
 @router.get("/profiles/{profile_id}/access-log")

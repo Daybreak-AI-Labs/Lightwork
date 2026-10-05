@@ -13,7 +13,6 @@ import secrets
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -424,11 +423,17 @@ class ConsentBulkJobsRuntime:
 
     def run_job(self, job_id: str) -> dict[str, Any]:
         scope = self.store.job_executor_scope(self.tenant_id, job_id)
+
+        def execute(operation: str, item: Mapping[str, Any]) -> Mapping[str, Any]:
+            if scope == "job" and operation in {"reactivate", "clear_expiration"}:
+                item = self.store.receipt_execution_item(self.tenant_id, job_id, item)
+            return self.executor(operation, item, job_id=job_id if scope == "job" else "")
+
         return self.store.run_job(
             self.tenant_id,
             job_id,
             worker_sha256=self.worker_sha256,
-            executor=partial(self.executor, job_id=job_id if scope == "job" else ""),
+            executor=execute,
             batch_size=self.worker_batch_size,
         )
 

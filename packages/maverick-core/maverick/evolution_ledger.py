@@ -1104,6 +1104,35 @@ def _promotion_entries(ledger: Any) -> tuple[tuple[EvolutionLedgerEntry, ...], t
     return tuple(entries), global_limits
 
 
+def promotion_receipt_for_entry(ledger: Any, entry_sha256: str) -> dict[str, Any] | None:
+    """Read a digest-only receipt for an exact currently recorded history row.
+
+    This performs no repair or approval verification. If a concurrent change
+    replaces the selected row, the caller must refresh instead of receiving a
+    receipt for a different record.
+    """
+    selected = _valid_digest(entry_sha256)
+    if selected is None:
+        raise EvolutionLedgerError("history row fingerprint is invalid")
+    entries, _limits = _promotion_entries(ledger)
+    target = next((entry for entry in entries if entry.entry_sha256 == selected), None)
+    if target is None:
+        return None
+    records, transactions, _chained = _readonly_promotion_state(ledger)
+    by_record = {_field(_field(tx, "record"), "id"): tx for tx in transactions.values()
+                 if _field(tx, "state") == "committed"}
+    for record in records.values():
+        if _digest("promotion-record-id", _field(record, "id")) != target.subject_sha256:
+            continue
+        if target.kind == "rollback" and not _field(record, "rolled_back", False):
+            return None
+        receipt = build_promotion_receipt(record, transaction=by_record.get(_field(record, "id")),
+                                          event=target.kind)
+        if hmac.compare_digest(receipt["receipt_sha256"], target.promotion_receipt_sha256 or ""):
+            return receipt
+    return None
+
+
 def project_evolution_ledger(
     promotion_ledger: Any = None,
     *,
@@ -1158,6 +1187,7 @@ __all__ = [
     "build_promotion_receipt",
     "project_dreaming_insights",
     "project_evolution_ledger",
+    "promotion_receipt_for_entry",
     "project_hindsight_reports",
     "project_learning_proofs",
     "verify_promotion_receipt",

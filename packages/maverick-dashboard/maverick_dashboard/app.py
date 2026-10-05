@@ -1449,6 +1449,7 @@ app.include_router(in_app_router)
 app.include_router(first_outcome_router)
 from .billing_invoice_api import router as billing_invoice_router  # noqa: E402
 from .channel_check_api import router as channel_check_router  # noqa: E402
+from .dsar_export_handoff_api import router as dsar_export_handoff_router  # noqa: E402
 from .feature_actions_api import page_router as feature_actions_page_router  # noqa: E402
 from .feature_actions_api import router as feature_actions_router  # noqa: E402
 from .mcp_presets import router as mcp_presets_router  # noqa: E402
@@ -1474,6 +1475,7 @@ app.include_router(feature_actions_router)
 app.include_router(feature_actions_page_router)
 app.include_router(tax_actions_router)
 app.include_router(channel_check_router)
+app.include_router(dsar_export_handoff_router)
 app.include_router(teams_links_router)
 app.include_router(page_assets_router)
 app.include_router(mcp_presets_router)
@@ -4721,6 +4723,7 @@ async def dsar_detail_page(request: Request, request_id: str) -> HTMLResponse:
          "record_alerts": record_alerts("dsar", record["id"]),
          "can_admin": has_permission(request, "admin"),
          "can_manage_email": has_global_permission(request, "admin"),
+         "can_record_package_handoff": has_permission(request, "operate") and has_permission(request, "audit"),
          "notices": public_rights_form.notice_log(record),
          "answer": privacy_ops.dsar_answer(record)})
 

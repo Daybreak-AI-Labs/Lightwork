@@ -15,6 +15,8 @@
     if (overrideSelection) return overrideSelection;
     var goal = window.location.pathname.match(/^\/(?:chat\/goal|tasks)\/(\d+)(?:\/|$)/);
     if (goal) return {kind: 'goal', id: Number(goal[1]), goal_id: Number(goal[1])};
+    var dsar = window.location.pathname.match(/^\/privacy\/dsar\/(DSAR-[0-9a-f]{10})$/);
+    if (dsar) return {kind: 'dsar', id: dsar[1]};
     var run = window.location.pathname.match(/^\/flows\/([^/]+)\/runs\/([^/]+)$/);
     if (run) {
       try { return {kind: 'flow_run', id: decodeURIComponent(run[2]), flow_id: decodeURIComponent(run[1])}; }

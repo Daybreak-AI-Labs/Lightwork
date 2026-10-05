@@ -3635,7 +3635,9 @@ def _dsar_aging_payload(rows: list[dict]) -> dict:
     endpoint and the command-center board so both always agree."""
     bands = {"overdue": 0, "d0_7": 0, "d8_14": 0, "d15_30": 0, "d30_plus": 0}
     by_kind: dict[str, dict] = {}
-    open_rows = [r for r in rows if r.get("status") == "open"]
+    from maverick.privacy_ops import dsar_response_pending
+
+    open_rows = [r for r in rows if dsar_response_pending(r)]
     for r in open_rows:
         dl = int(r.get("days_left", 0))
         band = (

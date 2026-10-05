@@ -200,6 +200,11 @@ def test_export_run_progress_download_history_integrity_and_credits(environment)
     history = client.get(f"{BASE}/{job['job_id']}/history")
     assert history.status_code == 200
     assert history.json()["events"]
+    first = client.get(f"{BASE}/{job['job_id']}/history?limit=1").json()
+    next_sequence = first["next_before_sequence"]
+    second = client.get(f"{BASE}/{job['job_id']}/history", params={"limit": 1, "before_sequence": next_sequence}).json()
+    assert second["events"][0]["sequence"] < first["events"][0]["sequence"]
+    assert client.get(f"{BASE}/{job['job_id']}/history?before_sequence=0").status_code == 422
     integrity = client.get(f"{BASE}/operations/integrity")
     assert integrity.status_code == 200
     assert integrity.json()["integrity_valid"] is True

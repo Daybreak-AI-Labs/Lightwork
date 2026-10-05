@@ -723,29 +723,29 @@ _CONTEXTS = tuple(
         _registered(
             path="/audit/evolution-ledger",
             summary=(
-                "Inspect a bounded, digest-only projection of durable promotion and "
-                "rollback lifecycle evidence without opening source journal content."
+                "Review recorded learning changes and restorations, and download "
+                "receipts to check their recorded contents."
             ),
             capabilities=(
-                "Read bounded promotion and rollback entries, lineage digests, integrity labels, and stated limitations.",
-                "Check the structural integrity of a digest-only promotion receipt without accepting private approval material.",
-                "Use the page as an audit-review surface while promotion, rollback, and approval authority remain in their source systems.",
+                "See when recorded changes were adopted or restored and whether their stored history checks match.",
+                "Download a recorded receipt and choose it in Check a receipt without editing its contents.",
+                "Copilot can check the current workspace history when learning actions are enabled and your role permits audit review.",
             ),
             boundaries=(
-                "This page cannot start learning, approve, promote, roll back, repair a ledger, or change an artifact.",
-                "It exposes no prompts, candidate identifiers, summaries, raw provenance, approval requests, approval signatures, or artifact locations.",
-                "Receipt integrity is not proof of a human approval: approval verification requires an original private binding and separate trust roots outside this page.",
-                "The dashboard projects only its configured durable promotion source; absent or bounded rows do not prove complete learning-history coverage.",
+                "Adopting a change does not establish that it improved results. Use the recorded results and review controls for that decision.",
+                "Private learned content and approval material stay out of this page and its receipt downloads.",
+                "Matching fingerprints do not establish who created or approved a receipt, or detect replacement of the whole history. Confirming those claims requires separate trusted evidence.",
+                "This history covers recorded adoptions and restorations, rather than every learning action. An empty history does not mean learning is turned off.",
             ),
             next_steps=(
-                "Refresh the digest-only projection and read its source state and limitations before relying on its count.",
-                "Verify a receipt only when you already have its digest-only JSON through an authorized channel.",
-                "Use the source system's governed approval and promotion evidence for any decision that needs human-approval or deployment assurance.",
+                "Select Refresh to check the current stored history.",
+                "Select Download receipt on a recorded change, then choose the downloaded file in Check a receipt.",
+                "Open Learning or Release decisions to review or change learned work through its own controls.",
             ),
             suggested_questions=(
-                "What does this Evolution Ledger projection include?",
-                "Does a verified promotion receipt prove human approval?",
-                "Why is the durable promotion source unavailable or empty?",
+                "Which learning changes are recorded here?",
+                "Does a matching receipt prove that someone approved the change?",
+                "How do I download and check a recorded receipt?",
             ),
         ),
         _registered(

@@ -236,7 +236,7 @@ def test_liquid_glass_client_is_bounded_accessible_and_injection_safe() -> None:
         assert required in template
     for required in (
         "MAX_RESPONSE_BYTES = 64 * 1024",
-        "MAX_JSON_INPUT_BYTES = 48 * 1024",
+        "MAX_JSON_INPUT_BYTES = 240 * 1024",
         'headers.get("Content-Length")',
         "response.body.getReader()",
         "reader.cancel()",

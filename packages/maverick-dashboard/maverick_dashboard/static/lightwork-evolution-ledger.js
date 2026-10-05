@@ -14,10 +14,10 @@
   var limitations = document.getElementById("elv-limitations");
   var LOAD_FAILED = "We could not load the learning history. Select Refresh; if it keeps failing, contact your administrator.";
 
-  var KIND = { promotion: "Adopted a learned improvement", rollback: "Undid a learned improvement" };
+  var KIND = { promotion: "Adopted a learning change", rollback: "Restored an earlier learning state" };
   var INTEGRITY = {
-    hash_chained_local_promotion_ledger: "Yes, sealed in a tamper-evident chain",
-    legacy_projection_promotion_ledger: "Yes, from an older record format",
+    hash_chained_local_promotion_ledger: "Stored chain checks match",
+    legacy_projection_promotion_ledger: "Older format; no sealed history",
     in_memory_promotion_ledger: "Not sealed (temporary record)",
     runtime_supplied: "Not sealed"
   };
@@ -33,10 +33,13 @@
     approval_signer_key_id_mismatch: "Signed by an unexpected key"
   };
   var LIMITS = {
-    promotion_ledger_not_present: "No learning has been adopted in this workspace yet.",
+    promotion_ledger_not_present: "No adopted changes are recorded in this history yet.",
+    promotion_ledger_is_local_not_externally_anchored: "This history is kept in this installation. A separately trusted copy is needed to detect replacement of the whole history.",
+    promotion_ledger_has_no_hash_chained_journal: "These older records have no sealed history. Their current fingerprints do not establish that earlier records were unchanged.",
+    promotion_ledger_is_not_durable: "This history exists only temporarily and will not survive a restart.",
     dashboard_projects_only_digest_only_promotion_history: "This page shows fingerprints and outcomes only, never the learned content itself.",
     dreaming_hindsight_and_runtime_proof_sources_are_not_exposed_here: "Overnight learning runs and learning checks are shown on the Learning page, not here.",
-    receipt_integrity_is_not_a_human_approval_verification: "An intact receipt shows the record was not changed. It does not by itself prove who approved it.",
+    receipt_integrity_is_not_a_human_approval_verification: "Matching receipt fingerprints do not establish who created or approved a receipt, or whether the whole history was replaced.",
     human_approval_signature_not_verifiable_from_receipt: "A person’s approval signature cannot be checked from the receipt alone.",
     approval_signature_requires_private_binding_verification: "Confirming the approval needs private records that stay on the server.",
     workspace_snapshot_digest_not_recorded: "Some older records do not include a fingerprint of the workspace.",
@@ -105,10 +108,35 @@
     }
   }
 
-  function cell(text) { var td = document.createElement("td"); td.textContent = text; return td; }
+  function cell(text, label) { var td = document.createElement("td"); td.textContent = text; td.dataset.label = label; return td; }
 
   function auditCell(entry) {
     var td = document.createElement("td");
+    td.dataset.label = 'Receipt';
+    if (typeof entry.entry_sha256 === 'string' && /^[0-9a-f]{64}$/.test(entry.entry_sha256)) {
+      var download = document.createElement('a'); download.className = 'btn btn--ghost';
+      download.textContent = 'Download receipt';
+      download.href = apiBase + '/entries/' + entry.entry_sha256 + '/receipt';
+      var downloading = false;
+      download.addEventListener('click', async function (event) {
+        event.preventDefault(); if (downloading) return;
+        downloading = true; download.setAttribute('aria-disabled', 'true');
+        try {
+          var response = await request('/entries/' + entry.entry_sha256 + '/receipt');
+          if (!response.ok) throw fail('That recorded receipt is unavailable. Refresh Learning history before trying again.');
+          var content = await readBody(response);
+          if (byteLength(content) > maxReceiptBytes) throw fail('That receipt could not be safely downloaded.');
+          var url = URL.createObjectURL(new Blob([content], {type: 'application/json'}));
+          var save = document.createElement('a'); save.href = url;
+          save.download = 'learning-receipt-' + entry.entry_sha256.slice(0, 16) + '.json';
+          document.body.appendChild(save); save.click(); save.remove();
+          setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+          errorEl.textContent = '';
+        } catch (error) { showError(error, 'download the recorded receipt'); }
+        finally { downloading = false; download.removeAttribute('aria-disabled'); }
+      });
+      td.appendChild(download);
+    }
     var details = document.createElement("details");
     var summary = document.createElement("summary");
     summary.textContent = "Fingerprints";
@@ -136,7 +164,7 @@
       var empty = document.createElement("tr");
       var td = document.createElement("td");
       td.colSpan = 5;
-      td.appendChild(document.createTextNode("No learned improvements have been adopted in this workspace yet. "));
+      td.appendChild(document.createTextNode("No adopted learning changes are recorded in this history yet. "));
       var link = document.createElement("a");
       link.className = "btn btn--ghost";
       link.href = "/learning";
@@ -148,10 +176,10 @@
     }
     entries.slice().reverse().forEach(function (entry) {
       var row = document.createElement("tr");
-      row.appendChild(cell(when(entry.occurred_at)));
-      row.appendChild(cell(plain(KIND, entry.kind)));
-      row.appendChild(cell(plain(INTEGRITY, entry.integrity)));
-      row.appendChild(cell(plain(APPROVAL, entry.approval_status)));
+      row.appendChild(cell(when(entry.occurred_at), 'When'));
+      row.appendChild(cell(plain(KIND, entry.kind), 'What happened'));
+      row.appendChild(cell(plain(INTEGRITY, entry.integrity), 'Stored record check'));
+      row.appendChild(cell(plain(APPROVAL, entry.approval_status), 'Approved by a person'));
       row.appendChild(auditCell(entry));
       entriesBody.appendChild(row);
     });
@@ -186,7 +214,7 @@
       : (total === 1 ? "1 record." : total + " records.");
     renderEntries(entries);
     renderLimitations(Array.isArray(projection.limitations) ? projection.limitations : []);
-    healthDetail.textContent = sources.promotion_ledger === "available" ? "Up to date." : "No learning has been adopted in this workspace yet.";
+    healthDetail.textContent = sources.promotion_ledger === "available" ? "Stored history checked." : "No adopted changes are recorded in this history yet.";
     errorEl.textContent = "";
   }
 
@@ -207,9 +235,10 @@
     var valid = result && result.receipt_valid === true;
     box.hidden = false;
     verdict.dataset.valid = valid ? "true" : "false";
-    verdict.textContent = valid ? "This receipt is intact: it has not been changed since it was made." :
+    verdict.textContent = valid ? "The receipt contents match their recorded fingerprint." :
       "This receipt could not be confirmed. It may have been changed, or it is not a Lightwork receipt.";
-    detail.textContent = "Approval by a person: " + plain(APPROVAL, result && result.approval_status) + ".";
+    detail.textContent = "Approval by a person: " + plain(APPROVAL, result && result.approval_status) +
+      ". A matching fingerprint alone does not prove who created this receipt or that the complete history is unchanged.";
   }
 
   document.getElementById("elv-refresh").addEventListener("click", loadSnapshot);

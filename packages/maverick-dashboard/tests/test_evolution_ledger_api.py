@@ -99,6 +99,42 @@ def test_snapshot_is_digest_only_bounded_and_does_not_repair_source(
     ):
         assert private not in rendered
     assert "e" * 64 in rendered
+    client = _client(monkeypatch)
+    for entry in projection["entries"]:
+        downloaded = client.get(f"{BASE}/entries/{entry['entry_sha256']}/receipt")
+        assert downloaded.status_code == 200
+        assert downloaded.headers["cache-control"].startswith("no-store")
+        assert downloaded.headers["content-disposition"].startswith("attachment;")
+        assert downloaded.json()["receipt_sha256"] == entry["promotion_receipt_sha256"]
+        checked = client.post(f"{BASE}/verify-receipt", json={"receipt": downloaded.text})
+        assert checked.status_code == 200 and checked.json()["receipt_valid"] is True
+        assert checked.json()["approval_status"] == "not_verifiable_without_private_binding"
+        for private in (record.id, record.summary, record.approval_signature, "C:/private/path/never-expose"):
+            assert private not in downloaded.text
+    assert client.get(f"{BASE}/entries/{'0' * 64}/receipt").status_code == 404
+    from maverick_dashboard import product_operations_learning_history as copilot
+
+    monkeypatch.setattr(copilot, "require_permission", lambda request, permission: None)
+    current = copilot.snapshot(None, {})
+    assert current.details["adopted_changes_shown"] == 1
+    assert current.details["restorations_shown"] == 1
+    assert copilot.prepare(None, {}, {}).native == current.details
+    assert current.revision == copilot.snapshot(None, {}).revision
+    assert record.id not in json.dumps(current.details)
+    assert record.summary not in json.dumps(current.details)
+    assert record.approval_signature not in json.dumps(current.details)
+    with pytest.raises(HTTPException) as selection_error:
+        copilot.snapshot(None, {"tenant": "other"})
+    assert selection_error.value.status_code == 422
+
+    def deny(request, permission):
+        raise HTTPException(403, "Audit review is required")
+
+    monkeypatch.setattr(copilot, "require_permission", deny)
+    with pytest.raises(HTTPException) as denied:
+        copilot.snapshot(None, {})
+    assert denied.value.status_code == 403
+    assert {path: path.read_bytes() for path in before} == before
 
 
 def test_snapshot_names_an_absent_source_without_claiming_no_learning(
@@ -149,7 +185,7 @@ def test_snapshot_fails_closed_without_leaking_source_error(
     response = _client(monkeypatch).get(f"{BASE}/snapshot")
 
     assert response.status_code == 503
-    assert response.json()["detail"] == "evolution ledger is unavailable or did not verify"
+    assert response.json()["detail"] == "Learning history is unavailable or its stored checks did not match. Select Refresh before relying on it."
     assert "private" not in response.text
 
 
@@ -202,4 +238,5 @@ def test_receipt_input_is_strict_bounded_and_all_routes_are_audit_gated(
 
     denied = _client(monkeypatch, permitted=False)
     assert denied.get(f"{BASE}/snapshot").status_code == 403
+    assert denied.get(f"{BASE}/entries/{'0' * 64}/receipt").status_code == 403
     assert denied.post(f"{BASE}/verify-receipt", json={"receipt": "{}"}).status_code == 403

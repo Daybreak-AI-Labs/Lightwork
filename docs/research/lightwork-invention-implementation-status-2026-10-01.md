@@ -51,6 +51,17 @@ self-improvement lifecycle, installed acceptance, or externally anchored audit.
 
 ## Product foundations
 
+October 5 product follow-through adds guarded Copilot teaching from selected
+permitted runs, native rule/procedure refinement forms, exact whole-instruction
+restoration, readable source/publication explanations, current nightly scheduling,
+and selected specialist questions from larger saved sets. These narrow F04/F05/F06
+operating gaps. Authenticated disposable native-dashboard journeys exercise
+teaching, saving, running and withdrawal stopping the next action. Learning history
+now downloads its actual digest-only receipts and checks them through the page.
+Its copy separates stored-chain consistency from human approval and an independent
+history copy. This does not establish external anchoring, measured improvement,
+customer qualification, or a new research mechanism; the status counts stay unchanged.
+
 | ID | Status | Present code and exact remaining boundary |
 | --- | --- | --- |
 | F01 | Partial product support | [Outcome pilots](https://github.com/Daybreak-AI-Labs/Lightwork/blob/1c27445dda93e21e2eb38ef2dde5193646832da8/packages/maverick-dashboard/maverick_dashboard/outcome_pilots.py#L1-L26), [outcome accounting](https://github.com/Daybreak-AI-Labs/Lightwork/blob/1c27445dda93e21e2eb38ef2dde5193646832da8/packages/maverick-core/maverick/outcome_accounting.py#L1-L8), and [candidate promotion](https://github.com/Daybreak-AI-Labs/Lightwork/blob/1c27445dda93e21e2eb38ef2dde5193646832da8/packages/maverick-core/maverick/candidate_promotion.py#L1-L15) cover separate stages. The source does not establish one completed customer-owned path from selected work through measured result and recovery. Promotion needs an installed deployment adapter; [composition refuses its absence](https://github.com/Daybreak-AI-Labs/Lightwork/blob/1c27445dda93e21e2eb38ef2dde5193646832da8/packages/maverick-dashboard/maverick_dashboard/candidate_promotion_composition.py#L281-L315). |

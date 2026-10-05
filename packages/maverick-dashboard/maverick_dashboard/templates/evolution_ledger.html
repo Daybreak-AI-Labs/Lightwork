@@ -13,15 +13,25 @@
   .elv-key{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.75rem;word-break:break-all}
   .elv-form{display:flex;flex-wrap:wrap;gap:.6rem;align-items:center}
   .elv-verdict{font-weight:700;margin:.6rem 0 .2rem}
-  @media(max-width:700px){.elv-metrics{grid-template-columns:1fr}}
+  @media(max-width:700px){
+    .elv-metrics{grid-template-columns:1fr}
+    .elv-table,.elv-table tbody{display:block;width:100%;min-width:0}
+    .elv-table thead{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
+    .elv-table tr{display:grid;gap:var(--space-2);padding-block:var(--space-3);border-bottom:1px solid var(--border)}
+    .elv-table td{display:grid;grid-template-columns:minmax(0,.9fr) minmax(0,1.4fr);gap:var(--space-2);padding:0;border:0;overflow-wrap:anywhere}
+    .elv-table td::before{content:attr(data-label);color:var(--text-muted);font-size:.85rem}
+    .elv-table td>details{grid-column:2;min-width:0}
+    .elv-table td[colspan]{display:block}
+    .elv-table td[colspan]::before{content:none}
+  }
 </style>
 {% endblock %}
 {% block content %}
 {% from "_hero.html" import hero %}
 <div class="elv-shell" id="elv-root" data-api-base="{{ api_base }}" data-copilot-page="{{ page_path }}" data-read-only="true">
   {{ hero('Learning', 'Learning history',
-          lede='Every time Lightwork adopted or undid a learned improvement, with a tamper-evident record of it.
-                This page only shows the history; it cannot change it.') }}
+          lede='Recorded learning changes that Lightwork adopted or restored in this workspace.
+                This page checks the stored history; adopting a change does not establish that it improved results.') }}
   <div class="elv-head">
     <p class="muted" id="elv-health-detail" role="status" aria-live="polite">Loading.</p>
     <button class="btn btn--ghost" id="elv-refresh" type="button">Refresh</button>
@@ -29,21 +39,21 @@
   <p class="danger-text" id="elv-error" role="alert" aria-live="assertive"></p>
 
   <section class="elv-metrics" aria-label="Learning history summary">
-    <article class="panel elv-metric"><span>Improvements adopted</span><strong id="elv-promotions">—</strong></article>
-    <article class="panel elv-metric"><span>Improvements undone</span><strong id="elv-rollbacks">—</strong></article>
+    <article class="panel elv-metric"><span>Adopted changes shown</span><strong id="elv-promotions">—</strong></article>
+    <article class="panel elv-metric"><span>Restorations shown</span><strong id="elv-rollbacks">—</strong></article>
     <article class="panel elv-metric"><span>Records shown</span><strong id="elv-entry-count">—</strong></article>
   </section>
 
   <section class="panel" aria-labelledby="elv-table-title">
     <div class="elv-head"><h2 id="elv-table-title">History</h2><span class="muted" id="elv-table-note"></span></div>
-    <div class="elv-table-wrap"><table class="elv-table"><caption class="sr-only">Learned improvements that were adopted or undone</caption>
-      <thead><tr><th scope="col">When</th><th scope="col">What happened</th><th scope="col">Record intact</th><th scope="col">Approved by a person</th><th scope="col">For auditors</th></tr></thead>
+    <div class="elv-table-wrap"><table class="elv-table"><caption class="sr-only">Recorded learning changes that were adopted or restored</caption>
+      <thead><tr><th scope="col">When</th><th scope="col">What happened</th><th scope="col">Stored record check</th><th scope="col">Approved by a person</th><th scope="col">Receipt</th></tr></thead>
       <tbody id="elv-entries"><tr><td colspan="5">Loading.</td></tr></tbody></table></div>
   </section>
 
   <section class="panel" aria-labelledby="elv-verify-title">
     <h2 id="elv-verify-title">Check a receipt</h2>
-    <p class="muted">If someone sent you a receipt file for an adopted improvement, choose it here to check that it has not been changed. No private approval material is accepted here.</p>
+    <p class="muted">Choose a downloaded receipt to check whether its contents match its recorded fingerprint. This does not prove who created it or whether an entire history was replaced. No private approval material is accepted here.</p>
     <form class="elv-form" id="elv-verify-form" autocomplete="off">
       <label for="elv-receipt">Receipt file</label>
       <input type="file" id="elv-receipt" name="receipt" class="input" accept=".json,application/json">

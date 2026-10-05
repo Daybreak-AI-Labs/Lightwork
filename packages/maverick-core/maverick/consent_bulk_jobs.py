@@ -762,6 +762,7 @@ class ConsentBulkJobStore:
                         "kind": kind,
                         "operation": operation,
                         "executor_scope": "job",
+                        "receipt_revision_chain": True,
                         "total_items": len(normalized),
                         "scheduled_for": scheduled,
                         "request_sha256": request_sha,
@@ -828,6 +829,64 @@ class ConsentBulkJobStore:
             if scope not in {"legacy", "job"}:
                 raise ConsentBulkJobError("bulk job execution scope is invalid")
             return scope
+
+    def receipt_execution_item(
+        self, tenant_id: str, job_id: str, item: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Advance a reviewed profile version only through verified job results.
+
+        Two receipts selected for one person share the version reviewed in the
+        UI. Each native change advances it. A failed predecessor or an unrelated
+        edit must never authorize later changes by blindly incrementing it.
+        """
+        tenant, job = _tenant(tenant_id), _text(job_id, "job_id")
+        selected = dict(item)
+        with self._connect() as connection:
+            admission = connection.execute(
+                "SELECT payload_json FROM consent_bulk_events WHERE tenant = ? AND job_id = ? "
+                "AND event_type = 'job.created' ORDER BY sequence LIMIT 1", (tenant, job),
+            ).fetchone()
+            if admission is None:
+                raise ConsentBulkJobNotFound("bulk job admission is unavailable")
+            if _loads(admission["payload_json"], "job admission").get("receipt_revision_chain") is not True:
+                return selected  # Keep pre-existing jobs' native replay inputs.
+            current = connection.execute(
+                "SELECT ordinal, input_sha256 FROM consent_bulk_items "
+                "WHERE tenant = ? AND job_id = ? AND item_id = ?",
+                (tenant, job, _text(selected.get("item_id"), "item_id")),
+            ).fetchone()
+            if current is None or not hmac.compare_digest(
+                _sha256(selected, maximum=_MAX_ITEM_BYTES), str(current["input_sha256"]),
+            ):
+                raise ConsentBulkJobError("stored bulk-job item integrity failed")
+            rows = connection.execute(
+                "SELECT input_json, input_sha256, state, result_json, result_sha256 "
+                "FROM consent_bulk_items WHERE tenant = ? AND job_id = ? AND ordinal < ? "
+                "ORDER BY ordinal", (tenant, job, current["ordinal"]),
+            ).fetchall()
+        revision = selected["expected_revision"]
+        for row in rows:
+            previous = _loads(row["input_json"], "bulk-job item", maximum=_MAX_ITEM_BYTES)
+            if not isinstance(previous, dict) or not hmac.compare_digest(
+                _sha256(previous, maximum=_MAX_ITEM_BYTES), str(row["input_sha256"]),
+            ):
+                raise ConsentBulkJobError("stored predecessor integrity failed")
+            if (previous.get("profile_id") != selected["profile_id"] or
+                    previous.get("expected_revision") != selected["expected_revision"]):
+                continue
+            if row["state"] != "succeeded":
+                raise ConsentBulkJobConflict("an earlier selected record was not confirmed")
+            result = _loads(row["result_json"], "bulk-job result", maximum=_MAX_RESULT_BYTES)
+            if (not isinstance(result, dict) or not hmac.compare_digest(
+                    _sha256(result, maximum=_MAX_RESULT_BYTES), str(row["result_sha256"])) or
+                    result.get("profile_id") != selected["profile_id"] or
+                    result.get("receipt_id") != previous.get("receipt_id") or
+                    type(result.get("profile_revision")) is not int or
+                    result["profile_revision"] != revision + 1):
+                raise ConsentBulkJobError("predecessor result could not be confirmed")
+            revision = result["profile_revision"]
+        selected["expected_revision"] = revision
+        return selected
 
     def created_job_for_request(
         self, tenant_id: str, *, idempotency_key: str, actor_sha256: str,
@@ -1424,19 +1483,21 @@ class ConsentBulkJobStore:
         return {"recovered_job_ids": recovered, "recovered_count": len(recovered)}
 
     def history(
-        self, tenant_id: str, job_id: str, *, limit: int = 100
+        self, tenant_id: str, job_id: str, *, limit: int = 100,
+        before_sequence: int | None = None,
     ) -> dict[str, Any]:
         tenant = _tenant(tenant_id)
         job = _text(job_id, "job_id")
         page_size = _integer(limit, "limit", 1, _MAX_READ_LIMIT)
+        before = 2**63 - 1 if before_sequence is None else _integer(before_sequence, "before_sequence", 1, 2**63 - 1)
         with self._connect() as connection:
             self._job_row(connection, tenant, job)
             rows = connection.execute(
                 "SELECT sequence, event_id, event_type, payload_json, payload_sha256, "
                 "previous_event_sha256, event_sha256, created_at "
-                "FROM consent_bulk_events WHERE tenant = ? AND job_id = ? "
+                "FROM consent_bulk_events WHERE tenant = ? AND job_id = ? AND sequence < ? "
                 "ORDER BY sequence DESC LIMIT ?",
-                (tenant, job, page_size + 1),
+                (tenant, job, before, page_size + 1),
             ).fetchall()
         events: list[dict[str, Any]] = []
         for row in rows[:page_size]:
@@ -1457,7 +1518,8 @@ class ConsentBulkJobStore:
                     "created_at": float(row["created_at"]),
                 }
             )
-        return {"job_id": job, "events": events, "truncated": len(rows) > page_size}
+        return {"job_id": job, "events": events, "truncated": len(rows) > page_size,
+                "next_before_sequence": events[-1]["sequence"] if len(rows) > page_size else None}
 
     def verify_integrity(self, tenant_id: str) -> dict[str, Any]:
         tenant = _tenant(tenant_id)
