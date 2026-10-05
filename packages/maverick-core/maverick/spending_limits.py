@@ -301,6 +301,18 @@ def _ledger() -> tuple[dict, dict]:
     return UsageLedger()._load_state()
 
 
+def spend_recorded_at() -> float | None:
+    """When spending last reached the usage ledger (epoch seconds), or None
+    when nothing has been recorded. Pages show it as "Updated ..." beside the
+    totals, which also count runs still going in this process."""
+    from .quotas import _ledger_path
+
+    try:
+        return _ledger_path().stat().st_mtime
+    except OSError:
+        return None
+
+
 def recorded_spend(period: str, principal: str | None = None, usage: dict | None = None) -> float:
     """Dollars on the usage ledger for today or this month (UTC), for one
     person or, with ``principal=None``, the whole workspace."""
@@ -455,7 +467,8 @@ def standing(principal: str) -> dict:
     workspace = _workspace_row(limits, marks, tenant, usage, receipts)
     if workspace is not None:
         rows.append(workspace)
-    return {"limits": rows, "installer_defaults": not _path().exists()}
+    return {"limits": rows, "installer_defaults": not _path().exists(),
+            "spend_recorded_at": spend_recorded_at()}
 
 
 def _workspace_row(limits, marks, tenant, usage, receipts) -> dict | None:
@@ -474,7 +487,8 @@ def workspace_standing() -> dict | None:
     if limits["workspace"] is None:
         return None
     usage, receipts = _ledger()
-    return _workspace_row(limits, provenance(), current_tenant(), usage, receipts)
+    row = _workspace_row(limits, provenance(), current_tenant(), usage, receipts)
+    return {**row, "spend_recorded_at": spend_recorded_at()} if row is not None else None
 
 
 def overview(people: list[str]) -> dict:
@@ -502,6 +516,7 @@ def overview(people: list[str]) -> dict:
         "workspace_month": recorded_spend("month", None, usage) + _live(tenant, None, receipts),
         "updated_by": limits.get("updated_by", ""),
         "updated_at": limits.get("updated_at", 0.0),
+        "spend_recorded_at": spend_recorded_at(),
     }
 
 
@@ -510,5 +525,5 @@ __all__ = [
     "SpendingLimitReached", "admit", "clear_default_limit", "clear_user_limit",
     "clear_workspace_limit", "limit_for", "load", "mark_recorded", "overview",
     "provenance", "recorded_spend", "set_default_limit", "set_user_limit",
-    "set_workspace_limit", "standing", "start_refusal", "workspace_standing",
+    "set_workspace_limit", "spend_recorded_at", "standing", "start_refusal", "workspace_standing",
 ]

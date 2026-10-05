@@ -150,6 +150,8 @@
       {% endfor %}
       </tbody>
     </table>
+    {% from "_spend_freshness.html" import spend_freshness %}
+    {{ spend_freshness(sp.spend_recorded_at, live=true, extra_class='access-help') }}
     <p class="muted access-help">Whichever limit runs out first stops new paid work. Days and months reset at midnight UTC.</p>
     {% else %}
     <p class="access-lead"><strong>No spending limit applies to them.</strong> No workspace limit, no limit for everyone and no personal limit is set.</p>

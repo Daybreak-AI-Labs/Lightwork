@@ -4290,6 +4290,18 @@ def facts_page(request: Request) -> HTMLResponse:
     })
 
 
+def _newest_cost_at(w, owner) -> float | None:
+    """When the newest task cost in this view was recorded, for the Spend
+    page's "Spending updated" label (None when there is none)."""
+    try:
+        newest = w.list_episodes(limit=1, owner=owner)
+    except Exception:  # noqa: BLE001 -- no label beats a made-up one
+        return None
+    if not newest:
+        return None
+    return newest[0].ended_at or newest[0].started_at
+
+
 @app.get("/spend", response_class=HTMLResponse)
 def spend_page(request: Request) -> HTMLResponse:
     require_unscoped_board(request)
@@ -4329,7 +4341,7 @@ def spend_page(request: Request) -> HTMLResponse:
         "spend.html",
         {"episodes": episodes, "total": w.total_spend(owner=value_view["owner"]),
          "goal_titles": goal_titles, "csv_months": months, "episode_provenance": episode_provenance,
-         "value_view": value_view},
+         "value_view": value_view, "spend_recorded_at": _newest_cost_at(w, value_view["owner"])},
     )
 
 

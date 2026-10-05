@@ -94,3 +94,32 @@ def test_spending_limits_is_in_the_admin_menu():
     from maverick_dashboard import ui_visibility
     entry = next(p for p in ui_visibility.PAGES if p["path"] == "/spending-limits")
     assert entry["group"] == "Admin" and entry["floor"] == "admin"
+
+
+def test_page_says_when_spending_was_updated_and_when_alerts_arrive(client):
+    from maverick import spending_limits
+    from maverick.quotas import UsageLedger
+    page = client.get("/spending-limits").text
+    assert "No spending recorded yet." in page
+    assert "alert in Lightwork at 50%, 75% and 100% of each daily or monthly limit" in page
+    assert 'href="/settings/all?id=spending_limits.alert_at"' in page
+    UsageLedger().record("user:alice", 1.0, 0, 0)
+    stamp = spending_limits.spend_recorded_at()
+    page = client.get("/spending-limits").text
+    # The label carries the ledger's own time, which the page script shows as "x minutes ago".
+    assert "Spending updated <time" in page and f'data-mv-time="{stamp:.3f}"' in page
+
+
+def test_spend_page_freshness_comes_from_the_newest_cost(client):
+    page = client.get("/spend").text
+    assert "No spending recorded yet." in page
+    from maverick import world_model
+    w = world_model.open_world()
+    gid = w.create_goal("Quarterly summary")
+    episode = w.start_episode(gid)
+    w.end_episode(episode, "Done", "success", cost_dollars=0.42)
+    newest = w.list_episodes(limit=1)[0]
+    from maverick_dashboard import app as dash_app
+    dash_app._world_cache.clear()
+    page = client.get("/spend").text
+    assert f'data-mv-time="{(newest.ended_at or newest.started_at):.3f}"' in page

@@ -352,6 +352,25 @@ def _csv_list(raw: str, *, lower: bool = False) -> list[str]:
     return [x.lower() for x in items] if lower else items
 
 
+def _spending_alert_at(raw) -> list[int] | None:
+    """The wizard's spending-alert answer as ``alert_at``; None keeps the
+    default (50, 75, 100). "none" means no alerts. An answer that cannot be
+    read keeps the default rather than silently turning alerts off."""
+    from maverick.spending_alerts import DEFAULT_ALERT_AT, validate_alert_at
+
+    text = str(raw if raw is not None else "").strip()
+    if not text:
+        return None
+    if text.lower() in ("none", "off", "no"):
+        return []
+    try:
+        chosen = validate_alert_at([part for part in text.replace(";", ",").split(",") if part.strip()])
+    except ValueError:
+        print("  Spending alerts: keeping 50, 75 and 100 percent (that answer could not be read).")
+        return None
+    return None if chosen == list(DEFAULT_ALERT_AT) else chosen
+
+
 def _safe_float(s: str, *, default: float) -> float:
     """``float()`` that doesn't crash on whitespace, empty, or junk input."""
     try:
@@ -5424,6 +5443,12 @@ def pick_advanced() -> dict[str, Any]:
             "(0 = no limit; you can set different limits per person in the dashboard)",
             default="0",
         ),
+        "spending_alert_at": _q_text(
+            "Alert administrators (and each person, for their own limit) when spending "
+            "reaches these percentages of a spending limit; comma-separated, or none "
+            "for no alerts. The limits still stop paid work at 100%.",
+            default="50, 75, 100",
+        ),
         "tenant_by_user": _q_confirm(
             "Isolate each user into their own tenant? Per-user cross-session memory "
             "is kept separate — recommended for multi-user servers.",
@@ -8708,7 +8733,8 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
     _person_limit = _safe_float(advanced.get("spending_person_monthly") or 0, default=0.0)
     _workspace_limit = _workspace_limit if math.isfinite(_workspace_limit) else 0.0
     _person_limit = _person_limit if math.isfinite(_person_limit) else 0.0
-    if _workspace_limit > 0 or _person_limit > 0:
+    _alert_at = _spending_alert_at(advanced.get("spending_alert_at"))
+    if _workspace_limit > 0 or _person_limit > 0 or _alert_at is not None:
         # Starting limits; administrators change them in the dashboard
         # (Admin > Spending limits), which then takes precedence.
         lines.append("")
@@ -8719,6 +8745,9 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
         if _person_limit > 0:
             lines.append(f"default_user_dollars = {_person_limit:.2f}")
             lines.append('default_user_period = "month"')
+        if _alert_at is not None:
+            # In-app alerts at these percentages of each limit (default 50, 75, 100).
+            lines.append(f"alert_at = [{', '.join(str(p) for p in _alert_at)}]")
     if advanced.get("tenant_by_user"):
         lines.append("")
         lines.append("[tenancy]")

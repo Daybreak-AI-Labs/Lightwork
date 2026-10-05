@@ -1377,6 +1377,7 @@ def spending_limits_page(request: Request, saved: str = "", error: str = "") -> 
         pass
     return _app().templates.TemplateResponse(request, "spending_limits.html", {
         "view": view,
+        "alert_at": _alert_points(),
         "periods": [(p, spending_limits.PERIOD_LABELS[p]) for p in spending_limits.PERIODS],
         "workspace_periods": [(p, spending_limits.PERIOD_LABELS[p])
                               for p in spending_limits.WORKSPACE_PERIODS],
@@ -1386,6 +1387,18 @@ def spending_limits_page(request: Request, saved: str = "", error: str = "") -> 
         "error": _LIMIT_ERRORS.get(error, ""),
         "load_error": load_error,
     })
+
+
+def _alert_points() -> str:
+    """The spending-alert percentages in words ("50%, 75% and 100%"), or ""."""
+    from maverick.spending_alerts import alert_at
+    try:
+        points = [f"{p}%" for p in alert_at()]
+    except Exception:  # noqa: BLE001 -- unreadable settings keep the default points
+        points = ["50%", "75%", "100%"]
+    if len(points) < 2:
+        return "".join(points)
+    return ", ".join(points[:-1]) + " and " + points[-1]
 
 
 def _limit_redirect(saved: str = "", error: str = "") -> RedirectResponse:

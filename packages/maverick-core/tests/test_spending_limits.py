@@ -291,4 +291,18 @@ def test_standing_shows_what_admission_enforces():
 
 
 def test_standing_without_limits_is_empty():
-    assert spending_limits.standing("user:alice") == {"limits": [], "installer_defaults": True}
+    assert spending_limits.standing("user:alice") == {"limits": [], "installer_defaults": True,
+                                                      "spend_recorded_at": None}
+
+
+def test_spend_views_say_when_spending_was_last_recorded():
+    import time
+    assert spending_limits.spend_recorded_at() is None  # nothing recorded: no made-up time
+    before = time.time()
+    UsageLedger().record("user:alice", 2.0, 0, 0)
+    stamp = spending_limits.spend_recorded_at()
+    assert stamp is not None and before - 2 <= stamp <= time.time() + 2
+    spending_limits.set_workspace_limit("50", "month", actor="user:admin")
+    assert spending_limits.standing("user:alice")["spend_recorded_at"] == stamp
+    assert spending_limits.workspace_standing()["spend_recorded_at"] == stamp
+    assert spending_limits.overview(["user:alice"])["spend_recorded_at"] == stamp

@@ -44,6 +44,14 @@
              copy=(view.workspace_today | money) ~ ' spent today across the workspace.') }}
   {% endcall %}
 
+  {% from "_spend_freshness.html" import spend_freshness %}
+  {{ spend_freshness(view.spend_recorded_at, live=true) }}
+  <p class="muted" id="spending-alerts">
+    {% if alert_at %}Administrators get an alert in Lightwork at {{ alert_at }} of each daily or monthly limit, and each person at the same points of their own limit. Each alerts once per day or month.
+    {% else %}Spending alerts are off. Limits still stop paid work when they are reached.{% endif %}
+    {% if can_open_page('/settings/all') %}<a href="/settings/all?id=spending_limits.alert_at">Change when alerts arrive</a>{% endif %}
+  </p>
+
   {% if saved %}
   <div class="panel" role="status" data-mv-toast="Saved. {{ saved }}"
        style="border-color: var(--brand-border); background: var(--brand-subtle); margin-bottom: var(--space-4);">

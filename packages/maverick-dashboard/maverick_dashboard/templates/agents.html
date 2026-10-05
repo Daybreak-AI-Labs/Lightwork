@@ -374,6 +374,7 @@
           <li>{% if access.workspace_limit %}The whole workspace may spend {{ access.workspace_limit.limit.amount | money }} {{ 'per day' if access.workspace_limit.limit.period == 'day' else 'per month' }}: {{ access.workspace_limit.remaining | money }} left.{% else %}The workspace has no spending limit.{% endif %}</li>
           <li>Tasks it works on also count against the spending limit of the person who starts them. There is no separate limit for one {{ access.noun }}.</li>
         </ul>
+        {% if access.workspace_limit %}{% from "_spend_freshness.html" import spend_freshness %}{{ spend_freshness(access.workspace_limit.spend_recorded_at, live=true) }}{% endif %}
         {% endif %}
       </details>
       {% endif %}

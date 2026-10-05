@@ -54,11 +54,13 @@
     <p>{% if access.data_scopes %}Shared knowledge it may read: {{ access.data_scopes | map('humanize') | join(', ') }}.{% else %}It may not read shared knowledge.{% endif %}</p>
     <h2 style="font-size: var(--text-md, 1rem); margin: var(--space-4) 0 var(--space-2);">Spending limit</h2>
     <p>{% if access.spending.limit is not none %}It may report {{ access.spending.limit | money }} {{ 'per month' if access.spending.period == 'monthly' else 'in total' }}: {{ access.spending.spent | money }} used, {{ access.spending.remaining | money }} left.{% if access.spending.over %} Further actions are refused until an administrator resets its spending.{% endif %}{% else %}It has no spending limit of its own.{% endif %}</p>
+    <p class="muted mv-freshness" data-mv-freshness>{% if a.last_run_at %}Spending updated {{ a.last_run_at | datetime }}, when it last reported a run.{% else %}No spending reported yet.{% endif %}</p>
   </details>
   {% endif %}
 
   <div class="panel">
     <h2 style="margin-top:0">Spend and budget</h2>
+    <p class="muted mv-freshness" data-mv-freshness>{% if a.last_run_at %}Spending updated {{ a.last_run_at | datetime }}, when it last reported a run.{% else %}No spending reported yet.{% endif %}</p>
     <table>
       <thead><tr><th scope="col">Period</th><th scope="col">Amount</th></tr></thead>
       <tbody>

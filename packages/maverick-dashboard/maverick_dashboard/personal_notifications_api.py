@@ -55,9 +55,11 @@ def _projection(request, actor: str, *, world=None) -> tuple[list[dict], list[di
         tenant = current_tenant_id_strict()
         role = rbac.get_tenant_role(tenant, actor) if tenant else auth.global_role_for_principal(actor)
         operate = "operate" in rbac.permissions_for(role)
+        admin = "admin" in rbac.permissions_for(role) or auth.is_dashboard_admin(actor)
         suites = None if auth.is_dashboard_admin(actor) else suite_grants.granted_suites(actor)
     else:
         operate = auth.has_permission(request, "operate")
+        admin = auth.has_permission(request, "admin")
         suites = auth.caller_suites(request)
     sources, tasks = [], []
     limited = False
@@ -123,6 +125,8 @@ def _projection(request, actor: str, *, world=None) -> tuple[list[dict], list[di
             })
     from maverick.budget_guidance import warning_sources
     sources.extend(warning_sources(actor))
+    from maverick.spending_alerts import sources as spending_alert_sources
+    sources.extend(spending_alert_sources(actor, admin=admin))
     return sources, tasks, list(projects.values()), limited
 
 
