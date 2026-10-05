@@ -137,6 +137,30 @@ by a local installer-to-dashboard route test. Other tool policies and runtime
 readiness still appear separately; an installed Docker/Podman customer journey
 and audit-store outage rehearsal remain open.
 
+## Approval challenges pilot (October 5, 2026)
+
+Learning links to ordinary controls for choosing a fictional approval change
+and one or two sign-offs, building and checking a practice scenario, reviewing
+an imported file before a separate local check, explicitly authorizing a
+download, and removing an inactive saved record. Selected Copilot operations
+use the same native authority, exact revision and original-operation receipts.
+The feature defaults off and has both installer and Settings controls.
+
+The fixed receiver checks supported local approval commit functions in a fresh
+disposable process with no customer configuration, credentials or network.
+Its result distinguishes the deliberately weakened fault from the actual guard
+and becomes historical when supported installed source changes. Unknown checks
+do not automatically run again. Both removal audits must be delivered before an
+active record is deleted; the separate removal receipt remains, and a retired
+operation cannot recreate it. Downloads already shared are not recalled.
+
+The active namespace holds 256 records with 40-row browsing; imports are capped
+at 8 KB. Supported modeled checks are limited to one request, two reviewers,
+12 transitions and 50,000 states, with a 10-second isolated receiver deadline.
+This is a model-only local pilot. It does not extract private incidents, qualify
+another product or a shared backend, deploy a live correction, or establish
+research novelty or customer business benefit.
+
 ## Promise reviews pilot (October 2, 2026)
 
 | Customer job | Current in-product path | Remaining boundary |

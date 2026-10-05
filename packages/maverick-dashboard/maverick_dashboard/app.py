@@ -1517,6 +1517,10 @@ from . import instruction_capture_api  # noqa: E402
 
 app.include_router(instruction_capture_api.router)
 app.include_router(instruction_capture_api.page_router)
+from . import approval_challenges_api  # noqa: E402
+
+app.include_router(approval_challenges_api.router)
+app.include_router(approval_challenges_api.page_router)
 
 from . import webhook_settings_recovery_api  # noqa: E402
 
@@ -3795,6 +3799,7 @@ async def learning_page(request: Request) -> HTMLResponse:
         {
             "snap": _learning_snapshot(request),
             "learning_can_manage": has_global_permission(request, "admin"),
+            "learning_can_operate": has_permission(request, "operate"),
         },
     )
 

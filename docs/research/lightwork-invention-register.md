@@ -4,7 +4,7 @@ For current code evidence, see the [28-item implementation status](lightwork-inv
 
 Created October 1, 2026; N01's bounded pilot status was updated October 2. This cumulative register retains the ideas from the current discussion and the retained invention research, including unsuccessful experiments. Its purpose is to help choose a genuinely differentiated capability for Lightwork without losing earlier work or repeatedly renaming established methods.
 
-The strongest new research candidates are preserving achievable customer commitments and turning private operational failures into transferable executable challenges. N01 has a bounded, manually entered feasibility pilot; its proposed novel mechanism is not implemented or established. N02 remains a research proposal. Earlier learning proposals remain in the register. Useful engineering, comparative advantage, scientific novelty, customer benefit, and acquisition interest are separate claims.
+The strongest new research candidates are preserving achievable customer commitments and turning private operational failures into transferable executable challenges. N01 has a bounded, manually entered feasibility pilot; its proposed novel mechanism is not implemented or established. N02 now has a model-only approval-challenge pilot; private-incident synthesis and automatic cross-product retargeting remain research. Earlier learning proposals remain in the register. Useful engineering, comparative advantage, scientific novelty, customer benefit, and acquisition interest are separate claims.
 
 The October 1 research review changed documentation only and inspected checkout `326402bf115a6d6de2adc255e3a1cc9d75fd37a9`. The later N01 pilot is described below and in the linked implementation status. No production deployment, paid provider experiment, or hosted CI is claimed by this register. Earlier experiment numbers below are preserved from their dated records, not rerun here.
 
@@ -68,7 +68,7 @@ The proposed technical object is a compact representation of feasible continuati
 
 **Reject the invention claim if** a strong robust scheduler matches the result, gains arise from accepting fewer jobs or buying more capacity, or engineers must hand-author each feasibility boundary. Conditional feasibility under a declared uncertainty model cannot guarantee against arbitrary external changes.
 
-October 2 research checkpoint: a bounded feasibility model assesses two manually entered accepted orders, reported capacity and stock, expiring conditional options, and owner-reviewed observed contention. A durable account/workspace-bound pilot now exposes ordinary forms, attributed source-review times, current assessments, owner decisions, recovery after uncertain responses, and typed Copilot controls behind an optional feature setting. It does not connect to a customer order system, independently verify stock or supplier claims, reserve or purchase anything, model full production precedence and quality, or qualify a customer deployment. The pilot caps the tenant's shared review namespace at 1,000 saved records across its account contexts; retention-based retirement is not yet a customer control. An independently implemented exhaustive robust scheduler matched all 27 small, fully observed comparator scenarios; these tests support correctness on their stated cases, not superiority or novelty. Wider held-out experiments and customer acceptance remain open.
+October 2 research checkpoint: a bounded feasibility model assesses two manually entered accepted orders, reported capacity and stock, expiring conditional options, and owner-reviewed observed contention. A durable account/workspace-bound pilot now exposes ordinary forms, attributed source-review times, current assessments, owner decisions, recovery after uncertain responses, and typed Copilot controls behind an optional feature setting. It does not connect to a customer order system, independently verify stock or supplier claims, reserve or purchase anything, model full production precedence and quality, or qualify a customer deployment. The pilot caps the tenant's active review namespace at 1,000 records across its account contexts. Its owner can finish and archive a review in the page or Copilot, retaining its saved history before freeing an active slot. An independently implemented exhaustive robust scheduler matched all 27 small, fully observed comparator scenarios; these tests support correctness on their stated cases, not superiority or novelty. Wider held-out experiments and customer acceptance remain open.
 
 Customer experience: “Friday remains achievable. Reserving these materials before 2 p.m. preserves both production options.” The person sees the affected commitments, supporting evidence, cost, authority, available options, and a real permitted decision.
 
@@ -87,6 +87,24 @@ The proposed synthesis algorithm must satisfy three connected obligations:
 A candidate method would search for a small parameterized witness while alternating failure-fidelity counterexamples and forbidden-disclosure counterexamples. A local receiver would synthesize a semantic mapping and produce its own checkable witness. This is a proposed method, not an implemented or established synthesis algorithm. Its declared model, language, bounds, permitted release, and local qualification must be explicit.
 
 **Possible advance:** jointly automatic mechanism-preserving witness synthesis, conditional noninterference, and local semantic retargeting. Federated privacy-preserving test generation already exists. Sanitized crash reproducers, delta debugging, semantic mapping, and generic shared regression tests are mandatory comparators.
+
+October 5 implementation checkpoint: the default-off Approval challenges page
+and Copilot can generate a closed fictional approval-race program, reproduce
+its failure in a deliberately weakened disposable copy, and check the same
+schedule against this installation's native approval guard. Four declared
+families cover a changed claim, changed request, reused review after undo, and
+expiry, with one or two required sign-offs. The finite model uses one request,
+two reviewers, up to 12 transitions and 50,000 states. The fixed local receiver
+has a 10-second deadline and fresh configuration, keys and databases.
+
+Sharing requires separate consent. The small imported file must exactly match
+the supported closed language; it supplies no code, private incident, identity
+or installation fingerprint. The receiver binds its result to supported
+installed source bytes and runtime entry points. Users can review saved states
+and remove inactive practice records with retained audited removal receipts.
+This is an executable model-only pilot. It does not mine a customer failure,
+learn a semantic adapter for another product, activate a production rule,
+establish private-incident noninterference, or demonstrate novelty or superiority.
 
 **Test:** independently authored failure families with varied schemas, connectors, rules, and event schedules; one observed source failure; receiving organizations and semantic variations withheld. Give every comparator the same permitted release and resources. Count extraction, model construction, synthesis, mapping, verification, and human review. Measure target defects correctly detected and localized, false accusations, legitimate work retained, and forbidden disclosure under adaptive probing.
 

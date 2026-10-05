@@ -135,6 +135,7 @@ def _adapter_modules():
     # every advertised native capability statically reachable and mandatory.
     from . import (
         product_operations_activation,
+        product_operations_approval_challenges,
         product_operations_approvals,
         product_operations_budget,
         product_operations_commitments,
@@ -182,6 +183,7 @@ def _adapter_modules():
     )
     return (
         product_operations_approvals,
+        product_operations_approval_challenges,
         product_operations_preferences,
         product_operations_companion,
         product_operations_companion_admin,
