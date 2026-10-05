@@ -237,3 +237,87 @@ def test_copilot_hardening_binds_input_and_saves_only_after_fresh_confirmation(m
         assert done.status_code == 200, done.text
         assert done.json()["status"] == "confirmed" and state["version"] == 4
         assert state["calls"].count("apply") == 1
+
+
+def test_copilot_teaching_reviews_exact_examples_then_hands_back_an_unapproved_recipe(monkeypatch):
+    from maverick_dashboard import flow_teach_ops_api as teach
+
+    client, state = _harness(monkeypatch)
+    page = "/flows/owned/teach"
+    rows = [{"run_id": name, "started": 100 + index, "status": "accepted", "can_learn": True,
+             "revision": 3, "episode": "e" * 64, "grant": "g" * 64} for index, name in enumerate(["one", "two"])]
+    monkeypatch.setattr(teach, "flow_teach_overview", lambda _request, flow_id: {
+        "flow": {"id": flow_id, "name": "Order review", "version": 2, "revision": "draft-2"},
+        "tools": ["lookup_customer"], "steps": []})
+    monkeypatch.setattr(teach, "reviewed_examples", lambda *_args: {"runs": rows, "available": True})
+    monkeypatch.setattr(teach, "_signed_ready", lambda _flags: True)
+    monkeypatch.setattr(ops.crypto_at_rest, "seal_to_str", lambda value: "sealed:" + value)
+    monkeypatch.setattr(ops.crypto_at_rest, "is_sealed_str", lambda value: value.startswith("sealed:"))
+    monkeypatch.setattr(ops.crypto_at_rest, "unseal_from_str", lambda value: value[len("sealed:"):])
+
+    def learn(_request, flow_id, body, *, expected_runs):
+        assert flow_id == "owned" and body.run_ids == ["one", "two"]
+        assert expected_runs == {row["run_id"]: {key: row[key] for key in ("revision", "episode", "grant")} for row in rows}
+        state["calls"].append("learn")
+        return {"package": {"artifact": {"schema": "test"}}, "summary": {"runs": 2, "actions": ["lookup_customer"]}, "approved": False}
+
+    monkeypatch.setattr(teach, "learn_reviewed_recipe", learn)
+
+    def prepare(run_ids=None):
+        catalog = client.post(BASE + "/catalog", json={"page": page, "selection": SELECTION}).json()
+        item = catalog["operations"][0]
+        assert item["id"] == "learning.workflow_teach" and item["available"]
+        assert item["fields"][0]["kind"] == "multiselect"
+        return client.post(BASE + "/prepare", json={"page": page, "selection": SELECTION,
+            "operation": item["id"], "context": catalog["context"], "revision": item["revision"],
+            "arguments": {"run_ids": run_ids or ["one", "two"], "tools": ["lookup_customer"], "style": "plain"}})
+
+    with client:
+        assert prepare(["one", "foreign"]).status_code == 409
+        reviewed = prepare()
+        assert reviewed.status_code == 200, reviewed.text
+        token = reviewed.json()["token"]
+        denied = client.post(BASE + "/execute", json={"token": token, "confirmed": False})
+        assert denied.status_code == 400 and "learn" not in state["calls"]
+        rows[0]["grant"] = "h" * 64
+        stale = client.post(BASE + "/execute", json={"token": token, "confirmed": True})
+        assert stale.status_code == 409 and "learn" not in state["calls"]
+        finished = client.post(BASE + "/execute", json={"token": prepare().json()["token"], "confirmed": True})
+        assert finished.status_code == 200, finished.text
+        result = finished.json()
+        assert result["status"] == "confirmed" and result["details"]["recipe"]["approved"] is False
+        assert result["details"]["saved"] is False and result["details"]["published"] is False
+        assert state["calls"].count("learn") == 1
+        rows[0]["can_learn"] = False
+        blocked = client.post(BASE + "/catalog", json={"page": page, "selection": SELECTION}).json()
+        assert blocked["operations"][0]["available"] is False
+
+
+def test_copilot_shared_teaching_forms_pin_the_current_step_and_flow_revision(monkeypatch):
+    from maverick_dashboard import flow_teach_ops_api as teach
+
+    client, _state = _harness(monkeypatch)
+    overview = {"flow": {"id": "owned", "name": "Order review", "version": 2, "revision": "current-2"},
+                "steps": [{"id": "decision", "ready": True, "rule": {"examples": 2}}], "tools": []}
+    monkeypatch.setattr(teach, "flow_teach_overview", lambda *_args: overview)
+    monkeypatch.setattr(teach, "reviewed_examples", lambda *_args: {"runs": [{"can_learn": True,
+        "run_id": "one", "started": 100, "revision": 3, "episode": "e" * 64, "grant": "g" * 64}], "available": True})
+    monkeypatch.setattr(teach, "_signed_ready", lambda _flags: True)
+    selection = {"kind": "flow", "id": "owned", "node_id": "decision"}
+    page = "/flows/owned/teach"
+    with client:
+        catalog = client.post(BASE + "/catalog", json={"page": page, "selection": selection}).json()
+        for identifier, mode in (("learning.workflow_refine", "recipe_refine"),
+                                 ("learning.rule_teach", "rule_teach"), ("learning.rule_refine", "rule_refine")):
+            item = next(row for row in catalog["operations"] if row["id"] == identifier)
+            assert item["available"] and item["confirmation_required"] is False
+            body = {"page": page, "selection": selection, "operation": identifier,
+                    "context": catalog["context"], "revision": item["revision"], "arguments": {}}
+            response = client.post(BASE + "/prepare", json=body)
+            assert response.status_code == 200, response.text
+            assert response.json()["read_only"] is True
+            assert response.json()["details"] == {"flow_id": "owned", "version": 2, "revision": "current-2",
+                                                 "context": None, "node_id": "decision", "mode": mode}
+            overview["flow"]["revision"] = "changed"
+            assert client.post(BASE + "/prepare", json=body).status_code == 409
+            overview["flow"]["revision"] = "current-2"

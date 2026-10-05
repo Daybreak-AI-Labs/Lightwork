@@ -1365,6 +1365,129 @@ def test_run_drains_through_queue_and_pauses_on_approval(monkeypatch, tmp_path):
     assert done["decided_by"] == "local:dashboard"
 
 
+def _expired_open_review(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    from maverick.approval_cards import digest
+    from maverick.flow import store
+    from maverick_dashboard import automation_queue as aq
+
+    _reset_aq(monkeypatch, aq)
+    client = _client()
+    flow = {"id": "review-recovery", "name": "Invoice review", "start": "prepare", "nodes": [
+        {"id": "prepare", "kind": "setvar", "assignments": {"vendor": "Acme", "amount": 5000}, "next": "gate"},
+        {"id": "gate", "kind": "approval", "prompt": "Approve paying {{vendor}} {{amount}}?", "next": "finish"},
+        {"id": "finish", "kind": "setvar", "assignments": {"finished": True}},
+    ]}
+    assert client.post("/api/v1/flows", json={"flow": flow}).status_code == 201
+    _publish(client, flow["id"])
+    started = client.post(f"/api/v1/flows/{flow['id']}/run", json={"data": {}})
+    assert started.status_code == 200, started.text
+    run_id = started.json()["run_id"]
+    _drain(aq)
+    run = store.load_run(run_id)
+    assert run.status == "paused_approval" and run.resume_at is None
+    old_decision = client.get(f"/api/v1/flows/runs/{run_id}").json()["approval_binding_sha256"]
+    card = dict(run.human["approval_card"])
+    card.pop("binding_sha256")
+    card["expires_at"] = time.time() - 1
+    card["binding_sha256"] = digest(card)
+    run.human["approval_card"] = card
+    store.save_run(run)
+    return client, run_id, old_decision
+
+
+def test_expired_open_approval_can_be_refreshed_then_decided_without_repeating_work(monkeypatch, tmp_path):
+    client, run_id, old_decision = _expired_open_review(monkeypatch, tmp_path)
+    from maverick.flow import store
+    from maverick_dashboard import automation_queue as aq
+
+    before = store.load_run(run_id)
+    url = f"/api/v1/flows/runs/{run_id}/approval-refresh"
+    preview = client.get(url)
+    assert preview.status_code == 200, preview.text
+    review = preview.json()
+    body = {"binding": review["binding"], "confirmed": True}
+    assert client.post(url, json={**body, "confirmed": False}).status_code == 422
+    result = client.post(url, json=body)
+    assert result.status_code == 200, result.text
+    renewed = store.load_run(run_id)
+    assert renewed.status == before.status and renewed.cursor == before.cursor
+    assert renewed.data == before.data and renewed.nodes == before.nodes
+    assert renewed.human["approval_card"]["expires_at"] > time.time() + 6 * 86400
+    assert client.post(url, json=body).status_code == 200  # same request is a receipt replay
+    assert client.post(f"/api/v1/flows/runs/{run_id}/resume", json={
+        "decision": "approved", "approval_binding_sha256": old_decision,
+    }).status_code == 409
+    assert client.post(f"/api/v1/flows/runs/{run_id}/resume",
+                       json=_approval_resume_body(client, run_id, "approved")).status_code == 200
+    _drain(aq)
+    assert store.load_run(run_id).status == "completed"
+    assert store.load_run(run_id).data["finished"] is True
+
+
+@pytest.mark.parametrize("change", ["credentials", "checkpoint", "timed", "audit", "publication", "owner"])
+def test_approval_refresh_refuses_changed_authority_data_or_deadline(monkeypatch, tmp_path, change):
+    client, run_id, _old_decision = _expired_open_review(monkeypatch, tmp_path)
+    from maverick import audit
+    from maverick.flow import store
+
+    url = f"/api/v1/flows/runs/{run_id}/approval-refresh"
+    review = client.get(url).json()
+    if change == "credentials":
+        monkeypatch.setenv("SYNTHETIC_API_KEY", "new-credential-generation")
+    elif change in {"checkpoint", "timed"}:
+        run = store.load_run(run_id)
+        if change == "checkpoint":
+            run.data["amount"] = 9000
+        else:
+            run.resume_at = time.time() - 1
+        store.save_run(run)
+    elif change == "publication":
+        flow = store.load_flow("review-recovery")
+        store.unpublish_flow(flow.id, expected_version=flow.version, expected_revision=flow.revision)
+    elif change == "owner":
+        from maverick_dashboard import api as native
+        monkeypatch.setattr(native, "goal_owner_filter", lambda _request: "user:someone-else")
+    else:
+        monkeypatch.setattr(audit, "record", lambda *_args, **_kwargs: False)
+    before = store.load_run(run_id)
+    result = client.post(url, json={"binding": review["binding"], "confirmed": True})
+    assert result.status_code == (503 if change == "audit" else 404 if change == "owner" else 409), result.text
+    assert store.load_run(run_id).human == before.human
+    assert store.load_run(run_id).status == "paused_approval"
+
+
+def test_copilot_refresh_uses_native_approval_checks_and_recovers_its_exact_receipt(monkeypatch, tmp_path):
+    client, run_id, _old_decision = _expired_open_review(monkeypatch, tmp_path)
+    from maverick.flow import store
+    from maverick_dashboard import product_operations as ops
+    from maverick_dashboard import product_operations_flow_approval_recovery as adapter
+
+    # Enable only the new adapter; its native ownership, authority, release,
+    # current-state and audit boundaries remain real.
+    monkeypatch.setattr(ops, "_gate", lambda _request: None)
+    monkeypatch.setattr(ops, "enabled_families", lambda: {"learning"})
+    monkeypatch.setattr(ops, "adapters", lambda: {entry.id: entry for entry in adapter.entries()})
+    base = "/api/v1/copilot/product-operations"
+    context = {"page": f"/flows/review-recovery/runs/{run_id}",
+               "selection": {"kind": "flow_run", "id": run_id, "flow_id": "review-recovery"}}
+    catalog = client.post(base + "/catalog", json=context)
+    assert catalog.status_code == 200, catalog.text
+    value = catalog.json()
+    entry = value["operations"][0]
+    assert entry["available"] is True
+    prepared = client.post(base + "/prepare", json={**context, "operation": entry["id"],
+        "context": value["context"], "revision": entry["revision"], "arguments": {}})
+    assert prepared.status_code == 200, prepared.text
+    body = {"token": prepared.json()["token"], "confirmed": True}
+    applied = client.post(base + "/execute", json=body)
+    assert applied.status_code == 200, applied.text
+    assert applied.json()["status"] == "confirmed"
+    assert client.post(base + "/execute", json=body).status_code == 200
+    assert store.load_run(run_id).status == "paused_approval"
+    assert store.load_run(run_id).data == {"vendor": "Acme", "amount": 5000}
+
+
 def test_restored_resume_rechecks_credential_revision_before_live_executors(
     monkeypatch, tmp_path,
 ):
@@ -2978,6 +3101,31 @@ def test_tools_category_filter_narrows_the_registry(monkeypatch, tmp_path):
     both = c.get("/api/v1/flows/tools?q=slack&category=Communication").json()["tools"]
     assert both and all(t["category"] == "Communication" for t in both)
     assert all("slack" in (t["name"] + t["description"]).lower() for t in both)
+
+
+def test_tools_category_pages_include_starters_and_every_remaining_action(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    from maverick_dashboard import api as api_mod
+
+    rows = [{"name": f"app_{i:03}", "description": "Send a message", "params": [],
+             "category": "Communication"} for i in range(110)]
+    rows.append({"name": "slack_bot", "description": "Send to Slack", "params": ["text"],
+                 "category": "Communication"})
+    monkeypatch.setattr(api_mod, "_TOOL_INDEX_CACHE", rows)
+    client = _client()
+    found = []
+    offset = 0
+    while offset is not None:
+        body = client.get(f"/api/v1/flows/tools?category=Communication&offset={offset}").json()
+        assert body["total"] == len(rows)
+        if not offset:
+            assert body["tools"][0]["name"] == "slack_bot"
+        found.extend(row["name"] for row in body["tools"])
+        offset = body["next_offset"]
+    assert len(found) == len(set(found)) == len(rows)
+    assert set(found) == {row["name"] for row in rows}
+    assert client.get("/api/v1/flows/tools?offset=-1").status_code == 422
+    assert client.get("/api/v1/flows/tools?limit=5000").status_code == 422
 
 
 def test_designer_opens_a_template_as_a_flow(monkeypatch, tmp_path):

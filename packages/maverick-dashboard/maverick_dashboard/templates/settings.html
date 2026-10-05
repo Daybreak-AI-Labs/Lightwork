@@ -422,7 +422,7 @@
     <p class="muted settings-lead">
       Connect the AI service your company uses. Azure and Bedrock can use the
       server's company sign-in instead of a key. Keys are stored securely and
-      never shown again. Leave a key field blank to keep its saved value.
+      never shown again. Leave a key or server address blank to keep its current value.
     </p>
     {% for p in providers %}
     <div class="provider-row" data-settings-search-item id="provider-{{ p.name }}" role="group" aria-labelledby="provider-name-{{ p.name }}"{% if p.name == ai_focus_provider %} data-ai-provider-focus{% endif %}>
@@ -431,13 +431,15 @@
         <div class="muted provider-row__meta">
           {% if p.configured %}Set up{% if p.via %}, {{ p.via|source_label }}{% endif %}{% if p.key_hint %} · {{ p.key_hint }}{% endif %}
           {% elif p.name in ('azure', 'bedrock') %}Not ready yet. Enter the connection details below.
+          {% elif p.base_url_field %}Enter your model server's address. Add a key only if that service requires one.
           {% else %}No key yet. Paste one to use this provider.{% endif %}
           {% if p.source_errors %}<div><span class="badge blocked">Settings could not be read</span></div>{% endif %}
           {% if not p.dashboard_can_set_api_key %}<div>This key is {{ p.api_key_source|source_label }}, so it can't be changed here.</div>{% endif %}
           {% if p.base_url_field and not p.dashboard_can_set_base_url %}<div>The server address is {{ p.base_url_source|source_label }}, so it can't be changed here.</div>{% endif %}
           {% if p.base_url_field and p.base_url %}<div>Server address in use: {{ p.base_url }}{% if p.base_url_source and p.base_url_source.startswith('environment:') %} (set on the computer running Lightwork){% endif %}</div>{% endif %}
+          {% if p.base_url_needs_repair %}<div>This address needs attention before its connection can be tested. Enter a clean server address below and use the key field for access.</div>{% endif %}
           {% if p.api_key_source and p.api_key_source.startswith('environment:') and p.dashboard_can_set_api_key %}<div>This key comes from the computer running Lightwork. Paste a key below to use a different one instead; removing it again brings the original back.</div>{% endif %}
-          {% if p.key_help %}<div><a href="{{ p.key_help }}" target="_blank" rel="noopener noreferrer">Where do I get a key?</a></div>{% endif %}
+          {% if p.key_help and p.name != 'ollama' %}<div><a href="{{ p.key_help }}" target="_blank" rel="noopener noreferrer">Where do I get a key?</a></div>{% endif %}
         </div>
         <div class="provider-row__readiness">{{ provider_status(p) }}</div>
         {% if p.discovery and p.configured %}
@@ -455,9 +457,11 @@
           <input type="hidden" name="provider" value="{{ p.name }}" />
           {% if p.name == 'azure' %}
           <label class="settings-field"><span>Azure resource address</span>
-            <input class="input" id="provider-url-azure" type="url" name="base_url" value="{{ p.base_url }}"
-                   placeholder="https://your-resource.openai.azure.com" autocomplete="off" required
+            <input class="input" id="provider-url-azure" type="url" name="base_url" value="" maxlength="320"
+                   placeholder="https://your-resource.openai.azure.com" autocomplete="off"
+                   aria-describedby="provider-url-help-azure"{% if not p.base_url or p.base_url_needs_repair %} required{% endif %}
                    {% if not p.dashboard_can_set_base_url %}disabled{% endif %} /></label>
+          <p class="muted provider-row__meta" id="provider-url-help-azure">{% if p.base_url %}Leave blank to keep the address above. Enter an address only to change it.{% else %}Use the resource address from your Azure account.{% endif %}</p>
           <label class="settings-field"><span>Azure model deployment</span>
             <input class="input" name="deployment" value="{{ p.setup.deployment }}" maxlength="64" required
                    placeholder="Your deployment name" {% if p.setup_locked.deployment %}disabled{% endif %} /></label>
@@ -491,14 +495,16 @@
           <p class="muted provider-row__meta">This connection runs Claude through your AWS account. Choosing server sign-in removes a Bedrock key saved here. After saving, test the connection, choose this model under Models, and <a href="#settings-model-prices" data-settings-jump="models">review its spending ceiling</a>.</p>
           {% elif p.base_url_field %}
           <label class="settings-field">
-            <span>Server address (only for self-hosted models)</span>
-            <input class="input" id="provider-url-{{ p.name }}" type="url" name="base_url" value="{{ p.base_url }}"
-                   placeholder="http://localhost:11434" autocomplete="off"
+            <span>Model server address</span>
+            <input class="input" id="provider-url-{{ p.name }}" type="url" name="base_url" value="" maxlength="320"
+                   placeholder="{{ 'http://localhost:11434' if p.name == 'ollama' else 'http://localhost:8080/v1' if p.name == 'tgi' else 'http://localhost:8000/v1' if p.name == 'vllm' else 'https://your-model-server.example/v1' }}" autocomplete="off"
+                   aria-describedby="provider-url-help-{{ p.name }}"{% if p.base_url_needs_repair %} required{% endif %}
                    {% if not p.dashboard_can_set_base_url %}disabled{% endif %} />
           </label>
+          <p class="muted provider-row__meta" id="provider-url-help-{{ p.name }}">{% if p.base_url %}Leave blank to keep the address above. Enter an address only to change it.{% else %}Use the address supplied by your model service.{% endif %}</p>
           {% endif %}
           <label class="settings-field">
-            <span>{{ 'Azure resource key' if p.name == 'azure' else 'Bedrock access key' if p.name == 'bedrock' else p.label ~ ' key' }}</span>
+            <span>{{ 'Azure resource key' if p.name == 'azure' else 'Bedrock access key' if p.name == 'bedrock' else 'Server access key (if required)' if p.base_url_field else p.label ~ ' key' }}</span>
             <input class="input" id="provider-key-{{ p.name }}" type="password" name="api_key"
                    placeholder="Paste your key" autocomplete="off"
                    {% if not p.dashboard_can_set_api_key %}disabled{% endif %} />

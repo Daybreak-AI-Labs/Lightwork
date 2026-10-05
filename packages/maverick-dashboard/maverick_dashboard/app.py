@@ -1499,6 +1499,9 @@ for _ops_module in (billing_ops_api, insights_ops_api, installation_ops_api, sup
     app.include_router(_ops_module.asset_router)
 app.include_router(process_ops_api.router)
 app.include_router(setup_guide.router)
+from .workflow_explanation import asset_router as workflow_explanation_assets  # noqa: E402
+
+app.include_router(workflow_explanation_assets)
 app.state.voice_setup = VoiceSetup()
 app.add_middleware(RecoveryOnlyMiddleware, dashboard_app=app)
 

@@ -53,6 +53,12 @@ def _as(monkeypatch, role: str, who: str = "user:someone"):
     monkeypatch.setattr(auth, "caller_principal", lambda request: who)
 
 
+def _decision(client, proposal, action):
+    preview = client.get(f"/api/v1/learning-ops/refinements/{proposal}/preview").json()
+    return client.post(API + f"/refinements/{proposal}/{action}",
+                       json={"revision": preview["revision"], "confirm": True})
+
+
 SUGGESTION = {
     "target": "prompt",
     "title": "Check quote approval",
@@ -66,8 +72,8 @@ def test_every_change_needs_a_global_admin(client, monkeypatch):
     _as(monkeypatch, "operator")
     for path, body in (
         ("/refinements", SUGGESTION),
-        ("/refinements/0123456789abcdef/apply", {}),  # pragma: allowlist secret
-        ("/refinements/0123456789abcdef/revert", {}),
+        ("/refinements/0123456789abcdef/apply", {"revision": "a" * 64, "confirm": True}),  # pragma: allowlist secret
+        ("/refinements/0123456789abcdef/revert", {"revision": "a" * 64, "confirm": True}),
         ("/run", {"scope": "main"}),
         ("/corpus-quality", {}),
         ("/lessons/withdraw", {"model_id": "M", "token": "a" * 64,
@@ -107,7 +113,7 @@ def test_suggest_approve_apply_and_undo_through_the_kernel(client):
     assert listed["approval"] == "Waiting for approval"
     assert listed["can_apply"] is False
 
-    early = client.post(API + f"/refinements/{proposal['id']}/apply")
+    early = _decision(client, proposal["id"], "apply")
     assert early.status_code == 409 and "waiting for approval" in early.json()["detail"]
     assert harness_refine.refinements() == []
 
@@ -116,15 +122,15 @@ def test_suggest_approve_apply_and_undo_through_the_kernel(client):
     world.decide_approval(approval_id, "approved", decided_by="security@corp.test")
     assert client.get(API + "/refinements").json()["proposals"][0]["can_apply"] is True
 
-    applied = client.post(API + f"/refinements/{proposal['id']}/apply")
+    applied = _decision(client, proposal["id"], "apply")
     assert applied.status_code == 200, applied.text
     live = client.get(API + "/refinements").json()
     assert live["in_force"][0]["change"] == SUGGESTION["change"]
     assert live["proposals"][0]["can_revert"] is True
 
-    assert client.post(API + f"/refinements/{proposal['id']}/revert").json() == {"reverted": True}
+    assert _decision(client, proposal["id"], "revert").json() == {"reverted": True}
     assert harness_refine.refinements() == []
-    again = client.post(API + f"/refinements/{proposal['id']}/revert")
+    again = _decision(client, proposal["id"], "revert")
     assert again.status_code == 409
 
 
@@ -276,6 +282,53 @@ def _finished(client, started, timeout: float = 15.0) -> dict:
         time.sleep(0.05)
         job = client.get(f"/api/v1/learning-ops/jobs/{job['id']}").json()["job"]
     return job
+
+
+def test_copilot_activates_and_restores_exact_instructions_without_replaying(client, monkeypatch):
+    from cryptography.fernet import Fernet
+    from maverick import harness_refine
+    from maverick_dashboard import product_operations as ops
+    from maverick_dashboard import product_operations_learning_program as program
+
+    _configure("[harness_refine]\nenable = true\nrequire_approval = false")
+    proposal = client.post(API + "/refinements", json=SUGGESTION).json()["proposal"]["id"]
+    codec = Fernet(Fernet.generate_key())
+    monkeypatch.setattr(ops, "_gate", lambda _request: None)
+    monkeypatch.setattr(ops, "_context", lambda _request: "c" * 64)
+    monkeypatch.setattr(ops, "enabled_families", lambda: {"learning"})
+    monkeypatch.setattr(ops, "adapters", lambda: {entry.id: entry for entry in program.entries()})
+    monkeypatch.setattr(ops.crypto_at_rest, "seal_to_str", lambda value: "sealed:" + codec.encrypt(value.encode()).decode())
+    monkeypatch.setattr(ops.crypto_at_rest, "is_sealed_str", lambda value: value.startswith("sealed:"))
+    monkeypatch.setattr(ops.crypto_at_rest, "unseal_from_str", lambda value: codec.decrypt(value[7:].encode()).decode())
+    base = "/api/v1/copilot/product-operations"
+
+    def prepare(identifier):
+        catalog = client.post(base + "/catalog", json={"page": "/learned", "selection": {}}).json()
+        operation = next(item for item in catalog["operations"] if item["id"] == identifier)
+        assert operation["available"]
+        review = client.post(base + "/prepare", json={"page": "/learned", "selection": {},
+            "operation": identifier, "context": catalog["context"], "revision": operation["revision"],
+            "arguments": {"proposal": proposal}})
+        assert review.status_code == 200, review.text
+        return review.json()
+
+    apply_review = prepare("learning.instructions_apply")
+    assert SUGGESTION["change"] in str(apply_review["changes"])
+    assert client.post(base + "/execute", json={"token": apply_review["token"], "confirmed": False}).status_code == 400
+    first = client.post(base + "/execute", json={"token": apply_review["token"], "confirmed": True})
+    assert first.status_code == 200, first.text
+    assert first.json()["status"] == "confirmed"
+    replay = client.post(base + "/execute", json={"token": apply_review["token"], "confirmed": True})
+    assert replay.json()["status"] == "replayed"
+    assert len(harness_refine.refinements()) == 1
+
+    undo_review = prepare("learning.instructions_restore")
+    assert undo_review["changes"][0]["after"] == "Removed"
+    restored = client.post(base + "/execute", json={"token": undo_review["token"], "confirmed": True})
+    assert restored.status_code == 200, restored.text
+    assert harness_refine.refinements() == []
+    assert client.post(base + "/execute", json={"token": undo_review["token"], "confirmed": True}).json()["status"] == "replayed"
+    assert client.post(base + "/execute", json={"token": apply_review["token"], "confirmed": True}).status_code == 409
 
 
 def test_run_now_respects_the_switch_and_the_learning_stop(client, monkeypatch):

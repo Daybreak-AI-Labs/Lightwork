@@ -776,17 +776,29 @@ def _handle_dream(_job=None) -> None:
     Learning stores are tenant-scoped, so the one process-global cron explicitly
     visits the shared/client floor and every active tenant."""
     from maverick import dreaming
+    from maverick.self_improvement_runner import (
+        nightly_self_harness_enabled,
+        run_nightly_self_harness,
+    )
 
     def _cycle() -> None:
         # Enablement can be overridden per tenant; check it inside the pin.
-        if dreaming.enabled():
+        if dreaming.enabled() or nightly_self_harness_enabled():
+            from maverick.learning_guard import check_learning_halt
+
+            check_learning_halt("dreaming", "scheduled")
             # Same rollback point `maverick dream` takes: a scheduled cycle must
             # never mutate learned state that `dream --rollback` cannot undo.
             # A snapshot failure raises before dream_cycle runs (fail closed).
             cfg = dreaming.settings()
             if cfg.get("snapshots", True):
                 dreaming.snapshot_learning_state(keep_last=int(cfg.get("snapshot_keep_last", 5)))
-            dreaming.dream_cycle(_world())
+            world = _world()
+            try:
+                if dreaming.enabled():
+                    dreaming.dream_cycle(world)
+            finally:
+                run_nightly_self_harness(world)
 
     _run_for_active_tenants("scheduled dream cycle", _cycle)
 
@@ -2198,6 +2210,52 @@ def _dream_cron() -> str:
         return _DREAM_CRON_DEFAULT
 
 
+def refresh_runtime(request) -> None:
+    """Apply in-product schedule changes while the dashboard owns its runtime.
+
+    No workers are launched by offline API clients or during shutdown. The
+    lifespan's existing supervisor continues to own any newly started workers.
+    """
+    supervisor = getattr(request.app.state, "lifecycle_supervisor", None)
+    if supervisor is None or supervisor.phase != "running":
+        return
+    try:
+        if start():
+            reconcile()
+    except Exception as exc:
+        from fastapi import HTTPException
+
+        log.exception("scheduled work could not apply saved settings")
+        raise HTTPException(status_code=503, detail=(
+            "Your settings were saved, but scheduled work could not be updated. "
+            "Try saving again. If this continues, ask your administrator to check Lightwork."
+        )) from exc
+
+
+def nightly_learning_status() -> dict:
+    """Tenant-local scheduled review receipts, with no customer content."""
+    from maverick.audit import default_audit_log
+    from maverick.self_improvement_runner import nightly_self_harness_enabled
+
+    status = {"enabled": nightly_self_harness_enabled(), "state": "not_run", "when": None}
+    try:
+        rows = default_audit_log().tail(2000)
+        event = next((row for row in reversed(rows)
+                      if row.get("agent") == "self_harness_nightly"), None)
+        if event is not None:
+            phase = event.get("phase")
+            status.update(state={"started": "running", "completed": "completed"}.get(phase, "stopped"),
+                          when=event.get("ts"))
+            for key in ("models_reviewed", "patterns_found", "improvements_adopted",
+                        "improvements_retired", "reviews_held_back", "examples_prepared",
+                        "inspection_only", "transfer_held_back"):
+                if key in event:
+                    status[key] = event[key]
+    except Exception:
+        status["state"] = "unavailable"
+    return status
+
+
 def _flywheel_cron() -> str:
     try:
         expr = str((config.load_config().get("data_engine") or {}).get("cron") or "").strip()
@@ -2210,9 +2268,10 @@ def reconcile() -> None:
     """Seed the tick + dream + flywheel cron jobs for whichever subsystems are
     enabled."""
     from maverick import automation_events, data_engine, dreaming, flow
+    from maverick.self_improvement_runner import nightly_self_harness_enabled
     if automation_events.enabled():
         _ensure_cron(TICK_KIND, _TICK_CRON)
-    if dreaming.enabled():
+    if dreaming.enabled() or nightly_self_harness_enabled():
         _ensure_cron(DREAM_KIND, _dream_cron())
     if data_engine.enabled():
         _ensure_cron(FLYWHEEL_KIND, _flywheel_cron())
@@ -2241,8 +2300,9 @@ def start() -> bool:
     idempotent. Returns whether the pool was started."""
     global _worker, _worker_threads, _worker_stopping
     from maverick import automation_events, data_engine, dreaming, flow
+    from maverick.self_improvement_runner import nightly_self_harness_enabled
     if not (automation_events.enabled() or dreaming.enabled()
-            or data_engine.enabled() or flow.enabled()):
+            or data_engine.enabled() or flow.enabled() or nightly_self_harness_enabled()):
         return False
     with _LOCK:
         if any(thread.is_alive() for thread in _worker_threads):

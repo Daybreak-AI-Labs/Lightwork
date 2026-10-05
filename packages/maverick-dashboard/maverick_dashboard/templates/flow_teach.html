@@ -11,7 +11,8 @@
              copy='Publishing stays a separate step in the flow designer.') }}
   {% endcall %}
   <p>{{ back_link('/flows/designer/' ~ (flow.id | urlencode), 'Flow designer') }}
-    <a class="btn btn--ghost" href="/learning/examples">Review learning examples</a></p>
+    <a class="btn btn--ghost" href="/learning/examples">Review learning examples</a>
+    <button type="button" class="btn btn--ghost" id="ft-refresh">Refresh flow and examples</button></p>
   <p id="ft-status" role="status" aria-live="polite" tabindex="-1"></p>
 
   <section class="panel ft__section" id="teach-rules" aria-labelledby="tr-title">
@@ -86,6 +87,7 @@
       current example, learns from those records, and binds the new flow to them. Each action will check that its examples
       are still allowed before it starts. You review and save the draft separately.</p>
     <div id="rc-runs" class="ft__list" role="group" aria-label="Reviewed runs"></div>
+    <button type="button" class="btn btn--ghost" id="rc-refresh">Refresh reviewed examples</button>
     <fieldset class="ft__choices" id="rc-tools-set"><legend>Actions the new flow may use</legend><div id="rc-tools"></div></fieldset>
     <div class="ft__field"><label for="rc-style">What to learn</label>
       <select id="rc-style" class="select">

@@ -365,15 +365,49 @@
         headers["Content-Type"] = "application/json";
         body = JSON.stringify(selected.body);
       }
-      var response = await fetch(base + path, {
-        method: selected.method || "GET", headers: headers, body: body,
-        credentials: "same-origin", cache: "no-store", redirect: "error", referrerPolicy: "no-referrer"
-      });
-      return parseResponse(response);
+      var controller = new AbortController(), timeout = setTimeout(function () { controller.abort(); }, 30000);
+      try {
+        var response = await fetch(base + path, {
+          method: selected.method || "GET", headers: headers, body: body, signal: controller.signal,
+          credentials: "same-origin", cache: "no-store", redirect: "error", referrerPolicy: "no-referrer"
+        });
+        return await parseResponse(response);
+      } finally { clearTimeout(timeout); }
     }
     function api(path, options) { return request(apiBase, path, options); }
     function say(text, isError) { CW.say(status, text, isError); }
     function fail(error, action) { return CW.fail(status, error, action); }
+    var pendingSubmission = null;
+    var recoveryKey = shell.dataset.requestContext ? 'lightwork:consent-submission:' + shell.dataset.requestContext : '';
+    try {
+      var savedReference = recoveryKey && global.sessionStorage.getItem(recoveryKey);
+      if (savedReference && IDEMPOTENCY_PATTERN.test(savedReference)) pendingSubmission = savedReference;
+    } catch (_) { /* Keep this tab's reference when browser storage is unavailable. */ }
+    function rememberSubmission(reference) {
+      pendingSubmission = reference;
+      try { if (recoveryKey) { if (reference) global.sessionStorage.setItem(recoveryKey, reference); else global.sessionStorage.removeItem(recoveryKey); } }
+      catch (_) { say('Keep this tab open until the submitted job is confirmed.', true); }
+      $('cbj-submission-recovery').hidden = !reference;
+    }
+    rememberSubmission(pendingSubmission);
+    async function checkSubmission() {
+      if (!pendingSubmission) return;
+      var result = await api('/requests/check', {method: 'POST', body: {idempotency_key: pendingSubmission}});
+      if (!result.found || !result.job) {
+        $('cbj-submission-note').textContent = 'No saved submission has been found yet. The original request may still be finishing. Check again; this check starts no work.';
+        return false;
+      }
+      var job = result.job;
+      rememberSubmission(null); clearReview(); form.hidden = true;
+      say(job.retained === false ? 'The original job was accepted, but its keeping period has ended. No job was repeated.'
+        : 'Your original job is ' + (STATE_LABELS[job.state] || ['recorded'])[0].toLowerCase() + '. No job was repeated.');
+      await Promise.all([refreshJobs(), refreshCredit()]);
+      if (job.retained !== false) await showDetail(job);
+      return true;
+    }
+    $('cbj-check-submission').addEventListener('click', function (event) {
+      handle(event.currentTarget, function (disableControls) { disableControls(); return checkSubmission(); });
+    });
     // One change at a time. The clicked control stays enabled (and focused)
     // until the shared confirmation captures it; a handler disables it only
     // after the person confirms, by calling disableControls().
@@ -518,6 +552,7 @@
       countPeople();
     }
     function countPeople() {
+      clearReview();
       var n = state.chosen.size;
       $("cbj-people-count").textContent = n ? n + (n === 1 ? " person selected." : " people selected.") : "No one selected.";
     }
@@ -527,6 +562,8 @@
     }
     function profileById(id) { for (var i = 0; i < state.profiles.length; i++) if (state.profiles[i].profile_id === id) return state.profiles[i]; return null; }
     async function openCreate() {
+      if (pendingSubmission) { CW.open($('cbj-submission-recovery'), '#cbj-check-submission'); return; }
+      clearReview();
       form.reset();
       form.elements.idempotency_key.value = CW.reference();
       state.chosen = new Set(); state.identifiers = []; state.receipts = [];
@@ -616,8 +653,32 @@
         return item;
       });
     }
-    async function submitCreate(disableControls) {
+    var reviewedJob = null, reviewRevision = 0;
+    function clearReview() {
+      reviewRevision += 1;
+      reviewedJob = null;
+      $("cbj-review").hidden = true;
+      $("cbj-review-rows").replaceChildren();
+    }
+    function reviewChange(op, item) {
+      if (op === "export_receipts") return "Export up to " + item.receipt_limit + " consent records.";
+      if (op === "delete_subject") return "Stop using this person's choices and replace their stored identifier. Past records remain for audit. Reason: " + CW.human(item.reason_code) + ".";
+      if (op === "edit_preferences") return item.choices.map(function (choice) {
+        return CW.human(choice.action) + " " + CW.human(choice.purpose_id) + " for " + CW.human(choice.channel) + " channels.";
+      }).join(" ");
+      if (op === "change_identifier_type") {
+        var entry = state.identifiers.find(function (value) { return value.profile.profile_id === item.profile_id; });
+        return "Use " + CW.human(item.identity_kind) + " identification: " + (entry ? entry.identifier : "the uploaded value") + ".";
+      }
+      var receipt = state.receipts.find(function (value) { return value.receipt_id === item.receipt_id; });
+      var purpose = receipt && receipt.purpose_id ? CW.human(receipt.purpose_id) : "the selected consent choice";
+      return op === "reactivate" ? "Bring back " + purpose + " on " + CW.when(item.reactivation_at) + "."
+        : "Remove the end date from " + purpose + ".";
+    }
+    async function submitCreate() {
+      if (pendingSubmission) { CW.open($('cbj-submission-recovery'), '#cbj-check-submission'); return; }
       var op = operation();
+      var revision = reviewRevision;
       try {
         var items = await buildItems(op);
         var itemsJson = JSON.stringify(items);
@@ -629,33 +690,73 @@
         var payload;
         if (op === "export_receipts") payload = buildExportPayload(values);
         else { values.operation = op; payload = buildActionPayload(values); }
-        var count = payload.items.length;
-        if (op !== "export_receipts" && !(await CW.confirm(WHAT[op] + " for " + count + (count === 1 ? " record" : " records") + "? This changes people’s consent records and cannot be undone by cancelling.", "Start job"))) return;
-        disableControls();
-        await api(op === "export_receipts" ? "/exports" : "/actions", { method: "POST", body: payload });
-        form.hidden = true;
-        say("Job started." + (op === "export_receipts" ? " Download the file from the job list when it has finished." : ""));
-        await Promise.all([refreshJobs(), refreshCredit()]);
+        if (revision !== reviewRevision) { say("Your selection changed while preparing the review. Review it again.", true); return; }
+        reviewedJob = { operation: op, payload: payload };
+        var rows = $("cbj-review-rows");
+        rows.replaceChildren();
+        payload.items.forEach(function (item) {
+          var row = CW.el("tr");
+          row.append(CW.el("td", "", item.profile_id), CW.el("td", "", reviewChange(op, item)));
+          rows.appendChild(row);
+        });
+        $("cbj-review-summary").textContent = WHAT[op] + " for " + payload.items.length + " records. " +
+          (payload.scheduled_for ? "Scheduled for " + CW.when(payload.scheduled_for) + ". " : "Starts as soon as possible. ") +
+          (op === "export_receipts" ? "The export will contain personal consent records." : "Cancelling later will not undo changes already made.");
+        CW.open($("cbj-review"), "#cbj-start-reviewed");
       } catch (error) {
         if (error && error.plain) { say(error.plain, true); return; }
         if (error && error.code === "invalid_input") { say("Some of the details could not be used. Check your choices and try again.", true); return; }
         fail(error, "start the job");
       }
     }
+    $("cbj-start-reviewed").addEventListener("click", function (event) {
+      handle(event.currentTarget, async function (disableControls) {
+        var selected = reviewedJob;
+        if (!selected) { say("Review your selection before starting the job.", true); return; }
+        var count = selected.payload.items.length;
+        if (!(await CW.confirm(WHAT[selected.operation] + " for " + count + (count === 1 ? " record" : " records") + "? " +
+          (selected.operation === "export_receipts" ? "This creates a file containing the selected consent records." : "This changes people’s consent records and cannot be undone by cancelling."), "Start job"))) return;
+        if (reviewedJob !== selected) { say("Your selection changed. Review it again before starting.", true); return; }
+        disableControls();
+        rememberSubmission(selected.payload.idempotency_key);
+        try {
+          await api(selected.operation === "export_receipts" ? "/exports" : "/actions", { method: "POST", body: selected.payload });
+        } catch (error) {
+          // A failed wait is not evidence that admission failed. Read this
+          // exact actor-bound submission rather than creating a new reference.
+          if ([400, 422].indexOf(error.status) >= 0) { rememberSubmission(null); throw error; }
+          say('The submission result could not be confirmed. Check submitted job before starting another job.', true);
+          try {
+            var found = await checkSubmission();
+            if (found === false && error.status === 409) { rememberSubmission(null); throw error; }
+          } catch (checkError) { if (checkError === error) throw error; /* The dedicated check remains available. */ }
+          return;
+        }
+        rememberSubmission(null);
+        clearReview(); form.hidden = true;
+        say("Job queued. Use Run now on its row when it is due." + (selected.operation === "export_receipts" ? " Download the file when it has finished." : ""));
+        await Promise.all([refreshJobs(), refreshCredit()]);
+      });
+    });
+    $("cbj-edit-reviewed").addEventListener("click", function () {
+      clearReview(); CW.open(form, "input[name=operation]:checked");
+    });
+    form.addEventListener("input", clearReview);
+    form.addEventListener("change", clearReview);
 
     // ----- Allowance and upkeep -----
     async function refreshCredit() {
       try {
         var credit = await api("/credits/detail");
         state.credit = credit;
-        $("cbj-credit-detail").textContent = credit.available + " jobs can still be started (" + credit.reserved + " set aside for waiting jobs, " + credit.consumed + " used).";
+        $("cbj-credit-detail").textContent = credit.available + " records can still be processed (" + credit.reserved + " set aside for waiting jobs, " + credit.consumed + " used).";
       } catch (error) { CW.fail($("cbj-credit-detail"), error, "load the allowance"); }
     }
     async function addCredits(disableControls) {
       if (!state.credit) return;
-      var answers = await global.mvForm("Add to the allowance", [{ key: "amount", label: "How many more jobs", type: "select", required: true, default: "10", options: [{ value: "10", label: "10" }, { value: "50", label: "50" }, { value: "100", label: "100" }, { value: "500", label: "500" }] }], { okText: "Continue" });
+      var answers = await global.mvForm("Add to the allowance", [{ key: "amount", label: "How many more records", type: "select", required: true, default: "10", options: [{ value: "10", label: "10" }, { value: "50", label: "50" }, { value: "100", label: "100" }, { value: "500", label: "500" }] }], { okText: "Continue" });
       if (!answers) return;
-      if (!(await CW.confirm("Allow " + answers.amount + " more bulk jobs in this workspace?", "Add"))) return;
+      if (!(await CW.confirm("Allow " + answers.amount + " more consent records to be processed in this workspace?", "Add"))) return;
       disableControls();
       try { await api("/credits/grant", { method: "POST", body: { amount: Number(answers.amount), expected_revision: state.credit.revision, idempotency_key: CW.reference() } }); say("Allowance updated."); await refreshCredit(); }
       catch (error) { fail(error, "update the allowance"); }

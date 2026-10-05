@@ -490,7 +490,17 @@ risk_limited = true              # require >=8 held-out
 # MAVERICK_SELF_HARNESS_REQUIRE_INDEPENDENT_CUSTODY=1 requests confirmatory
 # custody and currently fails closed on local/Windows deployments because the
 # controller account also administers the ledger and Docker daemon.
-auto_run = true                  # run the fleet cycle as part of `maverick dream`
+auto_run = true                  # run the fleet cycle on the dashboard's overnight
+#                                schedule, or as part of `maverick dream`.
+#                                Learning shows the last review receipt. The
+#                                dashboard starts this schedule even if dreaming
+#                                is off; UI changes apply without a restart.
+#                                One evaluation allowance is shared across the
+#                                fleet and an eligible transfer sweep. Reviews
+#                                remain inspection-only without evaluation cases
+#                                or authority for additional model calls. The
+#                                careful profile holds changes back without the
+#                                exact deployed prompt and independent checks.
 #   promote_as_canary = true     stage every promotion on probation
 #   relapse_failure_share = 0.5  re-probate a line whose recent outcomes turn bad
 #   metamorphic = true           reject lines overfit to exact goal wording

@@ -261,7 +261,6 @@ def test_liquid_glass_client_is_bounded_accessible_and_injection_safe() -> None:
         "insertAdjacentHTML",
         "document.write",
         "localStorage",
-        "sessionStorage",
         "document.cookie",
         "eval(",
         "new Function",
@@ -269,6 +268,12 @@ def test_liquid_glass_client_is_bounded_accessible_and_injection_safe() -> None:
         "JSON.stringify(value, null, 2)",
     ):
         assert forbidden not in source
+    # Only an opaque submission reference survives reload. The storage key is
+    # scoped to the authenticated account/workspace; no job payload is stored.
+    assert "'lightwork:consent-submission:' + shell.dataset.requestContext" in source
+    assert "global.sessionStorage.setItem(recoveryKey, reference)" in source
+    assert source.count("sessionStorage.setItem(") == 1
+    assert "global.sessionStorage.removeItem(recoveryKey)" in source
 
 
 def test_client_script_has_valid_node_syntax() -> None:

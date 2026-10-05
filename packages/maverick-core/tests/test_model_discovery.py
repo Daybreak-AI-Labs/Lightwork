@@ -150,14 +150,25 @@ def test_gemini_uses_its_native_listing_with_the_key_header(monkeypatch):
     assert fetch.calls[0][1] == {"x-goog-api-key": "gem-key"}
 
 
-def test_ollama_lists_local_tags_on_loopback_without_a_key(monkeypatch):
+@pytest.mark.parametrize("base", ["", "/v1", "/v1/"])
+def test_ollama_lists_local_tags_on_loopback_without_a_key(monkeypatch, base):
     monkeypatch.setattr(discovery, "_provider_material",
-                        _material(key="", base_url="http://127.0.0.1:11434"))
+                        _material(key="", base_url="http://127.0.0.1:11434" + base))
     fetch = FakeFetch({"http://127.0.0.1:11434/api/tags": (200, {"models": [{"name": "qwen3-32b:latest"}]})})
     entry = discovery.discover("ollama", fetch=fetch)
     assert entry["status"] == "live" and entry["models"] == ["qwen3-32b:latest"]
     url, headers, allow_loopback = fetch.calls[0]
     assert url == "http://127.0.0.1:11434/api/tags" and headers == {} and allow_loopback is True
+
+
+@pytest.mark.parametrize("provider", ["vllm", "tgi"])
+def test_self_hosted_root_lists_models_at_the_runtime_api_address(monkeypatch, provider):
+    monkeypatch.setattr(discovery, "_provider_material",
+                        _material(key="", base_url="http://127.0.0.1:8000"))
+    fetch = FakeFetch({"http://127.0.0.1:8000/v1/models": (200, {"data": [{"id": "local-model"}]})})
+    entry = discovery.discover(provider, fetch=fetch)
+    assert entry["status"] == "live" and entry["models"] == ["local-model"]
+    assert fetch.calls[0][0] == "http://127.0.0.1:8000/v1/models"
 
 
 @pytest.mark.parametrize("failure", ["http", "exception", "junk", "too-many-pages"])

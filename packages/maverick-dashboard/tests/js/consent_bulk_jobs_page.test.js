@@ -57,7 +57,7 @@ test("jobs load as rows and kinds of change that are not set up are disabled", a
   try {
     assert.equal(ui.d.getElementById("cbj-operations").disabled, false);
     assert.match(ui.d.getElementById("cbj-job-list").textContent, /Export consent records.*2.*0 of 2 done.*Waiting/);
-    assert.match(ui.d.getElementById("cbj-credit-detail").textContent, /7 jobs can still be started/);
+    assert.match(ui.d.getElementById("cbj-credit-detail").textContent, /7 records can still be processed/);
     assert.match(ui.d.getElementById("cbj-readiness-detail").textContent, /not set up yet: change how people are identified/);
     assert.equal(ui.d.querySelector("input[name=operation][value=reactivate]").disabled, true);
   } finally { ui.dom.window.close(); }
@@ -71,6 +71,10 @@ test("an export is built from ticked people, not typed items", async () => {
     ui.d.querySelectorAll("#cbj-people input[name=person]").forEach((c) => { c.checked = true; c.dispatchEvent(new ui.w.Event("change")); });
     ui.d.getElementById("cbj-create").elements.receipt_limit.value = "50";
     ui.d.getElementById("cbj-create").dispatchEvent(new ui.w.Event("submit", { bubbles: true, cancelable: true }));
+    await flush();
+    assert.equal(ui.posts().length, 0);
+    assert.match(ui.d.getElementById("cbj-review-rows").textContent, /customer-1.*50.*customer-2.*50/);
+    ui.d.getElementById("cbj-start-reviewed").click();
     await flush();
     const sent = ui.posts().find((c) => c.url.endsWith("/bulk-jobs/exports"));
     assert.deepEqual(sent.body.items, [
@@ -95,6 +99,10 @@ test("changing choices confirms and carries each person's version and the chosen
     form.elements.action.value = "deny";
     form.dispatchEvent(new ui.w.Event("submit", { bubbles: true, cancelable: true }));
     await flush();
+    assert.equal(ui.posts().length, 0);
+    assert.match(ui.d.getElementById("cbj-review-rows").textContent, /customer-2.*Deny Marketing/);
+    ui.d.getElementById("cbj-start-reviewed").click();
+    await flush();
     assert.match(ui.confirms[0], /Change choices for 1 record\?/);
     const sent = ui.posts().find((c) => c.url.endsWith("/bulk-jobs/actions"));
     const item = sent.body.items[0];
@@ -118,6 +126,34 @@ test("choosing nobody explains what to do instead of sending", async () => {
     await flush();
     assert.equal(ui.posts().length, 0);
     assert.equal(ui.d.getElementById("cbj-operation-status").textContent, "Choose at least one person.");
+  } finally { ui.dom.window.close(); }
+});
+
+test("a lost admission response reads the original job without submitting twice", async () => {
+  const ui = await page();
+  try {
+    const originalFetch = ui.w.fetch;
+    let submissions = 0, reference = null;
+    ui.w.fetch = async (url, init = {}) => {
+      if (url.endsWith('/bulk-jobs/exports')) {
+        submissions++;
+        reference = JSON.parse(init.body).idempotency_key;
+        throw new TypeError('Lost response after admission');
+      }
+      if (url.endsWith('/requests/check')) {
+        assert.equal(JSON.parse(init.body).idempotency_key, reference);
+        return reply(200, {found:true, job:JOBS[0]});
+      }
+      return originalFetch(url, init);
+    };
+    ui.d.getElementById('cbj-new').click(); await flush();
+    const person = ui.d.querySelector('#cbj-people input');
+    person.checked = true; person.dispatchEvent(new ui.w.Event('change'));
+    ui.d.getElementById('cbj-create').dispatchEvent(new ui.w.Event('submit', {cancelable:true}));
+    await flush(); ui.d.getElementById('cbj-start-reviewed').click(); await flush();
+    assert.equal(submissions, 1);
+    assert.match(ui.d.getElementById('cbj-operation-status').textContent, /original job is waiting.*No job was repeated/);
+    assert.equal(ui.d.getElementById('cbj-submission-recovery').hidden, true);
   } finally { ui.dom.window.close(); }
 });
 

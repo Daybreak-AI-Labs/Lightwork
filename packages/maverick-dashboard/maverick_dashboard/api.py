@@ -7721,13 +7721,16 @@ def retry_flow_run_endpoint(
 
 
 @router.get("/flows/tools")
-async def flow_tools_endpoint(request: Request, q: str = "", category: str = "") -> dict:
+async def flow_tools_endpoint(
+    request: Request, q: str = "", category: str = "",
+    offset: int = Query(0, ge=0, le=10000), limit: int = Query(50, ge=1, le=200),
+) -> dict:
     """The connector/action catalog for the designer's categorized, searchable
     tool picker: name, description, param names, and a coarse ``category``.
 
     - no ``q``, no ``category``: the curated starter set.
-    - ``category`` (no ``q``): every live tool in that bucket (built-ins + every
-      enabled connector), so a user can browse one area instead of a 3k-name list.
+    - ``category`` (no ``q``): a page of live tools in that bucket, with starter
+      actions first. ``next_offset`` exposes the remaining authorized actions.
     - ``q``: a substring search over the FULL live registry, optionally narrowed
       to ``category``.
 
@@ -7745,15 +7748,9 @@ async def flow_tools_endpoint(request: Request, q: str = "", category: str = "")
     user_id = execution_user_id_from_request(request)
     channel = "api" if user_id else None
 
-    if not q and not category:
-        return {
-            "tools": await run_in_threadpool(
-                lambda: _flow_tool_catalog(channel=channel, user_id=user_id)
-            ),
-            "categories": cats,
-        }
-
     def _filter():
+        if not q and not category:
+            return _flow_tool_catalog(channel=channel, user_id=user_id)
         out = _live_tool_index(channel=channel, user_id=user_id)
         if category:
             out = [t for t in out if t.get("category") == category]
@@ -7769,10 +7766,16 @@ async def flow_tools_endpoint(request: Request, q: str = "", category: str = "")
                 ),
             )
         else:
-            out = sorted(out, key=lambda t: t["name"])
-        return out[:50]
+            starters = {name: index for index, name in enumerate(_FLOW_DRAFT_TOOLS)}
+            out = sorted(out, key=lambda t: (starters.get(t["name"], len(starters)), t["name"]))
+        return out
 
-    return {"tools": await run_in_threadpool(_filter), "categories": cats}
+    tools = await run_in_threadpool(_filter)
+    end = offset + limit
+    return {
+        "tools": tools[offset:end], "categories": cats, "total": len(tools),
+        "next_offset": end if end < len(tools) else None,
+    }
 
 
 # Curated starter flows for the designer's gallery: small, runnable graphs a
@@ -17349,7 +17352,10 @@ def _learning_snapshot(request: Request) -> dict:
             dgm = self_modify.production_status()
         except Exception:  # pragma: no cover -- status is fail-closed in core
             dgm = None
+    from .automation_queue import nightly_learning_status
+
     return {
+        "overnight": nightly_learning_status() if can_manage else None,
         "components": components,
         "dgm": dgm,
         "flow_autonomy": flow_autonomy,
@@ -17414,6 +17420,9 @@ def set_learning_endpoint(request: Request, payload: LearningToggleIn) -> dict:
     from maverick.config import reset_config_cache
 
     reset_config_cache()
+    from .automation_queue import refresh_runtime
+
+    refresh_runtime(request)
     return _learning_snapshot(request)
 
 
@@ -17746,3 +17755,9 @@ router.include_router(policy_publication_links_router)
 router.include_router(public_policy_publication_links_router)
 router.include_router(security_router)
 router.include_router(finance_operations_router)
+from .flow_approval_recovery import router as flow_approval_recovery_router  # noqa: E402
+
+router.include_router(flow_approval_recovery_router)
+from .workflow_explanation import router as workflow_explanation_router  # noqa: E402
+
+router.include_router(workflow_explanation_router)

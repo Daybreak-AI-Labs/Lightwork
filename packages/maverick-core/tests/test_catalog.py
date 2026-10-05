@@ -67,6 +67,19 @@ def test_entry_round_trips():
     assert d["verified"] is True
 
 
+def test_malformed_statistics_and_entries_do_not_hide_valid_catalog(monkeypatch):
+    indexes = {
+        "https://broken.example/skills/index.json": ["invalid index"],
+        "https://valid.example/skills/index.json": _index([
+            None, _entry(install_count="1.2k"), _entry(name="second-skill", install_count=float("inf")),
+        ]),
+    }
+    monkeypatch.setattr(catalog, "_fetch_index_raw", indexes.get)
+    entries = catalog.load_catalog("skills", indexes=["https://broken.example", "https://valid.example"])
+    assert {entry.name for entry in entries} == {"summarize-url", "second-skill"}
+    assert all(entry.install_count == 0 for entry in entries)
+
+
 # ---------- load_catalog ----------
 
 def test_load_catalog_unknown_kind_raises():

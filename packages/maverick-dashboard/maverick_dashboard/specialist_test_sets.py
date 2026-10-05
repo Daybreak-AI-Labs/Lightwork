@@ -58,6 +58,17 @@ def cases_for(specialist: str) -> list[dict]:
                key=lambda row: (row["created_at"], row["id"])), False))
 
 
+def cases_for_specialists(specialists: set[str]) -> dict[str, list[dict]]:
+    """Read named choices once, within the current tenant's native store."""
+    rows = _with_store(lambda db: (
+        sorted((dict(row) for row in db["cases"].values() if row["specialist"] in specialists),
+               key=lambda row: (row["created_at"], row["id"])), False))
+    result: dict[str, list[dict]] = {}
+    for row in rows:
+        result.setdefault(row["specialist"], []).append(row)
+    return result
+
+
 def save_case(specialist: str, fields: dict, *, identity: str | None = None,
               expected_revision: int | None = None) -> dict:
     def mutate(db):

@@ -54,9 +54,11 @@ function defaults() {
       configured: true, removed: 1, cases: [{ task: "easy task", useful: false, baseline_rate: 1 }] } } },
     "/api/v1/learning-ops/self-harness/plan": { spending_limit: 5, checker: "Claude Checker", careful_testing: true },
     "/api/v1/learning-ops/refinements/0123456789abcdef/preview": { title: "Check quote approval",  // pragma: allowlist secret
-      now: "", after: "Confirm the quote first", undo_also_removes: [] },
+      revision: "a".repeat(64), now: "", after: "Confirm the quote first", undo_also_removes: [] },
     "/api/v1/learning-ops/refinements/fedcba9876543210/preview": { title: "Check quote approval",  // pragma: allowlist secret
-      now: "Confirm the quote first", after: "Confirm the quote first", undo_also_removes: ["Later change"] },
+      revision: "b".repeat(64), now: "Confirm the quote first", after: "", undo_also_removes: ["Later change"],
+      changes: [{title: "Check quote approval", before: "Confirm the quote first", after: ""},
+                {title: "Later change", before: "Check deadlines", after: ""}] },
   };
 }
 
@@ -127,6 +129,7 @@ test("apply previews, confirms, then calls the apply route", async (t) => {
   const confirmAt = ui.calls.findIndex((c) => c.confirm && /restore point/.test(c.confirm));
   assert.ok(previewAt >= 0 && confirmAt > previewAt);
   assert.ok(ui.calls.some((c) => c.method === "POST" && c.url === "/api/v1/learning-loop/refinements/0123456789abcdef/apply"));  // pragma: allowlist secret
+  assert.deepEqual(ui.calls.find((c) => c.method === "POST").body, {revision: "a".repeat(64), confirm: true});
   assert.match(ui.doc.getElementById("llp-ref-msg").textContent, /Change applied/);
 });
 
@@ -235,8 +238,9 @@ test("undo lists the later changes it also removes", async (t) => {
   ui.doc.querySelectorAll("#llp-ref-rows button")[1].click();
   await ui.settle();
   const confirm = ui.calls.find((c) => c.confirm);
-  assert.match(confirm.confirm, /also undoes 1 change applied after it/);
+  assert.match(confirm.confirm, /earlier instructions may return and later changes may be removed/);
   assert.match(ui.doc.getElementById("llp-ref-rows").textContent, /Later change/);
+  assert.match(ui.doc.getElementById("llp-ref-rows").textContent, /Current instructions: Check deadlines.*After restoring: \(removed\)/);
 });
 
 test("removing weak test cases asks first and sends the confirmation", async (t) => {

@@ -18,9 +18,12 @@ class OllamaClient(OpenAIClient):
     USAGE_REQUIRED = False  # local server may omit usage; $0 -> nothing to enforce
 
     def __init__(self, api_key: str | None = None, base_url: str | None = None, *, environment=None):
+        url = (base_url or "http://localhost:11434/v1").rstrip("/")
+        if not url.endswith("/v1"):
+            url += "/v1"
         super().__init__(
             api_key=api_key or "ollama",  # placeholder; Ollama ignores it
-            base_url=base_url or "http://localhost:11434/v1",
+            base_url=url,
             environment=environment,
         )
 

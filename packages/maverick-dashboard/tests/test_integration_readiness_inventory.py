@@ -169,13 +169,16 @@ def test_provider_probe_truth_for_loopback_runtime_and_unsupported(monkeypatch):
     assert "Blocked by outbound-connection rules" in page.text
     assert "Some details are missing or wrong" not in page.text
 
-    material = {"api_key": "test-bedrock-key"}  # pragma: allowlist secret
-    unsupported = integration_readiness.probe_provider("bedrock", material)
+    # Azure/Bedrock now have native bounded probes. Keep this assertion on a
+    # provider without a probe, not on a supported cloud connection.
+    unsupported_name = "custom_provider"
+    material = {"api_key": "test-provider-key"}  # pragma: allowlist secret
+    unsupported = integration_readiness.probe_provider(unsupported_name, material)
     assert unsupported["verified"] is None
     assert unsupported["evidence"]["kind"] == "unsupported"
     integration_readiness.record(
         "provider",
-        "bedrock",
+        unsupported_name,
         material,
         verified=unsupported["verified"],
         detail=unsupported["detail"],
@@ -183,7 +186,7 @@ def test_provider_probe_truth_for_loopback_runtime_and_unsupported(monkeypatch):
     )
     monkeypatch.setattr(config, "get_provider_config", lambda _name: material)
     monkeypatch.setattr(providers, "missing_sdks", lambda _specs: [])
-    readiness = integration_readiness.provider_readiness("bedrock", configured=True)
+    readiness = integration_readiness.provider_readiness(unsupported_name, configured=True)
     assert readiness["runtime"]["status"] == "unknown"
     assert readiness["live"]["status"] == "unknown"
     assert readiness["live"]["checked"] is True
@@ -243,6 +246,10 @@ def test_self_hosted_probe_reaches_loopback_without_following_a_redirect():
         try:
             material = {"base_url": f"http://127.0.0.1:{server.server_port}/v1"}
             passed = integration_readiness.probe_provider("vllm", material)
+            root = {"base_url": f"http://127.0.0.1:{server.server_port}"}
+            assert integration_readiness.probe_provider("vllm", root)["verified"] is True
+            assert integration_readiness.probe_provider("tgi", root)["verified"] is True
+            assert integration_readiness.probe_provider("ollama", material)["verified"] is True
             redirect[0] = True
             result = integration_readiness.probe_provider("vllm", material)
         finally:
@@ -251,7 +258,7 @@ def test_self_hosted_probe_reaches_loopback_without_following_a_redirect():
     assert passed["verified"] is True
     assert result["verified"] is False
     assert result["evidence"]["http_status"] == 302
-    assert requests == ["/v1/models", "/v1/models"]
+    assert requests == ["/v1/models", "/v1/models", "/v1/models", "/api/tags", "/v1/models"]
 
 
 def test_channel_failure_and_mcp_unknown_then_failed(_isolate: Path):
@@ -276,7 +283,10 @@ command = "lightwork-command-that-does-not-exist"
     assert channel["configured"] is True
     assert channel["readiness"]["runtime"]["status"] == "failed"
     assert channel["readiness"]["live"]["status"] == "unknown"
-    assert channel["readiness"]["state"] == "runtime_failed"
+    assert channel["readiness"]["state"] == (
+        "dependency_failed" if channel["readiness"]["dependency"]["status"] == "failed"
+        else "runtime_failed"
+    )
     channel_page = client.get("/channels")
     assert channel_page.status_code == 200
     assert "Connection test:" in channel_page.text

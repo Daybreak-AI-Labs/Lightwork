@@ -142,18 +142,16 @@ def _append_path(base_url: str, suffix: str) -> str:
     return urlunsplit((parsed.scheme, parsed.netloc, path, "", ""))
 
 
-def _origin(base_url: str) -> str:
-    parsed = urlsplit(base_url.strip())
-    return urlunsplit((parsed.scheme, parsed.netloc, "", "", ""))
-
-
 def _request_plan(provider: str, key: str, base_url: str) -> tuple[str, str, dict[str, str], bool]:
     """The (url, style, headers, allow_loopback) for one provider's model list."""
     if provider in LOCAL_LIST_PATHS:
         suffix, style = LOCAL_LIST_PATHS[provider]
         if provider == "ollama":
-            url = _append_path(_origin(base_url or "http://127.0.0.1:11434"), suffix)
+            base = (base_url or "http://127.0.0.1:11434").rstrip("/").removesuffix("/v1")
+            url = _append_path(base, suffix)
         elif base_url:
+            if provider in {"vllm", "tgi"} and not base_url.rstrip("/").endswith("/v1"):
+                base_url = base_url.rstrip("/") + "/v1"
             url = _append_path(base_url, suffix)
         else:
             raise ValueError("no base URL is configured for this self-hosted provider")

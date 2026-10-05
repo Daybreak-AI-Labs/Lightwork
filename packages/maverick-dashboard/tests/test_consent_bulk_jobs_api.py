@@ -170,6 +170,13 @@ def test_export_run_progress_download_history_integrity_and_credits(environment)
     created = client.post(f"{BASE}/exports", json=_export_body())
     assert created.status_code == 201
     job = created.json()
+    state.now += 60
+    replay = client.post(f"{BASE}/exports", json=_export_body())
+    assert replay.status_code == 201 and replay.json() == job
+    recovered = client.post(f"{BASE}/requests/check", json={"idempotency_key": "create-export-api-1"})
+    assert recovered.status_code == 200
+    assert recovered.json()["job"]["job_id"] == job["job_id"]
+    assert state.permission_calls[-2:] == [("tenant", "operate"), ("global", "admin")]
 
     listed = client.get(BASE)
     assert listed.status_code == 200

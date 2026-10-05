@@ -988,13 +988,15 @@ def _checked_provider_setup(
     name: str, key_value: str, base_value: str, details: dict[str, str] | None,
 ) -> tuple[dict[str, str], bool]:
     values = _provider_setup_details(name, details)
-    if name == "azure" and base_value:
-        from urllib.parse import urlsplit
+    if base_value:
+        from .integration_readiness import _valid_self_hosted_address
 
-        address = urlsplit(base_value)
-        if (len(base_value) > 320 or address.scheme != "https" or not address.hostname
-                or address.username or address.password or address.query or address.fragment
-                or any(ch.isspace() for ch in base_value)):
+        if len(base_value) > 320 or not _valid_self_hosted_address(base_value):
+            raise ValueError(
+                "enter a server address starting with http:// or https://, without "
+                "sign-in details, extra parameters or a bookmark; use the key field for access"
+            )
+        if name == "azure" and not base_value.lower().startswith("https://"):
             raise ValueError("enter the secure Azure resource address, starting with https://")
     if name in {"azure", "bedrock"} and len(key_value) > 500:
         raise ValueError("the provider key is too long")
@@ -1142,6 +1144,13 @@ def rotate_provider(
                     raise ProviderRotationConflict(
                         "; ".join(blockers) + "; rotate that source instead"
                     )
+
+                # A carried-forward address must not turn a key rotation into
+                # a new dashboard override of an installer/server address.
+                # Authorize first: unchanged protected fields remain refused.
+                if ((key_value or detail_values) and base_value == before["base_url"]
+                        and before["base_url_source"] != "dashboard"):
+                    base_value = ""
 
                 data = copy.deepcopy(before_overlay)
                 provider_table = data.setdefault("providers", {}).setdefault(name, {})
@@ -2490,6 +2499,29 @@ def _mask(secret: str) -> str:
     return ("•" * 4 + s[-4:]) if len(s) > 4 else "••••"
 
 
+def provider_address_display(value: object) -> tuple[str, bool]:
+    """A safe display only: never copy embedded URL credentials into a form."""
+    from urllib.parse import urlsplit, urlunsplit
+
+    from .integration_readiness import _valid_self_hosted_address
+
+    text = str(value or "").strip()
+    if not text:
+        return "", False
+    try:
+        address = urlsplit(text)
+        host = address.hostname
+        if address.scheme not in {"http", "https"} or not host:
+            raise ValueError("not a server address")
+        host = f"[{host}]" if ":" in host else host
+        if address.port is not None:
+            host += f":{address.port}"
+        display = urlunsplit((address.scheme, host, address.path, "", ""))
+    except ValueError:
+        return "Address needs attention", True
+    return display, len(text) > 320 or not _valid_self_hosted_address(text)
+
+
 def state() -> dict:
     """Redacted snapshot for the settings page. NEVER returns a raw key."""
     overlay = load_overlay()
@@ -2523,13 +2555,14 @@ def state() -> dict:
         via = effective["via"]
         if not via and ov and setup.get("auth_mode") in {"iam", "entra_id"}:
             via = "dashboard"
+        address, address_needs_repair = provider_address_display(effective["base_url"])
         providers.append({
             "name": name, "label": p["label"], "base_url_field": p["base_url"],
             "configured": effective["configured"],
             "via": via,
             "setup": setup, "setup_locked": setup_locked,
             "key_hint": _mask(key) if (ov.get("api_key") or raw.get("api_key")) else None,
-            "base_url": effective["base_url"],
+            "base_url": address, "base_url_needs_repair": address_needs_repair,
             "env_hint": ", ".join(p["env"]) if p["env"] else "",
             "dashboard_set": effective["dashboard_set"],
             "api_key_source": effective["api_key_source"],

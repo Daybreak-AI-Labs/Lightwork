@@ -15,7 +15,13 @@
     if (overrideSelection) return overrideSelection;
     var goal = window.location.pathname.match(/^\/(?:chat\/goal|tasks)\/(\d+)(?:\/|$)/);
     if (goal) return {kind: 'goal', id: Number(goal[1]), goal_id: Number(goal[1])};
-    var flow = window.location.pathname.match(/^\/flows\/designer\/([^/]+)$/);
+    var run = window.location.pathname.match(/^\/flows\/([^/]+)\/runs\/([^/]+)$/);
+    if (run) {
+      try { return {kind: 'flow_run', id: decodeURIComponent(run[2]), flow_id: decodeURIComponent(run[1])}; }
+      catch (_) { return {}; }
+    }
+    var flow = window.location.pathname.match(/^\/flows\/designer\/([^/]+)$/) ||
+      window.location.pathname.match(/^\/flows\/([^/]+)\/teach$/);
     if (flow) {
       try { return {kind: 'flow', id: decodeURIComponent(flow[1])}; } catch (_) { return {}; }
     }
@@ -82,7 +88,7 @@
   }
   function nativeLink(item, parent) {
     if (!safeLocalHref(item.direct_ui)) return;
-    var link = node('a', 'Open native controls', parent); link.className = 'btn btn--ghost'; link.href = item.direct_ui;
+    var link = node('a', 'Open full controls', parent); link.className = 'btn btn--ghost'; link.href = item.direct_ui;
   }
   async function refresh() {
     var started = generation, previous = catalog;
@@ -114,6 +120,33 @@
     var control;
     function install(choices) {
       if (control) control.remove();
+      if (choices && spec.kind === 'multiselect' && spec.presentation === 'checkboxes') {
+        control = node('fieldset', undefined, row); control.id = id; control.name = spec.name; control.className = 'input';
+        label.id = id + '-label'; control.setAttribute('aria-labelledby', label.id);
+        control.style.minInlineSize = '0'; control.style.maxHeight = '18rem'; control.style.overflowY = 'auto';
+        var note = node('p', undefined, control), boxes = [], limit = Number(spec.max_selections) || choices.length;
+        note.className = 'muted'; note.setAttribute('role', 'status'); note.setAttribute('aria-live', 'polite');
+        function chosen() { return boxes.filter(function (box) { return box.checked; }); }
+        function updateChoices() {
+          var count = chosen().length;
+          boxes.forEach(function (box) { box.disabled = busy || !box.checked && count >= limit; });
+          if (boxes[0]) boxes[0].setCustomValidity(spec.required && !count ? 'Choose at least one saved question.' :
+            count > limit ? 'Choose no more than ' + limit + ' saved questions.' : '');
+          note.textContent = count + ' selected. Choose up to ' + limit + '.' +
+            (count >= limit ? ' Uncheck a question before choosing another.' : '');
+        }
+        choices.forEach(function (choice) {
+          var option = node('label', undefined, control), box = node('input', undefined, option);
+          option.style.display = 'flex'; option.style.alignItems = 'flex-start'; option.style.gap = 'var(--space-2)';
+          option.style.paddingBlock = 'var(--space-2)';
+          box.type = 'checkbox'; box.name = spec.name + '_choice'; box._typedValue = choice.value;
+          box.style.flexShrink = '0'; box.checked = Array.isArray(spec.value) && spec.value.indexOf(choice.value) >= 0;
+          var text = node('span', choice.label, option); text.style.minWidth = '0'; text.style.overflowWrap = 'anywhere';
+          box.addEventListener('change', updateChoices); boxes.push(box);
+        });
+        controls[spec.name] = function () { return chosen().map(function (box) { return box._typedValue; }); };
+        updateChoices(); return;
+      }
       control = node(choices ? 'select' : spec.kind === 'textarea' ? 'textarea' : 'input', undefined, row);
       control.id = id; control.name = spec.name; control.className = 'input'; control.required = spec.required === true;
       if (choices && spec.kind === 'multiselect') control.multiple = true;
@@ -172,6 +205,44 @@
     launch.className = 'btn btn--primary'; launch.focus();
     button('Cancel', formHost, function () { clear(formHost); selected = null; status.textContent = 'Run review cancelled.'; });
   }
+  async function openTeachingForm(item, fresh, started) {
+    var selection = context(), teaching = window.LightworkFlowTeach;
+    var review = await request('/prepare', Object.assign(payload(), {
+      operation: item.id, context: fresh.context, revision: item.revision, arguments: {}
+    }));
+    if (!active(started)) return;
+    var details = review.details || {}, modes = {
+      'learning.workflow_refine': 'recipe_refine', 'learning.rule_teach': 'rule_teach', 'learning.rule_refine': 'rule_refine'
+    };
+    if (review.read_only !== true || review.operation !== item.id || details.flow_id !== selection.id ||
+        details.mode !== modes[item.id] || !teaching || typeof teaching.perform !== 'function')
+      throw new Error('The teaching form could not be confirmed. Reopen Teach before continuing.');
+    clear(formHost); node('h3', item.label, formHost); node('p', review.summary, formHost);
+    button('Review examples on Teach', formHost, function () { teaching.showTeachingInputs(details.mode); });
+    var use = button('Use the reviewed teaching examples', formHost, async function () {
+      if (busy || !active(started)) return;
+      if (JSON.stringify(context()) !== JSON.stringify(selection)) {
+        status.textContent = 'The selected flow or step changed. Refresh Copilot.'; return;
+      }
+      lock(true);
+      try {
+        var result = await teaching.perform(details);
+        if (!active(started)) return;
+        status.textContent = result && result.status === 'learned'
+          ? 'The learning result is ready on Teach. Review and save it when you are ready; it has not been published or run.'
+          : result && result.status === 'cancelled' ? 'Learning cancelled. Nothing was submitted.'
+          : result && result.message || 'The learning result was not confirmed. Check the message on Teach before trying again.';
+        if (result && result.status === 'learned') {
+          clear(formHost); node('p', status.textContent, formHost);
+          button('Review the learning result', formHost, function () {
+            if (details.mode === 'recipe_refine') teaching.showRecipeReview(); else teaching.showRuleReview();
+          });
+        }
+      } finally { lock(false); }
+    });
+    use.className = 'btn btn--primary'; use.focus();
+    button('Cancel', formHost, function () { clear(formHost); selected = null; status.textContent = 'Teaching review cancelled.'; });
+  }
   async function openOperation(id) {
     if (busy) return false;
     var started = generation; lock(true);
@@ -182,6 +253,10 @@
       if (!item) return false;
       if (item.id === 'learning.workflow_run') {
         await openWorkflowRun(item, fresh, started);
+        return true;
+      }
+      if (['learning.workflow_refine', 'learning.rule_teach', 'learning.rule_refine'].includes(item.id)) {
+        await openTeachingForm(item, fresh, started);
         return true;
       }
       selected = item; clear(formHost); node('h3', item.label, formHost); node('p', item.summary, formHost);
@@ -228,7 +303,22 @@
         if (!active(started)) return;
         clear(formHost); node('h3', item.label, formHost); node('p', result.message, formHost);
         uncertainty = result.status === 'confirmed' || result.status === 'replayed' ? '' : 'This outcome still needs confirmation. Check native status; do not submit it again automatically.';
-        if (result.details) renderData(formHost, result.details);
+        if (result.operation === 'learning.workflow_teach') {
+          var teaching = window.LightworkFlowTeach;
+          var delivered = result.status === 'confirmed' && teaching && typeof teaching.acceptRecipe === 'function' &&
+            await teaching.acceptRecipe(result.details && result.details.flow_id, result.details && result.details.recipe);
+          if (delivered) {
+            button('Review the learned procedure', formHost, function () { teaching.showRecipeReview(); });
+          } else {
+            uncertainty = 'The procedure was learned; your current draft is kept. Finish or cancel that draft, then open this learned result.';
+            if (teaching && typeof teaching.acceptRecipe === 'function') button('Open this learned result', formHost, async function () {
+              if (await teaching.acceptRecipe(result.details.flow_id, result.details.recipe)) {
+                uncertainty = ''; status.textContent = 'The learned procedure is ready on Teach.';
+                teaching.showRecipeReview();
+              }
+            });
+          }
+        } else if (result.details) renderData(formHost, result.details);
         if (result.operation === 'preferences.update' && result.status === 'confirmed' && result.details) {
           var revision = document.querySelector('meta[name="lightwork-preference-revision"]');
           if (revision && result.details.revision) revision.content = result.details.revision;
