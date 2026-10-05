@@ -64,7 +64,7 @@
   'pending_review': 'Waiting for review', 'review required': 'Waiting for review',
   'present': 'Found', 'missing': 'Not found', 'open': 'Open', 'in_progress': 'In progress',
   'blocked': 'Blocked', 'complete': 'Complete', 'accepted': 'Accepted', 'closed': 'Closed',
-  'draft': 'Draft', 'review': 'In review', 'attested': 'Signed off', 'retired': 'Retired',
+  'draft': 'Draft', 'review': 'In review', 'attested': 'Confirmed', 'retired': 'Retired',
   'mitigate': 'Reduce it', 'accept': 'Accept it', 'transfer': 'Transfer it', 'avoid': 'Avoid it',
   'unassigned': 'Not decided', 'planning': 'Planning', 'fieldwork': 'Testing', 'submitted': 'Submitted',
   'resolved': 'Resolved', 'remediated': 'Fixed', 'pass': 'Passed', 'fail': 'Failed', 'needs_review': 'Needs review',
@@ -469,7 +469,7 @@
       {% set policy_status = row.get('status','draft') %}
       <tr><td>{% if row.get('content_ref') and (row.get('content_ref').startswith('https://') or row.get('content_ref').startswith('http://')) %}<a href="{{ row.get('content_ref') }}" rel="noopener">{{ row.get('title') or 'Policy' }}</a>{% else %}{{ row.get('title') or 'Policy' }}{% endif %}</td><td>{{ status_words.get(policy_status) or (policy_status | humanize) }}</td><td>{{ (row.get('owner') | identity) if row.get('owner') else '—' }}</td><td>
         {% if policy_status != 'retired' %}
-        <details class="sec-details"><summary>Review, approve, sign off or retire</summary>
+        <details class="sec-details"><summary>Review, approve, confirm or retire</summary>
           <form class="sec-action" data-endpoint="/api/v1/security/policies/{{ row.id }}/transition">
             <label>Note<input class="input" name="note" required maxlength="2000"></label>
             <input type="hidden" name="target_status" value="">
@@ -483,10 +483,10 @@
           </form>
           {% if policy_status in ['approved','attested'] %}
           <form class="sec-action" data-endpoint="/api/v1/security/policies/{{ row.id }}/attest">
-            {{ owner_field('subject', 'Who is signing off', required=true) }}
+            {{ owner_field('subject', 'Who is confirming', required=true) }}
             <label>What they confirm<input class="input" name="statement" required maxlength="2000" value="I have read and will follow this policy."></label>
             <input type="hidden" name="expected_revision" value="{{ row.revision }}">
-            <button class="btn" type="submit">Record sign-off</button><span role="status" class="muted"></span>
+            <button class="btn" type="submit">Record confirmation</button><span role="status" class="muted"></span>
           </form>
           {% endif %}
           <form class="sec-action" data-endpoint="/api/v1/security/policies/{{ row.id }}/review">
@@ -761,7 +761,7 @@
         if (!rows.length) {
           var none = document.createElement('p');
           none.className = 'sec-empty';
-          none.textContent = 'Threat hunting is not available on this installation.';
+          none.textContent = 'Threat hunting is not available on this installation. Ask your administrator if you need it.';
           huntersHost.appendChild(none);
           return;
         }

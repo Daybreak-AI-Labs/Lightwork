@@ -258,7 +258,7 @@ def _binding(request, response, payload=None, *, operator=False):
 
         _require_same_origin(request)
         if not hmac.compare_digest(payload.context, context):
-            raise HTTPException(409, "Account or workspace changed; reload research jobs")
+            raise HTTPException(409, "Your account or workspace changed. Reload the page to see current research runs.")
         if payload.confirm is not True:
             raise HTTPException(422, "Review and confirm this research action")
     return tenant, actor, context
@@ -270,7 +270,7 @@ async def _call(function, *args, **kwargs):
     except ResearchNotFound as exc:
         raise HTTPException(404, str(exc)) from exc
     except (ResearchConflict, RecordConflict) as exc:
-        raise HTTPException(409, "Research job changed; reload its current state") from exc
+        raise HTTPException(409, "This research run changed. Reload the page to see its current state.") from exc
     except PermissionError as exc:
         raise HTTPException(403, "Current research workspace authority is required") from exc
     except ResearchUnavailable as exc:

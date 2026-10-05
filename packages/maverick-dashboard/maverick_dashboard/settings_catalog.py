@@ -577,13 +577,13 @@ SETTINGS: tuple[Setting, ...] = (
 
     # --------------------------------------------------------------- AI models
     S("routing", "cost_aware", "Pick the cheapest capable model",
-      "Use the least expensive model that can do each job well.",
+      "Use the least expensive model that can do each task well.",
       "toggle", "AI models", False, "maverick.cost.router"),
     S("routing", "verify_ensemble", "Double-check with a second AI service",
       "Confirm important answers with models from more than one provider.",
       "toggle", "AI models", False, "maverick.verifier"),
     S("routing", "energy_aware", "Prefer lower-energy models",
-      "Favour models that use less energy when they can do the job.",
+      "Favour models that use less energy when they can do the task.",
       "toggle", "AI models", False, "maverick.energy_aware_router"),
     S("routing", "allowed_providers", "AI services agents may use for these choices",
       "Limit automatic model choices to these AI services. Leave empty to allow any service you have connected.",
@@ -698,10 +698,10 @@ SETTINGS: tuple[Setting, ...] = (
       "list", "Spending & limits", [50, 75, 100], "maverick.spending_alerts",
       max_items=10, max_length=4, item_label="Percent", item_hint="75",
       item_error="a whole number from 1 to 100"),
-    S("spending_limits", "typical_cost_min_runs", "Past runs needed for a typical cost",
+    S("spending_limits", "typical_cost_min_runs", "Past tasks needed for a typical cost",
       "How many finished tasks an agent or specialist needs in this workspace before Lightwork "
-      "shows what its past runs usually cost beside the task form. Below this, it says there "
-      "are not enough past runs yet. The range is recorded history, never a prediction.",
+      "shows what its past tasks usually cost beside the task form. Below this, it says there "
+      "are not enough past tasks yet. The range is recorded history, never a prediction.",
       "number", "Spending & limits", 10, "maverick.typical_cost", minimum=2, maximum=1000,
       integer=True, unit="finished tasks"),
     S("swarm", "max_total_spawns", "Helper agents per task",

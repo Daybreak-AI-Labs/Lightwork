@@ -24,12 +24,12 @@ words in the right column.
 | **specialist** | One of Lightwork's own built-in job specialists (the packs that ship with Lightwork). A workspace's customized copy is still a specialist, marked **Customized**. | agent (for a built-in pack), pack, compartment |
 | **agent** | Everything else: an agent a customer built or drafted, an external or connected agent, an outside agent, and AI agents in general. | specialist (for anything not built in) |
 | **agents and specialists** | A list or count that can hold both. Singular: "an agent or specialist". | specialists and agents, specialist agents |
-| **task** | Work someone asks Lightwork to do. | goal, job |
-| **run** | One execution of a workflow, flow or automation. Keep "run" for this meaning only. | run (for a task) |
+| **task** | Work someone asks Lightwork to do, including background work. A batch has its own plain noun where the page already uses one ("bulk change", "rebuild"). | goal, job (keep **job** only for a person's job: job description, job role, job card) |
+| **run** | One execution of a workflow, flow, schedule, automation, test or check. Keep "run" for this meaning only. | run (for a task: say "past tasks", "recent tasks", "per task") |
 | **workspace** | The account boundary a team works in. | tenant; "client" except in an OAuth "client ID" field |
 | **organization** | The company. | |
 | **role** | A permission role only. | role (for an agent or specialist) |
-| **approval** / **approve** | A gate a person must pass. | decision, sign-off |
+| **approval** / **approve** | A gate a person must pass. A finished result waiting for a person is a "result approval". | decision, sign-off (a person confirming they read a policy "confirms" it) |
 | **review** | Looking at something without a gate. | |
 | **result** | What work produces. | deliverable, output, artifact |
 | Plain name first, acronym in brackets on first use | e.g. "Data requests (DSAR)", "Privacy impact assessment (DPIA)" | a bare DSAR or DPIA |
@@ -75,6 +75,16 @@ words in the right column.
 
 - Pattern: **[What happened]. [What to do next].**
   "The spending limits could not be read. Try again in a minute."
+- Pick the next step from what will actually help: "Refresh the page and try
+  again." after a read or check fails, "Try again." after a save or send fails,
+  "Try again in a minute." when a service is busy or not available right now,
+  "Check your connection and try again." when Lightwork cannot be reached,
+  "Choose the file again, or try a different file." for unreadable files, and
+  "Ask your administrator…" when only an administrator can change it.
+- A sentence that reassures ("Your draft has been kept.") is not a next step;
+  add one after it.
+- Record fields shown to people get plain labels, never raw keys (see the
+  `FIELD_LABELS` map in `_governance_operations.html`).
 - In the browser, go through `mvErrorText(failure, 'do the thing')`. It writes
   "Could not do the thing." plus a plain next step for the status code.
 - Show server text only after `mvPlainDetail` accepts it. Server messages

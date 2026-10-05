@@ -164,7 +164,7 @@
         fill('vp-comp', el('p', 'muted', 'Not enough repeated tasks yet. This appears once the same kind of task has run several times.'));
         return;
       }
-      fill('vp-comp', table(['Kind of task', 'Runs', 'Cost change', 'Success change', 'Verdict'], d.task_types.map(function (t) {
+      fill('vp-comp', table(['Kind of task', 'Tasks', 'Cost change', 'Success change', 'Verdict'], d.task_types.map(function (t) {
         return [t.name, String(t.runs), pct(t.cost_change_pct), pct(t.success_change * 100),
           t.improving ? 'Getting cheaper and no less reliable' : 'Not improving yet'];
       })));
@@ -174,10 +174,10 @@
     var win = $('vp-window');
     return get('/departments' + (win ? '?window=' + encodeURIComponent(win.value) : '')).then(function (d) {
       if (!d.departments.length) {
-        fill('vp-dept', el('p', 'muted', 'No department has enough runs yet to show a trend.'));
+        fill('vp-dept', el('p', 'muted', 'No department has enough tasks yet to show a trend.'));
         return;
       }
-      fill('vp-dept', table(['Department', 'Runs', 'Cost per task then', 'Cost per task now', 'Verdict'], d.departments.map(function (x) {
+      fill('vp-dept', table(['Department', 'Tasks', 'Cost per task then', 'Cost per task now', 'Verdict'], d.departments.map(function (x) {
         return [x.name, String(x.runs), money(x.cost_before), money(x.cost_now), x.improving ? 'Getting cheaper' : 'Not yet'];
       })));
     }).catch(failed('vp-dept', 'load the department results'));
@@ -322,7 +322,7 @@
         box.textContent = '';
         if (kind === 'record') {
           box.appendChild(el('p', null, !out.intact
-            ? 'This file could not be confirmed. It may have been changed, or it is not a signed Lightwork record.'
+            ? 'This file could not be confirmed. It may have been changed, or it is not a signed Lightwork record. Ask for the original file.'
             : (out.from_this_installation
               ? 'This record is intact and was signed by this Lightwork installation. It holds ' + plural(out.records, 'decision', 'decisions') + '.'
               : 'The signature is valid for the key in this file, but who signed it has not been verified. Obtain the publisher’s key through a trusted channel before relying on its origin.')));
@@ -332,8 +332,8 @@
               ? 'This learning statement is intact and was signed by the installation whose key you gave.'
               : 'This learning statement is intact and was signed by this Lightwork installation.')
             : (keyFile
-              ? 'This learning statement could not be confirmed with that key. It may have been changed or signed by someone else.'
-              : 'This learning statement could not be confirmed against this installation. It may have been changed or signed elsewhere.')));
+              ? 'This learning statement could not be confirmed with that key. It may have been changed or signed by someone else. Check that you chose the right key.'
+              : 'This learning statement could not be confirmed against this installation. It may have been changed or signed elsewhere. Ask for the original file.')));
           if (out.claims.length) {
             var ul = el('ul');
             out.claims.forEach(function (c) { ul.appendChild(el('li', null, c.claim + ': ' + c.result)); });

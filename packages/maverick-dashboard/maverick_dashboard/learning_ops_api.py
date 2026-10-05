@@ -253,7 +253,7 @@ def _job_or_404(request: Request, job_id: str) -> jobs.Job:
     job = jobs.get(job_id) if _JOB_ID.fullmatch(job_id) else None
     if job is None or not _can_see(request, job):
         raise HTTPException(status_code=404, detail=(
-            "That job is no longer on record. Lightwork may have restarted; start it again."))
+            "That task is no longer on record. Lightwork may have restarted; start it again."))
     return job
 
 
@@ -268,12 +268,12 @@ async def stop_job(request: Request, job_id: str) -> dict:
     require_permission(request, "view")
     job = _job_or_404(request, job_id)
     if not job.cancellable:
-        raise HTTPException(status_code=409, detail="This job cannot be stopped part-way. Let it finish.")
+        raise HTTPException(status_code=409, detail="This task cannot be stopped part-way. Let it finish.")
     if job.active:
         await run_in_threadpool(lambda: _record(request, "job_stop", installation=job.needs_global,
                                                 job=job.kind))
     if not jobs.cancel(job):
-        raise HTTPException(status_code=409, detail="This job has already finished.")
+        raise HTTPException(status_code=409, detail="This task has already finished. Refresh to see its result.")
     return {"job": job.view()}
 
 
@@ -656,7 +656,7 @@ def _modify_reason(reason: str) -> str:
     for needle, sentence in _MODIFY_REFUSALS:
         if needle in text:
             return sentence
-    return "The experiment could not run. Nothing was changed."
+    return "The experiment could not run. Nothing was changed. Try again."
 
 
 @router.post("/self-modify/run")

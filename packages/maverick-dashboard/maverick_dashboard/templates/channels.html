@@ -368,7 +368,7 @@
             var status = document.querySelector('[data-ch-status="' + form.getAttribute('data-ch-check') + '"]');
             if (status && body.readiness_html) status.innerHTML = body.readiness_html;
             summarize();
-            if (window.mvToast) window.mvToast(body.message || (body.ok ? 'Test passed.' : 'Test failed.'), {error: !body.ok});
+            if (window.mvToast) window.mvToast(body.message || (body.ok ? 'Test passed.' : 'Test failed. Check the channel settings, then test again.'), {error: !body.ok});
           })
           .catch(function (e) {
             result.className = 'ch-result ch-result--failed';

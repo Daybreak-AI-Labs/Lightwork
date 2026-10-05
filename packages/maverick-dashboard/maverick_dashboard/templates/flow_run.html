@@ -325,7 +325,7 @@
         addText(teachingPanel, 'p', 'The learned rules disagree on this completed case. Choosing an action opens a separate approval before it runs.');
         if (!Array.isArray(teachingOptions) || teachingOptions.length !== 2) {
           canDecide = false;
-          addText(teachingPanel, 'p', 'Complete, verified options are unavailable or contain protected values. This page cannot submit a teaching decision.');
+          addText(teachingPanel, 'p', 'Complete, verified options are unavailable or contain protected values. This page cannot submit a teaching decision. Refresh the page to see the latest.');
         } else {
           addText(teachingPanel, 'h4', 'Actual observations');
           addText(teachingPanel, 'pre', JSON.stringify(teachingDetail.question.observation, null, 2));
@@ -488,7 +488,7 @@
         .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) {
           done(!r.ok);
           say(r.ok ? (decision === 'rejected' ? 'Rejected.' : (decision === 'approved' ? 'Approved — continuing…' : '“' + decision + '” chosen — continuing…'))
-            : (j && typeof j.detail === 'string' && j.detail.length < 512 ? j.detail : 'Could not resume.'));
+            : (j && typeof j.detail === 'string' && j.detail.length < 512 ? j.detail : 'Could not resume. Refresh the page and try again.'));
           if (!r.ok) return;
           pendingAction = decidedRun ? { key: runKey(decidedRun), reviewOnly: assignedReviewOnly,
             kind: 'decision', exhausted: false } : null;
@@ -500,7 +500,7 @@
             poll(60, pendingAction && pendingAction.key);
           }
         }); })
-        .catch(function () { done(true); say('Could not resume.'); });
+        .catch(function () { done(true); say('Could not resume. Refresh the page and try again.'); });
     });
   }
   function retry(fromFailure, allowance, failedRun) {

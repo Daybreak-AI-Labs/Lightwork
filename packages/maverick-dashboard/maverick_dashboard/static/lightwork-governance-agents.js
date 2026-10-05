@@ -198,7 +198,7 @@
       applyStatus(await request("GET", "/status", undefined, "check what is set up"));
     } catch (error) {
       configured = {};
-      document.getElementById("ga-readiness-note").textContent = (error && error.message) || "Couldn't check what is set up.";
+      document.getElementById("ga-readiness-note").textContent = (error && error.message) || "Couldn't check what is set up. Refresh the page and try again.";
     }
   }
 
@@ -324,7 +324,7 @@
     box.appendChild(list);
     var limits = Array.isArray(run.limitations) ? run.limitations : [];
     if (limits.length) box.appendChild(el("p", "muted", "Limits: " + limits.map(human).join(", ")));
-    if (run.analysis_complete === false) box.appendChild(el("p", "muted", "The assistant could not read everything it needed."));
+    if (run.analysis_complete === false) box.appendChild(el("p", "muted", "The assistant could not read everything it needed. Refresh the page and try again."));
     document.getElementById("ga-detail-panel").hidden = false;
     var heading = document.getElementById("ga-detail-title");
     if (heading && heading.focus) heading.focus();
@@ -416,7 +416,7 @@
       sources.appendChild(label);
     });
     if (preview && !refs.length) sources.appendChild(el("p", "muted", "There are no records for this assistant to read yet."));
-    if (preview && preview.complete === false) sources.appendChild(el("p", "muted", "Some sources couldn't be read right now, so this list may be incomplete."));
+    if (preview && preview.complete === false) sources.appendChild(el("p", "muted", "Some sources couldn't be read right now, so this list may be incomplete. Refresh the page and try again."));
     document.getElementById("ga-start-panel").hidden = false;
     var heading = document.getElementById("ga-start-title");
     if (heading && heading.focus) heading.focus();
@@ -512,8 +512,8 @@
 
   loadStatus().then(function () {
     if (!ready("run-list")) {
-      emptyRow(document.getElementById("ga-runs"), 6, "Reviews can't be shown until setup is finished.");
-      emptyRow(document.getElementById("ga-policies"), 6, "Policies can't be shown until setup is finished.");
+      emptyRow(document.getElementById("ga-runs"), 6, "Reviews can't be shown until setup is finished. Ask your administrator to set it up.");
+      emptyRow(document.getElementById("ga-policies"), 6, "Policies can't be shown until setup is finished. Ask your administrator to set it up.");
       return undefined;
     }
     return loadPolicies().then(loadRuns);

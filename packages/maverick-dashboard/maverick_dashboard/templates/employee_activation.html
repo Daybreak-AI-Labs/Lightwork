@@ -3,14 +3,14 @@
 {% block content %}
 {% from "_hero.html" import hero %}
 {{ hero('', ui("Your first useful result"),
-        lede=ui("Choose a job, select evidence and decide how you will judge the result. Job choices never grant a role or access. Practice examples remain distinct from real work."),
+        lede=ui("Choose a task, select evidence and decide how you will judge the result. Choosing a task never grants a role or access. Practice examples remain distinct from real work."),
         compact=true) }}
 <section class="panel" id="employee-activation">
 <p><a href="/start">{{ ui("Installation checklist") }}</a> · <a href="/budget">{{ ui("Check your current budget") }}</a></p>
 {% if not activation.readiness.can_start %}<p role="status">{{ ui("Your account can read this guidance. An operator can create and run a private draft.") }}</p>{% endif %}
 {% if not activation.readiness.provider_ready %}<p role="status">{{ ui("The configured task routes are not ready. Your private draft can be saved now; ask your administrator to repair the current provider setup before starting.") }}</p>{% endif %}
 <form data-product-validation id="activation-form">
-<label>{{ ui("Job") }} <select class="select" id="activation-job">{% for key,job in activation.jobs.items() %}<option value="{{ key }}" lang="{{ ul(job.label) }}">{{ ut(job.label) }}</option>{% endfor %}</select></label>
+<label>{{ ui("Task") }} <select class="select" id="activation-job">{% for key,job in activation.jobs.items() %}<option value="{{ key }}" lang="{{ ul(job.label) }}">{{ ut(job.label) }}</option>{% endfor %}</select></label>
 <label>{{ ui("Data choice") }} <select class="select" id="activation-mode"><option value="sample" lang="{{ ul("Fictional practice example") }}">{{ ut("Fictional practice example") }}</option><option value="real" lang="{{ ul("Real source I am authorized to use") }}">{{ ut("Real source I am authorized to use") }}</option></select></label>
 <p id="activation-sample" lang="und" dir="auto" data-user-content class="panel"></p>
 <div id="activation-real" hidden>

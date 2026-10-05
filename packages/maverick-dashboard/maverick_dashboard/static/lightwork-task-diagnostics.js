@@ -10,7 +10,7 @@
     clear();button.disabled=true;status.textContent='Preparing a local diagnostic preview…';
     try{
       var response=await fetch('/api/v1/tasks/'+root.dataset.goal+'/diagnostics',{method:'POST',credentials:'same-origin',cache:'no-store',signal:own.signal,headers:{'Content-Type':'application/json'},body:JSON.stringify({context:root.dataset.context})});
-      var value=await response.json();if(!response.ok)throw new Error(value.detail&&(value.detail.message||value.detail)||'The diagnostic report could not be prepared.');
+      var value=await response.json();if(!response.ok)throw new Error(value.detail&&(value.detail.message||value.detail)||'The diagnostic report could not be prepared. Try again.');
       if(token!==generation||own.signal.aborted)return;
       preview.textContent=value.preview;download.href=value.download_href;expires=value.expires_at*1000;
       review.disabled=!!value.audit_pending;status.textContent=value.audit_pending?'The report is retained but its audit receipt is pending. Prepare again when audit storage is available.':'SHA-256 '+value.sha256+'. Link expires '+(window.mvTimeAbsolute ? window.mvTimeAbsolute(expires) : new Date(expires).toLocaleString())+'. Review before downloading.';

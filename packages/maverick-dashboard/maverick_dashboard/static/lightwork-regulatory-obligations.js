@@ -372,7 +372,7 @@
       });
     } catch (e) {
       gatewayPreviewState.textContent = e && e.status === 422
-        ? "Lightwork could not read that file as gateway rules."
+        ? "Lightwork could not read that file as gateway rules. Choose the file again, or try a different file."
         : errorText(e, "preview the file");
       return;
     }

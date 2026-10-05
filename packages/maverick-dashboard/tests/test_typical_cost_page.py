@@ -54,7 +54,7 @@ def test_the_specialist_page_says_not_enough_runs_below_the_minimum(env):
     client, world, _ = env
     _tasks(world, [0.5] * 3)
     words = _visible(client.get(f"/agents?name={SPECIALIST}").text)
-    assert "Not enough past runs to estimate yet: 3 of the 10 finished tasks needed." in words
+    assert "Not enough past tasks to estimate yet: 3 of the 10 finished tasks needed." in words
 
 
 def test_the_specialist_page_shows_the_range_from_enough_runs(env):
@@ -62,7 +62,7 @@ def test_the_specialist_page_shows_the_range_from_enough_runs(env):
     _tasks(world, [0.2, 0.4, 0.6, 0.8, 1.0, 0.2, 0.4, 0.6, 0.8, 1.0])
     _tasks(world, [90.0] * 10, domain="aero_cmmc")  # another specialist's history
     words = _visible(client.get(f"/agents?name={SPECIALIST}").text)
-    assert ("Past runs usually cost $0.40 to $0.80, $0.60 in the middle "
+    assert ("Past tasks usually cost $0.40 to $0.80, $0.60 in the middle "
             "(based on 10 finished tasks in this workspace). "
             "This is past spending, not a prediction.") in words
 
@@ -75,7 +75,7 @@ def test_the_minimum_follows_the_setting(env):
     config.reset_config_cache()
     _tasks(world, [1.0, 2.0, 3.0])
     words = _visible(client.get(f"/agents?name={SPECIALIST}").text)
-    assert "Past runs usually cost $1.50 to $2.50, $2.00 in the middle (based on 3" in words
+    assert "Past tasks usually cost $1.50 to $2.50, $2.00 in the middle (based on 3" in words
 
 
 def test_the_team_task_form_shows_each_agents_past_runs(env):
@@ -87,7 +87,7 @@ def test_the_team_task_form_shows_each_agents_past_runs(env):
     _tasks(world, [1.0] * 10)
     _tasks(world, [0.3], domain="", principal="agent:acme.writer")
     page = client.get("/fleets").text
-    assert ('data-typical="Past runs usually cost $1.00 to $1.00, $1.00 in the middle '
+    assert ('data-typical="Past tasks usually cost $1.00 to $1.00, $1.00 in the middle '
             '(based on 10 finished tasks in this workspace).') in page
-    assert 'data-typical="Not enough past runs to estimate yet: 1 of the 10' in page
-    assert "Choose an agent or specialist to see what its past runs usually cost." in page
+    assert 'data-typical="Not enough past tasks to estimate yet: 1 of the 10' in page
+    assert "Choose an agent or specialist to see what its past tasks usually cost." in page

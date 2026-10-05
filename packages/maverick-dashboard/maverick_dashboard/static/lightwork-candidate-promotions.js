@@ -319,7 +319,7 @@
       proposalForm.reset();
       await refresh();
     } catch (error) {
-      message(error.message || 'Candidate review request could not be created.', true);
+      message(error.message || 'Candidate review request could not be created. Try again.', true);
     } finally {
       setBusy(false);
     }

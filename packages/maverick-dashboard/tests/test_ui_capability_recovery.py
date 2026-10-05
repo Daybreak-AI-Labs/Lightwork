@@ -70,9 +70,9 @@ def test_destructive_clients_confirm_exact_targets_and_recover_single_flight():
     assert "Another operation is already running" in bulk
     assert "operationInFlight = false" in bulk
     assert "delete shell.dataset.operationInFlight" in bulk
-    assert "Run the next part of this job now?" in bulk
-    assert "Allow \" + answers.amount + \" more bulk jobs" in bulk
-    assert "Permanently delete \" + count + \" finished jobs" in bulk
+    assert "Run the next part of this bulk change now?" in bulk
+    assert "Allow \" + answers.amount + \" more bulk changes" in bulk
+    assert "Permanently delete \" + count + \" finished bulk changes" in bulk
 
     assert "var destructiveInFlight = false" in reports
     assert "Another report change is already running" in reports

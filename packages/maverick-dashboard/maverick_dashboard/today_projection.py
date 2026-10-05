@@ -46,7 +46,7 @@ def _tasks(request, world, principal, since):
             "coverage": "Current owned work, up to 100 tasks per state; cards show the latest 20." + (" More records exist; open Tasks for the full list." if not complete else "")}
 
 
-_DECISION_SOURCES = {"approval": "Approvals", "flow_approval": "Flow approvals", "signoff": "Sign-offs",
+_DECISION_SOURCES = {"approval": "Approvals", "flow_approval": "Flow approvals", "signoff": "Result approvals",
                      "assessment": "Assessments", "project_review": "Project reviews",
                      "vendor_reconciliation": "Vendor checks"}
 

@@ -97,7 +97,7 @@
   async function run(action) {
     if (busy) return;
     busy = true; controls();
-    try { await action(); } catch (error) { message(error && error.message ? error.message : 'This step could not be completed.'); }
+    try { await action(); } catch (error) { message(error && error.message ? error.message : 'This step could not be completed. Try again.'); }
     finally { busy = false; controls(); }
   }
   function paragraph(parent, text) { const p = document.createElement('p'); p.textContent = text; parent.append(p); }

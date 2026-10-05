@@ -155,7 +155,7 @@ class VoiceSetup:
     def cancel_job(self, identifier: str) -> None:
         with self.lock:
             if not self.job or self.job["id"] != identifier:
-                raise HTTPException(409, "This setup job changed. Refresh its progress.")
+                raise HTTPException(409, "This setup step changed. Refresh its progress.")
             if self.job["state"] in _ACTIVE:
                 self.job["state"] = "cancelling"
                 self.cancel.set()

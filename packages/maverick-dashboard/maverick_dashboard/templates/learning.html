@@ -143,7 +143,7 @@
   <section id="learning-controls" class="lrn__pane" role="tabpanel" aria-labelledby="learning-tab-controls" tabindex="0" hidden>
   <div class="lrn__moat">
     <strong>{{ snap.components_on }} of {{ snap.components_total }} core learning components are on.</strong>
-    Every run through Lightwork can teach the workforce — from failures, from consolidation, and from the
+    Every task in Lightwork can teach the workforce — from failures, from consolidation, and from the
     recorded outcomes of its own work. Review each feature below to decide which ones to use.
     <div style="margin-top: var(--space-3); display:flex; gap: var(--space-3); align-items:center;">
       <button type="button" id="lrn-enable" class="btn btn--primary"
@@ -270,7 +270,7 @@
         });
       })();
       </script>
-      <p class="lrn__enable-note">Once outcome tracking is on, every human sign-off on a deliverable
+      <p class="lrn__enable-note">Once outcome tracking is on, every approval a person gives a result
         automatically becomes feedback your workforce learns from — see
         <a href="/workforce">Workforce</a> for what your teams have delivered, and
         <a href="/learned">Learned</a> for capabilities picked up along the way.</p>
@@ -813,7 +813,7 @@
     k.appendChild(B.kpi({ label: 'Human decisions', value: acc.human_decisions,
       sub: 'approvals: ' + B.fmt(acc.approvals) }));
     k.appendChild(B.kpi({ label: 'Learned capabilities', value: learned === null ? 'Not available' : learned,
-      sub: grounded === null ? 'A current count could not be confirmed.' : B.fmt(grounded) + ' results checked against real outcomes' }));
+      sub: grounded === null ? 'A current count could not be confirmed. Refresh the page and try again.' : B.fmt(grounded) + ' results checked against real outcomes' }));
 
     B.donut(document.getElementById('bd-systems'), {
       segments: [

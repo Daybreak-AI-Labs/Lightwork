@@ -159,7 +159,7 @@
 
   async function refreshStatus() {
     if (!/^\/api\/v1\/consent\/application-scans$/.test(apiBase)) {
-      CW.say(runtimeStatus, "App checks are not available on this page right now.", true);
+      CW.say(runtimeStatus, "App checks are not available on this page right now. Try again in a minute.", true);
       operations.disabled = true;
       return;
     }

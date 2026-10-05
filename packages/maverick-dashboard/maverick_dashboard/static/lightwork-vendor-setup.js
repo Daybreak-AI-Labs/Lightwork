@@ -81,7 +81,7 @@
     var labels = data && Array.isArray(data.detail) ? data.detail.map(function (error) {
       return error && Array.isArray(error.loc) && error.loc.length === 2 && error.loc[0] === 'body' && fields[error.loc[1]];
     }).filter(function (label) { return typeof label === 'string'; }) : [];
-    return labels.length ? 'Check ' + Array.from(new Set(labels)).join(', ') + '.' : 'Setup could not be confirmed.';
+    return labels.length ? 'Check ' + Array.from(new Set(labels)).join(', ') + '.' : 'Setup could not be confirmed. Refresh the page and try again.';
   }
   function renderReadiness(readiness) {
     var links = ['/connections', '/users', '#vs-resource-owner', '#vs-ticket', '#vs-enable', '#vs-confirm', '#vs-save', '#vs-deployment'];
@@ -137,7 +137,7 @@
       else draft = null;
     } catch (error) {
       if (response && response.ok) clear(error.message || 'Setup response was incomplete. Refresh setup.', false);
-      else requireRefresh('Setup is unavailable.');
+      else requireRefresh('Setup is unavailable. Refresh the page and try again.');
     }
     finally { busy = false; controls(); }
   }

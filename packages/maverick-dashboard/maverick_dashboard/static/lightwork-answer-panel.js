@@ -60,12 +60,12 @@
           if (r.ok) { panel.querySelector('#signoff-note').value = ''; window.mvRefreshAnswerPanel(); return; }
           return r.json().catch(function () { return {}; }).then(function (j) {
             msg.style.color = 'var(--danger)';
-            window.mvRenderError(msg, r, 'record the sign-off', j);
+            window.mvRenderError(msg, r, 'record the approval', j);
             btns.forEach(function (b) { if (b) b.disabled = false; });
           });
         }).catch(function (e) {
           msg.style.color = 'var(--danger)';
-          say(msg, cgErr(e, 'record the sign-off'));
+          say(msg, cgErr(e, 'record the approval'));
           btns.forEach(function (b) { if (b) b.disabled = false; });
         });
       }
@@ -242,7 +242,7 @@
           if (!response.ok || !receipt.revision) throw response;
           reviewedAt = receipt.revision; savedText = textEl.value; textEl.dataset.savedText = savedText; pendingEdit = null;
           setTimeout(function () { window.mvRefreshAnswerPanel(); }, 0);
-          say(editMsg, 'Revision saved. Previous versions are kept; any earlier sign-off was cleared. Learning is a separate, policy-governed process.');
+          say(editMsg, 'Revision saved. Previous versions are kept; any earlier approval was cleared. Learning is a separate, policy-governed process.');
         } catch (failure) {
           editMsg.style.color = 'var(--danger)';
           say(editMsg, '{error} Your draft is kept. Retry uses the same save reference.', {error:cgErr(failure, 'save your edit')});

@@ -51,11 +51,11 @@ def entries(S, C, Column):
                     "unconfirmed. This reports startup configuration, separately from service health.",
                     "toggle", "People & access", True, "maverick.runtime_configuration", subgroup="Configuration status"))
     from maverick.config import EMPLOYEE_ACTIVATION_JOBS
-    result.append(S("dashboard", "employee_activation_jobs", "Approved first-job guides",
-                    "Choose the employee activation jobs this installation offers. Workspace choices may only narrow this catalog. Role selection never grants a department or tools; disabled departments remain hidden.",
+    result.append(S("dashboard", "employee_activation_jobs", "Approved first-task guides",
+                    "Choose the first-task guides this installation offers. Workspace choices may only narrow this catalog. Role selection never grants a department or tools; disabled departments remain hidden.",
                     "multiselect", "People & access", list(EMPLOYEE_ACTIVATION_JOBS), "maverick.config",
                     choices=tuple(EMPLOYEE_ACTIVATION_JOBS.items()), max_items=len(EMPLOYEE_ACTIVATION_JOBS),
-                    weaker="grow", warning="Additional guided jobs become available within each person's existing access."))
+                    weaker="grow", warning="Additional guided tasks become available within each person's existing access."))
     return result
 
 

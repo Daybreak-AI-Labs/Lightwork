@@ -13,7 +13,7 @@
   }
 
   function invalidResponse() {
-    var error = new Error("Lightwork sent an answer this page could not read.");
+    var error = new Error("Lightwork sent an answer this page could not read. Refresh the page and try again.");
     error.code = "response_invalid_json";
     return error;
   }

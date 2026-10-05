@@ -349,9 +349,9 @@ def _flow_approval_source(source: Callable[[], dict], principal: str | None):
                 href=row["href"], owner=principal or row["owner"],
                 due_at=row["due_at"], updated_at=row["updated_at"],
                 version=[row["approval_binding_sha256"], row["approval_card_status"]],
-                reason=("Flow approval waiting for your decision. Review the card, then approve or reject."
+                reason=("Flow approval waiting for you. Review the card, then approve or reject."
                         if row["approval_card_status"] == "current"
-                        else "Flow approval details need fresh review before a decision."),
+                        else "Flow approval details changed. Review them again before you approve or reject."),
             )
             item["flow_run_id"] = row["run_id"]
             items.append(item)
@@ -379,7 +379,7 @@ def _signoff_source(world, owner, specs):
             items.append(_item("signoff", goal.id, spec["deliverable"],
                 href=f"/chat/goal/{goal.id}", owner=getattr(goal, "owner", ""),
                 updated_at=goal.updated_at, version=[goal.title, spec.get("gate")],
-                reason="Result was rejected; revise and request fresh sign-off" if signed.get(goal.id) == "rejected" else "Completed work awaiting sign-off"))
+                reason="Result was rejected. Revise it, then ask for approval again." if signed.get(goal.id) == "rejected" else "Finished result waiting for approval"))
         coverage.append({"kind": "signoff", "status": "partial" if len(rows) > SOURCE_LIMIT else "current"})
     except Exception:
         coverage.append({"kind": "signoff", "status": "unavailable"})

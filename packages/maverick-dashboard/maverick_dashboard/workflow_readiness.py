@@ -6,7 +6,7 @@ CATALOG = (
      "scope": "Step-by-step help from first setup to a finished piece of work that a person has approved.",
      "limit": "A finished task is not proof the result is right for your business. Connect an AI provider and review a real result first."},
     {"name": "Action Center", "stage": "available", "feature": "action_center", "href": "/action-center", "permission": "operate",
-     "scope": "Everything waiting for you in one place: approvals, sign-offs, assessments and reviews. Mark items read or snooze them.",
+     "scope": "Everything waiting for you in one place: approvals, assessments and reviews. Mark items read or snooze them.",
      "limit": "Snoozing only hides an item for you. It does not pause the work or move its deadline."},
     {"name": "Editor recovery", "stage": "available", "feature": "draft_recovery", "href": "/workflow-builder", "permission": "operate",
      "scope": "Get back unsaved work in the agent, workflow and guided editors after a browser crash or closed tab.",

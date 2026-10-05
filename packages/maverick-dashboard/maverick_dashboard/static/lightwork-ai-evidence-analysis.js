@@ -394,7 +394,7 @@ async function refreshStatus() {
     const tesseractDetected = payload.external_parser_binaries_detected &&
       payload.external_parser_binaries_detected.tesseract === true;
     const ocrNotice = tesseractDetected ? "" :
-      " Text inside images can't be read on this installation.";
+      " Text inside images can't be read on this installation. Upload a text or PDF version instead.";
     if (payload.ready === true && payload.operational_composition_verified === true) {
       setStatus(runtimeStatus, `Evidence analysis is ready.${ocrNotice}`);
       operations.disabled = false;

@@ -7,7 +7,7 @@
   const coverage = document.getElementById("ac-coverage"), previous = document.getElementById("ac-previous");
   const next = document.getElementById("ac-next"), page = document.getElementById("ac-page");
   let model = null, offset = 0, busy = false, generation = 0, expired = false;
-  const labels = {connection_attention:"Your connections needing attention",task_attention:"Your task questions and recovery",approval:"Approvals",flow_approval:"Flow approvals",signoff:"Sign-offs",assessment:"Assessments",project_review:"Project reviews",vendor_reconciliation:"Actions to double-check in other apps"};
+  const labels = {connection_attention:"Your connections needing attention",task_attention:"Your task questions and recovery",approval:"Approvals",flow_approval:"Flow approvals",signoff:"Result approvals",assessment:"Assessments",project_review:"Project reviews",vendor_reconciliation:"Actions to double-check in other apps"};
   const ACTIONS = {"jira.create":"Create a Jira issue"};
   const OBSERVATIONS = {
     execution_attempt: { recorded: "Lightwork recorded the attempt" },
@@ -145,7 +145,7 @@
     if (!model.items.length) {
       const partial = model.coverage.some(source=>source.status !== "current" && source.status !== "disabled");
       const empty = node("div", undefined, "mv-empty");
-      empty.append(node("p", partial ? "No items are visible in this filter. Some sources are incomplete or unavailable." : "You're all caught up.", "mv-empty__title"));
+      empty.append(node("p", partial ? "No items are visible in this filter. Some sources are incomplete or unavailable; refresh the page or choose another filter." : "You're all caught up.", "mv-empty__title"));
       const filtered = form.elements.view.value !== "active" || form.elements.kind.value !== "all" || form.elements.assignment.value !== "all";
       if (filtered) {
         const all = node("button", "Show everything", "btn"); all.type = "button";

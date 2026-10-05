@@ -114,11 +114,11 @@ ROWS = [('Review note', 'Note de révision', 'Prüfnotiz', 'レビューのメ�
   'Prüfantwort speichern',
   'レビューの返答を保存',
   '保存审阅回复'),
- ('Approving this review does not approve tool use, run the task, or provide its final sign-off.',
+ ('Approving this review does not approve tool use, start the task, or give its final approval.',
   'Approuver cette révision n’autorise pas l’utilisation d’outils, ne lance pas la tâche et ne constitue pas '
-  'sa validation finale.',
-  'Die Genehmigung dieser Prüfung erlaubt keine Toolnutzung, führt die Aufgabe nicht aus und erteilt keine '
-  'endgültige Freigabe.',
+  'son approbation finale.',
+  'Die Genehmigung dieser Prüfung erlaubt keine Toolnutzung, startet die Aufgabe nicht und erteilt keine '
+  'endgültige Genehmigung.',
   'このレビューを承認しても、ツールの使用許可、タスクの実行、タスクの最終承認にはなりません。',
   '批准此审阅并不授权工具使用、运行任务或给予任务最终签核。'),
  ('Review and restore task files',
@@ -341,14 +341,14 @@ ROWS = [('Review note', 'Note de révision', 'Prüfnotiz', 'レビューのメ�
   'プロジェクトのチームレビュー',
   '项目团队审阅'),
  ('Share a fixed task result with a named workspace reviewer. Their decision applies to that captured '
-  'result. The owner remains responsible for any changes, final sign-off, or further work on the task.',
+  'result. The owner remains responsible for any changes, final approval, or further work on the task.',
   'Partagez un résultat figé avec un réviseur désigné dans cet espace. Sa décision porte sur cette copie. Le '
-  'propriétaire reste responsable des modifications, de la validation finale et de la suite du travail.',
+  'propriétaire reste responsable des modifications, de l’approbation finale et de la suite du travail.',
   'Teilen Sie einen festen Ergebnisstand mit einer benannten prüfenden Person im Arbeitsbereich. Deren '
-  'Entscheidung gilt für diesen Stand. Die verantwortliche Person bleibt für Änderungen, endgültige Freigabe '
+  'Entscheidung gilt für diesen Stand. Die verantwortliche Person bleibt für Änderungen, endgültige Genehmigung '
   'und weitere Arbeit zuständig.',
   'ワークスペース内の指定したレビュアーと、保存した時点の結果を共有します。判断はその結果に適用されます。変更、最終承認、タスクの追加作業は引き続き所有者の責任です。',
-  '与工作区中指定的审阅人分享固定的任务结果。其决定仅适用于捕获的结果。所有者仍负责更改、最终签核及任务的后续工作。'),
+  '与工作区中指定的审阅人分享固定的任务结果。其决定仅适用于捕获的结果。所有者仍负责更改、最终批准及任务的后续工作。'),
  ('Loading your reviews…',
   'Chargement de vos révisions…',
   'Ihre Prüfungen werden geladen…',
@@ -483,25 +483,25 @@ ROWS = [('Review note', 'Note de révision', 'Prüfnotiz', 'レビューのメ�
   'wiederhergestellt werden.',
   '今後のタスクは事前のコピーなしでファイルを変更するため、その変更をこのページで元に戻すことはできません。以前のタスクで保存したコピーは残り、引き続きここで復元できます。',
   '未来任务更改文件前将不再保存副本，因此无法从此页面还原其更改。此前任务已保存的副本仍会保留，并可继续在此恢复。'),
- ("Only files changed by this task's own file tools on this computer. Up to 100 files per run, 8 MB each and "
+ ("Only files changed by this task's own file tools on this computer. Up to 100 files per task, 8 MB each and "
   '32 MB in total. Long previews may be shortened, but every file is fully checked before it is put back. '
   'Stop this task, and any other task using the same folder, before restoring. If a restore is interrupted, '
-  "you can retry exactly the same restore. Tasks run on another computer, and very old runs, can't be "
+  "you can retry exactly the same restore. Tasks run on another computer, and very old tasks, can't be "
   'restored here.',
   'Uniquement les fichiers modifiés par les outils de fichiers de cette tâche sur cet ordinateur : 100 '
-  'fichiers par exécution, 8 Mo chacun et 32 Mo au total. Les longs aperçus peuvent être abrégés, mais '
+  'fichiers par tâche, 8 Mo chacun et 32 Mo au total. Les longs aperçus peuvent être abrégés, mais '
   'chaque fichier est intégralement vérifié avant restauration. Arrêtez cette tâche et toute autre tâche '
   'utilisant le même dossier avant de restaurer. Une restauration interrompue peut être reprise à '
-  'l’identique. Les tâches exécutées ailleurs et les très anciennes exécutions ne sont pas restaurables ici.',
+  'l’identique. Les tâches exécutées ailleurs et les très anciennes tâches ne sont pas restaurables ici.',
   'Nur Dateien, die die eigenen Dateiwerkzeuge dieser Aufgabe auf diesem Computer geändert haben: höchstens '
-  '100 Dateien pro Lauf, je 8 MB und insgesamt 32 MB. Lange Vorschauen können gekürzt sein; jede Datei wird '
+  '100 Dateien pro Aufgabe, je 8 MB und insgesamt 32 MB. Lange Vorschauen können gekürzt sein; jede Datei wird '
   'vor der Wiederherstellung vollständig geprüft. Stoppen Sie vorher diese Aufgabe und andere Aufgaben im '
-  'selben Ordner. Eine unterbrochene Wiederherstellung kann exakt wiederholt werden. Läufe auf anderen '
-  'Computern und sehr alte Läufe sind hier nicht wiederherstellbar.',
-  'このコンピューターで、このタスク自身のファイルツールが変更したファイルだけが対象です。1回の実行につき最大100ファイル、各8 MB、合計32 '
-  'MBです。長いプレビューは省略される場合がありますが、復元前に各ファイル全体を確認します。復元前に、このタスクと同じフォルダーを使う他のタスクを停止してください。中断した復元は同じ内容で再試行できます。他のコンピューターでの実行や古すぎる実行は、ここでは復元できません。',
-  '仅限此任务自身的文件工具在此计算机上更改的文件。每次运行最多100个文件，每个8 MB，总计32 '
-  'MB。较长预览可能被缩短，但恢复前会完整检查每个文件。恢复前请停止此任务及使用同一文件夹的其他任务。如果恢复中断，可以重试完全相同的恢复。在其他计算机运行的任务和过旧的运行无法在此恢复。'),
+  'selben Ordner. Eine unterbrochene Wiederherstellung kann exakt wiederholt werden. Aufgaben auf anderen '
+  'Computern und sehr alte Aufgaben sind hier nicht wiederherstellbar.',
+  'このコンピューターで、このタスク自身のファイルツールが変更したファイルだけが対象です。1つのタスクにつき最大100ファイル、各8 MB、合計32 '
+  'MBです。長いプレビューは省略される場合がありますが、復元前に各ファイル全体を確認します。復元前に、このタスクと同じフォルダーを使う他のタスクを停止してください。中断した復元は同じ内容で再試行できます。他のコンピューターで実行したタスクや古すぎるタスクは、ここでは復元できません。',
+  '仅限此任务自身的文件工具在此计算机上更改的文件。每个任务最多100个文件，每个8 MB，总计32 '
+  'MB。较长预览可能被缩短，但恢复前会完整检查每个文件。恢复前请停止此任务及使用同一文件夹的其他任务。如果恢复中断，可以重试完全相同的恢复。在其他计算机运行的任务和过旧的任务无法在此恢复。'),
  ("See each file in this task's work folder as it was before the task first changed it, next to how it is "
   "now. Lightwork keeps only those two points, so in-between versions can't be compared. Looking changes "
   'nothing.',
@@ -571,21 +571,16 @@ ROWS = [('Review note', 'Note de révision', 'Prüfnotiz', 'レビューのメ�
   'Vor einer Umsetzung muss eine Führungskraft dies genehmigen.',
   '実行に移す前に管理者の承認が必要です。',
   '付诸行动前，需要经理批准。'),
- ('A reviewer must sign off before this is acted on.',
-  'Un réviseur doit valider avant toute action.',
-  'Vor einer Umsetzung muss eine prüfende Person dies freigeben.',
+ ('A reviewer must approve this before it is acted on.',
+  'Un réviseur doit l’approuver avant toute action.',
+  'Vor einer Umsetzung muss eine prüfende Person dies genehmigen.',
   '実行に移す前にレビュアーの承認が必要です。',
-  '付诸行动前，需要审阅人签核。'),
+  '付诸行动前，需要审阅人批准。'),
  ('Approval opens when the result is finished.',
   'L’approbation est disponible quand le résultat est terminé.',
   'Die Genehmigung ist nach Fertigstellung des Ergebnisses möglich.',
   '結果が完成すると承認できるようになります。',
   '结果完成后可进行批准。'),
- ('Sign-off opens when the result is finished.',
-  'La validation est disponible quand le résultat est terminé.',
-  'Die Freigabe ist nach Fertigstellung des Ergebnisses möglich.',
-  '結果が完成すると最終承認できるようになります。',
-  '结果完成后可进行签核。'),
  ('Rate this result', 'Évaluer ce résultat', 'Dieses Ergebnis bewerten', 'この結果を評価', '评价此结果'),
  ('Yes, useful', 'Oui, utile', 'Ja, hilfreich', 'はい、役立ちました', '有帮助'),
  ('No, not useful', 'Non, inutile', 'Nein, nicht hilfreich', 'いいえ、役立ちませんでした', '没有帮助'),

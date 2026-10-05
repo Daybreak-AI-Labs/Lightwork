@@ -45,7 +45,7 @@
         headers: {'Content-Type': 'application/json', 'Accept': 'application/json'},
         body: JSON.stringify({confirm: true, grace_hours: hours})});
       if (!response.ok) {
-        const reason = typeof window.mvErrorText === 'function' ? await window.mvErrorText(response, 'change the link key') : 'The link key could not be changed. Nothing was changed.';
+        const reason = typeof window.mvErrorText === 'function' ? await window.mvErrorText(response, 'change the link key') : 'The link key could not be changed. Nothing was changed. Try again.';
         el('state').textContent = reason;
         return;
       }

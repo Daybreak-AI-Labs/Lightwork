@@ -1814,7 +1814,7 @@
     }
     learnedInputPending = true;
     return prepare().catch(function (error) {
-      say(error.message || 'Could not open workflow inputs.', true);
+      say(error.message || 'Could not open workflow inputs. Refresh the page and try again.', true);
       return {status: 'unconfirmed'};
     }).finally(function () { learnedInputPending = false; });
   }

@@ -784,7 +784,7 @@
 
   <div class="section-head" data-settings-group="maintenance"><h2>Background work</h2></div>
   <div class="panel" data-settings-group="maintenance" data-maintenance="queue">
-    <p class="muted settings-lead">Scheduled and background jobs, and any that stopped because of a problem.</p>
+    <p class="muted settings-lead">Scheduled and background tasks, and any that stopped because of a problem.</p>
     <p class="settings-row-form"><button type="button" class="btn" data-maintenance-run="queue">Show background work</button></p>
     <p class="muted" role="status" aria-live="polite" data-maintenance-status="queue"></p>
     <div data-maintenance-out="queue"></div>
@@ -1200,7 +1200,7 @@
             });
           }
         } catch (failure) {
-          status.textContent = failure.message || (window.mvErrorText ? window.mvErrorText(failure, 'save this section') : 'Could not save this section. Your draft is kept.');
+          status.textContent = failure.message || (window.mvErrorText ? window.mvErrorText(failure, 'save this section') : 'Could not save this section. Your draft is kept. Try again.');
         } finally {
           controls.forEach(function (item) { item[0].disabled = item[1]; });
           delete form.dataset.saving;

@@ -61,6 +61,7 @@
   const retryOperations = new WeakMap();
 
   class ProjectionError extends Error {}
+  const NEXT = ' Refresh the page and try again.';
   const fail = message => { throw new ProjectionError(message); };
   const node = (tag, value, className) => {
     const element = document.createElement(tag);
@@ -69,33 +70,33 @@
     return element;
   };
   const object = (value, label) => {
-    if (value === null || typeof value !== 'object' || Array.isArray(value)) fail(label + ' is invalid.');
+    if (value === null || typeof value !== 'object' || Array.isArray(value)) fail(label + ' is missing from the report.' + NEXT);
     return value;
   };
   const array = (value, label, maximum) => {
-    if (!Array.isArray(value) || value.length > maximum) fail(label + ' is invalid.');
+    if (!Array.isArray(value) || value.length > maximum) fail(label + ' is missing or lists too many items.' + NEXT);
     return value;
   };
   const count = (value, label, maximum = Number.MAX_SAFE_INTEGER) => {
-    if (!Number.isSafeInteger(value) || value < 0 || value > maximum) fail(label + ' is invalid.');
+    if (!Number.isSafeInteger(value) || value < 0 || value > maximum) fail(label + ' must be a whole number of 0 or more.' + NEXT);
     return value;
   };
   const text = (value, label, maximum, optional = false) => {
     if (optional && value === null) return null;
     if (typeof value !== 'string' || value.length < 1 || value.length > maximum || /[\u0000-\u001f\u007f]/.test(value)) {
-      fail(label + ' is invalid.');
+      fail(label + ' is missing, too long or contains characters this page cannot show.' + NEXT);
     }
     return value;
   };
   const money = (value, label, optional = false) => {
     if (optional && value === null) return null;
-    if (typeof value !== 'string' || value.length > 96 || !MONEY.test(value)) fail(label + ' is invalid.');
+    if (typeof value !== 'string' || value.length > 96 || !MONEY.test(value)) fail(label + ' must be an amount of money.' + NEXT);
     return value;
   };
   const timestamp = (value, label, optional = false) => {
     if (optional && value === null) return null;
     if (typeof value !== 'number' || !Number.isFinite(value) ||
-        value <= 0 || value > MAX_TIMESTAMP) fail(label + ' is invalid.');
+        value <= 0 || value > MAX_TIMESTAMP) fail(label + ' must be a date and time.' + NEXT);
     return value;
   };
   function outcomeCategory(outcome) {
@@ -110,7 +111,7 @@
   function totals(value, label) {
     const rows = object(value, label);
     Object.entries(rows).forEach(([code, amount]) => {
-      if (!CURRENCY.test(code)) fail(label + ' currency is invalid.');
+      if (!CURRENCY.test(code)) fail(label + ' uses a currency Lightwork does not recognise.' + NEXT);
       money(amount, label + ' amount');
     });
     return rows;
@@ -143,9 +144,9 @@
   }
   function comparison(value, component) {
     const result = object(value, component + ' comparison');
-    if (!COMPARISON.has(result.status)) fail(component + ' comparison status is invalid.');
+    if (!COMPARISON.has(result.status)) fail(component + ' comparison has an unknown status.' + NEXT);
     array(result.missing_records, component + ' missing records', MAX_CASES).forEach(identifier => {
-      if (typeof identifier !== 'string' || !ID.test(identifier)) fail(component + ' missing record is invalid.');
+      if (typeof identifier !== 'string' || !ID.test(identifier)) fail(component + ' comparison lists a missing record without a valid reference.' + NEXT);
     });
     const savingsKey = component === 'Human-time' ? 'minutes_saved' : 'net_savings';
     money(result[savingsKey], component + ' savings', true);
@@ -155,7 +156,7 @@
     }
     if (result.overflow !== undefined) {
       if (typeof result.overflow !== 'boolean' || (result.overflow && result.status !== 'unavailable')) {
-        fail(component + ' comparison overflow is invalid.');
+        fail(component + ' comparison is marked as too large to add up, but still shows a total.' + NEXT);
       }
     }
     if (result.reason !== undefined) text(result.reason, component + ' comparison reason', 1000);
@@ -164,17 +165,17 @@
         fail(component + ' complete comparison is missing evidence.');
       }
       if (component === 'Cost') {
-        if (!CURRENCY.test(result.currency || '')) fail('Comparison currency is invalid.');
+        if (!CURRENCY.test(result.currency || '')) fail('The cost comparison uses a currency Lightwork does not recognise. Refresh the page and try again.');
         money(result.baseline_total, 'Comparison baseline total');
         money(result.delivered_total, 'Comparison delivered total');
       }
     }
     if (result.measured_positive_roi === true && result.status !== 'measured') {
-      fail('Positive measured ROI classification is invalid.');
+      fail('The report says return on investment was measured, but the comparison was not measured. Refresh the page and try again.');
     }
     if (component === 'Cost' && result.measured_positive_roi !== undefined) {
       if (typeof result.measured_positive_roi !== 'boolean') {
-        fail('Positive measured ROI flag is invalid.');
+        fail('The report does not say clearly whether return on investment was measured. Refresh the page and try again.');
       }
       if (result.measured_positive_roi && (
         result.roi_percent === null || decimal(result.roi_percent).units <= 0n
@@ -248,7 +249,7 @@
     const report = object(value, 'Cohort value report');
     if (report.schema !== expectedSchema || report.context !== context || report.reconciles !== true ||
         report.pilot_id !== pilotSelector.value) {
-      fail('The cohort report did not match this account and workspace.');
+      fail('The cohort report is for a different account, workspace or pilot. Refresh the page and try again.');
     }
     text(report.plan_version, 'Pilot plan version', 64);
     text(report.admission_manifest_sha256, 'Admission manifest', 64);
@@ -260,11 +261,11 @@
     if (binding.acceptance_contract_ref !==
           'outcome-pilot:' + report.pilot_id + ':' + report.plan_version ||
         !/^[a-f0-9]{64}$/.test(binding.record_ids_sha256 || '')) {
-      fail('The cohort report contract is invalid.');
+      fail('The cohort report is incomplete or in a format this page cannot read. Refresh the page and try again.');
     }
     const admitted = count(report.admitted, 'Admitted denominator', MAX_CASES);
     if (count(binding.record_count, 'Bound cohort count', MAX_CASES) !== admitted) {
-      fail('The cohort report does not match its admission manifest.');
+      fail('The cohort report\'s case count does not match the list of cases it covers. Refresh the page and try again.');
     }
     if (expectedSchema === 'lightwork.outcome-value-export.v1') {
       if (!/^[a-f0-9]{64}$/.test(report.cohort_sha256 || '') ||
@@ -294,7 +295,7 @@
       const item = object(value, 'Cohort case');
       const outcome = object(item.outcome, 'Cohort outcome');
       if (typeof outcome.id !== 'string' || !ID.test(outcome.id) || ids.has(outcome.id)) {
-        fail('Cohort case identity is invalid.');
+        fail('A case in the cohort report is missing its reference or is listed twice. Refresh the page and try again.');
       }
       ids.add(outcome.id);
       text(outcome.admission_id, 'Admission identity', 512);
@@ -305,16 +306,16 @@
       }
       count(outcome.revision, 'Outcome revision');
       if (!['active', 'cancelled', 'completed', 'failed'].includes(outcome.disposition)) {
-        fail('Outcome disposition is invalid.');
+        fail('A case in the cohort report has an unknown state. Refresh the page and try again.');
       }
       const technical = object(outcome.technical_outcome, 'Technical outcome');
       if (!['verified', 'failed', 'unresolved'].includes(technical.status)) {
-        fail('Technical outcome status is invalid.');
+        fail('A case in the cohort report has an unknown technical result. Refresh the page and try again.');
       }
       text(technical.reason, 'Technical outcome reason', 1000);
       const business = object(outcome.business_outcome, 'Business outcome');
       if (!['accepted', 'rejected', 'unresolved'].includes(business.status)) {
-        fail('Business outcome status is invalid.');
+        fail('A case in the cohort report has an unknown business result. Refresh the page and try again.');
       }
       text(business.reason, 'Business outcome reason', 1000);
       const outcomeCosts = object(outcome.costs, 'Case delivered cost');
@@ -323,11 +324,11 @@
       caseFailedAttempts += count(
         outcomeCosts.failed_attempt_count, 'Case failed attempts', 5000,
       );
-      if (typeof outcomeCosts.complete !== 'boolean') fail('Case cost coverage is invalid.');
+      if (typeof outcomeCosts.complete !== 'boolean') fail('A case in the cohort report does not say whether all its costs are counted. Refresh the page and try again.');
       if (!outcomeCosts.complete) caseIncompleteCosts += 1;
       count(item.value_revision, 'Value revision');
       if (!CATEGORIES.includes(item.category) || item.category !== outcomeCategory(outcome)) {
-        fail('Cohort case category is invalid.');
+        fail('A case in the cohort report is in the wrong category for its outcome. Refresh the page and try again.');
       }
       derivedCategories[item.category] += 1;
       const timestamps = object(item.timestamps, 'Case timestamps');
@@ -341,13 +342,13 @@
       ].forEach(([key, label]) => timestamp(timestamps[key], label, true));
       const itemComparison = object(item.comparison, 'Case comparison');
       const cost = object(itemComparison.cost, 'Case cost comparison');
-      if (!COMPARISON.has(cost.status)) fail('Case cost comparison is invalid.');
+      if (!COMPARISON.has(cost.status)) fail('A case\'s cost comparison has an unknown status. Refresh the page and try again.');
       if (cost.status === 'unavailable' && (cost.net_savings !== null || cost.roi_percent !== null)) {
         fail('Incomplete case comparison exposed ROI.');
       }
       if (cost.overflow !== undefined) {
         if (typeof cost.overflow !== 'boolean' || (cost.overflow && cost.status !== 'unavailable')) {
-          fail('Case cost comparison overflow is invalid.');
+          fail('A case\'s cost comparison is marked as too large to add up, but still shows a total. Refresh the page and try again.');
         }
       }
       if (cost.reason !== undefined) text(cost.reason, 'Case cost comparison reason', 1000);
@@ -359,11 +360,11 @@
         money(baseline.value, 'Case baseline amount');
         money(delivered.amount, 'Case delivered amount');
         if (!CURRENCY.test(baseline.currency) || delivered.currency !== baseline.currency) {
-          fail('Case comparison currency is invalid.');
+          fail('A case\'s cost comparison mixes currencies or uses one Lightwork does not recognise. Refresh the page and try again.');
         }
       }
       const human = object(itemComparison.human_effort, 'Case human-time comparison');
-      if (!COMPARISON.has(human.status)) fail('Case human-time comparison is invalid.');
+      if (!COMPARISON.has(human.status)) fail('A case\'s time comparison has an unknown status. Refresh the page and try again.');
       if ((human.status === 'unavailable') !== (human.minutes_saved === null)) {
         fail('Case human-time comparison is incomplete.');
       }
@@ -373,13 +374,13 @@
       );
       if (new Set(missingComponents).size !== missingComponents.length ||
           missingComponents.some(component => !MISSING_COMPONENTS.has(component))) {
-        fail('Missing case components are invalid.');
+        fail('Missing case components are invalid. Refresh the page and try again.');
       }
       if (typeof itemComparison.measured_positive_roi !== 'boolean' ||
           itemComparison.measured_positive_roi !== (
             cost.status === 'measured' && cost.roi_percent !== null &&
             decimal(cost.roi_percent).units > 0n && human.status === 'measured'
-          )) fail('Case positive measured ROI classification is invalid.');
+          )) fail('A case says return on investment was measured, but its cost and time were not both measured. Refresh the page and try again.');
       if (human.status === 'unavailable' && cost.status !== 'unavailable') {
         fail('A case with incomplete human-time evidence exposed ROI.');
       }
@@ -389,7 +390,7 @@
         const baselineHuman = object(baseline.human_effort, 'Current baseline human time');
         if (!['observed', 'estimated', 'unknown'].includes(baselineCost.basis) ||
             !['observed', 'estimated', 'unknown'].includes(baselineHuman.basis)) {
-          fail('Current baseline basis is invalid.');
+          fail('The current baseline does not say whether its figures were observed, estimated or unknown. Refresh the page and try again.');
         }
         money(baselineCost.value, 'Current baseline cost value', true);
         money(baselineHuman.value, 'Current baseline human-time value', true);
@@ -399,7 +400,7 @@
           }
           text(baselineCost.unknown_reason, 'Unknown baseline cost reason', 1000);
         } else if (baselineCost.value === null || !CURRENCY.test(baselineCost.currency || '')) {
-          fail('Current baseline currency is invalid.');
+          fail('The current baseline cost has no amount or uses a currency Lightwork does not recognise. Refresh the page and try again.');
         }
         if (baselineHuman.basis === 'unknown') {
           if (baselineHuman.value !== null) fail('Unknown baseline human time exposed a value.');
@@ -432,7 +433,7 @@
     const overflow = new Set(array(
       costs.aggregate_overflow_currencies, 'Aggregate overflow currencies', 100,
     ).map(code => {
-      if (!CURRENCY.test(code)) fail('Aggregate overflow currency is invalid.');
+      if (!CURRENCY.test(code)) fail('The report lists a currency Lightwork does not recognise. Refresh the page and try again.');
       return code;
     }));
     if (overflow.size !== costs.aggregate_overflow_currencies.length) {
@@ -448,7 +449,7 @@
       fail('Cohort cost counts do not reconcile to admitted cases.');
     }
     if (typeof costs.complete !== 'boolean' || typeof costs.allocation_assumptions_explicit !== 'boolean') {
-      fail('Cost coverage flags are invalid.');
+      fail('Cost coverage flags are invalid. Refresh the page and try again.');
     }
     if (costs.complete && (
       costs.incomplete_records !== 0 || overflow.size || !costs.allocation_assumptions_explicit
@@ -486,12 +487,12 @@
         (report.commercial_records_complete && (
           renewals.length !== renewalCount || expansions.length !== expansionCount
         )) || renewals.length > renewalCount || expansions.length > expansionCount) {
-      fail('Commercial record coverage is invalid.');
+      fail('The count of renewals or expansions does not match the records listed. Refresh the page and try again.');
     }
     if (!report.commercial_records_complete && report.scope_complete) {
       fail('Incomplete commercial evidence claimed a complete cohort.');
     }
-    if (typeof report.scope_complete !== 'boolean') fail('Cohort scope is invalid.');
+    if (typeof report.scope_complete !== 'boolean') fail('The cohort report does not say whether it covers every case. Refresh the page and try again.');
     return {report, cases, costs, aggregate, commercial};
   }
 
@@ -689,27 +690,27 @@
   function validatePilotPage(value, requestedCursor) {
     const payload = object(value, 'Pilot list');
     if (payload.context !== context || typeof payload.partial !== 'boolean') {
-      fail('The pilot list did not match this account and workspace.');
+      fail('The pilot list is for a different account or workspace, or does not say whether it is complete. Refresh the page and try again.');
     }
     const page = object(payload.page, 'Pilot page');
     if (Object.keys(page).sort().join('\u0000') !== 'has_more\u0000next_cursor' ||
         typeof page.has_more !== 'boolean' || payload.partial !== page.has_more) {
-      fail('The pilot page is invalid.');
+      fail('The page of pilots is incomplete or in a format this page cannot read. Refresh the page and try again.');
     }
     let nextCursor = '';
     if (page.has_more) {
       if (typeof page.next_cursor !== 'string' || !PAGE_CURSOR.test(page.next_cursor) ||
           page.next_cursor === requestedCursor) {
-        fail('The pilot page cursor is invalid.');
+        fail('The link to the next page of pilots is not valid. Refresh the page and try again.');
       }
       nextCursor = page.next_cursor;
     } else if (page.next_cursor !== null) {
-      fail('The pilot page cursor is invalid.');
+      fail('The link to the next page of pilots is not valid. Refresh the page and try again.');
     }
     const items = array(payload.items, 'Pilot list', MAX_CASES).map(itemValue => {
       const item = object(itemValue, 'Pilot');
       if (typeof item.id !== 'string' || !PILOT_ID.test(item.id)) {
-        fail('A pilot identity is invalid.');
+        fail('A pilot in the list is missing a valid reference. Refresh the page and try again.');
       }
       return {id: item.id, title: text(item.title, 'Pilot title', 200)};
     });
@@ -842,7 +843,7 @@
       statusHost.textContent = 'Evidence saved and the exact pilot cohort was recalculated.';
     } catch (error) {
       statusHost.textContent = error instanceof ProjectionError
-        ? error.message : 'The evidence could not be saved. Your entries remain in the form.';
+        ? error.message : 'The evidence could not be saved. Your entries remain in the form. Try again.';
     } finally {
       button.disabled = false;
     }
@@ -1038,14 +1039,14 @@
       statusHost.textContent = 'Value evidence report downloaded.';
     } catch (error) {
       statusHost.textContent = error instanceof ProjectionError
-        ? error.message : 'The complete report could not be verified or downloaded.';
+        ? error.message : 'The complete report could not be verified or downloaded. Try again.';
     } finally {
       exportButton.disabled = !cohort || !cohort.report.scope_complete;
     }
   });
 
   if (!CONTEXT.test(context)) {
-    host.replaceChildren(node('p', 'The account or workspace context is invalid. Reload this page.'));
+    host.replaceChildren(node('p', 'This page is open for a different account or workspace. Reload this page.'));
     statusHost.textContent = 'No cohort data was requested.';
     refreshButton.disabled = true;
     loadMoreButton.disabled = true;

@@ -26,7 +26,7 @@
       var response = await fetch(base + path, {method:body ? 'POST' : 'GET', credentials:'same-origin', cache:'no-store', signal:controller.signal,
         headers:{'Content-Type':'application/json', 'X-Lightwork-Project-Context':context}, ...(body ? {body:JSON.stringify(body)} : {})});
       var data = null; try { data = await response.json(); } catch (_) { /* Never display raw responses. */ }
-      if (!response.ok) { var error = new Error(data && typeof data.detail === 'string' ? data.detail : 'This project operation could not be confirmed. Your draft is kept.'); error.status = response.status; if (response.status === 401 || response.status === 403) { closePrivateView(); status(error.message); } throw error; }
+      if (!response.ok) { var error = new Error(data && typeof data.detail === 'string' ? data.detail : 'This project operation could not be confirmed. Your draft is kept. Refresh the page and try again.'); error.status = response.status; if (response.status === 401 || response.status === 403) { closePrivateView(); status(error.message); } throw error; }
       if (!data || typeof data !== 'object' || (data.context && data.context !== context)) { closePrivateView(); status('The current account or workspace changed. Reload before continuing.'); var changed = new Error('The current account or workspace could not be confirmed. Reload before continuing.'); changed.status = 409; throw changed; }
       return data;
     } catch (error) { if (controller.signal.aborted && !error.status) throw new Error('The wait ended before a result was confirmed. Your draft is kept.'); throw error; }

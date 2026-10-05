@@ -446,7 +446,7 @@
       box.appendChild(R.el("p", "", (d.added_finding_sha256 || []).length + " new item(s), " + (d.removed_finding_sha256 || []).length +
         " no longer found, " + (d.unchanged_count || 0) + " unchanged."));
     } catch (f) {
-      if (f && f.status === 409) { say("These two scans used different protection keys, so they cannot be compared."); return; }
+      if (f && f.status === 409) { say("These two scans used different protection keys, so they cannot be compared. Choose two scans made with the same key."); return; }
       fail(f, "compare the scans");
     }
   }

@@ -9,11 +9,11 @@
     status.setAttribute('role','status');retry.type='button';retry.className='btn btn--ghost';copy(retry,'Refresh accounts');
     link.href='/connections';copy(link,'Open Connections');select.after(status,retry,link);
     let serial=0, context=null, lost=false;
-    function clear(){serial++;lost=true;select.replaceChildren();select.value='';select.disabled=false;select.setCustomValidity('Account selection is unavailable.');copy(status,'Account or workspace changed. Reload to continue.');retry.disabled=true;}
+    function clear(){serial++;lost=true;select.replaceChildren();select.value='';select.disabled=false;select.setCustomValidity('Account selection is unavailable. Refresh the page and try again.');copy(status,'Account or workspace changed. Reload to continue.');retry.disabled=true;}
     mounted.add(clear);
     async function load(){
       if(lost)return;const attempt=++serial, previous=select.value;
-      retry.disabled=true;select.disabled=false;select.setCustomValidity('Account selection is unavailable.');
+      retry.disabled=true;select.disabled=false;select.setCustomValidity('Account selection is unavailable. Refresh the page and try again.');
       const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),15000);
       try {
         const response=await fetch('/api/v1/templates/connection-choices',{cache:'no-store',signal:controller.signal});

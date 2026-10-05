@@ -80,7 +80,7 @@ test("savings page shows results, automatic approvals with Withdraw and the reco
   const ui = await fixture(PROOF);
   t.after(() => ui.window.close());
   assert.match(ui.doc.getElementById("vp-comp").textContent, /Invoices12-40%\+10%Getting cheaper/);
-  assert.match(ui.doc.getElementById("vp-dept").textContent, /No department has enough runs/);
+  assert.match(ui.doc.getElementById("vp-dept").textContent, /No department has enough tasks/);
   assert.match(ui.doc.getElementById("vp-ea").textContent, /Approved automatically/);
   assert.match(ui.doc.getElementById("vp-ea-state").textContent, /10 real outcomes/);
   assert.match(ui.doc.getElementById("vp-fleet").textContent, /No outside agents/);

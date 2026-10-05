@@ -123,10 +123,10 @@
       });
       box.appendChild(summary);
       if (!data.stopped.length) return 'Nothing has stopped.';
-      box.appendChild(el('h3', null, 'Stopped jobs'));
+      box.appendChild(el('h3', null, 'Stopped tasks'));
       var table = el('table');
       var head = el('tr');
-      ['Job', 'Stopped', 'What to do'].forEach(function (h) { var th = el('th', null, h); th.scope = 'col'; head.appendChild(th); });
+      ['Task', 'Stopped', 'What to do'].forEach(function (h) { var th = el('th', null, h); th.scope = 'col'; head.appendChild(th); });
       var thead = el('thead'); thead.appendChild(head); table.appendChild(thead);
       var body = el('tbody');
       data.stopped.forEach(function (job) {
@@ -294,7 +294,7 @@
       try {
         var state = await call(base + '/client/export/' + encodeURIComponent(job), 'GET');
         if (state.state === 'ready') { done(null, base + '/client/export/' + encodeURIComponent(job) + '/download'); return; }
-        if (state.state === 'failed') { done(state.message || 'The export could not be prepared.'); return; }
+        if (state.state === 'failed') { done(state.message || 'The export could not be prepared. Try again.'); return; }
       } catch (failure) { done(await plainFailure(failure, 'prepare the download')); return; }
       if (tries > 400) { done('The export is taking too long. Try again later.'); return; }
       setTimeout(poll, 3000);

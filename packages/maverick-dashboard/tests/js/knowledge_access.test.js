@@ -303,7 +303,7 @@ test('search withholds content when cache, purpose, or actor authority crosses t
     await tick();
     assert.equal(ui.document.getElementById('ka-results').textContent, '');
     assert.equal(ui.document.getElementById('ka-export').disabled, true);
-    assertVerifyFailure(ui.document, /failed its source eligibility contract/i);
+    assertVerifyFailure(ui.document, /included a source it may not use, so it is not shown/i);
     ui.dom.window.close();
   }
 });
@@ -321,7 +321,7 @@ test('search rejects a response bound to another requested purpose or actor', as
     await tick();
     assert.equal(ui.document.getElementById('ka-results').textContent, '');
     assert.equal(ui.document.getElementById('ka-export').disabled, true);
-    assertVerifyFailure(ui.document, /search response failed validation/i);
+    assertVerifyFailure(ui.document, /search results could not be checked/i);
     ui.dom.window.close();
   }
 });
@@ -392,7 +392,7 @@ test('export refuses a well-formed digest that does not bind its authority evide
   await tick();
   assert.equal(ui.downloads(), 0);
   assert.equal(ui.document.getElementById('ka-results').textContent, '');
-  assertVerifyFailure(ui.document, /binding did not match/i);
+  assertVerifyFailure(ui.document, /export did not match its evidence/i);
   ui.dom.window.close();
 });
 

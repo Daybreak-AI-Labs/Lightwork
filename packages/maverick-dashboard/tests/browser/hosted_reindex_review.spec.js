@@ -41,7 +41,7 @@ test('hosted rebuild shows a positive small admission ceiling and never retries 
   await expect(confirm).toContainText('not a provider invoice');
   expect(writes).toEqual([]);
   await confirm.getByRole('button',{name:'Start rebuild',exact:true}).click();
-  const jobs=page.getByRole('region',{name:'Search index rebuild jobs',exact:true});
+  const jobs=page.getByRole('region',{name:'Search index rebuilds',exact:true});
   await expect(jobs).toContainText('Unconfirmed');
   // Sub-cent amounts read as "under $0.01"; the exact figures stay on the receipt.
   await expect(jobs).toContainText('Observed provider usage at reviewed rates: under $0.01');await expect(jobs).toContainText('Unresolved reservation: under $0.01');
@@ -55,7 +55,7 @@ test('hosted rebuild shows a positive small admission ceiling and never retries 
   await expect(confirm).toContainText('Its operation receipt remains recorded');
   expect(writes).toHaveLength(1);
   await confirm.getByRole('button',{name:'Archive',exact:true}).click();
-  await expect(jobs.locator('.mv-empty__title')).toHaveText('No rebuild jobs to show');
+  await expect(jobs.locator('.mv-empty__title')).toHaveText('No rebuilds to show');
   await expect(jobs.locator('.mv-empty__body')).toContainText('Archived operation receipts remain recorded.');
   expect(writes).toHaveLength(2);
   expect(writes[1]).toEqual({path:'/api/v1/knowledge/library/reindex-jobs/'+writes[0].body.job_id+'/archive',

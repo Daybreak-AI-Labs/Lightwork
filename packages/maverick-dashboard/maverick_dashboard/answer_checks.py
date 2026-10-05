@@ -30,8 +30,8 @@ _OUTCOMES = (
     ("verification skipped (risk-proportional", "not_checked",
      "Your workspace skips the extra check for low-risk answers that use no tools or code."),
     ("verifier did not complete", "not_checked",
-     "The extra check started but could not finish within the spending limit."),
-    ("verifier failed", "not_checked", "The extra check could not run."),
+     "The extra check started but could not finish within the spending limit. Raise the limit or check fewer items, then try again."),
+    ("verifier failed", "not_checked", "The extra check could not run. Try again."),
 )
 LABELS = {"checked": "Checked", "concerns": "Checked with concerns",
           "not_checked": "Not checked", "hidden": "Check result not shown"}
@@ -59,7 +59,7 @@ def _latest_root_run(events: list) -> list:
 def _tests_outcome(content: str) -> tuple[str, str]:
     match = _TESTS.search(content)
     if match is None:
-        return "not_checked", "The required tests could not run."
+        return "not_checked", "The required tests could not run. Try again."
     a, b, c, d = (int(value) for value in match.groups())
     if a == b and c == d:
         return "checked", "The required tests passed."

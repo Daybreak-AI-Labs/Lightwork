@@ -204,7 +204,7 @@
           })
           .then(function (rows) {
             if (attempt !== generation || rows === null) return;
-            if (!Array.isArray(rows)) throw new Error('The search response could not be read. Previous results remain below.');
+            if (!Array.isArray(rows)) throw new Error('The search response could not be read. Previous results remain below. Try again.');
             render(rows); applyFilter(); status.textContent = rows.length ? rows.length + (rows.length === 1 ? ' matching task.' : ' matching tasks.') : 'No matching tasks.';
           })
           .catch(function (error) {

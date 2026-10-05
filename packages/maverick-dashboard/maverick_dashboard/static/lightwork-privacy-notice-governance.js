@@ -248,7 +248,7 @@
       var roles = Object.keys(ROLE).filter(function (role) { return v['r_' + role]; });
       var quorum = parseInt(v.quorum, 10);
       if (!roles.length) { say('Choose at least one role that must approve.'); return; }
-      if (quorum > roles.length) { say('The number of approvals cannot be more than the number of roles chosen.'); return; }
+      if (quorum > roles.length) { say('The number of approvals cannot be more than the number of roles chosen. Lower the number or choose more roles.'); return; }
       var id = existing && existing.policy_id ? existing.policy_id : R.slug(v.name, 'approval-rule');
       return R.call('PUT', API + '/approval-policies/' + encodeURIComponent(id), {
         required_roles: roles, quorum: quorum, approval_ttl_seconds: parseInt(v.ttl, 10),

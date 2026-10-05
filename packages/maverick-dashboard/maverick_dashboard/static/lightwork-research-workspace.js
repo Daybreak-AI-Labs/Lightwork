@@ -45,7 +45,7 @@
       const error = new Error(response.status === 409 ? (plain || 'Someone changed this. Refresh and check it again.') :
         response.status === 403 ? 'You do not have permission to do this. Ask an administrator.' :
         response.status === 422 ? (plain || 'Some details need fixing. Check what you entered and try again.') :
-        response.status === 404 ? 'That item is not available in this workspace.' :
+        response.status === 404 ? 'That item is not available in this workspace. Refresh the page to see the latest.' :
         'The research lab is not available right now. Try again in a minute.');
       error.status = response.status;
       throw error;
@@ -183,7 +183,7 @@
         headers:{'Content-Type':'application/octet-stream'}, body:chosen})
         .then(response => { if (!response.ok) throw response; return response.json(); })
         .then(body => { holder.value = body.fingerprint; state.textContent = `Ready: ${chosen.name}`; })
-        .catch(error => { state.textContent = window.mvErrorText ? window.mvErrorText(error, 'read the file') : 'Could not read the file.'; });
+        .catch(error => { state.textContent = window.mvErrorText ? window.mvErrorText(error, 'read the file') : 'Could not read the file. Choose the file again, or try a different file.'; });
     });
     label.append(file, state);
     return {label, holder};
@@ -470,7 +470,7 @@
     if (!response.ok) {
       let detail = '';
       try { detail = (await response.json()).detail || ''; } catch (_) { detail = ''; }
-      throw new Error('The run record is not available right now.');
+      throw new Error('The run record is not available right now. Try again in a minute.');
     }
     const bytes = await boundedBytes(response, 2200000);
     let evidence;

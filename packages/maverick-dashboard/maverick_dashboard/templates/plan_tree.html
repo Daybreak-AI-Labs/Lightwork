@@ -181,7 +181,7 @@
         statusEl.textContent = (stopped ? 'Task ' : 'Live — ') + String(tree.status || 'running').replace(/_/g, ' ') + '. Refreshed ' + lastRefresh + '.';
       } catch (e) {
         failures++;
-        statusEl.textContent = (e.name === 'AbortError' ? 'Plan refresh timed out.' : 'Plan updates unavailable.')
+        statusEl.textContent = (e.name === 'AbortError' ? 'Plan refresh timed out.' : 'Plan updates unavailable. Refresh the page and try again.')
           + (lastRefresh ? ' Showing older data from ' + lastRefresh + '.'
             : list.querySelector('a') ? ' Showing the plan captured when this page loaded; it may be out of date.'
               : ' No current plan was loaded.') + ' Choose Refresh plan to retry.';

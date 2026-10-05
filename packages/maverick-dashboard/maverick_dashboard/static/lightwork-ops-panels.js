@@ -128,7 +128,7 @@
       try {
         var state = await request(statusUrl);
         if (state.state === 'ready') { done(null, statusUrl + '/download'); return; }
-        if (state.state === 'failed') { done(state.message || 'The download could not be prepared.'); return; }
+        if (state.state === 'failed') { done(state.message || 'The download could not be prepared. Try again.'); return; }
       } catch (failure) { done(await failText(failure, 'prepare the download')); return; }
       if (tries > 400) { done('This is taking too long. Try again later.'); return; }
       setTimeout(poll, 2000);
@@ -580,7 +580,7 @@
         {key: 'name', label: 'Name (' + p.name + ')', type: 'text', required: true}], {okText: 'Erase documents'}) : null;
       if (!typed) return;
       if (String(typed.name || '').trim().toLowerCase() !== p.name.trim().toLowerCase()) {
-        say(out, 'The name you typed does not match. Nothing was erased.');
+        say(out, 'The name you typed does not match. Nothing was erased. Type the exact name to continue.');
         return;
       }
       say(out, 'Erasing…');

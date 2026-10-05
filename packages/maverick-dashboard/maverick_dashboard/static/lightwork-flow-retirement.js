@@ -79,7 +79,7 @@
       else if (window.mvToast) window.mvToast(action === 'delete' ? 'Flow deleted.' : 'Flow turned off.');
       return true;
     } catch (e) {
-      if (window.mvToast) window.mvToast(e.message || 'Could not change this flow.', {error: true});
+      if (window.mvToast) window.mvToast(e.message || 'Could not change this flow. Refresh the page and try again.', {error: true});
       return false;
     } finally {
       busy = false;

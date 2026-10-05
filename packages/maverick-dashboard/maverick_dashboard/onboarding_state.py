@@ -358,7 +358,7 @@ def build(
             "cta": "/chat",
             "cta_label": "Start a task",
             "allowed": bool(can_operate),
-            "readonly_label": "An operator can start or automate the first run.",
+            "readonly_label": "An operator can start or automate the first task.",
             "command": "",
         },
     ]

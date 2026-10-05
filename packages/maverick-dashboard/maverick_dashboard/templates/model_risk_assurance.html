@@ -157,7 +157,7 @@
   {% elif gateway_error %}
   {{ state('Current state', 'Records unavailable',
            badge='Needs attention', badge_class='warn',
-           copy='The evidence records could not be loaded safely, so no readiness conclusion is shown.') }}
+           copy='The evidence records could not be loaded safely, so no readiness conclusion is shown. Refresh the page and try again.') }}
   {% else %}
   {{ state('Current state', gateway_view.status.label,
            badge=gateway_view.ingestion|humanize,
@@ -1077,7 +1077,7 @@ window.mraFailure = response => {
         body: JSON.stringify({expected_revision: revision})
       };
     } else {
-      status.textContent = "That action is not available.";
+      status.textContent = "That action is not available. Refresh the page to see the latest.";
       return;
     }
     actionInFlight = true;
@@ -1188,7 +1188,7 @@ window.mraFailure = response => {
       endpoint = `/api/v1/security/assurance/red-team/campaigns/${encodeURIComponent(campaignId)}/cancel`;
       payload = {expected_revision: revision, rationale: String(values.rationale).trim()};
     } else if (!['finalize', 'force-finalize'].includes(action)) {
-      if (actionStatus) actionStatus.textContent = "That action is not available.";
+      if (actionStatus) actionStatus.textContent = "That action is not available. Refresh the page to see the latest.";
       return;
     }
     button.disabled = true;
@@ -1366,8 +1366,8 @@ window.mraFailure = response => {
       // Neither list arrived: say so in both tables instead of "Loading…"; the
       // line above them says why and what to do.
       portalInvitations.replaceChildren(); portalSubmissions.replaceChildren();
-      emptyRow(portalInvitations, "Access codes could not be loaded.", 4);
-      emptyRow(portalSubmissions, "Answers could not be loaded.", 4);
+      emptyRow(portalInvitations, "Access codes could not be loaded. Refresh the page and try again.", 4);
+      emptyRow(portalSubmissions, "Answers could not be loaded. Refresh the page and try again.", 4);
       status("ai-vendor-portal-status", window.mraPlain(error, "load the access codes"));
     }
   };

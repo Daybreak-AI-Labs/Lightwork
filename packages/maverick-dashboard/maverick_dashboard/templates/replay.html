@@ -59,16 +59,16 @@
     </table>
     {% else %}
     {% if replay.read_report and replay.read_report.failures %}
-    <p class="muted">No readable audit events are available for this run. The read is incomplete.</p>
+    <p class="muted">No readable audit events are available for this task. The read is incomplete.</p>
     {% else %}
-    <p class="muted">No audit events recorded for this run yet.</p>
+    <p class="muted">No audit events recorded for this task yet.</p>
     {% endif %}
     {% endif %}
   </div>
 
   <section class="panel" aria-labelledby="io-steps-title">
     <h2 id="io-steps-title">Recorded steps</h2>
-    <p class="muted">When step-by-step recording is on, each run keeps a sealed recording of everything its
+    <p class="muted">When step-by-step recording is on, each task keeps a sealed recording of everything its
       agents posted. Lightwork checks the seal before showing it.</p>
     <div class="io-row">
       <label class="io-field"><span>Show</span>

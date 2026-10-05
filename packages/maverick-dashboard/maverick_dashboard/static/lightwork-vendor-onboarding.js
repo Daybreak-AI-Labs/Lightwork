@@ -606,7 +606,7 @@
             no_match: "No matching ticket was found in Jira.",
             multiple_matches: `More than one matching ticket was found in Jira (${Number.isInteger(item.match_count) ? item.match_count : `at least ${item.match_count_lower_bound}`} matches).`,
             readback_mismatch: "A ticket was found in Jira but its content doesn't match what you approved.",
-            readback_unavailable: "Jira couldn't be checked.",
+            readback_unavailable: "Jira couldn't be checked. Try again in a minute.",
             exact_match_verified: "The exact ticket was found in Jira.",
           })[item.state] || "Jira's result is unknown.",
         };

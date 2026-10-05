@@ -121,7 +121,7 @@
         <ul>
           <li>Visitors whose browser asks not to be tracked, uses that must always be on, and layouts that fail accessibility or equal-button checks always get the original version.</li>
           <li>An experiment compares 2 to 10 versions and can be checked at most 20 times; visitor records are kept at most 90 days.</li>
-          <li>A statistical winner is not a legal or accessibility sign-off. Review the result before changing your published banner.</li>
+          <li>A statistical winner is not a legal or accessibility approval. Review the result before changing your published banner.</li>
         </ul>
       </details>
     </section>
@@ -172,7 +172,7 @@
           {label: "Experiment", value: nameOf},
           {label: "Status", value: function (x) { var s = STATES[x.state] || [CW.human(x.state), "idle"]; return CW.badge(s[0], s[1]); }},
           {label: "Versions", value: function (x) { return x.definition.variants.map(layoutOf).join(" vs "); }},
-          {label: "Runs", value: function (x) { return CW.when(x.definition.starts_at) + " to " + CW.when(x.definition.ends_at); }},
+          {label: "Dates", value: function (x) { return CW.when(x.definition.starts_at) + " to " + CW.when(x.definition.ends_at); }},
         ],
         actions: [
           {label: "Approve", when: function (x) { return can.admin && x.state === "draft"; }, run: function (x, b) { lifecycle(x, "approve", b); }},

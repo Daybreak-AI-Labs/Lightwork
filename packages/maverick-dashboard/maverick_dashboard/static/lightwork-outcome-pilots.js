@@ -142,7 +142,7 @@
           if (!current || current.id !== data.id) return;
           const deployed = {baseline_active:'The original baseline is currently deployed.', candidate_active:'The candidate is currently deployed.',
             other_release_active:'Another release is currently deployed.', candidate_changed:'The candidate record changed after this plan was frozen.',
-            rollback_unavailable:'Deployment compatibility or rollback readiness changed.', unavailable:'The deployed release could not be verified now.'};
+            rollback_unavailable:'Deployment compatibility or rollback readiness changed.', unavailable:'The deployed release could not be verified now. Try again in a minute.'};
           const states = {awaiting_review:'waiting for independent approval', authorized:'approved for staging', staged:'staged',
             canary:'in monitored rollout', active:'active', rolled_back:'rolled back', uncertain:'outcome uncertain',
             denied:'denied', blocked:'blocked', not_advancing:'not advancing', unavailable:'unavailable'};
@@ -187,12 +187,12 @@
     data.cases.forEach(c => {
       const details = node('details'); details.className = 'panel';
       details.append(node('summary', 'Case ' + c.id + (c.label ? ': ' + c.label : '') + ' · ' + c.status.replaceAll('_',' ') + ' · ' + (c.allocation === 'holdout' ? 'evaluation' : 'refinement')));
-      if (!c.source) { details.append(node('p', 'Source unavailable. Its observations are hidden until access is restored.')); report.append(details); return; }
+      if (!c.source) { details.append(node('p', 'Source unavailable. Its observations are hidden until access is restored; ask the source owner to restore access.')); report.append(details); return; }
       const link = node('a', 'Review current source'); link.href = c.source.href; details.append(link);
       details.append(node('p', (c.source.sample ? 'Sample source. ' : '') + (c.source.accepted ? 'Current source has a recorded acceptance.' : 'Current source has no qualifying acceptance.') +
         ' Recorded runtime price: ' + (c.source.runtime_cost_usd === null ? 'unmeasured' : window.mvMoney ? window.mvMoney(c.source.runtime_cost_usd) : 'USD ' + c.source.runtime_cost_usd) + '; provider invoice unverified.'));
       details.append(node('p', 'Leave unknown values blank. Enter non-overlapping effort: preparation, review, and rework are separate. Reported total cost includes all attempts.'));
-      if (c.learning_exclusion) details.append(node('p', c.learning_exclusion.enforced ? 'Local learning exclusion receipt: ' + c.learning_exclusion.policy_id : 'Local learning exclusion receipt is unavailable or no longer matches these task inputs.'));
+      if (c.learning_exclusion) details.append(node('p', c.learning_exclusion.enforced ? 'Local learning exclusion receipt: ' + c.learning_exclusion.policy_id : 'Local learning exclusion receipt is unavailable or no longer matches these task inputs. Refresh the page and try again.'));
       details.append(node('p', 'Human and rework cost details are operator reports. They are already part of your reported total; provider allocations are shown separately and are not added automatically.'));
       const form = node('form'), grid = node('div'); grid.className = 'op-grid';
       measurements.forEach(([key,label,type]) => field(grid,key,label,(c.measurement || {})[key],type));

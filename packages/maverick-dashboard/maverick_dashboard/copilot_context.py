@@ -200,9 +200,9 @@ _OPERATIONAL_GUIDES = (
      "Choose a status filter, open the task, then use Result, Steps, Plan or Problems to investigate it.",
      "A finished task is not proof that its answer is correct or approved for use.",
      "How do I find a failed task?", "Where can I see what a task did?"),
-    ("/deliverables", "Results", "Find saved answers and items awaiting sign-off, separate from running task history.",
+    ("/deliverables", "Results", "Find saved answers and items waiting for approval, separate from running task history.",
      "Open a result to read it; sharing, printing and downloads are on its task page.",
-     "Choose Review for an item awaiting sign-off, or open Finished work to inspect its saved answer.",
+     "Choose Review for an item waiting for approval, or open Finished work to inspect its saved answer.",
      "An available result may still need your review or sign-off before anyone relies on it.",
      "Where are my finished results?", "How do I download an answer?"),
     ("/automations", "Automations", "Manage schedules, connected-service starts, new-item starts and recent flow runs.",
@@ -825,7 +825,7 @@ _CONTEXTS = tuple(
                 "Local completion does not prove production volume, customer acceptance, regulator delivery, or an external provider effect.",
             ),
             next_steps=(
-                "Check readiness and the per-operation capability map before creating a job.",
+                "Check readiness and what each kind of change can do before starting a bulk change.",
                 "Confirm the credit reservation, exact profile revisions, and receipt identifiers before scheduling mutations.",
                 "Review terminal history and download integrity before relying on an export or action result.",
             ),
@@ -1083,7 +1083,7 @@ _CONTEXTS = tuple(
                 "discoveries, and bridge only fresh approved mappings."
             ),
             capabilities=(
-                "Enroll an exact property, schedule scans, and explicitly run a leased job.",
+                "Add an exact website, schedule scans, and start a scan when you choose.",
                 "Inspect bounded reports and record versioned classification review.",
                 "Bridge fresh reviewed mappings and operate audit, recovery, and retention controls.",
             ),
@@ -1351,12 +1351,12 @@ _CONTEXTS = tuple(
             ),
             capabilities=(
                 "Run the local SOC 2 observer and configured read-only AWS Security Hub, AWS Config, Azure Defender, Azure Policy, Google Cloud Security Command Center, GitHub security-stream, and Okta posture collectors.",
-                "Inspect exact definition and enrollment authority, jobs, runs, digest-only observations, alerts, retention, and integrity.",
+                "Inspect each source's setup and approval, its scans, recorded observations, alerts, retention, and integrity.",
                 "Run one bounded server-authorized scheduler cycle or let the configured leased scheduler operate across active workspaces.",
             ),
             boundaries=(
                 "The browser cannot choose a workspace, provider origin, asset scope, source selector, credential reference, transport, or raw provider payload.",
-                "Readiness resolves no credential value and performs no provider network request; collection rechecks the exact approved definition and active enrollment for every job.",
+                "Readiness resolves no credential value and performs no provider network request; collection rechecks the exact approved definition and active enrollment for every scan.",
                 "A configured source or successful observation does not prove estate completeness, control effectiveness, compliance, certification, licensed access, or live provider/customer acceptance.",
             ),
             next_steps=(
@@ -1404,7 +1404,7 @@ _CONTEXTS = tuple(
             ),
             capabilities=(
                 "Enroll, suspend, reactivate, or revoke an exact source and its schedule.",
-                "Lease, execute, fail, replay, and inspect bounded jobs through stock AWS S3, Azure Blob, Google Cloud Storage, Snowflake metadata, ServiceNow CMDB, and Microsoft Entra adapters.",
+                "Start, retry and inspect scans through stock AWS S3, Azure Blob, Google Cloud Storage, Snowflake metadata, ServiceNow CMDB, and Microsoft Entra adapters.",
                 "Propose and independently approve a classification, then operate its durable remediation outbox and digest-only governed data-map projection.",
                 "Inspect or enable the bounded managed remediation scheduler for workspace-derived retry and exact local ambiguity reconciliation.",
             ),
@@ -2058,7 +2058,7 @@ _PANEL_TIPS = {
     "/consent/native": "Registration needs a valid check from the device platform; local success does not prove live app acceptance.",
     "/consent/profile-data": "Authors cannot approve their own versions, and protected traits are never inferred.",
     "/consent/custom-indexes": "Search matches exact saved values. It does not search across workspaces or guess from similar data.",
-    "/consent/bulk-jobs": "A completed local job does not confirm that an outside service acted or received the result.",
+    "/consent/bulk-jobs": "A completed bulk change does not confirm that an outside service acted or received the result.",
     "/consent/publish-settings": "Lightwork keeps publishing keys and protected storage under administrator control.",
     "/consent/global-opt-out": "A local opt-out request does not confirm that every device or service honored it.",
     "/consent/application-scans": "The scan reviews submitted app information. It does not inspect a live device or network activity.",

@@ -35,13 +35,13 @@
       var failure=new URLSearchParams(root.location.search).get('failure');
       var input=/^lw-failure-[0-9a-f]{32}$/.test(failure||'')?{failure_reference:failure}:{};
       var response=await call('preview',input),data=await response.json();
-      if(!data||data.context!==host.dataset.context||!/^[0-9a-f]{32}$/.test(data.preview_id)||!/^[0-9a-f]{64}$/.test(data.sha256)||!data.bundle||typeof data.bundle!=='object')throw new Error('The report could not be verified for this account.');
+      if(!data||data.context!==host.dataset.context||!/^[0-9a-f]{32}$/.test(data.preview_id)||!/^[0-9a-f]{64}$/.test(data.sha256)||!data.bundle||typeof data.bundle!=='object')throw new Error('The report could not be verified for this account. Refresh the page and try again.');
       current=data;preview.textContent=JSON.stringify(data.bundle,null,2);if(readable)render(readable,data.bundle,0);reference.textContent='Support reference: '+String(data.bundle.correlation_id||'Unavailable')+' · Prepared '+String(data.bundle.generated_at||'just now');
       var labels={client_binding:'Workspace identity',shield:'Safety controls',agent_trust:'Trusted agents'};
       var checks=data.bundle.readiness||{};Object.keys(checks).forEach(function(key){var item=doc.createElement('li');item.textContent=(labels[key]||human(key))+': '+(checks[key]==='ok'?'ready':human(checks[key]).toLowerCase());readiness.append(item);});
       if(!readiness.children.length){var item=doc.createElement('li');item.textContent='Readiness details were unavailable. Review the report for the sections that were collected.';readiness.append(item);}
       result.hidden=false;status.textContent='Report ready for review. The download is available for ten minutes.';
-    }catch(error){clear();status.textContent=error.message||'Support report unavailable.';}finally{busy=false;controls();}
+    }catch(error){clear();status.textContent=error.message||'Support report unavailable. Try again in a minute.';}finally{busy=false;controls();}
   });
   confirm.addEventListener('change',controls);
   download.addEventListener('click',async function(){

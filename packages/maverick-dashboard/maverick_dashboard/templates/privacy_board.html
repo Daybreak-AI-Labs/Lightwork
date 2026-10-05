@@ -1197,7 +1197,7 @@
       .catch(function (e) {
         $('pb-roi').textContent = '';
         $('pb-roi').appendChild(el('p', 'pb-empty',
-          window.mvErrorText ? window.mvErrorText(e, 'load the question results') : 'Could not load the question results.'));
+          window.mvErrorText ? window.mvErrorText(e, 'load the question results') : 'Could not load the question results. Refresh the page and try again.'));
       });
   }
   var roiInit = false;
@@ -1253,7 +1253,7 @@
     }).catch(function (e) {
       $('pb-stamp').textContent = (window.mvErrorText
         ? window.mvErrorText(e, 'load the dashboard')
-        : 'Could not load the dashboard.') + ' Trying again in a minute.';
+        : 'Could not load the dashboard. Refresh the page and try again.') + ' Trying again in a minute.';
     });
   }
 

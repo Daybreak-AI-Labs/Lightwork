@@ -1472,7 +1472,7 @@
         if(warns.length)appendSource(savedMsg,warns[0]);
         showSaved('/agents', 'Open Agents');
       } catch (e) {
-        setStatus('Could not save the playbook.', true);
+        setStatus('Could not save the playbook. Try again.', true);
       } finally {
         pbSaveBtn.disabled = !PACK_EDITING;
       }
@@ -1630,7 +1630,7 @@
           setStatus(completedStatus);if(draftMode==='playbook')appendSource(status,playbookNoteSuffix(data));
         }
       } catch (e) {
-        setStatus('Could not reach the drafting service.', true);
+        setStatus('Could not reach the drafting service. Try again in a minute.', true);
       } finally {
         setBusy(draftBtn, false);
       }
@@ -1663,7 +1663,7 @@
         instrEl.value = '';
         setStatus('Refined — review the update, refine again, or save.');if(isPb)appendSource(status,playbookNoteSuffix(data));
       } catch (e) {
-        setStatus('Could not reach the refining service.', true);
+        setStatus('Could not reach the refining service. Try again in a minute.', true);
       } finally {
         setBusy(btn, false);
       }

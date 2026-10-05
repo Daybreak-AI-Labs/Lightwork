@@ -2,14 +2,14 @@
     attention) and, for administrators, background work. Shared by
     /action-center and, in the job-named navigation, Approvals' "All
     decisions" view (/approvals?view=all). Needs action_context and can_admin. -#}
-<p>Your approvals, sign-offs, assessments, assigned project reviews, and actions to double-check in other apps, in one place.
-  Open an item to review its evidence and make a decision.</p>
+<p>Your approvals, results waiting for approval, assessments, assigned project reviews, and actions to double-check in other apps, in one place.
+  Open an item to review its evidence and approve or reject it.</p>
 <p class="muted">Read and snooze settings are private to your account and workspace.
   Snoozing does not change a deadline or pause work. Overdue items remain in your active list.</p>
 <div class="panel" id="action-center" data-context="{{ action_context }}">
   <form id="ac-filters" style="display:flex;flex-wrap:wrap;gap:var(--space-3);align-items:end;">
     <label>Show<select class="input" name="view"><option value="active">Active</option><option value="unread">Unread</option><option value="overdue">Overdue</option><option value="snoozed">Snoozed</option><option value="all">All</option></select></label>
-    <label>Type<select class="input" name="kind"><option value="all">All types</option><option value="connection_attention">Your connections</option><option value="task_attention">My task questions and recovery</option><option value="approval">Approvals</option><option value="signoff">Sign-offs</option><option value="assessment">Assessments</option><option value="project_review">Project reviews</option><option value="vendor_reconciliation">Actions to double-check in other apps</option></select></label>
+    <label>Type<select class="input" name="kind"><option value="all">All types</option><option value="connection_attention">Your connections</option><option value="task_attention">My task questions and recovery</option><option value="approval">Approvals</option><option value="signoff">Result approvals</option><option value="assessment">Assessments</option><option value="project_review">Project reviews</option><option value="vendor_reconciliation">Actions to double-check in other apps</option></select></label>
     <label>Assignment<select class="input" name="assignment"><option value="all">Mine and available</option><option value="mine">Assigned to me</option><option value="available">Available to review</option></select></label>
     <button class="btn" type="submit">Refresh list</button>
   </form>
@@ -66,7 +66,7 @@
       });
       table.append(body); box.append(table);
     } catch (e) {
-      counts.textContent = window.mvErrorText ? mvErrorText(e, 'load background work') : 'Could not load background work.';
+      counts.textContent = window.mvErrorText ? mvErrorText(e, 'load background work') : 'Could not load background work. Refresh the page and try again.';
     }
   }
   document.getElementById('ac-queue-refresh').addEventListener('click', load);

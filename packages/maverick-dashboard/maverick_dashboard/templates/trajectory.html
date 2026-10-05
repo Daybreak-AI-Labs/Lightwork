@@ -207,7 +207,7 @@
         compare.href = "/run-tree?goal={{ goal.id }}"; compare.textContent = "Compare branches";
         msg.append(open, " · ", compare);
       } catch (err) {
-        msg.textContent = window.mvErrorText ? mvErrorText(err, "create the branch") : "Could not create the branch.";
+        msg.textContent = window.mvErrorText ? mvErrorText(err, "create the branch") : "Could not create the branch. Try again.";
       } finally { btn.disabled = false; }
     });
   })();

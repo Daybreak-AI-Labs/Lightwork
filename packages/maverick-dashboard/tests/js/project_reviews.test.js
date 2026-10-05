@@ -29,7 +29,7 @@ test("sharing needs a current preview and explicit confirmation, and keeps the e
   await preview(ui);assert.equal(ui.el("preview-text").querySelector("img"),null);assert.match(ui.el("preview-text").textContent,/Sensitive/);
   ui.window.mvConfirm=async()=>false;ui.submit("send");await ui.settle();assert.equal(ui.calls.some(row=>row.method==="POST"),false);
   ui.window.mvConfirm=async()=>true;ui.submit("send");await ui.settle();const write=ui.calls.find(row=>row.method==="POST"),body=JSON.parse(write.body);
-  assert.equal(body.source_version,packet.source_version);assert.equal(body.expected_team_revision,2);assert.equal(body.goal_id,7);assert.equal(write.headers["X-Lightwork-Review-Context"],"context-one");assert.match(ui.el("status").textContent,/No task was run or signed off/);
+  assert.equal(body.source_version,packet.source_version);assert.equal(body.expected_team_revision,2);assert.equal(body.goal_id,7);assert.equal(write.headers["X-Lightwork-Review-Context"],"context-one");assert.match(ui.el("status").textContent,/No task was started or approved/);
 });
 test("an uncertain send preserves input and exact retry identity while refusing duplicate clicks",async t=>{
   let release,writes=0;const blocked=new Promise(done=>release=done);

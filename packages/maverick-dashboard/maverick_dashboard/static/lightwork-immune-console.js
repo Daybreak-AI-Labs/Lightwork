@@ -143,7 +143,7 @@
       ], emptyText);
     }
     scoreRows("ic-over-rows", over.canary, over.available ? "No reviewer tests have been decided yet." :
-      "Reviewer results are not available right now.", "Yes", "Not yet");
+      "Reviewer results are not available right now. Try again in a minute.", "Yes", "Not yet");
     scoreRows("ic-drill-rows", over.drill, "No drill results yet.", "Yes", "Not yet");
     rows("ic-twin-rows", twin.replays, [
       function (r) { return task(r.production_goal); },

@@ -441,7 +441,7 @@
     var record = S.reports.filter(function (r) { return r.report_id === requested; })[0];
     try {
       if (!record) { record = await requestJson("/reports/" + encodeURIComponent(requested)); }
-      if (!record || record.report_id !== requested) { throw failure("The linked report couldn't be found."); }
+      if (!record || record.report_id !== requested) { throw failure("The linked report couldn't be found. Refresh the page to see the latest."); }
       showReport(record);
     } catch (error) { show(messageOf(error, "open the linked report")); }
   });

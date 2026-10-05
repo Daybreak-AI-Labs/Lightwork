@@ -147,7 +147,7 @@
     var job = await J.run(LO + '/self-modify/run', { method: 'POST', json: { objective: objective, cycles: cycles, confirm: true } },
       ui('lo-sm', 'start the practice rounds', function (d) {
         var out = [];
-        if (!d.ran) out.push(el('p', null, d.problem || 'The experiment could not run. Nothing was changed.'));
+        if (!d.ran) out.push(el('p', null, d.problem || 'The experiment could not run. Nothing was changed. Try again.'));
         else out.push(el('p', null, 'Tested ' + plural(d.tested, 'change') + ' across ' + plural(d.rounds.length, 'round') + '. Spent ' + J.money(d.spent) + '.'));
         if (d.rounds.length) out.push(J.technical(d.rounds.map(function (r, i) {
           return 'Round ' + (i + 1) + ': ' + r.ideas + ' idea(s), ' + r.tested + ' tested' + (r.note ? ' — ' + r.note : '');
@@ -341,12 +341,12 @@
   var STATES = { running: 'Running', stopping: 'Stopping', done: 'Finished', stopped: 'Stopped early', failed: 'Could not finish' };
   function loadJobs() {
     J.request(LO + '/jobs').then(function (d) {
-      if (!d.jobs.length) { fill('lo-jobs', el('p', 'muted', 'No background jobs since Lightwork last started.')); return; }
-      fill('lo-jobs', J.table(['Job', 'Started', 'Status'], d.jobs.map(function (j) {
+      if (!d.jobs.length) { fill('lo-jobs', el('p', 'muted', 'No background tasks since Lightwork last started.')); return; }
+      fill('lo-jobs', J.table(['Task', 'Started', 'Status'], d.jobs.map(function (j) {
         return [j.label, J.when(j.started_at), STATES[j.state] + (j.problem ? ': ' + j.problem : '')];
       })));
     }).catch(async function (failure) {
-      fill('lo-jobs', el('p', null, await J.problem(failure, 'load the background jobs')));
+      fill('lo-jobs', el('p', null, await J.problem(failure, 'load the background tasks')));
     });
   }
   var refresh = $('lo-jobs-refresh');

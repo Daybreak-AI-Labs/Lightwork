@@ -40,6 +40,7 @@
 
   class ProjectionError extends Error {}
 
+  const NEXT = ' Refresh the page and try again.';
   const fail = message => { throw new ProjectionError(message); };
   const node = (tag, value, className) => {
     const element = document.createElement(tag);
@@ -49,72 +50,72 @@
   };
   function object(value, label) {
     if (value === null || typeof value !== 'object' || Array.isArray(value)) {
-      fail(label + ' is invalid.');
+      fail(label + ' is missing from the report.' + NEXT);
     }
     return value;
   }
   function text(value, label, limit, optional) {
     if (optional && value === null) return null;
     if (typeof value !== 'string' || value.length < 1 || value.length > limit) {
-      fail(label + ' is invalid.');
+      fail(label + ' is missing or too long.' + NEXT);
     }
     return value;
   }
   function opaque(value, label, limit, optional) {
     const result = text(value, label, limit, optional);
-    if (result !== null && /[\u0000-\u001f\u007f]/.test(result)) fail(label + ' is invalid.');
+    if (result !== null && /[\u0000-\u001f\u007f]/.test(result)) fail(label + ' contains characters this page cannot show.' + NEXT);
     return result;
   }
   function identifier(value, label) {
     const result = opaque(value, label, 200, false);
-    if (!ID.test(result)) fail(label + ' is invalid.');
+    if (!ID.test(result)) fail(label + ' is missing a valid reference.' + NEXT);
     return result;
   }
   function sha256(value, label) {
-    if (typeof value !== 'string' || !SHA256.test(value)) fail(label + ' is invalid.');
+    if (typeof value !== 'string' || !SHA256.test(value)) fail(label + ' is missing a valid fingerprint.' + NEXT);
     return value;
   }
   function enumeration(value, label, allowed) {
-    if (typeof value !== 'string' || !allowed.has(value)) fail(label + ' is invalid.');
+    if (typeof value !== 'string' || !allowed.has(value)) fail(label + ' has a value this page does not recognise.' + NEXT);
     return value;
   }
   function boolean(value, label) {
-    if (typeof value !== 'boolean') fail(label + ' is invalid.');
+    if (typeof value !== 'boolean') fail(label + ' must be yes or no.' + NEXT);
     return value;
   }
   function count(value, label, maximum) {
     if (!Number.isSafeInteger(value) || value < 0 || value > maximum) {
-      fail(label + ' is invalid.');
+      fail(label + ' must be a whole number of 0 or more.' + NEXT);
     }
     return value;
   }
   function timestamp(value, label, optional) {
     if (optional && value === null) return null;
     if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0 || value > MAX_TIMESTAMP) {
-      fail(label + ' is invalid.');
+      fail(label + ' must be a date and time.' + NEXT);
     }
     return value;
   }
   function money(value, label, optional) {
     if (optional && value === null) return null;
     if (typeof value !== 'string' || value.length > 64 || !MONEY.test(value)) {
-      fail(label + ' is invalid.');
+      fail(label + ' must be an amount of money.' + NEXT);
     }
     return value;
   }
   function currency(value, label, optional) {
     if (optional && value === null) return null;
-    if (typeof value !== 'string' || !CURRENCY.test(value)) fail(label + ' is invalid.');
+    if (typeof value !== 'string' || !CURRENCY.test(value)) fail(label + ' uses a currency Lightwork does not recognise.' + NEXT);
     return value;
   }
   function array(value, label, maximum) {
-    if (!Array.isArray(value) || value.length > maximum) fail(label + ' is invalid.');
+    if (!Array.isArray(value) || value.length > maximum) fail(label + ' is missing or lists too many items.' + NEXT);
     return value;
   }
   function cursor(value, label, optional) {
     if (optional && value === null) return null;
     if (typeof value !== 'string' || value.length > 64 || !/^[A-Za-z0-9][A-Za-z0-9_.:-]*$/.test(value)) {
-      fail(label + ' is invalid.');
+      fail(label + ' is not a valid link to the next page.' + NEXT);
     }
     return value;
   }
@@ -132,7 +133,7 @@
   function totals(value, label) {
     const rows = object(value, label);
     const entries = Object.entries(rows);
-    if (entries.length > MAX_CURRENCIES) fail(label + ' is invalid.');
+    if (entries.length > MAX_CURRENCIES) fail(label + ' lists too many currencies.' + NEXT);
     entries.forEach(([code, amount]) => {
       currency(code, label + ' currency', false);
       money(amount, label + ' amount', false);
@@ -144,7 +145,7 @@
     const seen = new Set();
     rows.forEach(code => {
       currency(code, label + ' currency', false);
-      if (seen.has(code)) fail(label + ' is invalid.');
+      if (seen.has(code)) fail(label + ' lists the same currency twice.' + NEXT);
       seen.add(code);
     });
     return rows;
@@ -267,7 +268,7 @@
     if (
       typeof pricing.confidence !== 'number' || !Number.isFinite(pricing.confidence) ||
       pricing.confidence < 0 || pricing.confidence > 1
-    ) fail('Pricing confidence is invalid.');
+    ) fail('The pricing record gives a confidence outside 0 to 1. Refresh the page and try again.');
     boolean(pricing.verified, 'Pricing verification');
     opaque(pricing.rate_card_version, 'Rate-card version', 256, false);
     opaque(pricing.evidence_id, 'Pricing evidence identity', 256, false);
@@ -365,18 +366,18 @@
     )) fail('Cost evidence assurance does not reconcile.');
     event.pricing_evidence = validatePricingEvidence(event.pricing_evidence);
     if (event.pricing_evidence && event.pricing_evidence.currency !== event.currency) {
-      fail('Pricing evidence does not match the cost currency.');
+      fail('The pricing record uses a different currency from the cost. Refresh the page and try again.');
     }
     if (
       event.pricing_evidence &&
       ((!event.pricing_evidence.verified && event.basis === 'observed') || event.amount === null)
-    ) fail('Pricing evidence does not match the cost basis.');
+    ) fail('The pricing record does not support how this cost was worked out. Refresh the page and try again.');
     event.budget_reconciliation = validateReconciliation(event.budget_reconciliation);
     if (
       event.budget_reconciliation && event.budget_reconciliation.final_amount !== null &&
       (event.budget_reconciliation.final_amount !== event.amount ||
        event.budget_reconciliation.currency !== event.currency)
-    ) fail('Reservation settlement does not match the cost event.');
+    ) fail('The settled budget amount does not match the recorded cost. Refresh the page and try again.');
     return event;
   }
 
@@ -413,7 +414,7 @@
     if (
       report.schema !== 'lightwork.outcome-accounting-portfolio.v1' ||
       report.context !== context || report.reconciles !== true
-    ) fail('Outcome accounting did not match this account and workspace.');
+    ) fail('The outcome accounting is for a different account or workspace, or its totals do not add up. Refresh the page and try again.');
     const admitted = count(report.admitted, 'Admission count', MAX_PAGE);
     const categoryNames = ['accepted', 'rejected', 'failed', 'cancelled', 'unresolved'];
     const categories = object(report.categories, 'Outcome categories');
@@ -434,7 +435,7 @@
     const costs = object(report.costs, 'Portfolio costs');
     const knownTotals = totals(costs.known_totals, 'Recorded cost totals');
     const overflows = overflowCurrencies(costs.aggregate_overflow_currencies, 'Cost aggregate overflow');
-    if (knownTotals.some(([code]) => overflows.includes(code))) fail('Recorded cost totals are invalid.');
+    if (knownTotals.some(([code]) => overflows.includes(code))) fail('Recorded cost totals are invalid. Refresh the page and try again.');
     const totalsComplete = boolean(costs.totals_complete, 'Cost total completeness');
     if (totalsComplete !== (overflows.length === 0)) fail('Cost total completeness does not reconcile.');
     const incomplete = count(costs.incomplete_records, 'Incomplete cost count', MAX_PAGE + 1);
@@ -447,10 +448,10 @@
     ) fail('Portfolio cost coverage does not reconcile.');
 
     const page = object(report.page, 'Outcome accounting page');
-    if (count(page.limit, 'Accounting page limit', 200) !== MAX_PAGE) fail('Outcome accounting page did not match this request.');
+    if (count(page.limit, 'Accounting page limit', 200) !== MAX_PAGE) fail('The page of outcome accounting is not the one this page asked for. Refresh the page and try again.');
     const returnedCursor = page.cursor === null ? '' : cursor(page.cursor, 'Accounting cursor', false);
     if (returnedCursor !== requestedCursor || typeof page.has_more !== 'boolean') {
-      fail('Outcome accounting page did not match this request.');
+      fail('The page of outcome accounting is not the one this page asked for. Refresh the page and try again.');
     }
     boolean(page.scope_complete, 'Accounting scope coverage');
     count(page.scanned_records, 'Scanned record count', 501);
@@ -459,7 +460,7 @@
     }
     const following = page.has_more
       ? cursor(page.next_cursor, 'Next accounting cursor', false)
-      : (page.next_cursor === null ? null : fail('Next accounting cursor is invalid.'));
+      : (page.next_cursor === null ? null : fail('The link to the next page of outcome accounting is not valid. Refresh the page and try again.'));
     return {
       report, admitted, categoryNames, categoryValues, records, costs, knownTotals,
       overflows, incomplete, incompleteRecords: records.filter(record => !record.costs.complete).length,
@@ -477,7 +478,7 @@
     text(row.summary, 'Observation summary', 4000, false);
     timestamp(row.observed_at, 'Observation time', false);
     timestamp(row.valid_until, 'Observation expiry', true);
-    if (row.valid_until !== null && row.valid_until <= row.observed_at) fail('Observation expiry is invalid.');
+    if (row.valid_until !== null && row.valid_until <= row.observed_at) fail('An observation expires before it was made. Refresh the page and try again.');
     if (row.correction_of !== null) identifier(row.correction_of, 'Observation correction');
     text(row.actor, 'Observation actor', 4096, false);
     boolean(row.current, 'Current observation state');
@@ -516,13 +517,13 @@
   function validateDetail(data, summary) {
     const detail = object(data, 'Outcome detail');
     if (detail.context !== context || detail.id !== summary.id) {
-      fail('Outcome detail did not match this account, workspace, and record.');
+      fail('The outcome detail is for a different account, workspace or record. Refresh the page and try again.');
     }
     identifier(detail.id, 'Outcome detail identity');
     const revision = count(detail.revision, 'Outcome detail revision', Number.MAX_SAFE_INTEGER);
     if (revision < summary.revision) fail('Outcome detail is older than the visible record.');
     if (detail.work_item_id !== summary.work_item_id || detail.owner_id !== summary.owner_id) {
-      fail('Outcome detail did not match this account, workspace, and record.');
+      fail('The outcome detail is for a different account, workspace or record. Refresh the page and try again.');
     }
     opaque(detail.admission_id, 'Detail admission identity', 512, false);
     opaque(detail.work_item_id, 'Detail work item identity', 512, false);
@@ -543,7 +544,7 @@
       contract.schema_version !== 1 || contract.id !== detail.id ||
       contract.owner_id !== detail.owner_id || contract.work_item_id !== detail.work_item_id ||
       contract.revision !== detail.revision
-    ) fail('Outcome detail provenance did not match the record.');
+    ) fail('The outcome detail\'s source does not match the record. Refresh the page and try again.');
     opaque(contract.tenant_id, 'Outcome contract tenant', 256, false);
     const contractCost = object(contract.cost, 'Outcome contract cost');
     enumeration(contractCost.state, 'Outcome contract cost state', new Set(['exact', 'unknown']));
@@ -914,8 +915,10 @@
     nextCursor = null;
     host.setAttribute('aria-busy', 'false');
     navigation();
+    const message = safeMessage(error);
     host.replaceChildren(node(
-      'p', safeMessage(error) + ' Refresh this page after access or configuration is restored.',
+      'p', /\b(Refresh|Reload|Try)\b/.test(message)
+        ? message : message + ' Refresh this page after access or configuration is restored.',
     ));
   }
 

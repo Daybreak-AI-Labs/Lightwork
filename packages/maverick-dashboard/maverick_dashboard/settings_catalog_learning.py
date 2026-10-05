@@ -653,11 +653,11 @@ def _elsewhere(S) -> tuple:
           "Needs extra checks on uncertain work on.", "toggle", "Safety", True,
           "maverick.config", weaker=False,
           warning="Final answers agents disagree about will no longer get a second check."),
-        S("autonomy", "tighten_on_low_trust", "Limit risky tools when a run looks unreliable",
-          "When a run looks unreliable, lower the risk level its tools may reach. Needs "
+        S("autonomy", "tighten_on_low_trust", "Limit risky tools when a task looks unreliable",
+          "When a task looks unreliable, lower the risk level its tools may reach. Needs "
           "extra checks on uncertain work on.", "toggle", "Safety", True, "maverick.config",
           weaker=False,
-          warning="Risky tools will keep their usual limits even when a run looks "
+          warning="Risky tools will keep their usual limits even when a task looks "
                   "unreliable."),
         S("harness_refine", "max_pending", "Instruction changes waiting at once",
           "The most suggested instruction changes that can wait for a decision at one time.",
