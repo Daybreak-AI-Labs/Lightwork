@@ -148,7 +148,9 @@ def test_owner_is_enrolled_at_task_creation_and_first_check_catches_fast_outcome
     rows = first.json()["items"]
     assert {(row["goal_id"], row["category"]) for row in rows} == {
         (completed, "completed"), (failed, "failed"), (waiting, "needs-decision")}
-    assert all(row["href"] == f'/chat/goal/{row["goal_id"]}' for row in rows)
+    # Each alert opens its task; a question opens it with the answer box in view.
+    assert all(row["href"] == f'/chat/goal/{row["goal_id"]}'
+               + ("#question-panel" if row["category"] == "needs-decision" else "") for row in rows)
     assert "Private result" not in first.text and "Another person's task" not in first.text
     second = client.get("/api/v1/notifications/personal").json()["items"]
     assert {row["id"] for row in second} == {row["id"] for row in rows}
@@ -200,4 +202,6 @@ def test_background_observer_records_owner_outcomes_without_an_open_inbox(
     assert {(row["goal_id"], row["category"]) for row in rows} == {
         (completed, "completed"), (waiting, "needs-decision"),
     }
-    assert all(row["href"] == f'/chat/goal/{row["goal_id"]}' for row in rows)
+    # Each alert opens its task; a question opens it with the answer box in view.
+    assert all(row["href"] == f'/chat/goal/{row["goal_id"]}'
+               + ("#question-panel" if row["category"] == "needs-decision" else "") for row in rows)

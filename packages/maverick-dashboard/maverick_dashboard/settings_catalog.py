@@ -918,7 +918,7 @@ SETTINGS: tuple[Setting, ...] = (
       "Let people opt into Slack or Telegram private delivery using their explicitly verified My Data identities. Requires background observation, current membership and channel allowlists; organization webhook destinations are never reused.",
       "toggle", "Integrations", False, "maverick.personal_notification_delivery"),
     S("notifications", "personal_dashboard_url", "Dashboard address for personal notification links",
-      "The HTTPS origin people use to sign in, without a path, query or credentials. Messages contain minimal update counts and authenticated task links, never task text.",
+      "The HTTPS origin people use to sign in, without a path, query or credentials. Messages say why each alert was sent, what it needs and by when, with authenticated links, and never include task text.",
       "text", "Integrations", "", "maverick.personal_notification_delivery"),
     S("notifications", "delivery_receipts", "Keep notification delivery history",
       "Keep content-free delivery results for seven days, up to 1,000 attempts. View history and send a test on Notification delivery in Settings.",

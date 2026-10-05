@@ -222,6 +222,7 @@
     <form method="post" action="/me/digest/send-now" class="users-inline">
       <button type="submit" class="btn">Send my summary now</button>
     </form>
+    {% include "_digest_preview.html" %}
     <p class="muted">Each summary is noted in the audit log with who it went to and how many items it had — never the content.</p>
   </div>
 {% endblock %}

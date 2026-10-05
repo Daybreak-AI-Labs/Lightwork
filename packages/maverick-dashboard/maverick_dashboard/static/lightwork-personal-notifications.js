@@ -8,27 +8,65 @@
   const saveStatus = document.getElementById('personal-notification-save-status');
   const refresh = document.getElementById('personal-notification-refresh');
   const taskSelect = document.getElementById('notification-mute-task');
-  let snapshot = null, editSnapshot = null, dirty = false, busy = false, mutes = {}, timer = null, controller = null;
+  const muteStatus = document.getElementById('personal-notification-mute-status');
+  let snapshot = null, editSnapshot = null, dirty = false, busy = false, mutes = {}, agentMutes = {}, timer = null, controller = null;
   const scalar = ['mode','timezone','digest_time','quiet_start','quiet_end'];
   const checks = ['quiet_enabled','critical_exceptions','watch_all_projects'];
   function clearPrivate() {
     items.replaceChildren(); form.reset(); form.hidden = true;
     ['notification-project-watches','notification-mutes','personal-external-links','personal-delivery-receipts'].forEach(function (id) { document.getElementById(id).replaceChildren(); });
-    taskSelect.replaceChildren(); snapshot = null; editSnapshot = null; mutes = {}; dirty = false;
+    taskSelect.replaceChildren(); snapshot = null; editSnapshot = null; mutes = {}; agentMutes = {}; dirty = false;
+    if (muteStatus) muteStatus.replaceChildren();
     document.getElementById('personal-background-status').textContent = '';
     document.getElementById('personal-external-status').textContent = '';
     status.textContent = 'Private notification information was cleared. Reload after signing in to the intended account and workspace.';
   }
+  function when(value) { return window.mvTimeAbsolute ? window.mvTimeAbsolute(value) : new Date(value * 1000).toLocaleString(); }
   function renderMutes() {
     const container = document.getElementById('notification-mutes'); container.replaceChildren();
     Object.entries(mutes).forEach(function ([id, until]) {
       const row = document.createElement('p');
       const task = (snapshot.tasks || []).find(function (item) { return String(item.id) === id; });
-      const label = document.createElement('span'); label.textContent = (task ? task.title : 'Unavailable task') + ': muted until ' + (window.mvTimeAbsolute ? window.mvTimeAbsolute(until) : new Date(until * 1000).toLocaleString()) + ' ';
+      const label = document.createElement('span'); label.textContent = (task ? task.title : 'Unavailable task') + ': muted until ' + when(until) + ' ';
       const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'btn btn--ghost'; remove.textContent = 'Remove mute';
       remove.addEventListener('click', function () { delete mutes[id]; dirty = true; renderMutes(); });
       row.append(label, remove); container.append(row);
     });
+    // Alerts muted by agent from the alert itself; removing one here undoes it.
+    Object.entries(agentMutes).forEach(function ([agent, until]) {
+      const row = document.createElement('p');
+      const label = document.createElement('span'); label.textContent = 'Alerts from the ' + agent.replace(/[_-]/g, ' ') + ' agent: muted until ' + when(until) + ' ';
+      const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'btn btn--ghost'; remove.textContent = 'Remove mute';
+      remove.addEventListener('click', function () { delete agentMutes[agent]; dirty = true; renderMutes(); });
+      row.append(label, remove); container.append(row);
+    });
+  }
+  // Why, what is needed and by when (NOT-1). A question has no deadline: its task waits.
+  function dueText(item) {
+    if (typeof item.due_at === 'number') {
+      const relative = window.mvTimeRelative ? window.mvTimeRelative(item.due_at) : '';
+      return item.due_label + ' ' + when(item.due_at) + (relative ? ' (' + relative + ')' : '');
+    }
+    const asked = typeof item.waiting_since === 'number' && window.mvTimeRelative ? window.mvTimeRelative(item.waiting_since) : '';
+    return item.no_due + (asked ? '. Asked ' + asked : '');
+  }
+  function muteButton(item, scope, text) {
+    const button = document.createElement('button'); button.type = 'button'; button.className = 'btn btn--ghost';
+    button.textContent = text; button.dataset.alertId = item.id + '-mute-' + scope;
+    button.addEventListener('click', function () { request('/api/v1/notifications/personal/mute', {context:snapshot.context, item_id:item.id, scope:scope}); });
+    return button;
+  }
+  function showMuted(muted) {
+    if (!muteStatus) return;
+    muteStatus.replaceChildren();
+    const what = muted.scope === 'agent' ? 'alerts from the ' + muted.label + ' agent' : 'alerts for ' + muted.label;
+    const text = document.createElement('span'); text.textContent = 'Muted ' + what + ' until ' + when(muted.until) + '. ';
+    const undo = document.createElement('button'); undo.type = 'button'; undo.className = 'btn btn--ghost'; undo.textContent = 'Undo';
+    undo.addEventListener('click', function () {
+      muteStatus.replaceChildren();
+      request('/api/v1/notifications/personal/unmute', {context:snapshot.context, scope:muted.scope, key:muted.key});
+    });
+    muteStatus.append(text, undo); undo.focus({preventScroll:true});
   }
   function render(state, reset) {
     if (snapshot && snapshot.context !== state.context) {
@@ -67,12 +105,19 @@
       const row = document.createElement('article');
       const heading = document.createElement('h3'); const link = document.createElement('a');
       link.href = item.href; link.textContent = item.title; link.dataset.alertId = item.id + '-link'; heading.append(link);
-      const detail = document.createElement('p'); detail.textContent = item.label + ' · ' + (item.seen_at ? 'Marked seen' : 'Available in your inbox; not marked seen');
-      row.append(heading, detail);
+      const why = document.createElement('p'); why.className = 'personal-alert__why';
+      const reason = document.createElement('span'); reason.className = 'badge'; reason.textContent = item.reason;
+      why.append(reason, document.createTextNode(' ' + item.label));
+      const next = document.createElement('p'); next.className = 'personal-alert__next';
+      next.textContent = item.action + '. ' + dueText(item) + '.';
+      const detail = document.createElement('p'); detail.className = 'muted'; detail.textContent = item.seen_at ? 'Marked seen' : 'Available in your inbox; not marked seen';
+      row.append(heading, why, next, detail);
       if (!item.seen_at) {
         const seen = document.createElement('button'); seen.className = 'btn btn--ghost'; seen.textContent = 'Mark seen'; seen.dataset.alertId = item.id;
         seen.addEventListener('click', function () { request('/api/v1/notifications/personal/seen', {context:snapshot.context, item_id:item.id}); }); row.append(seen);
       }
+      if (item.goal_id) row.append(muteButton(item, 'task', 'Mute this task'));
+      if (item.agent) row.append(muteButton(item, 'agent', 'Mute alerts from this agent'));
       items.append(row);
     });
     if (restoreId) { const target = Array.from(items.querySelectorAll('[data-alert-id]')).find(function (element) { return element.dataset.alertId === restoreId || element.dataset.alertId === restoreId + '-link'; }); if (target) target.focus({preventScroll:true}); }
@@ -85,7 +130,7 @@
       state.projects.forEach(function (project) { const label = document.createElement('label'); const input = document.createElement('input'); input.type = 'checkbox'; input.name = 'project'; input.value = project.id; input.checked = state.preferences.projects.includes(project.id); label.append(input, document.createTextNode(' ' + project.name)); watches.append(label); });
       taskSelect.replaceChildren();
       state.tasks.forEach(function (task) { const option = document.createElement('option'); option.value = task.id; option.textContent = task.title; taskSelect.append(option); });
-      mutes = Object.assign({}, state.preferences.muted_tasks); renderMutes();
+      mutes = Object.assign({}, state.preferences.muted_tasks); agentMutes = Object.assign({}, state.preferences.muted_agents || {}); renderMutes();
     }
     document.getElementById('personal-critical-policy').textContent = state.critical_allowed ? 'Organization policy permits this exception if you select it.' : 'Organization policy currently prevents personal alerts from bypassing quiet hours or digests.';
   }
@@ -102,6 +147,8 @@
         throw new Error(typeof value.detail === 'string' ? value.detail : 'Your inbox is unavailable. Refresh before trying again.');
       }
       render(value, reset); if (reset) saveStatus.textContent = reset === true ? 'Your personal notification preferences were saved.' : 'Saved preferences reloaded.';
+      if (value.muted) showMuted(value.muted);
+      if (value.unmuted && muteStatus) muteStatus.textContent = 'The mute was removed. Those alerts show again.';
     } catch (failure) { if (failure.name !== 'AbortError' || !document.hidden) { error.textContent = failure.name === 'AbortError' ? 'The inbox request was interrupted. Refresh to check the latest state before saving again.' : failure.message; error.hidden = false; } }
     finally { clearTimeout(timeout); busy = false; controller = null; refresh.disabled = false; form.querySelector('[type="submit"]').disabled = false; }
   }
@@ -109,7 +156,7 @@
   form.addEventListener('change', function () { dirty = true; });
   form.addEventListener('submit', function (event) {
     event.preventDefault(); if (!editSnapshot || busy) return;
-    const preferences = {muted_tasks:mutes, events:[], projects:[], external_links:[]};
+    const preferences = {muted_tasks:mutes, muted_agents:agentMutes, events:[], projects:[], external_links:[]};
     scalar.forEach(function (name) { preferences[name] = form.elements[name].value; });
     checks.forEach(function (name) { preferences[name] = form.elements[name].checked; });
     form.querySelectorAll('[name="event"]:checked').forEach(function (element) { preferences.events.push(element.value); });

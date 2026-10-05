@@ -929,6 +929,11 @@
             currentQuestionVersion = qs[0].version;
             questionPanel.style.display = 'block';
             if (changed) questionText.textContent = qs[0].question;
+            // An alert's "answer" link (#question-panel) lands on the answer box.
+            if (changed && location.hash === '#question-panel') {
+              questionPanel.scrollIntoView({block: 'center'});
+              answerInput.focus({preventScroll: true});
+            }
           } else {
             currentQuestionId = null;
             questionPanel.style.display = 'none';

@@ -23,6 +23,8 @@
   <p class="muted" id="personal-background-status">This inbox refreshes while visible and catches up when you return. Checking whether background observation is enabled.</p>
   <p class="muted" id="personal-external-status">Checking verified private delivery options.</p>
   <div id="personal-delivery-receipts"></div>
+  <p class="muted">Each alert says why you get it, what it needs and by when. Mute a task, or every alert from one agent, from the alert itself; undo it there or below in your preferences.</p>
+  <p id="personal-notification-mute-status" role="status" aria-live="polite"></p>
   <div id="personal-notification-items"></div>
 </section>
 <form class="panel" id="notification-preferences" tabindex="-1">
@@ -43,7 +45,7 @@
     {% endfor %}
   </fieldset>
   <fieldset><legend>Private delivery channels</legend>
-    <p>Link and explicitly confirm your own identity in <a href="/my-data">My Data</a>, then select it here to opt into private alerts. Slack and Telegram are supported. Messages carry update counts and sign-in links, without task text. Organization webhook alerts stay separate.</p>
+    <p>Link and explicitly confirm your own identity in <a href="/my-data">My Data</a>, then select it here to opt into private alerts. Slack and Telegram are supported. Each message says why you get the alert, what it needs and by when, with a sign-in link to it, and never includes task text. Anything you already saw here is not sent again. Organization webhook alerts stay separate.</p>
     <div id="personal-external-links"></div>
   </fieldset>
   <fieldset><legend>Project watches</legend>
@@ -51,7 +53,11 @@
     <div id="notification-project-watches"></div>
     <p class="muted">When all-task watching is off, only the selected projects' tasks create alerts. Assigned approvals keep their own subscription.</p>
   </fieldset>
-  <fieldset><legend>Temporarily mute a task</legend>
+  <fieldset><legend>Your daily summary</legend>
+    <p class="muted">Your daily summary lists requests waiting for you, questions an agent asked and recent results. Choose when it goes out, and where, in <a href="/me#daily-summary">My work</a>. Results you already saw here are left out of it.</p>
+    {% include "_digest_preview.html" %}
+  </fieldset>
+  <fieldset><legend>Muted tasks and agents</legend>
     <select class="select" id="notification-mute-task" aria-label="Task to mute"></select>
     <select class="select" id="notification-mute-duration" aria-label="Mute duration"><option value="3600">One hour</option><option value="86400">One day</option><option value="604700">Seven days</option></select>
     <button class="btn btn--ghost" type="button" id="notification-add-mute">Add task mute to draft</button>

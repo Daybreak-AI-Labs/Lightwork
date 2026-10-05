@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Form, HTTPException, Request
+from fastapi import APIRouter, Form, HTTPException, Request, Response
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
@@ -357,16 +357,70 @@ async def me_send_now(request: Request) -> RedirectResponse:
     links = channel_identities.links_for(principal)
     if not links and not prefs.get("email"):
         return RedirectResponse("/me?saved=not_sent", status_code=303)
-    can_decide = auth.has_permission(request, "operate")
-    everything = auth.goal_owner_filter(request) is None
-    digest = daily_digest.compose_digest(
-        _world(), principal, can_decide=can_decide, sees_everything=everything,
-        time_zone=prefs["time_zone"],
-    )
+    digest = _prepared_digest(request, principal, prefs)
     outcomes = await run_in_threadpool(
         daily_digest.send_digest, principal, digest, links=links, prefs=prefs)
     ok = any(o["ok"] for o in outcomes)
     return RedirectResponse(f"/me?saved={'sent' if ok else 'not_sent'}", status_code=303)
+
+
+def _prepared_digest(request: Request, principal: str, prefs: dict) -> dict:
+    """Today's summary for this person, built exactly as it is sent."""
+    from maverick import daily_digest
+
+    return daily_digest.prepare_digest(
+        _world(), principal, can_decide=auth.has_permission(request, "operate"), prefs=prefs,
+        sees_everything=auth.goal_owner_filter(request) is None)
+
+
+def _delivery_notes(principal: str, prefs: dict, digest: dict) -> tuple[bool, list[str]]:
+    """Whether today's summary would really go out, and why not, in plain words."""
+    from maverick import channel_identities
+    from maverick.config import get_my_work
+
+    try:
+        workspace_on = bool(get_my_work().get("digest_enable"))
+    except Exception:  # noqa: BLE001 -- an unreadable config reads as "off"
+        workspace_on = False
+    try:
+        linked = bool(channel_identities.links_for(principal))
+    except channel_identities.ChannelIdentityError:
+        linked = False
+    blocking = []
+    if not workspace_on:
+        blocking.append("The daily summary is turned off for this workspace, so nothing is sent. "
+                        "An administrator can turn it on in Settings (My work › Send a daily summary).")
+    if not prefs.get("digest_enabled", True):
+        blocking.append("You turned your daily summary off in My work.")
+    if not linked and not prefs.get("email"):
+        blocking.append("No chat account or email address is linked, so there is nowhere to send it.")
+    if digest["empty"] and not prefs.get("send_when_empty"):
+        blocking.append("Nothing is waiting, and you chose not to get an empty summary.")
+    notes = list(blocking)
+    if digest.get("left_out_seen"):
+        count = int(digest["left_out_seen"])
+        notes.append(f"{count} result{'s' if count != 1 else ''} you already saw in the app "
+                     f"{'are' if count != 1 else 'is'} left out.")
+    if not blocking:
+        notes.insert(0, f"It goes out at {int(prefs.get('digest_hour', 8)):02d}:00 "
+                        f"({prefs.get('time_zone') or 'UTC'}) to your linked chat app or email.")
+    return not blocking, notes
+
+
+@api.get("/me/digest/preview")
+def me_digest_preview(request: Request, response: Response) -> dict:
+    """Exactly what today's summary would send, without sending anything."""
+    auth.require_permission(request, "view")
+    from maverick import daily_digest, user_preferences
+
+    response.headers["Cache-Control"] = "private, no-store"
+    principal = _principal(request)
+    prefs = user_preferences.get_preferences(principal)
+    digest = _prepared_digest(request, principal, prefs)
+    would_send, notes = _delivery_notes(principal, prefs, digest)
+    return {"subject": daily_digest.subject(digest),
+            "text": daily_digest.render_text(digest, dashboard_url=daily_digest.dashboard_url()),
+            "would_send": would_send, "notes": notes, "counts": digest["counts"]}
 
 
 # ----------------------------------------------------------------------------
