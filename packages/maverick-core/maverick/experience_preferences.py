@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from contextlib import nullcontext
 from pathlib import Path
 
@@ -210,6 +211,63 @@ def operation_confirmed(principal: str, *, scope: str, changes: dict, expected_r
     return previous.get("id") == operation_id and previous.get("digest") == digest
 
 
+# Recent pages: the last pages one person opened in this workspace, newest
+# first, for the sidebar's "Recent pages" list. Kept in their own record beside
+# the person's preferences so a page view never changes the preference
+# revision (another tab's draft would otherwise turn into a conflict). Only
+# plain page addresses are kept; callers filter them to the pages the person
+# may open before showing any.
+RECENT_KEEP = 12
+_PAGE_ADDRESS = re.compile(r"/(?:[A-Za-z0-9._~-]+(?:/[A-Za-z0-9._~-]+)*)?")
+
+
+def _recent_path(principal: str) -> Path:
+    return data_dir("experience-preferences", _principal_key(principal) + "-recent.enc")
+
+
+def _stored_recent(path: Path) -> list[str]:
+    try:
+        pages = _read(path)["values"].get("pages")
+    except (OSError, ValueError, TypeError):  # damaged or unreadable: nothing to offer
+        return []
+    if not isinstance(pages, list):
+        return []
+    return [page for page in pages if isinstance(page, str) and len(page) < 180
+            and _PAGE_ADDRESS.fullmatch(page)][:RECENT_KEEP]
+
+
+def recent_pages(principal: str) -> list[str]:
+    """The person's recently opened page addresses, newest first."""
+    if not enabled():
+        return []
+    return _stored_recent(_recent_path(principal))
+
+
+def record_visit(principal: str, page: str) -> list[str]:
+    """Put ``page`` first in the person's recent pages; returns the new list."""
+    if not enabled():
+        raise ValueError("Personal preferences are turned off by your administrator.")
+    if not isinstance(page, str) or len(page) >= 180 or not _PAGE_ADDRESS.fullmatch(page):
+        raise ValueError("Only a page address can be remembered.")
+    path = _recent_path(principal)
+    ensure_private_directory(path.parent)
+    with cross_process_lock(path, strict=True):
+        current = _stored_recent(path)
+        if current[:1] == [page]:
+            return current
+        pages = [page, *(item for item in current if item != page)][:RECENT_KEEP]
+        atomic_write_bytes(path, seal(json.dumps({"revision": 0, "values": {"pages": pages}}).encode()), mode=0o600)
+        return pages
+
+
+def clear_recent(principal: str) -> None:
+    """Forget the person's recent pages."""
+    path = _recent_path(principal)
+    ensure_private_directory(path.parent)
+    with cross_process_lock(path, strict=True):
+        path.unlink(missing_ok=True)
+
+
 def erase_personal(principal: str) -> int:
     """Delete only the named principal's encrypted account/conversation records."""
     directory = data_dir("experience-preferences")
@@ -218,7 +276,8 @@ def erase_personal(principal: str) -> int:
     ensure_private_directory(lock.parent)
     from .authority_effects import authority_effect_fence
     with authority_effect_fence(), cross_process_lock(config.dashboard_overrides_path(), strict=True), cross_process_lock(lock, strict=True):
-        paths = [directory / (prefix + ".enc"), *directory.glob(prefix + "-thread-*.enc")]
+        paths = [directory / (prefix + ".enc"), directory / (prefix + "-recent.enc"),
+                 *directory.glob(prefix + "-thread-*.enc")]
         count = 0
         for path in paths:
             if path.is_file():

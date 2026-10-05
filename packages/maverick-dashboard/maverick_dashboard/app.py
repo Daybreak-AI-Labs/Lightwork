@@ -121,6 +121,8 @@ from .i18n_journeys import region as _journey_region
 from .i18n_journeys import text as _journey_text
 from .model_tests_api import router as model_tests_router
 from .my_work_api import router as my_work_router
+from .navigation_api import GO_TO_KEYS, command_list, personal_view
+from .navigation_api import router as navigation_router
 from .oidc_login import router as oidc_login_router
 from .outcome_accounting_api import router as outcome_accounting_router
 from .outcome_pilot_costs_api import router as outcome_pilot_costs_router
@@ -665,7 +667,8 @@ def _nav_context(request: Request) -> dict:
     # A page whose module is switched off only says "...is turned off". Global
     # administrators, who can turn it on, keep the link marked Off; nobody else
     # gets a sidebar link into that dead end. Same switch state as the banner.
-    ui_visibility.mark_switched_off(groups, _switched_off_pages(), can_turn_on=viewer_global_admin)
+    switched_off = _switched_off_pages()
+    ui_visibility.mark_switched_off(groups, switched_off, can_turn_on=viewer_global_admin)
     try:
         from maverick import config as core_config
         from maverick import experience_preferences
@@ -679,6 +682,7 @@ def _nav_context(request: Request) -> dict:
         )
     except Exception:  # pragma: no cover -- shell rendering stays fail-closed
         show_personal_notifications = personal_notifications_enabled = False
+    personal = personal_view(request, role, finder, switched_off, viewer_global_admin)
     return {
         "viewer_global_admin": viewer_global_admin,
         "nav_groups": groups,
@@ -690,6 +694,13 @@ def _nav_context(request: Request) -> dict:
         "show_logout": show_logout,
         "show_personal_notifications": show_personal_notifications,
         "personal_notifications_enabled": personal_notifications_enabled,
+        # Pinned and recent pages, and the command menu's commands: computed
+        # only when a template asks.
+        "nav_personal": personal,
+        "nav_commands": command_list(can_create_goal=can_create_goal, can_halt=can_halt,
+                                     can_open_page=can_open_page, global_admin=viewer_global_admin,
+                                     personal=personal),
+        "nav_go_to_keys": GO_TO_KEYS,
     }
 
 
@@ -1432,6 +1443,7 @@ app.include_router(api_router)
 app.include_router(draft_router)
 
 app.include_router(preferences_router)
+app.include_router(navigation_router)
 app.include_router(budget_guidance_router)
 app.include_router(model_tests_router)
 app.include_router(cost_reconciliation_router)
@@ -12615,6 +12627,9 @@ async def shell_copilot_js() -> FileResponse:
 @app.get("/static/lightwork-employee-companion.css")
 @app.get("/static/lightwork-product-operations.js")
 @app.get("/static/lightwork-settings-search.js")
+@app.get("/static/lightwork-shortcuts.js")
+@app.get("/static/lightwork-pins.js")
+@app.get("/static/lightwork-command.css")
 @app.get("/static/lightwork-task-resume.js")
 @app.get("/static/lightwork-facts.js")
 @app.get("/static/lightwork-access-state.js")
