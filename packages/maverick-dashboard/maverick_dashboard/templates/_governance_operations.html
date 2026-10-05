@@ -1273,6 +1273,108 @@
   // under "Technical details" for auditors.
   const HIDDEN_KEYS = /sha256|digest|hmac|signature|schema|payload|tenant|principal|idempotency|revision|endpoint|uuid|(^|_)(ref|refs|id|ids|key|url)$/;
   const words = value => (typeof window.mvHuman === "function" ? window.mvHuman(value) : String(value).replace(/[_-]+/g, " "));
+  // Plain names for the record fields people see; anything not listed is
+  // spelled out from its key, with codes and kinds read as plain nouns.
+  const FIELD_LABELS = {
+    adapter: "Connector", adapter_reported_standard: "Standard the connector reported",
+    adapter_reported_trust_chain_state: "Signature chain the connector reported",
+    adapter_reported_validation_state: "Check result the connector reported", adapter_version: "Connector version",
+    age_seconds: "Age (seconds)", analysis_scope_code: "What was analysed",
+    annex_iii_point: "EU AI Act high-risk area (Annex III)",
+    annex_iii_point_2_national: "National critical infrastructure (Annex III point 2)",
+    annex_iv: "Technical documentation (Annex IV)", anonymity_claim: "Stated as anonymous",
+    anonymity_verified: "Anonymity checked", applicability_determination: "Does the rule apply",
+    approval_receipt: "Approval record", approval_scope: "What the approval covers", asserted: "Stated",
+    asserted_at: "Stated on", asserted_by: "Stated by", asserted_high_risk: "Stated as high risk",
+    asserted_union_market: "Stated as sold in the EU", assertion_codes: "Statements",
+    assertion_count: "Number of statements", assertions: "Statements", asset_binding: "Linked AI system",
+    asset_binding_current: "Linked AI system is current",
+    asset_binding_resolver_attached: "AI system lookup available", assumption_bindings: "Linked assumptions",
+    attestation: "Confirmation", attestation_accepted: "Confirmation accepted", attested_at: "Confirmed on",
+    attested_by: "Confirmed by", authoritative_for_compliance: "Counts as the compliance record",
+    authoritative_plane: "Where the official record is kept", backlink_base: "Link back to Lightwork",
+    binding: "Link", binding_current: "Link is current", body: "Content", body_bytes: "Content size (bytes)",
+    breakdown_truncated: "Breakdown shortened", canonical: "Standard form",
+    cas_enforced: "Protected against overlapping changes", case_projection: "Case summary",
+    ce_marking_artifact: "CE marking document", certification_claim: "Stated certification",
+    citations_truncated: "Citations shortened", claim_generator: "Tool that made the record", code: "Code",
+    cohort: "Comparison group", cohort_code: "Comparison group",
+    cohort_inclusion_verified: "Comparison group membership checked",
+    complete_inventory_claimed: "Stated as a complete list", compliance_determination: "Compliance conclusion",
+    conceptual_soundness: "Is the design sound", configured_sinks: "Where records are sent",
+    conformity_determination: "Conformity conclusion", context_binding: "Linked context",
+    context_floor: "Lowest risk level for this context", context_floor_change: "Change to the lowest risk level",
+    context_floors: "Lowest risk levels by context", correction_delta: "Size of the correction",
+    counterfactual: "What-if example", counterfactual_projection: "What-if summary",
+    counterfactuals: "What-if examples", coverage_determination: "Coverage conclusion",
+    crash_recovery_idempotent: "Safe to repeat after a crash", credentials_retained: "Sign-in details kept",
+    current_model_risk_binding: "Current model risk record", decision_receipt: "Decision record",
+    decision_seam_available: "Decision step available", declaration_artifact: "Declaration document",
+    delta: "Change", denominator: "Out of", deployment_binding: "Linked deployment", determination: "Conclusion",
+    differential_privacy_claim: "Stated privacy protection (differential privacy)",
+    differential_privacy_parameters_complete: "Privacy protection settings complete",
+    differential_privacy_verified: "Privacy protection checked", dispatch_unconfirmed: "Sending not confirmed",
+    dispatching: "Sending", durable_request_queue: "Requests kept until sent",
+    economic_operator_role: "Your role under the EU AI Act", epsilon: "Privacy protection strength (epsilon)",
+    eu_risk_tier: "EU AI Act risk level", evidence_binding_count: "Linked evidence items",
+    evidence_bindings: "Linked evidence", expires_in_seconds: "Expires in (seconds)", floor: "Lowest level",
+    four_eyes: "Second person required", four_eyes_approved: "Approved by a second person",
+    four_eyes_verified: "Second-person approval checked", fraction: "Share",
+    fria: "Fundamental rights impact assessment (FRIA)", governance_posture: "Overall governance status",
+    headers: "Request details", idempotent: "Safe to repeat", idempotent_replay: "Repeat of an earlier request",
+    idempotent_resume: "Resumed safely", immediate_trigger: "Needs reporting now",
+    immediate_trigger_ready: "Ready for immediate reporting", independent_audit_claim: "Stated independent audit",
+    ingested_at: "Received on", insurability_determination: "Insurability conclusion",
+    insurer_acceptance_claim: "Stated insurer acceptance", internal_control_annex_vi: "Internal checks (Annex VI)",
+    interpretation_state: "How sure the reading is", jurisdiction_scope_codes: "Jurisdictions covered",
+    k_anonymity_min: "Smallest group size shared", k_threshold_structurally_satisfied: "Group size rule met",
+    kind: "Type", legal_determination_state: "Legal conclusion status", lookback_days: "Days looked back",
+    lot_batch_number: "Batch number", magnitude: "Size", manifest: "Contents list",
+    manifest_citation: "Contents list reference", mapping_registry_retained: "Mapping list kept",
+    mapping_retention_seconds: "Mapping kept for (seconds)",
+    materialisation_measures: "Steps taken to reduce the risk", materiality: "Importance",
+    max_bytes_billed: "Most data billed (bytes)", max_request_bytes: "Largest request (bytes)",
+    max_response_bytes: "Largest reply (bytes)", media_bytes_persisted: "Media file stored",
+    missing_grace_runs: "Missed checks allowed", mixed_planes: "Records from more than one place",
+    model_modality_code: "Kind of model", model_tier: "Model level", next_cursor: "More results available",
+    noise_mechanism: "Privacy noise method", normalized: "Standardised",
+    notified_body_acceptance: "Accepted by the notified body",
+    notified_body_annex_vii: "Notified body review (Annex VII)", numerator: "Count",
+    observation_bindings: "Linked observations", offset: "Starting point", operation_claim: "Stated action",
+    operator: "Operator", operator_role: "Operator role", packet_issuance: "Report issued", page_cap: "Most pages",
+    params: "Request details", poll_seconds: "Check every (seconds)", posture: "Status",
+    premium_reduction_claim: "Stated premium reduction", projection: "Summary",
+    projection_version: "Summary version", provider_policy_mutated: "Provider settings changed",
+    provider_policy_writes: "Provider setting changes", provider_write_performed: "Change made at the provider",
+    provider_write_state: "Provider change status", provider_writes: "Changes at the provider",
+    provider_writes_possible: "Can change provider settings", public_key_hex: "Public key", rank: "Rank",
+    raw_content_persisted: "Original content stored", raw_identity_retained: "Original identity kept",
+    receipt: "Record", receipt_count: "Number of records", receipt_ids_truncated: "Record list shortened",
+    receipts: "Records", record_cap: "Most records", reference_cohort: "Comparison group", registry: "Register",
+    regulator_filing_claim: "Stated regulator filing", requirement_binding: "Linked requirement",
+    resource_arn: "Cloud resource", response_field_params: "Fields asked for",
+    revalidation_required: "Needs checking again", risk_tier: "Risk level",
+    runtime_available: "Running checks available", runtime_content: "Content checked while running", scope: "Scope",
+    scope_kind: "Type of scope", scope_summary: "Scope summary", secrets_retained: "Secrets kept",
+    sensor_binding: "Linked sensor", sink: "Destination", slot: "Place", snapshot_fresh: "Copy is up to date",
+    snapshot_total: "Total in the copy", snapshots: "Saved copies", soundness_summary: "Design review summary",
+    stale: "Out of date", stale_observation_count: "Out-of-date observations",
+    stale_reasons: "Why it is out of date", staleness: "How out of date", strict_manifest: "Exact contents list",
+    submission_receipt: "Filing record", superseded_at: "Replaced on", supersession: "Replacement",
+    sysparm_display_value: "ServiceNow display values", sysparm_limit: "ServiceNow record limit",
+    sysparm_query: "ServiceNow search", system_operator_type: "Who operates the system",
+    template_binding: "Linked template", threshold_determination: "Threshold conclusion",
+    timeout_seconds: "Time limit (seconds)", truncated: "Shortened", unblended_cost: "Cost before discounts",
+    uri: "Address", validation_scope: "What was checked", validity_seconds: "Valid for (seconds)",
+    verifier_instructions: "How to check it"
+  };
+  const fieldLabel = key => {
+    if (Object.prototype.hasOwnProperty.call(FIELD_LABELS, key)) return FIELD_LABELS[key];
+    let plain = key.replace(/_kind$/, "_type").replace(/_seconds$/, "_(seconds)");
+    if (/_codes$/.test(plain)) plain = plain.replace(/_codes$/, "").replace(/([^s])$/, "$1s");
+    else plain = plain.replace(/_code$/, "");
+    return words(plain);
+  };
   const readableValue = (key, value) => {
     if (value === true) return "Yes";
     if (value === false) return "No";
@@ -1297,7 +1399,7 @@
     const dl = document.createElement("dl");
     Object.entries(value).forEach(([key, item]) => {
       if (HIDDEN_KEYS.test(key) || item === null || item === undefined || item === "") return;
-      const dt = document.createElement("dt"); dt.textContent = words(key);
+      const dt = document.createElement("dt"); dt.textContent = fieldLabel(key);
       const dd = document.createElement("dd");
       if (item && typeof item === "object") { if (depth < 2) dd.appendChild(readable(item, depth + 1)); else dd.textContent = "(see technical details)"; }
       else dd.textContent = readableValue(key, item);
