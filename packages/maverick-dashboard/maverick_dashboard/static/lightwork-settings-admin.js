@@ -15,12 +15,7 @@
     return el('span', 'badge ' + (ok ? 'active' : 'blocked'), ok ? yes : no);
   }
   async function call(path, method) {
-    var response = await window.fetch(path, {
-      method: method || 'GET', cache: 'no-store', credentials: 'same-origin',
-      headers: {'Content-Type': 'application/json', Accept: 'application/json'}
-    });
-    if (!response.ok) throw response;
-    return response.json();
+    return window.mvFetchJSON(path, {method: method || 'GET', cache: 'no-store'});
   }
 
   // Forms marked data-confirm ask first (remove a key, reset visibility...).
@@ -43,8 +38,7 @@
   var base = '/api/v1/admin/system';
   function out(name) { return document.querySelector('[data-maintenance-out="' + name + '"]'); }
   function say(name, text) {
-    var node = document.querySelector('[data-maintenance-status="' + name + '"]');
-    if (node) node.textContent = text;
+    window.mvStatus(document.querySelector('[data-maintenance-status="' + name + '"]'), text);
   }
   function when(ts) { return window.mvWhen ? window.mvWhen(ts) : ''; }
 
@@ -148,12 +142,8 @@
             if (!ok) return;
             button.disabled = true;
             try {
-              var response = await window.fetch(base + '/queue/' + encodeURIComponent(job.id) + '/resume', {
-                method: 'POST', credentials: 'same-origin',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({attempts: job.attempts})
-              });
-              if (!response.ok) throw response;
+              await window.mvFetchJSON(base + '/queue/' + encodeURIComponent(job.id) + '/resume',
+                {method: 'POST', body: {attempts: job.attempts}});
               say('queue', 'The schedule will run again at its next time.');
               run('queue');
             } catch (failure) {
@@ -292,14 +282,8 @@
   async function plainFailure(failure, action) {
     // A server sentence written for people is shown as is; anything else
     // falls back to the shared plain message.
-    try {
-      if (failure && typeof failure.clone === 'function') {
-        var body = await failure.clone().json();
-        var plain = window.mvPlainDetail ? window.mvPlainDetail(body && body.detail) : '';
-        if (plain) return plain;
-      }
-    } catch (ignored) { /* not a readable body */ }
-    return errorText(failure, action);
+    var plain = window.mvPlainDetail ? window.mvPlainDetail(failure && failure.detail) : '';
+    return plain || errorText(failure, action);
   }
   function waitForExport(job, done) {
     // The file is prepared in the background; ask for its status until it is
@@ -431,12 +415,8 @@
           go.disabled = true;
           say('cleanup', 'Removing…');
           try {
-            var response = await window.fetch(base + '/cleanup', {
-              method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json'},
-              body: JSON.stringify({days: days, activity_days: activityDays, confirm: true})
-            });
-            if (!response.ok) throw response;
-            var done = await response.json();
+            var done = await window.mvFetchJSON(base + '/cleanup',
+              {method: 'POST', body: {days: days, activity_days: activityDays, confirm: true}});
             box.textContent = '';
             say('cleanup', 'Removed ' + done.conversations + ' conversation' + (done.conversations === 1 ? '' : 's') +
               ' and ' + done.activity + ' activity entr' + (done.activity === 1 ? 'y' : 'ies') + '.');

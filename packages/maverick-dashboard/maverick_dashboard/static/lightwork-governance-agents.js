@@ -55,7 +55,7 @@
   var result = document.getElementById("ga-result");
   var output = document.getElementById("ga-output");
 
-  function el(tag, text, cls) {
+  function el(tag, cls, text) {
     var node = document.createElement(tag);
     if (cls) node.className = cls;
     if (text !== undefined && text !== null) node.textContent = String(text);
@@ -146,7 +146,7 @@
   }
   function ready(op) { return configured[OP_STATUS[op]] === true; }
   function button(label, op, handler, cls) {
-    var b = el("button", label, cls || "btn");
+    var b = el("button", cls || "btn", label);
     b.type = "button";
     b.dataset.op = op;
     b.disabled = !ready(op);
@@ -160,7 +160,7 @@
   function emptyRow(tbody, columns, text) {
     tbody.textContent = "";
     var tr = el("tr");
-    var td = el("td", text);
+    var td = el("td", null, text);
     td.colSpan = columns;
     tr.appendChild(td);
     tbody.appendChild(tr);
@@ -185,7 +185,7 @@
     var missing = Object.keys(SETUP_LABELS).filter(function (key) { return operations[key] !== true; });
     var list = document.getElementById("ga-missing");
     list.textContent = "";
-    missing.forEach(function (key) { list.appendChild(el("li", "Not set up yet: " + SETUP_LABELS[key])); });
+    missing.forEach(function (key) { list.appendChild(el("li", null, "Not set up yet: " + SETUP_LABELS[key])); });
     document.getElementById("ga-readiness-note").textContent = missing.length
       ? "Some parts aren't set up yet, so their buttons are turned off. Ask an administrator to finish setting them up."
       : "Everything is set up. Each action is still checked when you use it.";
@@ -220,13 +220,13 @@
     tbody.textContent = "";
     policies.forEach(function (policy) {
       var tr = el("tr");
-      var th = el("th", human(policy.policy_id)); th.scope = "row"; tr.appendChild(th);
-      tr.appendChild(el("td", AGENTS[policy.agent_kind] || human(policy.agent_kind)));
-      tr.appendChild(el("td", String(policy.required_approvals)));
-      tr.appendChild(el("td", policy.execution_enabled ? "Yes" : "No"));
+      var th = el("th", null, human(policy.policy_id)); th.scope = "row"; tr.appendChild(th);
+      tr.appendChild(el("td", null, AGENTS[policy.agent_kind] || human(policy.agent_kind)));
+      tr.appendChild(el("td", null, String(policy.required_approvals)));
+      tr.appendChild(el("td", null, policy.execution_enabled ? "Yes" : "No"));
       var active = !policy.revoked && Number(policy.valid_until) * 1000 > Date.now();
       var status = el("td");
-      status.appendChild(el("span", policy.revoked ? "Stopped" : active ? "In use" : "Expired", "badge " + (active ? "ok" : "idle")));
+      status.appendChild(el("span", "badge " + (active ? "ok" : "idle"), policy.revoked ? "Stopped" : active ? "In use" : "Expired"));
       tr.appendChild(status);
       var actions = el("td");
       if (can.admin && active) {
@@ -273,21 +273,21 @@
     tbody.textContent = "";
     shown.forEach(function (run) {
       var tr = el("tr");
-      var th = el("th", AGENTS[run.agent_kind] || human(run.agent_kind)); th.scope = "row"; tr.appendChild(th);
-      tr.appendChild(el("td", human(run.capability)));
+      var th = el("th", null, AGENTS[run.agent_kind] || human(run.agent_kind)); th.scope = "row"; tr.appendChild(th);
+      tr.appendChild(el("td", null, human(run.capability)));
       var state = el("td");
       var pair = STATES[run.state] || [human(run.state), "idle"];
-      state.appendChild(el("span", pair[0], "badge " + pair[1]));
+      state.appendChild(el("span", "badge " + pair[1], pair[0]));
       var approvals = Array.isArray(run.approvals) ? run.approvals.filter(function (a) { return a.decision === "approve"; }).length : 0;
       var policy = policyFor(run);
       if (run.state === "pending_review" && policy) {
-        state.appendChild(el("div", approvals + " of " + policy.required_approvals + " approvals", "muted"));
+        state.appendChild(el("div", "muted", approvals + " of " + policy.required_approvals + " approvals"));
       }
       tr.appendChild(state);
-      tr.appendChild(el("td", String(Array.isArray(run.findings) ? run.findings.length : 0)));
-      tr.appendChild(el("td", when(run.created_at)));
+      tr.appendChild(el("td", null, String(Array.isArray(run.findings) ? run.findings.length : 0)));
+      tr.appendChild(el("td", null, when(run.created_at)));
       var actions = el("td");
-      var wrap = el("div", null, "ga-actions");
+      var wrap = el("div", "ga-actions", null);
       wrap.appendChild(button("View", "run-list", function () { showRun(run); }, "btn btn--ghost"));
       if (can.operate && run.state === "pending_review") {
         wrap.appendChild(button("Approve", "review", function () { return review(run, "approve"); }, "btn btn--primary"));
@@ -310,21 +310,21 @@
   function showRun(run) {
     var box = document.getElementById("ga-detail");
     box.textContent = "";
-    box.appendChild(el("p", (AGENTS[run.agent_kind] || human(run.agent_kind)) + " · " + human(run.capability) +
+    box.appendChild(el("p", null, (AGENTS[run.agent_kind] || human(run.agent_kind)) + " · " + human(run.capability) +
       " · " + (STATES[run.state] || [human(run.state)])[0]));
     var findings = Array.isArray(run.findings) ? run.findings : [];
-    if (!findings.length) box.appendChild(el("p", "No findings.", "muted"));
+    if (!findings.length) box.appendChild(el("p", "muted", "No findings."));
     var list = el("ul");
     findings.forEach(function (finding) {
       var text = human(finding.finding_code) + " (" + human(finding.severity) + ")";
       if (finding.recommended_action_code) text += " — suggested next step: " + human(finding.recommended_action_code);
       if (Number.isFinite(finding.confidence_bps)) text += " · confidence " + Math.round(finding.confidence_bps / 100) + "%";
-      list.appendChild(el("li", text));
+      list.appendChild(el("li", null, text));
     });
     box.appendChild(list);
     var limits = Array.isArray(run.limitations) ? run.limitations : [];
-    if (limits.length) box.appendChild(el("p", "Limits: " + limits.map(human).join(", "), "muted"));
-    if (run.analysis_complete === false) box.appendChild(el("p", "The assistant could not read everything it needed.", "muted"));
+    if (limits.length) box.appendChild(el("p", "muted", "Limits: " + limits.map(human).join(", ")));
+    if (run.analysis_complete === false) box.appendChild(el("p", "muted", "The assistant could not read everything it needed."));
     document.getElementById("ga-detail-panel").hidden = false;
     var heading = document.getElementById("ga-detail-title");
     if (heading && heading.focus) heading.focus();
@@ -368,7 +368,7 @@
 
   // ---- start a review ------------------------------------------------------
   function option(select, value, label) {
-    var o = el("option", label);
+    var o = el("option", null, label);
     o.value = value;
     select.appendChild(o);
   }
@@ -402,7 +402,7 @@
       preview = await request("GET", "/preview/" + encodeURIComponent(kind), undefined, "list the records the assistant can read",
         API + "/context");
     } catch (error) {
-      sources.appendChild(el("p", error.message, "muted"));
+      sources.appendChild(el("p", "muted", error.message));
     }
     var refs = preview && Array.isArray(preview.references) ? preview.references : [];
     var kinds = {};
@@ -415,8 +415,8 @@
       label.appendChild(document.createTextNode(" " + human(sourceKind) + " (" + kinds[sourceKind] + ")"));
       sources.appendChild(label);
     });
-    if (preview && !refs.length) sources.appendChild(el("p", "There are no records for this assistant to read yet.", "muted"));
-    if (preview && preview.complete === false) sources.appendChild(el("p", "Some sources couldn't be read right now, so this list may be incomplete.", "muted"));
+    if (preview && !refs.length) sources.appendChild(el("p", "muted", "There are no records for this assistant to read yet."));
+    if (preview && preview.complete === false) sources.appendChild(el("p", "muted", "Some sources couldn't be read right now, so this list may be incomplete."));
     document.getElementById("ga-start-panel").hidden = false;
     var heading = document.getElementById("ga-start-title");
     if (heading && heading.focus) heading.focus();

@@ -378,7 +378,7 @@ class StaticCacheMiddleware:
 
 
 from .i18n import t as _i18n_t  # noqa: E402
-from .themes import custom_themes, theme_css  # noqa: E402
+from .themes import custom_themes, theme_color, theme_css  # noqa: E402
 
 templates.env.globals.setdefault("t", lambda key: _i18n_t(key, "en"))
 
@@ -492,8 +492,10 @@ def _theme_context(request: Request) -> dict:
 
     lang = resolve_lang(request)
     custom = custom_themes()
+    theme = _resolve_theme(request)
     return {
-        "theme": _resolve_theme(request),
+        "theme": theme,
+        "theme_color": theme_color(theme, custom),
         "font": _resolve_font(request),
         "density": resolve_density(request),
         "glass": resolve_glass(request),

@@ -26,7 +26,11 @@ def test_controls_and_chips_inherit_the_product_face() -> None:
     css = CSS.read_text(encoding="utf-8")
     assert ":where(button, input, select, textarea) { font-family: inherit; }" in css
     assert ":where(.chip, .fd__chip) { font: inherit; }" in css
-    assert "body:not(.font-dyslexic) { font-family: var(--font-sans); }" in css
+    # The body face is the product face; the dyslexia-friendly font (a
+    # body.font-dyslexic rule, which outranks body) replaces it when chosen.
+    bodies = [rule.group(1) for rule in re.finditer(r"(?m)^\s*body \{([^}]*)\}", css)]
+    assert any("font: var(--text-base)/var(--leading) var(--font-sans);" in body for body in bodies)
+    assert re.search(r"body\.font-dyslexic, body\.font-dyslexic input[^{]*\{\s*font-family: \"OpenDyslexic\"", css)
 
 
 def test_public_demo_uses_the_shared_font_token(monkeypatch, tmp_path) -> None:

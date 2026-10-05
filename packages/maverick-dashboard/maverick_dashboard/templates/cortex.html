@@ -29,7 +29,7 @@
   .ctx-form__grid { display: grid; gap: var(--space-3); grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .ctx-field { display: grid; gap: var(--space-1); min-width: 0; }
   .ctx-field--wide { grid-column: 1 / -1; }
-  .ctx-field label, .ctx-sources legend { color: var(--muted); font-size: var(--text-sm); font-weight: 600; }
+  .ctx-field label, .ctx-sources legend { color: var(--muted); font-size: var(--text-sm); font-weight: var(--font-semibold); }
   .ctx-field .input, .ctx-field .textarea { width: 100%; }
   .ctx-sources { border: 1px solid var(--border); border-radius: var(--radius-md); padding: var(--space-2) var(--space-3);
                  display: flex; flex-wrap: wrap; gap: var(--space-3); margin: 0; }
@@ -37,7 +37,7 @@
   .ctx-inline { display: inline-flex; align-items: center; gap: var(--space-1); }
   .ctx-form__row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); }
   .ctx-result__meta { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); font-size: var(--text-sm); }
-  .ctx-chip { display: inline-flex; align-items: center; gap: .35em; border: 1px solid var(--border); border-radius: 999px;
+  .ctx-chip { display: inline-flex; align-items: center; gap: .35em; border: 1px solid var(--border); border-radius: var(--radius-pill);
               padding: .1rem .55rem; font-size: var(--text-xs); color: var(--muted); }
   .ctx-chip strong { color: var(--text); }
   .ctx-denied { margin: var(--space-3) 0 0; padding: var(--space-2) var(--space-3); border: 1px solid var(--border);

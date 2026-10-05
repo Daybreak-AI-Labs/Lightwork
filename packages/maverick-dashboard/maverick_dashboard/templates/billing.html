@@ -4,7 +4,7 @@
 {% macro month(period) %}{% set parts = period.split('-') %}{% if parts|length == 2 %}{{ ['January','February','March','April','May','June','July','August','September','October','November','December'][parts[1]|int - 1] }} {{ parts[0] }}{% else %}{{ period }}{% endif %}{% endmacro %}
 <style>
   /* Page-scoped; built from the design-system tokens. */
-  .bill-bars { display: flex; align-items: flex-end; gap: 4px; height: 140px; margin-top: var(--space-3); }
+  .bill-bars { display: flex; align-items: flex-end; gap: var(--space-1); height: 140px; margin-top: var(--space-3); }
   .bill-bars__col { flex: 1 1 0; min-width: 0; height: 100%; display: flex; align-items: flex-end; }
   .bill-bars__bar { width: 100%; min-height: 2px; background: linear-gradient(180deg, var(--brand-hi), var(--brand)); border-radius: 3px 3px 0 0; }
   .bill-axis { display: flex; justify-content: space-between; margin-top: var(--space-2); color: var(--muted); font-size: var(--text-xs); }

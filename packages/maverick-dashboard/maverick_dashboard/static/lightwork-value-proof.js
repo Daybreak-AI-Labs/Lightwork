@@ -12,7 +12,7 @@
   window.__lwValueProof = true;
 
   function $(id) { return document.getElementById(id); }
-  function el(tag, text, cls) {
+  function el(tag, cls, text) {
     var node = document.createElement(tag);
     if (cls) node.className = cls;
     if (text != null) node.textContent = text;
@@ -21,7 +21,7 @@
   function fill(id, node) { var box = $(id); if (!box) return; box.textContent = ''; if (node) box.appendChild(node); }
   // An empty card: the shared compact empty state when the page has it.
   function empty(id, title, body, action) {
-    fill(id, window.mvEmpty ? window.mvEmpty(title, body, action, { compact: true }) : el('p', title + '. ' + body, 'muted'));
+    fill(id, window.mvEmpty ? window.mvEmpty(title, body, action, { compact: true }) : el('p', 'muted', title + '. ' + body));
   }
   function say(id, text) { var box = $(id); if (box) box.textContent = String(text || ''); }
   function money(n) {
@@ -59,7 +59,7 @@
   function table(headers, rows) {
     var t = el('table');
     var head = el('thead'); var hr = el('tr');
-    headers.forEach(function (h) { var th = el('th', h); th.scope = 'col'; hr.appendChild(th); });
+    headers.forEach(function (h) { var th = el('th', null, h); th.scope = 'col'; hr.appendChild(th); });
     head.appendChild(hr); t.appendChild(head);
     var body = el('tbody');
     rows.forEach(function (cells) {
@@ -77,10 +77,10 @@
   function failed(id, action) {
     return async function (failure) {
       if (failure && failure.status === 403) {
-        fill(id, el('p', 'Only administrators and auditors can ' + action + '.', 'muted'));
+        fill(id, el('p', 'muted', 'Only administrators and auditors can ' + action + '.'));
         return;
       }
-      fill(id, el('p', errorText(failure, action)));
+      fill(id, el('p', null, errorText(failure, action)));
     };
   }
 
@@ -100,18 +100,18 @@
       say('vp-retro-summary', line);
       var advice = $('vp-retro-advice');
       advice.textContent = '';
-      d.advice.forEach(function (a) { advice.appendChild(el('li', a)); });
+      d.advice.forEach(function (a) { advice.appendChild(el('li', null, a)); });
       var rows = $('vp-retro-rows');
       rows.textContent = '';
       d.costliest.forEach(function (r) {
         var tr = el('tr');
         var td = el('td');
-        var link = el('a', r.title || 'Task');
+        var link = el('a', null, r.title || 'Task');
         link.href = '/chat/goal/' + encodeURIComponent(r.task);
         td.appendChild(link);
         tr.appendChild(td);
-        tr.appendChild(el('td', money(r.cost)));
-        tr.appendChild(el('td', r.failed ? 'Failed' : 'Finished'));
+        tr.appendChild(el('td', null, money(r.cost)));
+        tr.appendChild(el('td', null, r.failed ? 'Failed' : 'Finished'));
         rows.appendChild(tr);
       });
       $('vp-retro-table').hidden = !d.costliest.length;
@@ -146,7 +146,7 @@
       }
       var top = Math.max.apply(null, d.reasons.map(function (r) { return r.count; }));
       fill('vp-fail', table(['Reason', 'Tasks', ''], d.reasons.map(function (r) {
-        var bar = el('span', null, 'vp-bar');
+        var bar = el('span', 'vp-bar');
         bar.style.width = Math.max(2, Math.round(r.count / top * 100)) + '%';
         bar.setAttribute('aria-hidden', 'true');
         return [r.reason, String(r.count), bar];
@@ -161,7 +161,7 @@
     var win = $('vp-window');
     return get('/compounding' + (win ? '?window=' + encodeURIComponent(win.value) : '')).then(function (d) {
       if (!d.task_types.length) {
-        fill('vp-comp', el('p', 'Not enough repeated tasks yet. This appears once the same kind of task has run several times.', 'muted'));
+        fill('vp-comp', el('p', 'muted', 'Not enough repeated tasks yet. This appears once the same kind of task has run several times.'));
         return;
       }
       fill('vp-comp', table(['Kind of task', 'Runs', 'Cost change', 'Success change', 'Verdict'], d.task_types.map(function (t) {
@@ -174,7 +174,7 @@
     var win = $('vp-window');
     return get('/departments' + (win ? '?window=' + encodeURIComponent(win.value) : '')).then(function (d) {
       if (!d.departments.length) {
-        fill('vp-dept', el('p', 'No department has enough runs yet to show a trend.', 'muted'));
+        fill('vp-dept', el('p', 'muted', 'No department has enough runs yet to show a trend.'));
         return;
       }
       fill('vp-dept', table(['Department', 'Runs', 'Cost per task then', 'Cost per task now', 'Verdict'], d.departments.map(function (x) {
@@ -190,7 +190,7 @@
         : (d.auto_grant_on ? rule : 'Evidence is being collected, but automatic approval is not switched on. ' + rule);
       say('vp-ea-state', state);
       if (!d.actions.length) {
-        fill('vp-ea', el('p', 'No evidence yet. It builds up as checked actions run and their real outcomes come back.', 'muted'));
+        fill('vp-ea', el('p', 'muted', 'No evidence yet. It builds up as checked actions run and their real outcomes come back.'));
         return;
       }
       fill('vp-ea', table(['Action', 'Now', 'Why'].concat(access.admin ? ['Actions'] : []), d.actions.map(function (a) {
@@ -199,7 +199,7 @@
           a.streak + ' correct in a row'];
         if (access.admin) {
           if (a.auto_approved) {
-            var b = el('button', 'Withdraw', 'btn btn--danger');
+            var b = el('button', 'btn btn--danger', 'Withdraw');
             b.type = 'button';
             b.setAttribute('aria-label', 'Withdraw automatic approval for ' + a.name);
             b.addEventListener('click', function () { withdraw(a, b); });
@@ -226,12 +226,12 @@
   function loadFleet() {
     return get('/fleet-memory').then(function (d) {
       if (!d.enabled) {
-        fill('vp-fleet', el('p', 'Shared memory for outside agents is turned off.', 'muted'));
+        fill('vp-fleet', el('p', 'muted', 'Shared memory for outside agents is turned off.'));
         return;
       }
       if (!d.agents.length) {
-        var p = el('p', 'No outside agents are registered yet. ', 'muted');
-        var link = el('a', 'Connect an outside agent'); link.href = '/external-agents';
+        var p = el('p', 'muted', 'No outside agents are registered yet. ');
+        var link = el('a', null, 'Connect an outside agent'); link.href = '/external-agents';
         p.appendChild(link);
         fill('vp-fleet', p);
         return;
@@ -321,13 +321,13 @@
         var out = await post(kind === 'memory' ? '/memory-verify' : '/record-verify', body);
         box.textContent = '';
         if (kind === 'record') {
-          box.appendChild(el('p', !out.intact
+          box.appendChild(el('p', null, !out.intact
             ? 'This file could not be confirmed. It may have been changed, or it is not a signed Lightwork record.'
             : (out.from_this_installation
               ? 'This record is intact and was signed by this Lightwork installation. It holds ' + plural(out.records, 'decision', 'decisions') + '.'
               : 'The signature is valid for the key in this file, but who signed it has not been verified. Obtain the publisher’s key through a trusted channel before relying on its origin.')));
         } else {
-          box.appendChild(el('p', out.intact
+          box.appendChild(el('p', null, out.intact
             ? (out.from_this_installation === false
               ? 'This learning statement is intact and was signed by the installation whose key you gave.'
               : 'This learning statement is intact and was signed by this Lightwork installation.')
@@ -336,7 +336,7 @@
               : 'This learning statement could not be confirmed against this installation. It may have been changed or signed elsewhere.')));
           if (out.claims.length) {
             var ul = el('ul');
-            out.claims.forEach(function (c) { ul.appendChild(el('li', c.claim + ': ' + c.result)); });
+            out.claims.forEach(function (c) { ul.appendChild(el('li', null, c.claim + ': ' + c.result)); });
             box.appendChild(ul);
           }
         }

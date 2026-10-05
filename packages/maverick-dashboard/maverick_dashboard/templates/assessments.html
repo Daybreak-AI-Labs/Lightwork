@@ -36,10 +36,10 @@
   .pill.status-in_review{ color: var(--warn); border-color: currentColor; }
   .pill.status-needs_review{ color: var(--danger); border-color: currentColor; }
   .pill.status-reviewed{ color: var(--accent); border-color: currentColor; }
-  .dot{ width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+  .dot{ width: 9px; height: 9px; border-radius: var(--radius-round); display: inline-block; }
   .dot.ok{ background: var(--accent); } .dot.attention{ background: var(--danger); }
-  .lenses-mini{ display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-  .lenses-mini span{ display: inline-flex; gap: 4px; align-items: center; font-size: var(--text-xs); color: var(--muted); }
+  .lenses-mini{ display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
+  .lenses-mini span{ display: inline-flex; gap: var(--space-1); align-items: center; font-size: var(--text-xs); color: var(--muted); }
 
   .drift{ border: 1px solid var(--danger); color: var(--danger); background: color-mix(in srgb, var(--danger) 10%, transparent);
     border-radius: var(--radius-md); padding: var(--space-2) var(--space-3); font-size: var(--text-sm); margin-bottom: var(--space-3); }
@@ -52,9 +52,9 @@
   .finding__head{ display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
   .sev{ font-size: 10px; text-transform: uppercase; letter-spacing: .04em; padding: 1px 7px; border-radius: var(--radius-pill); border: 1px solid currentColor; }
   .sev.low{ color: var(--muted); } .sev.medium{ color: var(--warn); } .sev.high{ color: var(--danger); }
-  .finding__note{ color: var(--text); font-size: var(--text-sm); margin: 4px 0 0; }
-  .finding__mit{ color: var(--muted); font-size: var(--text-sm); margin: 2px 0 0; }
-  .finding__ev{ color: var(--accent); font-size: var(--text-xs); margin: 4px 0 0; }
+  .finding__note{ color: var(--text); font-size: var(--text-sm); margin: var(--space-1) 0 0; }
+  .finding__mit{ color: var(--muted); font-size: var(--text-sm); margin: var(--space-0-5) 0 0; }
+  .finding__ev{ color: var(--accent); font-size: var(--text-xs); margin: var(--space-1) 0 0; }
   .lens__actions{ display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap; margin-top: var(--space-2); }
   .as-empty{ color: var(--muted); text-align: center; padding: var(--space-6) var(--space-3);
     border: 1px dashed var(--glass-border); border-radius: var(--radius-lg); }

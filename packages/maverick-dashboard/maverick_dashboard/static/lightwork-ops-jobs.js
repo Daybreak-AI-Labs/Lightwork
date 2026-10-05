@@ -7,7 +7,7 @@
   if (window.LWJobs) return;
   var POLL_MS = 1500;
 
-  function el(tag, text, cls) {
+  function el(tag, cls, text) {
     var node = document.createElement(tag);
     if (cls) node.className = cls;
     if (text != null) node.textContent = text;
@@ -57,10 +57,10 @@
   }
 
   function technical(lines, title) {
-    var box = el('details', null, 'lw-ops-tech');
-    box.appendChild(el('summary', title || 'Technical details'));
+    var box = el('details', 'lw-ops-tech');
+    box.appendChild(el('summary', null, title || 'Technical details'));
     var list = el('ul');
-    (lines || []).forEach(function (t) { if (t !== '' && t != null) list.appendChild(el('li', String(t))); });
+    (lines || []).forEach(function (t) { if (t !== '' && t != null) list.appendChild(el('li', null, String(t))); });
     box.appendChild(list);
     return box;
   }
@@ -68,7 +68,7 @@
   function table(headers, rows) {
     var t = el('table');
     var head = el('tr');
-    headers.forEach(function (h) { var th = el('th', h); th.scope = 'col'; head.appendChild(th); });
+    headers.forEach(function (h) { var th = el('th', null, h); th.scope = 'col'; head.appendChild(th); });
     var thead = el('thead'); thead.appendChild(head); t.appendChild(thead);
     var body = el('tbody');
     rows.forEach(function (cells) {
@@ -114,7 +114,7 @@
       function show(j) {
         ui.status.textContent = j.state === 'failed' ? (j.problem || 'This job could not finish.') : STATE_TEXT[j.state] || '';
         if (j.can_stop && !stop) {
-          stop = el('button', 'Stop', 'btn btn--ghost');
+          stop = el('button', 'btn btn--ghost', 'Stop');
           stop.type = 'button';
           stop.addEventListener('click', async function () {
             if (!(await window.mvConfirm('Stop this job? It stops at the next safe point and keeps what it has already done.',

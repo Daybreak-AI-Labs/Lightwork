@@ -27,7 +27,7 @@
   /* An editor surface is not prose: mid-drag the browser otherwise paints text
      selection across the palette/props while wiring or moving nodes. */
   .fd__canvas-wrap, .fd__palette { user-select: none; -webkit-user-select: none; }
-  @media (max-width: 900px) {
+  @media (max-width: 880px) {
     .fd[data-view="steps"] .fdx-work { grid-template-columns: 1fr; height: auto; }
   }
   /* Stack the canvas workspace before its middle column becomes cramped.
@@ -84,7 +84,7 @@
   .fd-node:focus-visible rect.card { stroke: var(--ring); stroke-width: 3; }
   .fd-node.start rect.card { stroke: var(--success, #16a34a); }
   .fd-node text { font: 12px var(--font-sans); fill: var(--text); pointer-events: none; }
-  .fd-node text.kind { font-weight: 700; text-transform: uppercase; font-size: 10px; letter-spacing: .04em; }
+  .fd-node text.kind { font-weight: var(--font-bold); text-transform: uppercase; font-size: 10px; letter-spacing: .04em; }
   .fd-node .swatch { rx: 4; }
   .fd-node .port { fill: var(--accent); stroke: var(--surface-1); stroke-width: 2; cursor: crosshair; }
   .fd-edge { fill: none; stroke: var(--muted); stroke-width: 2; marker-end: url(#fd-arrow); }
@@ -105,14 +105,14 @@
   .fd__legend { font-size: var(--text-sm); color: var(--muted); display: none; gap: var(--space-3); }
   .fd__legend.on { display: inline-flex; }
   .fd__examples { flex-basis: 100%; display: flex; gap: var(--space-2); flex-wrap: wrap; }
-  .fd__chip { font-size: var(--text-sm); padding: 2px 10px; border: 1px solid var(--border);
-              border-radius: 999px; background: var(--surface-1); cursor: pointer; color: var(--muted); }
+  .fd__chip { font-size: var(--text-sm); padding: var(--space-0-5) 10px; border: 1px solid var(--border);
+              border-radius: var(--radius-pill); background: var(--surface-1); cursor: pointer; color: var(--muted); }
   .fd__chip:hover { border-color: var(--accent); color: var(--text); }
   .fd__props .toolhint { font-size: var(--text-sm); color: var(--muted); margin: -4px 0 var(--space-2); }
   /* breadcrumb: shown only while editing a nested sub-flow (foreach body / branch) */
   .fd__crumbs { display: none; position: absolute; top: 8px; inset-inline-start: 8px; z-index: 2;
                 background: var(--surface-1); border: 1px solid var(--border); border-radius: var(--radius-md);
-                padding: 4px 10px; font-size: var(--text-sm); color: var(--muted); max-width: calc(100% - 16px);
+                padding: var(--space-1) 10px; font-size: var(--text-sm); color: var(--muted); max-width: calc(100% - 16px);
                 overflow-x: auto; white-space: nowrap; }
   .fd__crumbs.on { display: block; }
   .fd__crumb { background: none; border: none; color: var(--accent); cursor: pointer; padding: 0; font: inherit; }
@@ -121,9 +121,9 @@
   .fd-edge-hit { fill: none; stroke: transparent; stroke-width: 14; cursor: pointer; pointer-events: stroke; }
   .fd-edge.selected { stroke: var(--accent); stroke-width: 3; }
   /* data pills: one-click {% raw %}{{key}}{% endraw %} insertion from upstream outputs */
-  .fd__pills { display: flex; flex-wrap: wrap; gap: 4px; margin: -4px 0 var(--space-2); }
-  .fd__pill { font-size: 11px; font-family: var(--font-mono, monospace); padding: 1px 8px;
-              border: 1px solid var(--border); border-radius: 999px; background: var(--surface-sunken);
+  .fd__pills { display: flex; flex-wrap: wrap; gap: var(--space-1); margin: -4px 0 var(--space-2); }
+  .fd__pill { font-size: 11px; font-family: var(--font-mono, monospace); padding: 1px var(--space-2);
+              border: 1px solid var(--border); border-radius: var(--radius-pill); background: var(--surface-sunken);
               cursor: pointer; color: var(--muted); }
   .fd__pill:hover { border-color: var(--accent); color: var(--text); }
   /* marquee multi-select (shift-drag on empty canvas) */
@@ -156,7 +156,7 @@
                   white-space: pre-wrap; word-break: break-word; }
   .fd__chat-msg.user { align-self: flex-end; background: var(--accent); color: #fff; }
   .fd__chat-msg.assistant { align-self: flex-start; background: var(--surface-sunken); border: 1px solid var(--border); }
-  .fd__chat-msg.note { align-self: flex-start; color: var(--muted); font-style: italic; padding: 0 2px; }
+  .fd__chat-msg.note { align-self: flex-start; color: var(--muted); font-style: italic; padding: 0 var(--space-0-5); }
   .fd__chat-form { display: flex; flex-shrink: 0; gap: var(--space-2); padding: var(--space-2); border-top: 1px solid var(--border); }
   .fdx-more { position: relative; }
   .fdx-more summary { list-style: none; cursor: pointer; }
@@ -223,21 +223,21 @@
   .fd-scard{ cursor: pointer; }
   .fd-scard.is-selected{ border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 40%, transparent); }
   .fd-scard__main{ min-width: 0; flex: 1; background: none; border: 0; padding: 0; text-align: start; color: inherit; font: inherit; cursor: pointer; }
-  .fd-scard__tools{ display: flex; gap: 4px; flex: none; }
+  .fd-scard__tools{ display: flex; gap: var(--space-1); flex: none; }
   .fd-scard__tools .btn{ padding: 0.25rem 0.55rem; font-size: var(--text-xs); }
   .fd-simple__add{ display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap; }
   /* In the Steps view the selected step's settings open in the side rail. */
   .fd[data-view="steps"] .fdx-rail .fd__props{ display: block; }
-  .fd__pair{ display: flex; gap: 4px; margin-bottom: 4px; flex-wrap: wrap; align-items: center; }
+  .fd__pair{ display: flex; gap: var(--space-1); margin-bottom: var(--space-1); flex-wrap: wrap; align-items: center; }
   .fd__pair > .input, .fd__pair > select{ flex: 1 1 120px; min-width: 0; width: auto; }
   .fd__check{ display: inline-flex !important; align-items: center; gap: 6px; font-size: var(--text-sm); margin-bottom: var(--space-3); }
   .fd__check input{ width: auto !important; }
   .fd__label{ display: block; font-size: var(--text-sm); margin-bottom: var(--space-1); }
   .fd__fails{ margin: var(--space-2) 0 var(--space-3); }
   .fd__fails > summary{ cursor: pointer; font-weight: var(--font-semibold); font-size: var(--text-sm); margin-bottom: var(--space-2); }
-  .fd__days{ border: 0; padding: 0; margin: 0 0 var(--space-2); display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: var(--text-sm); }
-  .fd__days legend{ color: var(--muted); font-size: var(--text-sm); margin-bottom: 4px; }
-  .fd__days label{ display: inline-flex; align-items: center; gap: 4px; }
+  .fd__days{ border: 0; padding: 0; margin: 0 0 var(--space-2); display: flex; flex-wrap: wrap; gap: var(--space-1) 10px; font-size: var(--text-sm); }
+  .fd__days legend{ color: var(--muted); font-size: var(--text-sm); margin-bottom: var(--space-1); }
+  .fd__days label{ display: inline-flex; align-items: center; gap: var(--space-1); }
 </style>
 
 {% from "_hero.html" import hero, state %}

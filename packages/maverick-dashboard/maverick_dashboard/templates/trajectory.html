@@ -13,7 +13,7 @@
   .timeline li:last-child { border-bottom: 0; }
   .timeline li::before {
     content: ""; position: absolute; left: -2.45rem; top: 1.1rem;
-    width: 10px; height: 10px; border-radius: 50%;
+    width: 10px; height: 10px; border-radius: var(--radius-round);
     background: var(--surface-1); border: 2px solid var(--border);
   }
   .timeline li.tool::before    { border-color: var(--accent); }
@@ -24,7 +24,7 @@
   .ev-kind { color: var(--accent); }
   .ev-content {
     margin-top: 0.4rem; white-space: pre-wrap; word-break: break-word;
-    background: var(--surface-1); padding: 0.4rem 0.6rem; border-radius: 4px;
+    background: var(--surface-1); padding: 0.4rem 0.6rem; border-radius: var(--radius-xs);
   }
   .ev-branch { margin-inline-start: auto; padding: 0.15rem 0.6rem; font-size: var(--text-xs); }
   .ev-step { margin: 0.35rem 0 0; color: var(--text); }

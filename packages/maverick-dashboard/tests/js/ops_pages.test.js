@@ -28,6 +28,14 @@ async function fixture(markup, script, route, {confirm = true, url = 'https://li
   await settle();
   return {window, document: window.document, calls, confirms, opened, settle};
 }
+// The shell's shared helpers (mvFetchJSON) load before page scripts, as in
+// base.html; this fixture's own stand-ins for the other helpers are kept.
+function withShell(window) {
+  const kept = Object.fromEntries(Object.keys(window).filter((k) => k.startsWith('mv')).map((k) => [k, window[k]]));
+  if (!window.matchMedia) window.matchMedia = () => ({matches: false, addEventListener() {}, removeEventListener() {}});
+  window.eval(fs.readFileSync(path.resolve(__dirname, '../../maverick_dashboard/static/lightwork-ui.js'), 'utf8'));
+  Object.assign(window, kept);
+}
 function submit(ui, form) { form.dispatchEvent(new ui.window.Event('submit', {cancelable: true})); }
 
 test('one-step client setup sends the form and shows the link once', async (t) => {
@@ -40,6 +48,7 @@ test('one-step client setup sends the form and shows the link once', async (t) =
     throw new Error('unexpected request ' + url);
   });
   t.after(() => ui.window.close());
+  withShell(ui.window);
   ui.window.eval(read('static/lightwork-tenants.js'));
   const form = ui.document.getElementById('tenant-add');
   assert.equal(form.querySelector('[data-onboard-roles]').options.length, 2);

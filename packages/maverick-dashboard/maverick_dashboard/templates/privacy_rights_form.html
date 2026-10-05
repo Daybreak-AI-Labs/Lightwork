@@ -6,13 +6,13 @@
   .prf-grid { display: grid; gap: var(--space-4); grid-template-columns: minmax(20rem, 1fr) minmax(24rem, 1.4fr); }
   .prf-fields { display: grid; gap: .75rem; }
   .prf-fields label { display: flex; flex-direction: column; gap: .25rem; }
-  .prf-choices { display: flex; flex-wrap: wrap; gap: .4rem 1rem; border: 1px solid var(--border); border-radius: 8px; padding: .5rem .75rem; }
+  .prf-choices { display: flex; flex-wrap: wrap; gap: .4rem 1rem; border: 1px solid var(--border); border-radius: var(--radius-md); padding: .5rem .75rem; }
   .prf-choices label { display: flex; gap: .4rem; align-items: center; }
   .prf-actions { display: flex; gap: var(--space-2); flex-wrap: wrap; margin-top: var(--space-3); align-items: center; }
   .prf-snippet { font-family: var(--font-mono); font-size: var(--text-xs); white-space: pre-wrap; word-break: break-all; }
   .prf-placeholders { columns: 2; font-size: var(--text-sm); }
   .prf-templates textarea { min-height: 14rem; font-family: var(--font-mono); }
-  @media (max-width: 900px) { .prf-grid { grid-template-columns: 1fr; } }
+  @media (max-width: 880px) { .prf-grid { grid-template-columns: 1fr; } }
 </style>
 <div id="prf-page" data-copilot-page="/privacy/rights-form" data-can-admin="{{ 'yes' if can_admin else 'no' }}">
   <p class="muted" style="margin-bottom: var(--space-2);">{{ back_link('/privacy', 'Privacy') }}</p>

@@ -4,7 +4,7 @@
 {% from "_back_link.html" import back_link with context %}
 <style>
   .ge-wrap { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 1rem; }
-  @media (max-width: 900px) { .ge-wrap { grid-template-columns: 1fr; } }
+  @media (max-width: 880px) { .ge-wrap { grid-template-columns: 1fr; } }
   /* Obsidian-style canvas: a flat dark field with a faint centre glow so the
      force-directed constellation reads with depth. */
   #ge-svg {
@@ -18,7 +18,7 @@
   }
   #ge-svg.panning { cursor: grabbing; }
   .ge-form label { display: block; font-size: 0.8rem; color: var(--muted); margin: 0.75rem 0 0.25rem; }
-  .ge-form input, .ge-form select { width: 100%; padding: 0.45rem 0.6rem; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 6px; }
+  .ge-form input, .ge-form select { width: 100%; padding: 0.45rem 0.6rem; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius-sm); }
   .ge-form button { margin-top: 0.5rem; padding: 0.45rem 1rem; background: var(--brand); color: var(--brand-fg); border: 0; border-radius: var(--radius-md); cursor: pointer; }
   .ge-form button:disabled { opacity: 0.5; cursor: not-allowed; }
   .legend { display: flex; gap: 0.75rem; flex-wrap: wrap; margin-bottom: 1rem; align-items: center; }
