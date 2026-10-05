@@ -176,3 +176,12 @@ def test_the_requester_still_sees_the_full_card(env, monkeypatch):
     page = client.get("/approvals").text
     assert "Requests you can't open" not in page
     assert re.search(r'data-action="approve"', _card(page, approval_id))
+
+
+def test_my_work_never_says_all_clear_beside_a_waiting_request(env, monkeypatch):
+    client, world = env
+    _shell_approval(world)
+    _as(monkeypatch, DANA)
+    page = client.get("/me").text
+    hero = _visible(page[page.index("Right now"):][:600])
+    assert "All clear" not in hero and "Waiting on others" in hero

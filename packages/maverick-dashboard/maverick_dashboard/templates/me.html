@@ -12,8 +12,8 @@
                      linked chat app or inbox.') %}
     {{ state('Right now',
              waiting ~ (' thing needs you' if waiting == 1 else ' things need you'),
-             badge='Action needed' if waiting else 'All clear',
-             badge_class='warn' if waiting else 'ok',
+             badge='Action needed' if waiting else ('Waiting on others' if d.approvals else 'All clear'),
+             badge_class='warn' if waiting else ('pending' if d.approvals else 'ok'),
              copy=d.local_date | datetime('date') ~ ' · ' ~ preferences.time_zone) }}
   {% endcall %}
 
