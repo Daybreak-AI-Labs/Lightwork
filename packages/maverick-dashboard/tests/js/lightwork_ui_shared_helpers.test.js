@@ -221,8 +221,11 @@ test("onAccess runs before the rejection when access is gone (401, 403, a redire
   const w = load();
   const lost = [];
   const onAccess = (error) => lost.push(error.status);
-  w.fetch = async () => respond(403, { detail: "forbidden" });
-  await assert.rejects(w.mvFetchJSON("/a", { onAccess }, "open the list"), /You do not have permission/);
+  let parsed = false;
+  w.fetch = async () => ({ ok: false, status: 403, headers: new Map(), redirected: false,
+    text: async () => { parsed = true; return "<html>sign in</html>"; }, json: async () => { parsed = true; throw new SyntaxError("html"); } });
+  await assert.rejects(w.mvFetchJSON("/a", { onAccess: (error) => { assert.equal(parsed, false, "cleared before anything is read"); onAccess(error); } }, "open the list"), /You do not have permission/);
+  assert.equal(parsed, false, "the refusal's body is never read");
   w.fetch = async () => respond(401, {});
   await assert.rejects(w.mvFetchJSON("/a", { onAccess }, "open the list"), /Sign in again/);
   w.fetch = async () => Object.assign(respond(200, {}), { redirected: true });
@@ -253,6 +256,24 @@ test("raw returns the response itself for a download, and still rejects plainly"
   assert.equal(await w.mvFetchJSON("/export", { raw: true }, "download"), file);
   w.fetch = async () => respond(500, { detail: "boom" });
   await assert.rejects(w.mvFetchJSON("/export", { raw: true }, "download the file"), { message: "Could not download the file. Something went wrong on our side. Try again in a minute." });
+  w.close();
+});
+
+test("a success whose body cannot be read fails closed, without echoing it", async () => {
+  const w = load();
+  w.fetch = async () => respond(200, "<html>secret sign-in page</html>");
+  await assert.rejects(w.mvFetchJSON("/a", {}, "load the list"), (error) => {
+    assert.equal(error.message, "Could not load the list. Something went wrong. Try again.");
+    assert.equal(error.status, 0);
+    assert.equal(error.unreadable, true);
+    assert.doesNotMatch(error.message, /secret/);
+    return true;
+  });
+  // A page's own fake with only json() works the same way.
+  w.fetch = async () => ({ ok: true, status: 200, headers: new Map(), json: async () => { throw new SyntaxError("bad"); } });
+  await assert.rejects(w.mvFetchJSON("/a", {}, "load the list"), { status: 0 });
+  w.fetch = async () => ({ ok: true, status: 204, headers: new Map(), json: async () => { throw new SyntaxError("empty"); } });
+  assert.equal(await w.mvFetchJSON("/a", {}, "load the list"), null, "No Content is an empty success");
   w.close();
 });
 

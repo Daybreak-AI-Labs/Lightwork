@@ -582,6 +582,15 @@
         error.status = failure.status; error.detail = failure.detail; error.headers = failure.headers; error.payload = failure.payload;
         return error;
       }
+      // The body as JSON; an empty body (No Content) is null.
+      async function readJSON(response) {
+        if (typeof response.text !== 'function') {
+          try { return await response.json(); }
+          catch (error) { if (response.status === 204) return null; throw error; }
+        }
+        var text = await response.text();
+        return text ? JSON.parse(text) : null;
+      }
       window.mvFetchJSON = async function (url, opts, action) {
         var own = opts || {};
         var options = Object.assign({ credentials: 'same-origin' }, own);
@@ -619,18 +628,27 @@
         }
         var access = own.accessStatuses || [401, 403];
         var lost = typeof own.onAccess === 'function' && (access.indexOf(response.status) !== -1 || response.redirected === true);
-        if (own.raw && response.ok && !lost) { clearTimeout(timer); return response; }
-        var payload = null;
-        try { payload = await response.json(); } catch (_) { payload = null; }
-        finally { clearTimeout(timer); }
         if (lost) {
-          // A redirect lands on the sign-in page: say so, as for a 401.
-          var gone = fetchFailure({ status: response.ok ? 401 : response.status, detail: payload && payload.detail, headers: response.headers, payload: payload }, action, own);
+          // The page clears what it showed privately before anything else,
+          // and the refusal's body (often a sign-in page) is never read. A
+          // redirect lands on the sign-in page: say so, as for a 401.
+          clearTimeout(timer);
+          var gone = fetchFailure({ status: response.ok ? 401 : response.status, headers: response.headers }, action, own);
           gone.status = response.status; gone.accessChanged = true;
           own.onAccess(gone);
           throw gone;
         }
-        if (response.ok) return payload;
+        if (own.raw && response.ok) { clearTimeout(timer); return response; }
+        var payload = null, unreadable = false;
+        try { payload = await readJSON(response); } catch (_) { payload = null; unreadable = true; }
+        finally { clearTimeout(timer); }
+        if (response.ok && !unreadable) return payload;
+        if (response.ok) {
+          // Malformed success never counts as success, and is never shown.
+          var bad = new Error(window.mvErrorText({ name: 'SyntaxError' }, action));
+          bad.status = 0; bad.unreadable = true;
+          throw bad;
+        }
         throw fetchFailure({ status: response.status, detail: payload && payload.detail, headers: response.headers, payload: payload }, action, own);
       };
       // Two page-wide live regions (polite, and assertive for errors) that
