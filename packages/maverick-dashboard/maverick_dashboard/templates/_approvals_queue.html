@@ -590,6 +590,7 @@
             markDecided(item, outcome, decidedBy, undoSeconds);
             if (moveFocus) focusAfterDecision(item, next, opts.pointer);
           }
+          document.dispatchEvent(new CustomEvent('lightwork:approval-decided', {detail: {id: id, outcome: outcome}}));
         } else if (r.status === 200 && action === 'revise') {
           await r.json().catch(function() { return {}; });
           say(label + ' was sent back. The requester will prepare a new request.', 'var(--accent)');

@@ -1936,3 +1936,11 @@ body:not(.theme-hicontrast) .btn--primary:hover { background: color-mix(in srgb,
 .cs-account .help-menu .help-menu__panel { left: 0; right: 0; min-width: 0; }
 .cs-account .help-menu > summary { color: var(--muted); font-size: var(--text-sm); cursor: pointer; }
 .cs-account .help-menu > summary:hover, .cs-account .help-menu[open] > summary { color: var(--text); }
+
+/* Optional ease-of-use survey panels (lightwork-usability-survey.js). */
+.mv-survey { margin-bottom: var(--space-4); }
+.mv-survey__item { border: 0; padding: 0; margin: 0 0 var(--space-3); }
+.mv-survey__item legend { font-weight: 600; margin-bottom: var(--space-1); }
+.mv-survey__choice { display: inline-flex; align-items: center; gap: var(--space-1); min-height: 24px; margin-right: var(--space-3); }
+.mv-survey__role { display: block; margin-bottom: var(--space-3); }
+.mv-survey__actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }

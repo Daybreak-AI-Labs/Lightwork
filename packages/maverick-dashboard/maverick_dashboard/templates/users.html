@@ -119,6 +119,7 @@
     </form>{% endif %}
   </section>
   <section class="panel"><h2>Employee content is private</h2><p>Administrator roles manage access and policy. They no longer open another employee's task text, files or chat by default. Existing employee-owned records use their recorded owner; unowned legacy work requires an explicit content review. Shared result packets keep their assigned reviewer access.</p><a class="btn" href="/content-access">Review or request content access</a></section>
+  {% if viewer_global_admin and can_open_page('/users/usability-survey') %}<p class="muted"><a href="/users/usability-survey">Ease-of-use results</a>: what people say about using Lightwork, by role and by task, from the optional survey.</p>{% endif %}
   <div class="section-head"><h2 id="people" tabindex="-1">People</h2></div>
   {% set uf = users_filter | default({'q': '', 'role': '', 'active': false}) %}
   {% set shown = users_shown | default(users) %}
@@ -192,7 +193,7 @@
           <td><input type="checkbox" name="principals" value="{{ principal }}" form="users-bulk" id="pick-{{ loop.index }}" data-bulk-pick /><label class="sr-only" for="pick-{{ loop.index }}">Select {{ name_of(principal) }}</label></td>
           <td>{{ who(principal) }}{% if principal == you %} <span class="muted">(you)</span>{% endif %}</td>
           <td>
-            <form method="post" action="/users/set" class="users-row-form" id="role-form-{{ loop.index }}">
+            <form method="post" data-mv-save action="/users/set" class="users-row-form" id="role-form-{{ loop.index }}">
               {{ workspace_binding() }}
               <input type="hidden" name="principal" value="{{ principal }}" />
               <label class="sr-only" for="role-{{ loop.index }}">Role for {{ name_of(principal) }}</label>
@@ -260,7 +261,7 @@
     {% set unassigned = people | rejectattr('role') | list %}
     <h3 class="users-subhead">Give someone a role</h3>
     {% if unassigned %}
-    <form method="post" action="/users/set" class="users-row-form" id="give-role-form" data-mv-validate data-mv-keep="users-set">
+    <form method="post" data-mv-save action="/users/set" class="users-row-form" id="give-role-form" data-mv-validate data-mv-keep="users-set">
       {{ workspace_binding() }}
       {{ error_summary('give-role-errors') }}
       {% set person_choices = [('', 'Choose a person…')] %}{% for person in unassigned %}{% set _ = person_choices.append((person.principal, person.label)) %}{% endfor %}
@@ -346,7 +347,7 @@
   {% if invites_on %}
   <div class="section-head"><h2 id="invite-email">Invite someone by email</h2></div>
   <div class="panel">
-    <form method="post" action="/users/invite" class="users-row-form" id="invite-form" data-mv-validate data-mv-keep="users-invite">
+    <form method="post" data-mv-save action="/users/invite" class="users-row-form" id="invite-form" data-mv-validate data-mv-keep="users-invite">
       {{ workspace_binding() }}
       {{ error_summary('invite-errors') }}
       <label class="users-field users-grow">

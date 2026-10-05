@@ -51,6 +51,7 @@ ASSETS = (
     "lightwork-tax.js",
     "lightwork-task-changes.js",
     "lightwork-viewpoints.js",
+    "lightwork-usability-survey.js",
 )
 
 

@@ -234,7 +234,7 @@ KNOWN_SCHEMA: dict[str, set[str] | None] = {
         "group_suites",
         "active_tenant",
     },
-    "analytics": {"mcp_client_language", "task_questions"},
+    "analytics": {"mcp_client_language", "task_questions", "usability_survey"},
     "first_outcome": {"department", "sample_workspace_created"},
     # Work discovery is a high-trust client-controlled sensor.  Keep this
     # section fixed-key so misspelled retention/privacy knobs do not silently
@@ -715,7 +715,7 @@ _BOOL_KEYS: dict[str, set[str]] = {
         "cross_run_pool",
         "warm",
     },
-    "analytics": {"mcp_client_language", "task_questions"},
+    "analytics": {"mcp_client_language", "task_questions", "usability_survey"},
     "self_learning": {
         "preflight",
         "create_tools",

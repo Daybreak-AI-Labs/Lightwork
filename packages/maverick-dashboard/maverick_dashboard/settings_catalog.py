@@ -813,6 +813,12 @@ SETTINGS: tuple[Setting, ...] = (
     S("analytics", "mcp_client_language", "Count which programming languages connect",
       "Keep a local count of the programming languages used by connected tools. Nothing leaves this computer.",
       "toggle", "Privacy", False, "maverick.mcp_analytics", env=("MAVERICK_MCP_ANALYTICS",)),
+    S("analytics", "usability_survey", "Ask people how easy Lightwork is to use",
+      "Offer each signed-in person a 10-question ease-of-use survey at most once a quarter, and one "
+      "question after a few common tasks. One click hides it for the quarter. Answers stay on this "
+      "server, are reported by the role people choose, never by name, and are never sent anywhere. "
+      "Results are on People > Ease-of-use results.",
+      "toggle", "Privacy", False, "maverick.usability_survey"),
     S("immune", "twin_record", "Record tool results for replay",
       "Keep sealed copies of every task's tool results so the task can be replayed to test changes.",
       "toggle", "Privacy", False, "maverick.config", weaker=True,

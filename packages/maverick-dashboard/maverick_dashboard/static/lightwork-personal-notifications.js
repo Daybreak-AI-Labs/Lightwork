@@ -138,6 +138,7 @@
     if (busy) return;
     busy = true; refresh.disabled = true; form.querySelector('[type="submit"]').disabled = true;
     controller = new AbortController(); error.hidden = true;
+    if (reset === true) saveStatus.textContent = 'Saving…';
     const timeout = setTimeout(function () { if (controller) controller.abort(); }, 20000);
     try {
       const response = await fetch(url, {method:body ? 'POST':'GET', credentials:'same-origin', signal:controller.signal, headers:body ? {'Content-Type':'application/json'}:{}, body:body ? JSON.stringify(body):undefined});
@@ -149,7 +150,10 @@
       render(value, reset); if (reset) saveStatus.textContent = reset === true ? 'Your personal notification preferences were saved.' : 'Saved preferences reloaded.';
       if (value.muted) showMuted(value.muted);
       if (value.unmuted && muteStatus) muteStatus.textContent = 'The mute was removed. Those alerts show again.';
-    } catch (failure) { if (failure.name !== 'AbortError' || !document.hidden) { error.textContent = failure.name === 'AbortError' ? 'The inbox request was interrupted. Refresh to check the latest state before saving again.' : failure.message; error.hidden = false; } }
+    } catch (failure) {
+      // Never leave an earlier "saved" beside the button after a failed save.
+      if (reset === true) saveStatus.textContent = form.hidden ? 'Your preferences were not saved.' : 'Your preferences were not saved. Your changes are still here; try again.';
+      if (failure.name !== 'AbortError' || !document.hidden) { error.textContent = failure.name === 'AbortError' ? 'The inbox request was interrupted. Refresh to check the latest state before saving again.' : failure.message; error.hidden = false; } }
     finally { clearTimeout(timeout); busy = false; controller = null; refresh.disabled = false; form.querySelector('[type="submit"]').disabled = false; }
   }
   form.addEventListener('input', function () { dirty = true; });

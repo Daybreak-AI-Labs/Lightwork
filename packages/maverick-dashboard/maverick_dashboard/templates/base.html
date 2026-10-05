@@ -201,6 +201,7 @@
   {% if show_personal_notifications %}<script src="{{ asset('lightwork-notification-badge.js') }}" defer></script>{% endif %}
   {% if record_search_context %}<link rel="stylesheet" href="{{ asset('lightwork-record-search.css') }}"><script src="{{ asset('lightwork-record-search.js') }}" defer></script>{% endif %}
   <script src="{{ asset('lightwork-voice.js') }}" defer></script>
+  {% if usability_survey_on %}<script src="{{ asset('lightwork-usability-survey.js') }}" defer></script>{% endif %}
   {% block scripts_extra %}{% endblock %}
 </body>
 </html>

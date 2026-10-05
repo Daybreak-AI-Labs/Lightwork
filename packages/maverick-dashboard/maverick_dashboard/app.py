@@ -1485,8 +1485,12 @@ app.include_router(task_handoffs_router)
 
 app.include_router(my_work_router)
 from .approval_waits import router as approval_waits_router  # noqa: E402
+from .usability_survey_api import router as usability_survey_router  # noqa: E402
+from .usability_survey_api import survey_context as _usability_survey_context  # noqa: E402
 
 app.include_router(approval_waits_router)
+app.include_router(usability_survey_router)
+templates.context_processors.append(_usability_survey_context)
 app.include_router(conversation_organization_router)
 from .first_outcome_api import router as first_outcome_router  # noqa: E402
 from .in_app_routes import router as in_app_router  # noqa: E402
