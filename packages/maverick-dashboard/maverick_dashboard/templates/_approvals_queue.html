@@ -27,6 +27,9 @@
        two-person approval their vote counts only if self-approval is on. #}
     {% set own_request = approval_viewer|default('') and a.requested_by and a.requested_by == approval_viewer %}
     {% set own_vote_counts = (a.approvals_required or 1) <= 1 or self_approval_allowed|default(false) %}
+    {# Approval progress comes with the page (app._approval_progress), plain
+       text rather than one status request and announcement per card. #}
+    {% set progress = approval_progress.get(a.id) if approval_progress else None %}
     <article class="approval-item" data-id="{{ a.id }}" data-label="{{ action_label }}" data-risk="{{ a.risk }}"{% if own_request %} data-own-request="yes"{% endif %}
              data-scope="{{ scope_text }}"
              {% if card %}data-target="{{ card.target.label }}" data-spending="{{ _budget_text(card.budget) | trim }}" data-irreversible="{{ 'yes' if card.consequences.irreversible else 'no' }}"{% endif %}
@@ -84,9 +87,10 @@
       <p class="approval-item__decided muted" hidden></p>
       {% if own_request and not own_vote_counts %}<p class="muted approval-own-note">You asked for this, so other people must approve it.</p>{% endif %}
       <div class="approval-actions">
-        <button type="button" class="btn approval-btn" data-id="{{ a.id }}" data-action="approve"{% if card %} data-binding="{{ card.binding_sha256 }}"{% endif %}{% if card_status in ('expired', 'invalid', 'legacy') %} disabled title="A new request is needed before this can be approved"{% elif own_request and not own_vote_counts %} disabled title="You asked for this, so other people must approve it."{% endif %}>Approve</button>
+        <button type="button" class="btn approval-btn" data-id="{{ a.id }}" data-action="approve"{% if card %} data-binding="{{ card.binding_sha256 }}"{% endif %}{% if card_status in ('expired', 'invalid', 'legacy') %} disabled title="A new request is needed before this can be approved"{% elif own_request and not own_vote_counts %} disabled title="You asked for this, so other people must approve it."{% elif progress and progress.recorded %} disabled{% endif %}>Approve</button>
         <button type="button" class="btn btn--ghost approval-btn" data-id="{{ a.id }}" data-action="deny">Reject</button>
         <button type="button" class="btn btn--ghost approval-btn" data-id="{{ a.id }}" data-action="revise">Send back for changes</button>
+        {% if progress %}<p class="approval-quorum" data-approval-quorum-status="1">{{ progress.text }}</p>{% endif %}
       </div>
       <div class="approval-actions approval-actions--decided" hidden>
         <button type="button" class="btn approval-undo" data-id="{{ a.id }}">Undo</button>
@@ -157,6 +161,7 @@
   .approval-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: auto; padding-top: var(--space-3); border-top: 1px solid var(--border); }
   .approval-actions .btn { flex: 1 1 8rem; }
   .approval-actions .btn[disabled] { opacity: 0.6; cursor: not-allowed; }
+  .approval-quorum { flex: 1 1 100%; margin: 0; }
   .approval-item--decided { border-color: var(--accent); }
   .approval-item--decided .approval-item__decided { margin: 0; }
   .approval-decided { margin-top: var(--space-5); }
@@ -660,33 +665,6 @@
       }
     });
   })();
-</script>
-
-<script>
-(function () {
-  document.querySelectorAll('article.approval-item[data-id]').forEach(async function (row) {
-    try {
-      var response = await fetch('/api/v1/approvals/' + row.dataset.id + '/state', {credentials: 'same-origin', cache: 'no-store'});
-      if (!response.ok) return;
-      var state = await response.json(), cell = row.querySelector('.approval-actions');
-      if (!cell || state.status !== 'pending') return;
-      var text = cell.querySelector('[data-approval-quorum-status]');
-      if (!text) { text = document.createElement('p'); text.setAttribute('role', 'status'); text.dataset.approvalQuorumStatus = '1'; cell.append(text); }
-      // The words follow what is enforced: one approver may be the person
-      // who asked; under two-person approval their own vote may not count.
-      var required = Number(state.approvals_required) || 1;
-      var words = [required <= 1 ? 'One approval is needed.'
-        : state.approved_count + ' of ' + required + ' required approvals received.'];
-      if (state.your_approval_recorded) words.push('Your approval is recorded.');
-      else if (state.requested_by_you) words.push(!state.self_approval_counts
-        ? 'You asked for this, so other people must approve it.'
-        : required <= 1 ? 'You asked for this, so approving it approves your own request.'
-          : 'You asked for this; your approval counts as one of them.');
-      text.textContent = words.join(' ');
-      if (state.your_approval_recorded) { var approve = row.querySelector('[data-action="approve"]'); if (approve) approve.disabled = true; }
-    } catch (_) { /* Existing decision controls retain their server-side checks. */ }
-  });
-}());
 </script>
 
 <details id="request-decision-history" class="panel">

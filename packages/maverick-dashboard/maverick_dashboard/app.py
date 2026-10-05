@@ -6610,10 +6610,12 @@ async def audit_page(request: Request) -> HTMLResponse:
 
     from . import audit_actions_api as _audit_plain
 
+    # 50 entries a page: the 200-row default made a 400 KB page that blocked a
+    # phone for most of a second. "Show older activity" continues the search.
     try:
-        n = max(1, min(int(request.query_params.get("n") or 200), 1000))
+        n = max(1, min(int(request.query_params.get("n") or 50), 1000))
     except (TypeError, ValueError):
-        n = 200
+        n = 50
     raw_day = request.query_params.get("day")
     day = safe_audit_day(raw_day)
     if raw_day not in (None, "") and day is None:
@@ -7129,6 +7131,60 @@ async def agents_page(request: Request) -> HTMLResponse:
          "selected": selected, "editable": editable, "creating": creating,
          "can_set_model_cost_tier": has_global_permission(request, "admin")},
     )
+
+
+def _picker_rank(query: str, label: str, name: str) -> int | None:
+    """Where a specialist sorts for a picker search, or None when it does not
+    match: the label or pack name starting with the words first, then a word
+    in the label starting with them, then a match anywhere."""
+    if not query:
+        return 0
+    text, key = label.casefold(), name.casefold()
+    if text.startswith(query) or key.startswith(query):
+        return 0
+    if re.search(r"(?:^|\W)" + re.escape(query), text):
+        return 1
+    if query in text or query in key:
+        return 2
+    return None
+
+
+@app.get("/agents/picker")
+async def agents_picker(request: Request, q: str = "", setup: bool = False, limit: int = 20) -> dict:
+    """Search-as-you-type for the Agent Factory picker.
+
+    The page used to ship all 2,000+ specialists as one picker list. This
+    answers with the best matches only: ready-to-run specialists unless
+    ``setup`` asks for those that need setup too, at most ``limit`` (20 by
+    default, 50 at most). It sits under /agents, so the page's role visibility
+    applies, and it is department-scoped exactly like the page's roster.
+    """
+    from maverick.domain_edit import list_agents
+
+    from .auth import caller_suites
+
+    query = " ".join(q.split())[:100].casefold()
+    limit = max(1, min(limit, 50))
+    allowed = caller_suites(request)
+    try:
+        roster = list_agents()
+    except Exception as exc:  # noqa: BLE001 - the page says the list is unavailable
+        raise HTTPException(status_code=503, detail="The specialist list is unavailable. Try again.") from exc
+    ranked = []
+    for position, agent in enumerate(roster):
+        if allowed is not None and not set(agent["suites"]) <= allowed:
+            continue
+        readiness = agent.get("readiness") or {}
+        ready = readiness.get("state") == "action_ready"
+        if not ready and not setup:
+            continue
+        label = (agent.get("description") or _idfmt.humanize(agent["name"])) + (" (custom)" if agent.get("is_override") else "")
+        rank = _picker_rank(query, label, agent["name"])
+        if rank is not None:
+            ranked.append((rank, position, {"name": agent["name"], "label": label, "ready": ready,
+                                            "readiness": readiness.get("label", "")}))
+    ranked.sort(key=lambda row: row[:2])
+    return {"items": [row[2] for row in ranked[:limit]], "total": len(ranked), "limit": limit}
 
 
 @app.get("/assessments", response_class=HTMLResponse)
@@ -8633,6 +8689,50 @@ def _approval_viewer_context(request: Request | None) -> dict:
     return {"approval_viewer": _supervisor(request), "self_approval_allowed": allow_self_approval()}
 
 
+def _approval_progress(approvals: list, request: Request) -> dict:
+    """Each pending card's approval progress, in the words the card shows.
+
+    The same facts ``GET /api/v1/approvals/{id}/state`` returns, rendered with
+    the page instead of fetched once per card after load. Callers pass only
+    the approvals the viewer may open (the page routes filter with
+    ``can_read_approval``, the state API's content check); the state API's
+    operate floor applies here too.
+    """
+    if not has_permission(request, "operate"):
+        return {}
+    from maverick.safety.dual_control import allow_self_approval
+
+    from .api import _supervisor
+
+    who = _supervisor(request)
+    world = _world()
+    progress = {}
+    for approval in approvals:
+        try:
+            state = world.approval_state(approval.id)
+        except Exception:  # noqa: BLE001 - the card keeps its server-side checks
+            continue
+        if not state or state.get("status") != "pending":
+            continue
+        required = int(state.get("approvals_required") or 1)
+        words = ["One approval is needed." if required <= 1
+                 else f"{state.get('approved_count', 0)} of {required} required approvals received."]
+        recorded = who in (state.get("approvers") or [])
+        if recorded:
+            words.append("Your approval is recorded.")
+        elif state.get("requested_by") and state.get("requested_by") == who:
+            # The words follow what is enforced: one approver may be the person
+            # who asked; under two-person approval their vote may not count.
+            if required > 1 and not allow_self_approval():
+                words.append("You asked for this, so other people must approve it.")
+            elif required <= 1:
+                words.append("You asked for this, so approving it approves your own request.")
+            else:
+                words.append("You asked for this; your approval counts as one of them.")
+        progress[approval.id] = {"text": " ".join(words), "recorded": recorded}
+    return progress
+
+
 def _approval_queue_context(approvals: list, request: Request | None = None) -> dict:
     """Build the exact-operation review context shared by approval surfaces."""
 
@@ -8697,6 +8797,7 @@ def _approval_queue_context(approvals: list, request: Request | None = None) -> 
         "approval_actions": approval_actions,
         "approval_scopes": approval_scopes,
         "assessment_ids": assessment_ids,
+        "approval_progress": _approval_progress(approvals, request) if request is not None else {},
         **_approval_viewer_context(request),
     }
 
@@ -12433,6 +12534,7 @@ async def shell_copilot_js() -> FileResponse:
     )
 
 
+@app.get("/static/lightwork-agent-picker.js")
 @app.get("/static/lightwork-answer-panel.js")
 @app.get("/static/lightwork-approval-history.js")
 @app.get("/static/lightwork-chat-drafts.js")
@@ -12907,8 +13009,7 @@ async def brand_mark() -> FileResponse:
 #: The self-hosted faces the design system declares. An allowlist, not a
 #: directory mount: nothing else under static/fonts/ is ever served.
 _FONT_FILES = frozenset({
-    "manrope-200.woff2", "manrope-300.woff2", "manrope-400.woff2",
-    "manrope-500.woff2", "manrope-600.woff2", "manrope-700.woff2",
+    "manrope-var.woff2",
     "jbm-400.woff2", "jbm-500.woff2",
 })
 

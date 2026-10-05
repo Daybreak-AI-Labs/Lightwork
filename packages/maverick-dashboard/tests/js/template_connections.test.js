@@ -24,7 +24,7 @@ test('unavailable or malformed response is retryable, never a valid empty accoun
 });
 
 test('encrypted composer recovery retains exact selections and old text-only drafts clear them',()=>{
- const dom=new JSDOM('<div><form action="/chat/send"><input name="title"><textarea name="description"></textarea><input name="connection_references" value="[]"></form></div>',{url:'http://localhost/chat',runScripts:'outside-only'});
+ const dom=new JSDOM('<div data-draft-host><section data-draft-panel inert></section><form action="/chat/send"><input name="title"><textarea name="description"></textarea><input name="connection_references" value="[]"></form><p data-draft-note></p></div>',{url:'http://localhost/chat',runScripts:'outside-only'});
  let options;dom.window.mvDraftRecovery={create:value=>{options=value;return {};}};
  dom.window.eval(fs.readFileSync(path.join(__dirname,'../../maverick_dashboard/static/lightwork-chat-drafts.js'),'utf8'));
  const pin=JSON.stringify([{name:'selected',revision:'exact-generation',connector:'gdrive',owner:'user:employee',tenant:'team'}]);

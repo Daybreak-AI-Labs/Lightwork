@@ -8,7 +8,9 @@
     .aud-k { color: var(--muted); font-size: var(--text-sm); }
     .aud-v { font-size: var(--text-sm); word-break: break-word; min-width: 0; }
     .aud-obligation .aud-k { color: var(--accent); }
-    .aud-sig summary { cursor: pointer; color: var(--muted); font-size: var(--text-sm); }
+    .aud-sig summary { cursor: pointer; color: var(--muted); font-size: var(--text-sm); min-height: 24px; padding-block: 2px; }
+    .aud-sig .aud-protect { margin: var(--space-2) 0 var(--space-1); }
+    .aud-more { display: flex; flex-wrap: wrap; gap: var(--space-3); margin: var(--space-3) 0 0; }
     .aud-hash { font-size: var(--text-xs); word-break: break-all; color: var(--muted); font-family: var(--font-mono, monospace); }
     .aud-filters { display: flex; gap: var(--space-3); align-items: end; flex-wrap: wrap; }
     .aud-filters label { display: flex; flex-direction: column; gap: .25rem; }
@@ -45,7 +47,6 @@
   {% endif %}
   {% if deployment_filter_view %}<p class="panel" role="note">These setting-change entries are from the deployment-wide log and are available only to global administrators. This metadata view does not show the saved values before and after a change.</p>{% endif %}
   {% if audit_filter_error %}<p role="alert">{{ audit_filter_error }}</p>{% endif %}
-  {% if audit_next_href %}<p><a class="btn" href="{{ audit_next_href }}">Older matching activity</a></p>{% endif %}
   {% if audit_read_report and audit_read_report.failures %}
   <p role="alert">Some entries could not be read. This view is incomplete. Run “Check the log has not been changed” below before using it as evidence.</p>
   {% endif %}
@@ -127,21 +128,19 @@
                     <span class="aud-v">{% if key == 'obligation_id' %}<a href="/compliance/obligations">{{ text }}</a>{% elif is_time_key(key) and ev.get(key) is number %}{{ ev.get(key) | datetime('absolute') }}{% else %}{{ text }}{% endif %}</span>
                   </div>
                   {% endfor %}
-                  {% if tech %}
+                  {# One disclosure per row: identifiers and protection fingerprints together. #}
+                  {% if tech or ev.get('hash') or ev.get('sig') %}
                   <details class="aud-sig">
                     <summary>Technical details</summary>
                     {% for key, label, text in tech %}
                     <div class="aud-kv"><span class="aud-k">{{ label }}</span><span class="aud-v aud-hash">{{ text }}</span></div>
                     {% endfor %}
-                  </details>
-                  {% endif %}
-                  {% if ev.get('hash') or ev.get('sig') %}
-                  <details class="aud-sig">
-                    <summary>How this entry is protected{% if not ev.get('prev_hash') %} (first entry){% endif %}</summary>
-                    <p class="muted">Each entry carries a fingerprint that includes the one before it, so a change anywhere breaks the chain.</p>
+                    {% if ev.get('hash') or ev.get('sig') %}
+                    <p class="muted aud-protect">How this entry is protected: each entry carries a fingerprint that includes the one before it, so a change anywhere breaks the chain.{% if not ev.get('prev_hash') %} This is the first entry.{% endif %}</p>
                     {% for key, label in [('hash', 'Fingerprint'), ('prev_hash', 'Previous fingerprint'), ('sig', 'Signature'), ('key_id', 'Signing key')] if ev.get(key) %}
                     <div class="aud-kv"><span class="aud-k">{{ label }}</span><span class="aud-v aud-hash">{{ ev.get(key) }}</span></div>
                     {% endfor %}
+                    {% endif %}
                   </details>
                   {% endif %}
                 </div>
@@ -153,6 +152,12 @@
         {% endfor %}
         </tbody>
       </table>
+      {% if audit_next_href or request.query_params.get('before_event') %}
+      <p class="aud-more">
+        {% if audit_next_href %}<a class="btn" href="{{ audit_next_href }}">Show older activity</a>{% endif %}
+        {% if request.query_params.get('before_event') %}<a class="btn btn--ghost" href="/audit?{{ request.query_params.multi_items() | rejectattr(0, 'equalto', 'before_event') | list | urlencode }}">Newest activity</a>{% endif %}
+      </p>
+      {% endif %}
     {% else %}
       {% if kind %}
         {% set audit_empty = ('No events of this kind', 'No events match the selected kind in the loaded tail. Other events may exist for this day; clear the kind filter or search the day.') %}

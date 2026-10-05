@@ -21,6 +21,7 @@
   {% endif %}
   <title>{% block title %}Lightwork{% endblock %}</title>
   <link rel="stylesheet" href="{{ asset('lightwork.css') }}" />
+  <link rel="preload" href="/static/fonts/manrope-var.woff2" as="font" type="font/woff2" crossorigin>
   {% if custom_theme_css %}
   <style{% if csp_style_nonce is defined %} nonce="{{ csp_style_nonce }}"{% endif %}>
     /* Operator-defined themes ([dashboard] themes in config.toml). Values

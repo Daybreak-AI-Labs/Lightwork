@@ -19,6 +19,7 @@
   {% if record_search_context %}<meta name="lightwork-search-context" content="{{ record_search_context }}">{% endif %}
   <title>{% block title %}Lightwork{% endblock %}</title>
   <link rel="stylesheet" href="{{ asset('lightwork.css') }}" />
+  <link rel="preload" href="/static/fonts/manrope-var.woff2" as="font" type="font/woff2" crossorigin>
   {% if custom_theme_css %}
   <style{% if csp_style_nonce is defined %} nonce="{{ csp_style_nonce }}"{% endif %}>
 {{ custom_theme_css }}
@@ -173,6 +174,16 @@
     .composer__send:hover, .ask__send:hover { background: var(--brand-hi); transform: translateY(-1px); }
     .composer__send:disabled, .ask__send:disabled { opacity: 0.45; cursor: default; transform: none; }
     .composer__controls { border: 0; padding: 0; margin: 0; min-width: 0; }
+    /* Draft recovery around a composer (_composer_recovery.html) is painted
+       with the page. The panel's status line keeps room for its usual
+       messages (two lines, three on a phone) so its updates do not move the
+       composer, and the note keeps the height of its longer text whichever
+       one is showing. */
+    .draft-host .draft-recovery > p:first-child { min-height: calc(2em * var(--leading)); }
+    @media (max-width: 480px) { .draft-host .draft-recovery > p:first-child { min-height: calc(3em * var(--leading)); } }
+    .draft-note { display: grid; }
+    .draft-note > span { grid-area: 1 / 1; }
+    .draft-note > [aria-hidden="true"] { visibility: hidden; }
 
     /* ---- small screens: the sidebar becomes a drawer behind a Menu button ---- */
     .cs-topbar { display: none; }
@@ -203,11 +214,14 @@
     }
     @media (max-width: 480px) { .cs-topbar__copilot span { display: none; } }
     @media (prefers-reduced-motion: reduce) { .cs-side { transition: none !important; } }
+    /* The entrance moves, never fades: the greeting is Chat's main content
+       and must be visible in the first frame it is painted. */
     @media (prefers-reduced-motion: no-preference) {
-      .cs-anim { opacity: 0; transform: translateY(8px); animation: csUp 0.4s ease forwards; }
+      .cs-anim { animation: csUp 0.4s ease both; }
     }
-    @keyframes csUp { to { opacity: 1; transform: none; } }
+    @keyframes csUp { from { transform: translateY(8px); } }
   </style>
+  {% if can_create_goal %}<link rel="stylesheet" href="{{ asset('lightwork-draft-recovery.css') }}">{% endif %}
   {% block head_extra %}{% endblock %}
   <link rel="icon" href="{{ asset('daybreak-logo.jpg') }}" />
 <link rel="preload" as="script" href="{{ asset('lightwork-ui.js') }}">
@@ -476,7 +490,6 @@
   </script>
   {% include "_journey_i18n_scripts.html" %}
   {% if can_create_goal %}{# Someone who cannot write a message has no draft to keep. #}
-  <link rel="stylesheet" href="{{ asset('lightwork-draft-recovery.css') }}">
   <script src="{{ asset('lightwork-draft-recovery.js') }}" defer></script>
   <script src="{{ asset('lightwork-chat-drafts.js') }}" defer></script>
   {% endif %}

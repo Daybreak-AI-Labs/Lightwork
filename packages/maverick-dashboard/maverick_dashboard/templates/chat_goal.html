@@ -589,6 +589,8 @@
       <p class="ask__eyebrow">{{ ui('Lightwork needs one thing from you') }}</p>
       <p id="question-text" lang="und" dir="auto" data-user-content class="ask__text" role="status" aria-live="polite"></p>
     </div>
+    {% from "_composer_recovery.html" import composer_recovery with context %}
+    {% call composer_recovery(can_create_goal and draft_recovery_context) %}
     <form id="answer-form" class="ask__row" method="post" action="/chat/goal/{{ goal.id }}/reply" enctype="multipart/form-data">
       <fieldset id="composer-controls" style="display: contents;"{% if not can_operate %} disabled{% endif %}>
       <input type="hidden" name="submission_key" value="{{ submission_key }}" />
@@ -614,6 +616,7 @@
       </button>
       </fieldset>
     </form>
+    {% endcall %}
     <p id="composer-hint" class="ask__hint" role="status" aria-live="polite"></p>
     <p id="composer-run-note" class="ask__hint" role="status" aria-live="polite" hidden></p>
   </div>

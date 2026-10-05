@@ -77,6 +77,8 @@
 {% endblock %}
 
 {% block dock %}
+{% from "_composer_recovery.html" import composer_recovery with context %}
+{% call composer_recovery(can_create_goal and draft_recovery_context) %}
 <form method="post" action="/chat/send" data-product-validation class="composer cs-anim" enctype="multipart/form-data">
   <input type="hidden" name="composer_mode" value="message">
   <input type="hidden" name="connection_references" value="[]">
@@ -139,6 +141,7 @@
   </div>
   </fieldset>
 </form>
+{% endcall %}
 <p id="chat-stop-note" class="cs-dock__note" role="status" hidden>{{ ui('Work is paused. Your message is still here; you can start it after work resumes.') }}</p>
 <p id="goal-error" role="alert" aria-live="assertive"
    style="display: none; margin: var(--space-3) 0 0; color: var(--danger); font-size: var(--text-sm); text-align: center;"></p>
