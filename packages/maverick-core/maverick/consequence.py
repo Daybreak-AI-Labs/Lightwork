@@ -1,32 +1,18 @@
-"""The Consequence Engine -- reality as the reward.
+"""Join reported business outcomes and distinct local learning signals.
 
-Every learning signal in production AI is a proxy: a human saying "looks good"
-(RLHF), an LLM judge (RLAIF), or a hardcoded checker (RLVR). None is the *actual
-consequence* of the action in the world -- because no one else operates a
-governed workforce that acts on real business systems and can observe the
-result. Lightwork can: weeks later, the invoice gets paid or it doesn't, the
-contract renews or it doesn't, the ticket stays closed or it reopens. That
-downstream fact is **ground truth** -- the one signal that can't be gamed,
-because a policy that fools an LLM judge still fails reality.
-
-This module is the grounded-outcome **join**: a system of record (CRM / ERP /
-ticketing) reports a real outcome for a past episode via :func:`record_outcome`,
-keyed by the ``(goal_id, episode_id)`` the agent acted under; :func:`resolve`
-returns it if it has landed. :func:`grounded_outcome` is the helper the data
-engine / causal credit use to **prefer reality over the proxy** wherever reality
-has reported back -- so triage and promotion learn from what actually happened,
-not from a model's opinion of it.
-
-The per-customer connectors that CALL ``record_outcome`` (map an invoice/contract
-id back to the episode that touched it) are integration seams; the grounded join,
-the store, and the prefer-reality rule are here. Grounding is ON by default.
-Direct external outcome submissions remain durable evidence even when the join is
-disabled; the data engine only consumes them while ``[consequence]`` is enabled.
+A reported invoice/payment/renewal result takes precedence over a later local
+rating, sign-off or execution verdict for the same episode. Reports remain
+reports: this store does not independently authenticate an external business
+system or certify the submitted fact. Entry points retain their actor policy.
+Without a business report, the latest local signal is the compatibility fallback.
+All accepted events remain in append order; reads use the retained bounded tail.
+The data-engine join consumes these signals only while [consequence] is enabled.
 """
 from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 import threading
 import time
@@ -38,6 +24,71 @@ from .config import governed_learning_env_flag
 log = logging.getLogger(__name__)
 
 _MAX_ROWS = 100_000
+_MAX_TAIL_BYTES = 64 * 1024 * 1024
+_SOURCES = frozenset({"reported_business", "human_feedback", "execution_verdict"})
+
+
+class ConsequenceWriteUncertain(RuntimeError):
+    """The attempted report may be present; do not automatically submit it again."""
+
+
+def _append(path, row):
+    raw = (json.dumps(row, sort_keys=True) + "\n").encode("utf-8")
+    fd = os.open(path, os.O_CREAT | os.O_RDWR | os.O_APPEND | getattr(os, "O_BINARY", 0), 0o600)
+    try:
+        end = os.fstat(fd).st_size
+        try:
+            if end:
+                os.lseek(fd, end - 1, os.SEEK_SET)
+                if os.read(fd, 1) != b"\n":
+                    return False  # Do not join a new report onto a torn prior row.
+            if os.write(fd, raw) != len(raw):
+                raise OSError("incomplete consequence append")
+            os.fsync(fd)
+            return True
+        except OSError:
+            try:
+                os.lseek(fd, end, os.SEEK_SET)
+                suffix = os.read(fd, len(raw) + 1)
+                if (os.fstat(fd).st_size != end + len(suffix)
+                        or len(suffix) > len(raw) or suffix != raw[:len(suffix)]):
+                    raise OSError("consequence suffix changed during cleanup")
+                os.ftruncate(fd, end)
+                os.fsync(fd)
+                if os.fstat(fd).st_size != end:
+                    raise OSError("consequence cleanup could not be verified")
+                return False
+            except OSError as error:
+                raise ConsequenceWriteUncertain("The report may have been written. Its original outcome is unconfirmed; do not automatically submit it again.") from error
+    finally:
+        try:
+            os.close(fd)
+        except OSError as error:
+            raise ConsequenceWriteUncertain("The report may have been written. Its original outcome is unconfirmed; do not automatically submit it again.") from error
+
+
+def _source(kind, source=None):
+    if source is not None:
+        return source if isinstance(source, str) and source in _SOURCES else None
+    # Legacy native local kinds are recognizable; unknown old reports retain
+    # compatibility, without claiming they came from an authenticated connector.
+    kind = str(kind).strip().lower()
+    if kind in {"feedback", "signoff", "edit"}:
+        return "human_feedback"
+    return "execution_verdict" if kind == "failed" else "reported_business"
+
+
+def _tail_lines(path, maximum):
+    """Read only complete rows from the retained bounded native journal tail."""
+    with Path(path).open("rb") as fh:
+        end = fh.seek(0, os.SEEK_END)
+        start = max(0, end - _MAX_TAIL_BYTES)
+        fh.seek(start)
+        raw = fh.read(_MAX_TAIL_BYTES)
+    if start:
+        raw = raw.partition(b"\n")[2]
+    limit = min(max(0, maximum), _MAX_ROWS)
+    return raw.split(b"\n")[:-1][-limit:] if limit else []
 
 
 def enabled() -> bool:
@@ -55,23 +106,27 @@ def enabled() -> bool:
 
 def _clamp(value: float) -> float:
     try:
-        return max(0.0, min(1.0, float(value)))
-    except (TypeError, ValueError):
+        number = float(value)
+        return max(0.0, min(1.0, number)) if math.isfinite(number) else 0.0
+    except (TypeError, ValueError, OverflowError):
         return 0.0
 
 
 @dataclass
 class ConsequenceStore:
-    """Append-only store of real-world outcome events, keyed (goal_id, episode_id).
+    """Append-only classified signals, keyed (goal_id, episode_id).
 
-    The latest event for a key wins (a contract can renew, then churn -- the most
-    recent ground truth is the reward). Atomic-append, 0600, bounded.
+    Latest business report wins within its class; local signals never replace it.
+    The retained read window is the latest max_rows lines, up to 64 MiB. This is
+    a learning-signal projection, not a complete-history audit or external proof.
     """
 
     path: Path | None = None
     max_rows: int = _MAX_ROWS
     _latest: dict = None  # type: ignore[assignment]
     _lock: threading.Lock = None  # type: ignore[assignment]
+    _loaded_stamp: tuple | None = None
+    _order: int = 0
 
     def __post_init__(self) -> None:
         if self._lock is None:
@@ -79,56 +134,103 @@ class ConsequenceStore:
         if self._latest is None:
             self._latest = {}
         if self.path is not None:
-            self._load()
+            self._refresh()
 
     def record(self, goal_id: int, episode_id: int, value: float, *, kind: str = "",
-               ts: float | None = None) -> bool:
-        """Append a real outcome for a past episode. Never raises."""
+               ts: float | None = None, source: str | None = None) -> bool:
+        """Append a classified episode signal; invalid provenance is refused."""
+        origin = _source(kind, source)
+        try:
+            stamp = time.time() if ts is None else float(ts)
+        except (TypeError, ValueError, OverflowError):
+            return False
+        if origin is None or isinstance(ts, bool) or not math.isfinite(stamp) or stamp < 0:
+            return False
         key = (int(goal_id), int(episode_id))
-        row = {"ts": ts if ts is not None else time.time(), "goal_id": key[0],
-               "episode_id": key[1], "value": _clamp(value), "kind": str(kind)[:64]}
+        row = {"ts": stamp, "goal_id": key[0], "episode_id": key[1],
+               "value": _clamp(value), "kind": str(kind)[:64], "source": origin}
         with self._lock:
-            self._latest[key] = (row["ts"], row["value"])
             if self.path is None:
+                self._accept(row)
                 return True
             try:
+                from .file_lock import cross_process_lock
+
                 p = Path(self.path)
-                p.parent.mkdir(parents=True, exist_ok=True)
-                with open(os.open(p, os.O_CREAT | os.O_WRONLY | os.O_APPEND, 0o600),
-                          "a", encoding="utf-8") as fh:
-                    fh.write(json.dumps(row, sort_keys=True) + "\n")
+                with cross_process_lock(p, strict=True):
+                    if not _append(p, row):
+                        return False
+                    # Reload at the next read, outside any caller's world write
+                    # transaction. Neither failed appends nor stale worker caches
+                    # become an authoritative in-memory result.
+                    self._loaded_stamp = ()
                 return True
+            except ConsequenceWriteUncertain:
+                self._loaded_stamp = ()
+                raise
             except Exception:  # pragma: no cover -- best-effort
                 log.debug("consequence record failed", exc_info=True)
                 return False
 
     def resolve(self, goal_id: int, episode_id: int) -> float | None:
-        """The latest real outcome for the episode, or None if none has landed."""
+        """Latest reported business result, otherwise the latest local signal."""
         with self._lock:
-            hit = self._latest.get((int(goal_id), int(episode_id)))
-            return hit[1] if hit is not None else None
+            if not self._refresh():
+                return None
+            signals = self._latest.get((int(goal_id), int(episode_id)))
+            hit = (signals.get("reported_business") or max(signals.values(), key=lambda item: (item[0], item[1]))) if signals else None
+            return hit[2] if hit else None
 
     def count(self) -> int:
-        """How many distinct episodes have a real outcome recorded -- the size of
-        the grounded-learning signal accumulated so far."""
+        """Distinct episodes with a signal in the retained learning read window."""
         with self._lock:
-            return len(self._latest)
+            return len(self._latest) if self._refresh() else 0
+
+    def _accept(self, row):
+        key = (int(row["goal_id"]), int(row["episode_id"]))
+        ts = float(row.get("ts", 0.0))
+        source = _source(row.get("kind", ""), row.get("source"))
+        if source is None or isinstance(row.get("ts"), bool) or not math.isfinite(ts) or ts < 0:
+            return
+        value = _clamp(row["value"])
+        self._order += 1
+        signals = self._latest.setdefault(key, {})
+        previous = signals.get(source)
+        if previous is None or ts >= previous[0]:
+            signals[source] = (ts, self._order, value)
+
+    def _refresh(self):
+        if self.path is None:
+            return True
+        try:
+            from .file_lock import cross_process_lock
+
+            path = Path(self.path)
+            try:
+                info = path.stat()
+            except FileNotFoundError:
+                self._latest.clear()
+                self._loaded_stamp = None
+                return True
+            stamp = (info.st_ino, info.st_size, info.st_mtime_ns)
+            if stamp != self._loaded_stamp:
+                with cross_process_lock(path, strict=True):
+                    self._load()
+                    info = path.stat()
+                    self._loaded_stamp = (info.st_ino, info.st_size, info.st_mtime_ns)
+            return True
+        except (OSError, RuntimeError, ValueError):
+            log.debug("consequence read unavailable")
+            return False
 
     def _load(self) -> None:
-        try:
-            with open(self.path, encoding="utf-8") as fh:
-                lines = fh.readlines()
-        except OSError:
-            return
-        for raw in lines[-self.max_rows:]:
+        lines = _tail_lines(self.path, self.max_rows)
+        self._latest.clear()
+        self._order = 0
+        for line in lines:
             try:
-                d = json.loads(raw)
-                key = (int(d["goal_id"]), int(d["episode_id"]))
-                ts = float(d.get("ts", 0.0))
-                prev = self._latest.get(key)
-                if prev is None or ts >= prev[0]:
-                    self._latest[key] = (ts, _clamp(d["value"]))
-            except (KeyError, ValueError, TypeError):
+                self._accept(json.loads(line))
+            except (KeyError, ValueError, TypeError, UnicodeError, OverflowError, RecursionError):
                 continue
 
 
@@ -156,36 +258,35 @@ def reset_shared() -> None:
 
 
 def record_outcome(goal_id: int, episode_id: int, value: float, *, kind: str = "",
-                   store: ConsequenceStore | None = None) -> bool:
-    """Record a real downstream outcome for a past episode (the grounded reward).
+                   store: ConsequenceStore | None = None, source: str | None = None) -> bool:
+    """Record a reported business result or explicitly classified local signal.
 
-    Called by a system-of-record connector once reality reports back. ``value`` is
-    the real result in [0, 1] (paid=1.0 / unpaid=0.0, renewed=1.0, reopened=0.0,
-    or a graded result). Just stores; the data-engine join decides whether to use
-    it (gated by ``[consequence]``)."""
+    Source identifies the signal category, not verified external authenticity.
+    Omitted source recognizes known legacy local kinds; other direct reports
+    remain reported_business. The data-engine join is gated by [consequence].
+    """
     from .learning_guard import learning_write_allowed
     if not learning_write_allowed("consequence"):
         return False
-    return (store or shared()).record(goal_id, episode_id, value, kind=kind)
+    return (store or shared()).record(goal_id, episode_id, value, kind=kind, source=source)
 
 
 def resolve(goal_id: int, episode_id: int, *, store: ConsequenceStore | None = None) -> float | None:
-    """The real outcome for an episode if it has landed, else None."""
+    """Preferred recorded signal for an episode, otherwise None."""
     return (store or shared()).resolve(goal_id, episode_id)
 
 
 def count(*, store: ConsequenceStore | None = None) -> int:
-    """Number of episodes with a grounded outcome recorded (accumulated signal)."""
+    """Distinct episodes with a recorded signal in the retained read window."""
     return (store or shared()).count()
 
 
 def grounded_outcome(goal_id: int, episode_id: int, proxy: float | None, *,
                      store: ConsequenceStore | None = None) -> float | None:
-    """Prefer the real outcome over the proxy (verifier confidence) when present.
+    """Prefer reported business evidence, then local signals, then the proxy.
 
-    The one-line rule that grounds learning in reality: if a real consequence has
-    landed for this episode, that's the reward; otherwise fall back to the proxy.
-    A no-op (returns ``proxy``) unless ``[consequence]`` is enabled.
+    A reported result is not independently certified by this join. A no-op
+    (returns proxy) unless [consequence] is enabled.
     """
     if not enabled():
         return proxy
@@ -194,8 +295,8 @@ def grounded_outcome(goal_id: int, episode_id: int, proxy: float | None, *,
 
 
 def record_self_outcome(world, goal_id: int, value: float, *, kind: str,
-                        store: ConsequenceStore | None = None) -> bool:
-    """Ground a **first-party** outcome against a goal's latest episode.
+                        store: ConsequenceStore | None = None) -> bool | None:
+    """Record a local first-party signal against a goal's latest episode.
 
     The single helper for the outcomes Lightwork observes directly -- a human's
     certify/reject, a thumbs-up/down, or the run's own terminal failure -- as
@@ -204,14 +305,19 @@ def record_self_outcome(world, goal_id: int, value: float, *, kind: str,
     (duck-typed: needs ``list_episodes(goal_id=, limit=)``). A no-op returning
     ``False`` when ``[consequence]`` is explicitly disabled, and never raises --
     grounding is best-effort and must not fail the
-    action that produced it."""
+    action that produced it. None means an append could not be confirmed after
+    cleanup failed; callers must not relabel it as a confirmed refusal."""
     try:
         if not enabled():
             return False
         episodes = world.list_episodes(goal_id=goal_id, limit=1)
         if not episodes:
             return False
-        return record_outcome(goal_id, episodes[0].id, float(value), kind=kind, store=store)
+        source = "human_feedback" if str(kind).strip().lower() in {"feedback", "signoff", "edit"} else "execution_verdict"
+        return record_outcome(goal_id, episodes[0].id, float(value), kind=kind, store=store, source=source)
+    except ConsequenceWriteUncertain:
+        log.warning("Optional local signal may have been written; original outcome unconfirmed for goal %s", goal_id)
+        return None
     except Exception:  # pragma: no cover -- grounding is best-effort
         log.debug("self-outcome not recorded for goal %s", goal_id, exc_info=True)
         return False
@@ -231,48 +337,43 @@ _MAX_LINKS = 100_000
 
 
 @dataclass
-class CorrelationStore:
+class CorrelationStore(ConsequenceStore):
     """Append-only map ``external key -> (goal_id, episode_id)`` that acted on it.
 
     The latest link for a key wins (the most recent run to touch the entity owns
     the outcome). Atomic-append, 0600, bounded -- the ``ConsequenceStore`` shape.
     """
 
-    path: Path | None = None
     max_rows: int = _MAX_LINKS
-    _latest: dict = None  # type: ignore[assignment]
-    _lock: threading.Lock = None  # type: ignore[assignment]
-
-    def __post_init__(self) -> None:
-        if self._lock is None:
-            self._lock = threading.Lock()
-        if self._latest is None:
-            self._latest = {}
-        if self.path is not None:
-            self._load()
 
     def link(self, key: str, goal_id: int, episode_id: int, *,
              ts: float | None = None) -> bool:
-        """Link an external business key to the episode that acted. Never raises."""
+        """Save a link; an uncertain durable write must never invite replay."""
         k = str(key).strip()
-        if not k:
+        try:
+            stamp = time.time() if ts is None else float(ts)
+        except (TypeError, ValueError, OverflowError):
             return False
-        row = {"ts": ts if ts is not None else time.time(), "key": k[:256],
+        if not k or len(k) > 256 or isinstance(ts, bool) or not math.isfinite(stamp) or stamp < 0:
+            return False
+        row = {"ts": stamp, "key": k,
                "goal_id": int(goal_id), "episode_id": int(episode_id)}
         with self._lock:
             if self.path is None:
-                self._latest[row["key"]] = (row["ts"], row["goal_id"], row["episode_id"])
+                self._accept(row)
                 return True
             try:
+                from .file_lock import cross_process_lock
+
                 p = Path(self.path)
-                p.parent.mkdir(parents=True, exist_ok=True)
-                with open(os.open(p, os.O_CREAT | os.O_WRONLY | os.O_APPEND, 0o600),
-                          "a", encoding="utf-8") as fh:
-                    fh.write(json.dumps(row, sort_keys=True) + "\n")
-                    fh.flush()
-                    os.fsync(fh.fileno())
-                self._latest[row["key"]] = (row["ts"], row["goal_id"], row["episode_id"])
+                with cross_process_lock(p, strict=True):
+                    if not _append(p, row):
+                        return False
+                    self._loaded_stamp = ()
                 return True
+            except ConsequenceWriteUncertain:
+                self._loaded_stamp = ()
+                raise
             except Exception:  # pragma: no cover -- best-effort
                 log.debug("outcome-link record failed", exc_info=True)
                 return False
@@ -280,28 +381,30 @@ class CorrelationStore:
     def resolve(self, key: str) -> tuple[int, int] | None:
         """The (goal_id, episode_id) most recently linked to ``key``, or None."""
         with self._lock:
+            if not self._refresh():
+                return None
             hit = self._latest.get(str(key).strip())
             return (hit[1], hit[2]) if hit is not None else None
 
     def count(self) -> int:
         with self._lock:
-            return len(self._latest)
+            return len(self._latest) if self._refresh() else 0
+
+    def _accept(self, row):
+        key, ts = str(row["key"]), float(row.get("ts", 0.0))
+        if not key.strip() or len(key) > 256 or isinstance(row.get("ts"), bool) or not math.isfinite(ts) or ts < 0:
+            return
+        previous = self._latest.get(key)
+        if previous is None or ts >= previous[0]:
+            self._latest[key] = (ts, int(row["goal_id"]), int(row["episode_id"]))
 
     def _load(self) -> None:
-        try:
-            with open(self.path, encoding="utf-8") as fh:
-                lines = fh.readlines()
-        except OSError:
-            return
-        for raw in lines[-self.max_rows:]:
+        lines = _tail_lines(self.path, self.max_rows)
+        self._latest.clear()
+        for raw in lines:
             try:
-                d = json.loads(raw)
-                key = str(d["key"])
-                ts = float(d.get("ts", 0.0))
-                prev = self._latest.get(key)
-                if prev is None or ts >= prev[0]:
-                    self._latest[key] = (ts, int(d["goal_id"]), int(d["episode_id"]))
-            except (KeyError, ValueError, TypeError):
+                self._accept(json.loads(raw))
+            except (KeyError, ValueError, TypeError, UnicodeError, OverflowError, RecursionError):
                 continue
 
 
@@ -334,7 +437,7 @@ def link_outcome_key(key: str, goal_id: int, episode_id: int, *,
 def record_outcome_for_key(key: str, value: float, *, kind: str = "",
                            store: ConsequenceStore | None = None,
                            corr: CorrelationStore | None = None,
-                           authorize=None) -> bool:
+                           authorize=None, source: str | None = None) -> bool:
     """Ground a downstream outcome using only the external business ``key``.
 
     Resolves ``key`` to the episode that acted (via the correlation store) and
@@ -349,11 +452,11 @@ def record_outcome_for_key(key: str, value: float, *, kind: str = "",
     goal_id, episode_id = hit
     if authorize is not None and not authorize(goal_id, episode_id):
         return False
-    return record_outcome(goal_id, episode_id, value, kind=kind, store=store)
+    return record_outcome(goal_id, episode_id, value, kind=kind, store=store, source=source)
 
 
 __all__ = [
-    "ConsequenceStore", "enabled", "shared", "reset_shared",
+    "ConsequenceStore", "ConsequenceWriteUncertain", "enabled", "shared", "reset_shared",
     "record_outcome", "resolve", "grounded_outcome", "count",
     "record_self_outcome",
     "CorrelationStore", "shared_correlation", "link_outcome_key",

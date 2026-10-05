@@ -5,6 +5,7 @@
   {% set _LIFECYCLE = {'active': 'Active', 'suspended': 'Paused', 'revoked': 'Access blocked', 'contained': 'Blocked for rule breaks', 'expired': 'Access expired'} %}
   <h1 class="page-title">Outside agents</h1>
   <p class="page-subtitle">Agents built on other platforms — Salesforce Agentforce, AWS Bedrock, Copilot Studio or your own — keep running where they are, but follow your rules here: access keys, spending limits, checks before risky actions, and a record of every run.</p>
+  {% if outside_agent_tabs %}{% from "_tabs.html" import tab_bar, panel_attrs %}{{ tab_bar('Outside agents views', outside_agent_tabs, '') }}<div {{ panel_attrs('') }}>{% endif %}
   {% if not enabled %}
   {{ module_gate('external_agents', 'Outside agents',
                  detail='Lets AI agents from other products (Salesforce, AWS, Microsoft and others) work under your rules and budgets.',
@@ -19,7 +20,7 @@
       {% if enabled %}<span class="badge active">Connection open</span>
       {% else %}<span class="badge">Connection closed</span>{% endif %}
       <span class="badge">{{ status.enrolled }} connected</span>
-      <span class="badge">{{ status.runs }} runs reported</span>
+      <span class="badge">{{ status.runs }} tasks reported</span>
       <span class="badge">{{ status.reported_dollars | money }} reported spend</span>
       {% if status.memory_contributions %}<span class="badge">{{ status.memory_contributions }} lessons shared</span>{% endif %}
       {% if status.over_budget %}<span class="badge failure">{{ status.over_budget }} over budget</span>{% endif %}
@@ -33,7 +34,7 @@
       <li>Add the agent below. The limits you set are what it must work within.</li>
       <li>Create its access key with <strong>Create access key</strong> — it is shown once. Paste it into your platform’s settings (for example a Salesforce Named Credential or AWS Secrets Manager).</li>
       {% if enabled %}
-      <li>Give your platform Lightwork’s connection file: <a class="btn btn--ghost" href="/api/v1/external/openapi.json" download="lightwork-connection.json">Download the connection file</a>. In Salesforce add it as an External Service; in AWS add it as a Bedrock action group. The agent then checks with Lightwork before risky actions and reports each finished run.</li>
+      <li>Give your platform Lightwork’s connection file: <a class="btn btn--ghost" href="/api/v1/external/openapi.json" download="lightwork-connection.json">Download the connection file</a>. In Salesforce add it as an External Service; in AWS add it as a Bedrock action group. The agent then checks with Lightwork before risky actions and reports each finished task.</li>
       {% else %}
       <li>The connection file is available once the connection is open.
         Ask an administrator to turn it on here, then come back to download it.</li>
@@ -45,7 +46,7 @@
     {% if agents %}
     <table>
       <thead>
-        <tr><th scope="col">Agent</th><th scope="col">Platform</th><th scope="col">Owner</th><th scope="col">Department</th><th scope="col">Riskiest action allowed</th><th scope="col">Spending</th><th scope="col">Runs</th><th scope="col">Access key</th><th scope="col">Status</th><th scope="col">Actions</th></tr>
+        <tr><th scope="col">Agent</th><th scope="col">Platform</th><th scope="col">Owner</th><th scope="col">Department</th><th scope="col">Riskiest action allowed</th><th scope="col">Spending</th><th scope="col">Tasks</th><th scope="col">Access key</th><th scope="col">Status</th><th scope="col">Actions</th></tr>
       </thead>
       <tbody>
         {% for a in agents %}
@@ -61,7 +62,7 @@
             <span class="muted" style="font-size: var(--text-sm)">{{ 'this month' if a.period == 'monthly' else 'all time' }}</span>
             {% if a.over_budget %}<span class="badge failure">Over budget</span>{% endif %}
           </td>
-          <td>{{ a.runs }}{% if a.wall_violations %} <span class="badge failure" title="Runs that took longer than allowed">{{ a.wall_violations }} too long</span>{% endif %}</td>
+          <td>{{ a.runs }}{% if a.wall_violations %} <span class="badge failure" title="Tasks that took longer than allowed">{{ a.wall_violations }} too long</span>{% endif %}</td>
           <td>
             {% if a.credentials %}<span class="badge">Active</span>{% else %}<span class="muted">None yet</span>{% endif %}
           </td>
@@ -166,6 +167,7 @@
       Adding an agent with a name that already exists updates its limits and keeps its history.
     </p>
   </div>
+  {% if outside_agent_tabs %}</div>{% endif %}
 
 <script>
 (function () {
@@ -198,12 +200,14 @@
         }
       });
       if (box && !box.children.length) box.textContent = "No departments are set up yet.";
-    }).catch(function () { var box = document.getElementById("xa-scopes"); if (box) box.textContent = "Departments could not be loaded."; });
+    }).catch(function () { var box = document.getElementById("xa-scopes"); if (box) box.textContent = "Departments could not be loaded. Refresh the page and try again."; });
   // Allowed actions: one row per action with your risk rating.
   var toolList = null;
   function tools() {
-    if (!toolList) toolList = fetch("/api/v1/tools").then(function (r) { return r.ok ? r.json() : { tools: [] }; })
-      .then(function (j) { return (j.tools || []).map(function (t) { return { name: t.name, label: window.mvHuman ? window.mvHuman(t.name) : t.name }; })
+    // The shell's helpers (lightwork-ui.js) load after the page content.
+    var ready = window.mvFetchJSON ? Promise.resolve() : new Promise(function (done) { document.addEventListener("DOMContentLoaded", done); });
+    if (!toolList) toolList = ready.then(function () { return window.mvFetchJSON("/api/v1/tools"); })
+      .then(function (j) { j = j || {}; return (j.tools || []).map(function (t) { return { name: t.name, label: window.mvHuman ? window.mvHuman(t.name) : t.name }; })
         .sort(function (a, b) { return a.label.localeCompare(b.label); }); })
       .catch(function () { return []; });
     return toolList;

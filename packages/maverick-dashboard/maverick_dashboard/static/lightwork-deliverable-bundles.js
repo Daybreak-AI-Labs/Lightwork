@@ -4,15 +4,13 @@
   const $=id=>document.getElementById('bundle-'+id),base='/api/v1/deliverable-bundles',context=root.dataset.context;
   const goal=Number(root.dataset.goal)||null;let reviewed=null,selected=null,busy=false,pendingShare=null,responseAttempt=null;
   const id=()=>crypto.randomUUID().replaceAll('-','');
-  function say(text){$('status').textContent=text;}
+  function say(text){window.mvStatus($('status'),text);}
   function clearPrivate(){root.querySelectorAll('input,textarea').forEach(el=>{el.value='';});for(const name of ['inbox','items','preview-content','detail-files'])$(name).replaceChildren();$('source').hidden=true;$('detail').hidden=true;$('preview').hidden=true;reviewed=null;selected=null;pendingShare=null;}
   async function call(path,body){
-    const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),30000);
-    try{const response=await fetch(base+path,{method:body?'POST':'GET',headers:{'X-Lightwork-Bundle-Context':context,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined,signal:controller.signal,redirect:'error'});
-      if(response.status===401||response.status===403){clearPrivate();throw new Error('Access changed. Sign in and reload before continuing.');}
-      const value=await response.json();if(!response.ok){if(response.status===404){$('detail').hidden=true;$('detail-files').replaceChildren();selected=null;}if(value.detail?.code==='context_changed')clearPrivate();const error=new Error(value.detail?.message||'The operation could not be confirmed. Your saved bundle is unchanged.');error.status=response.status;throw error;}
-      if(value.context!==context){clearPrivate();throw new Error('Your account or workspace changed. Reload this page.');}return value;
-    }finally{clearTimeout(timer);}
+    let value;
+    try{value=await window.mvFetchJSON(base+path,{method:body?'POST':'GET',body,headers:{'X-Lightwork-Bundle-Context':context},timeout:30000,redirect:'error',onAccess:clearPrivate,messages:{401:'Access changed. Sign in and reload before continuing.',403:'Access changed. Sign in and reload before continuing.'}},body?'share the bundle':'load the bundles');}
+    catch(error){if(error.status&&!error.accessChanged&&!error.timedOut)error.message='The operation could not be confirmed. Your saved bundle is unchanged. Refresh the page and try again.';if(error.status===404){$('detail').hidden=true;$('detail-files').replaceChildren();selected=null;}if(error.detail?.code==='context_changed')clearPrivate();throw error;}
+    if(value.context!==context){clearPrivate();throw new Error('Your account or workspace changed. Reload this page.');}return value;
   }
   function node(tag,text){const el=document.createElement(tag);el.textContent=text;return el;}
   function choice(value,label){const el=node('option',label);el.value=value;return el;}

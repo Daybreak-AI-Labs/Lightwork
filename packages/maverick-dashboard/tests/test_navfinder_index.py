@@ -202,7 +202,10 @@ def test_rendered_finder_indexes_folded_pages_and_sidebar_does_not(monkeypatch, 
     assert set(markup.sidebar_hrefs) < set(markup.finder_hrefs)
     assert unavailable.isdisjoint(markup.finder_hrefs)
     assert markup.finder_hrefs == [href for href in _hrefs(ui_visibility.finder_pages(None)) if href not in unavailable]
-    assert markup.sidebar_hrefs == [href for href in _hrefs(ui_visibility.nav_groups(None)) if href not in unavailable]
+    # The workspace line at the top of the sidebar (base.html) links to the
+    # active workspace; it is not a navigation entry.
+    rail = [href for href in markup.sidebar_hrefs if href != "/workspace/tenant"]
+    assert rail == [href for href in _hrefs(ui_visibility.nav_groups(None)) if href not in unavailable]
 
 
 def test_registered_screens_stay_out_of_the_sidebar_and_mirror_their_route_floor():

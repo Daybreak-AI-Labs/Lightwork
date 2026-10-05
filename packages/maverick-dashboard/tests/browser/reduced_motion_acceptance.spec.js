@@ -17,6 +17,9 @@ for (const name of names) test(`${name} reveal actions re-read reduced motion an
   await page.setViewportSize({width: 1000, height: 700});
   await page.goto('/__motion_acceptance_host');
   await page.addStyleTag({content: data.css});
+  // The shell's helpers load first, as in base.html; the fixture's stand-ins
+  // for the confirmation dialogs then replace the real ones.
+  await page.addScriptTag({content: data.shell});
   await page.evaluate(({def, setupSource}) => (0, eval)('(' + setupSource + ')(window, ' + JSON.stringify(def) + ')'), {def: {root: data.root, api: data.api}, setupSource: setup.toString()});
   await page.evaluate(() => {
     window.__reveals = [];
@@ -26,7 +29,6 @@ for (const name of names) test(`${name} reveal actions re-read reduced motion an
       return nativeScroll.call(this, options);
     };
   });
-  await page.addScriptTag({content: data.reveal});
   await page.addScriptTag({content: data.helpers});
   await page.addScriptTag({content: data.source});
   await expect(page.locator(data.ready).first()).toBeVisible();

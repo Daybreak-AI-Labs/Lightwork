@@ -7,7 +7,7 @@ test('an owner writes and revisits a specialist answer check in Workforce', asyn
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
   await page.goto('/workforce');
-  await expect(page.getByRole('heading', {name: "Check your specialist's answers"})).toBeVisible();
+  await expect(page.getByRole('heading', {name: 'Check answers from your agents and specialists'})).toBeVisible();
   const specialist = page.locator('#wo-test-specialist');
   await expect.poll(() => specialist.locator('option').count()).toBeGreaterThan(1);
   await specialist.selectOption({index: 1});

@@ -64,7 +64,7 @@
         var response = await fetch('/api/v1/templates/' + encodeURIComponent(card.dataset.templateName) + '/prepare', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({params:params})});
         if (!response.ok) throw plain(failText(response, 'prepare the task'));
         var result = await response.json();
-        if (result.started !== false || typeof result.title !== 'string' || typeof result.description !== 'string' || typeof result.context !== 'string') throw plain('The task could not be prepared. Your details are still here.');
+        if (result.started !== false || typeof result.title !== 'string' || typeof result.description !== 'string' || typeof result.context !== 'string') throw plain('The task could not be prepared. Your details are still here. Try again.');
         sessionStorage.setItem('lightwork:template-draft:v1', JSON.stringify({title:result.title, description:result.description, context:result.context, connection_references:result.connection_references || [], created_at:Date.now()}));
         window.location.assign('/chat');
       } catch (error) { message.textContent = error && error.plain ? error.message : failText(error, 'prepare the task'); button.disabled = false; }
@@ -79,9 +79,9 @@
     suggest.disabled = true; status.textContent = 'Finding suggestions.';
     try {
       var response = await fetch('/api/v1/templates/suggested', {cache:'no-store'});
-      if (!response.ok) throw plain('Suggestions are unavailable.');
+      if (!response.ok) throw plain('Suggestions are unavailable. Refresh the page and try again.');
       var result = await response.json();
-      if (!Array.isArray(result.suggested)) throw plain('Suggestions could not be read.');
+      if (!Array.isArray(result.suggested)) throw plain('Suggestions could not be read. Refresh the page and try again.');
       if (request !== filter.request) return;
       filter.names = result.suggested.map(function (item) { return item.name; });
       filter.mode = filter.names.length ? 'suggested' : 'all';

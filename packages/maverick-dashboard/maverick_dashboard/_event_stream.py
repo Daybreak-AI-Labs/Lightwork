@@ -136,6 +136,18 @@ def event_payload(event):
             "content": content, "ts": event.ts}
 
 
+def _chat_event_dict(event):
+    """The conversation page's shape: the readable activity plus its plain-words
+    step. The step is narrated from the exact record but only ever says fixed
+    phrases and role titles, so no internal text reaches the page."""
+    from .step_narration import narrate, who
+
+    payload = event_payload(event)
+    payload["step"] = narrate(event.kind, event.agent, event.content).as_dict()
+    payload["who"] = who(event.agent)
+    return payload
+
+
 def sse_event(event) -> str:
     kind = str(event.kind or "message").replace("\n", " ").replace("\r", " ")
     return f"id: {event.id}\nevent: {kind}\ndata: {json.dumps(event_payload(event))}\n\n"
@@ -179,7 +191,7 @@ async def goal_stream(request, world, goal_id, *, since, lease, visible,
                     payload = {"status": current.status, "result": stop["message"] if stop else current.result or "",
                                "stop": stop,
                                "next_id": last, "terminal": False,
-                               "events": [event_payload(event) for event in events]}
+                               "events": [_chat_event_dict(event) for event in events]}
                     yield f"id: {last}\ndata: {json.dumps(payload)}\n\n"
                     cadence.sent(clock())
                 else:

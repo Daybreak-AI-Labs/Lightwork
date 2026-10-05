@@ -7,7 +7,9 @@ Network denial is enforced by the container, never by a monkeypatched client.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import inspect
+import json
 
 
 def validator(schema):
@@ -33,20 +35,71 @@ def validate(schema, sample):
     validator(schema).validate(sample)
 
 
+def reviewed_schema(schema, expected):
+    if expected is not None and hashlib.sha256(json.dumps(schema, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()).hexdigest() != expected:
+        raise ValueError("practice questions changed since the exact inspection; no tool action was invoked")
+
+
 def await_result(value):
     return asyncio.run(value) if inspect.isawaitable(value) else value
 
 
-def execute(group, target, sample, dispatch):
+def inspect_contract(group, target, name):
+    """Describe the declared input only; never invoke a tool action/lifecycle."""
+    if group == "maverick.tools":
+        tool = target()
+        validator(tool.input_schema)
+        if not callable(tool.fn):
+            raise ValueError("tool has no callable handler")
+        return [{"name": name, "input_schema": tool.input_schema}]
+    if group == "maverick.personas":
+        return [{"name": name, "input_schema": {"type": "object", "additionalProperties": False}}]
+    if group == "maverick.skills":
+        return [{"name": name, "input_schema": {"type": "object", "properties": {"goal": {"type": "string", "title": "Practice request", "minLength": 1}},
+                                                "required": ["goal"], "additionalProperties": False}}]
+    if group == "maverick.channels":
+        return [{"name": name, "input_schema": {"type": "object", "properties": {
+            "user_id": {"type": "string", "title": "Fictional person", "minLength": 1},
+            "text": {"type": "string", "title": "Practice message"}, "reply": {"type": "string", "title": "Practice reply"},
+            "startup_seconds": {"type": "number", "title": "Seconds to wait for startup", "minimum": 0, "maximum": 5}},
+            "required": ["user_id", "text", "reply"], "additionalProperties": False}}]
+    raise ValueError("unsupported plugin contract")
+
+
+def inspect_remote(payload):
+    if payload["group"] == "maverick.ts":
+        from maverick.ts_plugin_host import _close_all_children, _fetch_manifest, _PinnedCommand
+        try:
+            _protocol, manifest = _fetch_manifest(_PinnedCommand.from_command(["node", "/candidate/plugin" + payload["source_suffix"]]))
+            result = [{"name": item["name"], "input_schema": item["inputSchema"]} for item in manifest]
+        finally:
+            _close_all_children()
+    else:
+        from maverick.grpc_plugin_host import _close_all_channels, load_grpc_plugin
+        try:
+            tools = load_grpc_plugin(payload["target"], command=[payload["runtime"], "/candidate/plugin" + payload["source_suffix"]],
+                                     call_timeout=10, strict_schema=True, expected_source_sha256=payload["content_sha256"])
+            result = [{"name": item.name, "input_schema": item.input_schema} for item in tools]
+        finally:
+            _close_all_channels()
+    for item in result:
+        validator(item["input_schema"])
+    return result
+
+
+def execute(group, target, sample, dispatch, expected_schema=None):
     if group == "maverick.tools":
         tool = target()
         validate(tool.input_schema, sample)
+        reviewed_schema(tool.input_schema, expected_schema)
         if not callable(tool.fn):
             raise ValueError("tool has no callable handler")
         dispatch()
         return await_result(tool.fn(sample))
     if group == "maverick.personas":
-        validate({"type": "object", "additionalProperties": False}, sample)
+        schema = inspect_contract(group, target, "")[0]["input_schema"]
+        validate(schema, sample)
+        reviewed_schema(schema, expected_schema)
         if not callable(target):
             raise ValueError("persona must be a callable renderer")
         dispatch()
@@ -56,8 +109,9 @@ def execute(group, target, sample, dispatch):
         return value
     if group == "maverick.skills":
         from maverick.skills import Skill, _relevant_skills_lexical, render_for_prompt
-        validate({"type": "object", "properties": {"goal": {"type": "string", "minLength": 1}},
-                  "required": ["goal"], "additionalProperties": False}, sample)
+        schema = inspect_contract(group, target, "")[0]["input_schema"]
+        validate(schema, sample)
+        reviewed_schema(schema, expected_schema)
         if (not isinstance(target, Skill) or not isinstance(target.name, str) or not target.name
                 or not isinstance(target.body, str) or not target.body.strip()
                 or not isinstance(target.triggers, list) or not target.triggers
@@ -72,11 +126,9 @@ def execute(group, target, sample, dispatch):
         from dataclasses import asdict
 
         from maverick_channels.base import Channel, IncomingMessage, Reply
-        schema = {"type": "object", "properties": {
-            "user_id": {"type": "string", "minLength": 1}, "text": {"type": "string"},
-            "reply": {"type": "string"}, "startup_seconds": {"type": "number", "minimum": 0, "maximum": 5}},
-            "required": ["user_id", "text", "reply"], "additionalProperties": False}
+        schema = inspect_contract(group, target, "")[0]["input_schema"]
         validate(schema, sample)
+        reviewed_schema(schema, expected_schema)
         if not isinstance(target, type) or not issubclass(target, Channel):
             raise ValueError("channel must be a concrete Channel subclass")
         async def exercise():
@@ -135,6 +187,8 @@ def execute_node(payload, dispatch):
     try:
         tools = load_ts_plugin(command, call_timeout=20)
         tool = next(item for item in tools if item.name == chosen["name"])
+        validate(tool.input_schema, payload["sample"]["arguments"])
+        reviewed_schema(tool.input_schema, payload.get("input_schema_sha256"))
         dispatch()
         value = tool.fn(payload["sample"]["arguments"])
         # The actual host preserves transport failure/unknown outcome as ERROR.
@@ -159,6 +213,7 @@ def execute_grpc(payload, dispatch):
         if tool is None:
             raise ValueError("sample tool is absent from the actual gRPC manifest")
         validate(tool.input_schema, payload["sample"]["arguments"])
+        reviewed_schema(tool.input_schema, payload.get("input_schema_sha256"))
         dispatch()
         result = tool.fn(payload["sample"]["arguments"])
         if getattr(result, "attempt", None) is None or result.attempt.outcome_unknown or result.startswith("ERROR:"):

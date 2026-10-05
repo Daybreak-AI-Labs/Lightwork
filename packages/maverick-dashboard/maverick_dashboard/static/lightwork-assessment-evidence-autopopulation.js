@@ -318,7 +318,7 @@
       Array.prototype.slice.call(box.querySelectorAll("label, p")).forEach(function (node) { node.remove(); });
       var note = document.createElement("p");
       note.className = "muted";
-      note.textContent = "Approved evidence couldn't be loaded. AI evidence analysis may be turned off.";
+      note.textContent = "Approved evidence couldn't be loaded. AI evidence analysis may be turned off; ask your administrator to check it.";
       box.appendChild(note);
     });
   }
@@ -381,7 +381,7 @@
       var td = document.createElement("td"); td.colSpan = 5;
       td.textContent = error && error.status === 403
         ? "You need auditor access to see the list of suggestions. Ask an administrator."
-        : (error && error.message) || "Couldn't load suggestions.";
+        : (error && error.message) || "Couldn't load suggestions. Refresh the page and try again.";
       tr.appendChild(td); queue.appendChild(tr);
     });
   }
@@ -514,7 +514,7 @@
       setText(pill, "Unavailable");
       setText(document.getElementById("aep-status-detail"), error && error.status === 403
         ? "You need auditor access to check availability. Ask an administrator."
-        : (error && error.message) || "Couldn't check availability.");
+        : (error && error.message) || "Couldn't check availability. Refresh the page and try again.");
     });
   }
 

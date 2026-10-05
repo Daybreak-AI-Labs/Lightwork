@@ -18,7 +18,7 @@ from zoneinfo import ZoneInfo
 from .crypto_at_rest import seal, unseal
 from .file_lock import atomic_write_bytes, cross_process_lock, ensure_private_directory
 from .paths import data_dir
-from .personal_notifications import delivery_window
+from .personal_notifications import alert_brief, delivery_window
 
 _prune_cursor = 0
 
@@ -241,6 +241,8 @@ def dispatch(principal: str, inbox: dict, preferences: dict) -> None:
             items = [item for item in items if item["category"] in {"needs-decision", "deadline"}]
         else:
             return
+    # Something the person already saw in the app is not sent to them again.
+    items = [item for item in items if not item.get("seen_at")]
     day = datetime.fromtimestamp(now, timezone.utc).astimezone(ZoneInfo(preferences["timezone"])).date().isoformat()
     links = [link for link in linked_channels(principal) if link["id"] in preferences["external_links"]]
     # Oldest attempted destination first, so one slow person cannot monopolize
@@ -262,7 +264,8 @@ def dispatch(principal: str, inbox: dict, preferences: dict) -> None:
                 href = item.get("href", "")
                 if (isinstance(href, str) and href.startswith("/") and not href.startswith("//")
                         and not any(char in href for char in "\r\n\\")):
-                    links.append(base + href)
+                    # Why, what and by when, never task text; then the exact link.
+                    links.append(alert_brief(item, time_zone=preferences["timezone"]) + "\n" + base + href)
             text = "Lightwork has " + str(len(fresh)) + " update(s) for you. Sign in to review.\n" + "\n".join(links)
             if len(fresh) > 5 or not links:
                 text += "\n" + base + "/notifications"

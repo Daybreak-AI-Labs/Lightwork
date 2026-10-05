@@ -8,7 +8,7 @@
   const $ = id => document.getElementById('ekko-rec-' + id);
   const MAX = 1000000;
   let busy = false;
-  function say(text) { $('msg').textContent = text; }
+  function say(text) { window.mvStatus($('msg'), text); }
   function failText(failure, what) {
     return typeof window.mvErrorText === 'function' ? window.mvErrorText(failure, what) : 'Could not ' + what + '. Please try again.';
   }
@@ -29,9 +29,9 @@
   async function follow(job, live) {
     for (let tries = 0; tries < 43200; tries += 1) {
       await new Promise(resolve => setTimeout(resolve, tries ? 2000 : 500));
-      const poll = await fetch('/api/v1/ekko/recording/' + job, { credentials: 'same-origin', cache: 'no-store' });
-      if (!poll.ok) { say(failText(poll, 'check the recording')); return; }
-      const data = await poll.json();
+      let data;
+      try { data = await window.mvFetchJSON('/api/v1/ekko/recording/' + job, { cache: 'no-store' }, 'check the recording'); }
+      catch (error) { say(error.message); return; }
       if (data && data.state === 'running') { if (live) say('Recording. Use Pause or Stop above to end it.'); continue; }
       const result = (data && data.result) || {};
       const recorded = Number(result.recorded) || 0, skipped = Number(result.skipped) || 0;
@@ -41,12 +41,9 @@
     }
   }
   async function start(path, body, live) {
-    const response = await fetch(path, {
-      method: 'POST', credentials: 'same-origin', cache: 'no-store',
-      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
-    });
-    if (!response.ok) { say(failText(response, 'start recording')); return; }
-    const data = await response.json();
+    let data;
+    try { data = await window.mvFetchJSON(path, { method: 'POST', cache: 'no-store', body: body }, 'start recording'); }
+    catch (error) { say(error.message); return; }
     if (!data || !/^[a-f0-9]{32}$/.test(String(data.job))) { say('The recording couldn’t be checked.'); return; }
     await follow(data.job, live);
   }
@@ -71,7 +68,7 @@
     catch (error) { say(failText(error, 'start recording')); }
     finally { lock(false); }
   });
-  fetch('/api/v1/ekko/recording/options', { credentials: 'same-origin', cache: 'no-store' })
-    .then(r => (r.ok ? r.json() : null)).then(data => { if (data && data.windows_active_app === true) $('watch').hidden = false; })
+  window.mvFetchJSON('/api/v1/ekko/recording/options', { cache: 'no-store' })
+    .then(data => { if (data && data.windows_active_app === true) $('watch').hidden = false; })
     .catch(() => {});
 })();

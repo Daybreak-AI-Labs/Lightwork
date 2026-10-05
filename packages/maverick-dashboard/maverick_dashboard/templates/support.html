@@ -3,10 +3,10 @@
 {% block head_extra %}<link rel="stylesheet" href="/static/lightwork-support.css">{% endblock %}
 {% block content %}
 <section id="support-center" data-context="{{ support_context }}" data-draft-recovery="off">
-  <h1 class="page-title">Help and Diagnostics</h1>
+  <h1 class="page-title">Help and diagnostics</h1>
   <p class="page-subtitle">Make a report about this installation for your support contact. Private details are removed. You review it here first, then download exactly what you reviewed.</p>
   <section class="panel support-scope" aria-labelledby="support-scope-title">
-    <h2 id="support-scope-title">What the Report Includes</h2>
+    <h2 id="support-scope-title">What the report includes</h2>
     <ul>
       <li>Which versions of Lightwork and its parts are installed, and the kind of computer and operating system.</li>
       <li>Where Lightwork and its data are installed on this computer (the folder locations), and whether the data folder exists.</li>
@@ -22,9 +22,9 @@
   <button type="button" class="btn btn--primary" id="support-prepare">Prepare support report</button>
   <p id="support-status" role="status" aria-live="polite">No report has been collected.</p>
   <section id="support-result" class="panel" hidden>
-    <h2>Report Summary</h2><p id="support-reference"></p><ul id="support-readiness"></ul>
+    <h2>Report summary</h2><p id="support-reference"></p><ul id="support-readiness"></ul>
     <p class="support-followups"><a class="btn btn--ghost" href="/settings">Review settings</a><a class="btn btn--ghost" href="/workspace/recovery">Open workspace recovery</a></p>
-    <h3>Review the Report</h3>
+    <h3>Review the report</h3>
     <div id="support-readable" class="support-readable"></div>
     <details><summary>Technical details: the exact file that will be downloaded</summary><pre id="support-preview"></pre></details>
     <p><label><input type="checkbox" id="support-confirm"> I reviewed the report and want to download it.</label></p>
@@ -32,8 +32,35 @@
   </section>
   {% elif not support_enabled %}<div class="panel"><p>Support reports are switched off. An administrator can turn them on in Settings.</p><p><a class="btn" href="/goals">Open your tasks</a></p></div>
   {% else %}<div class="panel"><p>Your administrator can make a support report. You can see each task's status and problems on its task page.</p><p><a class="btn" href="/goals">Open your tasks</a></p></div>{% endif %}
+  <section class="panel" id="get-help" aria-labelledby="get-help-title" data-draft-recovery="off">
+    <h2 id="get-help-title">Get help from a person</h2>
+    {% if help_request.email %}
+    <p>Your support contact is <a href="mailto:{{ help_request.email }}">{{ help_request.email }}</a>. Review the request below, then open it in your email app or copy it.</p>
+    {% else %}
+    <p>Send this request to your Lightwork administrator: the person who invited you or who looks after Lightwork for your team. Review it below, then copy it into an email or chat message to them.</p>
+    {% endif %}
+    <label for="get-help-body">Your request</label>
+    <textarea class="input" id="get-help-body" rows="12" maxlength="4000" autocomplete="off" data-help-subject="{{ help_request.subject }}" data-help-email="{{ help_request.email }}">{{ help_request.body }}</textarea>
+    <p class="muted">It already says which page you were on{% if help_request.task %}, the task{% endif %}{% if help_request.failure %} and the error reference{% endif %}. Task text and results are not included; add only what you are happy to share. Nothing is sent automatically.</p>
+    <p class="support-followups">
+      <button type="button" class="btn" id="get-help-copy">Copy request</button>
+      {% if help_request.email %}<a class="btn" id="get-help-email" href="mailto:{{ help_request.email }}?subject={{ help_request.subject|urlencode }}&amp;body={{ help_request.body|urlencode }}">Open in your email app</a>{% endif %}
+      {% if help_request.task %}<a class="btn btn--ghost" href="#issue-report">Also prepare a report about this task</a>{% endif %}
+    </p>
+    <p id="get-help-status" role="status" aria-live="polite"></p>
+  </section>
+  <section class="panel" id="how-to" aria-labelledby="how-to-title">
+    <h2 id="how-to-title">How to do common tasks</h2>
+    <p class="muted">Short steps for the tasks people do most. The Help menu on each page opens the steps for that page under “How this works”.</p>
+    {% for topic in help_topics %}
+    <details class="help-topic" id="how-{{ topic.slug }}">
+      <summary>{{ topic.title }} <span class="muted">· {{ topic.persona }}</span></summary>
+      <ol>{% for step in topic.steps %}<li>{{ step }}</li>{% endfor %}</ol>
+    </details>
+    {% endfor %}
+  </section>
   <section class="panel" id="issue-report" aria-labelledby="issue-report-title">
-    <h2 id="issue-report-title">Report a Problem With a Task</h2>
+    <h2 id="issue-report-title">Report a problem with a task</h2>
     <p class="muted">Choose a task that stopped with a problem. The draft includes the installed Lightwork version and the recorded reason it stopped, when available. Review it here and remove business details before sharing. Recognized passwords and keys are removed. This app has no support inbox set up for task reports; copy or download your reviewed draft, then share it through the support channel your organization gave you. Nothing is sent automatically.</p>
     <form id="issue-report-search" class="support-followups">
       <label for="issue-report-query">Task name</label><input id="issue-report-query" class="input" maxlength="160" type="search">

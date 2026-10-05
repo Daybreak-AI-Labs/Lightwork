@@ -69,9 +69,7 @@
   };
   async function loadPeople() {
     try {
-      const result = await fetch("/api/v1/choices/people", {method: "GET", credentials: "same-origin", headers: {"Accept": "application/json"}});
-      if (!result.ok) return;
-      const data = await result.json();
+      const data = await window.mvFetchJSON("/api/v1/choices/people");
       for (const row of data?.people || []) if (typeof row?.value === "string" && typeof row?.label === "string") people.set(row.value, row.label);
     } catch (_) { /* names fall back to sign-in handles */ }
   }
@@ -606,7 +604,7 @@
             no_match: "No matching ticket was found in Jira.",
             multiple_matches: `More than one matching ticket was found in Jira (${Number.isInteger(item.match_count) ? item.match_count : `at least ${item.match_count_lower_bound}`} matches).`,
             readback_mismatch: "A ticket was found in Jira but its content doesn't match what you approved.",
-            readback_unavailable: "Jira couldn't be checked.",
+            readback_unavailable: "Jira couldn't be checked. Try again in a minute.",
             exact_match_verified: "The exact ticket was found in Jira.",
           })[item.state] || "Jira's result is unknown.",
         };

@@ -284,7 +284,7 @@
   function renderTasks(tasks) {
     var list = el("ec-tasks");
     list.textContent = "";
-    if (!available || !policy || !(policy.allowed_sources || []).includes("own_tasks")) { list.appendChild(node("li", "Task access is unavailable under your current companion settings.")); return; }
+    if (!available || !policy || !(policy.allowed_sources || []).includes("own_tasks")) { list.appendChild(node("li", "Task access is unavailable under your current companion settings. Ask your administrator if you need it.")); return; }
     if (!tasks.length) { list.appendChild(node("li", "No active tasks to show.")); return; }
     tasks.forEach(function (task) {
       var item = node("li");

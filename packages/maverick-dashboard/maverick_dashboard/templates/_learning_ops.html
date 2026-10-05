@@ -4,7 +4,7 @@
     anything (the routes check again). -#}
 <section id="lo-root" class="lo" data-admin="{{ '1' if learning_can_manage else '0' }}" aria-labelledby="lo-h">
   <div class="section-head"><h2 id="lo-h" class="lrn__section-h">Run and check each learning system</h2></div>
-  <p class="lrn__section-sub">Each learning system above can also be run, checked or reviewed here. Long jobs keep
+  <p class="lrn__section-sub">Each learning system above can also be run, checked or reviewed here. Long tasks keep
     running in the background, and you can stop the ones that spend money.
     Self-coaching tools are on the <a href="/learned">Learned</a> page; failure reasons and suggested
     spending limits are on the <a href="/spend">Spend</a> page.</p>
@@ -22,14 +22,14 @@
 
   <div class="panel" id="lo-factory">
     <h3 class="lrn__section-h" id="lo-fa-h">Improve how new agents are built</h3>
-    <p class="lrn__section-sub">Finds problems that keep showing up when new specialists are set up, and suggests
+    <p class="lrn__section-sub">Finds problems that keep showing up when new agents are set up, and suggests
       guidance for building the next ones. Adoption requires paired comparison results that pass the recorded
       improvement checks. Review where the results came from before applying them.</p>
     {% if learning_can_manage %}
     <div class="lrn__actions">
       <label for="lo-fa-support">Only problems seen in at least</label>
       <select id="lo-fa-support" class="select">
-        <option value="2">2 specialists</option><option value="3" selected>3 specialists</option><option value="5">5 specialists</option>
+        <option value="2">2 agents</option><option value="3" selected>3 agents</option><option value="5">5 agents</option>
       </select>
       <button type="button" class="btn btn--ghost" id="lo-fa-preview">Show what it would change</button>
     </div>
@@ -69,7 +69,7 @@
   {% endif %}
 
   <div class="panel" id="lo-models">
-    <h3 class="lrn__section-h" id="lo-mi-h">Plan a specialist model</h3>
+    <h3 class="lrn__section-h" id="lo-mi-h">Plan a smaller model for a role</h3>
     <p class="lrn__section-sub">Which smaller models could take over a role, whether each fits your hardware, and how
       well a model's answers score on fixed task sets. This is planning only; no model is switched.</p>
     <div id="lo-mi-state" role="status" aria-live="polite">Loading…</div>
@@ -162,7 +162,7 @@
   </div>
 
   <div class="panel" id="lo-jobs-panel">
-    <h3 class="lrn__section-h" id="lo-jobs-h">Recent background jobs</h3>
+    <h3 class="lrn__section-h" id="lo-jobs-h">Recent background tasks</h3>
     <div id="lo-jobs" aria-labelledby="lo-jobs-h">Loading…</div>
     <button type="button" class="btn btn--ghost" id="lo-jobs-refresh">Refresh</button>
   </div>

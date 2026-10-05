@@ -69,7 +69,7 @@ def test_jobcard_uses_configured_runtime_override_not_pack_declaration(monkeypat
 def test_jobcard_page_names_approval_evidence_and_global_cost_band():
     page = client.get(f"/agents?name={_some_agent()}")
     assert page.status_code == 200
-    assert "Approved deliverables" in page.text
+    assert "Approved results" in page.text
     assert "Cost band for this model across Lightwork" in page.text
     assert "Value delivered" not in page.text
 

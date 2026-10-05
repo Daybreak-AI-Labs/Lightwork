@@ -5,6 +5,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
 const {JSDOM} = require("jsdom");
+const {shell} = require("./_shell");
 const base = path.resolve(__dirname, "../../maverick_dashboard");
 const turn = () => new Promise(resolve => setImmediate(resolve));
 
@@ -12,7 +13,7 @@ test("Copilot teaching reaches the existing name, draft and save controls withou
   const template = fs.readFileSync(path.join(base, "templates/flow_teach.html"), "utf8");
   const dom = new JSDOM(template + '<aside id="mv-copilot"><section id="mv-product-operations">' +
     '<p id="mv-product-operation-status"></p><div id="mv-product-operation-buttons"></div>' +
-    '<div id="mv-product-operation-form"></div></section></aside>', {url: "http://testserver/flows/owned/teach"});
+    '<div id="mv-product-operation-form"></div></section></aside>', {url: "http://testserver/flows/owned/teach", runScripts: "outside-only"});
   const document = dom.window.document, calls = [];
   Object.assign(document.getElementById("flow-teach").dataset, {flow: "owned", lineage: "1", examples: "1"});
   const packageValue = {artifact: {schema: "private_lineage", episodes: []}, bundles: [{private_record: "retained evidence"}]};
@@ -54,6 +55,7 @@ test("Copilot teaching reaches the existing name, draft and save controls withou
     } else throw new Error("Unexpected native request: " + url);
     return {ok: true, json: async () => value};
   };
+  shell(dom.window); dom.window.fetch = fetch;  // the shell's helpers send through this fetch
   dom.window.mvConfirm = async () => true;
   const runtime = {window: dom.window, document, CustomEvent: dom.window.CustomEvent,
     URL: dom.window.URL, URLSearchParams, AbortController, setTimeout, clearTimeout, fetch};
@@ -85,7 +87,7 @@ test("Copilot teaching reaches the existing name, draft and save controls withou
 
 test("the shared rule form learns, refines, attaches and saves with the reviewed step revision", async () => {
   const dom = new JSDOM(fs.readFileSync(path.join(base, "templates/flow_teach.html"), "utf8"),
-    {url: "http://testserver/flows/owned/teach"});
+    {url: "http://testserver/flows/owned/teach", runScripts: "outside-only"});
   const document = dom.window.document, calls = [];
   Object.assign(document.getElementById("flow-teach").dataset, {flow: "owned", lineage: "1", examples: "1"});
   const spec = {inputs: {amount: {type: "integer", min: 0, max: 1000}}, output_type: "boolean", constants: [100]};
@@ -115,6 +117,7 @@ test("the shared rule form learns, refines, attaches and saves with the reviewed
     }
     return {ok: true, json: async () => value};
   };
+  shell(dom.window); dom.window.fetch = fetch;  // the shell's helpers send through this fetch
   dom.window.mvConfirm = async () => true;
   vm.runInNewContext(fs.readFileSync(path.join(base, "static/lightwork-flow-teach.js"), "utf8"),
     {window: dom.window, document, CustomEvent: dom.window.CustomEvent, setTimeout, fetch});

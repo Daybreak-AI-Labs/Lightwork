@@ -40,6 +40,22 @@ def standard_role(principal):
     return value
 
 
+def role_descriptions() -> dict[str, str]:
+    """A plain sentence for every assignable role, built-in and custom.
+
+    Custom roles read as their saved description plus the powers their
+    permission atoms grant (the same atoms every permission check reads)."""
+    from . import rbac
+    from .identity_format import role_description
+    try:
+        custom = rbac.list_custom_roles()
+    except rbac.RbacStoreError:
+        custom = {}
+    return {name: role_description(name, rbac.permissions_for(name),
+                                   (custom.get(name) or {}).get("description", ""))
+            for name in rbac.known_roles()}
+
+
 def denial(request, permission, *, installation=False):
     from . import auth
     from .identity_format import role_label

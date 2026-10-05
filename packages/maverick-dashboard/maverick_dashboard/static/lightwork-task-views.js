@@ -7,7 +7,7 @@
   var confirm = document.getElementById('task-view-confirm'), dismiss = document.getElementById('task-view-dismiss');
   var refresh = document.getElementById('task-views-refresh'), state = null, pending = null, uncertain = null;
   var busy = false, expired = false, generation = 0, controller = null;
-  function say(message) { status.textContent = message; }
+  function say(message) { window.mvStatus(status, message); }
   function lock(value) {
     busy = value; root.setAttribute('aria-busy', String(value));
     root.querySelectorAll('button,input').forEach(function (node) { node.disabled = value || expired; });
@@ -19,22 +19,19 @@
     say('Your account or workspace changed. Reload Tasks before using saved views.');
   }
   async function request(url, options) {
-    var owner = new AbortController(), timer; controller = owner;
+    var owner = new AbortController(); controller = owner;
     try {
-      return await Promise.race([
-        (async function () {
-          var response = await fetch(url, Object.assign({credentials:'same-origin', cache:'no-store'}, options, {signal:owner.signal}));
-          if (response.status === 401 || response.status === 403) { invalidate(); throw new Error('Access changed.'); }
-          var data = await response.json();
-          if (data.detail && data.detail.code === 'context_changed') { invalidate(); throw new Error('Context changed.'); }
-          if (!response.ok) throw new Error(response.status === 409 ? 'Saved views changed. Refresh and review again; your view name is kept.' : 'The request could not be confirmed. Refresh saved views before trying again.');
-          if (!data || !Array.isArray(data.views) || typeof data.revision !== 'string' || typeof data.context !== 'string') throw new Error('The saved-view response could not be verified.');
-          if (state && state.context !== data.context) { invalidate(); throw new Error('Context changed.'); }
-          return data;
-        })(),
-        new Promise(function (_resolve, reject) { timer = setTimeout(function () { owner.abort(); reject(new Error('The request timed out. Refresh saved views to check the current state; no retry was sent.')); }, 15000); })
-      ]);
-    } finally { clearTimeout(timer); if (controller === owner) controller = null; }
+      var data = await window.mvFetchJSON(url, Object.assign({cache: 'no-store'}, options, {signal: owner.signal, timeout: 15000,
+        onAccess: invalidate, messages: {409: 'Saved views changed. Refresh and review again; your view name is kept.',
+          timeout: 'The request timed out. Refresh saved views to check the current state; no retry was sent.'}}), options && options.method ? 'save the view' : 'load your saved views');
+      if (data && data.detail && data.detail.code === 'context_changed') { invalidate(); throw new Error('Context changed.'); }
+      if (!data || !Array.isArray(data.views) || typeof data.revision !== 'string' || typeof data.context !== 'string') throw new Error('The saved-view response could not be verified. Refresh the page and try again.');
+      if (state && state.context !== data.context) { invalidate(); throw new Error('Context changed.'); }
+      return data;
+    } catch (error) {
+      if (error.detail && error.detail.code === 'context_changed') invalidate();
+      throw error;
+    } finally { if (controller === owner) controller = null; }
   }
   function render() {
     list.replaceChildren();

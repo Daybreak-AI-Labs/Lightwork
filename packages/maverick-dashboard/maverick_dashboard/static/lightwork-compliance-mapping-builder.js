@@ -6,7 +6,7 @@
   const storage = 'lightwork.compliance.mapping.original';
   try { pending = JSON.parse(sessionStorage.getItem(storage) || 'null'); } catch (_) { pending = null; }
   function save(value) { pending = value; try { if (value) sessionStorage.setItem(storage, JSON.stringify(value)); else sessionStorage.removeItem(storage); } catch (_) {} $('recovery').hidden = !value; }
-  function say(message) { $('status').textContent = message; }
+  function say(message) { window.mvStatus($('status'), message); }
   function problem(error) { return window.mvPlainDetail?.(error.detail) || window.mvErrorText?.(error, 'check this mapping') || 'The result could not be checked. Read saved records before trying again.'; }
   async function request(path, body) {
     const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 12000);

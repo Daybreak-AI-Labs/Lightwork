@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Cortex memory diagnostics · Lightwork{% endblock %}
+{% block title %}{{ 'Diagnostics · Knowledge' if tab_host else 'Cortex memory diagnostics' }} · Lightwork{% endblock %}
 {% block head_extra %}
 <style nonce="{{ csp_style_nonce }}">
   .ctx { display: grid; gap: var(--space-5); }
@@ -29,7 +29,7 @@
   .ctx-form__grid { display: grid; gap: var(--space-3); grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .ctx-field { display: grid; gap: var(--space-1); min-width: 0; }
   .ctx-field--wide { grid-column: 1 / -1; }
-  .ctx-field label, .ctx-sources legend { color: var(--muted); font-size: var(--text-sm); font-weight: 600; }
+  .ctx-field label, .ctx-sources legend { color: var(--muted); font-size: var(--text-sm); font-weight: var(--font-semibold); }
   .ctx-field .input, .ctx-field .textarea { width: 100%; }
   .ctx-sources { border: 1px solid var(--border); border-radius: var(--radius-md); padding: var(--space-2) var(--space-3);
                  display: flex; flex-wrap: wrap; gap: var(--space-3); margin: 0; }
@@ -37,7 +37,7 @@
   .ctx-inline { display: inline-flex; align-items: center; gap: var(--space-1); }
   .ctx-form__row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); }
   .ctx-result__meta { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); font-size: var(--text-sm); }
-  .ctx-chip { display: inline-flex; align-items: center; gap: .35em; border: 1px solid var(--border); border-radius: 999px;
+  .ctx-chip { display: inline-flex; align-items: center; gap: .35em; border: 1px solid var(--border); border-radius: var(--radius-pill);
               padding: .1rem .55rem; font-size: var(--text-xs); color: var(--muted); }
   .ctx-chip strong { color: var(--text); }
   .ctx-denied { margin: var(--space-3) 0 0; padding: var(--space-2) var(--space-3); border: 1px solid var(--border);
@@ -68,9 +68,20 @@
   {%- endif %} Searches record where results came from. Unavailable sources are
   shown so you can see what is missing.
 {% endset %}
+{% if tab_host %}{% from "_tabs.html" import host_header, panel_attrs %}{{ host_header(tab_host) }}{% endif %}
 <div class="ctx" id="ctx-root" data-api-base="{{ api_base }}" data-copilot-page="{{ page_path }}"
      data-enabled="{{ 'true' if status.enabled else 'false' }}"
-     data-source-labels='{{ source_labels | tojson }}'>
+     data-source-labels='{{ source_labels | tojson }}'{% if tab_host %} {{ panel_attrs(tab_host.selected) }}{% endif %}>
+  {% if tab_host %}
+  <section aria-labelledby="ctx-diagnostics-h">
+    <h2 id="ctx-diagnostics-h">Diagnostics</h2>
+    <p class="muted">Search your connected sources: cited documents, skills, lessons and records. Source availability
+      is shown below; searches are audited.</p>
+    <p><strong>{{ 'Knowledge search on' if status.enabled else 'Knowledge search off' }}</strong>
+      <span class="badge {{ 'ok' if status.enabled and answering == total else ('warn' if status.enabled and answering else 'idle') }}">{{ answering }} of {{ total }} sources answering</span></p>
+    <p class="muted">{{ state_copy }}</p>
+  </section>
+  {% else %}
   {% call hero('Your workspace', 'Cortex memory diagnostics',
                subtitle='Search your connected sources',
                lede='Find information in the knowledge sources available to your
@@ -83,6 +94,7 @@
                          else ('warn' if status.enabled and answering else 'idle'),
              copy=state_copy) }}
   {% endcall %}
+  {% endif %}
   {% if status.error %}
   <p class="panel" role="alert">Lightwork could not check its knowledge sources just now. Reload the page in a minute;
     if this keeps happening, ask your administrator.</p>

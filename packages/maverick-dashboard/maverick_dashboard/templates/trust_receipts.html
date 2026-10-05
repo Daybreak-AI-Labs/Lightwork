@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% from "_hero.html" import hero, state %}
-{% block title %}Trust Receipts - Lightwork{% endblock %}
+{% block title %}Trust receipts - Lightwork{% endblock %}
 {% block head_extra %}
 <style nonce="{{ csp_style_nonce }}">
   .rcp-grid{display:grid;gap:var(--space-4);grid-template-columns:repeat(auto-fit,minmax(min(100%,24rem),1fr))}
@@ -16,13 +16,13 @@
   .rcp-verdict{font-size:1.3rem;font-weight:800;margin:0}.rcp-verdict[data-ok=true]{color:var(--success)}.rcp-verdict[data-ok=false]{color:var(--danger)}
   .rcp-claims{list-style:none;margin:.6rem 0 0;padding:0}
   .rcp-claims li{border-bottom:1px solid var(--border);padding:.35rem 0}
-  .rcp-report{white-space:pre-wrap;overflow-wrap:anywhere;font-size:.75rem}
+  .rcp-report{white-space:pre-wrap;overflow-wrap:anywhere;font-size: var(--text-xs)}
   .rcp-flush-top{margin-top:0}.rcp-flush{margin:0}.rcp-row--split{justify-content:space-between}.rcp-gap-top{margin-top:var(--space-3)}
 </style>
 {% endblock %}
 {% block content %}
 <div id="rcp-root" data-api-base="{{ api_base }}" data-copilot-page="{{ page_path }}">
-  {% call hero('Audit', 'Trust Receipts',
+  {% call hero('Audit', 'Trust receipts',
                lede='A trust receipt is a file that proves a decision in your activity record has not been changed. Create one for any decision, send it to an auditor, or check one someone sent you.',
                title_id='rcp-title') %}
     <div class="hero-statebox" aria-live="polite">
@@ -44,7 +44,7 @@
   </section>
 
   <section class="panel" aria-labelledby="rcp-proves-title">
-    <h2 id="rcp-proves-title" class="rcp-flush-top">What a Receipt Proves</h2>
+    <h2 id="rcp-proves-title" class="rcp-flush-top">What a receipt proves</h2>
     <p>A verifier checks the recorded decision for consistency. It cannot prove that the underlying action really occurred. A separately retained checkpoint is needed to detect later changes to committed history.</p>
     <ul class="rcp-levels">
       <li><strong>Signed</strong><br>The recorded row verifies against the issuer's key.</li>
@@ -52,7 +52,7 @@
       <li><strong>Anchored</strong><br>That commitment matches a checkpoint supplied independently of this receipt.</li>
     </ul>
     <p>Keys held on this computer, including keys supplied by an external service, remain available to its signing process. External key sourcing alone cannot prevent it from re-signing history.</p>
-    <h3>Share Our Key</h3>
+    <h3>Share our key</h3>
     <p class="muted">Check this key through a separate trusted channel before relying on a receipt.</p>
     <div class="rcp-actions">
       <button class="btn" type="button" id="rcp-copy-key">Copy key</button>
@@ -62,7 +62,7 @@
   </section>
 
   <section class="panel" aria-labelledby="rcp-create-title">
-    <h2 id="rcp-create-title" class="rcp-flush-top">Create a Receipt</h2>
+    <h2 id="rcp-create-title" class="rcp-flush-top">Create a receipt</h2>
     <form class="rcp-form" id="rcp-rows-form" autocomplete="off">
       <div class="rcp-fields">
         <label for="rcp-day">Day<select class="select" name="day" id="rcp-day"><option value="">Loading…</option></select></label>
@@ -78,7 +78,7 @@
 
   <div class="rcp-grid">
     <section class="panel" aria-labelledby="rcp-check-title">
-      <h2 id="rcp-check-title" class="rcp-flush-top">Check a Receipt</h2>
+      <h2 id="rcp-check-title" class="rcp-flush-top">Check a receipt</h2>
       <form class="rcp-form" id="rcp-verify-form" autocomplete="off">
         <label for="rcp-file">Receipt file<input type="file" id="rcp-file" accept="application/json,.json"></label>
         <details><summary>More options</summary>
@@ -100,13 +100,13 @@
     </section>
 
     <section class="panel" aria-labelledby="rcp-proof-title">
-      <h2 id="rcp-proof-title" class="rcp-flush-top">Proof of How Lightwork Behaved</h2>
+      <h2 id="rcp-proof-title" class="rcp-flush-top">Proof of how Lightwork behaved</h2>
       <p class="muted">A signed proof file shows an outside party that agents stayed within your rules, that learning never gave itself more power, and that the activity record is complete.</p>
       <form class="rcp-form" id="rcp-proof-form" autocomplete="off">
         <label for="rcp-proof-since">Include learning changes from (optional)<input class="input" type="date" id="rcp-proof-since"></label>
         <button class="btn btn--primary" type="submit">Download signed proof</button>
       </form>
-      <h3>Check a Proof File</h3>
+      <h3>Check a proof file</h3>
       <form class="rcp-form" id="rcp-proof-verify-form" autocomplete="off">
         <label for="rcp-proof-file">Proof file<input type="file" id="rcp-proof-file" accept="application/json,.json"></label>
         <label for="rcp-proof-key">Sender's key (leave empty for this installation's own proof)<input class="input" id="rcp-proof-key" maxlength="64" placeholder="Paste the key"></label>

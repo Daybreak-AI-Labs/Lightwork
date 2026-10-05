@@ -204,6 +204,7 @@ from .approval_decisions import (  # noqa: F401 -- re-exported for tests
     _deliver_approval_audit_event,
     _record_vote_or_raise,
     _require_acknowledgement,
+    _require_separate_approver,
     _safe_action_label,
     require_current_decision_card,
     undo_from_dashboard,
@@ -576,7 +577,7 @@ def workforce_posture(request: Request) -> dict:
                 "can_grant": out["can_manage"] and out["levels_enabled"]
                 and view["autonomy"]["onboarding"]
                 and not view["autonomy"]["config_override"] and not auto_risks,
-                "grant_block_reason": _autonomy_auto_graduation_reason(auto_risks) if auto_risks else None,
+                "grant_block_reason": _autonomy_auto_graduation_reason(auto_risks, c.name) if auto_risks else None,
                 "needs_supervision": view["autonomy"]["onboarding"],
             })
             if len(visible_candidates) >= 100:
@@ -1186,7 +1187,7 @@ async def create_tenant(request: Request, body: TenantCreateIn) -> TenantOut:
             ) from rollback_exc
         raise HTTPException(
             status_code=503,
-            detail="Audit custody refused tenant creation. The workspace is unavailable and its identifier remains reserved; retry with a new identifier or a display name.",
+            detail="Audit custody refused workspace creation. The workspace is unavailable and its identifier remains reserved; retry with a new identifier or a display name.",
         ) from exc
     return _to_tenant_out(rec)
 
@@ -1609,7 +1610,7 @@ def _require_enabled_specialist(request: Request, domain: str) -> None:
 
     profile = enabled_domains().get(domain)
     if profile is None:
-        raise HTTPException(status_code=400, detail=f"unknown specialist: {domain!r}")
+        raise HTTPException(status_code=400, detail=f"unknown agent or specialist: {domain!r}")
     for suite in suites_for_domain(domain, profile):
         require_suite(request, suite)
 
@@ -1834,7 +1835,7 @@ def _source_analysis_selection(request: Request, payload: GoalIn):
         return None
     from maverick.knowledge_task_context import SourceContextUnavailable, validate_selection
     if payload.template or payload.domain or payload.director_profile or payload.params:
-        raise HTTPException(422, "Selected knowledge is available only for a source analysis task, without specialist tools or workflow execution.")
+        raise HTTPException(422, "Selected knowledge is available only for a source analysis task, without agent or specialist tools or workflow execution.")
     if not (request.headers.get("Idempotency-Key") or "").strip():
         raise HTTPException(422, "Keep one request identity for this source analysis and reconcile it before retrying.")
     from .draft_api import context_for
@@ -5911,6 +5912,13 @@ def record_outcome(request: Request, payload: OutcomeIn) -> None:
     prefers this over the verifier proxy on its next turn, so learning is grounded
     in what actually happened. ``value`` is clamped to [0, 1] by the store.
     """
+    from maverick.authority_effects import authority_effect_fence
+
+    with authority_effect_fence():
+        return _record_outcome_reviewed(request, payload)
+
+
+def _record_outcome_reviewed(request, payload):
     require_permission(request, "operate")
     goal_id = int(payload.goal_id)
     episode_id = int(payload.episode_id)
@@ -5921,9 +5929,16 @@ def record_outcome(request: Request, payload: OutcomeIn) -> None:
     assert_goal_access(request, g)
     if not w.episode_exists(goal_id, episode_id):
         raise HTTPException(status_code=404, detail="no such episode")
+    from maverick.consequence import ConsequenceWriteUncertain
     from maverick.consequence import record_outcome as _rec
 
-    _rec(goal_id, episode_id, float(payload.value), kind=(payload.kind or ""))
+    try:
+        recorded = _rec(goal_id, episode_id, float(payload.value), kind=(payload.kind or ""),
+                        source="reported_business")
+    except ConsequenceWriteUncertain as exc:
+        raise HTTPException(503, "This report may already be saved. Its outcome is unconfirmed; check the saved report before trying again.") from exc
+    if not recorded:
+        raise HTTPException(503, "The outcome report was not saved. Review the learning settings and storage availability.")
 
 
 @router.post("/outcomes/link", status_code=204)
@@ -5935,6 +5950,13 @@ def link_outcome(request: Request, payload: OutcomeLinkIn) -> None:
     so a later outcome reported against that key (see ``/outcomes/by-key``) can be
     grounded without the reporter knowing any episode id. Always harmless to store.
     """
+    from maverick.authority_effects import authority_effect_fence
+
+    with authority_effect_fence():
+        return _link_outcome_reviewed(request, payload)
+
+
+def _link_outcome_reviewed(request, payload):
     require_permission(request, "operate")
     goal_id = int(payload.goal_id)
     episode_id = int(payload.episode_id)
@@ -5945,9 +5967,14 @@ def link_outcome(request: Request, payload: OutcomeLinkIn) -> None:
     assert_goal_access(request, g)
     if not w.episode_exists(goal_id, episode_id):
         raise HTTPException(status_code=404, detail="no such episode")
-    from maverick.consequence import link_outcome_key
+    from maverick.consequence import ConsequenceWriteUncertain, link_outcome_key
 
-    link_outcome_key(payload.key, goal_id, episode_id)
+    try:
+        recorded = link_outcome_key(payload.key, goal_id, episode_id)
+    except ConsequenceWriteUncertain as exc:
+        raise HTTPException(503, "This connection may already be saved. Its outcome is unconfirmed; check the original connection before trying again.") from exc
+    if not recorded:
+        raise HTTPException(503, "The outcome connection was not saved. Review the learning settings and storage availability.")
 
 
 @router.post("/outcomes/by-key")
@@ -5960,21 +5987,32 @@ def record_outcome_by_key(request: Request, payload: OutcomeByKeyIn) -> dict:
     and ground the reward there. ``matched`` is ``false`` when no run has linked
     that key -- the connector reported an outcome for work Lightwork didn't do.
     """
+    from maverick.authority_effects import authority_effect_fence
+
+    with authority_effect_fence():
+        return _record_outcome_by_key_reviewed(request, payload)
+
+
+def _record_outcome_by_key_reviewed(request, payload):
     require_permission(request, "operate")
     from maverick import consequence
 
     w = _world()
 
-    def _authorize(goal_id: int, _episode_id: int) -> bool:
+    def _authorize(goal_id: int, episode_id: int) -> bool:
         # Enforce the same access boundary as the goal/episode ingest so an
         # operate caller can't ground outcomes on a goal they can't see (the
         # correlation store is already tenant-scoped by path).
         g = w.get_goal(goal_id)
-        return g is not None and can_access_goal(request, g)
+        return g is not None and can_access_goal(request, g) and w.episode_exists(goal_id, episode_id)
 
-    matched = consequence.record_outcome_for_key(
-        payload.key, float(payload.value), kind=(payload.kind or ""), authorize=_authorize
-    )
+    try:
+        matched = consequence.record_outcome_for_key(
+            payload.key, float(payload.value), kind=(payload.kind or ""), authorize=_authorize,
+            source="reported_business",
+        )
+    except consequence.ConsequenceWriteUncertain as exc:
+        raise HTTPException(503, "This report may already be saved. Its outcome is unconfirmed; check the saved report before trying again.") from exc
     return {"matched": bool(matched)}
 
 
@@ -10615,11 +10653,12 @@ def post_signoff(request: Request, goal_id: int, payload: SignoffIn) -> dict:
     return decide(request, goal_id, payload)
 
 
-def _ground_outcome(w, goal_id: int, value: float, *, kind: str) -> bool:
-    """Record a real human/world outcome for the goal's latest episode as
-    grounded reward the learning flywheel prefers over its proxy. Delegates to
-    the shared core helper (no-op unless ``[consequence]`` is enabled; never
-    raises -- grounding is best-effort and must not fail the request)."""
+def _ground_outcome(w, goal_id: int, value: float, *, kind: str) -> bool | None:
+    """Record an optional local human signal for the goal's latest episode.
+
+    Reported business outcomes retain precedence. None means the write's result
+    is unconfirmed; optional observation must not fail the saved task output.
+    """
     try:
         from maverick import consequence
 
@@ -10688,7 +10727,8 @@ def edit_deliverable(request: Request, goal_id: int, payload: DeliverableEditIn)
     if not receipt["replayed"]:
         observed = _ground_outcome(w, goal_id, similarity, kind="edit")
     return {"similarity": round(similarity, 3), **receipt, "saved": True,
-            "learning_observation": "not_repeated" if receipt["replayed"] else ("recorded" if observed else "not_recorded"),
+            "learning_observation": "not_repeated" if receipt["replayed"] else (
+                "unconfirmed" if observed is None else ("recorded" if observed else "not_recorded")),
             "training_completed": False}
 
 
@@ -12324,8 +12364,8 @@ def pack_editing_denial(request: Request) -> str | None:
 
     if not get_features().get("pack_editing", True):
         return (
-            "Specialist editing is disabled by this installation's policy. "
-            "Ask an installation administrator to enable it."
+            "Editing agents and specialists is turned off by this installation's policy. "
+            "Ask an installation administrator to turn it on."
         )
     return None
 
@@ -12477,7 +12517,7 @@ async def set_model_cost_tier_endpoint(request: Request, body: ModelCostTierIn) 
 _FEATURE_SWITCHES: dict = {
     "dreaming": (
         "Dreaming",
-        "Consolidates completed goals overnight into reusable lessons the fleet can recall.",
+        "Consolidates finished tasks overnight into reusable lessons your teams can recall.",
     ),
     "self_improvement": (
         "Self-improvement",
@@ -13618,7 +13658,10 @@ async def copilot_context_endpoint(request: Request, response: Response, page: s
         result["model_route_reason"] = reason
     from maverick.config import get_features
 
+    from .copilot_context import intro_for
+
     result["operations_enabled"] = get_features().get("copilot_operations") is True
+    result["intro"] = intro_for(context_for_page(page), changes_enabled=result["operations_enabled"])
     if not configured:
         result["provider_setup"] = _copilot_provider_setup(permissions, route_status)
     from .provider_readiness import public_verdict, workspace_readiness
@@ -13753,6 +13796,15 @@ async def copilot_endpoint(request: Request, payload: CopilotIn, response: Respo
                                        payload.selected_goal_id)
         return {**live, "page_context": public_context(context, permissions)}
 
+    # Something people come to this page to do: plain steps and a link that
+    # opens the page and focuses the control. Navigation only; nothing changes.
+    from .copilot_tasks import match as match_task
+    from .copilot_tasks import reply as task_reply
+
+    task = match_task(context.path, msg, permissions)
+    if task is not None:
+        return {**task_reply(task), "page_context": public_context(context, permissions)}
+
     # The browser offers only registered, reviewed operations before it asks
     # this read-only guide. A direct action request that reaches this endpoint
     # has no operation receipt and must never be delegated to a text model.
@@ -13869,8 +13921,8 @@ async def copilot_endpoint(request: Request, payload: CopilotIn, response: Respo
         "mode": "model",
         "model_output_verified": False,
         "warning": (
-            "Model-generated guidance is unverified; confirm readiness and outcomes "
-            "against live status, retained evidence, and authorized human review."
+            "This answer is from AI and unverified. Copilot hasn't changed anything; "
+            "check the page before you act on it."
         ),
         "page_context": public_context(context, permissions),
     })
@@ -13904,8 +13956,19 @@ def _autonomy_auto_risks(policy: dict) -> list[str]:
                 policy.get(risk) or policy.get("default")) == "auto"]
 
 
-def _autonomy_auto_graduation_reason(risks: list[str]) -> str:
-    return ("This specialist is set to Act on its own for " + ", ".join(risks)
+def _kind_word(name: str) -> str:
+    """"specialist" for a built-in pack, "agent" for anything else (owner glossary)."""
+    from .agent_changelog import agent_kind
+
+    return agent_kind(name)
+
+
+def _this_one(name: str) -> str:
+    return "This " + _kind_word(name)
+
+
+def _autonomy_auto_graduation_reason(risks: list[str], name: str = "") -> str:
+    return (_this_one(name) + " is set to Act on its own for " + ", ".join(risks)
             + " actions. Its overall approval record cannot prove those actions are safe. "
             "Set each of those levels to Ask or lower before ending supervision.")
 
@@ -13921,22 +13984,22 @@ def _agent_autonomy_errors(name: str, payload: AgentOverrideIn) -> list[str]:
     if view and view["autonomy"]["config_override"]:
         if payload.autonomy.model_dump() == view["autonomy"]["pack"]:
             return []  # preserve the existing pack setting during another edit
-        return ["A server-configured independence policy controls this specialist. Remove it before editing here."]
+        return ["A server-configured independence policy controls this " + _kind_word(name) + ". Remove it before editing here."]
     auto_risks = _autonomy_auto_risks(payload.autonomy.model_dump())
     if not payload.autonomy.onboarding and auto_risks:
-        return [_autonomy_auto_graduation_reason(auto_risks)]
+        return [_autonomy_auto_graduation_reason(auto_risks, name)]
     if payload.autonomy.onboarding or (view and not view["autonomy"]["onboarding"]):
         return []
     if not levels_enabled():
         return ["Turn on per-agent independence levels before ending supervision."]
     if view is None:
-        return ["A new specialist must start under supervision."]
+        return ["A new agent must start under supervision."]
     try:
         verdict = graduation_status(name, _world().list_approvals(limit=5000))
     except Exception:
-        return ["The specialist's approval record is unavailable. Keep supervision on and retry."]
+        return ["The approval record for this " + _kind_word(name) + " is unavailable. Keep supervision on and try again."]
     if not verdict.graduated:
-        return ["This specialist has not yet earned graduation from its approval record."]
+        return [_this_one(name) + " has not yet earned graduation from its approval record."]
     return []
 
 
@@ -14005,20 +14068,22 @@ async def save_agent_override(request: Request, name: str, payload: AgentOverrid
         if errors:
             raise ValueError("; ".join(errors))
         if payload.autonomy is not None and payload.expected_generation is None:
-            raise OverrideConflict("Reload the specialist before changing independence settings.")
+            raise OverrideConflict("Reload the " + _kind_word(name) + " before changing independence settings.")
         previous = read_override(name)
         if payload.autonomy is None and "autonomy" in previous:
-            raise OverrideConflict("This specialist has independence settings. Reload the editor before saving.")
+            raise OverrideConflict(_this_one(name) + " has independence settings. Reload the editor before saving.")
+        before_view = resolved_view(name)
         if payload.autonomy is not None:
-            current = resolved_view(name)
-            before = (current or {}).get("autonomy", {}).get("pack", {})
+            before = (before_view or {}).get("autonomy", {}).get("pack", {})
             after = payload.autonomy.model_dump()
             if before != after:
                 await run_in_threadpool(
                     _record_agent_autonomy_intent, request, name, before, after)
-        return write_override(name, payload.model_dump(exclude_unset=True, exclude_none=True,
+        view = write_override(name, payload.model_dump(exclude_unset=True, exclude_none=True,
                                                        exclude={"expected_generation"}),
                               expected_generation=payload.expected_generation, return_view=True)
+        _record_agent_change(request, name, before_view, view)
+        return view
     except OverrideConflict as e:
         raise HTTPException(status_code=409, detail=str(e)) from e
     except ValueError as e:
@@ -14043,25 +14108,25 @@ async def graduate_agent(request: Request, name: str, payload: AgentGraduationIn
 
     view = await run_in_threadpool(resolved_view, name)
     if view is None:
-        raise HTTPException(status_code=404, detail="No such specialist.")
+        raise HTTPException(status_code=404, detail="No such agent or specialist.")
     if view["generation"] != payload.expected_generation:
-        raise HTTPException(status_code=409, detail="This specialist changed. Refresh before granting independence.")
+        raise HTTPException(status_code=409, detail=_this_one(name) + " changed. Refresh before granting independence.")
     if not levels_enabled():
         raise HTTPException(status_code=409, detail="Turn on per-agent independence levels first.")
     if view["autonomy"]["config_override"]:
-        raise HTTPException(status_code=409, detail="A server-configured policy controls this specialist.")
+        raise HTTPException(status_code=409, detail="A server-configured policy controls this " + _kind_word(name) + ".")
     if not view["autonomy"]["onboarding"]:
-        raise HTTPException(status_code=409, detail="This specialist is already out of supervision.")
+        raise HTTPException(status_code=409, detail=_this_one(name) + " is already out of supervision.")
     auto_risks = _autonomy_auto_risks(view["autonomy"]["pack"])
     if auto_risks:
-        raise HTTPException(status_code=409, detail=_autonomy_auto_graduation_reason(auto_risks))
+        raise HTTPException(status_code=409, detail=_autonomy_auto_graduation_reason(auto_risks, name))
     try:
         verdict = await run_in_threadpool(
             lambda: graduation_status(name, _world().list_approvals(limit=5000)))
     except Exception as exc:
         raise HTTPException(status_code=503, detail="The approval record could not be checked.") from exc
     if not verdict.graduated:
-        raise HTTPException(status_code=409, detail="This specialist has not earned graduation yet.")
+        raise HTTPException(status_code=409, detail=_this_one(name) + " has not earned graduation yet.")
     patch = await run_in_threadpool(read_override, name)
     after = dict(view["autonomy"]["pack"])
     after["onboarding"] = False
@@ -14094,10 +14159,10 @@ async def delete_agent_override(request: Request, name: str, expected_generation
     try:
         current = read_override(name)
         if expected_generation is None:
-            raise OverrideConflict("Reload the specialist before resetting its settings.")
+            raise OverrideConflict("Reload the " + _kind_word(name) + " before resetting its settings.")
         view_before = resolved_view(name) or rejected_override_view(name)
         if view_before and view_before["generation"] != expected_generation:
-            raise OverrideConflict("This specialist changed. Reload its latest version before resetting it.")
+            raise OverrideConflict(_this_one(name) + " changed. Reload its latest version before resetting it.")
         if current or (view_before and "is_builtin" in view_before):
             await run_in_threadpool(
                 _record_agent_reset_intent, request, name,
@@ -14108,11 +14173,24 @@ async def delete_agent_override(request: Request, name: str, expected_generation
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e)) from e
     view = resolved_view(name)
+    if removed:
+        from . import agent_changelog
+
+        agent_changelog.record(name, ["Reset to the built-in version" if view else "Removed this agent"],
+                               by=caller_principal(request) or "")
     if view is None:
         if removed:
             return {"removed": True, "agent": None}
         raise HTTPException(status_code=404, detail=f"no such agent: {name!r}")
     return {"removed": removed, "agent": view}
+
+
+def _record_agent_change(request: Request, name: str, before: dict | None, after: dict | None) -> None:
+    """One plain-words changelog entry per saved agent change (who, when, what)."""
+    from . import agent_changelog
+
+    agent_changelog.record(name, agent_changelog.describe_agent_change(before, after),
+                           by=caller_principal(request) or "")
 
 
 # ---- JD hiring: map a job description onto the roster / draft a new pack ----
@@ -14334,11 +14412,18 @@ async def save_role_override(role: str, payload: RoleOverrideIn, request: Reques
     _require_role_editing(request)
     from maverick.role_edit import resolved_role, write_role_override
 
+    from . import agent_changelog
+
+    before = resolved_role(role)
     try:
         write_role_override(role, payload.model_dump(exclude_unset=True))
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e)) from e
-    return resolved_role(role)
+    after = resolved_role(role)
+    agent_changelog.record(agent_changelog.EVERY_AGENT,
+                           agent_changelog.describe_role_change(role, before, after),
+                           by=caller_principal(request) or "")
+    return after
 
 
 @router.delete("/roles/{role}/override")
@@ -14347,10 +14432,17 @@ async def delete_role_override(role: str, request: Request) -> dict:
     _require_role_editing(request)
     from maverick.role_edit import remove_role_override, resolved_role
 
+    from . import agent_changelog
+
+    before = resolved_role(role)
     removed = remove_role_override(role)
     view = resolved_role(role)
     if view is None:
         raise HTTPException(status_code=404, detail=f"no such role: {role!r}")
+    if removed:
+        agent_changelog.record(agent_changelog.EVERY_AGENT,
+                               agent_changelog.describe_role_change(role, before, view),
+                               by=caller_principal(request) or "")
     return {"removed": removed, "role": view}
 
 
@@ -14981,13 +15073,16 @@ def list_approvals(request: Request, response: Response) -> dict:
     require_permission(request, "operate")
     response.headers["Cache-Control"] = "private, no-store"
     w = _world()
+    from .approval_private_cards import private_cards
     from .content_access import can_read_approval
     from .flow_approval_inbox import pending_for_request
 
     rows = list(w.pending_approvals())
     readable = [a for a in rows if can_read_approval(request, a, w)]
     flow_approvals = pending_for_request(request)
+    private = private_cards(w, [a for a in rows if a not in readable], _supervisor(request) or "")
     return {"approvals": [_approval_api_row(a) for a in readable],
+            "private_requests": private,
             "flow_approvals": flow_approvals["items"],
             "flow_approval_coverage": flow_approvals["coverage"],
             "private_count": len(rows) - len(readable), "content_access_url": "/content-access"}
@@ -15001,11 +15096,15 @@ def approvals_waiting_count(request: Request, response: Response) -> dict:
     require_permission(request, "operate")
     response.headers["Cache-Control"] = "private, no-store"
     w = _world()
+    from .approval_private_cards import waiting_in_chat
     from .content_access import can_read_approval
     from .flow_approval_inbox import pending_for_request
 
-    readable = sum(1 for a in w.pending_approvals() if can_read_approval(request, a, w))
-    return {"waiting": readable + len(pending_for_request(request)["items"])}
+    pending = list(w.pending_approvals())
+    opened = [a for a in pending if can_read_approval(request, a, w)]
+    # A private request still waits on someone the rules let decide it in chat.
+    private = waiting_in_chat([a for a in pending if a not in opened], _supervisor(request) or "")
+    return {"waiting": len(opened) + private + len(pending_for_request(request)["items"])}
 
 
 def _approval_api_row(approval) -> dict:
@@ -15169,6 +15268,7 @@ def _decide_approval(request: Request, approval_id: int, payload: dict, status: 
             _require_current_decision_card(world, approval_id, request)
         else:
             require_current_decision_card(world, approval_id, binding)
+        _require_separate_approver(world, approval_id, who)
         _require_acknowledgement(world, approval_id, payload, who, channel="dashboard")
     reason = " ".join(str(payload.get("reason") or "").split())[:2000] if not approving else ""
     before = world.get_approval(approval_id) if reason else None
@@ -15409,19 +15509,22 @@ def approval_state(request: Request, approval_id: int) -> dict:
     require_permission(request, "operate")
     from .content_access import require_approval_content
     require_approval_content(request, approval_id)
-    st = _world().approval_state(approval_id)
-    if st is None:
+    world = _world()
+    st = world.approval_state(approval_id)
+    approval = world.get_approval(approval_id)
+    if st is None or approval is None:
         raise HTTPException(status_code=404, detail="no such approval")
-    from maverick.safety.dual_control import allow_self_approval
+    from .approval_decisions import own_request_note
 
     who = _supervisor(request)
     own = bool(st.get("requested_by")) and st.get("requested_by") == who
+    # What is actually enforced: the person who asked may approve unless
+    # someone else must (the separate-approver rule for a high-risk request,
+    # or two-person approval without self-approval); the note says why.
+    note = own_request_note(world, approval, who) if own else ""
     return {**st, "your_approval_recorded": who in st.get("approvers", []),
-            # What is actually enforced: one approver may be the person who
-            # asked; under two-person approval their vote counts only when
-            # [security] allow_self_approval is on.
-            "requested_by_you": own,
-            "self_approval_counts": int(st.get("approvals_required") or 1) <= 1 or allow_self_approval()}
+            "requested_by_you": own, "self_approval_counts": not note,
+            "own_request_note": note}
 
 
 @router.post("/approvals/{approval_id}/claim")
@@ -15688,7 +15791,7 @@ def run_fleet_agent(
             raise HTTPException(
                 status_code=400,
                 detail=(
-                    "This specialist isn't available right now: its department "
+                    _this_one(agent.domain) + " isn't available right now: its department "
                     "may be switched off, or it was removed. Switch the "
                     "department back on or deploy it again, then try again."
                 ),
@@ -15698,8 +15801,8 @@ def run_fleet_agent(
         if readiness["state"] != "action_ready":
             raise HTTPException(
                 status_code=409,
-                detail=("This specialist needs setup before it can start. "
-                        "Open Specialists to review its required actions, then try again."),
+                detail=(_this_one(agent.domain) + " needs setup before it can start. "
+                        "Open Agent Factory to review its required actions, then try again."),
             )
         cap = domain_capability(prof, cap, agent_principal)
     max_dollars = requested_goal_dollars(payload.max_dollars)

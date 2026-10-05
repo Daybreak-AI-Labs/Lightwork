@@ -3,9 +3,9 @@
     lightwork-workforce-ops.js; download and setup check appear for
     administrators only (the routes check again). -#}
 <div id="wo-root" class="wo">
-  <div class="section-head"><h2 id="wo-inv-h">What each specialist can do, and what stops it</h2></div>
+  <div class="section-head"><h2 id="wo-inv-h">What each agent and specialist can do, and what stops it</h2></div>
   <section class="panel" aria-labelledby="wo-inv-h">
-    <p class="muted">For each specialist: whether it can reach tools that change things, whether a person must sign
+    <p class="muted">For each agent and specialist: whether it can reach tools that change things, whether a person must sign
       off its work, and the requests it refuses. Useful for an audit or a risk review.</p>
     <div class="wo-row">
       <label for="wo-inv-suite">Department</label>
@@ -15,11 +15,11 @@
     <div id="wo-inv" role="status" aria-live="polite">Loading…</div>
   </section>
 
-  <div class="section-head wo-admin" hidden><h2 id="wo-lint-h">Check every specialist's setup</h2></div>
+  <div class="section-head wo-admin" hidden><h2 id="wo-lint-h">Check every agent's and specialist's setup</h2></div>
   <section class="panel wo-admin" aria-labelledby="wo-lint-h" hidden>
-    <p class="muted">Looks through every specialist for setup problems that weaken its safety limits, and for gaps
+    <p class="muted">Looks through every agent and specialist for setup problems that weaken its safety limits, and for gaps
       worth improving. Nothing is changed.</p>
-    <button type="button" class="btn" id="wo-lint-run">Check specialist setups</button>
+    <button type="button" class="btn" id="wo-lint-run">Check setups</button>
     <p class="muted" id="wo-lint-status" role="status" aria-live="polite"></p>
     <div id="wo-lint-out"></div>
   </section>
@@ -30,14 +30,14 @@
     <div id="wo-suite" role="status" aria-live="polite">Loading…</div>
   </section>
 
-  <div class="section-head"><h2 id="wo-my-tests-h">Check your specialist's answers</h2></div>
+  <div class="section-head"><h2 id="wo-my-tests-h">Check answers from your agents and specialists</h2></div>
   <section class="panel" aria-labelledby="wo-my-tests-h" id="wo-my-tests">
-    <p class="muted">Write examples from your business, then check the specialist's current instructions against them.
+    <p class="muted">Write examples from your business, then check the current instructions of an agent or specialist against them.
       These are answer checks only: no actions or outside systems run, and no company knowledge is retrieved.
       Use fictional examples and review each answer yourself.</p>
     <div class="wo-row">
-      <label for="wo-test-specialist">Specialist</label>
-      <select id="wo-test-specialist" class="select"><option value="">Choose a specialist</option></select>
+      <label for="wo-test-specialist">Agent or specialist</label>
+      <select id="wo-test-specialist" class="select"><option value="">Choose an agent or specialist</option></select>
     </div>
     <p id="wo-test-status" role="status" aria-live="polite"></p>
     <div id="wo-tests-list"></div>

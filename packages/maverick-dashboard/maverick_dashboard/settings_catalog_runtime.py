@@ -501,8 +501,9 @@ def _safety(S, C) -> tuple:
                    ("auto-approve", "Allow them all")),
           weaker=True, order=("auto-deny", "dashboard", "ask", "", "auto-approve"),
           env=("MAVERICK_CONSENT_MODE",),
-          aliases="approval approvals approve risky irreversible undo undone permanent",
-          warning="Actions that can't be undone will go ahead with less oversight."),
+          aliases="approval approvals approve risky irreversible undo undone permanent threshold",
+          warning="Actions that can't be undone will go ahead with less oversight.",
+          preview="approval_checks"),
         S("safety", "constitution", "Your own phrases to block",
           "Requests and answers containing any of these words or phrases are treated as a "
           "threat of the level you choose. Separate phrases with commas.", "rules", "Safety",
@@ -805,13 +806,13 @@ def _tools(S, C) -> tuple:
           "Keep the long list of business-system connectors out of each request until an "
           "agent searches for one.", "toggle", "Performance", True, "maverick.agent",
           subgroup="Reusing tool results", env=("MAVERICK_DEFERRED_TOOLS",)),
-        S("capabilities", "web_search", "Let specialists search the web",
-          "Allow specialists whose work calls for current web information to use Web search. "
+        S("capabilities", "web_search", "Let agents and specialists search the web",
+          "Allow agents and specialists whose work calls for current web information to use Web search. "
           "Lightwork uses a connected search service when available, with a public-search "
           "fallback; whether a search succeeds is checked when it runs.",
           "toggle", "Integrations", False, "maverick.agent",
           subgroup="Web research", restart=True, weaker=True,
-          warning="Specialists will be allowed to send search terms to the web search service."),
+          warning="Agents and specialists will be allowed to send search terms to the web search service."),
         S("limits", "file_write_quota_mb", "Most a task may write to files",
           "The most data one task may write to the work area. Leave empty for no limit.",
           "number", "Spending & limits", None, "maverick.file_quota", minimum=1,
@@ -874,8 +875,8 @@ def _memory(S) -> tuple:
                    ("pgvector", "Your company database")),
           env=("MAVERICK_VECTOR_STORE",), weaker="change",
           warning="Summaries of past tasks will be stored in a different place."),
-        S("session_tree", "max_depth", "Longest chain of copied runs",
-          "How many times a run may be copied from a copy.", "number", group, 10,
+        S("session_tree", "max_depth", "Longest chain of copied tasks",
+          "How many times a task may be copied from a copy.", "number", group, 10,
           "maverick.config", subgroup="Recall of past work", minimum=1, maximum=100,
           integer=True, unit="copies"),
         S("skills", "embed_threshold", "How closely a skill must match by meaning",

@@ -4,13 +4,14 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const {JSDOM} = require('jsdom');
+const {shell} = require('./_shell');
 const script = fs.readFileSync(path.resolve(__dirname, '../../maverick_dashboard/static/lightwork-deliverable-sharing.js'),'utf8');
 const settle=async()=>{for(let i=0;i<15;i++)await new Promise(resolve=>setImmediate(resolve));};
 function response(body,status=200){return {ok:status===200,status,redirected:false,json:async()=>body};}
 function page(handler,{canOperate=true,done=true}={}){
   const panel='<section id="answer-panel" data-status="'+(done?'done':'running')+'">'+(done?'<textarea id="saved-answer-source">Saved result</textarea>':'')+'</section>';
   const dom=new JSDOM(panel+'<div class="goal-share" data-goal="4" data-can-operate="'+(canOperate?'1':'0')+'"><select id="share-scope"><option value="result" selected>Saved answer</option><option value="conversation">Full conversation</option></select><button id="share-create">Review share link</button><input id="share-url"><button id="share-copy" hidden>Copy link</button><p id="share-msg"></p><ul id="share-list"></ul></div>',{url:'https://lightwork.invalid/chat/goal/4',runScripts:'outside-only',pretendToBeVisual:true});
-  dom.window.fetch=handler;dom.window.mvErrorText=()=> 'Unable to manage link';dom.window.mvRenderError=(node,error)=>{node.textContent=error.message;};dom.window.mvConfirm=async()=>true;dom.window.eval(script);
+  shell(dom.window);dom.window.fetch=handler;dom.window.mvErrorText=()=> 'Unable to manage link';dom.window.mvRenderError=(node,error)=>{node.textContent=error.message;};dom.window.mvConfirm=async()=>true;dom.window.eval(script);
   return {dom,doc:dom.window.document,stop(){dom.window.dispatchEvent(new dom.window.Event('pagehide'));dom.window.close();}};
 }
 const preview={audience:'Anyone with the link',scope:'Only selected saved result',source:{title:'Private title',result:'Private result',sha256:'digest',artifacts:[]},allowed_lifetimes:[3600,86400,604800]};

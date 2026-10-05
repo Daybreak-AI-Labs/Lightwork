@@ -2,6 +2,7 @@
 {% block title %}Knowledge · Lightwork{% endblock %}
 {% block head_extra %}<link rel="stylesheet" href="/static/lightwork-knowledge-access.css">{% endblock %}
 {% block content %}
+  {% from "_form_field.html" import error_summary %}
 <section class="ka-shell" id="knowledge-access"
       data-context="{{ knowledge_context }}"
       data-tenant="{{ knowledge_tenant }}"
@@ -20,6 +21,7 @@
       <span>Being allowed to search, use or download a source does not mean it may be used to train AI models.</span>
     </div>
   </header>
+  {% if knowledge_tabs %}{% from "_tabs.html" import tab_bar, panel_attrs %}{{ tab_bar('Knowledge views', knowledge_tabs, '') }}<div {{ panel_attrs('') }}>{% endif %}
 
   <p class="ka-status" id="ka-status" role="status" aria-live="polite" tabindex="-1">
     Choose what you'll use the information for, then search.
@@ -89,7 +91,8 @@
         <h2 id="ka-request-heading">Request a correction or removal</h2>
         <span class="muted">For one source</span>
       </div>
-      <form id="ka-request-form" class="ka-form" aria-labelledby="ka-request-heading" autocomplete="off">
+      <form id="ka-request-form" class="ka-form" aria-labelledby="ka-request-heading" autocomplete="off" data-mv-validate>
+        {{ error_summary('ka-request-errors') }}
         <p class="ka-selected" id="ka-request-source">Open a source with View details, then come back here.</p>
         <label class="ka-field" for="ka-request-type">
           Request
@@ -101,14 +104,17 @@
         </label>
         <label class="ka-field ka-field--wide" for="ka-request-reason">
           Why this is needed
-          <textarea class="textarea" id="ka-request-reason" name="reason" rows="3" maxlength="2000" required></textarea>
+          <textarea class="textarea" id="ka-request-reason" name="reason" rows="3" maxlength="2000" required
+                    data-error-required="Say why this source needs a change. For example: the price list is out of date."></textarea>
         </label>
         <label class="ka-field ka-field--wide" id="ka-correction-field" for="ka-proposed-correction">
           Correct information
-          <textarea class="textarea" id="ka-proposed-correction" name="proposed_correction" rows="4" maxlength="8192"></textarea>
+          <textarea class="textarea" id="ka-proposed-correction" name="proposed_correction" rows="4" maxlength="8192"
+                    data-error-required="Enter the correct information that should replace what the source says."></textarea>
         </label>
         <label class="ka-check ka-field--wide">
-          <input type="checkbox" name="confirm" required>
+          <input type="checkbox" id="ka-request-confirm" name="confirm" required
+                 data-error-required="Tick the box to confirm you checked this source.">
           <span>I checked this source. An independent administrator will review its dependencies and decide any change.</span>
         </label>
         <div class="ka-actions ka-field--wide">
@@ -163,6 +169,7 @@
   </section>
 
   <noscript><p class="panel">JavaScript is required to revalidate and display governed knowledge sources.</p></noscript>
+  {% if knowledge_tabs %}</div>{% endif %}
 </section>
 {% endblock %}
 {% block scripts_extra %}<script src="/static/lightwork-access-state.js" defer></script><script src="/static/lightwork-knowledge-access.js" defer></script><script src="/static/lightwork-knowledge-library.js" defer></script><script src="/static/lightwork-source-analysis.js" defer></script>{% endblock %}

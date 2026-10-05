@@ -4,6 +4,7 @@ const assert=require("node:assert/strict");
 const fs=require("node:fs"),path=require("node:path");
 const {webcrypto}=require("node:crypto");
 const {JSDOM}=require("jsdom");
+const {shell: loadShell} = require('./_shell');
 const root=path.resolve(__dirname,"../../maverick_dashboard");
 const read=name=>fs.readFileSync(path.join(root,name),"utf8");
 const flush=async()=>{for(let i=0;i<30;i++){await new Promise(setImmediate);await new Promise(r=>setTimeout(r,2));}};
@@ -32,6 +33,7 @@ async function page(options={}){
     if(options.conflict&&method!=="GET")return reply(409,{detail:{code:"authority_stale",message:"stale publication binding"}});
     return reply(201,{});
   };
+  loadShell(w);
   w.eval(read("static/lightwork-consent-workbench.js"));
   w.eval(read("static/lightwork-consent-global-opt-out.js"));
   await flush();
@@ -134,6 +136,7 @@ async function statusPage(status,moduleEnabled="true"){
   d.getElementById("goo-table").innerHTML='<p class="muted">Loading…</p>';
   w.mvErrorText=(failure,action)=>"Could not "+action+". Try again later.";
   w.fetch=async url=>{calls.push(url);return status();};
+  loadShell(w);
   w.eval(read("static/lightwork-consent-workbench.js"));
   w.eval(read("static/lightwork-consent-global-opt-out.js"));
   await flush();

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from contextlib import nullcontext
 from pathlib import Path
 
@@ -18,18 +19,24 @@ from .paths import current_tenant_id_strict, data_dir
 DEFAULTS = {
     "preferred_name": "", "tone": "", "language": "en", "interface_language": "", "verbosity": "balanced",
     "output_style": "", "custom_style_name": "", "custom_style": "",
-    "theme": "dark", "font": "default", "density": "comfortable", "text_size": "standard",
+    "theme": "dark", "font": "default", "density": "comfortable", "text_size": "standard", "glass": "off",
     "start_page": "/chat", "favorites": [], "today_cards": ["tasks", "decisions", "recent", "schedules", "templates"],
     "today_days": "7", "template_favorites": [],
     "notification_preferences": {},
     "conversation_mode": "queue", "conversation_detail": "balanced",
+    # Navigation style ("" follows the installation's [dashboard] navigation;
+    # used only while [dashboard] navigation_personal lets people choose) and
+    # the person's own order of sidebar areas ([] = their role's preset).
+    "navigation": "", "navigation_areas": [],
 }
-PERSONAL_ONLY = frozenset({"preferred_name", "favorites", "today_cards", "today_days", "template_favorites", "start_page", "notification_preferences"})
+PERSONAL_ONLY = frozenset({"preferred_name", "favorites", "today_cards", "today_days", "template_favorites", "start_page", "notification_preferences",
+                           "navigation", "navigation_areas"})
 CHOICES = {"interface_language": {"", "en", "fr", "de", "ja", "zh", "ar"},
            "conversation_mode": {"queue", "guidance", "independent"},
            "conversation_detail": {"brief", "balanced", "detailed"}, "verbosity": {"brief", "balanced", "detailed"},
            "font": {"default", "dyslexic"}, "density": {"comfortable", "compact"},
-           "text_size": {"standard", "large", "larger"}, "today_days": {"1", "7", "30"}}
+           "text_size": {"standard", "large", "larger"}, "glass": {"off", "on"}, "today_days": {"1", "7", "30"},
+           "navigation": {"", "classic", "areas"}}
 
 
 class PreferenceConflict(ValueError):
@@ -83,7 +90,7 @@ def state(principal: str, *, thread: int | None = None) -> dict:
     values = {**DEFAULTS}
     sources = dict.fromkeys(DEFAULTS, "product default")
     cfg = config.load_config()
-    for key in ("theme", "font", "density", "text_size"):
+    for key in ("theme", "font", "density", "text_size", "glass"):
         inherited = cfg.get("dashboard", {}).get(key)
         if inherited is not None:
             values[key], sources[key] = _validate(key, inherited), "installation settings"
@@ -149,7 +156,7 @@ def _validate(key: str, value):
         raise ValueError("Choose a supported writing tone.")
     elif key == "output_style" and value not in {"", "custom", *BUILTIN_STYLES}:
         raise ValueError("Choose an available output style.")
-    elif key in {"favorites", "today_cards", "template_favorites"}:
+    elif key in {"favorites", "today_cards", "template_favorites", "navigation_areas"}:
         if not isinstance(value, list) or len(value) > 30 or not all(isinstance(v, str) and len(v) < 180 for v in value):
             raise ValueError("Choose up to 30 named destinations.")
         return list(dict.fromkeys(value))
@@ -210,6 +217,63 @@ def operation_confirmed(principal: str, *, scope: str, changes: dict, expected_r
     return previous.get("id") == operation_id and previous.get("digest") == digest
 
 
+# Recent pages: the last pages one person opened in this workspace, newest
+# first, for the sidebar's "Recent pages" list. Kept in their own record beside
+# the person's preferences so a page view never changes the preference
+# revision (another tab's draft would otherwise turn into a conflict). Only
+# plain page addresses are kept; callers filter them to the pages the person
+# may open before showing any.
+RECENT_KEEP = 12
+_PAGE_ADDRESS = re.compile(r"/(?:[A-Za-z0-9._~-]+(?:/[A-Za-z0-9._~-]+)*)?")
+
+
+def _recent_path(principal: str) -> Path:
+    return data_dir("experience-preferences", _principal_key(principal) + "-recent.enc")
+
+
+def _stored_recent(path: Path) -> list[str]:
+    try:
+        pages = _read(path)["values"].get("pages")
+    except (OSError, ValueError, TypeError):  # damaged or unreadable: nothing to offer
+        return []
+    if not isinstance(pages, list):
+        return []
+    return [page for page in pages if isinstance(page, str) and len(page) < 180
+            and _PAGE_ADDRESS.fullmatch(page)][:RECENT_KEEP]
+
+
+def recent_pages(principal: str) -> list[str]:
+    """The person's recently opened page addresses, newest first."""
+    if not enabled():
+        return []
+    return _stored_recent(_recent_path(principal))
+
+
+def record_visit(principal: str, page: str) -> list[str]:
+    """Put ``page`` first in the person's recent pages; returns the new list."""
+    if not enabled():
+        raise ValueError("Personal preferences are turned off by your administrator.")
+    if not isinstance(page, str) or len(page) >= 180 or not _PAGE_ADDRESS.fullmatch(page):
+        raise ValueError("Only a page address can be remembered.")
+    path = _recent_path(principal)
+    ensure_private_directory(path.parent)
+    with cross_process_lock(path, strict=True):
+        current = _stored_recent(path)
+        if current[:1] == [page]:
+            return current
+        pages = [page, *(item for item in current if item != page)][:RECENT_KEEP]
+        atomic_write_bytes(path, seal(json.dumps({"revision": 0, "values": {"pages": pages}}).encode()), mode=0o600)
+        return pages
+
+
+def clear_recent(principal: str) -> None:
+    """Forget the person's recent pages."""
+    path = _recent_path(principal)
+    ensure_private_directory(path.parent)
+    with cross_process_lock(path, strict=True):
+        path.unlink(missing_ok=True)
+
+
 def erase_personal(principal: str) -> int:
     """Delete only the named principal's encrypted account/conversation records."""
     directory = data_dir("experience-preferences")
@@ -218,7 +282,8 @@ def erase_personal(principal: str) -> int:
     ensure_private_directory(lock.parent)
     from .authority_effects import authority_effect_fence
     with authority_effect_fence(), cross_process_lock(config.dashboard_overrides_path(), strict=True), cross_process_lock(lock, strict=True):
-        paths = [directory / (prefix + ".enc"), *directory.glob(prefix + "-thread-*.enc")]
+        paths = [directory / (prefix + ".enc"), directory / (prefix + "-recent.enc"),
+                 *directory.glob(prefix + "-thread-*.enc")]
         count = 0
         for path in paths:
             if path.is_file():

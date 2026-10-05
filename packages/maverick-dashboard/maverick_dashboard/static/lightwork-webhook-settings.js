@@ -19,7 +19,7 @@
       value.can_remove === (value.storage_writable && value.app_copy_present) &&
       typeof value.expected_generation === 'string' && value.expected_generation.startsWith('MVKAR1:') && value.expected_generation.length <= 4096;
   }
-  function say(text, focus) { get('state').textContent = text; if (focus) get('state').focus(); }
+  function say(text, focus) { window.mvStatus(get('state'), text); if (focus) get('state').focus(); }
   function controls() {
     var remove = get('action').value === 'remove';
     var permitted = current && (remove ? current.can_remove : current.can_set);
@@ -63,10 +63,10 @@
     say('Your administrator access changed. Sign in with an installation administrator account and refresh status.', true);
   }
   async function read() {
-    var response = await fetch('/settings/webhooks', { credentials: 'same-origin', cache: 'no-store' });
-    if (response.status === 401 || response.status === 403) { denied(); return false; }
-    if (!response.ok) throw new Error('status unavailable');
-    return display(await response.json()) ? 'context' : 'ok';
+    var lost = false, data;
+    try { data = await window.mvFetchJSON('/settings/webhooks', {cache: 'no-store', onAccess: function () { lost = true; denied(); }}, 'check the webhook secret'); }
+    catch (error) { if (lost) return false; throw error; }
+    return display(data) ? 'context' : 'ok';
   }
   async function refresh(focus) {
     if (busy) return;

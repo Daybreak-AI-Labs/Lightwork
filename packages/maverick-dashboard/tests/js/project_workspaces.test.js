@@ -4,8 +4,12 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const {JSDOM} = require('jsdom');
+const {shell} = require('./_shell');
 const script = fs.readFileSync(path.resolve(__dirname, '../../maverick_dashboard/static/lightwork-project-workspaces.js'), 'utf8');
-const template = fs.readFileSync(path.resolve(__dirname, '../../maverick_dashboard/templates/project_workspaces.html'), 'utf8');
+const templates = path.resolve(__dirname, '../../maverick_dashboard/templates');
+// The page includes the workspace controls it shares with Projects.
+const template = fs.readFileSync(path.join(templates, 'project_workspaces.html'), 'utf8')
+  .replace('{% include "_project_workspace_body.html" %}', () => fs.readFileSync(path.join(templates, '_project_workspace_body.html'), 'utf8'));
 const settle = async () => { for (let i = 0; i < 15; i++) await new Promise(resolve => setImmediate(resolve)); };
 
 function page() {
@@ -26,6 +30,7 @@ function page() {
     if (url.endsWith('/receipt')) return {ok:true,status:200,json:async () => ({confirmed:receipt})};
     return {ok:true,status:200,json:async () => structuredClone(state)};
   };
+  shell(dom.window);
   dom.window.eval(script);
   const doc = dom.window.document;
   function edit(value) { const input = doc.getElementById('pw-outcome-input'); input.value = value; input.dispatchEvent(new dom.window.Event('input', {bubbles:true})); }
@@ -89,4 +94,20 @@ test('changed authenticated context hides private projection and clears editable
   const p = page(); await settle(); p.edit('Private old-account draft'); p.state.context='another-account-context'; p.doc.getElementById('pw-refresh').click(); await settle();
   assert.equal(p.doc.getElementById('pw-workspace').hidden, true); assert.equal(p.doc.getElementById('pw-outcome-input').value, '');
   assert.match(p.doc.getElementById('pw-status').textContent, /account or workspace changed/); p.dom.window.close();
+});
+
+test('the project list opens each plan where the page says plans live', async () => {
+  const body = fs.readFileSync(path.join(templates, '_project_workspace_body.html'), 'utf8').replace(/\{#[\s\S]*?#\}/g, '');
+  const listing = {context:'current-context', projects:[{project_id:7, name:'Close', outcome:'', owned:true}]};
+  for (const [planHref, expected] of [['/projects/{id}?tab=plan', '/projects/7?tab=plan'], ['', '/project-workspaces/7']]) {
+    const attribute = planHref ? ` data-plan-href="${planHref}"` : '';
+    const dom = new JSDOM(`<div id="pw-root" data-project="" data-context="current-context"${attribute}><h2 id="pw-title">Plans</h2>${body}</div>`,
+      {url:'https://lightwork.invalid/projects', runScripts:'outside-only'});
+    dom.window.mvDraftRecovery = {create() { return {clear:async () => true, dispose() {}}; }};
+    dom.window.fetch = async () => ({ok:true, status:200, json:async () => structuredClone(listing)});
+    shell(dom.window);
+    dom.window.eval(script);
+    await settle();
+    assert.equal(dom.window.document.querySelector('#pw-list a').getAttribute('href'), expected);
+  }
 });

@@ -288,7 +288,9 @@ class Setting:
     # the fingerprint out from what is installed here (settings_fingerprints).
     fingerprint_of: str = ""
     # A preview the page shows before saving (``governance_level``: the
-    # settings a governance level changes; settings_governance_level).
+    # settings a governance level changes; settings_governance_level.
+    # ``approval_checks``: what the recorded approval checks would have
+    # needed at the chosen level; approval_threshold_preview).
     preview: str = ""
 
     @property
@@ -516,15 +518,16 @@ SETTINGS: tuple[Setting, ...] = (
       env=("MAVERICK_SECURE_DEFAULT",),
       warning="Record signing, encryption and other protections that rely on this will turn off."),
     S("security", "approvals_required", "People needed to approve risky actions",
-      "How many different people must approve a high-risk action. One means a single approver, "
-      "who may be the person who asked. With two or more, the person who asked doesn't count "
-      "unless people may approve their own requests.",
+      "How many different people must approve a high-risk action. One means a single approver; "
+      "whether that may be the person who asked is set by Who approves a risky action someone "
+      "asked for. With two or more, the person who asked doesn't count unless people may approve "
+      "their own requests.",
       "number", "Security", 1, "maverick.safety.dual_control", minimum=1, maximum=5, integer=True,
       unit="people", weaker="lower", env=("MAVERICK_APPROVALS_REQUIRED",),
       warning="Fewer people will need to approve risky actions."),
     S("security", "allow_self_approval", "Let people approve their own requests",
       "When two or more people must approve, let the person who asked count as one of them. "
-      "With a single approver, the person who asked can always approve their own request.",
+      "With a single approver, Who approves a risky action someone asked for decides instead.",
       "toggle", "Security", False, "maverick.safety.dual_control", weaker=True,
       env=("MAVERICK_ALLOW_SELF_APPROVAL",),
       warning="The person who asked will count as one of the approvers."),
@@ -574,13 +577,13 @@ SETTINGS: tuple[Setting, ...] = (
 
     # --------------------------------------------------------------- AI models
     S("routing", "cost_aware", "Pick the cheapest capable model",
-      "Use the least expensive model that can do each job well.",
+      "Use the least expensive model that can do each task well.",
       "toggle", "AI models", False, "maverick.cost.router"),
     S("routing", "verify_ensemble", "Double-check with a second AI service",
       "Confirm important answers with models from more than one provider.",
       "toggle", "AI models", False, "maverick.verifier"),
     S("routing", "energy_aware", "Prefer lower-energy models",
-      "Favour models that use less energy when they can do the job.",
+      "Favour models that use less energy when they can do the task.",
       "toggle", "AI models", False, "maverick.energy_aware_router"),
     S("routing", "allowed_providers", "AI services agents may use for these choices",
       "Limit automatic model choices to these AI services. Leave empty to allow any service you have connected.",
@@ -649,7 +652,7 @@ SETTINGS: tuple[Setting, ...] = (
       "Show a microphone button in Chat that turns spoken requests into text.",
       "toggle", "AI models", True, "maverick_dashboard.api", env=("MAVERICK_VOICE_COMMANDS",)),
     S("domains", "discipline", "Department working rules",
-      "Give each department's specialists their department's working rules.",
+      "Give each department's agents and specialists their department's working rules.",
       "toggle", "AI models", True, "maverick.config"),
 
     # ------------------------------------------------------- Spending & limits
@@ -688,6 +691,19 @@ SETTINGS: tuple[Setting, ...] = (
       "The most text, in tokens, one person's tasks may use in a day. Zero means no limit.",
       "number", "Spending & limits", 0, "maverick.quotas", minimum=0, maximum=10000000000,
       integer=True, unit="tokens per day", env=("MAVERICK_QUOTA_MAX_TOKENS_PER_DAY",)),
+    S("spending_limits", "alert_at", "Spending limit alerts",
+      "Percentages of a workspace or per-person spending limit at which administrators, and the "
+      "person for their own limit, get an in-app alert. Each one alerts once per day or month. "
+      "Leave the list empty for no alerts; the limits still stop paid work at 100 percent.",
+      "list", "Spending & limits", [50, 75, 100], "maverick.spending_alerts",
+      max_items=10, max_length=4, item_label="Percent", item_hint="75",
+      item_error="a whole number from 1 to 100"),
+    S("spending_limits", "typical_cost_min_runs", "Past tasks needed for a typical cost",
+      "How many finished tasks an agent or specialist needs in this workspace before Lightwork "
+      "shows what its past tasks usually cost beside the task form. Below this, it says there "
+      "are not enough past tasks yet. The range is recorded history, never a prediction.",
+      "number", "Spending & limits", 10, "maverick.typical_cost", minimum=2, maximum=1000,
+      integer=True, unit="finished tasks"),
     S("swarm", "max_total_spawns", "Helper agents per task",
       "The most helper agents one task may create.",
       "number", "Spending & limits", 64, "maverick.config", minimum=1, maximum=1000,
@@ -747,7 +763,7 @@ SETTINGS: tuple[Setting, ...] = (
       weaker=True, order=("3", "2", "1", "0"),
       warning="Agents will rely on less trusted memory, including content from outside sources."),
     S("domains", "memory", "Share department lessons",
-      "Give specialists the lessons their department has learned.",
+      "Give agents and specialists the lessons their department has learned.",
       "toggle", "Memory & learning", True, "maverick.config"),
     S("cortex", "enable", "Company memory",
       "One governed place to look up knowledge, skills, lessons and past decisions, with every look-up recorded.",
@@ -805,6 +821,12 @@ SETTINGS: tuple[Setting, ...] = (
     S("analytics", "mcp_client_language", "Count which programming languages connect",
       "Keep a local count of the programming languages used by connected tools. Nothing leaves this computer.",
       "toggle", "Privacy", False, "maverick.mcp_analytics", env=("MAVERICK_MCP_ANALYTICS",)),
+    S("analytics", "usability_survey", "Ask people how easy Lightwork is to use",
+      "Offer each signed-in person a 10-question ease-of-use survey at most once a quarter, and one "
+      "question after a few common tasks. One click hides it for the quarter. Answers stay on this "
+      "server, are reported by the role people choose, never by name, and are never sent anywhere. "
+      "Results are on People > Ease-of-use results.",
+      "toggle", "Privacy", False, "maverick.usability_survey"),
     S("immune", "twin_record", "Record tool results for replay",
       "Keep sealed copies of every task's tool results so the task can be replayed to test changes.",
       "toggle", "Privacy", False, "maverick.config", weaker=True,
@@ -915,11 +937,20 @@ SETTINGS: tuple[Setting, ...] = (
       "Run a bounded dashboard observer for explicitly enrolled named accounts. It rechecks current identity and owned work, observes changes about every 30 seconds, and releases eligible digests while the dashboard is running.",
       "toggle", "Integrations", False, "maverick_dashboard.personal_notification_scheduler"),
     S("notifications", "personal_external", "Allow personal alerts to verified private conversations",
-      "Let people opt into Slack or Telegram private delivery using their explicitly verified My Data identities. Requires background observation, current membership and channel allowlists; organization webhook destinations are never reused.",
+      "Let people opt into Slack or Telegram private delivery using their explicitly verified My data identities. Requires background observation, current membership and channel allowlists; organization webhook destinations are never reused.",
       "toggle", "Integrations", False, "maverick.personal_notification_delivery"),
     S("notifications", "personal_dashboard_url", "Dashboard address for personal notification links",
-      "The HTTPS origin people use to sign in, without a path, query or credentials. Messages contain minimal update counts and authenticated task links, never task text.",
+      "The HTTPS origin people use to sign in, without a path, query or credentials. Messages say why each alert was sent, what it needs and by when, with authenticated links, and never include task text.",
       "text", "Integrations", "", "maverick.personal_notification_delivery"),
+    S("support", "status_page_url", "Service status page",
+      "A public page that shows whether your Lightwork service is up and its incident history. When set, the Help menu on every page links to it, and so does the notice shown while an AI service is paused. Leave empty to show no link.",
+      "text", "Integrations", "", "maverick.config", pattern=r"(" + _HTTPS + r")?",
+      subgroup="Help and support", aliases="status page incident outage help menu"),
+    S("support", "contact_email", "Support contact email",
+      "Where \"Get help from a person\" requests go: your vendor's or help desk's address. People review the request and send it from their own email app; nothing is sent automatically. Leave empty to have people send requests to their Lightwork administrator.",
+      "text", "Integrations", "", "maverick.config",
+      pattern=r"([^@\s\"'<>,;]{1,64}@[^@\s\"'<>,;]{1,190}\.[A-Za-z]{2,24})?",
+      subgroup="Help and support", aliases="help desk vendor support person contact"),
     S("notifications", "delivery_receipts", "Keep notification delivery history",
       "Keep content-free delivery results for seven days, up to 1,000 attempts. View history and send a test on Notification delivery in Settings.",
       "toggle", "Integrations", True, "maverick.notifications"),
@@ -2279,8 +2310,8 @@ _POLICY: tuple[Setting, ...] = (
       warning="Supplier files will no longer be previewed and reviewed before use."),
 
     # ------------------------------------------------------ integrations
-    S("template_registries", "indexes", "Where to find goal templates",
-      "Web addresses of the catalogs goal templates can be installed from. With none listed, "
+    S("template_registries", "indexes", "Where to find task templates",
+      "Web addresses of the catalogs task templates can be installed from. With none listed, "
       "the built-in catalog is used.", "list", "Integrations", [], "maverick.templates",
       subgroup="Template and tool server catalogs", pattern=_HTTPS_PLAIN, max_length=300,
       item_error="a secure web address without a question mark", empty_unset=True,
@@ -2453,12 +2484,24 @@ def coerce(setting: Setting, value: object) -> object:
     ``None`` is only accepted for numbers without a default (meaning "no
     limit"), which callers treat as removing the dashboard value.
     """
+    if setting.id == "spending_limits.alert_at":
+        from maverick.spending_alerts import validate_alert_at
+        try:
+            return validate_alert_at(value)
+        except ValueError as exc:
+            raise SettingError(str(exc)) from exc
     if setting.id == "budget.warning_thresholds":
         try:
             return settings_catalog_budget_guidance.thresholds(value)
         except ValueError as exc:
             raise SettingError(str(exc)) from exc
     result = _coerce_value(setting, value)
+    if setting.id == "plugins.workbench_image":
+        from maverick.sandbox.local_images import LocalImageUnavailable, validate_choice
+        try:
+            result = validate_choice(result)
+        except LocalImageUnavailable as exc:
+            raise SettingError(str(exc)) from exc
     if not _storable(result):
         raise SettingError(
             f"{setting.label}: remove the hidden or unusual characters from this value."
@@ -3252,6 +3295,9 @@ def lookup(tree: object, path: tuple[str, ...]) -> tuple[bool, object]:
 
 def _structured_display(setting: Setting, value: object) -> str | None:
     """Plain words for the picks, fingerprint, document and address controls."""
+    if setting.id == "plugins.workbench_image":
+        from maverick.sandbox.local_images import cached_label
+        return cached_label(value)
     if setting.control == "picks" and isinstance(value, list):
         labels = dict(setting.choices)
         shown = [labels.get(str(v), str(v)) for v in value[:3]]

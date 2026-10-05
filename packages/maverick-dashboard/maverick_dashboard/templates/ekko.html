@@ -272,17 +272,13 @@
   }
 
   async function request(path, options, action) {
-    var response;
-    try { response = await fetch(path, options || {}); }
-    catch (e) { throw new Error(mvErrorText(e, action)); }
-    var data = null;
-    try { data = await response.json(); } catch (e) { data = null; }
-    if (!response.ok) {
-      var plain = data && window.mvPlainDetail && window.mvPlainDetail(data.detail);
-      if ([400, 409, 422].indexOf(response.status) >= 0 && plain) {
-        throw new Error(plain);
-      }
-      throw new Error(mvErrorText(response, action));
+    var data;
+    try { data = await window.mvFetchJSON(path, options || {}, action); }
+    catch (error) {
+      var plain = window.mvPlainDetail && window.mvPlainDetail(error.detail);
+      if ([400, 409, 422].indexOf(error.status) >= 0 && plain) throw new Error(plain);
+      if (error.unreadable) throw new Error(MALFORMED);
+      throw error;
     }
     if (data === null) throw new Error(MALFORMED);
     return data;

@@ -4,7 +4,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import time
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, ConfigDict, Field
@@ -55,9 +55,11 @@ def _projection(request, actor: str, *, world=None) -> tuple[list[dict], list[di
         tenant = current_tenant_id_strict()
         role = rbac.get_tenant_role(tenant, actor) if tenant else auth.global_role_for_principal(actor)
         operate = "operate" in rbac.permissions_for(role)
+        admin = "admin" in rbac.permissions_for(role) or auth.is_dashboard_admin(actor)
         suites = None if auth.is_dashboard_admin(actor) else suite_grants.granted_suites(actor)
     else:
         operate = auth.has_permission(request, "operate")
+        admin = auth.has_permission(request, "admin")
         suites = auth.caller_suites(request)
     sources, tasks = [], []
     limited = False
@@ -75,13 +77,17 @@ def _projection(request, actor: str, *, world=None) -> tuple[list[dict], list[di
             if project is not None and project.get("owner") == actor:
                 projects[project_id] = {"id": project_id, "name": project["name"]}
         category = {"blocked": "blocked", "failed": "failed", "done": "completed"}.get(goal.status)
-        def add(kind, version, label, *, category=category, href=None, goal=goal, project_id=project_id):
+        open_deadline = (float(goal.deadline) if goal.deadline and goal.status not in {"done", "failed", "cancelled"}
+                         else None)
+        def add(kind, version, label, *, category=category, href=None, goal=goal, project_id=project_id,
+                due_at=open_deadline, **extra):
             if not category:
                 return
             sources.append({"ref": f"goal:{goal.id}:{kind}", "version": str(version),
                             "category": category, "goal_id": goal.id, "project_id": project_id,
                             "title": goal.title, "label": label, "href": href or f"/chat/goal/{goal.id}",
-                            "occurred_at": getattr(goal, "completed_at", None)})
+                            "occurred_at": getattr(goal, "completed_at", None),
+                            "reason": "You started this task", "due_at": due_at, **_agent(goal), **extra})
         add("state", f"{goal.status}:{state_revision}", {"blocked": "Needs attention", "failed": "Did not finish", "done": "Finished"}.get(goal.status, ""))
         if goal.status == "done" and goal.result:
             result_digest = hashlib.sha256(str(goal.result).encode()).hexdigest()
@@ -89,8 +95,12 @@ def _projection(request, actor: str, *, world=None) -> tuple[list[dict], list[di
             sources[-1]["semantic_digest"] = result_digest
             sources[-1]["changed_after_completion"] = result_revision > 0
         for question in world.open_questions(goal.id):
-            add("question:" + str(question.id), question.id, "Needs your answer", category="needs-decision")
-        if goal.deadline and goal.status not in {"done", "failed", "cancelled"} and goal.deadline <= time.time() + 3600:
+            # Opens the task with the answer box in view; the task waits for the answer.
+            add("question:" + str(question.id), question.id, "Needs your answer", category="needs-decision",
+                href=f"/chat/goal/{goal.id}#question-panel",
+                action="Answer the agent's question so the task can continue",
+                no_due="The task waits until you answer", waiting_since=question.asked_at)
+        if open_deadline is not None and open_deadline <= time.time() + 3600:
             add("deadline", goal.deadline, "Deadline approaching or overdue", category="deadline")
     if operate:
         for approval in world.pending_approvals():
@@ -103,7 +113,14 @@ def _projection(request, actor: str, *, world=None) -> tuple[list[dict], list[di
                 continue
             sources.append({"ref": f"approval:{approval.id}", "version": str(approval.requested_at),
                             "category": "needs-decision", "title": "Assigned approval", "label": "Needs your decision",
-                            "href": f"/approvals#approval-{approval.id}", "goal_id": None, "project_id": None})
+                            "href": f"/approvals#approval-{approval.id}", "goal_id": None, "project_id": None,
+                            "reason": "You were assigned to decide this request",
+                            "action": "Approve or reject the request", "due_at": _approval_expiry(approval)})
+        # Ten minutes without a decision: one reminder for each person who
+        # could decide the request in Lightwork.
+        from .approval_reminders import reminder_sources
+
+        sources.extend(reminder_sources(world, actor, suites=suites))
         from .flow_approval_inbox import pending_for_observer, pending_for_request
 
         flow_approvals = (pending_for_observer(actor) if request is None
@@ -114,16 +131,49 @@ def _projection(request, actor: str, *, world=None) -> tuple[list[dict], list[di
                 continue
             # Keep personal notification history free of the card and run data.
             # The linked run page performs the current approval checks again.
+            card = row.get("approval_card") or {}
             sources.append({
                 "ref": f"flow-approval:{row['run_id']}",
                 "version": row["approval_binding_sha256"],
                 "category": "needs-decision", "title": "Flow approval waiting",
                 "label": "Review and decide", "href": row["href"],
                 "goal_id": None, "project_id": None,
+                "reason": ("You started this flow run" if row.get("owner") == actor
+                           else "You are the assigned reviewer for this flow step"),
+                "action": "Review the step and decide",
+                "due_at": _number(card.get("expires_at")),
             })
     from maverick.budget_guidance import warning_sources
+    from maverick.personal_notifications import explain
     sources.extend(warning_sources(actor))
-    return sources, tasks, list(projects.values()), limited
+    from maverick.spending_alerts import sources as spending_alert_sources
+    sources.extend(spending_alert_sources(actor, admin=admin))
+    # Every alert says why, what is needed and by when, whatever produced it.
+    return [explain(source) for source in sources], tasks, list(projects.values()), limited
+
+
+def _number(value) -> float | None:
+    return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else None
+
+
+def _approval_expiry(approval) -> float | None:
+    """The card's real expiry; a legacy or unreadable card has none."""
+    from maverick.approval_cards import ApprovalCardError, decode_approval_detail
+    try:
+        card = decode_approval_detail(getattr(approval, "detail", None))
+    except ApprovalCardError:
+        return None
+    return _number((card or {}).get("expires_at"))
+
+
+def _agent(goal) -> dict:
+    """The agent behind a task, when known, so its alerts can be muted."""
+    import re
+
+    name = str(getattr(goal, "domain", "") or "")
+    if not re.fullmatch(r"[a-z0-9][a-z0-9_.-]{0,63}", name):
+        return {}
+    return {"agent": name, "agent_label": name.replace("_", " ").replace("-", " ")}
 
 
 def _state(request, *, seen_id=None):
@@ -268,3 +318,80 @@ def seen(request: Request, response: Response, body: SeenIn):
         raise HTTPException(409, "That alert changed or is no longer available. Refresh the inbox.")
     response.headers["Cache-Control"] = "private, no-store"
     return _state(request, seen_id=body.item_id)
+
+
+_MUTE_FIELDS = {"task": "muted_tasks", "agent": "muted_agents"}
+
+
+class MuteIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    context: str = Field(max_length=128)
+    item_id: str = Field(pattern=r"^[0-9a-f]{64}$")
+    scope: Literal["task", "agent"]
+
+
+class UnmuteIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    context: str = Field(max_length=128)
+    scope: Literal["task", "agent"]
+    key: str = Field(pattern=r"^[a-z0-9][a-z0-9_.-]{0,63}$")
+
+
+def _change_mutes(request, context: str, change) -> dict:
+    """Apply one mute change to the saved preferences at their current revision."""
+    from maverick import experience_preferences as preferences
+    from maverick.authority_effects import authority_effect_fence
+    _binding(request, context)
+    try:
+        with authority_effect_fence():
+            current = _state_locked(request)
+            choice, outcome = change(current)
+            actor, choice = validate_current_preferences(request, choice)
+            preferences.save(actor, scope="personal", changes={"notification_preferences": choice},
+                             expected_revision=current["revision"])
+    except preferences.PreferenceConflict as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    return outcome
+
+
+@router.post("/api/v1/notifications/personal/mute")
+def mute(request: Request, response: Response, body: MuteIn):
+    """One click from an alert: mute its task, or every alert from its agent."""
+    from maverick.personal_notifications import MUTE_SECONDS
+
+    def change(current):
+        item = next((row for row in current["items"] if row["id"] == body.item_id), None)
+        if item is None:
+            raise HTTPException(409, "That alert changed or is no longer available. Refresh the inbox.")
+        if body.scope == "task":
+            key = str(item["goal_id"]) if item.get("goal_id") else ""
+            label = item.get("title") or "this task"
+        else:
+            key, label = str(item.get("agent") or ""), item.get("agent_label") or ""
+        if not key:
+            raise HTTPException(409, "This alert is not about one task, so it can't be muted that way."
+                                if body.scope == "task" else
+                                "This alert doesn't name an agent, so alerts can't be muted by agent.")
+        until = time.time() + MUTE_SECONDS
+        field = _MUTE_FIELDS[body.scope]
+        choice = {**current["preferences"], field: {**current["preferences"][field], key: until}}
+        return choice, {"scope": body.scope, "key": key, "label": label, "until": until}
+
+    muted = _change_mutes(request, body.context, change)
+    response.headers["Cache-Control"] = "private, no-store"
+    return {**_state(request), "muted": muted}
+
+
+@router.post("/api/v1/notifications/personal/unmute")
+def unmute(request: Request, response: Response, body: UnmuteIn):
+    """Undo a mute, from the alert's undo or from notification preferences."""
+    def change(current):
+        field = _MUTE_FIELDS[body.scope]
+        remaining = {key: until for key, until in current["preferences"][field].items() if key != body.key}
+        return {**current["preferences"], field: remaining}, {"scope": body.scope, "key": body.key}
+
+    unmuted = _change_mutes(request, body.context, change)
+    response.headers["Cache-Control"] = "private, no-store"
+    return {**_state(request), "unmuted": unmuted}

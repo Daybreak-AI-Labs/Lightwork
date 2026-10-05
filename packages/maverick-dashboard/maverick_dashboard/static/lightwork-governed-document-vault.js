@@ -84,7 +84,7 @@
     if (status === 404) return "That document no longer exists. Refresh the page to see the latest.";
     if (status === 409) return "This document changed since you opened the page. Refresh and try again.";
     if (status === 413) return "That file is too large.";
-    if (status === 415) return "That kind of file can't be stored here.";
+    if (status === 415) return "That kind of file can't be stored here. Try a PDF, image or office document.";
     return "Something went wrong. Please try again.";
   }
 
@@ -160,7 +160,7 @@
     return "vault-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 12);
   }
   function setStatus(target, message, failed) {
-    target.textContent = message;
+    window.mvStatus(target, message, {error: !!failed});
     target.dataset.state = failed ? "failed" : "ready";
   }
   function technical(value) {
@@ -517,7 +517,7 @@
     await run("Finding the linked document", async () => {
       const ref = bounded(requested, /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/, "The link");
       const record = await requestJson(vaultBase, "/documents/" + encodeURIComponent(ref));
-      if (!record || record.document_ref !== ref) throw failure("request_failed", "The linked document could not be found.");
+      if (!record || record.document_ref !== ref) throw failure("request_failed", "The linked document could not be found. Refresh the page to see the latest.");
       highlighted = ref;
       if (!documents.some((item) => item.document_ref === ref)) documents.unshift(record);
       renderDocuments();

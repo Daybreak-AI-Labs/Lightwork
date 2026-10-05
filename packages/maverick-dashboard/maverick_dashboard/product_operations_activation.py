@@ -26,9 +26,9 @@ def creation_snapshot(request, selection):
     native.actor(request, operate=True)
     choices = native.jobs(request)
     readiness = native.readiness(request)
-    return Snapshot(digest({"jobs": choices, "readiness": readiness}), "Enabled jobs and your current authority",
-        "Save a private sample or real-text job draft. This does not start paid work.", {"readiness": readiness},
-        [{"name": "job", "label": "Job", "kind": "select", "choices": [{"value": key, "label": value["label"]} for key, value in choices.items()]},
+    return Snapshot(digest({"jobs": choices, "readiness": readiness}), "Available tasks and your current access",
+        "Save a private draft task with sample or real text. This does not start paid work.", {"readiness": readiness},
+        [{"name": "job", "label": "Task", "kind": "select", "choices": [{"value": key, "label": value["label"]} for key, value in choices.items()]},
          {"name": "mode", "label": "Data choice", "kind": "select", "value": "sample", "choices": [{"value": "sample", "label": "Fictional practice"}, {"value": "real", "label": "Real text I provide"}]},
          {"name": "material", "label": "Real source text (unused for practice)", "kind": "textarea", "max_length": 10000},
          {"name": "criteria", "label": "My acceptance criteria", "kind": "textarea", "required": True, "max_length": 2000}])
@@ -146,7 +146,7 @@ def _recover(action):
 
 def entries():
     pages = ("/get-started/employee",)
-    return [Adapter("activation.create", "Save a first-job draft", "tasks", pages[0], pages, Draft, creation_snapshot, prepare_creation, create),
+    return [Adapter("activation.create", "Save a first-task draft", "tasks", pages[0], pages, Draft, creation_snapshot, prepare_creation, create),
             Adapter("activation.status", "Show this activation draft", "tasks", pages[0], pages, EmptyInput, snapshot, read),
             Adapter("activation.edit", "Edit unstarted activation draft", "tasks", pages[0], pages, Draft, edit_snapshot, prepare_edit, edit),
             *[Adapter("activation." + action, label, "tasks", pages[0], pages, EmptyInput, snapshot, _prepare_action(action), _execute_action(action), _recover(action))

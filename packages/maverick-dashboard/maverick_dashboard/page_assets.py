@@ -30,12 +30,16 @@ ASSETS = (
     "lightwork-notification-health.js",
     "lightwork-notification-badge.js",
     "lightwork-personal-notifications.js",
+    "lightwork-digest-preview.js",
+    "lightwork-help-menu.js",
     "lightwork-settings-admin.js",
     "lightwork-tenants.js",
     "lightwork-typeahead.js",
     "lightwork-compliance.js",
     "lightwork-retention-maintenance.js",
     "lightwork-compliance-scoping.js",
+    "lightwork-compliance-questionnaire-builder.js",
+    "lightwork-plugin-practice.js",
     "lightwork-compliance-scope-actions.js",
     "lightwork-dsar-detail.js",
     "lightwork-dsar-handoff.js",
@@ -46,6 +50,7 @@ ASSETS = (
     "lightwork-privacy-rights-orchestration.js",
     "lightwork-red-team-schedules.js",
     "lightwork-learning-loop.js",
+    "lightwork-learning-jobs.js",
     "lightwork-value-proof.js",
     "lightwork-assurance-forms.js",
     "lightwork-feature-actions.js",
@@ -53,8 +58,11 @@ ASSETS = (
     "lightwork-tax.js",
     "lightwork-task-changes.js",
     "lightwork-viewpoints.js",
+    "lightwork-usability-survey.js",
 )
-STYLES: tuple[str, ...] = ("lightwork-i18n.css", "lightwork-schedule-management.css")
+# Page stylesheets served next to their scripts (the shell itself is one
+# stylesheet, lightwork.css; its translation rules live there).
+STYLES: tuple[str, ...] = ("lightwork-schedule-management.css",)
 
 
 @router.get("/static/lightwork-i18n-catalog/{language}/{revision}.js", include_in_schema=False)
@@ -85,6 +93,10 @@ def _route(name: str):
     return serve
 
 
+for _name in ASSETS:
+    router.add_api_route("/static/" + _name, _route(_name), methods=["GET"], include_in_schema=False)
+
+
 def _style_route(name: str):
     async def serve() -> FileResponse:
         return FileResponse(_STATIC / name, media_type="text/css; charset=utf-8",
@@ -93,7 +105,5 @@ def _style_route(name: str):
     return serve
 
 
-for _name in ASSETS:
-    router.add_api_route("/static/" + _name, _route(_name), methods=["GET"], include_in_schema=False)
 for _name in STYLES:
     router.add_api_route("/static/" + _name, _style_route(_name), methods=["GET"], include_in_schema=False)

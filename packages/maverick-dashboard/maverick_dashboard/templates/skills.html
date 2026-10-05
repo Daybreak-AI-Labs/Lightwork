@@ -20,7 +20,7 @@
 
   <div class="sk-grid">
     <section class="panel" aria-labelledby="sk-create-title">
-      <h2 id="sk-create-title" class="sk-flush">Create a Skill</h2>
+      <h2 id="sk-create-title" class="sk-flush">Create a skill</h2>
       {% if not is_admin %}
         <p class="muted">Only administrators can add skills. Ask an administrator to add the one you need.</p>
       {% elif not install_allowed %}
@@ -55,7 +55,9 @@
               <input class="input" type="search" id="sc-tool-filter" placeholder="Find a tool…"
                      aria-label="Find a tool" autocomplete="off" />
             </label>
-            <div id="sc-tool-list" class="sk-tool-list" aria-live="polite">
+            {# A scroll box a keyboard can reach. Not a live region: reading every
+               tool aloud when the list loads was noise. #}
+            <div id="sc-tool-list" class="sk-tool-list" role="region" tabindex="0" aria-label="Tools to choose from">
               <p class="muted sk-small">Loading tools…</p>
             </div>
           </fieldset>
@@ -109,7 +111,7 @@
     </section>
 
     <section aria-labelledby="sk-list-title">
-      <div class="section-head"><h2 id="sk-list-title">Your Skills</h2></div>
+      <div class="section-head"><h2 id="sk-list-title">Your skills</h2></div>
       <div id="installed-skills">
         {% for s in skills %}
           {% set label = s.name | humanize %}
@@ -152,7 +154,7 @@
   {% endif %}
 
   <section class="panel sk-section" aria-labelledby="to-skill-usage-title">
-    <div class="section-head"><h2 id="to-skill-usage-title">How Your Skills Are Doing</h2></div>
+    <div class="section-head"><h2 id="to-skill-usage-title">How your skills are doing</h2></div>
     <p class="muted sk-small">Each time agents use a skill, Lightwork notes whether the task went well.</p>
     <p id="to-skill-usage-status" class="muted" role="status" aria-live="polite">Loading…</p>
     <div id="to-skill-usage"></div>
@@ -160,7 +162,7 @@
 
   {% if is_admin %}
   <section class="panel sk-section" aria-labelledby="to-tidy-title">
-    <div class="section-head"><h2 id="to-tidy-title">Tidy Up Skills That Rarely Help</h2></div>
+    <div class="section-head"><h2 id="to-tidy-title">Tidy up skills that rarely help</h2></div>
     <p class="muted sk-small">Find skills that have had a fair trial and still rarely help, then remove them.
       Lightwork allows for chance, so a skill is only listed when the evidence is clear.</p>
     <div class="sk-row">
@@ -183,7 +185,7 @@
 
   <style>
     .sk-grid { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr); gap: var(--space-5); align-items: start; }
-    @media (max-width: 900px) { .sk-grid { grid-template-columns: 1fr; } }
+    @media (max-width: 880px) { .sk-grid { grid-template-columns: 1fr; } }
     .sk-flush { margin-top: 0; }
     .sk-small { font-size: var(--text-sm); }
     .sk-form, .sk-fieldset { display: flex; flex-direction: column; gap: var(--space-3); }
@@ -262,22 +264,26 @@
     }
     window.lwAppendSkill = appendSkill;
 
-    // Remove a skill (administrators): confirm, then delete and drop the card.
-    installedEl.addEventListener('click', async function (event) {
+    // Remove a skill (administrators): the card goes at once and the toast
+    // offers Undo (window.mvUndo); the delete is sent when that time is up.
+    installedEl.addEventListener('click', function (event) {
       var btn = event.target.closest('[data-skill-remove]');
       if (!btn) return;
       var name = btn.getAttribute('data-skill-remove');
       var label = btn.getAttribute('data-skill-label') || human(name);
-      var ok = await window.mvConfirm('Remove the skill “' + label + '”? Agents stop using it from the next task.', {okText: 'Remove'});
-      if (!ok) return;
-      btn.disabled = true;
-      try {
-        var r = await fetch('/api/v1/skills/' + encodeURIComponent(name), {method: 'DELETE', credentials: 'same-origin'});
-        if (!r.ok && r.status !== 404) { window.mvFail(r, 'remove the skill'); btn.disabled = false; return; }
-        var card = btn.closest('.skill-card');
-        if (card) card.remove();
-        if (window.mvToast) window.mvToast('Removed ' + label + '.');
-      } catch (e) { window.mvFail(e, 'remove the skill'); btn.disabled = false; }
+      var card = btn.closest('.skill-card');
+      if (card) card.hidden = true;
+      var heading = document.getElementById('sk-list-title');
+      if (heading && heading.focus) { if (!heading.hasAttribute('tabindex')) heading.setAttribute('tabindex', '-1'); heading.focus(); }
+      window.mvUndo('Skill “' + label + '” removed. Agents stop using it from the next task.', {
+        action: 'remove the skill',
+        run: async function (keepalive) {
+          var r = await fetch('/api/v1/skills/' + encodeURIComponent(name), {method: 'DELETE', credentials: 'same-origin', keepalive: keepalive});
+          return r.ok || r.status === 404 ? {ok: true} : r;
+        },
+        undo: function () { if (card) { card.hidden = false; btn.focus(); } },
+        done: function () { if (card) card.remove(); }
+      });
     });
 
     // Tools picker: a filterable checklist of the tools agents can use.

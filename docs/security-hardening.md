@@ -988,6 +988,40 @@ returns **403** (vs **404** for an unknown approval).
 - The self-approval bar only bites when the approval records a `requested_by`
   principal; the quorum (N distinct approvers) is enforced regardless.
 
+### A second person for high-risk actions (one approver)
+
+With one approver (the default), `[approval] separate_approver` decides whether
+the person who asked for a **high or critical** risk action may approve it
+themselves:
+
+```toml
+[approval]
+separate_approver = "when_available"   # default | "always" | "never"
+```
+
+- `when_available` (default): someone else must approve it whenever at least
+  one other person could decide that request; where the requester is the only
+  one who can, they may approve it, and the record marks it as a self-approval.
+- `always`: someone else must approve it. If nobody else can, the request waits
+  until it expires and the action is refused (nothing ever runs by default).
+- `never`: the requester may approve it (still recorded as a self-approval).
+- env: `MAVERICK_SEPARATE_APPROVER`. A value Lightwork does not know is treated
+  as `always`. Settings > All settings (Safety > Approvals) and the setup wizard's
+  Approvals step offer the same choice.
+
+"Could decide that request" uses the existing permission model, nothing new:
+the person holds `operate` in the workspace, is not deprovisioned, and can open
+the request — on the Approvals page that is its owner or someone holding a
+current, reviewed Content access grant for exactly that card; in Slack or Teams,
+when approval cards are posted there, a linked account. So with Content access
+requests off, an employee's private request can only be opened by that employee,
+and the rule lets them approve it. Low and medium risk are unaffected; with two
+or more approvers, distinct people approve anyway and `allow_self_approval`
+alone decides whether the requester counts. The rule is enforced in the one
+shared decision path, so the Approvals page, the API (403 with the plain
+reason), Slack and Teams all obey it; the requester's Approve button is
+disabled with the reason.
+
 **Verify it's on:** park a high-risk action, then confirm one approval leaves it
 `pending` and a second *distinct* approver flips it to `approved` (watch
 `/approvals/{id}/state`).

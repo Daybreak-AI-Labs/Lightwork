@@ -12,7 +12,7 @@
   .arv__body { padding: var(--space-4) var(--space-5); overflow-y: auto; min-height: 0; min-width: 0; overflow-wrap: anywhere; }
   .arv__row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--space-3); padding: var(--space-3) 0; border-bottom: 1px solid var(--hairline); }
   .arv__q { font-size: var(--text-base); }
-  .arv__note { color: var(--muted); font-size: var(--text-sm); margin-top: 2px; }
+  .arv__note { color: var(--muted); font-size: var(--text-sm); margin-top: var(--space-0-5); }
   .arv__ans { align-self: start; }
   .arv__section { margin: var(--space-4) 0 var(--space-2); font-size: var(--text-xs); color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; font-weight: var(--font-semibold); }
   .arv textarea { width: 100%; min-height: 84px; background: var(--surface-sunken); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius-md); padding: var(--space-3); font: inherit; }
@@ -295,10 +295,9 @@
         return url;
       }
       async function readSource(source, exact) {
-        const response = await fetch(sourceUrl(source, exact), {cache: 'no-store', headers: memoryHeaders});
-        if ([401,403].includes(response.status)) { memorySuggestions = {}; memory.textContent = ''; }
-        if (!response.ok) throw new Error(response.status === 409 ? 'The source changed. Compare the current source and refresh suggestions before using it.' : problem(response, 'open the source answer'));
-        const value = await response.json();
+        const value = await window.mvFetchJSON(sourceUrl(source, exact), {cache: 'no-store', headers: memoryHeaders,
+          onAccess: () => { memorySuggestions = {}; memory.textContent = ''; },
+          messages: {409: 'The source changed. Compare the current source and refresh suggestions before using it.'}}, 'open the source answer');
         if (memoryContext && value.context !== memoryContext) { memorySuggestions = {}; memory.textContent = ''; throw new Error('Workspace changed. Reopen the assessment.'); }
         return value;
       }
@@ -361,9 +360,7 @@
       memoryButton.addEventListener('click', async function () {
         const generation = viewGeneration, id = currentId; memoryButton.disabled = true;
         try {
-          const response = await fetch('/api/v1/assessment-memory/similar?subject=' + encodeURIComponent(rec.subject || '') + '&type=' + encodeURIComponent(rec.type || '') + '&exclude_id=' + encodeURIComponent(id), {cache:'no-store', headers: memoryHeaders});
-          if (!response.ok) throw new Error(problem(response, 'find permitted precedents'));
-          const value = await response.json(); if (generation !== viewGeneration || id !== currentId) return;
+          const value = await window.mvFetchJSON('/api/v1/assessment-memory/similar?subject=' + encodeURIComponent(rec.subject || '') + '&type=' + encodeURIComponent(rec.type || '') + '&exclude_id=' + encodeURIComponent(id), {cache:'no-store', headers: memoryHeaders}, 'find permitted precedents'); if (generation !== viewGeneration || id !== currentId) return;
           if (memoryContext && value.context !== memoryContext) throw new Error('Workspace changed. Reopen the assessment.');
           memorySuggestions = value.suggestions || {}; renderSuggestion();
           statusEl.textContent = Object.keys(memorySuggestions).length ? 'Precedents are advisory. Review each answer separately.' : 'No matching precedent answers are available.';
@@ -452,10 +449,8 @@
     async function renderTrend(rec) {
       if (!rec.subject) return;
       try {
-        const r = await fetch('/api/v1/assess/trend?subject=' +
+        const data = await window.mvFetchJSON('/api/v1/assess/trend?subject=' +
           encodeURIComponent(rec.subject) + '&type=' + encodeURIComponent(rec.type || ''));
-        if (!r.ok) return;
-        const data = await r.json();
         const t = data.trend || [];
         if (t.length < 2) return;
         const arrow = data.direction === 'up' ? '▲ Risk rising'
@@ -516,11 +511,9 @@
     rejectBtn.addEventListener('click', function () { decide('rejected'); });
 
     async function reload(id = currentId, generation = viewGeneration) {
-      const r = await fetch('/api/v1/assess/sessions/' + encodeURIComponent(id));
-      if (r.ok) {
-        const record = await r.json();
-        if (id === currentId && generation === viewGeneration) render(record);
-      }
+      // A refusal keeps what is shown.
+      const record = await window.mvFetchJSON('/api/v1/assess/sessions/' + encodeURIComponent(id)).catch(() => null);
+      if (record && id === currentId && generation === viewGeneration) render(record);
     }
 
     // Accept the residual risk (B11): named owner, rationale, expiry.
@@ -595,9 +588,7 @@
       sendBtn.style.display = 'none';
       if (!dlg.open) dlg.showModal();
       try {
-        const r = await fetch('/api/v1/assess/sessions/' + encodeURIComponent(id));
-        if (!r.ok) throw new Error(problem(r, 'load the assessment'));
-        const record = await r.json(); if (generation === viewGeneration) render(record);
+        const record = await window.mvFetchJSON('/api/v1/assess/sessions/' + encodeURIComponent(id), {}, 'load the assessment'); if (generation === viewGeneration) render(record);
       } catch (e) {
         if (generation !== viewGeneration) return;
         body.innerHTML = '';

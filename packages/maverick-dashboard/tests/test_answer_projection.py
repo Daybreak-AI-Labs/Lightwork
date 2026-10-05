@@ -3,6 +3,7 @@ from html.parser import HTMLParser
 
 import pytest
 from fastapi import HTTPException
+from maverick.oidc import VerifiedPrincipal
 from maverick.world_model import WorldModel
 from maverick_dashboard import answer_projection as projection
 from starlette.requests import Request
@@ -25,7 +26,10 @@ def setup(tmp_path, monkeypatch):
 
 
 def request():
-    return Request({"type": "http", "method": "GET", "path": "/", "headers": []})
+    value = Request({"type": "http", "method": "GET", "path": "/", "headers": []})
+    value.state.principal = VerifiedPrincipal(sub="alice", issuer="https://issuer.example",
+                                             audience="lightwork", claims={"sub": "alice"})
+    return value
 
 
 def test_completion_projects_current_result_artifacts_and_owner_controls(setup):

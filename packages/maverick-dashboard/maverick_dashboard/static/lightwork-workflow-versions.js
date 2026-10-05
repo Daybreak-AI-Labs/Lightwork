@@ -12,14 +12,8 @@
   function clear(){lost=true;serial++;content.replaceChildren();copy(status,'Account or workspace changed. Reload to review this workflow.');}
   document.addEventListener('lightwork:workspace-changed',clear);
   async function request(path,body){
-    const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),15000);
-    try{
-      const response=await fetch('/api/v1/workflows/'+encodeURIComponent(name)+path,{method:body?'POST':'GET',headers:{'Content-Type':'application/json'},body:body?JSON.stringify({...body,context}):undefined,cache:'no-store',signal:controller.signal});
-      const data=await response.json().catch(()=>({}));
-      if(response.status===401){clear();throw new Error('Sign in before continuing.');}
-      if(!response.ok)throw new Error(typeof data.detail==='string'?data.detail:'The workflow review could not be completed.');
-      return data;
-    }finally{clearTimeout(timer);}
+    return window.mvFetchJSON('/api/v1/workflows/'+encodeURIComponent(name)+path,{method:body?'POST':'GET',body:body?{...body,context}:undefined,
+      cache:'no-store',timeout:15000,plainDetail:true,onAccess:clear,accessStatuses:[401],messages:{401:'Sign in before continuing.'}},'review the workflow versions');
   }
   async function mutate(button,path,body,success){
     if(busy||lost)return;busy=true;button.disabled=true;

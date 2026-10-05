@@ -12,7 +12,7 @@ def test_mixed_batch_activation_metadata():
 
 
 def test_runtime_projection_keeps_missing_receipt_unconfirmed(monkeypatch):
-    value = SimpleNamespace(id="dashboard.compress", reader="maverick_dashboard.app", label="Compression",
+    value = SimpleNamespace(id="dashboard.compress", reader="maverick_dashboard.app", label="Compression", group="Performance",
                             path=("dashboard", "compress"), env=(), restart=True)
     monkeypatch.setattr(status.runtime_configuration, "enabled", lambda: True)
     monkeypatch.setattr(status.runtime_configuration, "records", lambda: ([], False))

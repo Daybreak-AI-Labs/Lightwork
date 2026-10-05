@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Form, HTTPException, Request
+from fastapi import APIRouter, Form, HTTPException, Request, Response
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
@@ -100,13 +100,13 @@ def _require_bridge_identity(request: Request) -> tuple[str, str, str]:
 def _waiting_on(request: Request, world, principal: str, row: dict, *, can_decide: bool) -> str:
     """Who the request is really waiting on, by the rules that are enforced.
 
-    "you" / "you_own": this person can open and decide it (with one approver,
-    the person who asked may approve their own request); "others": they asked,
-    but under two-person approval other people must decide; "requester": it
-    belongs to a colleague's private task this person can't open.
+    "you" / "you_own": this person can open and decide it (the person who
+    asked may approve their own request); "others": they asked, but someone
+    else must decide (the separate-approver rule, or two-person approval);
+    "requester": it belongs to a colleague's private task this person can't open;
+    "you_chat": private here, but this person may decide it in Slack or Teams.
     """
-    from maverick.safety.dual_control import allow_self_approval
-
+    from .approval_decisions import own_request_note
     from .content_access import can_read_approval
 
     approval = world.get_approval(int(row["id"]))
@@ -114,11 +114,15 @@ def _waiting_on(request: Request, world, principal: str, row: dict, *, can_decid
         return "others"
     own = bool(principal) and approval.requested_by == principal
     if not can_decide or not can_read_approval(request, approval, world):
-        return "others" if own else "requester"
+        if own:
+            return "others"
+        from .approval_private_cards import decides_in_chat
+
+        # Private here, but the rules let this person decide it in chat.
+        return "you_chat" if can_decide and decides_in_chat(approval, principal) else "requester"
     if not own:
         return "you"
-    required = max(1, int(getattr(approval, "approvals_required", 1) or 1))
-    return "you_own" if required <= 1 or allow_self_approval() else "others"
+    return "others" if own_request_note(world, approval, principal) else "you_own"
 
 
 def _my_work(request: Request, principal: str) -> dict:
@@ -136,7 +140,7 @@ def _my_work(request: Request, principal: str) -> dict:
         row["waiting_on"] = _waiting_on(request, world, principal, row, can_decide=can_decide)
     # "Things that need you" counts only the requests this person can decide.
     digest["counts"]["approvals"] = sum(
-        1 for row in digest["approvals"] if row["waiting_on"] in ("you", "you_own"))
+        1 for row in digest["approvals"] if row["waiting_on"] in ("you", "you_own", "you_chat"))
     try:
         links = channel_identities.links_for(principal)
     except channel_identities.ChannelIdentityError:
@@ -166,6 +170,11 @@ def _my_work(request: Request, principal: str) -> dict:
 def me_page(request: Request, saved: str = "") -> HTMLResponse:
     # Connection codes must only reach this page from the authenticated POST
     # that issued them. A GET URL can be supplied by someone else.
+    from .navigation_api import areas_redirect
+
+    moved = areas_redirect(request)  # areas mode: Home's My work section
+    if moved is not None:
+        return moved
     return _render_me_page(request, saved=saved)
 
 
@@ -304,9 +313,25 @@ def me_preferences(
             email=email.strip(), digest_enabled=digest_enabled == "on",
             send_when_empty=send_when_empty == "on",
         )
-    except (user_preferences.UserPreferenceError, ValueError):
+    except (user_preferences.UserPreferenceError, ValueError) as exc:
+        from .product_errors import background_save
+        if background_save(request):
+            raise _preference_refusal(str(exc)) from exc
         return RedirectResponse("/me?saved=bad_preferences", status_code=303)
     return RedirectResponse("/me?saved=preferences", status_code=303)
+
+
+def _preference_refusal(reason: str) -> HTTPException:
+    """A refused daily-summary choice, tied to its field for a background save."""
+    from .product_errors import product_error
+    for words, field, message in (
+        ("time zone", "time_zone", "Choose your time zone from the list."),
+        ("hour", "digest_hour", "Choose the hour to send it from the list."),
+        ("email", "email", "Enter a full email address. For example: name@company.com."),
+    ):
+        if words in reason:
+            return product_error(422, "preferences_" + field, message, field_errors={field: message})
+    return product_error(422, "preferences_invalid", "Those choices could not be saved. Check the values and try again.")
 
 
 @router.post("/me/channels/link-code")
@@ -357,16 +382,70 @@ async def me_send_now(request: Request) -> RedirectResponse:
     links = channel_identities.links_for(principal)
     if not links and not prefs.get("email"):
         return RedirectResponse("/me?saved=not_sent", status_code=303)
-    can_decide = auth.has_permission(request, "operate")
-    everything = auth.goal_owner_filter(request) is None
-    digest = daily_digest.compose_digest(
-        _world(), principal, can_decide=can_decide, sees_everything=everything,
-        time_zone=prefs["time_zone"],
-    )
+    digest = _prepared_digest(request, principal, prefs)
     outcomes = await run_in_threadpool(
         daily_digest.send_digest, principal, digest, links=links, prefs=prefs)
     ok = any(o["ok"] for o in outcomes)
     return RedirectResponse(f"/me?saved={'sent' if ok else 'not_sent'}", status_code=303)
+
+
+def _prepared_digest(request: Request, principal: str, prefs: dict) -> dict:
+    """Today's summary for this person, built exactly as it is sent."""
+    from maverick import daily_digest
+
+    return daily_digest.prepare_digest(
+        _world(), principal, can_decide=auth.has_permission(request, "operate"), prefs=prefs,
+        sees_everything=auth.goal_owner_filter(request) is None)
+
+
+def _delivery_notes(principal: str, prefs: dict, digest: dict) -> tuple[bool, list[str]]:
+    """Whether today's summary would really go out, and why not, in plain words."""
+    from maverick import channel_identities
+    from maverick.config import get_my_work
+
+    try:
+        workspace_on = bool(get_my_work().get("digest_enable"))
+    except Exception:  # noqa: BLE001 -- an unreadable config reads as "off"
+        workspace_on = False
+    try:
+        linked = bool(channel_identities.links_for(principal))
+    except channel_identities.ChannelIdentityError:
+        linked = False
+    blocking = []
+    if not workspace_on:
+        blocking.append("The daily summary is turned off for this workspace, so nothing is sent. "
+                        "An administrator can turn it on in Settings (My work › Send a daily summary).")
+    if not prefs.get("digest_enabled", True):
+        blocking.append("You turned your daily summary off in My work.")
+    if not linked and not prefs.get("email"):
+        blocking.append("No chat account or email address is linked, so there is nowhere to send it.")
+    if digest["empty"] and not prefs.get("send_when_empty"):
+        blocking.append("Nothing is waiting, and you chose not to get an empty summary.")
+    notes = list(blocking)
+    if digest.get("left_out_seen"):
+        count = int(digest["left_out_seen"])
+        notes.append(f"{count} result{'s' if count != 1 else ''} you already saw in the app "
+                     f"{'are' if count != 1 else 'is'} left out.")
+    if not blocking:
+        notes.insert(0, f"It goes out at {int(prefs.get('digest_hour', 8)):02d}:00 "
+                        f"({prefs.get('time_zone') or 'UTC'}) to your linked chat app or email.")
+    return not blocking, notes
+
+
+@api.get("/me/digest/preview")
+def me_digest_preview(request: Request, response: Response) -> dict:
+    """Exactly what today's summary would send, without sending anything."""
+    auth.require_permission(request, "view")
+    from maverick import daily_digest, user_preferences
+
+    response.headers["Cache-Control"] = "private, no-store"
+    principal = _principal(request)
+    prefs = user_preferences.get_preferences(principal)
+    digest = _prepared_digest(request, principal, prefs)
+    would_send, notes = _delivery_notes(principal, prefs, digest)
+    return {"subject": daily_digest.subject(digest),
+            "text": daily_digest.render_text(digest, dashboard_url=daily_digest.dashboard_url()),
+            "would_send": would_send, "notes": notes, "counts": digest["counts"]}
 
 
 # ----------------------------------------------------------------------------

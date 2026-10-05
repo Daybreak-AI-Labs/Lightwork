@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Learning · Lightwork{% endblock %}
 {% block content %}
+{% from "_tabs.html" import panel_tabs, tab_panel %}
 <style>
   .lrn :focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; border-radius: var(--radius-sm); }
   .lrn__section-h { font-size: var(--text-lg); margin: 0 0 var(--space-1); }
@@ -11,26 +12,23 @@
   .lrn__row[data-on="false"] { border-left-color: var(--border-strong); }
   .lrn__row-main { flex: 1 1 auto; min-width: 0; }
   .lrn__row-label { font-weight: var(--font-medium); }
-  .lrn__row-desc { color: var(--muted); font-size: var(--text-sm); margin-top: 2px; }
-  .lrn__row-members { color: var(--muted); font-size: var(--text-xs); margin-top: 4px; }
+  .lrn__row-desc { color: var(--muted); font-size: var(--text-sm); margin-top: var(--space-0-5); }
+  .lrn__row-members { color: var(--muted); font-size: var(--text-xs); margin-top: var(--space-1); }
   /* Failure text must be LOUD: a quiet line under the row reads as "I
      clicked Turn on and nothing happened" (a real field complaint). */
-  .lrn__row-err:not(:empty) { color: var(--danger); font-size: var(--text-sm); font-weight: var(--font-medium); margin-top: 4px; }
+  .lrn__row-err:not(:empty) { color: var(--danger); font-size: var(--text-sm); font-weight: var(--font-medium); margin-top: var(--space-1); }
   .lrn__moat { --glass-tint: var(--brand-subtle); border: 1px solid var(--brand-border); border-radius: var(--radius-md); padding: var(--space-3) var(--space-4); margin-bottom: var(--space-5); }
   .lrn__moat strong { color: var(--brand); }
   .lrn__enable-note { color: var(--muted); font-size: var(--text-sm); margin-top: var(--space-3); }
   #lrn-flows-on { scroll-margin-top: var(--space-7); }
   .lrn__actions { display: flex; gap: var(--space-3); align-items: center; flex-wrap: wrap; margin-bottom: var(--space-3); }
   .lrn [hidden] { display: none !important; }
-  .lrn__tabs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border: 1px solid var(--border); border-radius: var(--radius-md); padding: var(--space-1); margin-block: var(--space-3) var(--space-4); }
-  .lrn__tabs .mv-tab { min-width: 0; min-height: 3rem; margin: 0; padding-inline: var(--space-2); overflow-wrap: anywhere; }
   .lrn__pane { min-width: 0; }
   .lrn__next { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-block: var(--space-4); }
   .lrn__disclosure { margin-block: var(--space-4); }
   .lrn__disclosure > summary { padding-block: var(--space-2); font-weight: var(--font-semibold); cursor: pointer; }
   .lrn__disclosure[open] > summary { margin-bottom: var(--space-3); }
   @media (max-width: 640px) {
-    .lrn__tabs .mv-tab { font-size: var(--text-sm); line-height: 1.35; padding-inline: var(--space-1); }
     .lrn__row { flex-wrap: wrap; align-items: flex-start; padding: var(--space-3); gap: var(--space-2); }
     .lrn__row-main { flex-basis: calc(100% - 5rem); }
     .lrn__row > button { margin-inline-start: auto; }
@@ -71,13 +69,10 @@
   </p>
   {% endif %}
 
-  <div class="mv-tabs lrn__tabs glass-surface" role="tablist" aria-label="Learning sections">
-    <button type="button" class="mv-tab" id="learning-tab-overview" role="tab" aria-selected="true" aria-controls="learning-overview" tabindex="0" data-learning-tab="overview">Overview</button>
-    <button type="button" class="mv-tab" id="learning-tab-controls" role="tab" aria-selected="false" aria-controls="learning-controls" tabindex="-1" data-learning-tab="controls">Learning controls</button>
-    <button type="button" class="mv-tab" id="learning-tab-review" role="tab" aria-selected="false" aria-controls="learning-review" tabindex="-1" data-learning-tab="review">Review &amp; restore</button>
-  </div>
+  {{ panel_tabs('Learning sections', [('overview', 'Overview'), ('controls', 'Learning controls'), ('review', 'Review & restore')], 'overview',
+                data='learning-tab', tab_prefix='learning-tab-', panel_prefix='learning-') }}
 
-  <section id="learning-overview" class="lrn__pane" role="tabpanel" aria-labelledby="learning-tab-overview" tabindex="0">
+  <section class="lrn__pane" {{ tab_panel('overview', 'overview', tab_prefix='learning-tab-', panel_prefix='learning-') }} tabindex="0">
 
   <div class="bd-kpis" id="bd-kpis"></div>
 
@@ -141,10 +136,10 @@
   </div>
   </section>
 
-  <section id="learning-controls" class="lrn__pane" role="tabpanel" aria-labelledby="learning-tab-controls" tabindex="0" hidden>
+  <section class="lrn__pane" {{ tab_panel('controls', 'overview', tab_prefix='learning-tab-', panel_prefix='learning-') }} tabindex="0">
   <div class="lrn__moat">
     <strong>{{ snap.components_on }} of {{ snap.components_total }} core learning components are on.</strong>
-    Every run through Lightwork can teach the workforce — from failures, from consolidation, and from the
+    Every task in Lightwork can teach the workforce — from failures, from consolidation, and from the
     recorded outcomes of its own work. Review each feature below to decide which ones to use.
     <div style="margin-top: var(--space-3); display:flex; gap: var(--space-3); align-items:center;">
       <button type="button" id="lrn-enable" class="btn btn--primary"
@@ -271,7 +266,7 @@
         });
       })();
       </script>
-      <p class="lrn__enable-note">Once outcome tracking is on, every human sign-off on a deliverable
+      <p class="lrn__enable-note">Once outcome tracking is on, every approval a person gives a result
         automatically becomes feedback your workforce learns from — see
         <a href="/workforce">Workforce</a> for what your teams have delivered, and
         <a href="/learned">Learned</a> for capabilities picked up along the way.</p>
@@ -407,7 +402,9 @@
   </details>
   </section>
 
-  <section id="learning-review" class="lrn__pane" role="tabpanel" aria-labelledby="learning-tab-review" tabindex="0" hidden>
+  <section class="lrn__pane" {{ tab_panel('review', 'overview', tab_prefix='learning-tab-', panel_prefix='learning-') }} tabindex="0">
+
+  {% include "_learning_jobs.html" %}
 
   {% if learning_can_manage %}
   <section aria-labelledby="lrn-run-h">
@@ -471,18 +468,12 @@
       lines.forEach(function (t, i) { var p = document.createElement(i ? 'p' : 'p'); p.textContent = t; box.appendChild(p); });
     }
     async function call(method, url, body, action, target) {
-      try {
-        var r = await fetch(url, { method: method, headers: { 'Content-Type': 'application/json' },
-          body: body ? JSON.stringify(body) : undefined });
-        var j = await r.json().catch(function () { return {}; });
-        if (!r.ok) {
-          var text = ([404, 409, 422, 503].indexOf(r.status) >= 0 && window.mvPlainDetail(j.detail))
-            || window.mvErrorText(r, action);
-          if (target) show(target, [text]); else window.mvToast(text, { error: true });
-          return null;
-        }
-        return j;
-      } catch (e) { var t = window.mvErrorText(e, action); if (target) show(target, [t]); else window.mvToast(t, { error: true }); return null; }
+      try { return (await window.mvFetchJSON(url, { method: method, body: body || undefined }, action)) || {}; }
+      catch (e) {
+        var text = ([404, 409, 422, 503].indexOf(e.status) >= 0 && window.mvPlainDetail(e.detail)) || e.message;
+        if (target) show(target, [text]); else window.mvToast(text, { error: true });
+        return null;
+      }
     }
     function plural(n, one, many) { return n + ' ' + (n === 1 ? one : many); }
     function dreamLines(d) {
@@ -644,7 +635,8 @@
           'This comparison does not establish that learning caused the difference.']);
       } finally { ev.target.disabled = false; }
     });
-    loadSnapshots();
+    // The shell's helpers (lightwork-ui.js) load after the page content.
+    if (window.mvFetchJSON) loadSnapshots(); else document.addEventListener('DOMContentLoaded', loadSnapshots);
   })();
   </script>
   {% endif %}
@@ -858,7 +850,7 @@
     k.appendChild(B.kpi({ label: 'Human decisions', value: acc.human_decisions,
       sub: 'approvals: ' + B.fmt(acc.approvals) }));
     k.appendChild(B.kpi({ label: 'Learned capabilities', value: learned === null ? 'Not available' : learned,
-      sub: grounded === null ? 'A current count could not be confirmed.' : B.fmt(grounded) + ' results checked against real outcomes' }));
+      sub: grounded === null ? 'A current count could not be confirmed. Refresh the page and try again.' : B.fmt(grounded) + ' results checked against real outcomes' }));
 
     B.donut(document.getElementById('bd-systems'), {
       segments: [
@@ -895,9 +887,36 @@
 </script>
 
   <div data-learning-group="review">
+  {# Per-specialist and per-agent ratings and the reasons people picked on a thumbs-down. Written
+     comments stay with the person and their task, so they are not listed. #}
+  <div class="section-head"><h2 id="agent-feedback-title">What people said about each agent and specialist</h2></div>
+  <section class="panel" id="agent-feedback" aria-labelledby="agent-feedback-title">
+    {% if agent_feedback %}
+    <div class="fa-scroll">
+      <table>
+        <thead><tr><th scope="col">Agent or specialist</th><th scope="col">Useful</th><th scope="col">Not useful</th><th scope="col">Reasons picked</th><th scope="col">Most recent reasons</th></tr></thead>
+        <tbody>
+        {% for row in agent_feedback %}
+          <tr>
+            <th scope="row">{% if row.agent %}<a href="/agents?name={{ row.agent | urlencode }}">{{ row.title }}</a>{% else %}{{ row.title }}{% endif %}</th>
+            <td>{{ row.up }}</td>
+            <td>{{ row.down }}</td>
+            <td>{% if row.reasons %}{% for item in row.reasons %}{{ item.label }} ({{ item.count }}){% if not loop.last %}, {% endif %}{% endfor %}{% else %}<span class="muted">None picked</span>{% endif %}</td>
+            <td>{% if row.recent %}{% for item in row.recent %}{{ item.label }} <span class="muted">{{ item.ts | datetime }}</span>{% if not loop.last %}; {% endif %}{% endfor %}{% else %}<span class="muted">None yet</span>{% endif %}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <p class="muted">Counts use each person's latest rating of an answer. People can add a written comment to a thumbs-down; it stays with them and their task and is not shown here.</p>
+    {% else %}
+    <p class="muted">No one has rated an answer yet. When people press thumbs up or down on an answer, each agent's and specialist's ratings and the reasons they picked appear here.</p>
+    {% endif %}
+  </section>
+
   <div class="section-head"><h2 id="fa-flywheel-title">What Lightwork learned from results</h2></div>
   <section class="panel" aria-labelledby="fa-flywheel-title">
-    <p class="muted" id="fa-flywheel-status" role="status" aria-live="polite">Loading…</p>
+    <p class="muted" id="fa-flywheel-status">Loading…</p>
     <div id="fa-flywheel"></div>
   </section>
   <div data-fa-needs="installation_admin" hidden>
@@ -961,18 +980,13 @@
         if (target !== pane) target.scrollIntoView({block: 'start'});
       }
     }
-    tabs.forEach(function (tab, index) {
-      function activate(name, focus) {
-        select(name, focus);
-        if (window.history && window.history.pushState) window.history.pushState(null, '', '#learning-' + name);
-      }
-      tab.addEventListener('click', function () { activate(tab.dataset.learningTab, false); });
-      tab.addEventListener('keydown', function (event) {
-        var position = event.key === 'ArrowRight' ? (index + 1) % tabs.length :
-          event.key === 'ArrowLeft' ? (index + tabs.length - 1) % tabs.length :
-          event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1 : -1;
-        if (position < 0) return;
-        event.preventDefault(); activate(tabs[position].dataset.learningTab, true);
+    // Each tab is a Back step (#learning-<name>). The shared tab bar
+    // (lightwork-tabs.js) gives the arrow, Home and End keys; they select
+    // through a click, so both arrive here.
+    tabs.forEach(function (tab) {
+      tab.addEventListener('click', function () {
+        select(tab.dataset.learningTab, false);
+        if (window.history && window.history.pushState) window.history.pushState(null, '', '#learning-' + tab.dataset.learningTab);
       });
     });
     window.addEventListener('hashchange', openHash);

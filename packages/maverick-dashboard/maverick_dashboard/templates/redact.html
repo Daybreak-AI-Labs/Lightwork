@@ -76,7 +76,7 @@
       } catch (e) {
         badge.className = "badge failure";
         badge.textContent = "Can't reach Lightwork. Check your connection and try again.";
-        mvToast("Could not check the text — Lightwork can't be reached.", { error: true });
+        mvToast("Could not check the text — Lightwork can't be reached. Check your connection and try again.", { error: true });
       } finally {
         inflight = false;
         previewBtn.disabled = false; previewBtn.removeAttribute("aria-busy");

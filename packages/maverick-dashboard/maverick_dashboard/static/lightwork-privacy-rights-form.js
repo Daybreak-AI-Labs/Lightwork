@@ -19,9 +19,7 @@
     text(el, window.mvErrorText ? window.mvErrorText(failure, action) : 'Could not ' + action + '. Please try again.');
   }
   function call(method, url, body) {
-    var opts = { method: method, credentials: 'same-origin', headers: { Accept: 'application/json' } };
-    if (body !== undefined) { opts.headers['Content-Type'] = 'application/json'; opts.body = JSON.stringify(body); }
-    return fetch(url, opts).then(function (r) { if (!r.ok) throw r; return r.status === 204 ? null : r.json(); });
+    return window.mvFetchJSON(url, { method: method, body: body });
   }
   function el(tag, attrs, children) {
     var node = doc.createElement(tag);
@@ -101,7 +99,7 @@
       if (canAdmin) {
         var del = el('button', { type: 'button', class: 'btn btn--danger', text: 'Delete' });
         del.addEventListener('click', function () {
-          var ask = window.mvConfirm ? window.mvConfirm('Delete the form for ' + p.name + '? Its page stops working immediately.', { okText: 'Delete' }) : Promise.resolve(window.confirm('Delete ' + p.name + '?'));
+          var ask = window.mvConfirm ? window.mvConfirm('Delete the form for ' + p.name + '? Its page stops working immediately.', { okText: 'Delete form' }) : Promise.resolve(window.confirm('Delete ' + p.name + '?'));
           ask.then(function (ok) { if (!ok) return; return call('DELETE', BASE + '/properties/' + encodeURIComponent(p.slug)).then(loadProperties); })
             .catch(function (f) { fail(status, f, 'delete the property'); });
         });

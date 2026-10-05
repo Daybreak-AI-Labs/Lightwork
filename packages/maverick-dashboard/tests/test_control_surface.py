@@ -300,6 +300,6 @@ def test_index_empty_state_shows_hero(monkeypatch, tmp_path):
     client = _client()
     r = client.get("/overview")
     text = r.text
-    assert "Start your first goal" in text
+    assert "Start your first task" in text
     # The 4-zeros graveyard should be absent on a fresh install.
     assert text.count('class="num"') == 0

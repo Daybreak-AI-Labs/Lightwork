@@ -87,7 +87,8 @@ def test_settings_has_bounded_sections_keyboard_tabs_and_search(monkeypatch, tmp
     for group in ("general", "models", "integrations", "controls", "access", "maintenance"):
         assert f'data-settings-tab="{group}"' in text
         assert f'data-settings-group="{group}"' in text
-    assert "ArrowRight" in text and "ArrowLeft" in text
+    # The arrow, Home and End keys come from the shared tab bar's script.
+    assert 'data-mv-tabs="panels"' in text and '<script src="/static/lightwork-tabs.js" defer></script>' in text
     assert "applySearch" in text
     assert "data-settings-search-item" in text
 
@@ -128,6 +129,66 @@ def test_settings_returns_to_section_that_was_saved(monkeypatch, tmp_path):
     _prep(monkeypatch, tmp_path)
     text = _client().get("/settings", params={"saved": "providers"}).text
     assert 'data-initial-group="integrations"' in text
+
+
+_GROUPS = ("general", "models", "integrations", "controls", "access", "maintenance")
+
+
+def _first_paint_state(text):
+    """What the page shows before its scripts run: the group the sections
+    element names (a rule parsed before the sections hides every other
+    group's headings and panels) and the tab marked selected."""
+    import re
+
+    before, after = text.split('<div id="settings-sections"', 1)
+    active = re.match(r'\s+data-settings-active="(\w+)"', after)
+    assert active is not None, after[:200]
+    for group in _GROUPS:
+        rule = (f'#settings-sections[data-settings-active="{group}"] '
+                f'[data-settings-group]:not([data-settings-group="{group}"])')
+        assert rule in before, f"no first-paint rule for {group}"
+    assert re.search(r'\[data-settings-group="maintenance"\]\)\s*\{\s*display:\s*none;\s*\}', before)
+    # No node is hidden or shown by the server any other way.
+    assert not re.search(r'data-settings-group="\w+"[^>]*\shidden[\s>]', after)
+    selected = re.findall(r'role="tab" data-settings-tab="(\w+)" aria-selected="true" tabindex="0"', text)
+    unselected = re.findall(r'role="tab" data-settings-tab="(\w+)" aria-selected="false" tabindex="-1"', text)
+    return active.group(1), selected, unselected
+
+
+def test_settings_paints_one_group_and_its_tab_before_any_script(monkeypatch, tmp_path):
+    """All six groups used to paint and then five were hidden by the page
+    script (layout shift 0.41-0.77 on Settings): the server now decides."""
+    _prep(monkeypatch, tmp_path)
+    active, selected, unselected = _first_paint_state(_client().get("/settings").text)
+    assert active == "general"
+    assert selected == ["general"]
+    assert sorted(unselected) == sorted(set(_GROUPS) - {"general"})
+
+
+def test_saved_section_is_the_group_painted_first(monkeypatch, tmp_path):
+    _prep(monkeypatch, tmp_path)
+    active, selected, unselected = _first_paint_state(
+        _client().get("/settings", params={"saved": "visibility"}).text)
+    assert active == selected[0] == "access" and len(selected) == 1
+    assert len(unselected) == 5
+
+
+def test_group_named_in_the_address_is_applied_before_the_sections_paint(monkeypatch, tmp_path):
+    """The server cannot see #settings-access; a small script placed before the
+    first section names that group, so a deep link paints it directly."""
+    _prep(monkeypatch, tmp_path)
+    text = _client().get("/settings").text
+    sections = text.index('<div id="settings-sections"')
+    first_node = text.index("data-settings-group=", sections)
+    early = text[sections:first_node]
+    assert "<script>" in early and "window.mvSettingsGroupFor" in early
+    assert "dataset.settingsActive" in early
+    # The page script hands the painted state to the tabs instead of
+    # repainting it, and keeps following later address changes.
+    page_script = text[first_node:]
+    assert "removeAttribute('data-settings-active')" in page_script
+    assert "window.mvSettingsGroupFor ||" in page_script
+    assert page_script.count("groupFor(window.location.hash)") == 2  # on load and on hashchange
 
 
 def test_set_and_clear_default_model(monkeypatch, tmp_path):

@@ -266,6 +266,6 @@ def test_authenticated_ui_uses_resolved_shared_token_names() -> None:
     }
     assert offenders == {}
 
-    for token in ("--warn", "--font-serif", "--font-mono"):
+    for token in ("--warn", "--font-sans", "--font-mono"):
         assert re.search(rf"{re.escape(token)}\s*:", shared_css), token
         assert any(f"var({token})" in source for source in sources.values()), token

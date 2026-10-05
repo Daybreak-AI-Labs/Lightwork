@@ -31,7 +31,7 @@
       throw failure("Server response exceeded the 64 KiB safety limit.", "response_too_large", response.status);
     }
     if (!response.body || typeof response.body.getReader !== "function") {
-      throw failure("Server response stream is unavailable.", "response_stream_unavailable", response.status);
+      throw failure("The reply could not be read. Refresh the page and try again.", "response_stream_unavailable", response.status);
     }
     var reader = response.body.getReader();
     var chunks = [];
@@ -65,7 +65,7 @@
     if (!response.ok) {
       var detail = payload && typeof payload.detail === "string"
         ? payload.detail.slice(0, 500)
-        : "Consent bulk-job request failed.";
+        : "The bulk request didn't work. Refresh the page and try again.";
       if (response.status === 422 && payload && Array.isArray(payload.detail)) {
         var invalidField = payload.detail.find(function (issue) {
           return issue && Array.isArray(issue.loc) && issue.loc[0] === "body" &&
@@ -160,9 +160,9 @@
     var region = String(selected.region_code || "");
     var source = String(selected.asserted_source || "operator");
     if (!/^[A-Z]{2}$/.test(country) || !/^(?:[A-Z0-9]{1,8}(?:-[A-Z0-9]{1,8}){0,2})?$/.test(region)) {
-      throw failure("Context country or region code is invalid.", "invalid_input");
+      throw failure("Context country or region code is invalid. Use a two-letter code such as US or FR.", "invalid_input");
     }
-    if (!SOURCES.has(source)) { throw failure("Context source is invalid.", "invalid_input"); }
+    if (!SOURCES.has(source)) { throw failure("Context source is invalid. Choose a source from the list.", "invalid_input"); }
     return {
       jurisdiction: identifier(selected.jurisdiction, "Jurisdiction"),
       country_code: country,
@@ -183,7 +183,7 @@
         ["channel", "vendor_id", "expires_at"],
         "Choice " + (index + 1)
       );
-      if (!ACTIONS.has(item.action)) { throw failure("Choice action is invalid.", "invalid_input"); }
+      if (!ACTIONS.has(item.action)) { throw failure("Choice action is invalid. Refresh the page and try again.", "invalid_input"); }
       return {
         purpose_id: identifier(item.purpose_id, "Purpose ID"),
         action: item.action,
@@ -269,7 +269,7 @@
       } else if (operation === "change_identifier_type") {
         item = exactShape(rawItem, ["item_id", "profile_id", "expected_revision", "identity_kind", "subject_sha256"], [], label);
         if (item.identity_kind !== "known" && item.identity_kind !== "anonymous") {
-          throw failure("Identity kind is invalid.", "invalid_input");
+          throw failure("Identity kind is invalid. Choose an identity type from the list.", "invalid_input");
         }
         if (!DIGEST_PATTERN.test(String(item.subject_sha256 || ""))) {
           throw failure("Subject digest must be lowercase SHA-256.", "invalid_input");
@@ -519,7 +519,7 @@
         if (older) older.hidden = !jobsNext;
         if ($('cbj-jobs-page')) $('cbj-jobs-page').textContent = before ? 'Older jobs. Select Latest jobs to return to new work.' : 'Latest jobs.';
         CW.table($("cbj-job-list"), state.jobs, {
-          label: "Jobs", name: function (j) { return WHAT[j.operation] || CW.human(j.operation); },
+          label: "Bulk change", name: function (j) { return WHAT[j.operation] || CW.human(j.operation); },
           columns: [
             { label: "What", value: function (j) { return WHAT[j.operation] || CW.human(j.operation); } },
             { label: "People", value: function (j) { return String(j.total_items); } },
@@ -539,11 +539,11 @@
             { label: "Run one part", when: function (j) { return canAdmin && (j.state === 'queued' || j.state === 'running') && !j.cancel_requested; }, run: function (j, b) { handle(b, function (disableControls) { return runPart(j, disableControls); }); } },
             { label: "Cancel", kind: "danger", when: function (j) { return canAdmin && (j.state === "queued" || j.state === "running") && !j.cancel_requested; }, run: function (j, b) { handle(b, function (disableControls) { return cancelJob(j, disableControls); }); } }
           ],
-          empty: { title: "No jobs yet.", body: "Start a bulk change to export or change many people’s consent records at once.", action: canAdmin ? { label: "Start a bulk change", run: openCreate } : null }
+          empty: { title: "No bulk changes yet.", body: "Start a bulk change to export or change many people’s consent records at once.", action: canAdmin ? { label: "Start a bulk change", run: openCreate } : null }
         });
       } catch (error) {
         if (generation !== jobsLoading) return;
-        fail(error, 'load the jobs');
+        fail(error, 'load the bulk changes');
       } finally {
         if (generation === jobsLoading) {
           if (older) older.disabled = false;
@@ -555,7 +555,7 @@
     async function showDetail(job, focus) {
       var generation = ++detailGeneration;
       var body = $("cbj-detail-body");
-      $("cbj-detail-title").textContent = WHAT[job.operation] || "Job details";
+      $("cbj-detail-title").textContent = WHAT[job.operation] || "Bulk change details";
       body.replaceChildren(CW.el("p", "muted", "Loading…"));
       $("cbj-detail").hidden = false;
       try {
@@ -611,11 +611,11 @@
         if (focus !== false) CW.open($("cbj-detail"), null);
       } catch (error) {
         if (generation !== detailGeneration) return;
-        selectJob(null); body.replaceChildren(CW.el("p", "danger-text", CW.errorText(error, "load the job details")));
+        selectJob(null); body.replaceChildren(CW.el("p", "danger-text", CW.errorText(error, "load the bulk change details")));
       }
     }
     async function runPart(job, disableControls) {
-      if (!(await CW.confirm('Run one part of this reviewed job? It may change or erase consent information. Remaining parts do not start automatically, and completed changes stay applied.', 'Run one part'))) return;
+      if (!(await CW.confirm('Run one part of this reviewed bulk change? It may change or erase consent information. Remaining parts do not start automatically, and completed changes stay applied.', 'Run one part'))) return;
       disableControls();
       try {
         var result = await api('/' + encodeURIComponent(job.job_id) + '/run', {method:'POST', body:{expected_revision:job.revision}});
@@ -629,7 +629,7 @@
       } finally { await Promise.all([refreshJobs(), refreshCredit()]); }
     }
     async function runJob(job, disableControls) {
-      if (!(await CW.confirm("Run this reviewed job to completion? It may change or delete people’s consent records. Keep this page open. You can pause before the next part; completed changes stay applied.", "Run now"))) return;
+      if (!(await CW.confirm("Run this reviewed bulk change to completion? It may change or delete people’s consent records. Keep this page open. You can pause before the next part; completed changes stay applied.", "Run now"))) return;
       disableControls();
       var paused = false, current = job, panel = CW.el('section', 'panel');
       panel.appendChild(CW.el('h3', '', 'Processing your reviewed job'));
@@ -668,7 +668,7 @@
       }
     }
     async function cancelJob(job, disableControls) {
-      if (!(await CW.confirm("Cancel this job? Changes already made are not undone.", "Cancel job"))) return;
+      if (!(await CW.confirm("Cancel this bulk change? Changes already made are not undone.", "Cancel bulk change"))) return;
       disableControls();
       try {
         await api("/" + encodeURIComponent(job.job_id) + "/cancel", { method: "POST", body: { expected_revision: job.revision, idempotency_key: CW.reference() } });
@@ -1015,7 +1015,7 @@
         var items = await buildItems(op);
         var itemsJson = JSON.stringify(items);
         if (items.length > MAX_UI_ITEMS || new TextEncoder().encode(itemsJson).byteLength > MAX_JSON_INPUT_BYTES) {
-          say("That is too many records for one job. Choose fewer people and start another job for the rest.", true);
+          say("That is too many records for one bulk change. Choose fewer people and start another bulk change for the rest.", true);
           return;
         }
         var values = { items_json: itemsJson, idempotency_key: form.elements.idempotency_key.value, scheduled_for: whenValue() };
@@ -1038,7 +1038,7 @@
       } catch (error) {
         if (error && error.plain) { say(error.plain, true); return; }
         if (error && error.code === "invalid_input") { say("Some of the details could not be used. Check your choices and try again.", true); return; }
-        fail(error, "start the job");
+        fail(error, "start the bulk change");
       }
     }
     $("cbj-start-reviewed").addEventListener("click", function (event) {
@@ -1084,7 +1084,7 @@
         var credit = await api("/credits/detail");
         if (privatePeopleCleared) return;
         state.credit = credit;
-        $("cbj-credit-detail").textContent = credit.available + " records can still be processed (" + credit.reserved + " set aside for waiting jobs, " + credit.consumed + " used).";
+        $("cbj-credit-detail").textContent = credit.available + " records can still be processed (" + credit.reserved + " set aside for waiting bulk changes, " + credit.consumed + " used).";
       } catch (error) { CW.fail($("cbj-credit-detail"), error, "load the allowance"); }
     }
     var pendingAllowance = null, allowanceKey = recoveryKey ? recoveryKey + ':allowance' : '';
@@ -1179,18 +1179,18 @@
     $("cbj-add-credits").addEventListener("click", function (event) { handle(event.currentTarget, addCredits); });
     $("cbj-run-next").addEventListener("click", function (event) {
       handle(event.currentTarget, async function (disableControls) {
-        if (!(await CW.confirm("Run the next job that is due now? It may change or delete people’s consent records.", "Run next job"))) return;
+        if (!(await CW.confirm("Run the next bulk change that is due now? It may change or delete people’s consent records.", "Run next change"))) return;
         disableControls();
-        try { await api("/worker/run-next", { method: "POST", body: {} }); say("The next due job ran."); await refreshJobs(); }
-        catch (error) { fail(error, "run the next job"); }
+        try { await api("/worker/run-next", { method: "POST", body: {} }); say("The next due bulk change ran."); await refreshJobs(); }
+        catch (error) { fail(error, "run the next bulk change"); }
       });
     });
     $("cbj-recover").addEventListener("click", function (event) {
       handle(event.currentTarget, async function (disableControls) {
-        if (!(await CW.confirm("Restart jobs that stopped part-way? They will carry on from where they stopped.", "Restart"))) return;
+        if (!(await CW.confirm("Restart bulk changes that stopped part-way? They will carry on from where they stopped.", "Restart"))) return;
         disableControls();
-        try { await api("/operations/recover", { method: "POST", body: { limit: 100 } }); say("Stuck jobs restarted."); await refreshJobs(); }
-        catch (error) { fail(error, "restart stuck jobs"); }
+        try { await api("/operations/recover", { method: "POST", body: { limit: 100 } }); say("Stuck bulk changes restarted."); await refreshJobs(); }
+        catch (error) { fail(error, "restart stuck bulk changes"); }
       });
     });
     $("cbj-verify-integrity").addEventListener("click", function (event) {
@@ -1210,17 +1210,17 @@
       try {
         var due = await api("/operations/retention?limit=500&before=" + encodeURIComponent(String(before)));
         var count = (due.jobs || due.items || []).length;
-        if (!count) { say("No finished jobs reached the end of their keeping period before " + CW.when(before) + "."); return; }
-        if (!(await CW.confirm("Permanently delete " + count + " finished jobs from before " + CW.when(before) + "? They cannot be recovered.", "Delete"))) return;
+        if (!count) { say("No finished bulk changes reached the end of their keeping period before " + CW.when(before) + "."); return; }
+        if (!(await CW.confirm("Permanently delete " + count + " finished bulk changes from before " + CW.when(before) + "? They cannot be recovered.", "Delete"))) return;
         disableControls();
         await api("/operations/retention/purge", { method: "POST", body: { before: before, limit: 500 } });
-        say("Old jobs deleted."); await refreshJobs();
-      } catch (error) { fail(error, "delete old jobs"); }
+        say("Old bulk changes deleted."); await refreshJobs();
+      } catch (error) { fail(error, "delete old bulk changes"); }
     }
 
     refreshStatus().then(function (ready) {
       if (!ready) {
-        $("cbj-job-list").replaceChildren(CW.el("p", "muted", "Jobs appear here once bulk changes are set up."));
+        $("cbj-job-list").replaceChildren(CW.el("p", "muted", "Bulk changes appear here once they are set up."));
         $("cbj-credit-detail").textContent = "";
         return null;
       }

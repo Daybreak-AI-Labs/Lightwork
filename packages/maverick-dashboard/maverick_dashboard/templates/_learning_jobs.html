@@ -1,0 +1,17 @@
+<section class="panel" id="learning-job-history" aria-labelledby="learning-job-title">
+  <h2 id="learning-job-title">Your recent learning tasks</h2>
+  <p class="muted">Return to work you started here, read its recorded progress, or request a stop where supported. Completed work is kept. Reading a result never starts or repeats a task.</p>
+  <div class="stack">
+    <label for="learning-job-choice">Learning task</label>
+    <select class="select" id="learning-job-choice"><option value="">Reading your retained tasks…</option></select>
+    <div class="actions"><button class="btn btn--ghost" id="learning-job-refresh" type="button">Refresh retained tasks</button></div>
+    <p class="muted" id="learning-job-status" role="status" aria-live="polite"></p>
+    <div id="learning-job-result"></div>
+    <button class="btn btn--ghost" id="learning-job-stop" type="button" disabled>Review a stop</button>
+    <div id="learning-job-review"></div>
+    <button class="btn btn--ghost" id="learning-job-original" type="button" hidden>Check original stop outcome</button>
+    <p id="learning-job-original-status" role="status" aria-live="polite"></p>
+    <p class="muted">Up to 40 recent tasks remain in this running Lightwork process. After a restart or removal of older records, the original outcome can be unavailable. That does not mean the work failed; do not repeat it automatically.</p>
+  </div>
+</section>
+<script src="/static/lightwork-learning-jobs.js" defer></script>

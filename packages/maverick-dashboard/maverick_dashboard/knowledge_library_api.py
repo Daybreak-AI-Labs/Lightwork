@@ -185,20 +185,20 @@ def reindex_action(request: Request, job_id: str, action: str, body: JobActionIn
     from maverick.knowledge_reindex_jobs import archive, cancel, list_jobs
     _reindex_authority(request, body.context)
     if not body.confirmed:
-        raise HTTPException(400, "Review this job before choosing an action.")
+        raise HTTPException(400, "Review this rebuild before choosing an action.")
     if action in {"cancel", "archive"}:
         try:
             function = archive if action == "archive" else cancel
             return {"context": body.context, "job": function(body.context, job_id)}
         except (FileNotFoundError, ValueError) as exc:
-            raise HTTPException(404, "This rebuild job is not available here.") from exc
+            raise HTTPException(404, "This rebuild is not available here. Refresh the list to see the latest.") from exc
     if action != "resume":
         raise HTTPException(404, "Choose a supported rebuild action.")
     job = next((row for row in list_jobs(body.context) if row["job_id"] == job_id), None)
     if job is None:
-        raise HTTPException(404, "This rebuild job is not available here.")
+        raise HTTPException(404, "This rebuild is not available here. Refresh the list to see the latest.")
     if job["state"] not in {"queued", "running", "publishing"}:
-        raise HTTPException(409, "This job has stopped. Review the collection before starting a new rebuild.")
+        raise HTTPException(409, "This rebuild has stopped. Review the collection before starting a new rebuild.")
     background_tasks.add_task(_run_reindex, request, body.context, job_id)
     return {"context": body.context, "job": job}
 

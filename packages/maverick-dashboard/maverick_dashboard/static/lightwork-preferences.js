@@ -10,7 +10,7 @@
   function appendCopy(node,source,values){var span=document.createElement('span');copy(span,source,values);node.append(' ',span);}
   function knownError(error,fallback){var message=error&&error.message;return window.LightworkI18n&&window.LightworkI18n.has(message)?message:fallback;}
   function sourceLabel(source){return text({'personal':'Personal','workspace':'Workspace','organization':'Organization','conversation':'Conversation','product default':'Product default','installation settings':'Installation settings','organization style':'Organization style','organization policy':'Organization policy'}[source]||source);}
-  function fieldLabel(key){return text({preferred_name:'What Lightwork calls you',tone:'Writing tone',verbosity:'Detail',language:'Response language',interface_language:'Interface language',output_style:'Output style',custom_style_name:'Style name',custom_style:'Style guidance',start_page:'Starting page',theme:'Theme',font:'Font',density:'Page spacing',text_size:'Text size',favorites:'Pinned pages',today_days:'Today period',today_cards:'Today cards',conversation_mode:'While a task runs',conversation_detail:'Inbox detail'}[key]||key);}
+  function fieldLabel(key){return text({preferred_name:'What Lightwork calls you',tone:'Writing tone',verbosity:'Detail',language:'Response language',interface_language:'Interface language',output_style:'Output style',custom_style_name:'Style name',custom_style:'Style guidance',start_page:'Starting page',navigation:'Sidebar',theme:'Theme',font:'Font',density:'Page spacing',text_size:'Text size',glass:'Glass effects',favorites:'Pinned pages',today_days:'Today period',today_cards:'Today cards',conversation_mode:'While a task runs',conversation_detail:'Inbox detail'}[key]||key);}
   var changes = {}, pins = [], busy = false;
   var compare = document.getElementById('preference-compare');
   function renderPins() {
@@ -77,7 +77,7 @@
   form.querySelectorAll('[data-inherit-list]').forEach(function (button) { button.addEventListener('click', function () { if (scope.value !== 'personal') return; changes[button.dataset.inheritList] = null; copy(status,'Product default selected for {preference}. Review and save to apply it.',{preference:fieldLabel(button.dataset.inheritList)}); }); });
   var previousScope = scope.value;
   scope.addEventListener('change', async function () {
-    if (Object.keys(changes).length && !(await window.mvConfirm('Discard these preference drafts before changing scope?',{productCopy:true}))) { scope.value = previousScope; return; }
+    if (Object.keys(changes).length && !(await window.mvConfirm('Discard these preference drafts before changing scope? Unsaved changes are lost.',{productCopy:true,okText:'Discard drafts'}))) { scope.value = previousScope; return; }
     previousScope = scope.value; render();
   });
   var add = document.getElementById('pin-add'); if (add) add.addEventListener('click', function () {
@@ -114,7 +114,7 @@
     busy = true;
     try {
       var response = await fetch('/api/v1/preferences' + (thread ? '?thread=' + encodeURIComponent(thread) : ''), {cache:'no-store'});
-      if (!response.ok) throw new Error('Current preferences could not be read. Your draft remains available.');
+      if (!response.ok) throw new Error('Current preferences could not be read. Your draft remains available. Refresh the page and try again.');
       var current = await response.json(), draft = Object.assign({}, changes);
       if (current.context !== model.context) throw new Error('Your account or workspace changed. Save this draft separately before reloading.');
       var locked = Object.keys(draft).filter(function (key) { return current.locked.indexOf(key) !== -1; });
@@ -123,7 +123,7 @@
       locked.forEach(function (key) { delete draft[key]; });
       model = current; render(); applyDraft(draft);
       window.LightworkI18n ? window.LightworkI18n.set(status, 'Current values loaded. Review and save your remaining draft when ready.') : copy(status,'Current values loaded. Review and save your remaining draft when ready.');
-    } catch (failure) { copy(status,knownError(failure,'Current preferences could not be read. Your draft remains available.')); }
+    } catch (failure) { copy(status,knownError(failure,'Current preferences could not be read. Your draft remains available. Refresh the page and try again.')); }
     finally { busy = false; renderPins(); }
   });
   form.addEventListener('submit', async function (event) {
@@ -146,7 +146,7 @@
         var revision = document.querySelector('meta[name="lightwork-preference-revision"]');
         if (revision) revision.content = model.revision;
         Object.keys(submitted).forEach(function (key) {
-          if (['theme','font','density','text_size','interface_language'].indexOf(key) === -1) return;
+          if (['theme','font','density','text_size','glass','interface_language'].indexOf(key) === -1) return;
           if (key!=='interface_language'&&window.mvApplyDisplayPreference) window.mvApplyDisplayPreference(key, model.values[key]);
           var picker = document.querySelector('[data-ui-preference="' + key + '"]');
           if (picker) {picker.value=model.values[key];picker.dataset.savedValue=model.values[key];}
@@ -167,12 +167,12 @@
     if (busy) return; busy = true; profileBusy(true);
     try {
       var response = await fetch('/api/v1/preferences/profile', {cache:'no-store'}), data = await response.json();
-      if (!response.ok) throw new Error(typeof data.detail === 'string' ? data.detail : 'Profile could not be exported.');
+      if (!response.ok) throw new Error(typeof data.detail === 'string' ? data.detail : 'Profile could not be exported. Try again.');
       var url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], {type:'application/json'}));
       var link = document.createElement('a'); link.href = url; link.download = 'lightwork-personal-style-profile.json'; link.click();
       setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
       copy(profileStatus,'Saved preferences exported. Unsaved drafts were excluded.');if(data.excluded.length)appendCopy(profileStatus,'Credential-like guidance was omitted: {fields}.',{fields:data.excluded.map(fieldLabel).join(', ')});
-    } catch (error) { copy(profileStatus,knownError(error,'Profile could not be exported.')); }
+    } catch (error) { copy(profileStatus,knownError(error,'Profile could not be exported. Try again.')); }
     finally { busy = false; profileBusy(false); }
   });
   if (importButton) importButton.addEventListener('click', async function () {
@@ -181,17 +181,17 @@
     var input = document.getElementById('personal-profile-file'), file = input.files[0];
     if (!file) { copy(profileStatus,'Choose a profile file first.'); return; }
     if (file.size > 262144) { copy(profileStatus,'Use a profile smaller than 256 KB.'); return; }
-    if (Object.keys(changes).length && !(await window.mvConfirm('Replace your current preference draft with this profile? Nothing saved will change until review.',{productCopy:true}))) return;
+    if (Object.keys(changes).length && !(await window.mvConfirm('Replace your current preference draft with this profile? Nothing saved will change until review.',{productCopy:true,okText:'Replace draft'}))) return;
     busy = true; profileBusy(true); form.inert = true;
     try {
       var response = await fetch('/api/v1/preferences/profile/import', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({profile:JSON.parse(await file.text())})});
       var data = await response.json();
-      if (!response.ok) throw new Error(typeof data.detail === 'string' ? data.detail : 'This profile could not be loaded.');
+      if (!response.ok) throw new Error(typeof data.detail === 'string' ? data.detail : 'This profile could not be loaded. Refresh the page and try again.');
       if (data.state.context !== model.context) throw new Error('Your account or workspace changed. Reload before importing.');
       model = data.state; render(); applyDraft(data.changes);
       copy(profileStatus,'Profile loaded as a personal draft. Review the before/after changes and save when ready.');
       form.inert = false; form.querySelector('[type="submit"]').focus();
-    } catch (error) { copy(profileStatus,knownError(error,'This profile could not be loaded.')); }
+    } catch (error) { copy(profileStatus,knownError(error,'This profile could not be loaded. Refresh the page and try again.')); }
     finally { busy = false; profileBusy(false); form.inert = false; renderPins(); }
   });
   window.addEventListener('beforeunload', function (event) { if (Object.keys(changes).length) { event.preventDefault(); event.returnValue = ''; } });

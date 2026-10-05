@@ -4,6 +4,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const { JSDOM } = require("jsdom");
+const {shell} = require('./_shell');
 
 const dir = path.resolve(__dirname, "../../maverick_dashboard");
 const helpers = fs.readFileSync(path.join(dir, "static/lightwork-record-workflows.js"), "utf8");
@@ -30,6 +31,7 @@ async function fixture({ canCreate = false, forms = [] } = {}) {
     if (url.endsWith("/scoping/records")) return json({ scopes: [{ scope_id: "scope-1", status: "finalized", frameworks: ["framework-eu-privacy"], controls: 3, revision: 4 }] });
     return json({});
   };
+  shell(window);
   window.eval(helpers);
   window.eval(source);
   const settle = async () => { for (let i = 0; i < 30; i++) await new Promise((d) => setImmediate(d)); };
@@ -40,7 +42,7 @@ async function fixture({ canCreate = false, forms = [] } = {}) {
 test("final scopes and plans load with row buttons; task creation hides when not connected", async (t) => {
   const ui = await fixture();
   t.after(() => ui.window.close());
-  assert.match(ui.doc.getElementById("csa-scopes").textContent, /Eu privacy.*Propose tasks/);
+  assert.match(ui.doc.getElementById("csa-scopes").textContent, /EU privacy.*Propose tasks/);
   const plans = ui.doc.getElementById("csa-plans").textContent;
   assert.match(plans, /Approved/);
   assert.doesNotMatch(plans, /Create the tasks/);

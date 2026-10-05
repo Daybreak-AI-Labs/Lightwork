@@ -44,14 +44,17 @@ function fixture(name) {
     .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '')
     .replace(/{% if not (?:contracts_[a-z_]+|inventory_can_[a-z]+) %}[\s\S]*?{% endif %}/g, '')
     .replace(/{%-?[\s\S]*?-?%}/g, '').replace(/{{[\s\S]*?}}/g, '');
-  return {...def, markup, css: read('static/lightwork.css'), reveal: reveal[0],
+  // shell: the whole of lightwork-ui.js, which base.html loads before page
+  // scripts (mvFetchJSON, mvStatus, mvErrorText as well as mvReveal).
+  return {...def, markup, css: read('static/lightwork.css'), reveal: reveal[0], shell: shared,
     helpers: read('static/lightwork-record-workflows.js'), source: read('static/lightwork-' + def.controller + '.js')};
 }
 
 function reply(name, pathname, method = 'GET') {
   if (pathname === '/api/v1/vendors') return {vendors: [{id: 'vend-acme', name: 'Acme Corp'}]};
   if (pathname === '/api/v1/choices/people') return {people: [{value: 'user:ann@example.com', label: 'Ann'}]};
-  if (pathname.endsWith('/people')) return {me: ME, items: [{value: ME, label: 'Me'}]};
+  // Named sign-in is set up, so questionnaire authoring is offered.
+  if (pathname.endsWith('/people')) return {me: ME, items: [{value: ME, label: 'Me'}], named_signin: true};
   const p = pathname.replace(definitions[name].api, '');
   if (name === 'collaboration') {
     if (pathname.endsWith('/lifecycle/templates')) return {items: [template]};

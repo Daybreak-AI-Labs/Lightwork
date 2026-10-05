@@ -5,10 +5,8 @@
   const node = (tag, text) => { const item = document.createElement(tag); if (text !== undefined) item.textContent = text; return item; };
   const say = text => { $('par-status').textContent = text; };
   async function call(path, body) {
-    const response = await fetch('/api/v1/access-requests' + path, {method: body ? 'POST' : 'GET', headers: {'Content-Type': 'application/json'}, body: body ? JSON.stringify(body) : undefined});
-    const data = await response.json();
-    if (!response.ok) throw new Error(typeof data.detail === 'string' ? data.detail : 'The request could not be confirmed. Refresh saved requests.');
-    return data;
+    return window.mvFetchJSON('/api/v1/access-requests' + path, {method: body ? 'POST' : 'GET', body, plainDetail: true},
+      body ? 'save the access request' : 'load the access requests');
   }
   function explanation(parent, value) {
     parent.appendChild(node('p', value.capability + ': ' + (value.allowed ? 'Allowed by the current root grant.' : 'Blocked by the current root grant.') + ' Policy owner: ' + value.owner + '.'));

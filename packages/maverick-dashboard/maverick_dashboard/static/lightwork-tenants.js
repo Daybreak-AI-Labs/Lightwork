@@ -9,13 +9,11 @@
     return window.mvErrorText ? window.mvErrorText(failure, action) : 'Could not ' + action + '. Please try again.';
   }
   async function send(url, method, body) {
-    var response = await window.fetch(url, {
-      method: method, credentials: 'same-origin',
-      headers: {'Content-Type': 'application/json'},
-      body: body === undefined ? undefined : JSON.stringify(body)
-    });
-    if (!response.ok) throw response;
-    return response.status === 204 ? {} : response.json().catch(function () { return {}; });
+    return (await window.mvFetchJSON(url, {method: method, body: body})) || {};
+  }
+  // A plain server explanation (a duplicate name), when it is one.
+  function plainDetail(failure) {
+    return window.mvPlainDetail ? window.mvPlainDetail(failure && failure.detail) : '';
   }
   function reloadSoon() { window.setTimeout(function () { window.location.reload(); }, 350); }
   function base(id) { return '/api/v1/admin/tenants/' + encodeURIComponent(id); }
@@ -74,8 +72,7 @@
         if (window.mvToastAfterReload) window.mvToastAfterReload('Workspace "' + name + '" created.');
         reloadSoon();
       } catch (failure) {
-        var plain = '';
-        try { if (failure && typeof failure.clone === 'function') { var body = await failure.clone().json(); plain = window.mvPlainDetail ? window.mvPlainDetail(body && body.detail) : ''; } } catch (ignored) {}
+        var plain = plainDetail(failure);
         addMsg.textContent = plain || errorText(failure, 'create the workspace');
         if (window.mvToast) window.mvToast(addMsg.textContent, {error: true});
       }
@@ -118,8 +115,9 @@
   });
 
   var questions = {
-    suspend: ['Pause {name}? No new work can start in it until you resume it. Nothing is deleted.', 'Pause', 'pause the workspace', 'POST', '/suspend', '{name} is paused.'],
-    resume: ['Resume {name}? Work can start in it again.', 'Resume', 'resume the workspace', 'POST', '/resume', '{name} is active again.'],
+    suspend: ['Pause {name}? No new work can start in it until you resume it. Nothing is deleted.', 'Pause workspace', 'pause the workspace', 'POST', '/suspend', '{name} is paused.'],
+    // Resuming is routine and can be undone with Pause: no question.
+    resume: ['', 'Resume', 'resume the workspace', 'POST', '/resume', '{name} is active again.'],
     delete: ['Remove {name} from the list? Access and member roles will be revoked. Its stored records stay on this computer for deliberate recovery.', 'Remove workspace', 'remove the workspace', 'DELETE', '', '{name} was removed.']
   };
   document.querySelectorAll('[data-tenant-action]').forEach(function (button) {
@@ -127,7 +125,11 @@
       var row = button.closest('[data-tenant-row]');
       var id = row.dataset.tenantRow;
       var q = questions[button.dataset.tenantAction];
-      var ok = await window.mvConfirm(q[0].replace('{name}', row.dataset.tenantName), {okText: q[1]});
+      // Removing a workspace revokes everyone's access at once: the person
+      // types REMOVE first.
+      var removing = button.dataset.tenantAction === 'delete';
+      var ok = !q[0] || await window.mvConfirm(q[0].replace('{name}', row.dataset.tenantName),
+        {okText: q[1], danger: removing, typed: removing ? 'REMOVE' : undefined});
       if (!ok) return;
       button.disabled = true;
       rowMsg.textContent = 'Saving…';
@@ -158,8 +160,7 @@
         if (window.mvToastAfterReload) window.mvToastAfterReload(rowMsg.textContent);
         reloadSoon();
       } catch (failure) {
-        var plain = '';
-        try { if (failure && typeof failure.clone === 'function') { var body = await failure.clone().json(); plain = window.mvPlainDetail ? window.mvPlainDetail(body && body.detail) : ''; } } catch (ignored) {}
+        var plain = plainDetail(failure);
         rowMsg.textContent = plain || errorText(failure, 'restore the workspace');
         button.disabled = false;
       }

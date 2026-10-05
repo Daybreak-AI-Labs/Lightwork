@@ -12,15 +12,21 @@
   <meta name="lightwork-preference-revision" content="{{ display_preference_revision }}">
   <meta name="lightwork-preference-account" content="{{ '1' if display_signed_in else '0' }}">
   <meta name="lightwork-text-size" content="{{ display_text_size or 'standard' }}">
-  <link rel="stylesheet" href="{{ asset('lightwork-preferences.css') }}">
-  <meta name="theme-color" content="#0e1320" />
+  <meta name="theme-color" content="{{ theme_color or '#04050A' }}" />
   {% if draft_recovery_context %}<meta name="lightwork-draft-context" content="{{ draft_recovery_context }}">{% endif %}
   {% if record_search_context %}<meta name="lightwork-search-context" content="{{ record_search_context }}">{% endif %}
   {% if workspace_tenant_selection %}
   <meta name="lightwork-workspace-tenant" content="{{ workspace_tenant_selection }}" />
   {% endif %}
   <title>{% block title %}Lightwork{% endblock %}</title>
+  {#- One stylesheet holds the whole shell (a phone pays one round trip before
+      the first paint). The Copilot and its native controls never take part in
+      the first paint: deferred, and first among deferred scripts, so page
+      scripts still find them ready. -#}
   <link rel="stylesheet" href="{{ asset('lightwork.css') }}" />
+  <link rel="preload" href="/static/fonts/manrope-var.woff2" as="font" type="font/woff2" crossorigin>
+  <script src="{{ asset('lightwork-product-operations.js') }}" defer></script>
+  <script src="{{ asset('lightwork-copilot.js') }}" defer></script>
   {% if custom_theme_css %}
   <style{% if csp_style_nonce is defined %} nonce="{{ csp_style_nonce }}"{% endif %}>
     /* Operator-defined themes ([dashboard] themes in config.toml). Values
@@ -36,10 +42,10 @@
 <link rel="preload" as="script" href="{{ asset('lightwork-ui.js') }}">
 {% include "_journey_i18n.html" %}
 </head>
-<body class="theme-{{ theme or 'dark' }} font-{{ font or 'default' }} density-{{ density or 'comfortable' }}" data-global-admin="{{ '1' if viewer_global_admin else '0' }}">
-  <p class="muted active-workspace-banner" aria-label="{{ ut('Active workspace') }}" lang="{{ ul('Active workspace') }}">{{ ui('Workspace:') }} <a href="/workspace/tenant">{% if workspace_tenant_name %}<bdi lang="und" dir="auto" data-user-content>{{ workspace_tenant_name }}</bdi>{% else %}{{ ui('Main workspace') }}{% endif %}</a></p>
-  {% if lang and lang != 'en' %}<aside class="locale-coverage" aria-label="{{ ut('Translation coverage') }}" lang="{{ ul('Translation coverage') }}">{{ ui('Some controls are translated. Other sections remain in English. These draft translations need language and consequence-copy review.') }} {{ ui('User-written content is kept in its original language.') }}</aside>{% endif %}
+<body class="theme-{{ theme or 'dark' }} font-{{ font or 'default' }} density-{{ density or 'comfortable' }} glass-{{ glass or 'off' }}" data-global-admin="{{ '1' if viewer_global_admin else '0' }}">
+  {# The skip link is the first keyboard stop on every page. #}
   <a class="skip-link" href="#content"{% if lang and page_lang and lang != page_lang %} lang="{{ lang }}"{% endif %}>{{ t('chrome.skip_to_content') }}</a>
+  {% if lang and lang != 'en' %}<aside class="locale-coverage" aria-label="{{ ut('Translation coverage') }}" lang="{{ ul('Translation coverage') }}">{{ ui('Some controls are translated. Other sections remain in English. These draft translations need language and consequence-copy review.') }} {{ ui('User-written content is kept in its original language.') }}</aside>{% endif %}
   {% include "_icon_sprite.html" %}
   <header class="topbar">
     <button type="button" class="topbar__menu" id="nav-toggle"
@@ -57,16 +63,20 @@
     </a>
     <span class="topbar__controls">
       {% if can_halt %}
+      {# #halt-label becomes a polite live region only after the first status
+         read (lightwork-ui.js), so loading a page never announces it. #}
       <a href="#" id="halt-pill" class="halt-pill" role="button" data-can-halt="true" aria-label="{{ ut('Emergency stop: stop or resume work') }}" lang="{{ ul('Emergency stop: stop or resume work') }}">
         <span class="dot" aria-hidden="true"></span>
-        <span id="halt-label" aria-live="polite">{{ ui('checking') }}</span>
+        <span id="halt-label">{{ ui('checking') }}</span>
       </a>
       {% else %}
+      {# A plain status, not a control: aria-label is not allowed on a <span>,
+         so the explanation is visually hidden text that is read with it. #}
       <span id="halt-pill" class="halt-pill" data-can-halt="false" aria-disabled="true"
-            aria-label="{{ ut('Emergency stop status. Halt permission is required to change it.') }}" lang="{{ ul('Emergency stop status. Halt permission is required to change it.') }}"
             title="{{ ut('You do not have permission to stop or resume this work.') }}">
         <span class="dot" aria-hidden="true"></span>
-        <span id="halt-label" aria-live="polite">{{ ui('checking') }}</span>
+        <span class="sr-only" lang="{{ ul('Emergency stop status. Halt permission is required to change it.') }}">{{ ut('Emergency stop status. Halt permission is required to change it.') }}</span>
+        <span id="halt-label">{{ ui('checking') }}</span>
       </span>
       {% endif %}
       {% if show_settings_link is not defined or show_settings_link %}
@@ -83,8 +93,8 @@
       </a>
       {% endif %}
       <a class="iconbtn iconbtn--text" href="{{ docs_learn_more.url if docs_learn_more else docs_home }}" target="_blank" rel="noopener noreferrer"
-         aria-label="Documentation (opens in a new tab)" title="Documentation (opens in a new tab)"><svg viewBox="0 0 16 16" aria-hidden="true"><use href="#i-walkthroughs"></use></svg><span class="iconbtn__text">Docs</span></a>
-      <a class="iconbtn" href="/help" aria-label="{{ ut('Help and diagnostics') }}" title="{{ ut('Help and diagnostics') }}" lang="{{ ul('Help and diagnostics') }}"><svg viewBox="0 0 16 16" aria-hidden="true"><use href="#i-facts"></use></svg></a>
+         aria-label="Docs (opens in a new tab)" title="Docs (opens in a new tab)"><svg viewBox="0 0 16 16" aria-hidden="true"><use href="#i-walkthroughs"></use></svg><span class="iconbtn__text">Docs</span></a>
+      {% include "_help_menu.html" %}
       {% include "_display_preferences.html" %}
       <a class="iconbtn" href="/account" aria-label="{{ t('chrome.account') }}" title="{{ t('chrome.account') }}"{% if lang and page_lang and lang != page_lang %} lang="{{ lang }}"{% endif %}>
         <svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="5.5" r="2.75"/><path d="M2.75 14a5.25 5.25 0 0 1 10.5 0"/></svg>
@@ -98,6 +108,10 @@
   </header>
   <div class="nav-backdrop" id="nav-backdrop"></div>
   <aside class="sidebar" id="sidebar">
+    {# The workspace this page works in, at the top of the sidebar (the chat
+       shell shows it in its sidebar too). As a loose child of <body> the grid
+       placed it after the footer, behind the sidebar, as the first Tab stop. #}
+    <p class="muted active-workspace-banner">{{ ui('Workspace:') }} <a href="/workspace/tenant">{% if workspace_tenant_name %}<bdi lang="und" dir="auto" data-user-content>{{ workspace_tenant_name }}</bdi>{% else %}{{ ui('Main workspace') }}{% endif %}</a></p>
     <nav aria-label="{{ ut('Primary') }}" lang="{{ ul('Primary') }}">
       {% if can_create_goal %}
       <a class="btn btn--primary navquick" href="/chat">
@@ -111,6 +125,7 @@
         <span class="nav-label">{{ ui('Search') }}</span>
         <kbd aria-hidden="true">Ctrl K</kbd>
       </button>
+      {% include "_shortcuts_open.html" %}
       {% include "_sidebar_nav.html" %}
     </nav>
   </aside>
@@ -121,10 +136,24 @@
      JavaScript filters these existing links; it never manufactures a
      destination. #}
   {% include "_navfinder.html" %}
+  {% include "_shortcuts.html" %}
   <main id="content" tabindex="-1">
     {% include "_halt_banner.html" %}
+    {% include "_service_status_banner.html" %}{% if nav_mode == 'areas' %}{% include "_area_nav.html" %}{% endif %}
+    {# The page's own tools: its documentation, and pinning it to the
+       sidebar (only on a page the person may open, when they can pin). #}
+    {% set _page_personal = nav_personal() if nav_personal is defined and nav_personal else none %}
+    {% set _page_pin = _page_personal and _page_personal.current %}
+    {% if docs_learn_more or _page_pin %}
+    <div class="page-tools">
     {% if docs_learn_more %}
     <p class="page-docs"><a href="{{ docs_learn_more.url }}" target="_blank" rel="noopener noreferrer">Learn more about {{ docs_learn_more.label }} in the documentation<span class="sr-only"> (opens in a new tab)</span></a></p>
+    {% endif %}
+    {% if _page_pin %}
+    <button type="button" class="btn btn--ghost page-pin" id="page-pin-toggle" data-nav-pin-toggle="{{ _page_personal.current }}"
+            aria-pressed="{{ 'true' if _page_personal.current_pinned else 'false' }}"><svg class="page-pin__icon" width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" aria-hidden="true"><path d="M9.6 2.4 13.6 6.4 11.4 7.2 8.8 9.8l.4 3.2-6.2-6.2 3.2.4 2.6-2.6z"/><path d="M5.6 10.4 2.6 13.4" stroke-linecap="round"/></svg>{{ ui('Pin to sidebar') }}</button>
+    {% endif %}
+    </div>
     {% endif %}
     {% block content %}{% endblock %}
   </main>
@@ -138,6 +167,10 @@
     <div id="mv-toasts-alert" class="mv-toasts__list" role="alert" aria-live="assertive" aria-atomic="false"></div>
     <div id="mv-toasts" class="mv-toasts__list" aria-live="polite" aria-atomic="false"></div>
   </div>
+  <!-- Status lines (window.mvStatus) speak through these: they exist from the
+       first paint, so even a page's first message is announced. -->
+  <div id="mv-announce" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></div>
+  <div id="mv-announce-alert" class="sr-only" role="alert" aria-live="assertive" aria-atomic="true"></div>
   <dialog id="mv-confirm" class="mv-confirm" aria-labelledby="mv-confirm-msg">
     <div class="mv-confirm__body">
       <p class="mv-confirm__msg" id="mv-confirm-msg"></p>
@@ -161,17 +194,18 @@
   {% include "_copilot.html" %}
   <script src="{{ asset('lightwork-ui.js') }}"></script>
   {% include "_journey_i18n_scripts.html" %}
-  <script src="{{ asset('lightwork-product-operations.js') }}"></script>
-  <script src="{{ asset('lightwork-copilot.js') }}"></script>
-  <link rel="stylesheet" href="{{ asset('lightwork-draft-recovery.css') }}">
   <script src="{{ asset('lightwork-draft-recovery.js') }}" defer></script>
   <link rel="stylesheet" href="{{ asset('lightwork-guided-actions.css') }}">
   <script src="{{ asset('lightwork-guided-actions.js') }}" defer></script>
   <script src="{{ asset('lightwork-navfinder.js') }}" defer></script>
+  <script src="{{ asset('lightwork-shortcuts.js') }}" defer></script>
+  <script src="{{ asset('lightwork-pins.js') }}" defer></script>
+  <script src="{{ asset('lightwork-help-menu.js') }}" defer></script>
   <script src="{{ asset('lightwork-settings-search.js') }}" defer></script>
   {% if show_personal_notifications %}<script src="{{ asset('lightwork-notification-badge.js') }}" defer></script>{% endif %}
   {% if record_search_context %}<link rel="stylesheet" href="{{ asset('lightwork-record-search.css') }}"><script src="{{ asset('lightwork-record-search.js') }}" defer></script>{% endif %}
   <script src="{{ asset('lightwork-voice.js') }}" defer></script>
+  {% if usability_survey_on %}<script src="{{ asset('lightwork-usability-survey.js') }}" defer></script>{% endif %}
   {% block scripts_extra %}{% endblock %}
 </body>
 </html>

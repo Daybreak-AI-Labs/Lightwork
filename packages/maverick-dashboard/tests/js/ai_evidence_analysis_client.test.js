@@ -6,6 +6,8 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
+const { JSDOM: ShellDOM } = require("jsdom");
+const { shell } = require("./_shell");
 
 function client(response) {
   const elements = new Map();
@@ -24,8 +26,12 @@ function client(response) {
     }
     return elements.get(id);
   }
+  // The shell's helpers (mvFetchJSON) send through this window's fetch.
+  const shellWindow = shell(new ShellDOM("", { url: "https://lightwork.test/ai-evidence-analysis", runScripts: "outside-only" }).window);
+  shellWindow.fetch = async () => response;
   const context = {
     console,
+    window: shellWindow,
     document: {
       getElementById(id) { return id === "evidence-shell" ? null : element(id); },
     },
@@ -51,7 +57,7 @@ test("malformed 2xx evidence response rejects generically without echoing its bo
   await assert.rejects(request(), (error) => {
     assert.equal(error.message, "Lightwork returned something unexpected. Refresh the page and try again.");
     assert.equal(error.message.includes(secret), false);
-    assert.equal(error.status, 200);
+    assert.equal(error.status, 0, "nothing confirmed");
     return true;
   });
 });
@@ -112,6 +118,7 @@ function page(t) {
     if (key.endsWith("/review")) return json({ ...RECORD, status: "review_approved", revision: 4 });
     return json({ detail: "not found" }, 404);
   };
+  shell(w);
   w.eval(pageSource);
   const settle = async () => { for (let i = 0; i < 40; i += 1) await new Promise((r) => setImmediate(r)); };
   return { w, calls, settle, setConfirm: (v) => { confirmAnswer = v; }, $: (id) => w.document.getElementById(id) };
@@ -121,13 +128,13 @@ test("the page lists analyses and offers documents and criteria as choices", asy
   const h = page(t);
   await h.settle();
   const rows = h.$("analyses-rows").textContent;
-  assert.match(rows, /Supplier contract pdf/);
+  assert.match(rows, /Supplier contract pdf/i);
   assert.match(rows, /Waiting for review/);
   assert.match(rows, /1 of 1 supported · score 80%/);
   assert.doesNotMatch(rows, /EVA-1|pending_review|access-controls/);
   const labels = [...h.$("analyses-rows").querySelectorAll("button")].map((b) => b.textContent);
   assert.deepEqual(labels, ["View findings", "Approve", "Reject", "Withdraw", "History"]);
-  assert.equal(h.$("artifact-select").options[1].textContent, "Supplier contract pdf (Supplier review)");
+  assert.equal(h.$("artifact-select").options[1].textContent, "Supplier contract PDF (Supplier review)");
   assert.match(h.$("criteria-select").options[1].textContent, /Access controls \(1 check\)/);
 });
 
@@ -182,6 +189,7 @@ function settledPage(t, status, moduleEnabled = "true") {
   w.mvErrorText = (failure, action) => "Could not " + action + ". Try again in a few minutes.";
   const calls = [];
   w.fetch = async (url) => { calls.push(url); return status(); };
+  shell(w);
   w.eval(pageSource);
   const settle = async () => { for (let i = 0; i < 40; i += 1) await new Promise((r) => setImmediate(r)); };
   const loaders = () => ["artifact-select", "criteria-select", "analyses-rows"].map((id) => w.document.getElementById(id).textContent).join(" | ");

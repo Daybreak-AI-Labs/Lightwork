@@ -2251,6 +2251,29 @@ def get_my_work() -> dict:
     }
 
 
+_SUPPORT_URL_RE = re.compile(r"https://[^\s\"'<>]{1,300}\Z")
+_SUPPORT_EMAIL_RE = re.compile(r"[^@\s\"'<>,;]{1,64}@[^@\s\"'<>,;]{1,190}\.[A-Za-z]{2,24}\Z")
+
+
+def get_support() -> dict:
+    """Return the ``[support]`` section: where people go for help.
+
+    ``status_page_url`` is a public service-status page linked from the Help
+    menu (empty = no link). ``contact_email`` is the vendor or help-desk
+    address a "Get help from a person" request is addressed to (empty = the
+    request is for the workspace's administrators). Anything that is not a
+    secure web address or a plain email address reads as empty, so a bad
+    value hides the link rather than sending people somewhere unexpected.
+    """
+    cfg = load_config().get("support", {})
+    if not isinstance(cfg, dict):
+        cfg = {}
+    url = str(cfg.get("status_page_url") or "").strip()
+    email = str(cfg.get("contact_email") or "").strip()
+    return {"status_page_url": url if _SUPPORT_URL_RE.fullmatch(url) else "",
+            "contact_email": email if _SUPPORT_EMAIL_RE.fullmatch(email) else ""}
+
+
 def get_fleet_memory() -> dict:
     """Return the ``[fleet_memory]`` section (agent-agnostic learning plane).
     OFF by default: exposing governed memory to third-party agents is an

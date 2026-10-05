@@ -13,7 +13,7 @@
   }
 
   function invalidResponse() {
-    var error = new Error("Lightwork sent an answer this page could not read.");
+    var error = new Error("Lightwork sent an answer this page could not read. Refresh the page and try again.");
     error.code = "response_invalid_json";
     return error;
   }
@@ -72,7 +72,7 @@
     if (!response.ok) {
       var failure = new Error(
         payload && typeof payload.detail === "string" ?
-          payload.detail : "The operation failed."
+          payload.detail : "That didn't work. Refresh the page and try again."
       );
       failure.status = response.status;
       throw failure;
@@ -124,7 +124,7 @@
   var TEMPLATE_RE = /^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[1-5][0-9A-Fa-f]{3}-[89ABab][0-9A-Fa-f]{3}-[0-9A-Fa-f]{12}$/;
 
   function byId(id) { return document.getElementById(id); }
-  function say(text) { statusEl.textContent = text; }
+  function say(text) { window.mvStatus(statusEl, text); }
   function fail(failure, action) { say(R.errorText(failure, action)); }
   function language(code) { return LANGUAGE[String(code || "").toLowerCase()] || String(code || "").toUpperCase(); }
   function brokerName(ref) { return R.human(ref); }

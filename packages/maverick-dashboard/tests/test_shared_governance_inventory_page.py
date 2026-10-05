@@ -38,7 +38,7 @@ def test_page_is_liquid_glass_copilot_wired_and_permission_aware(monkeypatch) ->
     assert "'unsafe-inline'" not in response.headers["content-security-policy"]
     assert "style-src 'self' 'nonce-" in response.headers["content-security-policy"]
     body = response.text
-    assert "Governance Inventory" in body
+    assert "Governance inventory" in body
     assert f'data-copilot-page="{page.PAGE_PATH}"' in body
     assert page.ASSET_PATH in body
     assert 'data-can-operate="true"' in body

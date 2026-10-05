@@ -95,3 +95,62 @@ def test_in_app_alerts_are_on_unless_an_administrator_turned_them_off():
     # approvals waiting on them; nothing goes to another channel.
     assert {"completed", "needs-decision"} <= set(alerts.DEFAULTS["events"])
     assert alerts.DEFAULTS["external_links"] == [] and alerts.DEFAULTS["mode"] == "immediate"
+
+
+def test_agent_mute_silences_that_agents_tasks_only_and_stays_bounded(tmp_path, monkeypatch):
+    import pytest
+
+    _plaintext_test_storage(monkeypatch)
+    now = time.time()
+    inbox = alerts.PersonalInbox('user:alice', tmp_path / 'alice.enc')
+    prefs = alerts.validate_preferences({'muted_agents': {'finance_ap': now + 3600}})
+    finance = {**_source(1), 'agent': 'finance_ap'}
+    privacy = {**_source(2), 'agent': 'privacy_dsar'}
+    approval = {**_source(3), 'ref': 'approval:3', 'goal_id': None}
+    result = inbox.refresh([finance, privacy, approval], prefs, now=now)
+    assert sorted(str(item['ref']) for item in result['items']) == ['approval:3', 'goal:2:state']
+    # The mute ends on its own and is undone by removing it from preferences.
+    assert len(inbox.refresh([finance, privacy, approval], alerts.validate_preferences({}), now=now + 1)['items']) == 3
+    for bad in ({'Finance AP': now + 60}, {'finance_ap': now + 8 * 86400}, {'finance_ap': True}):
+        with pytest.raises(ValueError, match='agent mute'):
+            alerts.validate_preferences({'muted_agents': bad})
+    # Expired mutes drop out instead of accumulating.
+    assert alerts.validate_preferences({'muted_agents': {'finance_ap': now - 1}})['muted_agents'] == {}
+    assert alerts.DEFAULTS['muted_agents'] == {}
+
+
+def test_every_category_explains_why_what_and_when_without_task_text():
+    """NOT-1: each alert category carries a reason, an action and due wording."""
+    for category in alerts.EVENTS:
+        filled = alerts.explain({'category': category})
+        assert filled['reason'] and filled['action'] and filled['due_label'] and filled['no_due']
+    # A source's own, more exact words win over the category defaults.
+    own = alerts.explain({'category': 'needs-decision', 'reason': 'You were assigned this approval'})
+    assert own['reason'] == 'You were assigned this approval'
+
+
+def test_alert_brief_names_reason_action_and_due_time_but_never_the_task():
+    due = _timestamp('2026-10-04T21:05:00')
+    item = {'category': 'needs-decision', 'label': 'Needs your decision', 'title': 'Acquire Initech secretly',
+            'result': 'Confidential board memo', 'reason': 'You were assigned this approval',
+            'action': 'Approve or reject the request', 'due_at': due}
+    brief = alerts.alert_brief(item, time_zone='Europe/London')
+    assert brief == ('Needs your decision: Approve or reject the request. '
+                     'Decide by Sun 04 Oct 2026, 22:05 (Europe/London). Why: You were assigned this approval.')
+    assert 'Initech' not in brief and 'Confidential' not in brief
+    question = alerts.alert_brief({'category': 'needs-decision', 'label': 'Needs your answer',
+                                   'action': "Answer the agent's question", 'no_due': 'The task waits until you answer',
+                                   'reason': 'You started this task'})
+    assert 'The task waits until you answer.' in question and 'Why: You started this task.' in question
+
+
+def test_seen_goal_ids_report_only_this_persons_seen_task_alerts(tmp_path, monkeypatch):
+    _plaintext_test_storage(monkeypatch)
+    now = time.time()
+    inbox = alerts.PersonalInbox('user:alice', tmp_path / 'alice.enc')
+    prefs = alerts.validate_preferences({})
+    first = inbox.refresh([_source(1), _source(2)], prefs, now=now)
+    seen = next(item for item in first['items'] if item['goal_id'] == 1)
+    inbox.refresh([_source(1), _source(2)], prefs, now=now + 1, seen_id=seen['id'])
+    assert inbox.seen_goal_ids() == {1}
+    assert alerts.PersonalInbox('user:bob', tmp_path / 'bob.enc').seen_goal_ids() == set()

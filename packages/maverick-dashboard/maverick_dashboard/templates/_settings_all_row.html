@@ -25,7 +25,7 @@
     {% if s.warning %}<p class="muted settings-all-warning">{{ s.warning_lead }} {{ s.warning }}</p>{% endif %}
   </div>
   <div class="settings-all-control">
-    {% if s.id in ['persona.name','persona.style','persona.addendum','dashboard.theme','dashboard.density','budget.max_wall_seconds','budget.max_tool_calls','budget.max_output_tokens','models.vision','speculative.draft_model','verification.cross_family_model'] %}<label><input type="checkbox" data-profile-select> Export preference</label>{% endif %}
+    {% if s.id in ['persona.name','persona.style','persona.addendum','dashboard.theme','dashboard.density','dashboard.glass','budget.max_wall_seconds','budget.max_tool_calls','budget.max_output_tokens','models.vision','speculative.draft_model','verification.cross_family_model'] %}<label><input type="checkbox" data-profile-select> Export preference</label>{% endif %}
     {% if s.locked %}
       <p class="muted">Set by your server's deployment settings, so it can't be changed here.</p>
     {% elif s.control == 'toggle' %}
@@ -37,11 +37,16 @@
       </label>
     {% elif s.control == 'select' %}
       <select class="select" id="{{ cid }}" data-input aria-describedby="{{ cid }}-help"
-              {% if s.preview_url %}data-preview-url="{{ s.preview_url }}"{% endif %}>
+              {% if s.choices_url %}data-select-choices-url="{{ s.choices_url }}"{% endif %}
+              {% if s.preview_url %}data-preview-url="{{ s.preview_url }}"{% if s.preview_any %} data-preview-any{% endif %}{% endif %}>
         {% for c in s.choices %}
         <option value="{{ c.value }}" {% if c.value == s.value %}selected{% endif %}>{{ c.label }}</option>
         {% endfor %}
       </select>
+      {% if s.choices_url %}
+      <button type="button" class="btn ghost" data-select-choices-load>Load installed environments</button>
+      <p class="muted" data-select-choices-notice role="status">Installed choices are read only when you load or refresh this list. Your current choice is kept until you review and save a change.</p>
+      {% endif %}
       {% if s.empty_hint %}<p class="muted">{{ s.empty_hint }} <a href="/users">Open People</a></p>{% endif %}
       {% if s.preview_url %}<div class="settings-all-preview" data-preview aria-live="polite"></div>{% endif %}
     {% elif s.control == 'multiselect' %}

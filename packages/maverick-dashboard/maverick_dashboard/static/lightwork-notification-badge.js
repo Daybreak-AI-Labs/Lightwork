@@ -19,13 +19,10 @@
   async function check() {
     if (document.hidden || controller) return;
     controller = new AbortController();
-    const timer = setTimeout(function () { controller.abort(); }, 12000);
     try {
-      const response = await fetch('/api/v1/notifications/personal/summary', {
-        credentials: 'same-origin', cache: 'no-store', signal: controller.signal,
+      const value = await window.mvFetchJSON('/api/v1/notifications/personal/summary', {
+        cache: 'no-store', signal: controller.signal, timeout: 12000,
       });
-      if (!response.ok) throw new Error('Unavailable');
-      const value = await response.json();
       if (!Number.isSafeInteger(value.unseen) || value.unseen < 0) throw new Error('Unavailable');
       show(value.unseen, value.partial === true);
     } catch (_) {
@@ -40,7 +37,6 @@
         });
       }
     } finally {
-      clearTimeout(timer);
       controller = null;
     }
   }

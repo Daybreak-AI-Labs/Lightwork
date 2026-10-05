@@ -38,14 +38,16 @@ test('Copilot stays available in Chat and knows the current task on desktop and 
 });
 
 test('everyday pages show specific Copilot guidance in the real interface', async ({page}) => {
-  for (const [path, tip, question] of [
-    ['/settings', 'A saved setting can still require setup', 'Where do I set an AI model?'],
-    ['/goals', 'A finished task is not proof', 'How do I find a failed task?'],
-    ['/help', 'Nothing is sent automatically', 'How do I report a failed task?'],
+  // One short line on what Copilot can do on this page, then tasks people
+  // come to this page to do (copilot_context.intro_for / suggestions_for).
+  for (const [path, intro, question] of [
+    ['/settings', 'I can explain Settings,', 'Choose the AI model'],
+    ['/goals', 'I can explain Tasks,', 'Show tasks that failed'],
+    ['/help', 'I can explain Help and diagnostics,', 'How do I report a failed task?'],
   ]) {
     await page.goto(path);
     await page.getByRole('button', {name: 'Open Lightwork Copilot'}).click();
-    await expect(page.locator('#mv-copilot-tips')).toContainText(tip);
+    await expect(page.locator('#mv-copilot-hello')).toContainText(intro);
     await expect(page.locator('#mv-copilot-prompts')).toContainText(question);
   }
 });

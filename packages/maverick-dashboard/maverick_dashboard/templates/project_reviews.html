@@ -6,7 +6,7 @@
   <p>{{ back_link('/projects', 'Projects') }}</p>
   {% from "_hero.html" import hero %}
   {{ hero('', ui("Project team reviews"),
-          lede=ui("Share a fixed task result with a named workspace reviewer. Their decision applies to that captured result. The owner remains responsible for any changes, final sign-off, or further work on the task."),
+          lede=ui("Share a fixed task result with a named workspace reviewer. Their decision applies to that captured result. The owner remains responsible for any changes, final approval, or further work on the task."),
           compact=true) }}
   <p id="pr-status" role="status" aria-live="polite">{{ ui("Loading your reviews…") }}</p>
   <button id="pr-refresh" class="btn" type="button">{{ ui("Refresh reviews") }}</button>
@@ -54,7 +54,7 @@
       <label for="pr-response-note">{{ ui("Review comment") }}</label><textarea lang="und" dir="auto" data-user-content id="pr-response-note" class="input" rows="3" maxlength="4000" required></textarea>
       <button id="pr-response-button" class="btn btn--primary" type="submit">{{ ui("Save review response") }}</button>
     </form>
-    <p>{{ ui("Approving this review does not approve tool use, run the task, or provide its final sign-off.") }}</p>
+    <p>{{ ui("Approving this review does not approve tool use, start the task, or give its final approval.") }}</p>
   </section>
 </div>
 <style>

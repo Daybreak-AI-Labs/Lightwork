@@ -86,7 +86,7 @@ def test_unmanaged_agent_actions_explain_the_config_file():
 def test_trust_page_has_register_form_and_row_actions():
     _register()
     page = client.get("/trust").text
-    assert "Add an Outside Agent" in page
+    assert "Add an outside agent" in page
     assert 'id="trust-add"' in page
     assert "data-trust-revoke" in page
     assert "data-trust-remove" in page

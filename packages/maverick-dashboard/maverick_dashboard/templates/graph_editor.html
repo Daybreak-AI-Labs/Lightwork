@@ -4,7 +4,7 @@
 {% from "_back_link.html" import back_link with context %}
 <style>
   .ge-wrap { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 1rem; }
-  @media (max-width: 900px) { .ge-wrap { grid-template-columns: 1fr; } }
+  @media (max-width: 880px) { .ge-wrap { grid-template-columns: 1fr; } }
   /* Obsidian-style canvas: a flat dark field with a faint centre glow so the
      force-directed constellation reads with depth. */
   #ge-svg {
@@ -18,7 +18,7 @@
   }
   #ge-svg.panning { cursor: grabbing; }
   .ge-form label { display: block; font-size: 0.8rem; color: var(--muted); margin: 0.75rem 0 0.25rem; }
-  .ge-form input, .ge-form select { width: 100%; padding: 0.45rem 0.6rem; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 6px; }
+  .ge-form input, .ge-form select { width: 100%; padding: 0.45rem 0.6rem; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius-sm); }
   .ge-form button { margin-top: 0.5rem; padding: 0.45rem 1rem; background: var(--brand); color: var(--brand-fg); border: 0; border-radius: var(--radius-md); cursor: pointer; }
   .ge-form button:disabled { opacity: 0.5; cursor: not-allowed; }
   .legend { display: flex; gap: 0.75rem; flex-wrap: wrap; margin-bottom: 1rem; align-items: center; }
@@ -27,10 +27,11 @@
   .tree ul { list-style: none; padding-inline-start: 1.5rem; border-inline-start: 1px solid var(--border); margin: 0; }
   .tree > ul { padding-inline-start: 0; border-inline-start: 0; }
 </style>
-<p class="muted">{{ back_link('/goals', 'Tasks') }} · <a href="/plan-tree-3d">3D view</a></p>
+<p class="muted">{{ back_link('/goals', 'Tasks') }}{% if not map_views %} · <a href="/plan-tree-3d">3D view</a>{% endif %}</p>
 <h1 class="page-title">Task map</h1>
 <p class="page-subtitle">See how your tasks fit together. Select a task to rename it, move it, or add a smaller task beneath it.</p>
-<div class="panel">
+{% if map_views %}{% from "_tabs.html" import tab_bar, panel_attrs %}{{ tab_bar('Task map views', map_views, '') }}{% endif %}
+<div class="panel"{% if map_views %} {{ panel_attrs('') }}{% endif %}>
   <div class="legend">
     <span><span class="badge active">Running</span></span>
     <span><span class="badge done">Done</span></span>
@@ -364,7 +365,7 @@
     });
   }
 
-  function setStatus(msg) { statusEl.textContent = msg; }
+  function setStatus(msg) { if (window.mvStatus) window.mvStatus(statusEl, msg); else statusEl.textContent = msg; }
   function showError(msg) {
     errEl.textContent = msg; errEl.style.display = msg ? "block" : "none";
   }
@@ -447,19 +448,17 @@
   const pendingRequests = new Set();
   let contextChanged = false;
   async function boundedRequest(url, options) {
+    // The answer's status and body, as the callers read them; the request
+    // goes through the shell's mvFetchJSON with a 15-second deadline.
     const controller = new AbortController();
     pendingRequests.add(controller);
-    let timer;
-    const timeout = new Promise((_resolve, reject) => {
-      timer = setTimeout(() => { controller.abort(); reject(new Error('Request outcome is unknown.')); }, 15000);
-    });
-    const request = (async () => {
-      const response = await fetch(url, Object.assign({}, options || {}, {signal: controller.signal}));
-      const body = response.ok && response.status !== 204 ? await response.json() : null;
-      return {response, body};
-    })();
-    try { return await Promise.race([request, timeout]); }
-    finally { clearTimeout(timer); pendingRequests.delete(controller); }
+    try {
+      const body = await window.mvFetchJSON(url, Object.assign({}, options || {}, {signal: controller.signal, timeout: 15000}));
+      return {response: {ok: true, status: body === null ? 204 : 200, headers: null}, body};
+    } catch (error) {
+      if (!error.status) throw error;
+      return {response: {ok: false, status: error.status, headers: error.headers}, body: null};
+    } finally { pendingRequests.delete(controller); }
   }
   function abandonRequests() { pendingRequests.forEach(controller => controller.abort()); }
   window.addEventListener('pagehide', abandonRequests);
@@ -640,7 +639,8 @@
 
   window.addEventListener("resize", () => { measure(); });
 
-  load();
+  // The shell's helpers (lightwork-ui.js) load after the page content.
+  if (window.mvFetchJSON) load(); else document.addEventListener('DOMContentLoaded', load);
 })();
 </script>
 {% endblock %}

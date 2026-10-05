@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const {JSDOM} = require('jsdom');
+const {shell} = require('./_shell');
 
 const source = fs.readFileSync(
   path.resolve(__dirname, '../../maverick_dashboard/static/lightwork-research-workspace.js'),
@@ -116,6 +117,7 @@ async function fixture(handler) {
     return value && Object.hasOwn(value, 'ok') ? value : {ok:true, status:200,
       json:async () => value, blob:async () => new dom.window.Blob([JSON.stringify(value)])};
   };
+  shell(dom.window);
   dom.window.eval(source);
   await settle();
   return {dom, window:dom.window, document:dom.window.document, calls};
@@ -266,6 +268,7 @@ test('a refused first load replaces both lists\' Loading with what happened', as
   for (const id of ['research-registry-items', 'research-governed-runs']) document.getElementById(id).innerHTML = '<li>Loading…</li>';
   dom.window.mvErrorText = (failure, action) => `Could not ${action}. Ask an administrator. (${failure.status})`;
   dom.window.fetch = async () => ({ok:false, status:403, json:async () => ({detail:'Current research workspace authority is required'})});
+  shell(dom.window);
   dom.window.eval(source);
   await settle();
   assert.equal(document.getElementById('research-registry-items').textContent, 'Could not load datasets and models. Ask an administrator. (403)');

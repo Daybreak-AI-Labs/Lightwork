@@ -4,6 +4,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const { JSDOM } = require("jsdom");
+const {shell} = require('./_shell');
 
 const source = fs.readFileSync(
   path.resolve(__dirname, "../../maverick_dashboard/static/lightwork-value-proof.js"), "utf8");
@@ -40,6 +41,7 @@ function answers(over) {
 async function fixture(html, { over, confirm = true } = {}) {
   const dom = new JSDOM(html, { url: "https://lightwork.example/savings", runScripts: "outside-only" });
   const { window } = dom;
+  shell(window);
   const calls = [];
   const table = answers(over);
   window.mvErrorText = (failure, action) => `Could not ${action}.`;
@@ -80,7 +82,7 @@ test("savings page shows results, automatic approvals with Withdraw and the reco
   const ui = await fixture(PROOF);
   t.after(() => ui.window.close());
   assert.match(ui.doc.getElementById("vp-comp").textContent, /Invoices12-40%\+10%Getting cheaper/);
-  assert.match(ui.doc.getElementById("vp-dept").textContent, /No department has enough runs/);
+  assert.match(ui.doc.getElementById("vp-dept").textContent, /No department has enough tasks/);
   assert.match(ui.doc.getElementById("vp-ea").textContent, /Approved automatically/);
   assert.match(ui.doc.getElementById("vp-ea-state").textContent, /10 real outcomes/);
   assert.match(ui.doc.getElementById("vp-fleet").textContent, /No outside agents/);

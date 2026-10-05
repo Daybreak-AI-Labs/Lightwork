@@ -418,6 +418,10 @@ def _more_choices(source: str) -> list[tuple[str, str]]:  # noqa: C901 - one bra
         from maverick.suite_grants import known_suites
 
         return sorted(((s, department_title(s)) for s in known_suites()), key=lambda c: c[1])
+    if source == "local_linux_images":
+        from maverick.sandbox.local_images import inventory
+        images, _notice = inventory()
+        return [("", "No practice environment selected"), *((image.id, image.label) for image in images)]
     if source == "roles":
         from . import rbac
 
@@ -530,7 +534,7 @@ _ACCESS_SOURCES = {
 }
 # Lists too long (or too slow: the voices ask the speech service) to put in
 # the page: loaded when the person searches them.
-_LAZY_SOURCES = frozenset({"tools", "tools_any", "chat_users", "tts_voices"})
+_LAZY_SOURCES = frozenset({"tools", "tools_any", "chat_users", "tts_voices", "local_linux_images"})
 _TOOL_SOURCES = frozenset({"tools", "tools_any"})
 
 
@@ -551,15 +555,40 @@ def _resolved(
 
     if setting.choices_from in _LAZY_SOURCES and not full:
         choices = list(TOOL_FAMILIES) if setting.choices_from == "tools" else []
+        if setting.choices_from == "local_linux_images":
+            choices = [("", "No practice environment selected")]
     else:
-        choices = list(_source_choices(setting.choices_from))
+        if setting.choices_from == "local_linux_images":
+            from maverick.sandbox.local_images import LocalImageUnavailable
+            try:
+                choices = list(_source_choices(setting.choices_from))
+            except LocalImageUnavailable:
+                # Preserve the exact draft; coerce performs the fresh selected
+                # image check and returns a plain refusal before any write.
+                choices = [("", "No practice environment selected")]
+        else:
+            choices = list(_source_choices(setting.choices_from))
     known = {v for v, _ in choices}
     extra = current if isinstance(current, (list, dict)) else [current]
     if setting.control == "rules":
         extra = []
     for value in extra:
         if value not in (None, "") and str(value) not in known:
-            choices.append((str(value), identity_format.humanize(value)))
+            if setting.choices_from == "local_linux_images":
+                from maverick.sandbox.local_images import (
+                    LocalImageUnavailable,
+                    cached_label,
+                    selected,
+                )
+                label = cached_label(value)
+                if full:
+                    try:
+                        label = selected(str(value)).label
+                    except LocalImageUnavailable:
+                        label = "Previously selected practice environment · unavailable"
+                choices.append((str(value), label))
+            else:
+                choices.append((str(value), identity_format.humanize(value)))
             known.add(str(value))
     if setting.control == "table":
         choices = [c for c in choices if c[0] not in setting.fixed_keys]
@@ -666,6 +695,8 @@ def _row(setting: catalog.Setting, layers: dict[str, Any]) -> dict[str, Any]:
             {"value": key, "fingerprint": catalog.key_fingerprint(key)}
             for key in (value if isinstance(value, list) else [])
         ]
+    if setting.control == "select" and setting.choices_from in _LAZY_SOURCES:
+        row["choices_url"] = f"{API_PATH}/choices/{setting.id}"
     if setting.control == "picks":
         labels = dict(setting.choices)
         row["picks"] = [{"value": str(v), "label": labels.get(str(v), str(v))}
@@ -684,6 +715,8 @@ def _row(setting: catalog.Setting, layers: dict[str, Any]) -> dict[str, Any]:
         row["segment_at"] = catalog.workspace_address_parts(value)[1] if state["known"] else -1
     if setting.preview:
         row["preview_url"] = f"{API_PATH}/preview/{setting.id}"
+        # The approval-threshold preview also covers the default (empty) choice.
+        row["preview_any"] = setting.preview == "approval_checks"
     if setting.control == "table":
         if setting.choices_from == "tools":
             row["choices"] = []  # long list: the page loads it when needed
@@ -1053,7 +1086,7 @@ class CatalogUpdate(BaseModel):
 
 @router.get(API_PATH + "/choices/{setting_id}")
 async def catalog_choices(
-    request: Request, setting_id: str, column: str = "",
+    request: Request, setting_id: str, column: str = "", refresh: bool = False,
 ) -> JSONResponse:
     """The options of one setting (or one column of its rows) whose list is
     too long to put in the page."""
@@ -1066,6 +1099,15 @@ async def catalog_choices(
         return JSONResponse({"detail": "That setting has no list of options.",
                              "message": "That setting has no list of options."},
                             status_code=404)
+    notice = ""
+    if setting.choices_from == "local_linux_images":
+        from maverick.sandbox.local_images import LocalImageUnavailable, inventory
+        try:
+            images, notice = await run_in_threadpool(inventory, refresh=refresh)
+        except LocalImageUnavailable as exc:
+            raise HTTPException(503, str(exc)) from exc
+        choices = (("", "No practice environment selected"), *((image.id, image.label) for image in images))
+        return JSONResponse({"choices": [{"value": v, "label": label} for v, label in choices], "notice": notice}, headers={"Cache-Control": "no-store"})
     resolved = await run_in_threadpool(_resolved, setting)
     choices = (next(c for c in resolved.columns if c.key == column).choices
                if column else resolved.choices)
@@ -1090,6 +1132,10 @@ async def catalog_list(
         return JSONResponse({"detail": message, "message": message}, status_code=404,
                             headers={"Cache-Control": "no-store"})
     state = await run_in_threadpool(catalog_state, group, _words(q), changed=changed)
+    from .draft_api import context_for
+
+    auth.require_global_permission(request, "admin")
+    state["context"] = context_for(request)
     return _conditional_json(request, state)
 
 
@@ -1223,6 +1269,11 @@ def _plan(body: CatalogUpdate) -> tuple[dict, list[dict], list[dict], dict]:  # 
                 writes[marker] = None
             inherited = {**layers, "here": {}}
             new = _resolve(setting, inherited)["value"]
+            if setting.id == "plugins.workbench_image":
+                try:
+                    new = catalog.coerce(_resolved(setting, new), new)
+                except catalog.SettingError as exc:
+                    raise _Refused(400, str(exc)) from exc
             writes[setting.path] = None
             prospective[setting.id] = new
             changes.append({"setting": setting, "old": old, "new": new})
@@ -1305,6 +1356,11 @@ def _plan(body: CatalogUpdate) -> tuple[dict, list[dict], list[dict], dict]:  # 
             else:
                 node[setting.path[-1]] = writes[setting.path]
             new = _resolve(setting, {**layers, "here": planned_here})["value"]
+        if item.reset and setting.id == "plugins.workbench_image":
+            try:
+                new = catalog.coerce(_resolved(setting, new), new)
+            except catalog.SettingError as exc:
+                raise _Refused(400, str(exc)) from exc
         unchanged = old == new and (not item.reset or state["source"] != "here")
         if unchanged and marker not in writes and (item.reset or not setting.secret):
             writes.pop(setting.path, None)
@@ -1690,6 +1746,15 @@ async def catalog_preview(request: Request, setting_id: str, value: str = "") ->
 
     headers = {"Cache-Control": "no-store"}
     setting = catalog.BY_ID.get(setting_id)
+    if setting is not None and setting.preview == "approval_checks":
+        # The approval threshold: what the recorded checks would have needed (report only).
+        from . import approval_threshold_preview
+        try:
+            shown = await run_in_threadpool(approval_threshold_preview.preview, value)
+        except ValueError as exc:
+            return JSONResponse({"detail": str(exc), "message": str(exc)}, status_code=422,
+                                headers=headers)
+        return JSONResponse(shown, headers=headers)
     if setting is None or setting.preview != "governance_level":
         message = "This setting has nothing to preview."
         return JSONResponse({"detail": message, "message": message}, status_code=404,

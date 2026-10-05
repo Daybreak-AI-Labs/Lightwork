@@ -245,6 +245,29 @@ def _ledger_path() -> Path:
     return data_dir("provider_spend.json")
 
 
+def recorded_at() -> float | None:
+    """When provider spending last reached this installation's ledger (epoch
+    seconds), for a page's "Spending updated" label. None when nothing is
+    recorded here, and None for a shared database ledger, whose rows carry no
+    time this module can read: no label beats a made-up one."""
+    try:
+        if _shared_world() is not None:
+            return None
+    except ProviderAccountingUnavailable:
+        return None
+    from . import provider_spend_sqlite
+
+    legacy = _ledger_path()
+    database = provider_spend_sqlite.database_path(legacy)
+    stamps = []
+    for path in (legacy, database, database.with_name(database.name + "-wal")):
+        try:
+            stamps.append(path.stat().st_mtime)
+        except OSError:
+            continue
+    return max(stamps) if stamps else None
+
+
 def _use_indexed_ledger(path: Path) -> bool:
     """Migrate healthy local accounting before the legacy file size ceiling."""
     if path.absolute() != _ledger_path().absolute():
@@ -1970,6 +1993,7 @@ __all__ = [
     "metered_provider_call",
     "claim_reservation",
     "commit_reservation_claim",
+    "recorded_at",
     "reserve",
     "settle",
     "CapStatus",

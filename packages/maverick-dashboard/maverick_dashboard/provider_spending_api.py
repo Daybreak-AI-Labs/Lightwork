@@ -75,14 +75,32 @@ class ApplyIn(BaseModel):
     confirm: bool = Field(strict=True)
 
 
+def _freshness() -> tuple[bool, float | None]:
+    """Whether the ledger is the shared database (which has no readable time)
+    and, if not, when spending was last recorded. File and database reads, so
+    the page runs this off the event loop."""
+    try:
+        shared = provider_cost_cap._shared_world() is not None
+    except provider_cost_cap.ProviderAccountingUnavailable:
+        shared = True
+    return shared, None if shared else provider_cost_cap.recorded_at()
+
+
 @router.get("/provider-spending")
 async def page(request: Request):
     _admit(request)
+    from starlette.concurrency import run_in_threadpool
+
     from . import settings_store
     from .app import templates
+
+    shared, recorded_at = await run_in_threadpool(_freshness)
     response = templates.TemplateResponse(request, "provider_spending.html", {
         "recovery_mode": enabled(request.app),
         "provider_options": [{"name": p["name"], "label": p["label"]} for p in settings_store.PROVIDERS],
+        # A shared database ledger has no readable time: say nothing rather than guess.
+        "spend_freshness_known": not shared,
+        "spend_recorded_at": recorded_at,
     })
     response.headers["Cache-Control"] = "private, no-store"
     return response

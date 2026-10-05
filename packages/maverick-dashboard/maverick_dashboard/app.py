@@ -121,6 +121,8 @@ from .i18n_journeys import region as _journey_region
 from .i18n_journeys import text as _journey_text
 from .model_tests_api import router as model_tests_router
 from .my_work_api import router as my_work_router
+from .navigation_api import GO_TO_KEYS, area_context, command_list, personal_view
+from .navigation_api import router as navigation_router
 from .oidc_login import router as oidc_login_router
 from .outcome_accounting_api import router as outcome_accounting_router
 from .outcome_pilot_costs_api import router as outcome_pilot_costs_router
@@ -282,6 +284,10 @@ from .run_status import status_label as _run_status_label  # noqa: E402
 templates.env.filters["approval_spending"] = _approval_spending
 
 templates.env.globals["run_status_label"] = _run_status_label
+# The optional reasons a thumbs-down offers (shared by the page and its live refresh).
+from .goal_feedback_store import REASONS as _FEEDBACK_REASONS  # noqa: E402
+
+templates.env.globals["feedback_reasons"] = list(_FEEDBACK_REASONS.items())
 # Plain labels for model ids, setting sources and sizes (administration pages).
 from . import plain_labels as _plain_labels  # noqa: E402
 
@@ -293,6 +299,7 @@ templates.env.globals.setdefault("font", "default")
 templates.env.globals.setdefault("lang", "en")
 templates.env.globals.setdefault("page_lang", "en")
 templates.env.globals.setdefault("density", "comfortable")
+templates.env.globals.setdefault("glass", "off")
 templates.env.globals.setdefault("custom_theme_css", "")
 templates.env.globals.setdefault("custom_theme_names", [])
 templates.env.globals.setdefault("dir", "ltr")
@@ -371,7 +378,7 @@ class StaticCacheMiddleware:
 
 
 from .i18n import t as _i18n_t  # noqa: E402
-from .themes import custom_themes, theme_css  # noqa: E402
+from .themes import custom_themes, theme_color, theme_css  # noqa: E402
 
 templates.env.globals.setdefault("t", lambda key: _i18n_t(key, "en"))
 
@@ -382,6 +389,7 @@ templates.env.globals.setdefault("ul", lambda source: "en")
 _VALID_THEMES = {"dark", "light", "solarized", "hicontrast"}
 _VALID_FONTS = {"default", "dyslexic"}
 _VALID_DENSITIES = {"comfortable", "compact"}
+_VALID_GLASS = {"off", "on"}
 
 
 def _valid_theme_names() -> set[str]:
@@ -448,6 +456,20 @@ def resolve_density(request: Request) -> str:
     )
 
 
+def resolve_glass(request: Request) -> str:
+    """Glass effects: ``?glass=`` → ``mvk_glass`` cookie (or the account's
+    saved choice) → ``[dashboard] glass`` config → off. Default-off: solid
+    panes repaint fast; ``on`` brings back the translucent, blurred look."""
+    return _resolve_pref(
+        request,
+        param="glass",
+        cookie="mvk_glass",
+        valid=_VALID_GLASS,
+        config_key="glass",
+        default="off",
+    )
+
+
 def _resolve_font(request: Request) -> str:
     """Font preference: ``?font=`` → cookie → default. Independent axis from
     the theme so high-contrast + dyslexia-friendly compose."""
@@ -470,10 +492,13 @@ def _theme_context(request: Request) -> dict:
 
     lang = resolve_lang(request)
     custom = custom_themes()
+    theme = _resolve_theme(request)
     return {
-        "theme": _resolve_theme(request),
+        "theme": theme,
+        "theme_color": theme_color(theme, custom),
         "font": _resolve_font(request),
         "density": resolve_density(request),
+        "glass": resolve_glass(request),
         "custom_theme_css": theme_css(custom),
         "custom_theme_names": sorted(custom),
         # ``lang`` is the selected UI language (drives ``t()``); ``page_lang``
@@ -648,7 +673,8 @@ def _nav_context(request: Request) -> dict:
     # A page whose module is switched off only says "...is turned off". Global
     # administrators, who can turn it on, keep the link marked Off; nobody else
     # gets a sidebar link into that dead end. Same switch state as the banner.
-    ui_visibility.mark_switched_off(groups, _switched_off_pages(), can_turn_on=viewer_global_admin)
+    switched_off = _switched_off_pages()
+    ui_visibility.mark_switched_off(groups, switched_off, can_turn_on=viewer_global_admin)
     try:
         from maverick import config as core_config
         from maverick import experience_preferences
@@ -662,6 +688,7 @@ def _nav_context(request: Request) -> dict:
         )
     except Exception:  # pragma: no cover -- shell rendering stays fail-closed
         show_personal_notifications = personal_notifications_enabled = False
+    personal = personal_view(request, role, finder, switched_off, viewer_global_admin)
     return {
         "viewer_global_admin": viewer_global_admin,
         "nav_groups": groups,
@@ -673,6 +700,16 @@ def _nav_context(request: Request) -> dict:
         "show_logout": show_logout,
         "show_personal_notifications": show_personal_notifications,
         "personal_notifications_enabled": personal_notifications_enabled,
+        # Pinned and recent pages, and the command menu's commands: computed
+        # only when a template asks.
+        "nav_personal": personal,
+        "nav_commands": command_list(can_create_goal=can_create_goal, can_halt=can_halt,
+                                     can_open_page=can_open_page, global_admin=viewer_global_admin,
+                                     personal=personal),
+        "nav_go_to_keys": GO_TO_KEYS,
+        # The navigation style ("classic" or "areas") and, in areas mode, the
+        # areas and where this page sits in them.
+        **area_context(request, role, finder, switched_off, viewer_global_admin),
     }
 
 
@@ -719,11 +756,32 @@ def _docs_context(request: Request) -> dict:
 templates.context_processors.append(_docs_context)
 templates.env.globals.setdefault("docs_home", "https://daybreak-ai-labs.github.io/Lightwork/")
 templates.env.globals.setdefault("docs_learn_more", None)
+# A page's tab bar (templates/_tabs.html) and a hosted page's header: absent
+# unless the page's handler passes them.
+for _tab_value in ("tab_host", "builder_modes", "map_views", "replay_tabs", "outside_agent_tabs",
+                   "permission_tabs", "compliance_tabs", "knowledge_tabs"):
+    templates.env.globals.setdefault(_tab_value, None)
+
+
+def _help_context(request: Request) -> dict:
+    """The Help menu (page topic, status page) and the AI service banner."""
+    from .help_menu import context
+
+    return context(request)
+
+
+templates.context_processors.append(_help_context)
+templates.env.globals.setdefault("help_topic", None)
+templates.env.globals.setdefault("support_status_page_url", "")
+templates.env.globals.setdefault("help_menu_text", False)
+templates.env.globals.setdefault("service_status", None)
 # Requestless renders cannot prove authority; the request processor supplies
 # permitted destinations, including full navigation in verified local mode.
 templates.env.globals.setdefault("nav_groups", [])
 templates.env.globals.setdefault("finder_pages", [])
 templates.env.globals.setdefault("can_open_page", lambda path: False)
+templates.env.globals.setdefault("nav_mode", "classic")
+templates.env.globals.setdefault("nav_areas", None)
 
 
 def _set_theme_cookie(response, theme: str) -> None:
@@ -1173,19 +1231,32 @@ def enforce_page_visibility(
     if request is None:  # WebSocket connection -- page policy doesn't apply
         return
     from . import auth as auth_boundary
-    from . import ui_visibility
 
     # A route that carries its own credential (the signed consent webhook) has
     # no dashboard role to compare against the page policy of its parent page.
     if auth_boundary._self_authenticated_path(request.url.path):
         return
-    page = ui_visibility.page_for(request.url.path)
+    require_page_visible(request, request.url.path)
+
+
+def page_visible(request: Request, path: str) -> bool:
+    """Whether the page governing ``path`` admits the caller: the same rule
+    :func:`enforce_page_visibility` applies to every request for it."""
+    from . import ui_visibility
+
+    page = ui_visibility.page_for(path)
     if page is None:
-        return
+        return True
     role = _page_role(request, global_scope=page.get("scope") == "global")
-    if ui_visibility.is_visible(page, role):
-        return
-    raise HTTPException(status_code=403, detail="this page is not enabled for your role")
+    return ui_visibility.is_visible(page, role)
+
+
+def require_page_visible(request: Request, path: str) -> None:
+    """403 unless the page governing ``path`` admits the caller. A page that
+    shows another page's content at a new address checks the old page here,
+    so a merged view never admits more (or fewer) people than before."""
+    if not page_visible(request, path):
+        raise HTTPException(status_code=403, detail="this page is not enabled for your role")
 
 
 async def enforce_expected_workspace_tenant(
@@ -1420,6 +1491,7 @@ app.include_router(api_router)
 app.include_router(draft_router)
 
 app.include_router(preferences_router)
+app.include_router(navigation_router)
 app.include_router(budget_guidance_router)
 app.include_router(model_tests_router)
 app.include_router(cost_reconciliation_router)
@@ -1444,8 +1516,12 @@ app.include_router(task_handoffs_router)
 
 app.include_router(my_work_router)
 from .approval_waits import router as approval_waits_router  # noqa: E402
+from .usability_survey_api import router as usability_survey_router  # noqa: E402
+from .usability_survey_api import survey_context as _usability_survey_context  # noqa: E402
 
 app.include_router(approval_waits_router)
+app.include_router(usability_survey_router)
+templates.context_processors.append(_usability_survey_context)
 app.include_router(conversation_organization_router)
 from .first_outcome_api import router as first_outcome_router  # noqa: E402
 from .in_app_routes import router as in_app_router  # noqa: E402
@@ -1739,6 +1815,14 @@ from .department_team_updates_api import router as department_team_updates_route
 
 app.include_router(department_team_updates_router)
 app.include_router(answer_feedback_router)
+from .compliance_questionnaire_builder_api import (  # noqa: E402
+    router as compliance_questionnaire_builder_router,
+)
+
+app.include_router(compliance_questionnaire_builder_router, prefix="/api/v1")
+from .plugin_practice_forms_api import router as plugin_practice_forms_router  # noqa: E402
+
+app.include_router(plugin_practice_forms_router)
 app.include_router(knowledge_access_page_router)
 app.include_router(create_vendor_onboarding_page_router(templates))
 from .agent_control_plane_api import router as agent_control_plane_router  # noqa: E402
@@ -1982,7 +2066,7 @@ def _persist_pref_cookie(request, response, *, param, cookie, valid, max_age) ->
 
 @app.middleware("http")
 async def persist_theme(request: Request, call_next):
-    """If ?theme= / ?font= / ?density= / ?lang= is in the URL, set a cookie so it sticks."""
+    """If ?theme= / ?font= / ?density= / ?glass= / ?lang= is in the URL, set a cookie so it sticks."""
     response = await call_next(request)
     q = request.query_params.get("theme")
     if q and q.lower() in _valid_theme_names():
@@ -2003,6 +2087,14 @@ async def persist_theme(request: Request, call_next):
         param="density",
         cookie="mvk_density",
         valid=_VALID_DENSITIES,
+        max_age=30 * 24 * 3600,
+    )
+    _persist_pref_cookie(
+        request,
+        response,
+        param="glass",
+        cookie="mvk_glass",
+        valid=_VALID_GLASS,
         max_age=30 * 24 * 3600,
     )
     _persist_pref_cookie(
@@ -3686,7 +3778,7 @@ def public_demo(request: Request) -> HTMLResponse:
         "</style></head><body>"
         "<header><p class='eyebrow'>read-only public snapshot</p>"
         "<h1>Lightwork demo</h1>"
-        "<p>This page intentionally shows only seeded demo-owned finished runs. "
+        "<p>This page intentionally shows only seeded demo-owned finished tasks. "
         "Operator state, audit logs, spend, facts, plugins, permissions, and "
         "the rest of the authenticated dashboard are not proxied publicly.</p>"
         "</header><main class='grid'>"
@@ -3698,7 +3790,11 @@ def public_demo(request: Request) -> HTMLResponse:
 @app.get("/overview", response_class=HTMLResponse)
 def overview(request: Request) -> HTMLResponse:
     from . import department_boards
+    from .navigation_api import areas_redirect
 
+    moved = areas_redirect(request)  # areas mode: Home's Overview section
+    if moved is not None:
+        return moved
     if department_boards.scoped(request):
         return department_boards.page(request, "overview")
     require_unscoped_board(request)
@@ -3830,9 +3926,24 @@ async def learning_page(request: Request) -> HTMLResponse:
         {
             "snap": _learning_snapshot(request),
             "learning_can_manage": has_global_permission(request, "admin"),
+            "agent_feedback": _agent_feedback_summary(),
             "learning_can_operate": has_permission(request, "operate"),
         },
     )
+
+
+def _agent_feedback_summary() -> list[dict]:
+    """Ratings and picked reasons per agent for the administrator's Learning page."""
+    try:
+        from . import goal_feedback_store
+        from .agent_changelog import agent_title
+
+        rows = goal_feedback_store.summary_by_agent(world=_world())
+        for row in rows:
+            row["title"] = agent_title(row["agent"])
+        return rows
+    except Exception:  # pragma: no cover -- the page renders without the summary
+        return []
 
 
 @app.get("/perf", response_class=HTMLResponse)
@@ -3873,9 +3984,20 @@ GOALS_PAGE_SIZE = 50
 
 
 @app.get("/goals", response_class=HTMLResponse)
-def goals_page(request: Request) -> HTMLResponse:
+def goals_page(request: Request, owner: str = "", include: str = "") -> HTMLResponse:
     """The Tasks page: the newest page of goals; the rest load on demand from
-    ``/api/v1/goals`` (rendering all 200 was 104 KB of rows per visit)."""
+    ``/api/v1/goals`` (rendering all 200 was 104 KB of rows per visit).
+
+    ``?owner=me`` names the list for what it is -- every account lists its own
+    tasks (``goal_owner_filter``), so it never widens or narrows the rows.
+    ``&include=background`` adds My background work (schedules, workflow runs
+    and connections) under the same check as its old page, /my-work."""
+    from .draft_api import context_for
+
+    background = include == "background"
+    if background:
+        require_page_visible(request, "/my-work")
+        require_permission(request, "view")
     goals = _world().list_goals(
         owner=goal_owner_filter(request), limit=GOALS_PAGE_SIZE + 1, order="desc",
     )
@@ -3892,14 +4014,26 @@ def goals_page(request: Request) -> HTMLResponse:
         "page_size": GOALS_PAGE_SIZE,
         "has_more": has_more,
         "next_offset": GOALS_PAGE_SIZE if has_more else 0,
+        "goals_owner": "me" if owner == "me" or background else "",
+        "goals_background": background,
+        "work_context": context_for(request) if background else "",
     })
 
 
 @app.get("/projects", response_class=HTMLResponse)
 def projects_page(request: Request) -> HTMLResponse:
-    """Projects ("matters") -- workspaces grouping related goals."""
+    """Projects ("matters") -- workspaces grouping related goals. In the
+    job-named navigation it also lists the project plans (the Project
+    workspaces page), for exactly the people that page admits."""
+    from .draft_api import context_for
+    from .navigation_api import areas_on
+
     projects = _world().list_projects(owner=goal_owner_filter(request))
-    return templates.TemplateResponse(request, "projects.html", {"projects": projects})
+    plans = areas_on(request) and page_visible(request, "/project-workspaces") and has_permission(request, "view")
+    return templates.TemplateResponse(request, "projects.html", {
+        "projects": projects, "project_plans": plans,
+        "project_context": context_for(request) if plans else "",
+    })
 
 
 @app.post("/projects")
@@ -3920,15 +4054,36 @@ def projects_create(
     return RedirectResponse(f"/projects/{pid}", status_code=303)
 
 
+def _project_plan_tab(request: Request, project_id: int, project) -> HTMLResponse:
+    """A project's Plan tab: the Project workspace page for this project,
+    under that page's own check (its page policy and ``view``). The
+    workspace's API decides what the person may read, as before -- a planning
+    member who cannot open the project's task list still sees the plan."""
+    from .draft_api import context_for
+
+    require_page_visible(request, "/project-workspaces")
+    require_permission(request, "view")
+    tabs = [("plan", "Plan", f"/projects/{project_id}?tab=plan")]
+    if project is not None:
+        tabs.insert(0, ("tasks", "Tasks", f"/projects/{project_id}"))
+    return templates.TemplateResponse(
+        request, "project_workspaces.html",
+        {"project_id": project_id, "project_context": context_for(request), "project_tabs": tabs},
+        headers={"Cache-Control": "private, no-store"},
+    )
+
+
 @app.get("/projects/{project_id}", response_class=HTMLResponse)
-def project_detail(request: Request, project_id: int) -> HTMLResponse:
+def project_detail(request: Request, project_id: int, tab: str = "") -> HTMLResponse:
     w = _world()
     project = w.get_project(project_id)
-    if project is None:
-        raise HTTPException(status_code=404, detail="no such project")
     # Owner-scoped like goals: a project you don't own 404s rather than leaks.
     owner = goal_owner_filter(request)
-    if owner is not None and project["owner"] != owner:
+    if project is not None and owner is not None and project["owner"] != owner:
+        project = None
+    if tab == "plan":
+        return _project_plan_tab(request, project_id, project)
+    if project is None:
         raise HTTPException(status_code=404, detail="no such project")
     goals = w.list_goals(project_id=project_id, owner=owner, order="desc")
     counts: dict[str, int] = {}
@@ -3937,7 +4092,8 @@ def project_detail(request: Request, project_id: int) -> HTMLResponse:
     return templates.TemplateResponse(
         request,
         "project_detail.html",
-        {"project": project, "goals": goals, "counts": counts},
+        {"project": project, "goals": goals, "counts": counts,
+         "project_plan_available": page_visible(request, "/project-workspaces")},
     )
 
 
@@ -4091,7 +4247,11 @@ def deliverables_page(request: Request, role: str = "") -> HTMLResponse:
 async def action_center_page(request: Request) -> HTMLResponse:
     from .action_center_api import require_enabled
     from .draft_api import context_for
+    from .navigation_api import areas_redirect
 
+    moved = areas_redirect(request)  # areas mode: Approvals' "All decisions"
+    if moved is not None:
+        return moved
     require_enabled(request)
     return templates.TemplateResponse(
         request, "action_center.html",
@@ -4372,6 +4532,18 @@ def facts_page(request: Request) -> HTMLResponse:
     })
 
 
+def _newest_cost_at(w, owner) -> float | None:
+    """When the newest task cost in this view was recorded, for the Spend
+    page's "Spending updated" label (None when there is none)."""
+    try:
+        newest = w.list_episodes(limit=1, owner=owner)
+    except Exception:  # noqa: BLE001 -- no label beats a made-up one
+        return None
+    if not newest:
+        return None
+    return newest[0].ended_at or newest[0].started_at
+
+
 @app.get("/spend", response_class=HTMLResponse)
 def spend_page(request: Request) -> HTMLResponse:
     from . import department_boards
@@ -4415,7 +4587,7 @@ def spend_page(request: Request) -> HTMLResponse:
         "spend.html",
         {"episodes": episodes, "total": w.total_spend(owner=value_view["owner"]),
          "goal_titles": goal_titles, "csv_months": months, "episode_provenance": episode_provenance,
-         "value_view": value_view},
+         "value_view": value_view, "spend_recorded_at": _newest_cost_at(w, value_view["owner"])},
     )
 
 
@@ -4643,6 +4815,15 @@ def _date(stamp) -> str:
     return _plain_labels.datetime_text(value, date_only=True) if value else "—"
 
 
+def _day(stamp) -> str:
+    """The UTC calendar day of a deadline stamp ("2026-10-04"; "" when unset)."""
+    try:
+        value = float(stamp or 0)
+    except (TypeError, ValueError):
+        return ""
+    return time.strftime("%Y-%m-%d", time.gmtime(value)) if value > 0 else ""
+
+
 @app.get("/privacy/vendors/{vendor_id}", response_class=HTMLResponse)
 async def vendor_detail_page(request: Request, vendor_id: str) -> HTMLResponse:
     """One vendor's full governed record: lifecycle, contracts and their
@@ -4747,11 +4928,12 @@ async def dsar_detail_page(request: Request, request_id: str) -> HTMLResponse:
     record = dict(record)
     now = _time.time()
     record.update(privacy_ops.dsar_clock(record, now=now))
-    record["created_date"] = _date(record.get("created_at"))
     record["received_date"] = _date(record.get("received_at") or record.get("created_at"))
-    record["due_date"] = _date(record.get("effective_due_at"))
-    record["acknowledge_date"] = _date(record.get("acknowledge_by"))
-    record["extended_date"] = _date(record.get("extended_until"))
+    # Deadlines are calendar days: the page shows that same day in each
+    # reader's own style (|datetime('date')), never shifted by a time zone.
+    record["due_day"] = _day(record.get("effective_due_at"))
+    record["acknowledge_day"] = _day(record.get("acknowledge_by"))
+    record["extended_day"] = _day(record.get("extended_until"))
     from maverick import rights_deadlines
 
     regime = rights_deadlines.REGIMES.get(str(record.get("jurisdiction") or ""))
@@ -4761,9 +4943,6 @@ async def dsar_detail_page(request: Request, request_id: str) -> HTMLResponse:
     fulfillment_enabled = dsar_fulfillment.enabled()
     if fulfillment_enabled:
         fulfillment = dsar_fulfillment.get_fulfillment(record["id"])
-        if fulfillment and fulfillment.get("response"):
-            fulfillment["response"]["expires_date"] = _date(
-                fulfillment["response"].get("expires_at"))
     # Which secure-link step the "Completed" notice can point to.
     fulfillment_state = (
         "off" if not fulfillment_enabled else "not_started" if not fulfillment
@@ -5714,7 +5893,7 @@ async def _policy_pack_page_data(module: Any) -> dict[str, Any]:
         else:
             channels = channel_result
         if isinstance(subscription_result, Exception):
-            error = error or "Select a tenant to view policy-pack subscriptions."
+            error = error or "Select a workspace to view policy-pack subscriptions."
         else:
             subscriptions = subscription_result
     return {
@@ -6414,6 +6593,7 @@ def savings_page(request: Request, days: int = 90) -> HTMLResponse:
         request,
         "savings.html",
         {
+            "spend_recorded_at": _newest_cost_at(_world(), value_view["owner"]),
             "days": days,
             "cfg": cfg,
             "report": savings_mod.to_dict(report),
@@ -6445,9 +6625,11 @@ def billing_page(request: Request, format: str = "", period: str = "", receipt_o
     owner = goal_owner_filter(request)
     episodes = iter_episodes(w, owner=owner, finished_only=True)
     months: dict[str, dict] = {}
+    newest_cost_at = None  # the "Spending updated" label: the newest finished attempt
     for e in episodes:
         if not e.ended_at:
             continue
+        newest_cost_at = max(newest_cost_at or e.ended_at, e.ended_at)
         m = datetime.fromtimestamp(e.started_at, timezone.utc).strftime("%Y-%m")
         b = months.setdefault(
             m, {"period": m, "cost": 0.0, "unknown_cost_runs": 0, "input_tokens": 0, "output_tokens": 0, "runs": 0}
@@ -6550,6 +6732,7 @@ def billing_page(request: Request, format: str = "", period: str = "", receipt_o
             "series": series,
             "usage_receipts": receipts,
             "usage_receipt_error": receipt_error,
+            "spend_recorded_at": newest_cost_at,
             "invoice_admin": has_global_permission(request, "admin"),
             "invoice_workspaces": _invoice_workspaces(tenant, tenant_label),
         },
@@ -6677,10 +6860,12 @@ async def audit_page(request: Request) -> HTMLResponse:
 
     from . import audit_actions_api as _audit_plain
 
+    # 50 entries a page: the 200-row default made a 400 KB page that blocked a
+    # phone for most of a second. "Show older activity" continues the search.
     try:
-        n = max(1, min(int(request.query_params.get("n") or 200), 1000))
+        n = max(1, min(int(request.query_params.get("n") or 50), 1000))
     except (TypeError, ValueError):
-        n = 200
+        n = 50
     raw_day = request.query_params.get("day")
     day = safe_audit_day(raw_day)
     if raw_day not in (None, "") and day is None:
@@ -6843,19 +7028,52 @@ async def audit_binder_page(request: Request, days: int = 90) -> HTMLResponse:
     )
 
 
+def _replay_tabs(request: Request, goal_id: int | None) -> list[tuple[str, str, str]]:
+    """Task replay's views this person may open: Replay, then Branches (the
+    /run-tree page) and Video (the /walkthroughs page) under the same access
+    those pages check. The selected task carries over to Branches."""
+    from .navigation_api import may_open
+
+    task = f"goal={goal_id}" if goal_id is not None else ""
+    tabs = [("", "Replay", "/replay" + (f"?{task}" if task else ""))]
+    if may_open(request, "/run-tree"):
+        tabs.append(("branches", "Branches", "/replay?tab=branches" + (f"&{task}" if task else "")))
+    if may_open(request, "/walkthroughs"):
+        tabs.append(("video", "Video", "/replay?tab=video"))
+    return tabs
+
+
 @app.get("/replay", response_class=HTMLResponse)
-def replay_page(request: Request) -> HTMLResponse:
+def replay_page(request: Request, tab: str = "") -> HTMLResponse:
     """Flight recorder: reconstruct a run's action timeline from the signed
     audit log, verify the tamper-evident chain, and offer an evidence export.
 
     With no ``?goal=<id>`` it lists recent runs (owner-scoped) to pick from.
+    ``?tab=branches`` and ``?tab=video`` show the Branches and Video views
+    (the /run-tree and /walkthroughs pages) to people who may open those.
     """
     from maverick.world_model import close_world_if_owned, open_world
 
     from .control_plane import build_replay
+    from .navigation_api import areas_on
 
     raw = (request.query_params.get("goal") or "").strip()
     goal_id = int(raw) if raw.isdigit() else None
+    tabs = _replay_tabs(request, goal_id)
+    if tab in ("branches", "video"):
+        if tab not in {key for key, _label, _href in tabs}:
+            raise HTTPException(status_code=403, detail="this page is not enabled for your role")
+        if tab == "branches":
+            context = {**_run_tree_context(request), "branches_href": "/replay?tab=branches&"}
+        else:
+            context = _walkthroughs_context(request)
+        context["tab_host"] = {
+            "title": "Task replay", "label": "Task replay views", "tabs": tabs, "selected": tab,
+            "lede": "See everything a task did, step by step, check that the record hasn't been altered, "
+                    "and download evidence for auditors."}
+        return templates.TemplateResponse(
+            request, "run_tree.html" if tab == "branches" else "walkthroughs.html", context)
+    replay_tabs = tabs if len(tabs) > 1 and areas_on(request) else None
     w = open_world()
     try:
         if goal_id is None:
@@ -6863,7 +7081,7 @@ def replay_page(request: Request) -> HTMLResponse:
             return templates.TemplateResponse(
                 request,
                 "replay.html",
-                {"goal": None, "goals": goals, "replay": None},
+                {"goal": None, "goals": goals, "replay": None, "replay_tabs": replay_tabs},
             )
         goal = w.get_goal(goal_id)
         if goal is None:
@@ -6873,7 +7091,7 @@ def replay_page(request: Request) -> HTMLResponse:
         return templates.TemplateResponse(
             request,
             "replay.html",
-            {"goal": goal, "goals": None, "replay": replay},
+            {"goal": goal, "goals": None, "replay": replay, "replay_tabs": replay_tabs},
         )
     finally:
         try:
@@ -6882,10 +7100,22 @@ def replay_page(request: Request) -> HTMLResponse:
             pass
 
 
-@app.get("/trust", response_class=HTMLResponse)
-def trust_page(request: Request) -> HTMLResponse:
+@app.get("/trust", response_class=HTMLResponse, response_model=None)
+def trust_page(request: Request) -> HTMLResponse | RedirectResponse:
     """Agent Trust Plane: the cross-agent permission graph -- every external
-    agent allowed to interact, with its tool/risk/budget ceilings + lifecycle."""
+    agent allowed to interact, with its tool/risk/budget ceilings + lifecycle.
+    In areas navigation it is Outside agents' Access tab."""
+    from .navigation_api import areas_redirect
+
+    moved = areas_redirect(request)
+    if moved is not None:
+        return moved
+    return templates.TemplateResponse(request, "trust.html", _trust_context(request))
+
+
+def _trust_context(request: Request) -> dict:
+    """Agent Trust: which outside agents may work with Lightwork, and what
+    each may do, see and spend (/trust, and Outside agents' Access tab)."""
     from .control_plane import _discover_tools, trust_overview
     from .trust_page_api import managed_ids
     from .ui_choices_api import work_area_choices
@@ -6903,16 +7133,32 @@ def trust_page(request: Request) -> HTMLResponse:
             _world(), [s for a in context.get("agents", []) for s in a["data_scopes"]]),
         "can_admin": has_permission(request, "admin"),
     })
-    return templates.TemplateResponse(request, "trust.html", context)
+    return context
+
+
+_OUTSIDE_AGENT_TABS = (("", "Agents", "/external-agents"), ("access", "Access", "/external-agents?tab=access"))
 
 
 @app.get("/external-agents", response_class=HTMLResponse)
-async def external_agents_page(request: Request) -> HTMLResponse:
+async def external_agents_page(request: Request, tab: str = "") -> HTMLResponse:
     """Bring-your-own-agent console: enroll agents built on other platforms
     (Agentforce, Bedrock, Copilot Studio, custom), mint their credentials,
-    and watch their governed runs/spend land on the Operating Record."""
+    and watch their governed runs/spend land on the Operating Record.
+    ``?tab=access`` shows Agent Trust (the /trust page) to people who may
+    open it."""
     from maverick import external_agents as xa
 
+    from .navigation_api import areas_on, may_open
+
+    tabs = list(_OUTSIDE_AGENT_TABS) if may_open(request, "/trust") else None
+    if tab == "access":
+        if tabs is None:
+            raise HTTPException(status_code=403, detail="this page is not enabled for your role")
+        context = await run_in_threadpool(_trust_context, request)
+        context["tab_host"] = {
+            "title": "Outside agents", "label": "Outside agents views", "tabs": tabs, "selected": "access",
+            "lede": "Choose which outside AI agents may work with Lightwork, and what each one may do, see and spend."}
+        return templates.TemplateResponse(request, "trust.html", context)
     enabled = xa.enabled()
     entitled = xa.entitled()
 
@@ -6930,6 +7176,7 @@ async def external_agents_page(request: Request) -> HTMLResponse:
             "agents": xa.roster(),
             "platforms": xa.PLATFORMS,
             "surfaces": xa.TOKEN_SURFACES,
+            "outside_agent_tabs": tabs if areas_on(request) else None,
         },
     )
 
@@ -6945,18 +7192,31 @@ async def external_agent_scorecard(request: Request, agent_id: str) -> HTMLRespo
 
     detail = await run_in_threadpool(detail_for, request, agent_id)
     can_manage = xa.enabled() and xa.entitled() and has_permission(request, "admin")
+    access = None
+    try:
+        from .effective_access import outside_agent
+
+        access = outside_agent(agent_id)
+    except Exception:  # noqa: BLE001 -- the access check is read-only help
+        log.warning("outside agent access check unavailable", exc_info=True)
     return templates.TemplateResponse(
-        request, "external_agent_detail.html", {"a": detail, "can_manage": can_manage},
+        request, "external_agent_detail.html",
+        {"a": detail, "can_manage": can_manage, "access": access},
         headers={"Cache-Control": "private, no-store"}
     )
 
 
-@app.get("/discovery", response_class=HTMLResponse)
-async def discovery_page(request: Request) -> HTMLResponse:
+@app.get("/discovery", response_class=HTMLResponse, response_model=None)
+async def discovery_page(request: Request) -> HTMLResponse | RedirectResponse:
     """Inventory every governable surface the deployment exposes (tools, MCP
-    servers, providers, channels, external agents)."""
+    servers, providers, channels, external agents). In areas navigation it
+    is the Permissions page's Inventory tab."""
     from .control_plane import discovery_overview
+    from .navigation_api import areas_redirect
 
+    moved = areas_redirect(request)
+    if moved is not None:
+        return moved
     return templates.TemplateResponse(
         request, "discovery.html", {"discovery": discovery_overview()}
     )
@@ -7156,22 +7416,7 @@ async def agents_page(request: Request) -> HTMLResponse:
             agent for agent in list_agents()
             if allowed is None or set(agent["suites"]) <= allowed
         ]
-        # Datalist values are what the browser returns to the input. Give each
-        # visible choice an unambiguous value even when two packs have the same
-        # description or their names look identical after humanizing them.
-        picker_values: set[str] = set()
-        for agent in agents:
-            name = agent["name"]
-            base = f"{agent.get('description') or _idfmt.humanize(name)} · {_idfmt.humanize(name)}"
-            value = base
-            if value in picker_values:
-                value = f"{base} ({name})"
-            suffix = 2
-            while value in picker_values:
-                value = f"{base} ({name}, {suffix})"
-                suffix += 1
-            agent["picker_label"] = value
-            picker_values.add(value)
+        _assign_picker_labels(agents)
         if editable:
             rejected_agents = [
                 view for name in sorted(rejected_workspace_domains())
@@ -7182,6 +7427,8 @@ async def agents_page(request: Request) -> HTMLResponse:
             view = resolved_view(name)
             if view and (allowed is None or set(view["suites"]) <= allowed):
                 selected = view
+                selected["plain_errors"] = _plain_findings(view.get("errors") or [])
+                selected["plain_warnings"] = _plain_findings(view.get("warnings") or [])
                 selected["picker_label"] = next(
                     (agent["picker_label"] for agent in agents if agent["name"] == name),
                     f"{view.get('description') or _idfmt.humanize(name)} · {_idfmt.humanize(name)}",
@@ -7189,13 +7436,128 @@ async def agents_page(request: Request) -> HTMLResponse:
             creating = False  # editing an existing agent wins over the new form
     except Exception:  # never 500 the page if the factory layer is unavailable
         agents = []
+    agent_changes: list = []
+    selected_kind = "agent"
+    if selected:
+        try:
+            from . import agent_changelog
+
+            agent_changes = agent_changelog.entries(selected["name"], limit=10)
+            selected_kind = agent_changelog.agent_kind(selected["name"])
+        except Exception:  # pragma: no cover -- the history is best effort
+            agent_changes = []
+    access = None
+    if selected:
+        try:
+            from .effective_access import agent as agent_access
+
+            access = agent_access(selected["name"], selected)
+        except Exception:  # noqa: BLE001 -- the access check is read-only help
+            log.warning("specialist or agent access check unavailable", exc_info=True)
+    typical = None
+    if selected and not creating:
+        from maverick.typical_cost import typical_cost
+
+        # The cost history is a database read: keep it off the event loop.
+        typical = await run_in_threadpool(lambda: typical_cost(_world(), specialist=selected["name"]))
     return templates.TemplateResponse(
         request,
         "agents.html",
         {"agents": agents, "rejected_agents": rejected_agents,
          "selected": selected, "editable": editable, "creating": creating,
-         "can_set_model_cost_tier": has_global_permission(request, "admin")},
+         "can_set_model_cost_tier": has_global_permission(request, "admin"),
+         "agent_changes": agent_changes, "selected_kind": selected_kind,
+         # Names of the people who changed an agent are shown to administrators.
+         "show_change_authors": has_global_permission(request, "admin"),
+         "access": access, "typical_cost": typical},
     )
+
+
+def _plain_findings(findings: list) -> list[str]:
+    """Setup-check findings in plain words, each said once; the raw lint text
+    stays under Technical details."""
+    from .workforce_ops_api import _finding
+
+    return list(dict.fromkeys(_finding(str(item)) for item in findings))
+
+
+def _assign_picker_labels(agents: list[dict]) -> None:
+    """Give each specialist an unambiguous picker label, even when two packs
+    share a description or their names look identical after humanizing."""
+    picker_values: set[str] = set()
+    for agent in agents:
+        name = agent["name"]
+        base = f"{agent.get('description') or _idfmt.humanize(name)} · {_idfmt.humanize(name)}"
+        value = base
+        if value in picker_values:
+            value = f"{base} ({name})"
+        suffix = 2
+        while value in picker_values:
+            value = f"{base} ({name}, {suffix})"
+            suffix += 1
+        agent["picker_label"] = value
+        picker_values.add(value)
+
+
+_PICKER_READINESS_ORDER = {"action_ready": 0, "needs_setup": 1}
+
+
+def _picker_rank(query: str, label: str, name: str) -> int | None:
+    """Where a specialist sorts for a picker search, or None when it does not
+    match: the label or pack name starting with the words first, then a word
+    in the label starting with them, then a match anywhere."""
+    if not query:
+        return 0
+    text, key = label.casefold(), name.casefold()
+    if text.startswith(query) or key.startswith(query):
+        return 0
+    if re.search(r"(?:^|\W)" + re.escape(query), text):
+        return 1
+    if query in text or query in key:
+        return 2
+    return None
+
+
+@app.get("/agents/picker")
+async def agents_picker(request: Request, q: str = "", setup: bool = False, limit: int = 20) -> dict:
+    """Search-as-you-type for the Agent Factory picker.
+
+    The page used to ship all 2,000+ specialists as one picker list. This
+    answers with the best matches only: ready-to-run specialists unless
+    ``setup`` asks for those that need setup too, at most ``limit`` (20 by
+    default, 50 at most). It sits under /agents, so the page's role visibility
+    applies, and it is department-scoped exactly like the page's roster.
+    """
+    from maverick.domain_edit import list_agents
+
+    from .auth import caller_suites
+
+    query = " ".join(q.split())[:100].casefold()
+    limit = max(1, min(limit, 50))
+    allowed = caller_suites(request)
+    try:
+        roster = list_agents()
+    except Exception as exc:  # noqa: BLE001 - the page says the list is unavailable
+        raise HTTPException(status_code=503, detail="The list of agents and specialists is unavailable. Try again.") from exc
+    visible = [agent for agent in roster if allowed is None or set(agent["suites"]) <= allowed]
+    _assign_picker_labels(visible)
+    ranked = []
+    for position, agent in enumerate(visible):
+        readiness = agent.get("readiness") or {}
+        state = readiness.get("state")
+        ready = state == "action_ready"
+        if not ready and not setup:
+            continue
+        label = agent["picker_label"] + (" (custom)" if agent.get("is_override") else "")
+        rank = _picker_rank(query, label, agent["name"])
+        if rank is not None:
+            # Best text match first; within it, specialists that can start, then
+            # those needing setup, then those whose setup check is unavailable.
+            ranked.append((rank, _PICKER_READINESS_ORDER.get(state, 2), position,
+                           {"name": agent["name"], "label": label, "ready": ready,
+                            "readiness": readiness.get("label", "")}))
+    ranked.sort(key=lambda row: row[:3])
+    return {"items": [row[3] for row in ranked[:limit]], "total": len(ranked), "limit": limit}
 
 
 @app.get("/assessments", response_class=HTMLResponse)
@@ -7236,7 +7598,7 @@ def assessments_page(request: Request) -> HTMLResponse:
                 getattr(prof, "persona", ""),
                 getattr(prof, "description", ""),
             )
-            a["group"] = department_title(a["suite"]) if a.get("suite") else "Other agents"
+            a["group"] = department_title(a["suite"]) if a.get("suite") else "Other agents and specialists"
         agents.sort(key=lambda a: (a["group"].casefold(), a["label"].casefold(), a["name"]))
     except Exception:  # never 500 the page if the factory layer is unavailable
         agents = []
@@ -7563,15 +7925,27 @@ def oversight_page(request: Request) -> HTMLResponse:
     )
 
 
-@app.get("/run-tree", response_class=HTMLResponse)
-def run_tree_page(request: Request) -> HTMLResponse:
+@app.get("/run-tree", response_class=HTMLResponse, response_model=None)
+def run_tree_page(request: Request) -> HTMLResponse | RedirectResponse:
     """Counterfactual review: the runs that were forked, and their branches.
 
     Read-only. Forking happens on the run itself; this is where a reviewer
     reads what the agent chose against what the alternative did, under one
     root. Owner-scoped like the goal listings, and fail-soft: an unreadable
-    lineage sidecar renders the empty state, never a 500.
+    lineage sidecar renders the empty state, never a 500. In areas navigation
+    it is Task replay's Branches tab (/replay?tab=branches).
     """
+    from .navigation_api import areas_redirect
+
+    moved = areas_redirect(request)
+    if moved is not None:
+        return moved
+    return templates.TemplateResponse(request, "run_tree.html", _run_tree_context(request))
+
+
+def _run_tree_context(request: Request) -> dict:
+    """The Branches view: tasks with branches, one task's branch tree and
+    the branch controls (/run-tree, and Task replay's Branches tab)."""
     from maverick import session_tree
 
     owner_filter = goal_owner_filter(request)
@@ -7599,19 +7973,16 @@ def run_tree_page(request: Request) -> HTMLResponse:
         ]
     except Exception:  # pragma: no cover - the picker is best-effort
         recent = []
-    return templates.TemplateResponse(
-        request,
-        "run_tree.html",
-        {
-            "enabled": bool(cfg.get("enable")),
-            "max_depth": cfg.get("max_depth"),
-            "roots": rows,
-            "tree": tree,
-            "recent": recent,
-            "can_operate": has_permission(request, "operate"),
-            "can_admin": has_permission(request, "admin"),
-        },
-    )
+    return {
+        "enabled": bool(cfg.get("enable")),
+        "max_depth": cfg.get("max_depth"),
+        "roots": rows,
+        "tree": tree,
+        "recent": recent,
+        "can_operate": has_permission(request, "operate"),
+        "can_admin": has_permission(request, "admin"),
+        "branches_href": "/run-tree?",
+    }
 
 
 @app.get("/safety", response_class=HTMLResponse)
@@ -7691,16 +8062,37 @@ def _compliance_view(framework: str) -> dict:
     }
 
 
+_COMPLIANCE_TABS = (("", "Coverage", "/compliance"), ("overview", "Overview", "/compliance?tab=overview"))
+
+
 @app.get("/compliance", response_class=HTMLResponse)
-async def compliance_page(request: Request) -> HTMLResponse:
+async def compliance_page(request: Request, tab: str = "") -> HTMLResponse:
     """Auditor-ready control-coverage report (GDPR + EU AI Act + US frameworks).
 
     Org/system-level posture (like /safety), grouped by framework. The
     ``?framework=eu|us|all`` query param mirrors ``maverick compliance``.
     Control coverage only -- not a legal attestation. Fail-soft to an empty
-    state so a missing core install never 500s the console.
+    state so a missing core install never 500s the console. ``?tab=overview``
+    shows the Autonomous Compliance landing to people who may open it.
     """
+    from .navigation_api import areas_on, may_open
+
+    tabs = list(_COMPLIANCE_TABS) if may_open(request, "/autonomous-compliance") else None
+    if tab == "overview":
+        if tabs is None:
+            raise HTTPException(status_code=403, detail="this page is not enabled for your role")
+        require_permission(request, "view")  # the landing's own check
+        from .autonomous_compliance_page import landing_context, with_landing_headers
+
+        context = landing_context()
+        context["tab_host"] = {
+            "kicker": "Governance", "title": "Compliance", "subtitle": "What is covered and what still needs doing",
+            "label": "Compliance views", "tabs": tabs, "selected": "overview",
+            "lede": "Everything you need to run your compliance program, in six areas. Pick a card to open "
+                    "that part of Lightwork. Each card says whether it is ready to use today."}
+        return with_landing_headers(templates.TemplateResponse(request, "autonomous_compliance.html", context))
     view = _compliance_view(request.query_params.get("framework") or "all")
+    view["compliance_tabs"] = tabs if areas_on(request) else None
     from .compliance_controls_api import RETENTION_FIELDS, guide_for
 
     view["guide_for"] = guide_for
@@ -7708,7 +8100,61 @@ async def compliance_page(request: Request) -> HTMLResponse:
     view["can_admin"] = has_permission(request, "admin")
     view["can_operate"] = has_permission(request, "operate")
     view["can_global_admin"] = has_global_permission(request, "admin")
+    view.update(_compliance_owner_view(request, view["can_admin"]))
     return templates.TemplateResponse(request, "compliance.html", view)
+
+
+def _compliance_owner_view(request: Request, can_admin: bool) -> dict:
+    """Owners, due dates and steps for protections that need action, plus
+    when the report was checked (it is computed live for this page)."""
+    import datetime as _dt
+
+    from . import compliance_owners
+    try:
+        owners = compliance_owners.load()
+    except Exception:  # noqa: BLE001 -- the report still shows without owners
+        owners = {}
+    people: list[tuple[str, str]] = []
+    if can_admin:
+        try:
+            from .rbac import list_users
+            people = [(p, _idfmt.humanize_principal(p).name) for p in sorted(list_users())]
+        except Exception:  # noqa: BLE001 -- a free choice is still offered below
+            people = []
+    return {"owners": owners, "owner_people": people, "checked_at": time.time(),
+            "owner_steps": compliance_owners.steps_for, "owner_overdue": compliance_owners.overdue,
+            "today": _dt.date.today().isoformat(),
+            "owner_saved": request.query_params.get("owner_saved") == "1",
+            "owner_error": {"control": "Choose a protection from the list.", "owner": "Choose an owner.",
+                            "due": "Choose a due date."}.get(request.query_params.get("owner_error", ""), "")}
+
+
+@app.post("/compliance/owners")
+async def compliance_set_owner(request: Request) -> RedirectResponse:
+    """Set the owner and due date of a protection that needs action. Workspace
+    administrators only; each change is written to the activity record."""
+    require_permission(request, "admin")
+    _require_same_origin(request)
+    from urllib.parse import urlencode
+
+    from . import compliance_owners
+    from .audit_actions_api import _audit_event
+    form = await request.form()
+    control = str(form.get("control", ""))
+    owner = str(form.get("owner", ""))
+    due = str(form.get("due", ""))
+    try:
+        from maverick.compliance import compliance_report
+        known = {c.control for c in compliance_report()}
+        entry = compliance_owners.save(control, owner=owner, due=due,
+                                       actor=caller_principal(request) or "local", known=known)
+    except compliance_owners.OwnerError as exc:
+        code = "due" if "date" in str(exc) else "owner" if "owner" in str(exc) else "control"
+        return RedirectResponse("/compliance?" + urlencode({"owner_error": code}) + "#cmp-attention",
+                                status_code=303)
+    _audit_event(request, "compliance_control_owner_set", control=control.strip(),
+                 owner=entry["owner"], due=entry["due"])
+    return RedirectResponse("/compliance?owner_saved=1#cmp-attention", status_code=303)
 
 
 @app.get("/compliance/policy-links", response_class=HTMLResponse)
@@ -8625,6 +9071,9 @@ def _permissions_tool_page(
     return result
 
 
+_PERMISSION_TABS = (("", "Permissions", "/permissions"), ("inventory", "Inventory", "/permissions?tab=inventory"))
+
+
 @app.get("/permissions", response_class=HTMLResponse)
 async def permissions_page(
     request: Request,
@@ -8632,8 +9081,25 @@ async def permissions_page(
     state: str = Query(default="all"),
     page: int = Query(default=1, ge=1),
     per_page: int = Query(default=50, ge=1, le=100),
+    tab: str = Query(default="", max_length=32),
 ) -> HTMLResponse:
-    """What Lightwork can do — tools, capabilities, channels, data flow."""
+    """What Lightwork can do — tools, capabilities, channels, data flow.
+    ``?tab=inventory`` shows everything Lightwork can use here (the
+    /discovery page) to people who may open it."""
+    from .navigation_api import areas_on, may_open
+
+    tabs = list(_PERMISSION_TABS) if may_open(request, "/discovery") else None
+    if tab == "inventory":
+        if tabs is None:
+            raise HTTPException(status_code=403, detail="this page is not enabled for your role")
+        from .control_plane import discovery_overview
+
+        return templates.TemplateResponse(request, "discovery.html", {
+            "discovery": discovery_overview(),
+            "tab_host": {"kicker": "Governance", "title": "Permissions", "subtitle": "What Lightwork can do",
+                         "label": "Permissions views", "tabs": tabs, "selected": "inventory",
+                         "lede": "Everything Lightwork can use here and keep under your rules: actions, connected "
+                                 "tool servers, AI providers, channels and outside agents."}})
     perm = _permissions_tool_page(
         _permissions_snapshot(),
         q=q,
@@ -8648,6 +9114,7 @@ async def permissions_page(
             "perm": perm,
             "permissions_can_manage_sandbox": has_global_permission(request, "admin"),
             "permissions_can_manage_tools": has_global_permission(request, "operate"),
+            "permission_tabs": tabs if areas_on(request) else None,
         },
     )
 
@@ -8691,16 +9158,76 @@ def _approval_source(provenance: str | None) -> str | None:
     return None
 
 
-def _approval_viewer_context(request: Request | None) -> dict:
-    """Who is looking at the queue, so a card can say "your own request"
-    exactly when the enforced rule treats it as one."""
+def _approval_viewer_context(request: Request | None, approvals: list) -> dict:
+    """Who is looking at the queue, so a card can say "your own request", and
+    -- when the enforced rules keep that person from approving it (someone
+    else must, or under two-person approval their vote doesn't count) -- why.
+    Also which waiting requests have had their one reminder sent."""
     if request is None:
-        return {"approval_viewer": "", "self_approval_allowed": False}
+        return {"approval_viewer": "", "own_request_notes": {}, "approval_reminders": set()}
+    from .api import _supervisor
+    from .approval_decisions import own_request_note
+    from .approval_reminders import reminder_sent
+
+    viewer = _supervisor(request)
+    world = _world()
+    notes = {}
+    reminders = set()
+    for approval in approvals:
+        note = own_request_note(world, approval, viewer)
+        if note:
+            notes[approval.id] = note
+        if reminder_sent(world, approval):
+            reminders.add(approval.id)
+    return {"approval_viewer": viewer, "own_request_notes": notes, "approval_reminders": reminders}
+
+
+def _approval_progress(approvals: list, request: Request) -> dict:
+    """Each pending card's approval progress, in the words the card shows.
+
+    The same facts ``GET /api/v1/approvals/{id}/state`` returns, rendered with
+    the page instead of fetched once per card after load. Callers pass only
+    the approvals the viewer may open (the page routes filter with
+    ``can_read_approval``, the state API's content check); the state API's
+    operate floor applies here too.
+    """
+    if not has_permission(request, "operate"):
+        return {}
     from maverick.safety.dual_control import allow_self_approval
 
     from .api import _supervisor
+    from .approval_decisions import own_request_note
 
-    return {"approval_viewer": _supervisor(request), "self_approval_allowed": allow_self_approval()}
+    who = _supervisor(request)
+    world = _world()
+    progress = {}
+    for approval in approvals:
+        try:
+            state = world.approval_state(approval.id)
+        except Exception:  # noqa: BLE001 - the card keeps its server-side checks
+            continue
+        if not state or state.get("status") != "pending":
+            continue
+        required = int(state.get("approvals_required") or 1)
+        words = ["One approval is needed." if required <= 1
+                 else f"{state.get('approved_count', 0)} of {required} required approvals received."]
+        recorded = who in (state.get("approvers") or [])
+        if recorded:
+            words.append("Your approval is recorded.")
+        elif state.get("requested_by") and state.get("requested_by") == who:
+            # The words follow what is enforced: one approver may be the person
+            # who asked; under two-person approval their vote may not count.
+            # When another approver must decide, the card already says why.
+            if own_request_note(world, approval, who):
+                pass
+            elif required > 1 and not allow_self_approval():
+                words.append("You asked for this, so other people must approve it.")
+            elif required <= 1:
+                words.append("You asked for this, so approving it approves your own request.")
+            else:
+                words.append("You asked for this; your approval counts as one of them.")
+        progress[approval.id] = {"text": " ".join(words), "recorded": recorded}
+    return progress
 
 
 def _approval_queue_context(approvals: list, request: Request | None = None) -> dict:
@@ -8767,12 +9294,31 @@ def _approval_queue_context(approvals: list, request: Request | None = None) -> 
         "approval_actions": approval_actions,
         "approval_scopes": approval_scopes,
         "assessment_ids": assessment_ids,
-        **_approval_viewer_context(request),
+        "approval_progress": _approval_progress(approvals, request) if request is not None else {},
+        **_approval_viewer_context(request, approvals),
     }
 
 
+def _all_decisions_view(request: Request, view: str) -> dict:
+    """Approvals' ``?view=all``: the Action Center's list (every kind of item
+    waiting on you) in place of the approvals list, under the hero's same
+    approval count. Only for people the Action Center itself admits -- its
+    page policy, ``operate`` and its feature switch -- refused with the Action
+    Center's own answer otherwise. In the job-named navigation the Approvals
+    section's page tabs (Approvals, Action Center) switch between the two."""
+    from .action_center_api import require_enabled
+    from .draft_api import context_for
+
+    if view != "all":
+        return {"approvals_view": ""}
+    require_page_visible(request, "/action-center")
+    require_enabled(request)
+    return {"approvals_view": "all", "action_context": context_for(request),
+            "can_admin": has_permission(request, "admin")}
+
+
 @app.get("/approvals", response_class=HTMLResponse)
-def approvals_page(request: Request) -> HTMLResponse:
+def approvals_page(request: Request, view: str = "") -> HTMLResponse:
     """Pending high-risk actions awaiting approve/deny.
 
     Populated when an agent runs with ``MAVERICK_CONSENT_MODE=dashboard``:
@@ -8791,10 +9337,19 @@ def approvals_page(request: Request) -> HTMLResponse:
     from .content_access import can_read_approval
     from .flow_approval_inbox import pending_for_request
 
+    all_view = _all_decisions_view(request, view)
     world = _world()
     pending = list(world.pending_approvals())
     approvals = [row for row in pending if can_read_approval(request, row, world)]
     flow_approvals = pending_for_request(request)
+    # Requests from colleagues' private tasks: a card with only who asked,
+    # the action and its risk, the agent or specialist and the expiry.
+    from .api import _supervisor
+    from .approval_private_cards import private_cards
+
+    readable = {row.id for row in approvals}
+    private = private_cards(world, [row for row in pending if row.id not in readable],
+                            _supervisor(request) or "")
     return templates.TemplateResponse(
         request,
         "approvals.html",
@@ -8803,12 +9358,26 @@ def approvals_page(request: Request) -> HTMLResponse:
             "flow_approvals": flow_approvals["items"],
             "flow_approval_coverage": flow_approvals["coverage"],
             "private_count": len(pending) - len(approvals),
+            "private_cards": private,
+            "viewer_role": _approval_viewer_role(request),
             # Link to Content access only when asking for a card read is on.
             "content_access_on": content_access.enabled(),
             **_approval_queue_context(approvals, request),
+            **all_view,
         },
         headers={"Cache-Control": "private, no-store"},
     )
+
+
+def _approval_viewer_role(request: Request) -> str:
+    """The viewer's role name in this workspace, for "why you see this"."""
+    from . import auth as _auth
+    from .api import _supervisor
+
+    try:
+        return _auth.role_for_principal(_supervisor(request) or "") or ""
+    except Exception:  # an unreadable roster names no role
+        return ""
 
 
 def _recent_governance_holds(limit: int = 10) -> list[dict]:
@@ -8828,6 +9397,28 @@ def _recent_governance_holds(limit: int = 10) -> list[dict]:
         return []
     from .content_access import audit_metadata
     return [audit_metadata(event) for event in reversed(events)][:limit]
+
+
+def _fleet_typical_costs(fleets: list) -> tuple[dict, dict | None]:
+    """What each team agent's past tasks usually cost, beside the task form,
+    and the workspace's remaining budget. A specialist's history is its pack's
+    tasks in this workspace; any other agent's is its own tasks."""
+    from maverick.typical_cost import min_runs, typical_cost
+
+    world, minimum = _world(), min_runs()
+    costs: dict[str, dict] = {}
+    for fleet in fleets:
+        for agent in fleet.agents:
+            principal = "" if agent.domain else fleet.principal_for(agent.name)
+            costs[f"{fleet.name}/{agent.name}"] = typical_cost(
+                world, specialist=agent.domain or "", agent_principal=principal, minimum=minimum)
+    try:
+        from maverick import spending_limits
+
+        workspace = spending_limits.workspace_standing()
+    except Exception:  # noqa: BLE001 -- the task form still works; the line is left out
+        workspace = None
+    return costs, workspace
 
 
 def _fleet_recent_runs(fleet_name: str, *, owner: str | None = None, limit: int = 12) -> list[dict]:
@@ -8911,7 +9502,7 @@ def fleets_page(request: Request) -> HTMLResponse:
                 profile = catalog.get(domain)
                 if profile is None:
                     specialist_readiness[domain] = {
-                        "state": "needs_setup", "label": "Specialist no longer available",
+                        "state": "needs_setup", "label": "No longer available",
                         "fix_url": "/agents", "missing_tools": [],
                     }
                 else:
@@ -8934,6 +9525,7 @@ def fleets_page(request: Request) -> HTMLResponse:
     }
     # Per-fleet recent runs (newest-first), scoped to the fleets already shown.
     runs_by_fleet = {f.name: _fleet_recent_runs(f.name, owner=owner) for f in fleets}
+    typical_costs, workspace_limit = _fleet_typical_costs(fleets)
     try:  # role picker for new agents (same roles the access page offers)
         from . import rbac as _rbac
 
@@ -8949,6 +9541,8 @@ def fleets_page(request: Request) -> HTMLResponse:
             "fleet_can_start": fleet_can_start,
             "role_options": role_options,
             "runs_by_fleet": runs_by_fleet,
+            "typical_costs": typical_costs,
+            "workspace_limit": workspace_limit,
             "holds": _recent_governance_holds(),
             "pending_count": len(_world().pending_approvals()),
         },
@@ -9893,11 +10487,18 @@ async def shield_calibration_api() -> JSONResponse:
 
 
 @app.get("/chat", response_class=HTMLResponse)
-def chat_page(request: Request) -> HTMLResponse:
+def chat_page(request: Request, compose: str = "") -> HTMLResponse:
+    """Chat. ``?compose=form`` shows the task builder's form (the Task builder
+    page's job in the job-named navigation): the same fields, checks and
+    submit, under that page's own check."""
     from maverick import flow
     from maverick.runner import configured_max_dollars, configured_max_wall_seconds
 
     from .onboarding_state import workspace_readiness
+
+    compose_form = compose == "form"
+    if compose_form:
+        require_page_visible(request, "/goal-builder")
 
     workspace = workspace_readiness()
     w = _world()
@@ -9924,8 +10525,33 @@ def chat_page(request: Request) -> HTMLResponse:
             "goal_max_wall_seconds": configured_max_wall_seconds(),
             "flows_enabled": flow.enabled(),
             "can_enable_flows": has_global_permission(request, "admin") and "MAVERICK_FLOWS" not in os.environ,
+            # What Lightwork can do (examples for the person's department) and
+            # one limit that is true in code.
+            "chat_examples": _chat_examples(request),
+            "chat_limits": _CHAT_LIMITS,
+            "compose_form": compose_form,
+            "compose_form_available": page_visible(request, "/goal-builder"),
+            "channels": _goal_builder_channels() if compose_form else [],
         },
     )
+
+
+def _goal_builder_channels() -> list:
+    from .control_plane import _discover_channels
+
+    return _discover_channels()
+
+
+def _chat_examples(request: Request) -> dict:
+    try:
+        from .chat_examples import examples_for
+
+        return examples_for(request)
+    except Exception:  # pragma: no cover -- the empty chat renders without examples
+        return {"department": None, "examples": [], "sample": None}
+
+
+from .chat_examples import LIMITS as _CHAT_LIMITS  # noqa: E402
 
 
 def _director_choices() -> list[dict]:
@@ -10100,7 +10726,13 @@ async def home(request: Request) -> HTMLResponse | RedirectResponse:
         from .preferences_api import _state
 
         try:
-            start = (await run_in_threadpool(_state, request))["values"]["start_page"]
+            start_state = await run_in_threadpool(_state, request)
+            start = start_state["values"]["start_page"]
+            if start_state["sources"].get("start_page") == "product default":
+                # Areas navigation starts each role on its preset's page.
+                from .navigation_api import preset_start
+
+                start = await run_in_threadpool(preset_start, request) or start
             if start != "/chat" and start != "/":
                 return RedirectResponse(start, status_code=303)
         except (HTTPException, ValueError, OSError):
@@ -10149,7 +10781,7 @@ async def chat_send(
         if len(title) > GOAL_TITLE_MAX_LENGTH:
             raise HTTPException(
                 status_code=422,
-                detail=f"Shorten the goal to {GOAL_TITLE_MAX_LENGTH:,} characters or fewer. Move additional instructions to Add details.",
+                detail=f"Shorten the task to {GOAL_TITLE_MAX_LENGTH:,} characters or fewer. Move additional instructions to Add details.",
             )
         if len(description) > GOAL_DESCRIPTION_MAX_LENGTH:
             raise HTTPException(
@@ -10757,7 +11389,7 @@ def _load_paused_approval_run(token: str):
 
             assert_tenant_active(tenant)
         except Exception:
-            return None, "That tenant is not active.", tenant, ""
+            return None, "That workspace is not active.", tenant, ""
         from maverick.paths import set_tenant
 
         tenant_token = set_tenant(tenant)
@@ -11696,6 +12328,8 @@ def chat_answer_panel(request: Request, goal_id: int) -> HTMLResponse:
 
 @app.get("/chat/goal/{goal_id}", response_class=HTMLResponse)
 def chat_goal(request: Request, goal_id: int) -> HTMLResponse:
+    require_permission(request, "view")
+    original_context = _conversation_context(request)
     w = _world()
     g = w.get_goal(goal_id)
     if g is None:
@@ -11729,7 +12363,8 @@ def chat_goal(request: Request, goal_id: int) -> HTMLResponse:
     from maverick.runner import configured_goal_ceiling_dollars
 
     from ._event_stream import TERMINAL_RUN_STATUSES
-    from .answer_projection import version_for
+    from .answer_checks import answer_facts
+    from .answer_projection import validate_current, version_for
     from .answer_run_details import read as read_run_details
 
     try:
@@ -11763,10 +12398,7 @@ def chat_goal(request: Request, goal_id: int) -> HTMLResponse:
     spend_ceiling = handoff_budget.max_dollars
     answer_run_details = read_run_details(request, w, goal_id, expected_goal=g)
 
-    return templates.TemplateResponse(
-        request,
-        "chat_goal.html",
-        {
+    context = {
             "goal": g,
             "can_download_chat_answer": can_download_answer,
             "chat_answer_download_note": download_note,
@@ -11799,12 +12431,19 @@ def chat_goal(request: Request, goal_id: int) -> HTMLResponse:
             "answer_version": version_for(g, contract, signoff, artifacts, handed_off),
             "answer_run_details": answer_run_details,
             "answer_run_details_version": digest(answer_run_details),
+            **answer_facts(w, g, frozenset(_withheld_event_markers()), request=request),
             "projects": projects,
             "share_links": share_links,
             "withheld_markers": _withheld_event_markers(),
             "voice_only": _voice_only_mode(),
-        },
-    )
+    }
+    validate_current(request, w, context, original_context)
+    current_root = w.get_goal(root_id)
+    if current_root is None:
+        raise HTTPException(404, "This conversation is no longer available.")
+    assert_goal_access(request, current_root)
+    return templates.TemplateResponse(request, "chat_goal.html", context,
+                                      headers={"Cache-Control": "no-store, private"})
 
 
 @app.get("/chat/goal/{goal_id}/download.md")
@@ -12231,10 +12870,15 @@ def trajectory_page(request: Request, goal_id: int) -> HTMLResponse:
         fork_enabled = session_tree.enabled()
     except Exception:  # pragma: no cover - branching is optional
         fork_enabled = False
+    from .step_narration import narrate, who
+
+    # Plain words for each step; the recorded text stays under Technical details.
+    steps = {e.id: narrate(e.kind, e.agent, e.content) for e in events}
+    agents = {e.agent: who(e.agent) for e in events}
     return templates.TemplateResponse(
         request,
         "trajectory.html",
-        {"goal": g, "events": events, "fork_enabled": fork_enabled,
+        {"goal": g, "events": events, "fork_enabled": fork_enabled, "steps": steps, "agents": agents,
          "can_operate": has_permission(request, "operate") and can_access_goal_principal(caller_principal(request), g)},
     )
 
@@ -12351,7 +12995,7 @@ def api_goal_events_legacy(
     since: int = 0,
     limit: int = 200,
 ) -> dict:
-    from ._event_stream import TERMINAL_RUN_STATUSES, event_page, event_payload, replay_cursor
+    from ._event_stream import TERMINAL_RUN_STATUSES, _chat_event_dict, event_page, replay_cursor
 
     w = _world()
     g = w.get_goal(goal_id)
@@ -12370,7 +13014,7 @@ def api_goal_events_legacy(
         "next_id": events[-1].id if events else since,
         "has_more": has_more,
         "terminal": g.status in TERMINAL_RUN_STATUSES and not has_more,
-        "events": [event_payload(e) for e in events],
+        "events": [_chat_event_dict(e) for e in events],
     }
 
 
@@ -12498,6 +13142,7 @@ async def shell_copilot_js() -> FileResponse:
     )
 
 
+@app.get("/static/lightwork-agent-picker.js")
 @app.get("/static/lightwork-answer-panel.js")
 @app.get("/static/lightwork-approval-history.js")
 @app.get("/static/lightwork-chat-drafts.js")
@@ -12519,9 +13164,11 @@ async def shell_copilot_js() -> FileResponse:
 @app.get("/static/lightwork-task-handoffs.js")
 @app.get("/static/lightwork-thread-history.js")
 @app.get("/static/lightwork-employee-companion.css")
-@app.get("/static/lightwork-preferences.css")
 @app.get("/static/lightwork-product-operations.js")
 @app.get("/static/lightwork-settings-search.js")
+@app.get("/static/lightwork-shortcuts.js")
+@app.get("/static/lightwork-pins.js")
+@app.get("/static/lightwork-command.css")
 @app.get("/static/lightwork-task-resume.js")
 @app.get("/static/lightwork-facts.js")
 @app.get("/static/lightwork-access-state.js")
@@ -12568,6 +13215,7 @@ async def shell_copilot_js() -> FileResponse:
 @app.get("/static/lightwork-ai-cloud-agent-governance.js")
 @app.get("/static/lightwork-governance-agents.js")
 @app.get("/static/lightwork-knowledge-library.js")
+@app.get("/static/lightwork-tabs.js")
 async def in_app_ui_asset(request: Request) -> FileResponse:
     """Serve only the explicitly registered in-app form assets."""
     name = request.url.path.rsplit("/", 1)[-1]
@@ -12973,8 +13621,7 @@ async def brand_mark() -> FileResponse:
 #: The self-hosted faces the design system declares. An allowlist, not a
 #: directory mount: nothing else under static/fonts/ is ever served.
 _FONT_FILES = frozenset({
-    "manrope-200.woff2", "manrope-300.woff2", "manrope-400.woff2",
-    "manrope-500.woff2", "manrope-600.woff2", "manrope-700.woff2",
+    "manrope-var.woff2",
     "jbm-400.woff2", "jbm-500.woff2",
 })
 
@@ -12993,30 +13640,51 @@ async def shell_font(name: str) -> FileResponse:
     )
 
 
+_MAP_VIEWS = (("", "Flat map", "/graph-editor"), ("3d", "3D view", "/graph-editor?view=3d"))
+
+
 @app.get("/graph-editor", response_class=HTMLResponse)
-def graph_editor_page(request: Request) -> HTMLResponse:
+def graph_editor_page(request: Request, view: str = "") -> HTMLResponse:
     """Visual graph editor: the goal forest as an editable SVG node graph.
 
     Layout comes from the server (GET /api/v1/goal-tree); the page JS only
-    draws and posts edits (retitle / re-parent / add child)."""
+    draws and posts edits (retitle / re-parent / add child). ``?view=3d``
+    shows the same forest in 3D (the 3D plan view's page, under the task
+    map), for people who may open the 3D plan view."""
     from .goal_tree import forest_html, goal_nodes
+    from .navigation_api import areas_on, may_open
 
+    show_3d = may_open(request, "/plan-tree-3d")
+    if view == "3d" and not show_3d:
+        raise HTTPException(status_code=403, detail="this page is not enabled for your role")
     nodes = goal_nodes(_world(), owner=goal_owner_filter(request))
-    return templates.TemplateResponse(
-        request,
-        "graph_editor.html",
-        {"node_count": len(nodes), "fallback_html": forest_html(nodes)},
-    )
+    # The views bar is areas navigation's; the classic page keeps its 3D link.
+    context = {"node_count": len(nodes), "fallback_html": forest_html(nodes),
+               "map_views": list(_MAP_VIEWS) if show_3d and areas_on(request) else None}
+    if view == "3d":
+        context["tab_host"] = {"title": "Task map", "label": "Task map views", "tabs": list(_MAP_VIEWS),
+                               "selected": "3d",
+                               "lede": "Your tasks and their smaller steps as a 3D map you can move around."}
+        return templates.TemplateResponse(request, "plan_tree_3d.html", context)
+    return templates.TemplateResponse(request, "graph_editor.html", context)
 
 
 @app.get("/goal-builder", response_class=HTMLResponse)
 async def goal_builder_page(request: Request) -> HTMLResponse:
     """Drag-and-drop goal builder: compose a brief from blocks, then run it."""
-    from .control_plane import _discover_channels
+    from .navigation_api import areas_redirect
 
+    moved = areas_redirect(request)  # areas mode: Chat's form mode
+    if moved is not None:
+        return moved
     return templates.TemplateResponse(
-        request, "goal_builder.html", {"channels": _discover_channels()}
+        request, "goal_builder.html", {"channels": _goal_builder_channels()}
     )
+
+
+# "Step by step", not "Steps": the editor's own view switch already says "Steps".
+_BUILDER_MODES = (("", "Describe it", "/workflow-builder"), ("steps", "Step by step", "/workflow-builder?mode=steps"))
+_FLOW_ID = re.compile(r"[A-Za-z0-9_-]{1,120}")
 
 
 @app.get("/workflow-builder", response_class=HTMLResponse)
@@ -13025,6 +13693,9 @@ async def workflow_builder_page(
     template: str | None = None,
     edit: str | None = None,
     edit_agent: str | None = None,
+    mode: str = "",
+    flow: str = "",
+    from_template: str = "",
 ) -> HTMLResponse:
     """AI workflow builder: draft a reusable workflow from a brief or an
     uploaded document, edit it, then save it as a runnable template.
@@ -13034,9 +13705,25 @@ async def workflow_builder_page(
     re-drafting it. ``?edit=<name>`` rehydrates the full template editor so Save
     overwrites it; ``?edit_agent=<name>`` rehydrates the playbook editor for an
     existing agent (round-tripping override fields the builder can't show, so
-    editing can't silently clear them). An unknown name yields no prefill."""
+    editing can't silently clear them). An unknown name yields no prefill.
+
+    ``?mode=steps`` is the step-by-step editor (the flow designer's, with its
+    drafting, canvas, testing, publishing and assistant) for people who may
+    open the flow designer; ``&flow=<id>`` opens a saved flow in it and
+    ``&from_template=<name>`` starts from a saved template, as the designer
+    does. Flows save through the same /api/v1/flows calls either way."""
     from maverick.config import get_features
 
+    from .navigation_api import areas_on, may_open
+
+    modes = list(_BUILDER_MODES) if may_open(request, "/flows/designer") else None
+    if mode == "steps":
+        if modes is None:
+            raise HTTPException(status_code=403, detail="this page is not enabled for your role")
+        flow_id = flow if _FLOW_ID.fullmatch(flow) else ""
+        context = _flow_designer_context(request, flow_id, from_template)
+        context["builder_modes"] = modes
+        return templates.TemplateResponse(request, "flow_designer.html", context)
     feats = get_features()
     prefill = None
     edit_prefill = None
@@ -13120,6 +13807,7 @@ async def workflow_builder_page(
             "edit_prefill": edit_prefill,
             "edit_agent_prefill": edit_agent_prefill,
             "edit_agent_denied": edit_agent_denied,
+            "builder_modes": modes if areas_on(request) else None,
         },
     )
 
@@ -13284,7 +13972,7 @@ async def connections_page(request: Request) -> HTMLResponse:
 )
 async def flow_designer_page(
     request: Request, flow_id: str = "", from_template: str = ""
-) -> HTMLResponse:
+) -> Response:
     """The visual flow designer -- a canvas node editor + the natural-language
     drafter + the copilot chat. Talks to the /api/v1/flows endpoints; the
     flow-engine gate is enforced there, so the page renders even when flows are
@@ -13293,7 +13981,21 @@ async def flow_designer_page(
     ``?from_template=<name>`` opens a saved TEMPLATE as its equivalent
     single-agent flow (the IR's degenerate case) -- the bridge from the text
     workflow builder into the graph designer: start from what you had, then add
-    branches/approvals/loops around it."""
+    branches/approvals/loops around it. In areas navigation a new flow starts
+    in the workflow builder's Steps mode; a saved flow keeps its address."""
+    from .navigation_api import areas_redirect
+
+    moved = areas_redirect(request)
+    if moved is not None:
+        return moved
+    return templates.TemplateResponse(
+        request, "flow_designer.html", _flow_designer_context(request, flow_id, from_template))
+
+
+def _flow_designer_context(request: Request, flow_id: str, from_template: str) -> dict:
+    """The flow designer's editor: the flow to open (or a template seed) and
+    the engine and management switches (/flows/designer, and the workflow
+    builder's Steps mode)."""
     from maverick import flow as _flow
 
     seed_flow = None
@@ -13311,14 +14013,12 @@ async def flow_designer_page(
             seed_flow = seed.to_dict()
         except (ValueError, FileNotFoundError):
             seed_flow = None  # unknown template -> a blank canvas, not a 500
-    return templates.TemplateResponse(
-        request, "flow_designer.html", {
-            "flow_id": flow_id,
-            "seed_flow": seed_flow,
-            "flows_enabled": _flow.enabled(),
-            "can_manage_flows": has_global_permission(request, "admin") and "MAVERICK_FLOWS" not in os.environ,
-        }
-    )
+    return {
+        "flow_id": flow_id,
+        "seed_flow": seed_flow,
+        "flows_enabled": _flow.enabled(),
+        "can_manage_flows": has_global_permission(request, "admin") and "MAVERICK_FLOWS" not in os.environ,
+    }
 
 
 @app.get("/flows/{flow_id}/runs/{run_id}", response_class=HTMLResponse)
@@ -13450,13 +14150,25 @@ async def benchmarks_page(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(request, "benchmarks.html", snap)
 
 
-@app.get("/walkthroughs", response_class=HTMLResponse)
-def walkthroughs_page(request: Request) -> HTMLResponse:
+@app.get("/walkthroughs", response_class=HTMLResponse, response_model=None)
+def walkthroughs_page(request: Request) -> HTMLResponse | RedirectResponse:
     """Locally exported run walkthrough videos (no external hosting).
 
     Lists the MP4s under the walkthroughs dir with native <video> embeds and
     a captions track when the export produced one. The export itself is
-    POST /api/v1/goals/{id}/walkthrough (replay-to-MP4 machinery)."""
+    POST /api/v1/goals/{id}/walkthrough (replay-to-MP4 machinery). In areas
+    navigation it is Task replay's Video tab (/replay?tab=video)."""
+    from .navigation_api import areas_redirect
+
+    moved = areas_redirect(request)
+    if moved is not None:
+        return moved
+    return templates.TemplateResponse(request, "walkthroughs.html", _walkthroughs_context(request))
+
+
+def _walkthroughs_context(request: Request) -> dict:
+    """The Video view: exported walkthrough videos the person may open and
+    the finished tasks they may turn into one."""
     from .api import _walkthroughs_dir
 
     d = _walkthroughs_dir()
@@ -13491,11 +14203,7 @@ def walkthroughs_page(request: Request) -> HTMLResponse:
         for g in _world().list_goals(owner=goal_owner_filter(request), limit=100, order="desc")
         if g.status not in {"pending", "running"}
     ]
-    return templates.TemplateResponse(
-        request,
-        "walkthroughs.html",
-        {"items": items, "runs": runs},
-    )
+    return {"items": items, "runs": runs}
 
 
 _WALKTHROUGH_NAME_RE = re.compile(r"^goal-(\d+)\.(mp4|vtt)$")
@@ -13532,16 +14240,20 @@ async def walkthrough_media(request: Request, name: str) -> FileResponse:
     return FileResponse(path, media_type=media)
 
 
-@app.get("/plan-tree-3d", response_class=HTMLResponse)
-def plan_tree_3d_page(request: Request) -> HTMLResponse:
+@app.get("/plan-tree-3d", response_class=HTMLResponse, response_model=None)
+def plan_tree_3d_page(request: Request) -> HTMLResponse | RedirectResponse:
     """The goal forest in 3D (vanilla WebGL; no three.js, no CDN).
 
     Progressive enhancement: without WebGL (or JS) the server-rendered text
     tree IS the page — it is also always present in a <details> for screen
     readers. WebXR shows an "Enter VR" button only when the browser reports
-    support."""
+    support. In areas navigation it lives at /graph-editor?view=3d."""
     from .goal_tree import forest_html, goal_nodes
+    from .navigation_api import areas_redirect
 
+    moved = areas_redirect(request)
+    if moved is not None:
+        return moved
     nodes = goal_nodes(_world(), owner=goal_owner_filter(request))
     return templates.TemplateResponse(
         request,

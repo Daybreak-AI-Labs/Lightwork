@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const { JSDOM } = require('jsdom');
+const {shell} = require('./_shell');
 const base = path.join(__dirname, '../../maverick_dashboard');
 const template = fs.readFileSync(path.join(base, 'templates/settings.html'), 'utf8');
 const source = fs.readFileSync(path.join(base, 'static/lightwork-webhook-settings.js'), 'utf8');
@@ -14,6 +15,7 @@ async function harness(handler) {
   const dom = new JSDOM(template, { url: 'http://localhost/settings', runScripts: 'outside-only' });
   const calls = [];
   dom.window.fetch = async (url, init = {}) => { calls.push({ url, init }); return handler(url, init, calls); };
+  shell(dom.window);
   dom.window.eval(source); await tick(); await tick();
   const get = name => dom.window.document.getElementById('wh-' + name);
   function enter(secret = 'synthetic-ui-key') { // pragma: allowlist secret

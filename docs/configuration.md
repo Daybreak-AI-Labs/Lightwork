@@ -120,18 +120,35 @@ scan_output     = true
 # (pay, delete, deploy, passwords, all customers, production ...) before it
 # starts. When set, tasks at or above this level wait on the dashboard's
 # Approvals page until a person approves them, and do not start if nobody
-# does within MAVERICK_CONSENT_DASHBOARD_TIMEOUT (300 s). It reads only the
+# does within [approval] dashboard_wait_seconds (1800 s). It reads only the
 # words: every action is still checked on its own once the task runs.
 # goal_risk_require_human = "high"   # never (default) | high | medium
 # goal_risk_floor         = "low"    # low (default) | medium | high
 
 [approval]
-# The Approvals page. A decision can be undone for this long; the agent
+# The Approvals page. A risky step waits this long for a decision (30
+# minutes; MAVERICK_CONSENT_DASHBOARD_TIMEOUT wins); after 10 minutes the
+# people who can decide get one in-app reminder, and with no decision in
+# time the step is refused. A request's card stays approvable for the wait,
+# at most an hour.
+dashboard_wait_seconds  = 1800
+# A decision can be undone for this long; the agent
 # only acts on an approval once the window has passed (0 = act at once,
 # no Undo). High and critical risk approvals need an explicit confirmation
 # (a ticked box; typing APPROVE for critical) unless switched off.
 undo_grace_seconds      = 30
 require_acknowledgement = true
+# Who approves a high or critical risk action someone asked for:
+# "when_available" (default) = someone else whenever another approver could
+# decide it, else the requester (recorded as a self-approval); "always" =
+# always someone else; "never" = the requester may approve it.
+separate_approver       = "when_available"
+# One row per approval check: when, workspace, risk, kind of action, agent or
+# specialist, and whether it was allowed, sent to a person or refused. Never
+# the content, arguments or command. For previewing a threshold change later;
+# rows older than check_retention_days are pruned a few hundred at a time.
+record_checks           = true
+check_retention_days    = 90
 
 [sandbox]
 backend = "local"                   # local | docker | ssh | podman | devcontainer | firecracker | kubernetes
@@ -197,6 +214,35 @@ token = "${MAVERICK_DASHBOARD_TOKEN}"
 # are also served with a content hash in the URL and a one-year cache, so an
 # upgrade restyles on the next page load without a hard refresh.
 # compress = true
+
+# Glass effects for everyone: "off" (the default) keeps panels, rows, controls
+# and dialogs solid, so clicks and typing repaint quickly; "on" brings back the
+# see-through, blurred look until people choose their own in Display
+# preferences (on this device or on their account). The top bar and sidebar
+# stay translucent either way. Settings > All settings and the setup wizard's
+# advanced step set it too.
+# glass = "off"
+
+# The sidebar: "classic" (the default) keeps today's groups; "areas" puts
+# every page in one of nine job-named areas (Home, Work, Agents, Rules &
+# safety, Privacy, Risk & compliance, Evidence & audit, Costs & value,
+# Settings) with local tabs and an "Area › Section" breadcrumb, and starts
+# each role from its own layout. Who may open a page never changes. In areas
+# mode merged pages' old addresses forward to their new homes, each still
+# checked as the old page was: /today, /me and /overview to Home's views,
+# /action-center to Approvals' "All decisions", /my-work to Tasks with
+# background work, /project-workspaces to Projects (one project's to its Plan
+# tab), /goal-builder to Chat's form, /run-tree and /walkthroughs to Task
+# replay's Branches and Video tabs, /plan-tree-3d to the task map's 3D view,
+# /trust, /discovery, /autonomous-compliance and /cortex to tabs of Outside
+# agents, Permissions, Compliance and Knowledge access, and /flows/designer to
+# the workflow builder's Steps mode. Anyone the new address would not admit,
+# and classic mode, keeps the old address. Run the tree test in
+# docs/research/tree-test/ before switching everyone.
+# navigation_personal = true lets each person choose for themselves in Your
+# preferences. Settings > All settings and the setup wizard set both.
+# navigation = "classic"
+# navigation_personal = false
 
 # Department (suite) access for authenticated users with NO explicit grant on
 # the Users page (job-function scoping: a finance analyst sees and runs only
@@ -873,6 +919,7 @@ client_token = ""             # MAVERICK_PROXY_CLIENT_TOKEN (sealed when set on 
 
 [analytics]
 task_questions = true         # Insights page questions (need the dashboard's "duckdb" extra)
+usability_survey = false      # optional ease-of-use survey (SUS + one question after top tasks); answers stay local
 
 [env_hunt.enrichment_sources.intel_feed]  # a lookup service your server registered
 enable = true
@@ -940,7 +987,15 @@ workspace_dollars = 500.0       # 0 or unset = no workspace limit
 workspace_period = "month"      # "day" or "month"
 default_user_dollars = 50.0     # 0 or unset = no limit for each person
 default_user_period = "month"   # "task", "day" or "month"
+typical_cost_min_runs = 10      # finished tasks needed before a typical cost shows
 ```
+
+Beside the task form on **Teams** and in a specialist's or agent's **Check
+access** panel, Lightwork shows what that agent's or specialist's past runs
+usually cost: the middle half (25th to 75th percentile) and the median of its
+most recent finished tasks in this workspace. It is recorded history, never a
+prediction. With fewer finished tasks than `typical_cost_min_runs` (2 to 1000,
+default 10) it says there are not enough past runs yet.
 
 Spend is counted from the usage ledger plus runs still going in the dashboard
 process. Runs in separate worker processes are counted once they settle, so

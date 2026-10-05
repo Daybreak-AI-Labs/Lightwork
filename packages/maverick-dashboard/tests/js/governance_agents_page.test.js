@@ -5,6 +5,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const { JSDOM } = require("jsdom");
+const {shell: loadShell} = require("./_shell");
 
 const base = path.join(__dirname, "../../maverick_dashboard");
 const template = fs.readFileSync(path.join(base, "templates/governance_agents.html"), "utf8");
@@ -51,6 +52,7 @@ function page(t, extra = "") {
     if (key.endsWith("/analysis")) return streamed({ ...RUN, run_id: "run-2" });
     return streamed({ detail: "nope" }, 404);
   };
+  loadShell(w);
   w.eval(source);
   const settle = async () => { for (let i = 0; i < 40; i += 1) await new Promise((r) => setImmediate(r)); };
   return { w, calls, settle, $: (id) => w.document.getElementById(id) };

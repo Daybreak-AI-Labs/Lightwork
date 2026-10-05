@@ -10,7 +10,7 @@
   var tbody = document.getElementById("ka-library-collections");
   var starters = document.getElementById("ka-library-starters");
 
-  function el(tag, text, cls) {
+  function el(tag, cls, text) {
     var node = document.createElement(tag);
     if (cls) node.className = cls;
     if (text !== undefined && text !== null) node.textContent = String(text);
@@ -22,26 +22,10 @@
     return text ? text.charAt(0).toUpperCase() + text.slice(1) : "";
   }
   function money(value) { return window.mvMoney ? window.mvMoney(Number(value || 0)) : "$" + Number(value || 0).toFixed(2); }
-  function plain(status, action, headers) {
-    // Headers carry the turned-off reason, so "off" is never read as "no permission".
-    if (typeof window.mvErrorText === "function") return window.mvErrorText({ status: status, headers: headers }, action);
-    return "Could not " + action + ". Please try again.";
-  }
   async function call(method, path, body, action) {
-    var response;
-    try {
-      response = await fetch(API + path, {
-        method: method, credentials: "same-origin",
-        headers: { Accept: "application/json", "Content-Type": "application/json" },
-        body: body === undefined ? undefined : JSON.stringify(body)
-      });
-    } catch (error) {
-      throw new Error(typeof window.mvErrorText === "function" ? window.mvErrorText(error, action) : "Could not " + action + ".");
-    }
-    var payload = {};
-    try { payload = await response.json(); } catch (_error) { payload = null; }
-    if (!response.ok || !payload || typeof payload !== "object") {
-      throw new Error(response.ok ? "Could not " + action + ". Lightwork returned something unexpected." : (payload && window.mvPlainDetail && window.mvPlainDetail(payload.detail) || plain(response.status, action, response.headers)));
+    var payload = await window.mvFetchJSON(API + path, { method: method, body: body, plainDetail: true }, action);
+    if (!payload || typeof payload !== "object") {
+      throw new Error(window.mvErrorText({ name: "SyntaxError" }, action));
     }
     return payload;
   }
@@ -50,7 +34,7 @@
     return Promise.resolve(false);
   }
   function button(label, handler, cls) {
-    var b = el("button", label, cls || "btn");
+    var b = el("button", cls || "btn", label);
     b.type = "button";
     b.addEventListener("click", function () {
       if (b.disabled) return;
@@ -62,24 +46,24 @@
     return b;
   }
   var jobsPanel = el("section"), jobsContext = "", pendingRebuild = null;
-  jobsPanel.setAttribute("aria-label", "Search index rebuild jobs"); panel.appendChild(jobsPanel);
+  jobsPanel.setAttribute("aria-label", "Search index rebuilds"); panel.appendChild(jobsPanel);
   async function refreshJobs() {
     if (!canAdmin) return;
-    var payload = await call("GET", "/reindex-jobs", undefined, "refresh rebuild jobs");
+    var payload = await call("GET", "/reindex-jobs", undefined, "refresh the rebuilds");
     if (jobsContext && jobsContext !== payload.context) { jobsPanel.replaceChildren(); pendingRebuild = null; throw new Error("Your workspace changed. Reload to review rebuilds."); }
-    jobsContext = payload.context; jobsPanel.replaceChildren(el("h3", "Search index rebuild jobs"));
+    jobsContext = payload.context; jobsPanel.replaceChildren(el("h3", null, "Search index rebuilds"));
     if (!payload.jobs.length) {
-      var title = "No rebuild jobs to show", body = "Rebuilds you start appear here with their progress and cost. Use Rebuild search index on a collection to start one. Archived operation receipts remain recorded.";
-      jobsPanel.appendChild(window.mvEmpty ? window.mvEmpty(title, body, null, { compact: true }) : el("p", title + ". " + body));
+      var title = "No rebuilds to show", body = "Rebuilds you start appear here with their progress and cost. Use Rebuild search index on a collection to start one. Archived operation receipts remain recorded.";
+      jobsPanel.appendChild(window.mvEmpty ? window.mvEmpty(title, body, null, { compact: true }) : el("p", null, title + ". " + body));
     }
     payload.jobs.forEach(function(job) {
       var section = el("section"), progress = el("progress"); progress.max = Math.max(1,job.count); progress.value = job.done; progress.setAttribute("aria-label", "Rebuild progress");
-      section.append(el("h4",human(job.collection)), el("p", human(job.state) + ": " + job.done + " of " + job.count + " passages. " + job.message),progress);
-      section.appendChild(el("p", "Observed provider usage at reviewed rates: " + money(job.observed_dollars) + ". Unresolved reservation: " + money(job.unresolved_dollars) + "."));
+      section.append(el("h4", null,human(job.collection)), el("p", null, human(job.state) + ": " + job.done + " of " + job.count + " passages. " + job.message),progress);
+      section.appendChild(el("p", null, "Observed provider usage at reviewed rates: " + money(job.observed_dollars) + ". Unresolved reservation: " + money(job.unresolved_dollars) + "."));
       if (["queued","running","publishing"].indexOf(job.state) >= 0) {
         ["cancel","resume"].forEach(function(action) {
           section.appendChild(button(action === "cancel" ? "Cancel at next safe boundary" : "Continue after an interruption", async function() {
-            if (!(await confirmed(action === "cancel" ? "Stop after the current batch? The live index stays unchanged unless its complete replacement already published." : "Continue this recorded job? Saved progress and current permissions will be checked. An active job will keep its single run.", "Confirm"))) return;
+            if (!(await confirmed(action === "cancel" ? "Stop after the current batch? The live index stays unchanged unless its complete replacement already published." : "Continue this rebuild? Saved progress and current permissions will be checked. A rebuild that is already running is not started twice.", "Confirm"))) return;
             await call("POST","/reindex-jobs/"+job.job_id+"/"+action,{context:jobsContext,confirmed:true},action + " rebuild"); await refreshJobs();
           },"btn btn--ghost"));
         });
@@ -105,7 +89,7 @@
       await call("POST", "/collections/" + encodeURIComponent(name) + "/reindex", pendingRebuild.body, "start rebuild");
       pendingRebuild = null; await refreshJobs();
     } catch(error) {
-      statusEl.textContent = "The start could not be confirmed. Refresh rebuild progress to locate the recorded job before starting again. " + error.message;
+      statusEl.textContent = "The start could not be confirmed. Refresh rebuild progress to find the recorded rebuild before starting again. " + error.message;
       await refreshJobs();
     }
   }
@@ -129,7 +113,7 @@
     starters.textContent = "";
     if (!body.enabled) {
       if (canAdmin) {
-        var settings = el("a", "Turn it on in Settings");
+        var settings = el("a", null, "Turn it on in Settings");
         settings.href = "/settings/all?id=knowledge_access.enable";
         statusEl.replaceChildren(document.createTextNode("The knowledge library is turned off. "), settings);
       } else {
@@ -141,8 +125,8 @@
     statusEl.textContent = collections.length ? "" : "No collections yet." + (canAdmin ? " Load some starter content below to begin." : "");
     collections.forEach(function (item) {
       var tr = el("tr");
-      var th = el("th", human(item.name)); th.scope = "row"; tr.appendChild(th);
-      tr.appendChild(el("td", item.chunks === null || item.chunks === undefined ? "—" : String(item.chunks)));
+      var th = el("th", null, human(item.name)); th.scope = "row"; tr.appendChild(th);
+      tr.appendChild(el("td", null, item.chunks === null || item.chunks === undefined ? "—" : String(item.chunks)));
       var actions = el("td");
       if (canAdmin) {
         var rebuild = button("Rebuild search index", function () { return reindex(item.name); }, "btn btn--ghost");
@@ -153,7 +137,7 @@
       tbody.appendChild(tr);
     });
     (Array.isArray(body.starter_content) ? body.starter_content : []).forEach(function (item) {
-      var li = el("li", item.title + " (" + item.documents + " documents)" + (item.loaded ? " — loaded" : "") + " ");
+      var li = el("li", null, item.title + " (" + item.documents + " documents)" + (item.loaded ? " — loaded" : "") + " ");
       if (canAdmin) {
         var load = button(item.loaded ? "Load again" : "Load", function () { return seed(item.collection, item.title); }, "btn btn--ghost");
         load.setAttribute("aria-label", (item.loaded ? "Load again: " : "Load: ") + item.title);

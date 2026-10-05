@@ -23,7 +23,7 @@
     revoked: ['Revoked', 'idle'], expired: ['Expired', 'idle'], exhausted: ['Too many tries', 'warn'],
   };
 
-  function say(text) { statusEl.textContent = text; }
+  function say(text) { window.mvStatus(statusEl, text); }
   function fail(f, action) { say(R.errorText(f, action)); }
   function codeId(pkg, n) { return ('code-' + pkg.package_id + '-' + n).slice(0, 128); }
 

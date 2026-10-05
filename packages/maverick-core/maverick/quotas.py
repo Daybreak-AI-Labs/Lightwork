@@ -525,6 +525,13 @@ def record_usage(
             # Warnings must never turn an acknowledged charge into a failed
             # settlement. The interactive preview can recover the same notice.
             log.warning("Budget warning observation unavailable; usage remains recorded.")
+        try:
+            from .spending_alerts import observe as observe_spending_alerts
+            observe_spending_alerts(principal)
+        except Exception:
+            # Same rule: an alert is never a reason to fail a recorded charge,
+            # and the spending limit itself still stops paid work.
+            log.warning("Spending limit alert observation unavailable; usage remains recorded.")
     return recorded
 
 

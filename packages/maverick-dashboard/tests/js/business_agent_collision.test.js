@@ -5,6 +5,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const { JSDOM } = require("jsdom");
+const {shell} = require('./_shell');
 
 const source = fs.readFileSync(path.join(__dirname, "../../maverick_dashboard/static/lightwork-business-agent.js"), "utf8");
 
@@ -20,11 +21,12 @@ test("a matching specialist name is explained before any draft is shown", async 
   t.after(() => dom.window.close());
   const w = dom.window;
   const calls = [];
-  const detail = "A specialist called “HR Screening” already exists. Choose another name for the new specialist. The existing specialist and its safeguards have not changed.";
+  const detail = "A specialist called “HR Screening” already exists. Choose another name for the new agent. The existing specialist and its safeguards have not changed.";
   w.fetch = async (url, options) => {
     calls.push({ url, options });
     return { ok: false, status: 409, json: async () => ({ detail }) };
   };
+  shell(w);
   w.eval(source);
   w.document.getElementById("biz-form").dispatchEvent(new w.Event("submit", { cancelable: true }));
   for (let i = 0; i < 6; i += 1) await new Promise(resolve => setImmediate(resolve));

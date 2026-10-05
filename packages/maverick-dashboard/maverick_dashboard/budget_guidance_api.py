@@ -65,7 +65,7 @@ def _forecast(actor, projection):
             "detail": "Admission rechecks current policy at the next start. A paused or uncertain occurrence is never automatically replayed."}
             for row in rows], "price_basis": "Schedule ceilings are limits, not predicted prices; this forecast does not add them to charges."}
     except (ValueError, OSError, RuntimeError):
-        return {"state": "unavailable", "items": [], "message": "Upcoming schedules could not be read; no empty or safe forecast is assumed."}
+        return {"state": "unavailable", "items": [], "message": "Upcoming schedules could not be read; no empty or safe forecast is assumed. Refresh the page and try again."}
 
 
 def _projection(request, *, max_dollars=None, max_wall_seconds=None, goal_id=None):
@@ -96,7 +96,9 @@ def _projection(request, *, max_dollars=None, max_wall_seconds=None, goal_id=Non
 def page(request: Request, goal_id: int | None = None):
     _actor(request)
     _goal(request, goal_id)
-    return _app().templates.TemplateResponse(request, "budget_guidance.html", {"goal_id": goal_id},
+    from maverick.spending_limits import spend_recorded_at
+    return _app().templates.TemplateResponse(request, "budget_guidance.html", {
+        "goal_id": goal_id, "spend_recorded_at": spend_recorded_at()},
         headers={"Cache-Control": "private, no-store"})
 
 
@@ -195,7 +197,7 @@ def progress(request: Request, identifier: str, body: ProgressIn):
         actor = _actor(request, named=True)
         row = CASES.get(identifier)
         if row is None:
-            raise product_error(404, "budget_case_missing", "That accounting request is unavailable in this workspace.")
+            raise product_error(404, "budget_case_missing", "That accounting request is unavailable in this workspace. Refresh the page to see the latest.")
         if body.action != "claim" and row.get("assigned_to") != actor:
             raise product_error(409, "budget_case_unassigned", "Claim this request before changing its progress.")
         changes = {"assigned_to": actor}

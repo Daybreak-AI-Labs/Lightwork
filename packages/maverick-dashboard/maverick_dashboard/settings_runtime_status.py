@@ -40,7 +40,7 @@ def projection(ids=()):
             value = runtime_configuration.setting_status(setting, desired, observed, unavailable=unavailable)
         else:
             value = {"state": timing["activation"], "message": timing["timing"], "processes": []}
-        items.append({"id": setting.id, "label": setting.label, "module": setting.reader,
+        items.append({"id": setting.id, "label": setting.label, "module": setting.group,
                       "scope": "Organization / installation; authorized workspaces inherit unless policy specifies otherwise",
                       **timing, **value})
     return {"enabled": True, "checked_at": time.time(), "saved_revision": page._revision(layers),

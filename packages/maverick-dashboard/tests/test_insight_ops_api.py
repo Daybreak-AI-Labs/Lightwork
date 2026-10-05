@@ -211,9 +211,9 @@ def test_spend_replay_and_task_pages_carry_the_new_controls(client):
     from test_support.plain_language import developer_terms, visible_text
     gid = _task("", "Weekly report", 1.0)
     spend = client.get("/spend").text
-    assert "Questions About Your Tasks" in visible_text(spend) and 'id="io-ask-form"' in spend
+    assert "Questions about your tasks" in visible_text(spend) and 'id="io-ask-form"' in spend
     replay = client.get(f"/replay?goal={gid}").text
-    assert "Recorded Steps" in visible_text(replay) and 'id="io-steps-show"' in replay
+    assert "Recorded steps" in visible_text(replay) and 'id="io-steps-show"' in replay
     task = client.get(f"/chat/goal/{gid}").text
     text = visible_text(task)
     assert "Check this task's health" in text and "Run code for this task" in text

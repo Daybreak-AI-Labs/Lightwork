@@ -352,6 +352,41 @@ def _csv_list(raw: str, *, lower: bool = False) -> list[str]:
     return [x.lower() for x in items] if lower else items
 
 
+def _spending_alert_at(raw) -> list[int] | None:
+    """The wizard's spending-alert answer as ``alert_at``; None keeps the
+    default (50, 75, 100). "none" means no alerts. An answer that cannot be
+    read keeps the default rather than silently turning alerts off."""
+    from maverick.spending_alerts import DEFAULT_ALERT_AT, validate_alert_at
+
+    text = str(raw if raw is not None else "").strip()
+    if not text:
+        return None
+    if text.lower() in ("none", "off", "no"):
+        return []
+    try:
+        chosen = validate_alert_at([part for part in text.replace(";", ",").split(",") if part.strip()])
+    except ValueError:
+        print("  Spending alerts: keeping 50, 75 and 100 percent (that answer could not be read).")
+        return None
+    return None if chosen == list(DEFAULT_ALERT_AT) else chosen
+
+
+def _typical_cost_min_runs(raw) -> int | None:
+    """The wizard's answer for how many finished tasks a typical cost needs;
+    None keeps the default (10). An answer that cannot be read keeps it too."""
+    from maverick.typical_cost import DEFAULT_MIN_RUNS, validate_min_runs
+
+    text = str(raw if raw is not None else "").strip()
+    if not text:
+        return None
+    try:
+        chosen = validate_min_runs(text)
+    except ValueError:
+        print(f"  Typical cost: keeping {DEFAULT_MIN_RUNS} finished tasks (that answer could not be read).")
+        return None
+    return None if chosen == DEFAULT_MIN_RUNS else chosen
+
+
 def _safe_float(s: str, *, default: float) -> float:
     """``float()`` that doesn't crash on whitespace, empty, or junk input."""
     try:
@@ -1281,15 +1316,20 @@ def pick_signed_skills() -> dict[str, Any]:
 
 
 def pick_approvals() -> dict[str, Any]:
-    """``[approval]``: the undo window and the high-risk confirmation.
+    """``[approval]``: the undo window, the high-risk confirmation and who
+    approves a risky action the requester asked for.
 
     The Approvals page is the human-in-command loop: a decision can be undone
-    for ``undo_grace_seconds`` (the agent waits that long before acting) and
-    approving a high or critical risk request needs an explicit confirmation.
+    for ``undo_grace_seconds`` (the agent waits that long before acting),
+    approving a high or critical risk request needs an explicit confirmation,
+    and ``separate_approver`` says whether someone other than the person who
+    asked must approve it (default: whenever another approver is available).
     """
     console.print()
     console.print(
-        "[dim]Risky actions wait on the Approvals page for a person. A decision "
+        "[dim]Risky actions wait on the Approvals page for a person for up to 30 "
+        "minutes; after 10 minutes the people who can decide get one in-app "
+        "reminder, and with no decision in time the action is refused. A decision "
         "can be undone for a short while; the agent only acts once that window "
         "has passed.[/dim]"
     )
@@ -1302,9 +1342,29 @@ def pick_approvals() -> dict[str, Any]:
         "requests? (a ticked box for high, typing APPROVE for critical)",
         default=True,
     )
+    separate = _q_select(
+        "  Who approves a high or critical risk action someone asked for?",
+        [
+            "when_available - Someone else, whenever another approver is available (default).",
+            "always         - Always someone else, even if the request then waits and expires.",
+            "never          - The person who asked may approve it.",
+        ],
+        default="when_available - Someone else, whenever another approver is available (default).",
+    ).split()[0]
+    record_checks = _q_confirm(
+        "  Keep a record of each approval check (when, risk, kind of action, agent and "
+        "outcome; never the content) so you can preview a threshold change later?",
+        default=True,
+    )
+    retention = _safe_int(
+        _q_text("  Days to keep that record", default="90"), default=90,
+    ) if record_checks else 90
     return {
         "undo_grace_seconds": max(0, min(undo_seconds, 3600)),
         "require_acknowledgement": bool(require_ack),
+        "separate_approver": separate,
+        "record_checks": bool(record_checks),
+        "check_retention_days": max(1, min(retention, 3650)),
     }
 
 
@@ -5017,9 +5077,9 @@ def pick_advanced() -> dict[str, Any]:
             "Import previews every change and keeps current policy checks.", default=True,
         ),
         "allow_conversation_inbox": _q_confirm(
-            "Enable durable conversation guidance, queued messages and explicitly separate tasks while work is running? "
-            "Guidance requires review and a safe checkpoint; existing task ownership, permissions and spending limits remain enforced.",
-            default=False,
+            "Let people add guidance, queue their next message or start separate work while a task runs? On by default. "
+            "Guidance is reviewed and read at the task's next safe point; existing task ownership, permissions and spending limits remain enforced.",
+            default=True,
         ),
         "allow_personal_preferences": _q_confirm(
             "Allow account-scoped writing style, display preferences, pinned pages, saved task filters and daily work layout? "
@@ -5434,6 +5494,18 @@ def pick_advanced() -> dict[str, Any]:
             "(0 = no limit; you can set different limits per person in the dashboard)",
             default="0",
         ),
+        "spending_alert_at": _q_text(
+            "Alert administrators (and each person, for their own limit) when spending "
+            "reaches these percentages of a spending limit; comma-separated, or none "
+            "for no alerts. The limits still stop paid work at 100%.",
+            default="50, 75, 100",
+        ),
+        "typical_cost_min_runs": _q_text(
+            "Show what an agent's or specialist's past tasks usually cost beside the task "
+            "form once it has finished this many tasks (2 to 1000). It is recorded history, "
+            "never a prediction.",
+            default="10",
+        ),
         "tenant_by_user": _q_confirm(
             "Isolate each user into their own tenant? Per-user cross-session memory "
             "is kept separate — recommended for multi-user servers.",
@@ -5516,9 +5588,10 @@ def pick_advanced() -> dict[str, Any]:
             )
         ],
         "allow_copilot_operations": _q_confirm(
-            "Let Copilot open the native controls in your selected action families? "
-            "Changes require a fresh review and explicit confirmation. Native page "
-            "controls remain available when this is off.", default=False,
+            "Let Copilot open controls that change things in your selected action families? "
+            "Each change requires a fresh review and explicit confirmation. When this is off, "
+            "Copilot still opens pages, focuses controls and shows status, but changes nothing.",
+            default=False,
         ),
         "governed_pg_pool": _q_confirm(
             "Reuse one bounded Postgres connection for governed records? "
@@ -5960,6 +6033,28 @@ def pick_advanced() -> dict[str, Any]:
         "Compress dashboard responses (gzip)? Say no only if a proxy in front "
         "of Lightwork already compresses.",
         default=True,
+    )
+    # Glass effects ([dashboard] glass) are off by default: solid panels keep
+    # pages fast to respond. People can still turn them on for themselves in
+    # Display preferences; this only changes the starting look for everyone.
+    advanced["dashboard_glass"] = _q_confirm(
+        "Turn on glass effects (see-through, blurred panels) for everyone? "
+        "Pages respond more slowly with them, especially on older computers. "
+        "People can still choose for themselves in Display preferences.",
+        default=False,
+    )
+    # The sidebar ([dashboard] navigation) stays "classic" by default. "areas"
+    # groups every page into nine job-named areas; run the tree test in
+    # docs/research/tree-test before switching it on for everyone.
+    # navigation_personal lets each person try it in Your preferences.
+    advanced["dashboard_navigation"] = "areas" if _q_confirm(
+        "Use the job-named sidebar (areas such as Work, Privacy and Settings) for everyone? "
+        "Keep the classic sidebar until a tree test shows people find pages faster.",
+        default=False,
+    ) else "classic"
+    advanced["dashboard_navigation_personal"] = _q_confirm(
+        "Let each person switch to the job-named sidebar for themselves in Your preferences?",
+        default=False,
     )
     # Settings > Models lists the models each saved key can reach by asking the
     # provider's own model-list endpoint ([models] discovery, default on).
@@ -6657,6 +6752,27 @@ def pick_analytics() -> dict[str, Any]:
     return {"mcp_client_language": True}
 
 
+def pick_usability_survey() -> dict[str, Any]:
+    """Optional in-product ease-of-use survey. OFF by default.
+
+    When on, each signed-in person is offered the 10-question System
+    Usability Scale at most once a quarter (one click hides it) and one ease
+    question after a few common tasks. Answers stay on this server, are
+    reported by the role people choose and never by name. Written under
+    ``[analytics]`` as ``usability_survey``.
+    """
+    console.print()
+    console.print(
+        "[dim]Optional: ask people how easy Lightwork is to use - ten short "
+        "questions at most once a quarter, and one question after a few common "
+        "tasks. Answers stay on this server, are reported by role and never by "
+        "name, and nothing is sent anywhere. OFF by default.[/dim]"
+    )
+    if not _q_confirm("Ask people how easy Lightwork is to use?", default=False):
+        return {}
+    return {"usability_survey": True}
+
+
 def pick_persona() -> dict[str, str]:
     """Agent identity: name + voice."""
     if not _q_confirm(
@@ -6904,6 +7020,33 @@ def pick_webhooks() -> tuple[dict[str, Any], list[str]]:
         cfg["secret"] = "${MAVERICK_WEBHOOK_SECRET}"
         envs.append("MAVERICK_WEBHOOK_SECRET")
     return cfg, envs
+
+
+def pick_support() -> dict[str, Any]:
+    """Help and support links, asked with the daily summary. Returns the
+    ``[support]`` table (empty when skipped).
+
+    ``status_page_url``: a public service-status page the Help menu links to.
+    ``contact_email``: where "Get help from a person" requests are addressed;
+    without one people send them to their Lightwork administrator. Nothing is
+    ever sent automatically (``maverick.config.get_support``)."""
+    if not _q_confirm(
+        "Add a service-status page or a support contact to the Help menu? Without them, people send help requests to their Lightwork administrator.",
+        default=False,
+    ):
+        return {}
+    support: dict[str, Any] = {}
+    url = _q_text("  Public service-status page (https://..., empty for none):", default="").strip()
+    if url.startswith("https://") and len(url) <= 308 and not any(c in url for c in " \"'<>"):
+        support["status_page_url"] = url
+    elif url:
+        console.print("[yellow]Skipped: the status page must be a secure https:// address.[/yellow]")
+    email = _q_text("  Support contact email (empty: people ask their administrator):", default="").strip()
+    if "@" in email and " " not in email and "." in email.rsplit("@", 1)[-1]:
+        support["contact_email"] = email
+    elif email:
+        console.print("[yellow]Skipped: that is not an email address.[/yellow]")
+    return support
 
 
 def pick_deliverable_handoff() -> tuple[dict[str, Any], list[str]]:
@@ -7380,7 +7523,8 @@ def _cfg_core(
 def _cfg_approval(approval: dict[str, Any] | None) -> list[str]:
     if not approval:
         return []
-    # Approvals page: undo window (the agent waits it out) + high-risk confirmation.
+    # Approvals page: undo window (the agent waits it out), high-risk
+    # confirmation, and who approves a risky action the requester asked for.
     lines = ["", "[approval]"]
     for k, v in approval.items():
         _emit_kv(lines, k, v)
@@ -8718,7 +8862,9 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
     _person_limit = _safe_float(advanced.get("spending_person_monthly") or 0, default=0.0)
     _workspace_limit = _workspace_limit if math.isfinite(_workspace_limit) else 0.0
     _person_limit = _person_limit if math.isfinite(_person_limit) else 0.0
-    if _workspace_limit > 0 or _person_limit > 0:
+    _alert_at = _spending_alert_at(advanced.get("spending_alert_at"))
+    _min_runs = _typical_cost_min_runs(advanced.get("typical_cost_min_runs"))
+    if _workspace_limit > 0 or _person_limit > 0 or _alert_at is not None or _min_runs is not None:
         # Starting limits; administrators change them in the dashboard
         # (Admin > Spending limits), which then takes precedence.
         lines.append("")
@@ -8729,6 +8875,12 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
         if _person_limit > 0:
             lines.append(f"default_user_dollars = {_person_limit:.2f}")
             lines.append('default_user_period = "month"')
+        if _alert_at is not None:
+            # In-app alerts at these percentages of each limit (default 50, 75, 100).
+            lines.append(f"alert_at = [{', '.join(str(p) for p in _alert_at)}]")
+        if _min_runs is not None:
+            # Finished tasks needed before a typical cost is shown (default 10).
+            lines.append(f"typical_cost_min_runs = {_min_runs}")
     if advanced.get("tenant_by_user"):
         lines.append("")
         lines.append("[tenancy]")
@@ -8930,6 +9082,9 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
         lines.extend(_feature_locks)
     if advanced.get("allow_conversation_inbox") is True:
         lines.extend(["", "[conversation_inbox]", "enabled = true", "guidance = true", "queue = true", "independent = true", "max_pending = 20"])
+    elif advanced.get("allow_conversation_inbox") is False:
+        # On by default, so only a deliberate "no" is written (and stays off).
+        lines.extend(["", "[conversation_inbox]", "enabled = false"])
     if advanced.get("tree_of_thought"):
         lines.append("")
         lines.append("[planning]")
@@ -9387,6 +9542,11 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
                 _emit_kv(lines, key, val)
     dept = advanced.get("department_access") or {}
     compress_off = advanced.get("dashboard_compress") is False
+    glass_on = advanced.get("dashboard_glass") is True
+    navigation_lines = {key: value for key, value in (
+        ("navigation", "areas" if advanced.get("dashboard_navigation") == "areas" else None),
+        ("navigation_personal", True if advanced.get("dashboard_navigation_personal") is True else None),
+    ) if value is not None}
     api_keys = advanced.get("api_keys") if isinstance(advanced.get("api_keys"), dict) else {}
     # Only a deliberate change is written: the app's defaults (on, 90 / 365
     # days, 24 hours) apply when the table says nothing.
@@ -9397,7 +9557,7 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
         api_key_lines = {"api_keys": False}
     if isinstance(dept, dict) and (
         "default_suites" in dept or "default_role" in dept or dept.get("group_roles") or dept.get("group_suites")
-        or "local_owner_setup" in advanced or compress_off or api_key_lines
+        or "local_owner_setup" in advanced or compress_off or glass_on or navigation_lines or api_key_lines
         or "employee_activation_jobs" in advanced or "extension_form_values" in advanced
         or "extension_page_structure" in advanced
     ):
@@ -9417,6 +9577,15 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
             # Default-on in the app; only a deliberate "no" is written.
             lines.append("# Response compression off: a proxy in front already compresses.")
             _emit_kv(lines, "compress", False)
+        if glass_on:
+            # Default-off in the app; only a deliberate "yes" is written.
+            lines.append("# Glass effects for everyone until people choose their own.")
+            _emit_kv(lines, "glass", "on")
+        if navigation_lines:
+            # Default classic, chosen by nobody; only a deliberate "yes" is written.
+            lines.append("# The job-named sidebar (areas), for everyone or for people who choose it.")
+            for key, value in navigation_lines.items():
+                _emit_kv(lines, key, value)
         if api_key_lines:
             lines.append("# API keys for scripts and integrations (maverick.config.api_key_settings).")
             for key in ("api_keys", "api_key_default_days", "api_key_max_days",
@@ -9756,6 +9925,7 @@ def write_config(
     a2a: dict[str, Any] | None = None,
     my_work: dict[str, Any] | None = None,
     notifications_email: dict[str, Any] | None = None,
+    support: dict[str, Any] | None = None,
     web_search_enabled: bool = False,
     skills: dict[str, Any] | None = None,
     self_learning: dict[str, Any] | None = None,
@@ -9954,6 +10124,7 @@ def write_config(
     lines += _cfg_deadline_alerts(deadline_alerts)
     lines += _cfg_table("notifications.email", notifications_email)
     lines += _cfg_table("my_work", my_work)
+    lines += _cfg_table("support", support)
     lines += _cfg_table("webhooks", webhooks)
     lines += _cfg_table("deliverables", deliverables)
     lines += _cfg_table("personas", personas)
@@ -11090,7 +11261,7 @@ def _run_plugin_picks(state: dict[str, Any], _announce, channels: dict[str, Any]
     _announce()
     analytics = state.get("analytics")
     if analytics is None:
-        analytics = pick_analytics()
+        analytics = {**pick_analytics(), **pick_usability_survey()}
         state["analytics"] = analytics
         _save_partial(state)
 
@@ -11282,6 +11453,8 @@ def run(fast: bool = False, resume: bool = False) -> int:
 
     _announce()
     my_work_cfg, notifications_email, summary_envs = _daily_summary_step(state, channels)
+    support_cfg = state.get("_support") if isinstance(state.get("_support"), dict) else pick_support()
+    state["_support"] = support_cfg
     _save_partial(state)
 
     _announce()
@@ -11367,6 +11540,7 @@ def run(fast: bool = False, resume: bool = False) -> int:
         a2a=a2a_cfg,
         my_work=my_work_cfg,
         notifications_email=notifications_email,
+        support=support_cfg,
         web_search_enabled=web_search_enabled,
         skills=signed_skills
         if (

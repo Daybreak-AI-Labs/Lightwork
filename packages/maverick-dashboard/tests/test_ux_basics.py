@@ -192,11 +192,14 @@ def test_activity_log_hides_machine_ids_and_never_shows_raw_epochs(monkeypatch, 
     page = _client().get("/audit").text
     assert "e+09" not in page
     assert "Approval decided" in page and "Approved" in page
-    # The projected metadata view omits private decision identity and machine
-    # identifiers; it still says a person (not Lightwork) decided, and its event
-    # time is rendered as a readable time.
-    assert "approval-v1-" not in page and "owner@example.com" not in page
-    assert "A person (name not shown)" in page
+    # The projected metadata view omits machine identifiers and the request's
+    # content, but names the person who decided (governance evidence, like the
+    # actor on undo and confirmation rows). The owner chose this on 4 October,
+    # reversing the 1 October choice to leave the decider's name out. Its event
+    # time is still rendered as a readable time.
+    assert "approval-v1-" not in page
+    assert re.search(r'Decided by</span>\s*<span class="aud-v">owner@example\.com</span>', page)
+    assert "A person (name not shown)" not in page
     assert re.search(r'data-mv-time="[0-9.]+" data-mv-time-mode="absolute"', page)
 
 
@@ -221,14 +224,17 @@ def test_goal_id_resolves_and_every_task_page_shares_the_tabs():
         for tab in (f'href="/chat/goal/{g.id}"', f'href="/goals/{g.id}/trajectory"',
                     f'href="/goals/{g.id}/plan"', f'href="/goals/{g.id}/errors"'):
             assert tab in body, (path, tab)
-        assert body.count('class="task-tabs__on" aria-current="page"') == 1
+        bar = body[body.index('aria-label="Task pages"'):]
+        bar = bar[:bar.index("</nav>")]
+        assert bar.count('aria-current="page"') == 1, path
     # A one-step task's plan page explains the missing map without claiming
     # the task already ran.
     plan = client.get(f"/goals/{g.id}/plan").text
     assert "This task has one step, so there is no map of smaller steps" in plan
     assert 'id="plan-tree-list"' in plan and "<noscript>" not in plan
     listing = client.get("/goals").text
-    assert f'<a href="/chat/goal/{g.id}">Result</a>' in listing
+    # The row link names its task for screen readers after the visible word.
+    assert f'<a href="/chat/goal/{g.id}">Result<span class="sr-only">: Summarize vendor contracts</span></a>' in listing
 
 
 # ---- owner creation --------------------------------------------------------

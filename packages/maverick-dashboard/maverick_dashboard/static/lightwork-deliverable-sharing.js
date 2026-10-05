@@ -22,19 +22,19 @@
   }
   async function request(path, options) {
     if (denied) throw accessError();
-    var ticket = generation, controller = new AbortController(), timer = setTimeout(function () { controller.abort(); }, 15000);
+    var ticket = generation, controller = new AbortController();
     requests.add(controller);
+    var opts = Object.assign({cache: 'no-store', signal: controller.signal, timeout: 15000, accessStatuses: [401, 403, 404],
+      onAccess: clearPrivate}, options);
+    opts.headers = Object.assign({'Content-Type': 'application/json'}, options && options.headers);
     try {
-      var response = await fetch('/api/v1/goals/' + goal + '/share' + path,
-        Object.assign({credentials: 'same-origin', cache: 'no-store', headers: {'Content-Type': 'application/json'}, signal: controller.signal}, options));
-      var body = await response.json().catch(function () { return {}; });
+      var body = await window.mvFetchJSON('/api/v1/goals/' + goal + '/share' + path, opts, 'manage this link');
       if (denied || ticket !== generation) throw accessError();
-      if (response.redirected || [401, 403, 404].includes(response.status)) {
-        clearPrivate(); throw accessError();
-      }
-      if (!response.ok) { var error = new Error(window.mvErrorText({status: response.status, detail: body.detail}, 'manage this link')); error.status = response.status; error.detail = body.detail; throw error; }
-      return body;
-    } finally { clearTimeout(timer); requests.delete(controller); }
+      return body || {};
+    } catch (error) {
+      if (error.accessChanged || denied || ticket !== generation) throw accessError();
+      throw error;
+    } finally { requests.delete(controller); }
   }
   function text(tag, value) { var node = document.createElement(tag); node.textContent = value; return node; }
   async function refresh() {

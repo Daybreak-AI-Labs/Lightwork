@@ -7,6 +7,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
 const { webcrypto } = require("node:crypto");
+const { fetchHelpers } = require("./_shell");
 
 // The third-party lifecycle, collaboration and intelligence pages now load
 // their records through lightwork-record-workflows.js (LwRecords.call), which
@@ -157,6 +158,7 @@ function harness(file, functionName, args) {
     async json() { return {}; },
     async text() { return "{}"; },
   };
+  const helpers = fetchHelpers(() => context.fetch);
   const context = {
     console,
     crypto: webcrypto,
@@ -171,6 +173,8 @@ function harness(file, functionName, args) {
     },
     window: {
       confirm() { return true; },
+      // The shell's fetch helper, sending through the context's fetch.
+      mvFetchJSON: (...args) => helpers.mvFetchJSON(...args),
       // Pages show a server message only when it is already a plain sentence.
       mvPlainDetail(detail) { return typeof detail === "string" && /^[A-Z][^_{}<>]*[.!?]$/.test(detail) ? detail : ""; },
     },
@@ -192,6 +196,12 @@ function harness(file, functionName, args) {
   }
   const source = instrument(extractScript(file, functionName), functionName, file);
   vm.runInContext(source, context, { filename: file });
+  // The consent pages' clients are the shared consent client (CW.client),
+  // loaded after the page script so the page itself does not start here.
+  if (/LightworkConsentWorkbench\.client\(/.test(source)) {
+    vm.runInContext(fs.readFileSync(path.resolve(__dirname,
+      "../../maverick_dashboard/static/lightwork-consent-workbench.js"), "utf8"), context);
+  }
   return {
     invoke(response) {
       context.fetch = async () => response;

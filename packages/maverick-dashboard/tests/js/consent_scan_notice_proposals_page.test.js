@@ -6,6 +6,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const crypto = require("node:crypto");
 const { JSDOM } = require("jsdom");
+const {shell} = require('./_shell');
 
 const root = path.resolve(__dirname, "../../maverick_dashboard");
 const read = (name) => fs.readFileSync(path.join(root, name), "utf8");
@@ -36,6 +37,7 @@ async function page(role, options = {}) {
     if (options.conflict && method === "POST") return reply(409, { detail: "scan disclosure-proposal state conflict" });
     return reply(200, {});
   };
+  shell(w);
   w.eval(read("static/lightwork-consent-workbench.js"));
   [...read("templates/consent_scan_notice_proposals.html").matchAll(/<script>([\s\S]*?)<\/script>/g)].forEach((m) => w.eval(m[1]));
   await flush();

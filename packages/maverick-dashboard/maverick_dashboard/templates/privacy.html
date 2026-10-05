@@ -2,16 +2,15 @@
 {% block title %}Privacy · Lightwork{% endblock %}
 {% block content %}
 {% from "_module_gate.html" import module_gate %}
+{% from "_tabs.html" import panel_tabs, tab_panel %}
 <style>
-  /* Record-type tabs (DPA / AI registry / RoPA / DSAR). */
-  .pw-tab[hidden] { display: none; }
   .pw-links { display: flex; flex-wrap: wrap; gap: var(--space-2); margin: 0 0 var(--space-4); }
   .pw-bulk-row { display: flex; gap: var(--space-2); flex-wrap: wrap; align-items: end; margin-bottom: var(--space-2); }
   .pw-bulk-row label { display: flex; flex-direction: column; gap: var(--space-1); flex: 1; min-width: 12rem; }
   .pw-scroll { overflow-x: auto; }
   .pw-form { display: flex; flex-direction: column; gap: var(--space-3);
              margin-bottom: var(--space-4); padding: var(--space-3);
-             border: 1px dashed var(--border); border-radius: 8px; }
+             border: 1px dashed var(--border); border-radius: var(--radius-md); }
   .pw-form-row { display: flex; gap: var(--space-3); flex-wrap: wrap; }
   .pw-form label { display: flex; flex-direction: column; gap: var(--space-1);
                    flex: 1; min-width: 12rem; }
@@ -22,13 +21,12 @@
   .pw-clip { max-width: 18rem; overflow: hidden; text-overflow: ellipsis;
              white-space: nowrap; }
   .pw-due-warn { color: var(--danger); font-weight: var(--font-medium); }
-  .pe-tab[hidden] { display: none; }
   .pw-clauses td { font-size: var(--text-sm); }
   .pw-erase-note { display: inline-block; font-size: var(--text-xs); }
   .pw-review-required { display: inline-block; margin-top: var(--space-1);
                         white-space: normal; }
   .pw-evidence-panel { margin-bottom: var(--space-3); padding: var(--space-3);
-                       border: 1px solid var(--warn); border-radius: 8px;
+                       border: 1px solid var(--warn); border-radius: var(--radius-md);
                        background: var(--warn-subtle); }
   .pw-evidence-panel dl { display: grid; grid-template-columns: max-content 1fr;
                           gap: var(--space-1) var(--space-3); margin: var(--space-2) 0 0; }
@@ -41,6 +39,7 @@
 
   {% from "_hero.html" import hero, state %}
   {% from "_empty_state.html" import empty_state %}
+  {% from "_form_field.html" import error_summary %}
   {% set privacy_actions %}<a class="btn btn--primary" href="#pw-start">Start an assessment</a>{% endset %}
   {% call hero('Governed workspaces', 'Privacy',
                subtitle='Program of record',
@@ -76,7 +75,8 @@
       <span class="bd-stamp" id="bd-stamp" role="status" aria-live="off">loading…</span></span>
   </div>
 
-  <div class="bd-kpis" id="bd-kpis"></div>
+  {% from "_board_kpis.html" import kpi_row %}
+  {{ kpi_row(['On the record', 'Open', 'Approved', 'Due for re-review']) }}
 
   <div class="viz-grid">
     <div class="panel viz-card viz-card--wide">
@@ -102,14 +102,14 @@
   {% if records.enabled %}
   <style>
     .pv-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-4); }
-    @media (max-width: 900px) { .pv-grid { grid-template-columns: 1fr; } }
-    .pv-heat { display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; margin-top: var(--space-2); }
-    .pv-cell { border-radius: 6px; padding: 10px 8px; text-align: center; border: 1px solid var(--border); }
+    @media (max-width: 880px) { .pv-grid { grid-template-columns: 1fr; } }
+    .pv-heat { display: grid; grid-template-columns: repeat(5, 1fr); gap: var(--space-1); margin-top: var(--space-2); }
+    .pv-cell { border-radius: var(--radius-sm); padding: 10px var(--space-2); text-align: center; border: 1px solid var(--border); }
     .pv-cell .n { font-size: var(--text-lg); font-weight: var(--font-bold); }
     .pv-cell .l { font-size: var(--text-xs); color: var(--muted); text-transform: uppercase; letter-spacing: 0.03em; }
     .pv-cell.hot { background: color-mix(in srgb, var(--danger) 18%, transparent); border-color: var(--danger); }
     .pv-cell.warm { background: color-mix(in srgb, var(--warn, #b8860b) 16%, transparent); }
-    .pv-flow { display: flex; align-items: center; gap: var(--space-2); padding: 8px 0; border-bottom: 1px solid var(--border); font-size: var(--text-sm); }
+    .pv-flow { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) 0; border-bottom: 1px solid var(--border); font-size: var(--text-sm); }
     .pv-flow .arr { color: var(--muted); }
     .pv-flow .dest { font-weight: var(--font-medium); }
   </style>
@@ -147,7 +147,7 @@
           d.open + ' open · ' + (d.closing_soon || 0) + ' closing this week' +
           (d.overdue ? ' · ' + d.overdue + ' already overdue' : '');
       }).catch(function (e) {
-        document.getElementById('pv-dsar-msg').textContent = window.mvErrorText ? mvErrorText(e, 'load the request deadlines') : 'Could not load the request deadlines.';
+        document.getElementById('pv-dsar-msg').textContent = window.mvErrorText ? mvErrorText(e, 'load the request deadlines') : 'Could not load the request deadlines. Refresh the page and try again.';
       });
       fetch('/api/v1/privacy/transfer-map').then(okJson).then(function (d) {
         const box = document.getElementById('pv-transfer');
@@ -178,7 +178,7 @@
         }
       }).catch(function (e) {
         const box = document.getElementById('pv-transfer');
-        box.textContent = window.mvErrorText ? mvErrorText(e, 'load the transfer map') : 'Could not load the transfer map.';
+        box.textContent = window.mvErrorText ? mvErrorText(e, 'load the transfer map') : 'Could not load the transfer map. Refresh the page and try again.';
       });
     })();
   </script>
@@ -288,7 +288,7 @@
             (d.error_count ? ', ' + d.error_count + ' vendor(s) skipped' : '') + '. Reloading…';
           setTimeout(function () { location.reload(); }, 900);
         } catch (e) {
-          msg.textContent = window.mvErrorText ? mvErrorText(e, 'queue the assessments') : 'Could not queue the assessments.';
+          msg.textContent = window.mvErrorText ? mvErrorText(e, 'queue the assessments') : 'Could not queue the assessments. Try again.';
         } finally { btn.disabled = false; }
       });
     })();
@@ -296,17 +296,17 @@
 
   <div class="section-head"><h2>Privacy records</h2></div>
   <div class="panel">
-    <div class="mv-tabs" role="tablist" aria-label="Record types">
-      <button class="mv-tab" id="pw-tabbtn-dpa" role="tab" aria-selected="true" aria-controls="pw-tab-dpa" tabindex="0" data-tab="dpa" type="button">Vendor data agreements (DPA) ({{ records.dpa | length }})</button>
-      <button class="mv-tab" id="pw-tabbtn-ai" role="tab" aria-selected="false" aria-controls="pw-tab-ai" tabindex="-1" data-tab="ai" type="button">AI systems ({{ records.ai | length }})</button>
-      <button class="mv-tab" id="pw-tabbtn-ropa" role="tab" aria-selected="false" aria-controls="pw-tab-ropa" tabindex="-1" data-tab="ropa" type="button">Processing record (RoPA) ({{ records.ropa | length }})</button>
-      <button class="mv-tab" id="pw-tabbtn-dsar" role="tab" aria-selected="false" aria-controls="pw-tab-dsar" tabindex="-1" data-tab="dsar" type="button">Data requests (DSAR) ({{ records.dsar | length }})</button>
-      <button class="mv-tab" id="pw-tabbtn-paper" role="tab" aria-selected="false" aria-controls="pw-tab-paper" tabindex="-1" data-tab="paper" type="button">Vendor contracts ({{ records.paper | length }})</button>
-      <button class="mv-tab" id="pw-tabbtn-lineage" role="tab" aria-selected="false" aria-controls="pw-tab-lineage" tabindex="-1" data-tab="lineage" type="button">Vendor history</button>
-      <button class="mv-tab" id="pw-tabbtn-incidents" role="tab" aria-selected="false" aria-controls="pw-tab-incidents" tabindex="-1" data-tab="incidents" type="button">Incidents ({{ records.incidents | length }}){% if records.incidents_breached %} <span class="badge blocked">{{ records.incidents_breached }} past 72h</span>{% endif %}</button>
-    </div>
+    {% set pw_incidents_label %}Incidents ({{ records.incidents | length }}){% if records.incidents_breached %} <span class="badge blocked">{{ records.incidents_breached }} past 72h</span>{% endif %}{% endset %}
+    {{ panel_tabs('Record types', [
+         ('dpa', 'Vendor data agreements (DPA) (%d)' % records.dpa | length),
+         ('ai', 'AI systems (%d)' % records.ai | length),
+         ('ropa', 'Processing record (RoPA) (%d)' % records.ropa | length),
+         ('dsar', 'Data requests (DSAR) (%d)' % records.dsar | length),
+         ('paper', 'Vendor contracts (%d)' % records.paper | length),
+         ('lineage', 'Vendor history'),
+         ('incidents', pw_incidents_label)], 'dpa', tab_prefix='pw-tabbtn-', panel_prefix='pw-tab-') }}
 
-    <div class="pw-tab" id="pw-tab-lineage" role="tabpanel" aria-labelledby="pw-tabbtn-lineage" hidden>
+    <div {{ tab_panel('lineage', 'dpa', tab_prefix='pw-tabbtn-', panel_prefix='pw-tab-') }}>
       <p class="muted" style="font-size:var(--text-sm);margin-bottom:var(--space-3);">
         Answer the questions a regulator asks about a vendor: its full history,
         why it was approved, and what else depends on a clause or document
@@ -361,7 +361,7 @@
       </datalist>
     </div>
 
-    <div class="pw-tab" id="pw-tab-paper" role="tabpanel" aria-labelledby="pw-tabbtn-paper" hidden>
+    <div {{ tab_panel('paper', 'dpa', tab_prefix='pw-tabbtn-', panel_prefix='pw-tab-') }}>
       <p class="muted" style="font-size:var(--text-sm);margin-bottom:var(--space-3);">
         When the vendor insists on <strong>their</strong> paper. Upload it and
         Lightwork works out whether it is a DPA or a privacy addendum, compares
@@ -438,7 +438,7 @@
             <td>{{ r.gaps }}{% if r.high_severity_gaps %} <span class="muted">({{ r.high_severity_gaps }} high)</span>{% endif %}</td>
             <td><span class="badge {{ 'blocked' if r.recommendation == 'do_not_sign_without_changes' else 'warn' if r.recommendation == 'acceptable_with_changes' else 'done' }}">
               {{ 'Do not sign as drafted' if r.recommendation == 'do_not_sign_without_changes' else 'Acceptable with changes' if r.recommendation == 'acceptable_with_changes' else 'Acceptable' }}</span></td>
-            <td>{{ r.created }}</td>
+            <td>{% if r.created_at %}{{ r.created_at | datetime('date') }}{% else %}—{% endif %}</td>
             <td>
               <a class="btn" href="/api/v1/privacy/paper-reviews/{{ r.id }}/memo" target="_blank" rel="noopener">Read the memo</a>
               {% if r.redline_bytes %}<a class="btn" href="/api/v1/privacy/paper-reviews/{{ r.id }}/redline">Download marked-up copy</a>{% endif %}
@@ -451,7 +451,7 @@
       {% endif %}
     </div>
 
-    <div class="pw-tab" id="pw-tab-dpa" role="tabpanel" aria-labelledby="pw-tabbtn-dpa">
+    <div {{ tab_panel('dpa', 'dpa', tab_prefix='pw-tabbtn-', panel_prefix='pw-tab-') }}>
       <form class="pw-form" data-endpoint="/api/v1/privacy/dpa-reviews">
         <div class="pw-form-row">
           <label><span>Vendor</span>
@@ -500,7 +500,7 @@
                 <br><span class="badge warn pw-review-required">Read from a scanned or converted file: a person must check it{% if r.extraction_confidence %} ({{ r.extraction_confidence }} confidence){% endif %}</span>
               {% endif %}
             </td>
-            <td class="muted">{{ r.created }}</td>
+            <td class="muted">{% if r.created_at %}{{ r.created_at | datetime('date') }}{% else %}—{% endif %}</td>
             <td><button class="btn pw-dpa-clauses" data-review="{{ r.id }}" type="button">Show clauses</button></td>
           </tr>
           {% endfor %}
@@ -514,7 +514,7 @@
       {% endif %}
     </div>
 
-    <div class="pw-tab" id="pw-tab-ai" role="tabpanel" aria-labelledby="pw-tabbtn-ai" hidden>
+    <div {{ tab_panel('ai', 'dpa', tab_prefix='pw-tabbtn-', panel_prefix='pw-tab-') }}>
       <form class="pw-form" data-endpoint="/api/v1/privacy/ai-systems">
         <div class="pw-form-row">
           <label><span>System name</span>
@@ -563,7 +563,7 @@
               <ul style="margin:var(--space-2) 0 0; padding-inline-start:1.2rem; font-size:var(--text-sm);">
                 {% for o in r.obligations %}<li>{{ o }}</li>{% endfor %}
               </ul></details></td>
-            <td class="muted">{{ r.created }}</td>
+            <td class="muted">{% if r.created_at %}{{ r.created_at | datetime('date') }}{% else %}—{% endif %}</td>
           </tr>
           {% endfor %}
         </tbody>
@@ -578,7 +578,7 @@
       {% endif %}
     </div>
 
-    <div class="pw-tab" id="pw-tab-ropa" role="tabpanel" aria-labelledby="pw-tabbtn-ropa" hidden>
+    <div {{ tab_panel('ropa', 'dpa', tab_prefix='pw-tabbtn-', panel_prefix='pw-tab-') }}>
       <div class="pw-form">
         <div class="pw-form-actions">
           <label style="flex:1;"><span>Draft a processing record entry from a completed assessment</span>
@@ -631,11 +631,14 @@
       {% endif %}
     </div>
 
-    <div class="pw-tab" id="pw-tab-dsar" role="tabpanel" aria-labelledby="pw-tabbtn-dsar" hidden>
-      <form class="pw-form" data-endpoint="/api/v1/privacy/dsar">
+    <div {{ tab_panel('dsar', 'dpa', tab_prefix='pw-tabbtn-', panel_prefix='pw-tab-') }}>
+      <form class="pw-form" id="pw-dsar-form" data-endpoint="/api/v1/privacy/dsar" data-mv-validate data-mv-keep="privacy-dsar">
+        {{ error_summary('pw-dsar-errors') }}
         <div class="pw-form-row">
           <label><span>Person making the request (email or ID)</span>
-            <input class="input" name="subject_id" required maxlength="200" placeholder="jordan@example.com"></label>
+            <input class="input" id="pw-dsar-subject" name="subject_id" required maxlength="200" placeholder="jordan@example.com"
+                   data-error-required="Enter the email address or ID of the person making the request."
+                   data-error-length="Shorten the email address or ID to 200 characters or fewer."></label>
           <label><span>What they asked for</span>
             <select class="select" name="kind">
               <option value="access">A copy of their data</option>
@@ -685,9 +688,11 @@
       <p class="muted" style="font-size: var(--text-sm);">People can also file requests themselves from your website:
         <a href="/privacy/rights-form">set up the rights request form</a>. Those arrive here as
         <em>From your website</em> and open once the person confirms their email address.</p>
-      <form class="pw-form" data-endpoint="/api/v1/privacy/dsar/from-message">
+      <form class="pw-form" id="pw-dsar-message-form" data-endpoint="/api/v1/privacy/dsar/from-message" data-mv-validate data-mv-keep="privacy-dsar-message">
+        {{ error_summary('pw-dsar-message-errors') }}
         <label><span>…or paste an inbound message</span>
-          <textarea class="textarea" name="text" rows="3" required
+          <textarea class="textarea" id="pw-dsar-message" name="text" rows="3" required
+            data-error-required="Paste the message the person sent, so Lightwork can read what they asked for."
             placeholder='For example: "Please delete my data. Sam, sam@example.com". Lightwork works out what was asked and who asked, and keeps the phrases it matched.'></textarea></label>
         <div class="pw-form-actions">
           <label style="flex:1;"><span>Sender (optional — detected from the message when present)</span>
@@ -761,7 +766,7 @@
                        compact=true) }}
       {% endif %}
     </div>
-    <div class="pw-tab" id="pw-tab-incidents" role="tabpanel" aria-labelledby="pw-tabbtn-incidents" hidden>
+    <div {{ tab_panel('incidents', 'dpa', tab_prefix='pw-tabbtn-', panel_prefix='pw-tab-') }}>
       <form class="pw-form" data-endpoint="/api/v1/privacy/incidents">
         <div class="pw-form-row">
           <label><span>What happened</span>
@@ -847,13 +852,13 @@
       records: who processes your data (vendors), what people agreed to
       (consent), and where personal data actually lives (the data map). Each
       one is turned on separately; turned-off registers show a button to turn them on.</p>
-    <div class="mv-tabs" role="tablist" aria-label="Estate registers">
-      <button class="mv-tab" id="pe-tabbtn-vendors" role="tab" aria-selected="true" aria-controls="pe-tab-vendors" tabindex="0" data-pane="vendors" type="button">Vendors ({{ estate.vendors | length }})</button>
-      <button class="mv-tab" id="pe-tabbtn-consent" role="tab" aria-selected="false" aria-controls="pe-tab-consent" tabindex="-1" data-pane="consent" type="button">Consent{% if estate.consent_enabled %} ({{ estate.consent_posture.records }}){% endif %}</button>
-      <button class="mv-tab" id="pe-tabbtn-datamap" role="tab" aria-selected="false" aria-controls="pe-tab-datamap" tabindex="-1" data-pane="datamap" type="button">Data map ({{ estate.assets | length }})</button>
-    </div>
+    {% set pe_consent_label %}Consent{% if estate.consent_enabled %} ({{ estate.consent_posture.records }}){% endif %}{% endset %}
+    {{ panel_tabs('Estate registers', [
+         ('vendors', 'Vendors (%d)' % estate.vendors | length),
+         ('consent', pe_consent_label),
+         ('datamap', 'Data map (%d)' % estate.assets | length)], 'vendors', tab_prefix='pe-tabbtn-', panel_prefix='pe-tab-') }}
 
-    <div class="pe-tab" id="pe-tab-vendors" role="tabpanel" aria-labelledby="pe-tabbtn-vendors">
+    <div {{ tab_panel('vendors', 'vendors', tab_prefix='pe-tabbtn-', panel_prefix='pe-tab-') }}>
       {% if estate.vendors_enabled %}
       <p class="muted" style="font-size:var(--text-sm);margin-bottom:var(--space-3);">
         One governed row per vendor: criticality, lifecycle, questionnaires the
@@ -1001,7 +1006,7 @@
       {% endif %}
     </div>
 
-    <div class="pe-tab" id="pe-tab-consent" role="tabpanel" aria-labelledby="pe-tabbtn-consent" hidden>
+    <div {{ tab_panel('consent', 'vendors', tab_prefix='pe-tabbtn-', panel_prefix='pe-tab-') }}>
       {% if estate.consent_enabled %}
       <p class="muted" style="font-size:var(--text-sm);margin-bottom:var(--space-3);">
         A lasting record of what each person agreed to, kept behind your consent
@@ -1093,7 +1098,7 @@
         {% if estate.notices %}
         <ul class="muted" style="font-size:var(--text-sm);margin:0 0 var(--space-2) 1.2em;">
           {% for notice in estate.notices %}
-          <li>{{ notice.version }}{% if notice.published_date and notice.published_date != '—' %} · published {{ notice.published_date }}{% endif %}</li>
+          <li>{{ notice.version }}{% if notice.published_at %} · published {{ notice.published_at | datetime('date') }}{% endif %}</li>
           {% endfor %}
         </ul>
         {% endif %}
@@ -1131,7 +1136,7 @@
       {% endif %}
     </div>
 
-    <div class="pe-tab" id="pe-tab-datamap" role="tabpanel" aria-labelledby="pe-tabbtn-datamap" hidden>
+    <div {{ tab_panel('datamap', 'vendors', tab_prefix='pe-tabbtn-', panel_prefix='pe-tab-') }}>
       {% if estate.data_map_enabled %}
       <p class="muted" style="font-size:var(--text-sm);margin-bottom:var(--space-3);">
         Where personal data actually lives. Import your database&rsquo;s column list or list your
@@ -1225,49 +1230,9 @@
   <script>
     (function () {
       'use strict';
-      var panes = document.querySelectorAll('.pe-tab');
-      var buttons = Array.prototype.slice.call(document.querySelectorAll('button[data-pane]'));
-      function showPane(tb, focus) {
-        buttons.forEach(function (b) {
-          b.setAttribute('aria-selected', b === tb ? 'true' : 'false');
-          b.tabIndex = b === tb ? 0 : -1;
-        });
-        panes.forEach(function (p) {
-          p.hidden = p.id !== 'pe-tab-' + tb.dataset.pane;
-        });
-        if (focus) tb.focus();
-      }
-      buttons.forEach(function (tb, i) {
-        tb.addEventListener('click', function () { showPane(tb, false); });
-        tb.addEventListener('keydown', function (event) {
-          var next = event.key === 'ArrowRight' ? buttons[(i + 1) % buttons.length]
-            : event.key === 'ArrowLeft' ? buttons[(i - 1 + buttons.length) % buttons.length]
-            : event.key === 'Home' ? buttons[0] : event.key === 'End' ? buttons[buttons.length - 1] : null;
-          if (next) { event.preventDefault(); showPane(next, true); }
-        });
-      });
-
       function post(url, body) {
-        return fetch(url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body)
-        }).then(function (r) {
-          // Read text first: an error body from a proxy or crash page is
-          // often not JSON, and r.json() would mask the status with a
-          // SyntaxError.
-          return r.text().then(function (t) {
-            var d = null;
-            try { d = JSON.parse(t); } catch (e) { d = null; }
-            if (!r.ok) {
-              var failure = new Error('request failed');
-              failure.status = r.status;
-              failure.headers = r.headers;  // carries the turned-off reason
-              throw failure;
-            }
-            return d;
-          });
-        });
+        // A refusal keeps its status and the turned-off reason for errText.
+        return window.mvFetchJSON(url, { method: 'POST', body: body });
       }
       function errText(e, action) {
         return window.mvErrorText ? window.mvErrorText(e, action) : 'Could not ' + action + '. Please try again.';
@@ -1654,28 +1619,6 @@
 <script>
 (function () {
   'use strict';
-  // Record-type tabs: a selected state and arrow keys, never btn--primary.
-  var tabs = Array.prototype.slice.call(document.querySelectorAll('[role="tablist"] button[data-tab]'));
-  function showTab(tb, focus) {
-    tabs.forEach(function (b) {
-      b.setAttribute('aria-selected', b === tb ? 'true' : 'false');
-      b.tabIndex = b === tb ? 0 : -1;
-    });
-    document.querySelectorAll('.pw-tab').forEach(function (p) {
-      p.hidden = p.id !== 'pw-tab-' + tb.dataset.tab;
-    });
-    if (focus) tb.focus();
-  }
-  tabs.forEach(function (tb, i) {
-    tb.addEventListener('click', function () { showTab(tb, false); });
-    tb.addEventListener('keydown', function (event) {
-      var next = event.key === 'ArrowRight' ? tabs[(i + 1) % tabs.length]
-        : event.key === 'ArrowLeft' ? tabs[(i - 1 + tabs.length) % tabs.length]
-        : event.key === 'Home' ? tabs[0] : event.key === 'End' ? tabs[tabs.length - 1] : null;
-      if (next) { event.preventDefault(); showTab(next, true); }
-    });
-  });
-
   // An incident's awareness time starts as now, in the viewer's own time
   // zone, and cannot be later than now.
   var awareInput = document.getElementById('pw-inc-aware');
@@ -1706,13 +1649,13 @@
   function day(ts) {
     return ts ? (window.mvDateAbsolute ? window.mvDateAbsolute(ts) : new Date(ts * 1000).toLocaleDateString()) : '';
   }
-  function post(url, body) {
+  function post(url, body, beforeReload) {
     return fetch(url, {
       method: 'POST',
       headers: body ? { 'Content-Type': 'application/json' } : {},
       body: body ? JSON.stringify(body) : undefined
     }).then(function (r) {
-      if (r.ok) { location.reload(); return null; }
+      if (r.ok) { if (beforeReload) beforeReload(); location.reload(); return null; }
       throw failed(r);
     });
   }
@@ -1734,8 +1677,11 @@
       });
       var err = form.querySelector('.pw-form-err');
       err.textContent = '';
-      post(form.dataset.endpoint, body).catch(function (e) {
-        err.textContent = errText(e, 'save this');
+      var fields = form.hasAttribute('data-mv-validate') && window.mvFieldErrors;
+      // A saved form starts empty after the reload; a failed one keeps every value.
+      post(form.dataset.endpoint, body, fields ? function () { fields.forget(form); } : null).catch(function (e) {
+        if (fields) fields.fail(form, e, 'save this');
+        else err.textContent = errText(e, 'save this');
       });
     });
   });
@@ -1852,10 +1798,7 @@
     function ask(url) {
       err.textContent = '';
       out.innerHTML = '';
-      fetch(url).then(function (r) {
-        if (!r.ok) { throw failed(r); }
-        return r.json();
-      }).then(render).catch(function (e) { err.textContent = errText(e, 'answer that question'); });
+      window.mvFetchJSON(url).then(render).catch(function (e) { err.textContent = errText(e, 'answer that question'); });
     }
     function render(data) {
       if (data.found === false) {
@@ -2156,7 +2099,7 @@
           ? 'Prepare deletion for this request? Nothing is deleted yet: you confirm the deletion on the request\'s own page.'
           : 'Gather everything Lightwork holds about this person now?';
       if (!(await mvConfirm(text, { okText: btn.dataset.retry === 'true' ? 'Retry cleanup' :
-          btn.dataset.act === 'close' ? 'Close request' : 'Continue' }))) return;
+          btn.dataset.act === 'close' ? 'Close request' : btn.dataset.kind === 'erasure' ? 'Prepare deletion' : 'Gather their data' }))) return;
       btn.disabled = true;
       fetch('/api/v1/privacy/dsar/' + encodeURIComponent(btn.dataset.id) +
            '/' + btn.dataset.act, { method: 'POST' }).then(function (response) {

@@ -17,6 +17,7 @@ at once, so a button pressed twice never doubles the spend.
 from __future__ import annotations
 
 import contextvars
+import copy
 import logging
 import threading
 import time
@@ -29,7 +30,7 @@ log = logging.getLogger(__name__)
 
 MAX_RUNNING = 3
 _MAX_KEPT = 40
-_FAILED = "This job stopped because of a problem. Nothing more was changed."
+_FAILED = "This task stopped because of a problem. Work completed before the failure may remain. Read its current result before deciding what to do next; do not repeat it automatically."
 
 
 class JobRefused(Exception):
@@ -52,6 +53,7 @@ class Job:
     problem: str = ""
     on_cancel: Callable[[], None] | None = None
     _cancel: threading.Event = field(default_factory=threading.Event, repr=False)
+    _stop_receipt: dict | None = field(default=None, repr=False)
 
     @property
     def cancelled(self) -> bool:
@@ -134,6 +136,61 @@ def get(job_id: str) -> Job | None:
 def listed() -> list[Job]:
     with _lock:
         return sorted(_jobs.values(), key=lambda j: j.started_at, reverse=True)
+
+
+def current_view(job: Job) -> dict:
+    """A coherent retained view; private result values never escape by reference."""
+    with _lock:
+        if _jobs.get(job.id) is not job:
+            raise JobRefused("The original result is no longer available. Its absence does not mean the work failed; do not repeat it automatically.")
+        return copy.deepcopy(job.view())
+
+
+def _revision(job: Job) -> str:
+    from maverick.governed_operations import digest
+
+    return digest(job.view())
+
+
+def reviewed_view(job: Job) -> dict:
+    with _lock:
+        if _jobs.get(job.id) is not job:
+            raise JobRefused("The original result is no longer available. No work was repeated.")
+        return {"job": copy.deepcopy(job.view()), "revision": _revision(job)}
+
+
+def stop_receipt(job: Job, operation: str | None, actor: str, context: str) -> dict | None:
+    with _lock:
+        row = job._stop_receipt if _jobs.get(job.id) is job else None
+        if row is None or (row["actor"], row["context"]) != (actor, context) or operation is not None and row["operation"] != operation:
+            return None
+        return copy.deepcopy(row)
+
+
+def cancel_reviewed(job: Job, revision: str, operation: str, actor: str, context: str,
+                    before_stop: Callable[[], None]) -> dict:
+    """Bind one reviewed stop to its original actor inside the native job lock."""
+    with _lock:
+        if _jobs.get(job.id) is not job:
+            raise JobRefused("The original result is unavailable. No work was repeated.")
+        row = job._stop_receipt
+        if row is not None and (row["operation"], row["actor"], row["context"]) == (operation, actor, context):
+            return copy.deepcopy(row)
+        if _revision(job) != revision or job.state != "running" or not job.cancellable or job.cancelled:
+            raise JobRefused("This task changed or can no longer stop part-way. Read its current progress and review again. Nothing was stopped by this request.")
+        before_stop()
+        job._cancel.set()
+        job.state = "stopping"
+        row = {"operation": operation, "actor": actor, "context": context,
+               "job": job.id, "revision": revision, "requested_at": time.time()}
+        job._stop_receipt = row
+        hook = job.on_cancel
+    if hook is not None:
+        try:
+            hook()
+        except Exception:  # noqa: BLE001 -- the native safe-point stop flag is retained
+            log.debug("job %s stop hook failed", job.id, exc_info=True)
+    return copy.deepcopy(row)
 
 
 def cancel(job: Job) -> bool:

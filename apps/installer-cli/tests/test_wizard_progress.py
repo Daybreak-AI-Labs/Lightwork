@@ -103,6 +103,10 @@ def test_run_prints_step_indicators(monkeypatch):
     # keep their defaults rather than reaching a real prompt.
     monkeypatch.setattr(wizard, "_q_text",
                         lambda *a, **kw: kw.get("default", ""))
+    # Choice questions in unstubbed steps (e.g. who approves a risky action
+    # the requester asked for) take their defaults too.
+    monkeypatch.setattr(wizard, "_q_select",
+                        lambda *a, **kw: kw.get("default") or (a[1][0] if len(a) > 1 and a[1] else ""))
 
     rc = wizard.run()
     assert rc == 0

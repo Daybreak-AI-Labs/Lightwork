@@ -14,22 +14,25 @@
   function human(value) { return window.mvHuman ? window.mvHuman(value) : String(value == null ? '' : value); }
   function when(ts) { return ts && window.mvWhen ? window.mvWhen(ts) : (ts ? new Date(ts * 1000).toLocaleString() : 'Never'); }
   function plural(n, one, many) { return n + ' ' + (n === 1 ? one : (many || one + 's')); }
-  function say(node, text) { if (node) node.textContent = text || ''; }
+  function say(node, text) { window.mvStatus(node, text || ''); }
   function errorText(failure, action) {
     return window.mvErrorText ? window.mvErrorText(failure, action) : 'Could not ' + action + '. Please try again.';
   }
   async function failText(failure, action) {
     try {
-      if (failure && typeof failure.clone === 'function') {
-        var body = await failure.clone().json();
-        var plain = window.mvPlainDetail ? window.mvPlainDetail(body && body.detail) : '';
-        if (plain) return plain;
-      }
+      var detail = failure && failure.detail;
+      if (failure && typeof failure.clone === 'function') detail = ((await failure.clone().json()) || {}).detail;
+      var plain = window.mvPlainDetail ? window.mvPlainDetail(detail) : '';
+      if (plain) return plain;
     } catch (ignored) { /* not a readable body */ }
     return errorText(failure, action);
   }
+  // JSON through the shared helper; raw: the Response itself (a download).
   async function request(url, options) {
     options = options || {};
+    if (!options.raw) {
+      return window.mvFetchJSON(url, {method: options.method || 'GET', cache: 'no-store', body: options.json});
+    }
     var init = {method: options.method || 'GET', cache: 'no-store', credentials: 'same-origin',
       headers: {Accept: 'application/json'}};
     if (options.json !== undefined) {
@@ -38,7 +41,7 @@
     }
     var response = await window.fetch(url, init);
     if (!response.ok) throw response;
-    return options.raw ? response : response.json();
+    return response;
   }
   function table(headers, rows, caption) {
     var wrap = el('div', 'to-scroll');
@@ -340,7 +343,7 @@
         out.appendChild(table(USAGE_HEAD, usageRows(found), 'Skills that rarely help'));
         var remove = button('Remove ' + plural(found.length, 'skill'), 'btn--danger');
         remove.addEventListener('click', async function () {
-          var ok = await window.mvConfirm('Remove ' + plural(found.length, 'skill') + ' that rarely help? Agents stop using them from the next task. This cannot be undone.', {okText: 'Remove'});
+          var ok = await window.mvConfirm('Remove ' + plural(found.length, 'skill') + ' that rarely help? Agents stop using them from the next task. This cannot be undone.', {okText: 'Remove ' + plural(found.length, 'skill')});
           if (!ok) return;
           remove.disabled = true;
           try {

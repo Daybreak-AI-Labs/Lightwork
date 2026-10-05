@@ -15,18 +15,8 @@
     return el('span', 'badge ' + (ok ? 'active' : 'blocked'), ok ? yes : no);
   }
   async function call(path, method, body) {
-    var controller = new AbortController();
-    var timeout = setTimeout(function () { controller.abort(); }, 30000);
-    try {
-    var response = await window.fetch(path, {
-      method: method || 'GET', cache: 'no-store', credentials: 'same-origin',
-      headers: {'Content-Type': 'application/json', Accept: 'application/json'},
-      body: body == null ? undefined : JSON.stringify(body), signal: controller.signal
-    });
-    var content = await response.text();
-    if (!response.ok) throw new Response(content, {status: response.status, headers: response.headers});
-    return JSON.parse(content);
-    } finally { clearTimeout(timeout); }
+    return window.mvFetchJSON(path, {method: method || 'GET', cache: 'no-store',
+      body: body == null ? undefined : body, timeout: 30000});
   }
 
   // Forms marked data-confirm ask first (remove a key, reset visibility...).
@@ -50,8 +40,7 @@
   var runs = {}, encryptionContext = null;
   function out(name) { return document.querySelector('[data-maintenance-out="' + name + '"]'); }
   function say(name, text) {
-    var node = document.querySelector('[data-maintenance-status="' + name + '"]');
-    if (node) node.textContent = text;
+    window.mvStatus(document.querySelector('[data-maintenance-status="' + name + '"]'), text);
   }
   function when(ts) { return window.mvWhen ? window.mvWhen(ts) : ''; }
 
@@ -136,10 +125,10 @@
       });
       box.appendChild(summary);
       if (!data.stopped.length) return 'Nothing has stopped.';
-      box.appendChild(el('h3', null, 'Stopped jobs'));
+      box.appendChild(el('h3', null, 'Stopped tasks'));
       var table = el('table');
       var head = el('tr');
-      ['Job', 'Stopped', 'What to do'].forEach(function (h) { var th = el('th', null, h); th.scope = 'col'; head.appendChild(th); });
+      ['Task', 'Stopped', 'What to do'].forEach(function (h) { var th = el('th', null, h); th.scope = 'col'; head.appendChild(th); });
       var thead = el('thead'); thead.appendChild(head); table.appendChild(thead);
       var body = el('tbody');
       data.stopped.forEach(function (job) {
@@ -343,14 +332,8 @@
   async function plainFailure(failure, action) {
     // A server sentence written for people is shown as is; anything else
     // falls back to the shared plain message.
-    try {
-      if (failure && typeof failure.clone === 'function') {
-        var body = await failure.clone().json();
-        var plain = window.mvPlainDetail ? window.mvPlainDetail(body && body.detail) : '';
-        if (plain) return plain;
-      }
-    } catch (ignored) { /* not a readable body */ }
-    return errorText(failure, action);
+    var plain = window.mvPlainDetail ? window.mvPlainDetail(failure && failure.detail) : '';
+    return plain || errorText(failure, action);
   }
   function waitForExport(job, done) {
     // The file is prepared in the background; ask for its status until it is
@@ -361,7 +344,7 @@
       try {
         var state = await call(base + '/client/export/' + encodeURIComponent(job), 'GET');
         if (state.state === 'ready') { done(null, base + '/client/export/' + encodeURIComponent(job) + '/download'); return; }
-        if (state.state === 'failed') { done(state.message || 'The export could not be prepared.'); return; }
+        if (state.state === 'failed') { done(state.message || 'The export could not be prepared. Try again.'); return; }
       } catch (failure) { done(await plainFailure(failure, 'prepare the download')); return; }
       if (tries > 400) { done('The export is taking too long. Try again later.'); return; }
       setTimeout(poll, 3000);
@@ -477,17 +460,13 @@
         var go = el('button', 'btn btn--danger', 'Remove these records');
         go.type = 'button';
         go.addEventListener('click', async function () {
-          var ok = await window.mvConfirm('Remove these old records from this workspace? They cannot be brought back.', {okText: 'Remove'});
+          var ok = await window.mvConfirm('Remove these old records from this workspace? They cannot be brought back.', {okText: 'Remove old records'});
           if (!ok) return;
           go.disabled = true;
           say('cleanup', 'Removing…');
           try {
-            var response = await window.fetch(base + '/cleanup', {
-              method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json'},
-              body: JSON.stringify({days: days, activity_days: activityDays, confirm: true})
-            });
-            if (!response.ok) throw response;
-            var done = await response.json();
+            var done = await window.mvFetchJSON(base + '/cleanup',
+              {method: 'POST', body: {days: days, activity_days: activityDays, confirm: true}});
             box.textContent = '';
             say('cleanup', 'Removed ' + done.conversations + ' conversation' + (done.conversations === 1 ? '' : 's') +
               ' and ' + done.activity + ' activity entr' + (done.activity === 1 ? 'y' : 'ies') + '.');

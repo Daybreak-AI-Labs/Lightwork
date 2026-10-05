@@ -147,6 +147,11 @@ async def _call(request, response, operation, *, write=False):
 @router.get("/project-workspaces/{project_id}")
 async def page(request: Request, project_id: int | None = None):
     from .app import templates
+    from .navigation_api import areas_redirect
+
+    moved = areas_redirect(request)  # areas mode: Projects, and a project's Plan tab
+    if moved is not None:
+        return moved
     require_permission(request, "view")
     return templates.TemplateResponse(request, "project_workspaces.html",
                                       {"project_id": project_id, "project_context": context_for(request)},

@@ -7,7 +7,8 @@ test('a saved answer exposes the product and its print, copy, download and share
   await page.goto(`/chat/goal/${fixture.review_goal}`);
 
   const product = page.getByRole('navigation', {name: 'Primary'});
-  await expect(product.getByRole('link', {name: 'Workflows', exact: true})).toBeVisible();
+  // Workflows is a sidebar group entry; Recent pages may repeat it by design.
+  await expect(product.locator('.navgrp__items').getByRole('link', {name: 'Workflows', exact: true})).toBeVisible();
   // Tasks is a one-click Most used shortcut as well as a Work entry.
   await expect(product.getByRole('list', {name: 'Most used'}).getByRole('link', {name: 'Tasks', exact: true})).toBeVisible();
   const answer = page.locator('#result');
@@ -56,7 +57,8 @@ test('a saved answer exposes the product and its print, copy, download and share
   await page.setViewportSize({width: 390, height: 844});
   await expect(page.getByRole('button', {name: 'Menu', exact: true})).toBeVisible();
   await page.getByRole('button', {name: 'Menu', exact: true}).click();
-  await expect(product.getByRole('link', {name: 'Workflows', exact: true})).toBeVisible();
+  // Workflows is a sidebar group entry; Recent pages may repeat it by design.
+  await expect(product.locator('.navgrp__items').getByRole('link', {name: 'Workflows', exact: true})).toBeVisible();
   await expect(page.getByRole('button', {name: 'Close menu'})).toBeVisible();
   await expect(page.locator('main')).toHaveAttribute('inert', '');
   const firstNavigation = page.locator('#cs-side .cs-brand');

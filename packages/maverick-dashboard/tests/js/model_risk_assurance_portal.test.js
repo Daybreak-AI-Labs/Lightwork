@@ -8,6 +8,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const {JSDOM} = require("jsdom");
+const {shell} = require('./_shell');
 
 const template = fs.readFileSync(path.join(__dirname, "../../maverick_dashboard/templates/model_risk_assurance.html"), "utf8");
 const scripts = [...template.matchAll(/<script>([\s\S]*?)<\/script>/g)].map(match => match[1]);
@@ -26,6 +27,7 @@ function page(t, answer) {
   const w = dom.window, released = [];
   w.mvErrorText = (failure, action) => `Could not ${action}. Ask an administrator. (${failure.status})`;
   w.fetch = async url => answer(String(url), released);
+  shell(w);
   w.eval(helpers);
   w.eval(supplier);
   const settle = async () => { for (let i = 0; i < 20; i += 1) await new Promise(resolve => setImmediate(resolve)); };
@@ -35,8 +37,8 @@ function page(t, answer) {
 test("refused access-code lists say so in both tables and release the responses", async t => {
   const h = page(t, (url, released) => ({ok: false, status: 403, body: {cancel: async () => { released.push(url); }}}));
   await h.settle();
-  assert.equal(h.text("ai-vendor-portal-invitations"), "Access codes could not be loaded.");
-  assert.equal(h.text("ai-vendor-portal-submissions"), "Answers could not be loaded.");
+  assert.equal(h.text("ai-vendor-portal-invitations"), "Access codes could not be loaded. Refresh the page and try again.");
+  assert.equal(h.text("ai-vendor-portal-submissions"), "Answers could not be loaded. Refresh the page and try again.");
   assert.equal(h.text("ai-vendor-portal-status"), "Could not load the access codes. Ask an administrator. (403)");
   assert.equal(h.released.length, 2);
 });

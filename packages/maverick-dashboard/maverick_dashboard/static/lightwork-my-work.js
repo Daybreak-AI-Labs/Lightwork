@@ -9,7 +9,7 @@
     rows.replaceChildren(); if (!model) return;
     var visible = model.items.filter(function (item) { return filter.value === 'all' || item.kind === filter.value; });
     visible.forEach(function (item) {
-      var row = node('article', ''), title = node('h2', item.title), detail = node('p', item.state + ' — ' + item.detail), link = node('a', item.action);
+      var row = node('article', ''), title = node(root.dataset.rowHeading || 'h2', item.title), detail = node('p', item.state + ' — ' + item.detail), link = node('a', item.action);
       if (typeof item.href !== 'string' || !item.href.startsWith('/') || item.href.startsWith('//')) return;
       link.href = item.href; row.append(title, detail, link); rows.append(row);
     });

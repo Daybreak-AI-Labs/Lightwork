@@ -92,7 +92,7 @@
     } catch (error) {
       // A lost acknowledgement can leave a newer revision on the server.
       // Never retry a decision automatically or reuse an uncertain comparison.
-      invalidate(); status.textContent = error.message || "Could not complete the review. Your note is retained.";
+      invalidate(); status.textContent = error.message || "Could not complete the review. Your note is retained. Try again.";
     } finally { pending(false); }
   }
   inspect.addEventListener("click", () => act("inspect"));

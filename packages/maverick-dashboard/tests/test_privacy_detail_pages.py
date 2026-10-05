@@ -309,7 +309,8 @@ def test_dsar_page_says_whether_an_answer_is_on_record():
         "kind": "answered", "answered_on": today, "reference": "CRM ticket 77",
         "erasure": "erased"})
     main = _main(client.get(f"/privacy/dsar/{request['id']}").text)
-    assert f"Answered on {today}" in main and "Their data was erased" in main
+    assert f'Answered on <time datetime="{today}" data-mv-time="{today}"' in main
+    assert "Their data was erased" in main
     assert "CRM ticket 77" in main
     assert 'id="dsar-record-outcome"' not in main
 
@@ -324,7 +325,7 @@ def test_a_request_marked_answered_then_closed_still_shows_its_answer():
     privacy_ops.close_dsar(request["id"], closed_by="ops")
     main = _main(client.get(f"/privacy/dsar/{request['id']}").text)
     today = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d")
-    assert f"Answered on {today}" in main
+    assert f'Answered on <time datetime="{today}" data-mv-time="{today}"' in main
     assert "Closed without a recorded answer" not in main
     assert 'id="dsar-record-outcome"' not in main  # nothing left to record
 

@@ -33,6 +33,25 @@ def _snapshot(world, goal):
             "signoff": signoff, "artifacts": artifacts, "answer_version": version, "handoff_closed": closed}
 
 
+def validate_current(request, world, context, expected_context):
+    """Withhold a page when an edit or access change overtakes its reads."""
+    require_permission(request, "view")
+    fresh = world.get_goal(context["goal"].id)
+    if fresh is None:
+        raise product_error(404, "task_unavailable", "This task is no longer available.")
+    assert_goal_access(request, fresh)
+    try:
+        latest = _snapshot(world, fresh)
+    except (LookupError, ValueError, TypeError) as exc:
+        raise product_error(503, "result_unavailable", "The saved result and its release requirements could not be loaded. Retry to confirm the current version.", retryable=True) from exc
+    require_permission(request, "view")
+    assert_goal_access(request, fresh)
+    if (context["answer_version"] != latest["answer_version"]
+            or world.get_goal(fresh.id) != fresh
+            or expected_context != context_for(request)):
+        raise product_error(409, "result_changing", "The saved result or your access changed. Refresh it again in a moment.", retryable=True)
+
+
 def projection(request, world, goal_id: int) -> dict:
     from maverick.attachment_submissions import SubmissionStore
 
@@ -40,6 +59,7 @@ def projection(request, world, goal_id: int) -> dict:
     from .app import _chat_answer_download_state, _chat_answer_text, _voice_only_mode
 
     require_permission(request, "view")
+    original_context = context_for(request)
     goal = world.get_goal(goal_id)
     if goal is None:
         raise product_error(404, "task_unavailable", "This task is no longer available.")
@@ -61,6 +81,9 @@ def projection(request, world, goal_id: int) -> dict:
     can_download, download_note = _chat_answer_download_state(world, fresh)
     from maverick.stop_reasons import stop_payload
 
+    from .answer_checks import answer_facts
+    from .app import _withheld_event_markers
+
     stop = stop_payload(fresh.status, fresh.result)
     # Exceptional content grants never become permission to mutate the task.
     context.update(can_operate=not context["handoff_closed"] and has_permission(request, "operate") and
@@ -68,5 +91,7 @@ def projection(request, world, goal_id: int) -> dict:
                    conversation_context=context_for(request), voice_only=_voice_only_mode(),
                    stop=stop,
                    can_download_chat_answer=can_download, chat_answer_download_note=download_note,
-                   chat_answer_text=_chat_answer_text(fresh))
+                   chat_answer_text=_chat_answer_text(fresh),
+                   **answer_facts(world, fresh, frozenset(_withheld_event_markers()), request=request))
+    validate_current(request, world, context, original_context)
     return context

@@ -38,10 +38,7 @@
   }
   loadAttempts();
   async function request(path, body) {
-    const response = await fetch(path, {method: 'POST', credentials: 'same-origin', cache: 'no-store', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body || {})});
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error((window.mvPlainDetail && window.mvPlainDetail(data.detail)) || 'This sharing operation could not be confirmed. Check the existing attempt before trying again.');
-    return data;
+    return window.mvFetchJSON(path, {method: 'POST', cache: 'no-store', body: body || {}, plainDetail: true}, 'share the result');
   }
   function outcome(data) {
     msg.replaceChildren();

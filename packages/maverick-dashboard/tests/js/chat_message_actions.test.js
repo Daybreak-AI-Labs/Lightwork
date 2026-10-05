@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const {JSDOM} = require('jsdom');
+const {shell} = require('./_shell');
 const root = path.resolve(__dirname, '../../maverick_dashboard');
 const read = name => fs.readFileSync(path.join(root, name), 'utf8').replace(/\r\n?/g, '\n');
 const template = read('templates/chat_goal.html');
@@ -57,6 +58,7 @@ async function projectionHarness(content = '<div id="result">Live answer</div>',
     assert.equal(url, '/chat/goal/7/answer-panel', 'refresh fetches the authorized result projection');
     return typeof projection === 'function' ? projection(url, options) : projection;
   };
+  shell(window);
   window.eval(projectionScript);
   await settle();
   return {dom, window, doc: window.document, copied, calls, get prints() {return prints;},
@@ -202,6 +204,7 @@ test('Print loads every older page and answered clarification before opening the
   ];
   w.fetch = async (url, options) => { seen.push({url, options}); return {ok:true, status:200, redirected:false, json:async()=>pages.shift()}; };
   let printed = ''; w.print = () => {printed = w.document.getElementById('history-turns').textContent;};
+  shell(w);
   w.eval(historyScript);
   await w.LightworkThreadHistory.printConversation(w.document.getElementById('print-status'));
   assert.deepEqual(seen.map(call => call.url), [
@@ -291,6 +294,7 @@ function shareHarness({localOnly = false, canCreate = true, existing = false} = 
     } else body = {links: minted && !revoked ? [{id: 3, label: 'Reviewed result', state: 'active', revoked: false}] : []};
     return {ok: true, status: 200, json: async () => body};
   };
+  shell(window);
   window.eval(shareScript);
   return {dom, window, doc: window.document, copied, calls};
 }
@@ -350,6 +354,7 @@ function voiceHarness(text, allowed = true) {
     <div id="voice-actions"><button id="read-aloud" data-voice-only="0">Read aloud</button></div></section></body>`, {runScripts: 'outside-only'});
   const {window} = dom;
   window.document.getElementById('result').textContent = text;
+  shell(window);
   window.eval(voiceScript); window.lwReadAloud(window.document.getElementById('read-aloud'));
   return {dom, window, doc: window.document, status: () => window.document.querySelector('#voice-actions [role="status"]')};
 }

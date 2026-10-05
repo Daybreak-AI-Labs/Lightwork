@@ -53,20 +53,22 @@
     return true;
   }
   async function request(path, body, signal) {
-    var response = await window.fetch(base + path, {method:body ? 'POST' : 'GET', cache:'no-store',
-      headers:{'Content-Type':'application/json', ...(context ? {'X-Lightwork-Voice-Context':context} : {})},
-      ...(body ? {body:JSON.stringify(body)} : {}), ...(signal ? {signal:signal} : {})});
-    if (response.status === 401 || response.status === 403) {
-      clearPrivate('Voice setup access is no longer available. Sign in with an administrator account and reload this page.');
-      throw new Error('Access changed');
+    var data;
+    try {
+      data = await window.mvFetchJSON(base + path, {method: body ? 'POST' : 'GET', cache: 'no-store', body: body || undefined, signal: signal || undefined,
+        headers: context ? {'X-Lightwork-Voice-Context': context} : {},
+        onAccess: function () { clearPrivate('Voice setup access is no longer available. Sign in with an administrator account and reload this page.'); }},
+        'confirm this voice setup request');
+    } catch (error) {
+      if (error.accessChanged) throw new Error('Access changed');
+      if (error.status === 409) {
+        clearPrivate('The account, workspace or voice setup changed. Please reload this page and review its current status.');
+        throw new Error('Setup changed');
+      }
+      error.plain = error.status > 0 || error.unreadable === true;
+      throw error;
     }
-    if (response.status === 409) {
-      clearPrivate('The account, workspace or voice setup changed. Please reload this page and review its current status.');
-      throw new Error('Setup changed');
-    }
-    var data; try { data = await response.json(); } catch (_error) { throw plainError('Voice setup returned an unreadable response.'); }
-    if (!response.ok) throw plainError(window.mvErrorText ? window.mvErrorText(response, 'confirm this voice setup request') : 'Voice setup could not confirm this request.');
-    if (!valid(data)) throw plainError('Voice setup information could not be verified.');
+    if (!valid(data)) throw plainError('Voice setup information could not be verified. Refresh the page and try again.');
     if (context && context !== data.context) {
       clearPrivate('The account, workspace or voice configuration changed. Please reload this page before continuing.');
       throw new Error('Context changed');
@@ -89,7 +91,7 @@
       cancelling:'Cancelling… Stopping the download and cleaning up.', cancelled:'Download cancelled. Review the model and confirm again to retry.',
       ready:data.engine_available ? 'Model file verified during the last setup. Try dictation using the microphone in Chat.' : 'Model file verified during the last setup.', failed:'Setup failed. Review the connection and available disk space, then confirm again to retry.'};
     var unavailable = !data.enabled || !data.can_download || data.configuration.managed_path || !model;
-    var status = unavailable ? 'Voice model setup is unavailable for this deployment.' :
+    var status = unavailable ? 'Voice model setup is unavailable for this deployment. Ask your administrator if you need it.' :
       job && job.state === 'ready' && data.model_state !== 'verified' ? 'The previously verified model file has changed or is missing. Confirm below to check it again.' :
       job ? messages[job.state] : data.model_state === 'verified' ? messages.ready :
         data.model_state === 'present_unverified' ? 'A model file is present but has not been verified by setup. Confirm below to check it and repair it if needed.' :
@@ -111,7 +113,7 @@
     if (locked || reading || writing) return;
     reading = true; var expected = generation, controller = new AbortController(); readController = controller; controls();
     try { var data = await request('', null, controller.signal); if (!locked && expected === generation) render(data); }
-    catch (error) { if (!locked && expected === generation) problem(error && error.plain ? error.message : 'Voice setup status is unavailable. Lightwork may not be responding.'); }
+    catch (error) { if (!locked && expected === generation) problem(error && error.plain ? error.message : 'Voice setup status is unavailable. Lightwork may not be responding. Try again in a minute.'); }
     finally { if (readController === controller) { readController = null; reading = false; } controls(); }
   }
   async function mutate(path, body) {
@@ -120,7 +122,7 @@
     if (readController) { readController.abort(); readController = null; reading = false; }
     el('confirm').checked = false; controls();
     try { var data = await request(path, body); if (!locked) render(data); }
-    catch (error) { if (!locked) problem(error && error.plain ? error.message : 'Voice setup could not confirm the action. Lightwork may not be responding.'); }
+    catch (error) { if (!locked) problem(error && error.plain ? error.message : 'Voice setup could not confirm the action. Lightwork may not be responding. Try again in a minute.'); }
     finally { writing = false; controls(); }
   }
   el('confirm').addEventListener('change', controls);

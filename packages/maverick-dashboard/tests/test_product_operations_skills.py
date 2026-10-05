@@ -20,6 +20,8 @@ def _harness(monkeypatch):
     codec = Fernet(Fernet.generate_key())
     monkeypatch.setattr(ops, "_same_origin", lambda request: None)
     monkeypatch.setattr(ops, "_gate", lambda request: None)
+    # The status-only gate is bypassed too: this harness exercises the adapters.
+    monkeypatch.setattr(ops, "_read_gate", lambda request: None)
     monkeypatch.setattr(ops, "_context", lambda request: "c" * 64)
     monkeypatch.setattr(ops, "enabled_families", lambda: {"learning"})
     monkeypatch.setattr(ops, "adapters", lambda: {entry.id: entry for entry in suggested.entries()})

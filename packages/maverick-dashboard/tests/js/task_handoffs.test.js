@@ -4,6 +4,7 @@ const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const path=require('node:path');
 const {JSDOM}=require('jsdom');
+const {shell} = require('./_shell');
 const root=path.resolve(__dirname,'../../maverick_dashboard');
 const script=fs.readFileSync(path.join(root,'static/lightwork-task-handoffs.js'),'utf8');
 const template=fs.readFileSync(path.join(root,'templates/task_handoffs.html'),'utf8');
@@ -15,6 +16,7 @@ function page(bundle='',query='') {
  const calls=[];let handler=async()=>({ok:true,status:200,json:async()=>({context:'context',items:[{id:row.id,title:'Next',state:'offered'}]})});
  dom.window.fetch=async(url,opts)=>{calls.push({url,opts,body:opts.body?JSON.parse(opts.body):null});return handler(url,opts);};
  dom.window.mvBusinessError=value=>value.detail||null;
+ shell(dom.window);
  dom.window.eval(script);
  return {dom,doc:dom.window.document,calls,set(fn){handler=fn;},json(body){return {ok:true,status:200,json:async()=>({context:'context',...body})};}};
 }
@@ -40,7 +42,7 @@ test('workspace change clears the selected private preview',async()=>{
  p.set(async()=>({ok:true,status:200,json:async()=>({context:'other',items:[]})}));p.doc.getElementById('handoff-refresh').click();await tick();
  assert.equal(p.doc.getElementById('handoff-detail').hidden,true);assert.equal(p.doc.getElementById('handoff-content').textContent,'');p.dom.window.close();
 });
-test('My Data deep link reads the exact current handoff without starting or accepting work',async()=>{
+test('My data deep link reads the exact current handoff without starting or accepting work',async()=>{
  const p=page('','?open=HOF-one');p.set(async()=>p.json({handoff:row}));await tick();
  assert.equal(p.doc.getElementById('handoff-detail').hidden,false);
  assert.equal(p.calls.at(-1).url,'/api/v1/task-handoffs/HOF-one');

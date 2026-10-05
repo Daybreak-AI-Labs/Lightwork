@@ -14,11 +14,11 @@
      data-can-audit="{{ 'true' if bulk_jobs_can_audit else 'false' }}"
      data-can-admin="{{ 'true' if bulk_jobs_can_admin else 'false' }}">
   {{ hero('Consent operations', 'Bulk consent changes',
-          lede='Export consent records or change many people’s choices at once. Follow each job’s progress, cancel a job that has not finished, and see its history.') }}
+          lede='Export consent records or change many people’s choices at once. Follow each bulk change’s progress, cancel one that has not finished, and see its history.') }}
   {% include "_consent_nav.html" %}
   {% if bulk_jobs_enabled is defined and not bulk_jobs_enabled %}
   {{ module_gate('consent_preferences.bulk_jobs', 'Bulk consent changes',
-                 detail='Lets administrators export or change many people’s consent records in one job.',
+                 detail='Lets administrators export or change many people’s consent records in one bulk change.',
                  can_activate=bulk_jobs_can_admin) }}
   {% endif %}
   <p class="muted" id="cbj-readiness-detail" role="status" aria-live="polite">Checking whether bulk changes are available…</p>
@@ -39,11 +39,11 @@
 
     <section class="panel" aria-labelledby="cbj-list-title">
       <div class="section-head">
-        <h2 id="cbj-list-title">Jobs</h2>
+        <h2 id="cbj-list-title">Bulk changes</h2>
         <div class="cw-actions">
           <label>Show
             <select class="select" id="cbj-state-filter">
-              <option value="">All jobs</option><option value="queued">Waiting</option><option value="running">Running</option>
+              <option value="">All bulk changes</option><option value="queued">Waiting</option><option value="running">Running</option>
               <option value="succeeded">Finished</option><option value="failed">Failed</option><option value="cancelled">Cancelled</option>
             </select>
           </label>
@@ -51,15 +51,15 @@
           <button class="btn btn--primary" type="button" id="cbj-new"{% if not bulk_jobs_can_admin %} disabled{% endif %}>Start a bulk change</button>
         </div>
       </div>
-      {% if not bulk_jobs_can_admin %}<p class="muted">Only an administrator can start, run or cancel jobs.</p>{% endif %}
-      <div id="cbj-job-list"><p class="muted">Loading jobs…</p></div>
+      {% if not bulk_jobs_can_admin %}<p class="muted">Only an administrator can start, run or cancel bulk changes.</p>{% endif %}
+      <div id="cbj-job-list"><p class="muted">Loading bulk changes…</p></div>
       <div class="cw-actions" aria-label="Job pages">
         <button class="btn btn--ghost" type="button" id="cbj-jobs-latest">Latest jobs</button>
         <button class="btn" type="button" id="cbj-jobs-older" hidden>Older jobs</button>
         <span class="muted" id="cbj-jobs-page" role="status" aria-live="polite"></span>
       </div>
       <div id="cbj-detail" class="cw-editor" hidden tabindex="-1">
-        <h3 id="cbj-detail-title">Job details</h3>
+        <h3 id="cbj-detail-title">Bulk change details</h3>
         <div id="cbj-detail-body"></div>
         <div class="cw-actions"><button class="btn btn--ghost" type="button" data-cbj-close="cbj-detail">Close</button></div>
       </div>
@@ -157,7 +157,7 @@
         <label>Run<select class="select" name="when"><option value="now">As soon as possible</option><option value="later">At a set time</option></select></label>
         <label data-when="later" hidden>Start at<input class="input" type="datetime-local" name="scheduled_for"></label>
         <div class="cw-actions">
-          <button class="btn btn--primary" type="submit">Review job</button>
+          <button class="btn btn--primary" type="submit">Review bulk change</button>
           <button class="btn btn--ghost" type="button" data-cbj-close="cbj-create">Cancel</button>
         </div>
         <section id="cbj-review" class="cw-wide panel" hidden tabindex="-1" aria-labelledby="cbj-review-title">
@@ -189,14 +189,14 @@
     <section class="panel" aria-labelledby="cbj-upkeep-title">
       <h2 id="cbj-upkeep-title">Upkeep</h2>
       <div class="cw-actions">
-        <button class="btn" id="cbj-run-next" type="button"{% if not bulk_jobs_can_admin %} disabled{% endif %}>Run the next scheduled job now</button>
-        <button class="btn" id="cbj-recover" type="button"{% if not bulk_jobs_can_admin %} disabled{% endif %}>Restart stuck jobs</button>
+        <button class="btn" id="cbj-run-next" type="button"{% if not bulk_jobs_can_admin %} disabled{% endif %}>Run the next scheduled change now</button>
+        <button class="btn" id="cbj-recover" type="button"{% if not bulk_jobs_can_admin %} disabled{% endif %}>Restart stuck changes</button>
         <button class="btn" id="cbj-verify-integrity" type="button">Check that the history is intact</button>
       </div>
       <form id="cbj-retention" class="cw-form" novalidate>
-        <label>Finished jobs whose keeping period ended before<input class="input" id="cbj-retention-before" type="date"></label>
+        <label>Finished changes whose keeping period ended before<input class="input" id="cbj-retention-before" type="date"></label>
         <div class="cw-actions">
-          <button class="btn btn--danger" id="cbj-purge" type="submit"{% if not bulk_jobs_can_admin %} disabled{% endif %}>Delete old jobs</button>
+          <button class="btn btn--danger" id="cbj-purge" type="submit"{% if not bulk_jobs_can_admin %} disabled{% endif %}>Delete old changes</button>
         </div>
       </form>
       <p class="cw-result" id="cbj-operation-status" role="status" aria-live="polite"></p>
@@ -205,7 +205,7 @@
 
   <details class="panel">
     <summary>About this page’s safeguards</summary>
-    <p class="muted">Jobs only use your workspace’s own records, and each kind of change runs only once it has been set up. Checking status never adds to the allowance. Large exports are downloaded as files. Completed changes are not undone when a job is cancelled.</p>
+    <p class="muted">Bulk changes only use your workspace’s own records, and each kind of change runs only once it has been set up. Checking status never adds to the allowance. Large exports are downloaded as files. Completed changes are not undone when a bulk change is cancelled.</p>
   </details>
   <noscript><p class="panel">Turn on JavaScript to use this page.</p></noscript>
 </div>

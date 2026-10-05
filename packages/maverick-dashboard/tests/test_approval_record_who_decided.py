@@ -2,8 +2,8 @@
 
 A person approves (and undoes, and approves again) a request on the Approvals
 page; the activity log and its spreadsheet download name that person rather
-than "Lightwork", the undo is on the record with who undid it, and the binder
-counts the approval and its approver.
+than "Lightwork" (the owner's choice on 4 October), the undo is on the record
+with who undid it, and the binder counts the approval and its approver.
 """
 from __future__ import annotations
 
@@ -73,9 +73,10 @@ def _csv_rows(client):
     return list(csv.reader(io.StringIO(response.text)))
 
 
-def test_activity_log_and_download_say_a_person_decided_without_naming_them(env, monkeypatch):
-    # The metadata view keeps the decider's identity private (the owner's rule,
-    # test_ux_basics), but never credits Lightwork with a person's decision.
+def test_activity_log_and_download_name_the_person_who_decided(env, monkeypatch):
+    # The owner chose on 4 October to name the decider in the activity log,
+    # reversing the 1 October choice to leave the name out: who decided is
+    # governance evidence, like the actor on undo and confirmation rows.
     client, world = env
     approval_id, headers = _approval(world)
     _as(monkeypatch, APPROVER)
@@ -84,12 +85,12 @@ def test_activity_log_and_download_say_a_person_decided_without_naming_them(env,
     rows = _csv_rows(client)
     decided = [row for row in rows if row[1] == "Approval decided"]
     assert decided, rows
-    assert decided[-1][2] == "A person (name not shown)"
-    assert not {"Lightwork", "dana.admin@northwind.example"} & {row[2] for row in decided}
+    assert decided[-1][2] == "dana.admin@northwind.example"
+    assert not {"Lightwork", "A person (name not shown)"} & {row[2] for row in decided}
 
     html = client.get("/audit").text
     page = _visible(html)
-    assert re.search(r"Approval decided\s+A person \(name not shown\)", page), page[:2000]
+    assert re.search(r"Approval decided\s+dana\.admin@northwind\.example", page), page[:2000]
     # A decision row names no task, so it shows a dash, not a link to nowhere.
     assert 'href="/chat/goal/"' not in html
 
@@ -160,5 +161,30 @@ def test_approval_steps_read_plainly_in_the_log():
     details = {label: text for _key, label, text in event_details(in_slack)}
     assert details["Chat app"] == "Slack"
     assert details["Approved own request"] == "Yes"
-    assert event_who(in_slack) == "A person (name not shown)"
-    assert APPROVER not in str(in_slack)
+    assert details["Decided by"] == "dana.admin@northwind.example"
+    assert event_who(in_slack) == "dana.admin@northwind.example"
+
+
+def test_an_undo_row_names_the_earlier_decider_plainly():
+    from maverick_dashboard.audit_actions_api import event_details, event_who
+    from maverick_dashboard.content_access import audit_metadata
+
+    undone = audit_metadata({"kind": "consent_result", "agent": REQUESTER, "actor": REQUESTER,
+                             "action": "approval_decision_undone", "approval_id": 3,
+                             "previous_status": "approved", "previously_decided_by": APPROVER})
+    details = {label: text for _key, label, text in event_details(undone)}
+    assert event_who(undone) == "sam.lee@northwind.example"
+    assert details["Earlier decision by"] == "dana.admin@northwind.example"
+
+
+def test_a_decider_whose_name_cannot_be_shown_is_still_a_person():
+    # The fallback stays for a row whose recorded decider can't be shown
+    # (here a value too long to be a sign-in name): a person decided, so the
+    # row never credits Lightwork.
+    from maverick_dashboard.audit_actions_api import event_who
+    from maverick_dashboard.content_access import audit_metadata
+
+    row = audit_metadata({"kind": "approval_decision", "decided_by": "user:" + "x" * 400,
+                          "status": "approved", "approval_id": 4})
+    assert "decided_by" not in row
+    assert event_who(row) == "A person (name not shown)"

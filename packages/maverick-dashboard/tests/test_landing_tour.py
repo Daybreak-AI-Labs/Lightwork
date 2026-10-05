@@ -37,7 +37,7 @@ def test_overview_uses_shared_hero_with_real_counts(monkeypatch, tmp_path):
     assert 'class="hero' in body
     assert "hero-statebox" in body
     # The state box reflects the real (empty) world, not invented numbers.
-    assert "0 goals on record" in body
+    assert "0 tasks on record" in body
 
 
 def test_overview_stat_row_counts_goal_statuses(monkeypatch, tmp_path):
@@ -51,6 +51,6 @@ def test_overview_stat_row_counts_goal_statuses(monkeypatch, tmp_path):
     body = _client(monkeypatch, tmp_path).get("/overview").text
     # Counts render server-side in the hero; the stat row, charts, and the
     # recent-goals list are the client-rendered executive board.
-    assert "2 goals on record" in body
+    assert "2 tasks on record" in body
     assert 'id="bd-kpis"' in body and "bd-momentum" in body
     assert "/static/board.js" in body

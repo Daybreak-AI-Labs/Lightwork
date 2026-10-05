@@ -1,6 +1,7 @@
 'use strict';
 const {test} = require('node:test'), assert = require('node:assert/strict');
 const fs = require('node:fs'), path = require('node:path'), {JSDOM} = require('jsdom');
+const {shell} = require('./_shell');
 const folder = path.resolve(__dirname, '../../maverick_dashboard');
 const markup = '<div id="settings-sections">' + fs.readFileSync(path.join(folder, 'templates/_maintenance_ops.html'), 'utf8')
   .replace(/\{#[\s\S]*?#\}/g, '').replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '') + '</div>';
@@ -19,6 +20,7 @@ let DASHBOARD = {label: 'This app', about: 'The dashboard you are using now.', r
 async function fixture(route, {confirm = true} = {}) {
   const dom = new JSDOM(markup, {url: 'https://lightwork.example/settings', runScripts: 'outside-only'});
   const {window} = dom, calls = [], confirms = [];
+  shell(window);
   window.fetch = async (url, options = {}) => {
     calls.push({url, options});
     if (url === '/api/v1/admin/services') return response(Object.assign({}, SERVICES, {dashboard: DASHBOARD}));
@@ -155,6 +157,7 @@ test('every workspace clean-up previews, then confirms and follows the job', asy
     '<p data-ops-status="cleanup-all"></p><div data-ops-out="cleanup-all"></div></div>';
   const dom = new JSDOM(markup.replace('</div>', extra + '</div>'), {url: 'https://lightwork.example/settings', runScripts: 'outside-only'});
   const {window} = dom, calls = [], confirms = [];
+  shell(window);
   t.after(() => window.close());
   window.fetch = async (url, options = {}) => {
     calls.push({url, options});

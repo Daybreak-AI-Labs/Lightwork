@@ -15,7 +15,7 @@
   .gs__mark { flex: none; width: 1.9rem; height: 1.9rem; border-radius: var(--radius-pill); display: inline-flex; align-items: center; justify-content: center; font-weight: var(--font-semibold); font-variant-numeric: tabular-nums; background: var(--surface-2); color: var(--muted); border: 1px solid var(--border); }
   .gs__step--done .gs__mark { background: var(--brand); color: var(--brand-fg); border-color: var(--brand); }
   .gs__body { flex: 1 1 auto; min-width: 0; }
-  .gs__title { font-weight: var(--font-semibold); margin: 0 0 2px; }
+  .gs__title { font-weight: var(--font-semibold); margin: 0 0 var(--space-0-5); }
   .gs__desc { color: var(--muted); font-size: var(--text-sm); margin: 0; }
   .gs__cta { flex: none; align-self: center; }
   .gs__preflight { margin-bottom: var(--space-5); }
@@ -243,7 +243,7 @@
   <details class="panel gs__fold gs__more">
     <summary>More ways to get started</summary>
     <div class="gs__fold-body">
-      {% if employee_activation_enabled %}<p><a class="btn btn--ghost" href="/get-started/employee">Choose a job and review your first result</a></p>{% endif %}
+      {% if employee_activation_enabled %}<p><a class="btn btn--ghost" href="/get-started/employee">Choose a task and review your first result</a></p>{% endif %}
       {% if guided %}
       <section aria-labelledby="guided-outcome-title">
         <h2 id="guided-outcome-title">Choose your first outcome</h2>

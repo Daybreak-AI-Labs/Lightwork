@@ -99,7 +99,7 @@
         <tr><th scope="row">Result checked</th><td>{{ 'Passed' if research_result.oracle_passed else 'Did not pass' }}</td></tr>
         <tr><th scope="row">Approved by</th><td>{{ research_result.approver_principal | identity }} (a named person must approve)</td></tr>
         <tr><th scope="row">Step history</th><td>{{ 'Complete' if research_result.action_lineage_valid else 'Incomplete' }}</td></tr>
-        <tr><th scope="row">Cost</th><td>$0 (practice run)</td></tr>
+        <tr><th scope="row">Cost</th><td>$0 (practice only)</td></tr>
         <tr><th scope="row">Live effect</th><td>No</td></tr>
         <tr><th scope="row">Business outcome</th><td>Not eligible for acceptance</td></tr>
       </tbody>

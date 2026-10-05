@@ -3,6 +3,7 @@
 {% block content %}
   {% from "_hero.html" import hero, state %}
   {% from "_integration_readiness.html" import provider_status %}
+  {% from "_form_field.html" import error_summary %}
   {# The main action is the AI-service setup step the workspace still needs;
      each section's own Save stays a plain button. #}
   {% set settings_actions %}{% if workspace.next_action %}<a class="btn btn--primary" href="{{ workspace.next_action.href }}">{{ workspace.next_action.label }}</a>{% endif %}{% endset %}
@@ -19,7 +20,7 @@
   {% endcall %}
 
   {% if saved %}
-  <div class="panel settings-saved" role="status" data-mv-toast="Saved. {{ saved }}">
+  <div class="panel settings-saved" role="status" data-mv-toast="Saved. {{ saved }}" data-mv-keep-done="settings-{{ request.query_params.get('saved', '') }}">
     <strong>Saved.</strong> {{ saved }}
   </div>
   {% endif %}
@@ -31,6 +32,11 @@
     <a href="/audit?kind=setting_changed">Activity log</a>. This metadata view does not display the values before and after a change. A prepared entry alone does not confirm a save.
     If a save reports that its completion record is unavailable, refresh Settings and Activity before retrying.</p>
 
+  {# The group shown first is decided here, not by the page script, so the
+     page never paints all six groups and then hides five of them. #}
+  {% set settings_tabs = [('general', 'General'), ('models', 'Models'), ('integrations', 'Connections'),
+                          ('controls', 'Features'), ('access', 'Access'), ('maintenance', 'Maintenance')] %}
+  {% set settings_group = saved_section if saved_section in settings_tabs | map('first') | list else 'general' %}
   <section class="settings-index" aria-labelledby="settings-index-title"
            data-initial-group="{{ saved_section or 'general' }}">
     <div>
@@ -41,14 +47,8 @@
       <input class="input" id="settings-search" type="search" maxlength="100"
              placeholder="Provider, budget, visibility…" aria-controls="settings-sections">
     </label>
-    <div class="mv-tabs settings-tabs" role="tablist" aria-label="Settings sections">
-      <button class="mv-tab" type="button" role="tab" data-settings-tab="general">General</button>
-      <button class="mv-tab" type="button" role="tab" data-settings-tab="models">Models</button>
-      <button class="mv-tab" type="button" role="tab" data-settings-tab="integrations">Connections</button>
-      <button class="mv-tab" type="button" role="tab" data-settings-tab="controls">Features</button>
-      <button class="mv-tab" type="button" role="tab" data-settings-tab="access">Access</button>
-      <button class="mv-tab" type="button" role="tab" data-settings-tab="maintenance">Maintenance</button>
-    </div>
+    {% from "_tabs.html" import panel_tabs %}
+    {{ panel_tabs('Settings sections', settings_tabs, settings_group, id='settings', data='settings-tab', controls='settings-sections') }}
     <p class="muted" id="settings-filter-status" role="status" aria-live="polite"></p>
     <p class="settings-all-link">
       <a class="btn btn--ghost" href="/settings/all">All settings</a>
@@ -56,7 +56,37 @@
     </p>
   </section>
 
-  <div id="settings-sections">
+  <style>
+    /* Before the page script takes over the tabs, the sections element names
+       the one group that shows; every other group's headings and panels stay
+       hidden from the first paint. */
+    {% for key, _label in settings_tabs %}#settings-sections[data-settings-active="{{ key }}"] [data-settings-group]:not([data-settings-group="{{ key }}"]){{ ',' if not loop.last }}
+    {% endfor %}{ display: none; }
+  </style>
+  <div id="settings-sections" data-settings-active="{{ settings_group }}" role="tabpanel" aria-labelledby="settings-tab-{{ settings_group }}">
+  <script>
+  // A link to /settings#settings-<group> (or an older section name) shows that
+  // group, and selects its tab, from the first paint: the server cannot see
+  // the address fragment. The page script below then takes over the tabs.
+  window.mvSettingsGroupFor = function (hash) {
+    var aliases = {appearance: 'general', budget: 'general', providers: 'integrations', webhooks: 'integrations', capabilities: 'controls', features: 'controls', visibility: 'access', voice: 'models', discovery: 'models', connections: 'integrations', system: 'maintenance'};
+    var name = String(hash || '').replace(/^#settings-?/, '').replace(/^#/, '');
+    if (Object.prototype.hasOwnProperty.call(aliases, name)) name = aliases[name];
+    return ['general', 'models', 'integrations', 'controls', 'access', 'maintenance'].indexOf(name) === -1 ? '' : name;
+  };
+  (function () {
+    var wanted = window.mvSettingsGroupFor(window.location.hash);
+    var sections = document.getElementById('settings-sections');
+    if (!wanted || !sections || sections.dataset.settingsActive === wanted) return;
+    sections.dataset.settingsActive = wanted;
+    sections.setAttribute('aria-labelledby', 'settings-tab-' + wanted);
+    Array.prototype.forEach.call(document.querySelectorAll('[data-settings-tab]'), function (tab) {
+      var selected = tab.dataset.settingsTab === wanted;
+      tab.setAttribute('aria-selected', selected ? 'true' : 'false');
+      tab.tabIndex = selected ? 0 : -1;
+    });
+  })();
+  </script>
   <div class="section-head" data-settings-group="general" id="settings-general"><h2>Appearance</h2></div>
   <div class="panel" data-settings-group="general">
     <p class="muted settings-lead">Theme, density and font follow your signed-in account. Use Display preferences for an explicit device-only override. Applies without leaving your draft.</p>
@@ -292,7 +322,7 @@
         <thead><tr>
           <th scope="col">Role</th>
           <th scope="col">Model</th>
-          <th scope="col">Will Use</th>
+          <th scope="col">Will use</th>
         </tr></thead>
         <tbody>
           {% for label, role, effective, override in role_models %}
@@ -392,7 +422,8 @@
       <a href="/spending-limits">Spending limits</a>.
     </p>
     {% set limit_mode = 'off' if not task_limits_enabled else ('amount' if budget is not none else 'default') %}
-    <form method="post" action="/settings/budget" class="settings-stack-form">
+    <form method="post" action="/settings/budget" class="settings-stack-form" id="settings-budget-form" data-mv-validate data-mv-keep="settings-budget">
+      {{ error_summary('settings-budget-errors') }}
       <fieldset class="settings-choice">
         <legend>Stop tasks that go over a limit</legend>
         <label><input type="radio" name="mode" value="disabled"{% if limit_mode == 'off' %} checked{% endif %} /> No limit for each task</label>
@@ -400,10 +431,11 @@
         <label><input type="radio" name="mode" value="configured"{% if limit_mode == 'amount' %} checked{% endif %} /> Stop a task when it has spent</label>
         <label class="settings-field settings-amount">
           <span>Amount per task (US dollars)</span>
-          <input class="input" id="settings-task-budget" type="number" name="max_dollars" min="0.01" step="0.5" inputmode="decimal"
+          <input class="input" id="settings-task-budget" type="number" name="max_dollars" min="0.01" step="0.01" inputmode="decimal"
                  value="{% if budget is not none %}{{ '%.2f'|format(budget) }}{% endif %}"
                  aria-describedby="task-limit-help" />
         </label>
+        <p class="mv-form__err settings-amount-error" id="settings-task-budget-error" role="alert" hidden></p>
       </fieldset>
       <p class="muted" id="task-limit-help">
         Turning the limit off keeps your saved amount for later. Workspace spending limits,
@@ -411,6 +443,44 @@
       </p>
       <p class="settings-foot"><button type="submit" class="btn">Save task limit</button></p>
     </form>
+    <script>
+    (function () {
+      // A written error beside the amount, tied to the field, in place of the
+      // browser's bubble: it says what is wrong and how to fix it.
+      var field = document.getElementById('settings-task-budget');
+      var error = document.getElementById('settings-task-budget-error');
+      if (!field || !error) return;
+      var help = field.getAttribute('aria-describedby') || '';
+      field.addEventListener('invalid', function (event) {
+        event.preventDefault();
+        var validity = field.validity;
+        error.textContent = validity.rangeUnderflow
+          ? 'Enter an amount of at least $0.01, or choose No limit for each task.'
+          : validity.stepMismatch
+            ? 'Use dollars and cents, with at most two decimal places. For example: 7.50.'
+            : 'Enter the amount in US dollars as a number. For example: 7.50.';
+        error.hidden = false;
+        field.setAttribute('aria-invalid', 'true');
+        field.setAttribute('aria-describedby', (error.id + ' ' + help).trim());
+        field.focus();
+      });
+      field.addEventListener('input', function () {
+        if (error.hidden) return;
+        error.hidden = true;
+        error.textContent = '';
+        field.removeAttribute('aria-invalid');
+        field.setAttribute('aria-describedby', help);
+      });
+      // "Stop a task when it has spent" needs an amount; empty used to fall
+      // back to the standard limits without saying so.
+      if (field.form) field.form.addEventListener('mv:validate', function (event) {
+        var mode = field.form.querySelector('input[name="mode"]:checked');
+        if (mode && mode.value === 'configured' && !field.value.trim()) {
+          event.detail.error(field, 'Enter the amount per task in US dollars, or choose another option.');
+        }
+      });
+    })();
+    </script>
     <p class="muted settings-foot" role="note">Right now:
       {% if limit_mode == 'off' %}tasks have no spending limit of their own.
       {% elif limit_mode == 'amount' %}each task stops after spending {{ budget | money }}.
@@ -677,7 +747,7 @@
       </p>
     </form>
     <form method="post" action="/settings/ui-visibility/reset" class="settings-inline-form"
-          data-confirm="Put every role's pages back to the standard set? Your changes on this table will be lost." data-confirm-ok="Reset">
+          data-confirm="Put every role's pages back to the standard set? Your changes on this table will be lost." data-confirm-ok="Reset page access">
       <button type="submit" class="btn">Reset to standard</button>
     </form>
     <p class="muted settings-foot">
@@ -864,6 +934,7 @@
     .settings-choice legend { font-weight: var(--font-medium); margin-bottom: var(--space-2); }
     .settings-choice > label:not(.settings-field) { display: flex; gap: var(--space-2); align-items: center; }
     .settings-amount { max-width: 16rem; margin-left: var(--space-6, 1.5rem); }
+    .settings-amount-error { margin: 0 0 0 var(--space-6, 1.5rem); }
     .settings-callout { border: 1px solid var(--hairline); border-radius: var(--radius-md, 8px); padding: var(--space-3); margin: var(--space-3) 0; }
     .settings-callout p { margin: 0 0 var(--space-2); }
     .settings-details { margin-top: var(--space-3); }
@@ -893,7 +964,7 @@
     .voice-setup-actions .btn { max-width: 100%; white-space: normal; }
     .models-overview { display: flex; flex-wrap: wrap; gap: var(--space-4); align-items: center; margin: var(--space-3) 0; }
     .models-overview .stat { display: flex; flex-direction: column; min-width: 8rem; }
-    .models-overview .num { font-size: 1.5rem; font-weight: 600; line-height: 1.2; }
+    .models-overview .num { font-size: 1.5rem; font-weight: var(--font-semibold); line-height: 1.2; }
     .models-status { list-style: none; padding: 0; margin: 0; display: grid; gap: var(--space-2); }
     .models-status li { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: baseline; padding-top: var(--space-2); border-top: 1px solid var(--hairline); }
     .models-status-label { min-width: 11rem; font-weight: var(--font-medium); }
@@ -910,7 +981,7 @@
     .settings-index > * { min-width: 0; }
     .settings-index h2, .settings-index p { margin: 0; }
     .settings-index label { display: grid; gap: var(--space-1); }
-    .settings-tabs { grid-column: 1 / -1; }
+    .settings-index > .mv-tabs { grid-column: 1 / -1; }
     #settings-filter-status { grid-column: 1 / -1; min-height: 1.3em; }
     .settings-all-link { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
     @media (max-width: 720px) { .settings-index { grid-template-columns: 1fr; } }
@@ -925,11 +996,12 @@
     var search = document.getElementById('settings-search');
     var filterStatus = document.getElementById('settings-filter-status');
     var groups = ['general', 'models', 'integrations', 'controls', 'access', 'maintenance'];
-    var aliases = {appearance: 'general', budget: 'general', providers: 'integrations', webhooks: 'integrations', capabilities: 'controls', features: 'controls', visibility: 'access', voice: 'models', discovery: 'models', connections: 'integrations', system: 'maintenance'};
+    var sectionsRoot = document.getElementById('settings-sections');
+    // The address-to-group rule is defined once, before the sections.
+    var groupFor = window.mvSettingsGroupFor || function () { return ''; };
     var active = (index && index.dataset.initialGroup) || 'general';
-    var hash = String(window.location.hash || '').replace(/^#settings-?/, '').replace(/^#/, '');
-    if (aliases[hash]) hash = aliases[hash];
-    if (groups.indexOf(hash) !== -1) active = hash;
+    var hashed = groupFor(window.location.hash);
+    if (hashed) active = hashed;
 
     function sections() {
       return grouped.filter(function (node) { return node.classList.contains('section-head'); }).map(function (head) {
@@ -937,10 +1009,15 @@
         return {head: head, panel: panel, group: head.dataset.settingsGroup, title: head.textContent.trim()};
       });
     }
-    function selectGroup(group, focus) {
+    // Only a person's own switch (a tab, the arrow keys or a jump link) is
+    // written to the address, so a reload returns to it. Loading the page
+    // never writes a fragment: Chrome scrolls to it when loading finishes and
+    // starts keyboard focus there instead of at the skip link.
+    function selectGroup(group, focus, remember) {
       active = groups.indexOf(group) === -1 ? 'general' : group;
       if (search) search.value = '';
       grouped.forEach(function (node) { node.hidden = node.dataset.settingsGroup !== active; });
+      if (sectionsRoot) sectionsRoot.setAttribute('aria-labelledby', 'settings-tab-' + active);
       tabs.forEach(function (tab) {
         var selected = tab.dataset.settingsTab === active;
         tab.setAttribute('aria-selected', selected ? 'true' : 'false');
@@ -949,7 +1026,7 @@
       });
       document.querySelectorAll('[data-settings-search-item]').forEach(function (item) { item.hidden = false; });
       if (filterStatus) filterStatus.textContent = sections().filter(function (section) { return section.group === active; }).length + ' sections shown.';
-      if (window.history && window.history.replaceState) window.history.replaceState(null, '', '#settings-' + active);
+      if (remember && window.history && window.history.replaceState) window.history.replaceState(null, '', '#settings-' + active);
     }
     function applySearch() {
       var query = String(search.value || '').trim().toLocaleLowerCase();
@@ -972,15 +1049,10 @@
       });
       if (filterStatus) filterStatus.textContent = visible ? visible + ' matching sections shown.' : 'No settings match “' + search.value.trim() + '”.';
     }
-    tabs.forEach(function (tab, position) {
-      tab.addEventListener('click', function () { selectGroup(tab.dataset.settingsTab, false); });
-      tab.addEventListener('keydown', function (event) {
-        var direction = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0;
-        if (!direction) return;
-        event.preventDefault();
-        var next = (position + direction + tabs.length) % tabs.length;
-        selectGroup(tabs[next].dataset.settingsTab, true);
-      });
+    // The shared tab bar (lightwork-tabs.js) gives the arrow, Home and End
+    // keys; they select through a click, so both arrive here.
+    tabs.forEach(function (tab) {
+      tab.addEventListener('click', function () { selectGroup(tab.dataset.settingsTab, false, true); });
     });
     if (search) search.addEventListener('input', applySearch);
     var requestedFocus = new URLSearchParams(window.location.search).get('focus');
@@ -990,6 +1062,9 @@
       var aiRow = document.querySelector('[data-ai-provider-focus]');
       requestedFocus = aiRow ? aiRow.id : 'settings-integrations';
     }
+    // Hand what the server (and the address) painted over to the tabs: the
+    // hidden attributes selectGroup sets show exactly the same group.
+    if (sectionsRoot) sectionsRoot.removeAttribute('data-settings-active');
     selectGroup(active, false);
     if (requestedFocus) {
       var focusTarget = document.getElementById(requestedFocus);
@@ -1011,9 +1086,8 @@
     // A link to /settings#settings-<group> from another page, or from this
     // page while it is already open, lands on that section.
     window.addEventListener('hashchange', function () {
-      var next = String(window.location.hash || '').replace(/^#settings-?/, '').replace(/^#/, '');
-      if (aliases[next]) next = aliases[next];
-      if (groups.indexOf(next) !== -1 && next !== active) selectGroup(next, true);
+      var next = groupFor(window.location.hash);
+      if (next && next !== active) selectGroup(next, true);
     });
 
     var forms = Array.prototype.slice.call(document.querySelectorAll('form[action^="/settings"]'));
@@ -1131,7 +1205,7 @@
             });
           }
         } catch (failure) {
-          status.textContent = failure.message || (window.mvErrorText ? window.mvErrorText(failure, 'save this section') : 'Could not save this section. Your draft is kept.');
+          status.textContent = failure.message || (window.mvErrorText ? window.mvErrorText(failure, 'save this section') : 'Could not save this section. Your draft is kept. Try again.');
         } finally {
           controls.forEach(function (item) { item[0].disabled = item[1]; });
           delete form.dataset.saving;
@@ -1172,7 +1246,7 @@
     document.querySelectorAll('[data-settings-jump]').forEach(function (link) {
       link.addEventListener('click', function (event) {
         event.preventDefault();
-        selectGroup(link.dataset.settingsJump, true);
+        selectGroup(link.dataset.settingsJump, true, true);
       });
     });
 

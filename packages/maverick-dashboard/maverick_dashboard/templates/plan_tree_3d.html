@@ -1,22 +1,27 @@
 {% extends "base.html" %}
-{% block title %}3D plan view · Lightwork{% endblock %}
+{% block title %}{{ '3D view · Task map' if tab_host else '3D plan view' }} · Lightwork{% endblock %}
 {% block content %}
 {% from "_back_link.html" import back_link with context %}
 <style>
   .gl-wrap { position: relative; }
-  #gl3d { width: 100%; height: 560px; display: block; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; touch-action: none; }
-  #node-info { position: absolute; top: 0.75rem; inset-inline-end: 0.75rem; max-width: 280px; background: var(--surface-1); border: 1px solid var(--border); border-radius: 6px; padding: 0.6rem 0.8rem; font-size: 0.85rem; display: none; }
-  #vr-btn { display: none; margin-top: 0.5rem; padding: 0.45rem 1rem; background: var(--surface-1); color: var(--text); border: 1px solid var(--border); border-radius: 6px; cursor: pointer; }
+  #gl3d { width: 100%; height: 560px; display: block; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-sm); touch-action: none; }
+  #node-info { position: absolute; top: 0.75rem; inset-inline-end: 0.75rem; max-width: 280px; background: var(--surface-1); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 0.6rem 0.8rem; font-size: 0.85rem; display: none; }
+  #vr-btn { display: none; margin-top: 0.5rem; padding: 0.45rem 1rem; background: var(--surface-1); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius-sm); cursor: pointer; }
   .tree { font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
   .tree ul { list-style: none; padding-inline-start: 1.5rem; border-inline-start: 1px solid var(--border); margin: 0; }
   .tree > ul { padding-inline-start: 0; border-inline-start: 0; }
   .legend { display: flex; gap: 0.75rem; flex-wrap: wrap; margin-bottom: 1rem; align-items: center; }
   .legend .live { margin-inline-start: auto; }
 </style>
+{% if tab_host %}
+<p class="muted">{{ back_link('/goals', 'Tasks') }}</p>
+{% from "_tabs.html" import host_header, panel_attrs %}{{ host_header(tab_host) }}
+{% else %}
 <p class="muted">{{ back_link('/goals', 'Tasks') }} · <a href="/graph-editor">Flat view</a></p>
 <h1 class="page-title">3D plan view</h1>
 <p class="page-subtitle">Your tasks and their smaller steps as a 3D map you can move around.</p>
-<div class="panel">
+{% endif %}
+<div class="panel"{% if tab_host %} {{ panel_attrs(tab_host.selected) }}{% endif %}>
   <div class="legend">
     <span><span class="badge active">Running</span></span>
     <span><span class="badge done">Done</span></span>
@@ -351,7 +356,7 @@
         requestAnimationFrame(frame);
       });
     } catch (e) {
-      statusEl.textContent = "Could not start virtual reality on this device.";
+      statusEl.textContent = "Could not start virtual reality on this device. Use the regular 3D view instead.";
     }
   });
 

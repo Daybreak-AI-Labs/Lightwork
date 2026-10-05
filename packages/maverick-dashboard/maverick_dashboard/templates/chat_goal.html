@@ -13,7 +13,7 @@
   .msg--user { display: flex; justify-content: flex-end; }
   .msg--user .bubble {
     --glass-tint: var(--brand-subtle); border: 1px solid var(--brand-border);
-    border-radius: 16px 16px 4px 16px; padding: var(--space-3) var(--space-4); max-width: 85%;
+    border-radius: 16px 16px var(--radius-xs) 16px; padding: var(--space-3) var(--space-4); max-width: 85%;
   }
   .bubble__title { font-weight: var(--font-medium); }
   .bubble__desc { color: var(--muted); font-size: var(--text-sm); margin-top: var(--space-2); white-space: pre-wrap; }
@@ -32,13 +32,20 @@
   .step__body { min-width: 0; }
   .step__label { color: var(--text); font-weight: var(--font-medium); }
   .step__agent { color: var(--muted); font-size: var(--text-xs); margin-inline-start: var(--space-2); }
-  .step__text { color: var(--muted); white-space: pre-wrap; overflow-wrap: anywhere; margin-top: 2px; }
+  .step__text { color: var(--muted); white-space: pre-wrap; overflow-wrap: anywhere; margin-top: var(--space-0-5); }
   .step--plan .step__icon { color: var(--brand-hi); }
   .step--finding .step__icon, .step--artifact .step__icon { color: var(--accent); }
   .step--verify .step__icon { color: var(--warn); }
   .step--error .step__icon, .step--error .step__label { color: var(--danger); }
   .step--withheld .step__text { font-style: italic; }
-  .answer { margin-top: var(--space-4); font-size: var(--text-md); line-height: 1.7; color: var(--text); }
+  .raw-trace { margin-top: var(--space-3); border-top: 1px solid var(--hairline); padding-top: var(--space-2); }
+  .raw-trace > summary { cursor: pointer; width: max-content; color: var(--muted); font-size: var(--text-xs); }
+  .raw-trace__note { margin: var(--space-2) 0; font-size: var(--text-xs); }
+  .raw-trace__list { margin: 0; padding-inline-start: 1.5em; max-height: 320px; overflow-y: auto; }
+  .raw-trace__list li { margin-bottom: var(--space-2); }
+  .raw-trace__meta { font-size: var(--text-xs); color: var(--muted); }
+  .raw-trace__text { margin: var(--space-0-5) 0 0; white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--font-mono); font-size: var(--text-xs); }
+  .answer { margin-top: var(--space-4); font-size: var(--text-md); line-height: var(--leading-relaxed); color: var(--text); }
   /* Rendered prose (markdown from the model): chat-client typography. */
   .prose { font-family: inherit; overflow-wrap: anywhere; }
   .prose[data-markdown] { white-space: pre-wrap; }
@@ -54,7 +61,7 @@
   .prose li > ul, .prose li > ol { margin: var(--space-1) 0 0; }
   .prose li.task { list-style: none; margin-inline-start: -1.5em; }
   .prose code { font-family: var(--font-mono); font-size: 0.9em; padding: 0.1em 0.35em; border-radius: var(--radius-sm); background: var(--surface-sunken); }
-  .prose pre { padding: var(--space-3) var(--space-4); border-radius: var(--radius-md); background: var(--surface-sunken); border: 1px solid var(--hairline); overflow-x: auto; font-size: var(--text-sm); line-height: 1.55; }
+  .prose pre { padding: var(--space-3) var(--space-4); border-radius: var(--radius-md); background: var(--surface-sunken); border: 1px solid var(--hairline); overflow-x: auto; font-size: var(--text-sm); line-height: var(--leading); }
   .prose pre code { padding: 0; background: transparent; font-size: inherit; }
   .prose blockquote { margin-inline: 0; padding: var(--space-1) var(--space-4); border-inline-start: 3px solid var(--border-strong); color: var(--muted); }
   .prose table { display: block; overflow-x: auto; font-size: var(--text-sm); border-collapse: collapse; }
@@ -96,6 +103,15 @@
   .signoff__actions { display: flex; gap: var(--space-2); }
   .signoff textarea.input { width: 100%; margin-bottom: var(--space-3); }
 
+  /* What to know before relying on the answer: check, agent version, backup model. */
+  .answer-facts { margin-top: var(--space-3); display: grid; gap: var(--space-1); font-size: var(--text-sm); color: var(--muted); }
+  .answer-facts p { margin: 0; }
+  .answer-check__label { font-weight: var(--font-semibold); color: var(--text); margin-inline-end: var(--space-2); }
+  .answer-check[data-state="checked"] .answer-check__label { color: var(--accent); }
+  .answer-check[data-state="concerns"] .answer-check__label { color: var(--warn); }
+  .answer-fallback { border-inline-start: 3px solid var(--warn); padding-inline-start: var(--space-2); color: var(--text); }
+  .answer-agent__changes summary { cursor: pointer; width: max-content; }
+  .answer-agent__changes ul { margin: var(--space-1) 0 0; padding-inline-start: 1.25em; }
   /* Feedback: the always-available thumbs up/down on any finished result. */
   .feedback { margin-top: var(--space-3); display: flex; align-items: center; gap: var(--space-1); flex-wrap: wrap; }
   .feedback__q { font-size: var(--text-sm); }
@@ -106,6 +122,12 @@
   .more > summary::-webkit-details-marker { display: none; }
   .more[open] > summary { color: var(--text); }
   .feedback .btn.is-active { border-color: var(--accent); background: var(--surface-sunken); }
+  .feedback-reason { margin-top: var(--space-2); padding: var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-md); display: grid; gap: var(--space-2); max-width: 36rem; }
+  .feedback-reason__q { margin: 0; font-weight: var(--font-medium); }
+  .feedback-reason__chips { display: flex; flex-wrap: wrap; gap: var(--space-1); }
+  .feedback-reason__chip[aria-pressed="true"] { border-color: var(--accent); background: var(--surface-sunken); color: var(--text); }
+  .feedback-reason__label { font-size: var(--text-sm); color: var(--muted); }
+  .feedback-reason__actions { display: flex; gap: var(--space-2); }
 
   /* Artifacts: a goal's versioned, kind-tagged outputs. */
   .artifacts { margin-top: var(--space-5); }
@@ -133,7 +155,7 @@
   .spinner {
     display: inline-block; width: 0.8em; height: 0.8em;
     border: 2px solid var(--border); border-top-color: var(--brand);
-    border-radius: 50%; animation: spin 0.8s linear infinite; vertical-align: -0.1em;
+    border-radius: var(--radius-round); animation: spin 0.8s linear infinite; vertical-align: -0.1em;
   }
   @keyframes spin { to { transform: rotate(360deg); } }
 
@@ -141,7 +163,7 @@
      needs an answer — Lightwork goals run autonomously between asks. */
   .ask { margin-top: 0; }
   .ask__eyebrow { margin: 0 0 var(--space-1); color: var(--muted); font-size: var(--text-xs); font-weight: var(--font-semibold); text-transform: uppercase; letter-spacing: 0.08em; }
-  .ask__text { margin: 0 0 var(--space-2); color: var(--text); font-size: var(--text-base); line-height: 1.55; }
+  .ask__text { margin: 0 0 var(--space-2); color: var(--text); font-size: var(--text-base); line-height: var(--leading); }
   .ask__question { margin-bottom: var(--space-2); }
   .ask__row { display: flex; gap: var(--space-2); align-items: flex-end; }
   .ask__field {
@@ -149,7 +171,7 @@
     outline: none; padding: var(--space-2); resize: none; min-height: 40px; max-height: 220px; line-height: 1.5;
   }
   .ask__icon {
-    flex: none; width: 36px; height: 36px; border: 1px solid var(--border); border-radius: 50%; background: transparent;
+    flex: none; width: 36px; height: 36px; border: 1px solid var(--border); border-radius: var(--radius-round); background: transparent;
     color: var(--muted); cursor: pointer; display: inline-flex; align-items: center; justify-content: center;
     transition: color 0.14s ease, border-color 0.14s ease;
   }
@@ -163,7 +185,7 @@
   .ask__stop:disabled { opacity: 0.5; cursor: default; }
   .ask__hint { margin: var(--space-2) 0 0; min-height: 1em; font-size: var(--text-xs); color: var(--muted); }
   .ask__send {
-    flex: none; width: 40px; height: 40px; border: 0; border-radius: 50%; cursor: pointer;
+    flex: none; width: 40px; height: 40px; border: 0; border-radius: var(--radius-round); cursor: pointer;
     background: var(--brand); color: var(--brand-fg); display: inline-flex; align-items: center; justify-content: center;
     transition: background 0.14s ease, transform 0.14s ease;
   }
@@ -225,7 +247,7 @@
      reads as the expanded body, not a nested box. */
   .activity .worklog { border: 0; border-top: 1px solid var(--hairline); border-radius: 0; padding-inline: 0; background-image: none; background-color: transparent; }
   /* The finished answer: the hero of the agent turn. */
-  #result-section.answer { font-size: var(--text-md); line-height: 1.7; }
+  #result-section.answer { font-size: var(--text-md); line-height: var(--leading-relaxed); }
   /* Glass-lift the user bubble + deliverable/artifact cards to match. */
   .msg--user .bubble { box-shadow: var(--shadow-sm), var(--glass-edge, 0 0 transparent); }
   .deliverable, .artifact { box-shadow: var(--shadow-sm), var(--glass-edge, 0 0 transparent); }
@@ -254,12 +276,12 @@
     #history-load, #history-status, #history-turns a { display: none !important; }
     .convo, .msg, .answer, .prose, .artifact, .deliverable { color: #111 !important; background: #fff !important; box-shadow: none !important; }
     .print-heading { display: block; padding-bottom: 10mm; margin-bottom: 9mm; border-bottom: 1px solid #bbb; }
-    .print-heading h1 { margin: 2mm 0; color: #111; font-size: 20pt; line-height: 1.25; }
+    .print-heading h1 { margin: 2mm 0; color: #111; font-size: 20pt; line-height: var(--leading-tight); }
     .print-heading p, .bubble__desc, .agent__label { color: #555 !important; }
     .msg--user .bubble, .artifact, .deliverable { border-color: #bbb !important; background: #fff !important; color: #111 !important; box-shadow: none !important; }
     .msg--user { display: block !important; }
     .msg--user .bubble { max-width: none !important; border: 0 !important; border-inline-start: 3px solid #bbb !important; border-radius: 0 !important; padding: 0 0 0 6mm !important; }
-    .msg--user .bubble::before { content: 'You'; display: block; margin-bottom: 2mm; color: #555; font-size: 9pt; font-weight: 600; }
+    .msg--user .bubble::before { content: 'You'; display: block; margin-bottom: 2mm; color: #555; font-size: 9pt; font-weight: var(--font-semibold); }
     .agent__label, .artifact__head, .deliverable__head { break-after: avoid; }
     .prose pre, .artifact__body, .deliverable__table-wrap { overflow: visible !important; max-height: none !important; }
     .prose pre, .artifact__body pre { white-space: pre-wrap !important; overflow-wrap: anywhere; }
@@ -432,6 +454,13 @@
         <p id="loading-placeholder" class="muted" aria-busy="true" style="margin: 0;">
           <span class="spinner" aria-hidden="true"></span> {{ ui('Working…') }}
         </p>
+        {# Each step above is narrated in plain words; the text Lightwork
+           recorded for it (prompts, tool output) stays here, folded away. #}
+        <details class="raw-trace" id="raw-trace" hidden>
+          <summary>{{ ui('What each step recorded') }}</summary>
+          <p class="muted raw-trace__note">{{ ui('A short record of what each step did.') }}</p>
+          <ol class="raw-trace__list" id="raw-trace-list"></ol>
+        </details>
       </div>
     </details>
     <div id="qa-thread" class="qa" aria-live="polite">
@@ -526,7 +555,7 @@
         <a id="halt-action-link" href="{{ stop.link if stop and stop.link else '#' }}"{% if not (stop and stop.link and (show_technical_details or not stop.link.startswith(('/settings', '/mcp')))) %} hidden{% endif %}>{{ stop.link_label if stop and stop.link_label else '' }}</a>
       </p>
       <p id="halt-specialist-alternative" class="muted"{% if not specialist_setup %} hidden{% endif %}>
-        {{ ui('Need another route?') }} <a href="/agents">{{ ui('Browse specialists') }}</a> {{ ui('or') }} <a href="/chat">{{ ui('start a different task') }}</a>. {{ ui("This task won't switch specialists on its own.") }}
+        {{ ui('Need another route?') }} <a href="/agents">{{ ui('Browse agents and specialists') }}</a> {{ ui('or') }} <a href="/chat">{{ ui('start a different task') }}</a>. {{ ui("This task won't switch to another agent or specialist on its own.") }}
       </p>
       {% if show_technical_details %}
       <details class="halt-card__technical" id="halt-technical"{% if not (stop and stop.technical) %} hidden{% endif %}>
@@ -590,6 +619,8 @@
       <p class="ask__eyebrow">{{ ui('Lightwork needs one thing from you') }}</p>
       <p id="question-text" lang="und" dir="auto" data-user-content class="ask__text" role="status" aria-live="polite"></p>
     </div>
+    {% from "_composer_recovery.html" import composer_recovery with context %}
+    {% call composer_recovery(can_create_goal and draft_recovery_context) %}
     <form id="answer-form" class="ask__row" method="post" action="/chat/goal/{{ goal.id }}/reply" enctype="multipart/form-data">
       <fieldset id="composer-controls" style="display: contents;"{% if not can_operate %} disabled{% endif %}>
       <input type="hidden" name="submission_key" value="{{ submission_key }}" />
@@ -615,6 +646,7 @@
       </button>
       </fieldset>
     </form>
+    {% endcall %}
     <p id="composer-hint" class="ask__hint" role="status" aria-live="polite"></p>
     <p id="composer-run-note" class="ask__hint" role="status" aria-live="polite" hidden></p>
   </div>
@@ -723,7 +755,8 @@
       // The kernel replaces model-derived events with one fixed sentence when
       // the evidence gateway is on; the page folds those into a single line.
       const WITHHELD = new Set({{ (withheld_markers or [])|tojson }});
-      const TOOL_LINE = /^tool=([\w.:-]+)\s*->\s*([\s\S]*)$/;
+      const rawTraceList = document.getElementById('raw-trace-list');
+      const rawTrace = document.getElementById('raw-trace');
 
       function stepIcon(kind) {
         const span = document.createElement('span');
@@ -737,11 +770,6 @@
         path.setAttribute('stroke-width', '1.5'); path.setAttribute('stroke-linecap', 'round'); path.setAttribute('stroke-linejoin', 'round');
         svg.appendChild(path); span.appendChild(svg);
         return span;
-      }
-
-      function humanTool(name) {
-        const words = String(name || '').replace(/[_\-.:]+/g, ' ').trim();
-        return words ? words.charAt(0).toUpperCase() + words.slice(1) : 'a tool';
       }
 
       function setStatus(status) {
@@ -796,7 +824,7 @@
         haltCard.dataset.stopKind = s.kind || '';
         const haltTitle = document.getElementById('halt-title');
         if (haltTitle) cgCopy(haltTitle,prepared ? 'Ready to start' : setup ? "Can't start" : 'Lightwork stopped');
-        haltReasonEl.textContent = s.message || 'The run stopped before producing a result.';
+        haltReasonEl.textContent = s.message || 'The task stopped before producing a result.';
         const actionText = document.getElementById('halt-action-text');
         const actionLink = document.getElementById('halt-action-link');
         if (actionText) actionText.textContent = s.action || '';
@@ -856,32 +884,69 @@
         return row;
       }
 
+      // The recorded text of each step (briefs, tool output, raw markdown) is
+      // kept under "What each step recorded", never in the plain step list.
+      function recordRaw(e) {
+        if (!rawTraceList) return;
+        const item = document.createElement('li');
+        const meta = document.createElement('span');
+        meta.className = 'raw-trace__meta';
+        meta.textContent = String(e.kind || '') + ' · ' + String(e.agent || '');
+        meta.lang = 'und'; meta.dir = 'auto'; meta.dataset.userContent = '';
+        const body = document.createElement('pre');
+        body.className = 'raw-trace__text';
+        body.textContent = String(e.content || '');
+        body.lang = 'und'; body.dir = 'auto'; body.dataset.userContent = '';
+        item.append(meta, body);
+        rawTraceList.appendChild(item);
+        if (rawTrace) rawTrace.hidden = false;
+      }
+      // The server narrates each step in plain words (step_narration.py); an
+      // older payload without one still gets a plain kind label, never raw text.
+      function plainStep(e) {
+        const step = e && e.step && typeof e.step === 'object' ? e.step : null;
+        if (step && typeof step.text === 'string') return step;
+        return {text: KIND_LABELS[String(e.kind || '')] || 'Worked on a step', group: '', plural: '', hidden: false};
+      }
+      let lastStepRow = null;  // a run of the same step reads as one counted line
       function appendEvent(e) {
         // Internal trace bookkeeping isn't conversation content — skip it.
         if (e && (e.kind === 'trace_meta' || fmtAgent(e.agent) === 'system')) return;
         hidePlaceholder();
         const content = String(e.content || '');
-        stepCount += 1;
-        eventsEl.dataset.steps = String(stepCount);
+        recordRaw(e);
         if (WITHHELD.has(content.trim())) {
+          stepCount += 1;
+          eventsEl.dataset.steps = String(stepCount);
           const n = Number(eventsEl.dataset.withheld || 0) + 1;
           eventsEl.dataset.withheld = String(n);
           const text = cgText(n===1?'{count} step completed. Step details will appear when the answer is ready.':'{count} steps completed. Step details will appear when the answer is ready.',{count:cgNumber(n)});
           if (!withheldRow) withheldRow = stepRow('withheld', KIND_LABELS.withheld, text, '',true);
           else cgCopy(withheldRow.querySelector('.step__text'),text);
           eventsEl.appendChild(withheldRow);  // stays the latest line
+          lastStepRow = null;
           return;
         }
-        let kind = String(e.kind || 'observation');
-        let label = KIND_LABELS[kind] || (kind.charAt(0).toUpperCase() + kind.slice(1));
-        let text = content;
-        const tool = TOOL_LINE.exec(content);
-        if (tool) {
-          kind = 'observation';
-          label = tool[1] === 'ask_user' ? 'Asked you a question' : cgText('Used {tool}',{tool:humanTool(tool[1])});
-          text = tool[2].trim();
+        const step = plainStep(e);
+        if (step.hidden || !step.text) return;
+        stepCount += 1;
+        eventsEl.dataset.steps = String(stepCount);
+        const kind = String(e.kind || 'observation');
+        if (step.group && step.plural && lastStepRow && lastStepRow === eventsEl.lastElementChild &&
+            lastStepRow.dataset.group === step.group) {
+          const count = Number(lastStepRow.dataset.count || 1) + 1;
+          lastStepRow.dataset.count = String(count);
+          cgCopy(lastStepRow.querySelector('.step__label'), step.plural, {count: cgNumber(count)});
+          return;
         }
-        eventsEl.appendChild(stepRow(kind, label, text, fmtAgent(e.agent)));
+        // A helper's steps name the helper; the main agent's steps need no name.
+        const helper = !/-0-[0-9a-f]{6}$/.test(String(e.agent || '')) && typeof e.who === 'string' &&
+          e.who !== 'Lightwork' && step.text.indexOf(e.who) !== 0 ? e.who : '';
+        const row = stepRow(kind, step.text, '', helper);
+        row.dataset.group = step.group || '';
+        row.dataset.count = '1';
+        eventsEl.appendChild(row);
+        lastStepRow = row;
       }
 
       document.addEventListener('lightwork:answer-panel-updated', function () {
@@ -934,7 +999,7 @@
           const r = await fetch('/api/v1/goals/' + goalId + '/open_questions', {credentials: 'same-origin', cache: 'no-store', signal: control.signal});
           if (!r.ok || r.redirected) {
             if (r.status === 401 || r.status === 403 || r.redirected) { currentQuestionId = null; questionText.textContent = ''; questionPanel.style.display = 'none'; }
-            throw new Error(r.status === 401 || r.redirected ? 'Sign in again to load this question.' : r.status === 403 ? 'Access to this question is no longer available.' : 'Could not refresh the question. Last shown question may be out of date.');
+            throw new Error(r.status === 401 || r.redirected ? 'Sign in again to load this question.' : r.status === 403 ? 'Access to this question is no longer available.' : 'Could not refresh the question. Last shown question may be out of date. Refresh the page and try again.');
           }
           const j = await r.json();
           if (!Array.isArray(j.open_questions)) throw new Error('The question response could not be read. Retry loading it.');
@@ -956,6 +1021,11 @@
             currentQuestionVersion = qs[0].version;
             questionPanel.style.display = 'block';
             if (changed) questionText.textContent = qs[0].question;
+            // An alert's "answer" link (#question-panel) lands on the answer box.
+            if (changed && location.hash === '#question-panel') {
+              questionPanel.scrollIntoView({block: 'center'});
+              answerInput.focus({preventScroll: true});
+            }
           } else {
             currentQuestionId = null;
             questionPanel.style.display = 'none';
@@ -964,7 +1034,7 @@
           syncComposer();
         } catch (e) {
           questionsFresh = false;
-          cgCopy(status,e.name === 'AbortError' ? 'Loading the question timed out. Your draft has been kept.' : (e.message || 'Could not load the question. Your draft has been kept.'));
+          cgCopy(status,e.name === 'AbortError' ? 'Loading the question timed out. Your draft has been kept.' : (e.message || 'Could not load the question. Your draft has been kept. Refresh the page and try again.'));
           retry.hidden = false;
         } finally { clearTimeout(timeout); questionLoading = false; syncComposer(); }
       }
@@ -1031,9 +1101,8 @@
         if (done) { showApprovalWait(null); return; }
         approvalWaitLoading = true;
         try {
-          const r = await fetch('/api/v1/goals/' + goalId + '/approval-wait', {credentials: 'same-origin', cache: 'no-store'});
-          if (!r.ok || r.redirected) return;  // keep what is shown; the next tick retries
-          const j = await r.json();
+          // A refusal or a redirect keeps what is shown; the next tick retries.
+          const j = await window.mvFetchJSON('/api/v1/goals/' + goalId + '/approval-wait', {cache: 'no-store', onAccess: function () {}, accessStatuses: []});
           showApprovalWait(!done && Array.isArray(j.waiting) && j.waiting.length ? j.waiting[0] : null);
         } catch (_) { /* the next tick retries */ } finally { approvalWaitLoading = false; }
       }
@@ -1215,7 +1284,9 @@
           }
           return;
         }
-        if (window.mvConversationInbox && window.mvConversationInbox.available) {
+        // Guidance and queued messages are for a task that is still working;
+        // once it has finished, the next message is an ordinary follow-up.
+        if (!done && window.mvConversationInbox && window.mvConversationInbox.available) {
           submitting = true;
           try { await window.mvConversationInbox.send(answerForm); }
           finally { submitting = false; syncComposer(); }
@@ -1416,7 +1487,7 @@
             if (done) { polling = false; return; }
           } catch (_) {
             pollFailures++;
-            showStreamError('Updates are unavailable. The task may still be running. Your draft has been kept.');
+            showStreamError('Updates are unavailable. The task may still be running. Your draft has been kept. Refresh the page to see the latest.');
             document.getElementById('stream-retry').hidden = false;
             if (pollFailures >= MAX_POLL_FAILURES) { polling = false; return; }
           } finally { clearTimeout(timeout); }
@@ -1572,18 +1643,15 @@
       async function fileRequest(options) {
         if (denied) throw new Error('Task access is no longer available.');
         var ticket = generation, controller = new AbortController(); requests.add(controller);
-        var timer = setTimeout(function () { controller.abort(); }, options && options.method === 'POST' ? 60000 : 12000);
         try {
-          var response = await fetch('/api/v1/goals/' + goalId + '/attachments', Object.assign({credentials:'same-origin',cache:'no-store',signal:controller.signal}, options));
-          if (denied || ticket !== generation) throw new Error('Task access is no longer available.');
-          if (response.redirected || [401,403,404].includes(response.status)) {
-            clearPrivate(); throw new Error('Task access is no longer available.');
-          }
-          if (!response.ok) throw new Error(cgErr(response, 'load the attached files'));
-          var body = await response.json();
+          var body = await window.mvFetchJSON('/api/v1/goals/' + goalId + '/attachments', Object.assign({cache: 'no-store', signal: controller.signal,
+            timeout: options && options.method === 'POST' ? 60000 : 12000, accessStatuses: [401, 403, 404], onAccess: clearPrivate}, options), 'load the attached files');
           if (denied || ticket !== generation) throw new Error('Task access is no longer available.');
           return body;
-        } finally { clearTimeout(timer); requests.delete(controller); }
+        } catch (error) {
+          if (error.accessChanged || denied || ticket !== generation) throw new Error('Task access is no longer available.');
+          throw error;
+        } finally { requests.delete(controller); }
       }
 
       function fmtSize(n) {

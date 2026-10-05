@@ -3,11 +3,11 @@
 {% block content %}
 <style>
   .err-list { list-style: none; padding: 0; margin: 0; }
-  .err-item { border: 1px solid var(--danger); border-radius: 6px; margin: 0.6rem 0; }
+  .err-item { border: 1px solid var(--danger); border-radius: var(--radius-sm); margin: 0.6rem 0; }
   .err-item > summary {
-    cursor: pointer; padding: 0.6rem 0.8rem; color: var(--danger); font-weight: 600;
+    cursor: pointer; padding: 0.6rem 0.8rem; color: var(--danger); font-weight: var(--font-semibold);
   }
-  .err-meta { color: var(--muted); font-size: 0.85em; font-weight: 400; margin-left: 0.5rem; }
+  .err-meta { color: var(--muted); font-size: 0.85em; font-weight: var(--font-normal); margin-left: 0.5rem; }
   .err-content {
     white-space: pre-wrap; word-break: break-word; margin: 0;
     padding: 0.6rem 0.8rem; border-top: 1px solid var(--border);

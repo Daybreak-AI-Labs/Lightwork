@@ -8,7 +8,7 @@
   .pf-tile .l { font-size: var(--text-xs); color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
   .pf-scroll { overflow-x: auto; }
   .pf-form { display: flex; gap: var(--space-2); flex-wrap: wrap; align-items: flex-end; margin-top: var(--space-3); }
-  .pf-form label { display: flex; flex-direction: column; gap: 4px; font-size: var(--text-sm); }
+  .pf-form label { display: flex; flex-direction: column; gap: var(--space-1); font-size: var(--text-sm); }
   .pf-url { max-width: 16rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono, monospace); font-size: var(--text-xs); }
 </style>
 
@@ -145,8 +145,7 @@
   }
 
   function load(check) {
-    fetch('/api/v1/partner/fleet' + (check === true ? '?check=1' : ''))
-      .then(function (r) { if (!r.ok) throw r; return r.json(); })
+    window.mvFetchJSON('/api/v1/partner/fleet' + (check === true ? '?check=1' : ''))
       .then(render)
       .catch(function (r) {
         $('pf-msg').textContent = r && r.status ? problem(r, 'load your clients') : offline('load your clients');
@@ -188,7 +187,8 @@
     }).catch(function () { $('pf-msg').textContent = offline('add the client'); });
   });
 
-  load();
+  // The shell's helpers (lightwork-ui.js) load after the page content.
+  if (window.mvFetchJSON) load(); else document.addEventListener('DOMContentLoaded', function () { load(); });
 })();
 </script>
 {% endblock %}

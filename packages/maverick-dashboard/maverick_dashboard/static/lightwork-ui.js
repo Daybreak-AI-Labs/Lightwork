@@ -79,9 +79,14 @@
 
     // Reusable feedback primitives, on every page that extends base.html.
     // Prefer these over the browser's native dialogs. Contract: docs/ui-primitives.md.
-    //   window.mvToast(message, {error}) -> transient status/alert toast
-    //   window.mvConfirm(message, {okText}) -> Promise<bool> (native <dialog>;
-    //     focus-returning, not re-entrant; falls back to window.confirm)
+    //   window.mvToast(message, {error, quiet}) -> transient status/alert toast
+    //   window.mvConfirm(message, {okText, cancelText, danger, typed}) -> Promise<bool>
+    //     (native <dialog>; focus starts on the safe choice and returns to the
+    //     opener; not re-entrant; falls back to window.confirm). Say what will
+    //     happen and to what ("Delete the automation "Weekly report"? It stops
+    //     running."); okText names the action ("Delete automation"), never "OK".
+    //     danger: style the action as destructive. typed: a word the person
+    //     must type before the action unlocks, for workspace-wide deletes.
     //   window.mvCopy(text) -> copy to clipboard with a toast (+ fallback)
     (function () {
       var region = document.getElementById('mv-toasts');
@@ -96,12 +101,95 @@
         var t = document.createElement('div');
         t.className = 'mv-toast' + (opts.error ? ' mv-toast--error' : '');
         t.textContent = (opts.error ? '⚠ ' : '') + String(message);
+        // quiet: the page already says these words where the person is (its
+        // own status line or a focus move), so the toast is shown, not read
+        // a second time.
+        if (opts.quiet) t.setAttribute('aria-hidden', 'true');
         if(window.LightworkI18n){t.lang=window.LightworkI18n.languageFor(String(message));t.dir='auto';}
         target.appendChild(t);
         setTimeout(function () {
           t.style.transition = 'opacity 200ms'; t.style.opacity = '0';
           setTimeout(function () { t.remove(); }, 220);
         }, opts.error ? 5000 : 3200);
+      };
+      // A way back from a delete (Gmail's Undo Send): the item goes from the
+      // page at once and a toast offers Undo, and Ctrl+Z or Cmd+Z, for
+      // opts.seconds (10 by default, never under 5; the time stops while the
+      // pointer or focus is on the toast). The delete is sent only when that
+      // time is up, when the person leaves the page (keepalive), or when
+      // another delete starts. Nothing is kept anywhere in the meantime, so
+      // a privacy erasure is never held back by it. If the delete then fails,
+      // undo() puts the item back and the failure is shown.
+      //   window.mvUndo(message, {run(keepalive) -> Promise<Response>, undo(), done(), action, seconds, latest})
+      var pendingUndo = null;
+      function typing(target) {
+        return target && target.closest && !!target.closest('input, textarea, select, [contenteditable="true"]');
+      }
+      window.mvUndo = function (message, opts) {
+        opts = opts || {};
+        if (pendingUndo) pendingUndo.commit(false);   // one at a time: the earlier delete goes through now
+        var wait = Math.max(5, Number(opts.seconds) || 10) * 1000;
+        var toast = document.createElement('div');
+        toast.className = 'mv-toast mv-toast--undo';
+        var words = document.createElement('span'); words.textContent = String(message);
+        var undoBtn = document.createElement('button'); undoBtn.type = 'button';
+        undoBtn.className = 'mv-toast__undo'; undoBtn.setAttribute('aria-keyshortcuts', 'Control+Z Meta+Z');
+        if (window.LightworkI18n) window.LightworkI18n.set(undoBtn, 'Undo'); else undoBtn.textContent = 'Undo';
+        toast.append(words, document.createTextNode(' '), undoBtn);
+        if (region) region.appendChild(toast);
+        var settled = false, timer = null, startedAt = 0, hard = null;
+        // opts.latest (epoch ms): the delete goes through by then even while
+        // the toast is paused, e.g. before a schedule's next run.
+        if (opts.latest) hard = setTimeout(function () { entry.commit(false); }, Math.max(0, Number(opts.latest) - Date.now()));
+        function start() { startedAt = Date.now(); timer = setTimeout(function () { entry.commit(false); }, wait); }
+        function pause() { if (timer) { clearTimeout(timer); timer = null; wait = Math.max(1000, wait - (Date.now() - startedAt)); } }
+        function finish() {
+          settled = true; pause(); if (hard) clearTimeout(hard);
+          toast.remove();
+          window.removeEventListener('pagehide', onHide);
+          document.removeEventListener('keydown', onKey);
+          if (pendingUndo === entry) pendingUndo = null;
+        }
+        function onHide() { entry.commit(true); }
+        function onKey(event) {
+          if ((event.ctrlKey || event.metaKey) && !event.shiftKey && !event.altKey &&
+              String(event.key).toLowerCase() === 'z' && !typing(event.target)) {
+            event.preventDefault(); entry.undo();
+          }
+        }
+        var entry = {
+          commit: async function (keepalive) {
+            if (settled) return 'settled';
+            finish();
+            try {
+              var response = await opts.run(!!keepalive);
+              if (response && response.ok === false) throw response;
+              if (opts.done) opts.done();
+              return 'done';
+            } catch (failure) {
+              if (opts.undo) opts.undo();
+              window.mvFail(failure, opts.action || 'delete it');
+              return 'failed';
+            }
+          },
+          undo: function () {
+            if (settled) return 'settled';
+            finish();
+            if (opts.undo) opts.undo();
+            mvToast(productText('Restored.'));
+            return 'undone';
+          }
+        };
+        undoBtn.addEventListener('click', function () { entry.undo(); });
+        toast.addEventListener('mouseenter', pause);
+        toast.addEventListener('focusin', pause);
+        toast.addEventListener('mouseleave', function () { if (!settled && !timer && !toast.contains(document.activeElement)) start(); });
+        toast.addEventListener('focusout', function () { if (!settled && !timer) start(); });
+        window.addEventListener('pagehide', onHide);
+        document.addEventListener('keydown', onKey);
+        pendingUndo = entry;
+        start();
+        return entry;
       };
       var dlg = document.getElementById('mv-confirm');
       var msgEl = document.getElementById('mv-confirm-msg');
@@ -116,10 +204,29 @@
         var opener = document.activeElement;           // restore focus on close
         if (opts.productCopy && window.LightworkI18n) window.LightworkI18n.set(msgEl, String(message), opts.values);
         else { msgEl.textContent = String(message); msgEl.lang = 'und'; msgEl.dir = 'auto'; }
-        if (window.LightworkI18n) { window.LightworkI18n.set(okBtn, opts.okText || 'Confirm'); window.LightworkI18n.set(cancelBtn, 'Cancel'); }
-        else okBtn.textContent = opts.okText || 'Confirm';
+        if (window.LightworkI18n) { window.LightworkI18n.set(okBtn, opts.okText || 'Confirm'); window.LightworkI18n.set(cancelBtn, opts.cancelText || 'Cancel'); }
+        else { okBtn.textContent = opts.okText || 'Confirm'; cancelBtn.textContent = opts.cancelText || 'Cancel'; }
+        okBtn.classList.toggle('btn--danger', !!opts.danger);
+        okBtn.classList.toggle('btn--primary', !opts.danger);
+        var typedWrap = document.getElementById('mv-confirm-typed');
+        if (typedWrap) typedWrap.remove();
+        typedWrap = null;
+        var typedInput = null;
+        if (opts.typed) {
+          typedWrap = document.createElement('p'); typedWrap.id = 'mv-confirm-typed'; typedWrap.className = 'mv-confirm__typed';
+          var typedLabel = document.createElement('label'); typedLabel.setAttribute('for', 'mv-confirm-typed-input');
+          typedLabel.textContent = window.LightworkI18n ? window.LightworkI18n.text('Type {word} to confirm', {word: String(opts.typed)}) : 'Type ' + String(opts.typed) + ' to confirm';
+          typedInput = document.createElement('input'); typedInput.id = 'mv-confirm-typed-input'; typedInput.className = 'input';
+          typedInput.autocomplete = 'off'; typedInput.spellcheck = false;
+          typedWrap.append(typedLabel, typedInput);
+          msgEl.insertAdjacentElement('afterend', typedWrap);
+          okBtn.disabled = true;
+          typedInput.addEventListener('input', function () { okBtn.disabled = typedInput.value.trim() !== String(opts.typed); });
+        } else okBtn.disabled = false;
         return new Promise(function (resolve) {
           function done(val) {
+            if (typedWrap) typedWrap.remove();
+            okBtn.disabled = false;
             okBtn.removeEventListener('click', onOk);
             cancelBtn.removeEventListener('click', onCancel);
             dlg.removeEventListener('cancel', onCancel);
@@ -129,7 +236,7 @@
             if (opener && opener.isConnected && typeof opener.focus === 'function') opener.focus();
             resolve(val);
           }
-          function onOk() { done(true); }
+          function onOk() { if (typedInput && typedInput.value.trim() !== String(opts.typed)) return; done(true); }
           function onCancel(e) { if (e) e.preventDefault(); done(false); }
           okBtn.addEventListener('click', onOk);
           cancelBtn.addEventListener('click', onCancel);
@@ -452,6 +559,171 @@
         mvToast(text, { error: true });
         return text;
       };
+      // One JSON request: the page's cookies, JSON in and out, and a plain
+      // sentence on failure. Resolves to the parsed body (null when empty).
+      // Rejects with an Error whose message is mvErrorText(failure, action)
+      // (or a business error's own message) and which keeps status, detail,
+      // payload and headers, so mvFeatureOff(error) and
+      // mvRenderError(el, error, action, error.payload) still work.
+      //   const data = await mvFetchJSON('/api/v1/x', {method: 'POST', body: {...}}, 'save the policy');
+      // Options beyond fetch's own:
+      //   timeout: ms   give up (AbortError, error.timedOut) after this long;
+      //                 a page's own signal still cancels it too.
+      //   onAccess(error)  runs before the rejection when access is gone: a
+      //                 401 or 403 (or accessStatuses), or a redirect to the
+      //                 sign-in page; the page clears what it showed privately.
+      //   plainDetail   use the server's explanation when it is a plain
+      //                 sentence written for people (mvPlainDetail).
+      //   raw           resolve to the response itself (a download), unread.
+      //   messages      the page's own sentence for a status it knows more
+      //                 about ({409: 'This changed since the list loaded…'},
+      //                 timeout: for the deadline, or offline: when the
+      //                 server cannot be reached); every other failure gets
+      //                 mvErrorText's words.
+      var OWN_OPTIONS = ['timeout', 'onAccess', 'accessStatuses', 'plainDetail', 'raw', 'messages'];
+      function fetchFailure(failure, action, opts) {
+        var plain = opts.plainDetail && typeof window.mvPlainDetail === 'function' ? window.mvPlainDetail(failure.detail) : '';
+        var own = opts.messages && Object.prototype.hasOwnProperty.call(opts.messages, failure.status) ? opts.messages[failure.status] : '';
+        var error = new Error(plain || own || window.mvErrorText(failure, action));
+        error.status = failure.status; error.detail = failure.detail; error.headers = failure.headers; error.payload = failure.payload;
+        return error;
+      }
+      // A body that is not read is released, so the request ends and the page
+      // can go quiet.
+      function release(response) {
+        try { if (response.body && typeof response.body.cancel === 'function' && !response.bodyUsed) response.body.cancel().catch(function () {}); }
+        catch (_) { /* already closed */ }
+      }
+      // The body as JSON; an empty body (No Content) is null.
+      async function readJSON(response) {
+        if (typeof response.text !== 'function') {
+          try { return await response.json(); }
+          catch (error) { if (response.status === 204) return null; throw error; }
+        }
+        var text = await response.text();
+        if (text) return JSON.parse(text);
+        // An empty body is null; a stand-in response may only answer json().
+        try { return typeof response.json === 'function' ? await response.json() : null; } catch (_) { return null; }
+      }
+      window.mvFetchJSON = async function (url, opts, action) {
+        var own = opts || {};
+        var options = Object.assign({ credentials: 'same-origin' }, own);
+        OWN_OPTIONS.forEach(function (name) { delete options[name]; });
+        var headers = Object.assign({ Accept: 'application/json' }, options.headers || {});
+        var body = options.body;
+        var declared = headers['Content-Type'] || headers['content-type'];
+        var raw = body == null || typeof body === 'string' || (declared && !/json/i.test(declared)) || (typeof FormData !== 'undefined' && body instanceof FormData) ||
+          (typeof Blob !== 'undefined' && body instanceof Blob) || (typeof URLSearchParams !== 'undefined' && body instanceof URLSearchParams) ||
+          (typeof ArrayBuffer !== 'undefined' && body instanceof ArrayBuffer);
+        if (!raw) {
+          options.body = JSON.stringify(body);
+          if (!headers['Content-Type']) headers['Content-Type'] = 'application/json';
+        }
+        options.headers = headers;
+        var timer = null, timedOut = false, expired = null;
+        if (own.timeout > 0) {
+          var controller = new AbortController(), outer = own.signal;
+          if (outer) {
+            if (outer.aborted) controller.abort();
+            else outer.addEventListener('abort', function () { controller.abort(); });
+          }
+          // The wait ends at the deadline even if the request ignores the abort.
+          var expired = new Promise(function (_, reject) {
+            timer = setTimeout(function () {
+              timedOut = true; controller.abort();
+              var late = new Error('The operation timed out.'); late.name = 'AbortError'; reject(late);
+            }, own.timeout);
+          });
+          options.signal = controller.signal;
+        }
+        var response;
+        try { response = await (expired ? Promise.race([fetch(url, options), expired]) : fetch(url, options)); }
+        catch (cause) {
+          clearTimeout(timer);
+          var said = own.messages && (timedOut ? own.messages.timeout : own.messages.offline);
+          var offline = new Error(said || window.mvErrorText(cause, action));
+          // Same name as the cause (TypeError, AbortError), so passing this
+          // error to mvErrorText or mvFieldErrors.fail gives the same words.
+          offline.status = 0; offline.cause = cause; offline.name = (cause && cause.name) || 'Error';
+          if (timedOut) offline.timedOut = true;
+          throw offline;
+        }
+        var access = own.accessStatuses || [401, 403];
+        var lost = typeof own.onAccess === 'function' && (access.indexOf(response.status) !== -1 || response.redirected === true);
+        if (lost) {
+          // The page clears what it showed privately before anything else,
+          // and the refusal's body (often a sign-in page) is never read. A
+          // redirect lands on the sign-in page: say so, as for a 401.
+          clearTimeout(timer); release(response);
+          var gone = fetchFailure({ status: response.ok ? 401 : response.status, headers: response.headers }, action, own);
+          gone.status = response.status; gone.accessChanged = true;
+          own.onAccess(gone);
+          throw gone;
+        }
+        if (own.raw && response.ok) { clearTimeout(timer); return response; }
+        var payload = null, unreadable = false;
+        try { payload = await readJSON(response); } catch (_) { payload = null; unreadable = true; }
+        finally { clearTimeout(timer); }
+        if (response.ok && !unreadable) return payload;
+        if (!response.ok || unreadable) release(response);  // a refusal's or unreadable body is never left open
+        if (response.ok) {
+          // Malformed success never counts as success, and is never shown.
+          var bad = new Error(window.mvErrorText({ name: 'SyntaxError' }, action));
+          bad.status = 0; bad.unreadable = true;
+          throw bad;
+        }
+        throw fetchFailure({ status: response.status, detail: payload && payload.detail, headers: response.headers, payload: payload }, action, own);
+      };
+      // Two page-wide live regions (polite, and assertive for errors) that
+      // exist before any message: base.html renders them, and a page without
+      // them gets them made here, before the words are written into them. A region that appears, or gets its
+      // role, in the same moment as its first words is often not read out,
+      // so status lines speak through these instead of becoming regions
+      // themselves. Each message clears both, then writes a moment later, so
+      // a repeat of the same words is spoken again and only the latest of
+      // quick messages is.
+      var announceTimer = null;
+      function announcer(id, live) {
+        var region = document.getElementById(id);
+        if (region || !document.body) return region;
+        region = document.createElement('div');
+        region.id = id; region.className = 'sr-only';
+        region.setAttribute('role', live === 'assertive' ? 'alert' : 'status');
+        region.setAttribute('aria-live', live);
+        region.setAttribute('aria-atomic', 'true');
+        document.body.appendChild(region);
+        return region;
+      }
+      function announcers() {
+        return { polite: announcer('mv-announce', 'polite'), alert: announcer('mv-announce-alert', 'assertive') };
+      }
+      window.mvAnnounce = function (text, opts) {
+        var regions = announcers(), words = text == null ? '' : String(text);
+        var target = opts && opts.error ? regions.alert : regions.polite;
+        clearTimeout(announceTimer);
+        if (regions.polite) regions.polite.textContent = '';
+        if (regions.alert) regions.alert.textContent = '';
+        if (!words || !target) return;
+        announceTimer = setTimeout(function () { target.textContent = words; }, 100);
+      };
+      // One inline status line next to the control it reports on. Sets the
+      // words at once (with the error style for an error) and, unless the
+      // page made the element a live region itself, announces them through
+      // mvAnnounce: politely, or at once for an error. Empty text clears it
+      // and announces nothing.
+      window.mvStatus = function (element, text, opts) {
+        if (!element) return null;
+        var error = !!(opts && opts.error);
+        var words = text == null ? '' : String(text);
+        var own = element.hasAttribute('aria-live') || (element.hasAttribute('role') && !element.hasAttribute('data-mv-status'));
+        element.classList.toggle('mv-status--error', error);
+        element.textContent = words;
+        if (!own) {
+          element.setAttribute('data-mv-status', '');
+          if (words) window.mvAnnounce(words, { error: error });
+        }
+        return element;
+      };
       // A stored value (status, kind, slug) as a readable label:
       // "pending_review" -> "Pending review", "ai_act" -> "AI Act".
       var WORDS = { ai: 'AI', api: 'API', id: 'ID', ids: 'IDs', url: 'URL', sso: 'SSO',
@@ -484,11 +756,26 @@
       //   hover) | "absolute" ("30 Sep 2026, 17:15 BST") | "both" | "date"
       //   ("30 Sep 2026"; a "2026-09-30" value is a calendar date, not UTC midnight).
       // Elements added later are formatted by calling window.mvFormatTimes(root).
-      // English pages read the same in every browser ("4 Oct 2026, 14:01 BST",
-      // a 24-hour clock); a translated interface uses its own locale's order.
+      // Each reader sees one style, their browser's regional setting: an en-US
+      // browser reads "Oct 4, 2026, 2:01 PM EDT", an en-GB one "4 Oct 2026,
+      // 19:01 BST"; a translated interface uses its own locale. The same
+      // choice is made in lightwork-i18n.js (formatDate), so both agree.
+      function mvBrowserLocale() {
+        var wanted = [].concat(navigator.languages || [], navigator.language || []);
+        for (var i = 0; i < wanted.length; i++) {
+          try { if (wanted[i] && Intl.DateTimeFormat.supportedLocalesOf([wanted[i]]).length) return wanted[i]; } catch (e) {}
+        }
+        return 'en-GB';
+      }
       function mvFormatLocale() {
         var i18n = window.LightworkI18n;
-        return i18n && i18n.language && i18n.language !== 'en' ? (i18n.locale || i18n.language) : 'en-GB';
+        return i18n && i18n.language && i18n.language !== 'en' ? (i18n.locale || i18n.language) : mvBrowserLocale();
+      }
+      // Phrases ("2 minutes ago") are words, so they stay in the interface
+      // language even when the browser's regional style is another language.
+      function mvPhraseLocale() {
+        var locale = mvFormatLocale();
+        return /^en\b/i.test(locale) || (window.LightworkI18n && window.LightworkI18n.language && window.LightworkI18n.language !== 'en') ? locale : 'en';
       }
       function mvParseTime(raw) {
         if (raw === null || raw === undefined || raw === '') return null;
@@ -501,7 +788,7 @@
       window.mvTimeAbsolute = function (raw, zone) {
         var d = mvParseTime(raw);
         if (!d) return '';
-        var options = { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', timeZoneName: 'short' };
+        var options = { day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' };
         if (zone) options.timeZone = zone;
         try { return new Intl.DateTimeFormat(mvFormatLocale(), options).format(d); }
         catch (e) { return zone ? window.mvTimeAbsolute(raw) : d.toUTCString(); }
@@ -557,7 +844,7 @@
         while (Math.round(abs / units[i][0]) * units[i][0] >= units[i][2]) i++;
         var size = units[i][0], unit = units[i][1], value = Math.round(abs / size);
         if (typeof Intl !== 'undefined' && Intl.RelativeTimeFormat) {
-          try { return new Intl.RelativeTimeFormat(mvFormatLocale(), { numeric: 'auto' }).format(past ? -value : value, unit); } catch (e) {}
+          try { return new Intl.RelativeTimeFormat(mvPhraseLocale(), { numeric: 'auto' }).format(past ? -value : value, unit); } catch (e) {}
         }
         var word = value + ' ' + unit + (value === 1 ? '' : 's');
         return past ? word + ' ago' : 'in ' + word;
@@ -597,7 +884,7 @@
       Array.prototype.forEach.call(realDocument ? document.querySelectorAll('[data-mv-utc-midnight]') : [], function (el) {
         try {
           var next = new Date(); next.setUTCHours(24, 0, 0, 0);
-          var local = next.toLocaleTimeString(mvFormatLocale(), { hour: '2-digit', minute: '2-digit' });
+          var local = next.toLocaleTimeString(mvFormatLocale(), { hour: 'numeric', minute: '2-digit' });
           var zone = (Intl.DateTimeFormat().resolvedOptions().timeZone || '').replace(/_/g, ' ');
           if (next.getTimezoneOffset() !== 0) el.textContent = ', which is ' + local + ' in your time zone' + (zone ? ' (' + zone + ')' : '');
         } catch (e) {}
@@ -713,9 +1000,13 @@
             : 'Stop status unavailable');
         // A late catalog translates the current verified state, never an older
         // pending label. Authority checks and status reads stay immediate.
-        label.dataset.i18n = copy;
-        if (window.LightworkI18n) window.LightworkI18n.set(label, copy);
-        else { label.textContent = copy; label.lang = 'en'; label.dir = 'ltr'; }
+        // The words are rewritten only when they change: the 15-second poll
+        // must not repeat the same announcement from the live label.
+        if (label.dataset.i18n !== copy) {
+          label.dataset.i18n = copy;
+          if (window.LightworkI18n) window.LightworkI18n.set(label, copy);
+          else { label.textContent = copy; label.lang = 'en'; label.dir = 'ltr'; }
+        }
         renderBanner(armed && !pending);
         renderChatStop(state);
         if (canHalt) {
@@ -870,7 +1161,14 @@
           pill.click();
         }
       });
-      refresh();
+      // The label turns into a polite live region only once the first read
+      // has settled and the page has finished loading (the localization pass
+      // rewrites the label at DOMContentLoaded): loading a page must not
+      // announce "Emergency stop", while a later stop, resume or lost status
+      // is still announced.
+      const loaded = document.readyState === 'complete' ? Promise.resolve()
+        : new Promise(function (resolve) { window.addEventListener('load', resolve, {once: true}); });
+      Promise.all([refresh(), loaded]).then(function () { label.setAttribute('aria-live', 'polite'); });
       setInterval(refresh, 15000);
     })();
 
@@ -999,6 +1297,140 @@
       });
     })();
 
+    // A form that posts and reloads the page (<form data-mv-save>) says
+    // "Saving…" the moment it is sent, so a slow server never looks like a
+    // missed click. The page that loads next shows what happened.
+    (function () {
+      function say(status, text) {
+        if (window.LightworkI18n && text) window.LightworkI18n.set(status, text); else status.textContent = text;
+      }
+      function clear(form, button) {
+        var status = form.querySelector('[data-mv-save-status]');
+        if (status) say(status, '');
+        if (button) button.removeAttribute('aria-busy');
+      }
+      document.addEventListener('submit', function (event) {
+        var form = event.target;
+        if (!(form instanceof HTMLFormElement) || !form.hasAttribute('data-mv-save') || event.defaultPrevented) return;
+        var button = event.submitter || null, status = form.querySelector('[data-mv-save-status]');
+        // A button that only reads (formmethod="get", e.g. Preview) saves nothing.
+        if (button && (button.getAttribute('formmethod') || '').toLowerCase() === 'get') return;
+        if (!status) {
+          status = document.createElement('span');
+          status.className = 'muted';
+          status.setAttribute('role', 'status');
+          status.setAttribute('data-mv-save-status', '');
+          form.appendChild(status);
+        }
+        if (form.getAttribute('data-mv-save') === 'background' && typeof window.fetch === 'function') {
+          event.preventDefault();
+          if (form._mvSaving) return;   // one save at a time; the first is still on its way
+          say(status, 'Saving…');
+          if (button) button.setAttribute('aria-busy', 'true');
+          form._mvSaveButton = button;
+          send(form, button, status);
+          return;
+        }
+        say(status, 'Saving…');
+        if (button) button.setAttribute('aria-busy', 'true');
+        form._mvSaveButton = button;
+        // A script that stops the submission after this point must not leave "Saving…".
+        setTimeout(function () { if (event.defaultPrevented) clear(form, button); }, 0);
+      });
+      window.addEventListener('pageshow', function (event) {
+        if (!event.persisted) return;
+        Array.prototype.forEach.call(document.querySelectorAll('form[data-mv-save]'), function (form) {
+          clear(form, form._mvSaveButton);
+        });
+      });
+
+      // <form data-mv-save="background"> saves without leaving the page until
+      // the save is done, so nothing typed is lost when it fails. The same
+      // request as the plain form (same address, same fields, same-origin
+      // cookies), asking for a plain JSON error instead of an error page:
+      //   saved, with a next page  -> that page (it says "Saved.")
+      //   saved, with a result     -> data-mv-save-show="id": the element with
+      //                               that id is replaced by the answer's copy
+      //   needs a fresh sign-in    -> the sign-in, which comes back to this page
+      //                               (data-mv-keep restores what was typed)
+      //   anything else            -> the form's error summary (mvFieldErrors),
+      //                               every value kept; offline and an expired
+      //                               sign-in say so in plain words
+      // data-mv-save-what="save the limit" words the failure.
+      var hooks = window.mvBackgroundSave = {navigate: function (url) { window.location.assign(url); }};
+      function returnHere(link) {
+        try {
+          var url = new URL(link, window.location.href);
+          if (url.origin !== window.location.origin) return null;
+          if (url.searchParams.has('return_to')) url.searchParams.set('return_to', window.location.pathname + window.location.search);
+          return url.pathname + url.search;
+        } catch (_) { return null; }
+      }
+      function failed(form, button, status, failure, payload) {
+        form._mvSaving = false;
+        clear(form, button);
+        var what = form.getAttribute('data-mv-save-what') || 'save this';
+        var fields = window.mvFieldErrors, business = payload && window.mvBusinessError ? window.mvBusinessError(payload) : null;
+        if (fields && business && business.field_errors) {
+          var errors = Object.keys(business.field_errors).filter(function (name) { return form.elements[name]; })
+            .map(function (name) { return {field: name, message: business.field_errors[name]}; });
+          var kept = window.LightworkI18n ? window.LightworkI18n.text('What you entered is still here.') : 'What you entered is still here.';
+          fields.show(form, errors, {message: errors.length ? '' : business.message + ' ' + kept});
+        } else if (fields) {
+          fields.fail(form, failure, what);
+        } else if (window.mvFail) {
+          window.mvFail(failure, what);
+        }
+      }
+      function showResult(form, id, html) {
+        var fresh = new DOMParser().parseFromString(html, 'text/html').getElementById(id);
+        var here = document.getElementById(id);
+        if (!fresh || !here) return false;
+        var copy = document.importNode(fresh, true);
+        here.replaceWith(copy);
+        if (window.mvFormatTimes) window.mvFormatTimes(copy);
+        var landing = copy.querySelector('[tabindex="-1"]') || copy;
+        if (landing.focus) landing.focus();
+        return true;
+      }
+      async function send(form, button, status) {
+        form._mvSaving = true;
+        var action = button && button.hasAttribute('formaction') ? button.formAction : form.action;
+        var data = new FormData(form);
+        if (button && button.name) data.append(button.name, button.value);
+        var response, payload = null;
+        try {
+          response = await window.fetch(action, {method: 'POST', body: new URLSearchParams(data),
+            credentials: 'same-origin', headers: {Accept: 'application/json'}});
+        } catch (error) {
+          return failed(form, button, status, error, null);
+        }
+        var fields = window.mvFieldErrors;
+        if (response.ok) {
+          if (fields) { fields.clear(form); fields.forget(form); }
+          var show = form.getAttribute('data-mv-save-show');
+          if (!response.redirected && show && showResult(form, show, await response.text())) {
+            form._mvSaving = false;
+            clear(form, button);
+            form.reset();
+            form.dispatchEvent(new CustomEvent('mv:saved', {bubbles: true}));
+            return;
+          }
+          // The page the server sent us to shows "Saved."; a page drawn for
+          // this request alone is drawn again from the same address.
+          return response.redirected ? hooks.navigate(response.url) : window.location.reload();
+        }
+        try { payload = await response.clone().json(); } catch (_) { payload = null; }
+        var reauthenticate = response.headers.get('X-Reauthenticate') || (payload && payload.reauthenticate);
+        var signIn = response.status === 403 && reauthenticate && returnHere(reauthenticate);
+        if (signIn) {
+          say(status, 'Sign in again to continue…');
+          return hooks.navigate(signIn);
+        }
+        failed(form, button, status, {status: response.status, detail: payload && payload.detail}, payload);
+      }
+    })();
+
     // Required fields say so beside their label: one small "Required" for
     // every [required] control, on load and for forms added later (dialogs,
     // rows built from data). The required attribute already tells assistive
@@ -1085,6 +1517,348 @@
       }
     }, true);
 
+    // One form-field error pattern (GOV.UK error summary). A form marked
+    // data-mv-validate is checked on submit: each problem is written next to
+    // its field (aria-invalid plus aria-describedby to the message) and listed
+    // in a summary at the top of the form that takes focus and links to each
+    // field. The page title starts with "Error: " while problems remain.
+    // Nothing typed is cleared. A form marked data-mv-keep="name" also keeps
+    // what was typed in this tab (sessionStorage) across a reload, a failed
+    // request or a sign-in, until the page shows it was saved
+    // (an element with data-mv-keep-done="name") or the script calls forget().
+    //   mvFieldErrors.validate(form) -> true when there is nothing to fix
+    //   mvFieldErrors.show(form, [{field, message}], {message}) -> list problems
+    //   mvFieldErrors.fail(form, failure, action) -> a failed request, values kept
+    //   mvFieldErrors.clear(form) / restore(form) / forget(form)
+    // Extra checks: listen for 'mv:validate' on the form and call
+    // event.detail.error(control, message). Field wording: data-error-required,
+    // data-error-format, data-error-range and data-error-length on the control.
+    // Template side: templates/_form_field.html (form_field, error_summary).
+    (function () {
+      if (typeof document.querySelectorAll !== 'function') return;
+      var TITLE_PREFIX = 'Error: ';
+      var KEEP_HOURS = 24;
+      var SECRET = /(pass(word|phrase)?|secret|token|api[_-]?key|credential|private[_-]?key|authorization|cookie|otp|mfa[_-]?code)/i;
+      function t(source, values) { return window.LightworkI18n ? window.LightworkI18n.text(source, values) : source.replace(/\{(\w+)\}/g, function (_m, k) { return values && values[k] != null ? values[k] : ''; }); }
+      function controls(form) {
+        return Array.prototype.filter.call(form.elements, function (c) {
+          return c.matches && c.matches('input, select, textarea') && c.type !== 'hidden' && !c.disabled;
+        });
+      }
+      function labelText(control) {
+        var label = null;
+        if (control.type === 'radio' || control.type === 'checkbox') {
+          var group = control.closest('fieldset');
+          if (control.type === 'radio' && group && group.querySelector('legend')) label = group.querySelector('legend');
+        }
+        if (!label && control.labels && control.labels.length) label = control.labels[0];
+        var text = '';
+        if (label) {
+          var copy = label.cloneNode(true);
+          Array.prototype.forEach.call(copy.querySelectorAll('.mv-required, .sr-only, input, select, textarea, button, [role="status"]'), function (n) { n.remove(); });
+          text = copy.textContent;
+        }
+        if (!text.trim()) text = control.getAttribute('aria-label') || control.name || '';
+        return text.replace(/\s+/g, ' ').replace(/\s*\((optional|required)\)\s*$/i, '').replace(/[:*]\s*$/, '').trim();
+      }
+      function lower(text) { return /^[A-Z][a-z]/.test(text) ? text.charAt(0).toLowerCase() + text.slice(1) : text; }
+      // The message for one invalid control: the page's own words first, then
+      // a written error another script already showed for it, then a plain default.
+      function messageFor(control) {
+        var v = control.validity, d = control.dataset || {}, label = lower(labelText(control));
+        if (v.valueMissing && d.errorRequired) return d.errorRequired;
+        if ((v.typeMismatch || v.patternMismatch || v.badInput) && d.errorFormat) return d.errorFormat;
+        if ((v.rangeUnderflow || v.rangeOverflow || v.stepMismatch) && d.errorRange) return d.errorRange;
+        if ((v.tooLong || v.tooShort) && d.errorLength) return d.errorLength;
+        var shown = describedError(control);
+        if (shown) return shown;
+        if (v.valueMissing) {
+          if (control.type === 'checkbox') return t('Tick the box to confirm: {label}', {label: labelText(control)});
+          if (control.tagName === 'SELECT' || control.type === 'radio') return t('Choose {label}.', {label: label});
+          return t('Enter {label}.', {label: label});
+        }
+        if (v.typeMismatch && control.type === 'email') return t('Enter a full email address. For example: name@company.com.');
+        if (v.typeMismatch && control.type === 'url') return t('Enter a full web address, starting with https://.');
+        if (v.badInput) return t('Enter {label} as a number.', {label: label});
+        if (v.rangeUnderflow) return t('Enter {label} of at least {min}.', {label: label, min: control.min});
+        if (v.rangeOverflow) return t('Enter {label} of no more than {max}.', {label: label, max: control.max});
+        if (v.stepMismatch) return t('Check {label}: use at most two decimal places.', {label: label});
+        if (v.tooLong) return t('Shorten {label} to {max} characters or fewer.', {label: label, max: control.maxLength});
+        if (v.tooShort) return t('Make {label} at least {min} characters long.', {label: label, min: control.minLength});
+        if (v.patternMismatch) return t('Check the format of {label}.', {label: label});
+        return control.validationMessage || t('Check {label}.', {label: label});
+      }
+      function describedError(control) {
+        var ids = (control.getAttribute('aria-describedby') || '').split(/\s+/);
+        for (var i = 0; i < ids.length; i++) {
+          var node = ids[i] && document.getElementById(ids[i]);
+          if (node && !node.hidden && node.classList.contains('mv-form__err') && !node.hasAttribute('data-mv-field-error')) {
+            var text = node.textContent.replace(/^\s*Error:\s*/, '').trim();
+            if (text) return text;
+          }
+        }
+        return '';
+      }
+      function target(control) {
+        if (control.type === 'radio') {
+          var first = control.form && control.form.querySelector('input[type="radio"][name="' + (window.CSS && CSS.escape ? CSS.escape(control.name) : control.name) + '"]');
+          if (first) control = first;
+        }
+        if (!control.id) control.id = 'mvf-' + Math.random().toString(36).slice(2, 10);
+        return control;
+      }
+      // The field's error slot: its own (id-error or data-mv-error-for), or a
+      // written error another script already ties to it (aria-describedby).
+      function existingSlot(control) {
+        var slot = document.getElementById(control.id + '-error') ||
+          (control.form && control.form.querySelector('[data-mv-error-for="' + control.id + '"]'));
+        if (slot) return slot;
+        var ids = (control.getAttribute('aria-describedby') || '').split(/\s+/);
+        for (var i = 0; i < ids.length; i++) {
+          var node = ids[i] && document.getElementById(ids[i]);
+          if (node && node.classList.contains('mv-form__err')) return node;
+        }
+        return null;
+      }
+      function slotFor(control) {
+        var slot = existingSlot(control);
+        if (slot) return slot;
+        slot = document.createElement('p');
+        slot.className = 'mv-form__err mv-field__error'; slot.id = control.id + '-error'; slot.hidden = true;
+        var anchor = control.closest('.mv-field') || (control.labels && control.labels[0] && control.labels[0].contains(control) ? control.labels[0] : control);
+        if (anchor === control.closest('.mv-field')) anchor.appendChild(slot);
+        else anchor.insertAdjacentElement('afterend', slot);
+        return slot;
+      }
+      function describe(control, id, on) {
+        var ids = (control.getAttribute('aria-describedby') || '').split(/\s+/).filter(function (x) { return x && x !== id; });
+        if (on) ids.unshift(id);
+        if (ids.length) control.setAttribute('aria-describedby', ids.join(' ')); else control.removeAttribute('aria-describedby');
+      }
+      function markField(control, message) {
+        var slot = slotFor(control);
+        slot.setAttribute('data-mv-field-error', '');
+        slot.replaceChildren();
+        var hidden = document.createElement('span'); hidden.className = 'sr-only'; hidden.textContent = t('Error:') + ' ';
+        slot.append(hidden, document.createTextNode(message));
+        slot.hidden = false;
+        control.setAttribute('aria-invalid', 'true');
+        describe(control, slot.id, true);
+        var wrap = control.closest('.mv-field'); if (wrap) wrap.classList.add('mv-field--error');
+      }
+      function unmarkField(control) {
+        var slot = existingSlot(control);
+        if (slot && slot.hasAttribute('data-mv-field-error')) {
+          slot.hidden = true; slot.replaceChildren(); slot.removeAttribute('data-mv-field-error');
+          describe(control, slot.id, false);
+        }
+        if (control.getAttribute('aria-invalid') === 'true') control.removeAttribute('aria-invalid');
+        var wrap = control.closest('.mv-field'); if (wrap) wrap.classList.remove('mv-field--error');
+      }
+      function summaryFor(form) {
+        var box = form.querySelector('[data-mv-error-summary]');
+        var before = form.previousElementSibling;
+        if (!box && before && before.hasAttribute('data-mv-error-summary')) box = before;
+        if (box) return box;
+        box = document.createElement('div');
+        box.className = 'mv-error-summary'; box.setAttribute('data-mv-error-summary', '');
+        box.id = (form.id || 'mvf-' + Math.random().toString(36).slice(2, 10)) + '-errors';
+        box.tabIndex = -1; box.hidden = true;
+        form.insertBefore(box, form.firstChild);
+        return box;
+      }
+      function setTitle(on) {
+        var has = document.title.indexOf(TITLE_PREFIX) === 0;
+        if (on && !has) document.title = TITLE_PREFIX + document.title;
+        if (!on && has && !document.querySelector('[data-mv-error-summary]:not([hidden])')) document.title = document.title.slice(TITLE_PREFIX.length);
+      }
+      function renderSummary(form, problems, general) {
+        var box = summaryFor(form);
+        box.replaceChildren();
+        box.setAttribute('tabindex', '-1');
+        var titleId = box.id + '-title';
+        var title = document.createElement('h2'); title.className = 'mv-error-summary__title'; title.id = titleId;
+        title.textContent = problems.length ? t('There is a problem') : t('This was not saved');
+        box.setAttribute('aria-labelledby', titleId);
+        box.appendChild(title);
+        if (general) { var p = document.createElement('p'); p.className = 'mv-error-summary__body'; p.textContent = general; box.appendChild(p); }
+        if (problems.length) {
+          var list = document.createElement('ul'); list.className = 'mv-error-summary__list';
+          problems.forEach(function (problem) {
+            var item = document.createElement('li'), link = document.createElement('a');
+            link.href = '#' + problem.control.id; link.textContent = problem.message;
+            item.appendChild(link); list.appendChild(item);
+          });
+          box.appendChild(list);
+        }
+        box.hidden = false;
+        setTitle(true);
+        var disclosure = form.closest('details');
+        while (disclosure) { disclosure.open = true; disclosure = disclosure.parentElement && disclosure.parentElement.closest('details'); }
+        box.focus();
+        return box;
+      }
+      function clear(form) {
+        controls(form).forEach(unmarkField);
+        var box = form.querySelector('[data-mv-error-summary]') || (form.previousElementSibling && form.previousElementSibling.hasAttribute('data-mv-error-summary') ? form.previousElementSibling : null);
+        if (box) { box.hidden = true; box.replaceChildren(); }
+        setTitle(false);
+      }
+      function show(form, errors, opts) {
+        opts = opts || {};
+        controls(form).forEach(unmarkField);
+        var seen = [], problems = [];
+        (errors || []).forEach(function (e) {
+          var c = typeof e.field === 'string' ? (document.getElementById(e.field) || form.elements[e.field]) : e.field;
+          if (c && c.length && !c.tagName) c = c[0];
+          if (!c || seen.indexOf(c) >= 0) return;
+          c = target(c); seen.push(c);
+          markField(c, e.message);
+          problems.push({control: c, message: e.message});
+        });
+        if (!problems.length && !opts.message) { clear(form); return null; }
+        return renderSummary(form, problems, opts.message || '');
+      }
+      function validate(form) {
+        var problems = [], seenGroups = {};
+        controls(form).forEach(function (c) {
+          if (c.closest('[hidden]') && !c.closest('details')) return;   // a branch that is not in use
+          if (c.type === 'radio') { if (seenGroups[c.name]) return; seenGroups[c.name] = true; }
+          if (c.checkValidity()) return;   // fires 'invalid' so page handlers can word it first
+          problems.push({field: c, message: messageFor(c)});
+        });
+        var extra = [];
+        form.dispatchEvent(new CustomEvent('mv:validate', {detail: {error: function (control, message) { extra.push({field: control, message: message}); }}}));
+        extra.forEach(function (e) { if (!problems.some(function (p) { return p.field === e.field; })) problems.push(e); });
+        if (!problems.length) { clear(form); return true; }
+        // Keep the page's field order in the summary.
+        var order = controls(form);
+        problems.sort(function (a, b) { return order.indexOf(a.field) - order.indexOf(b.field); });
+        show(form, problems);
+        return false;
+      }
+      function fail(form, failure, action) {
+        var text = window.mvErrorText ? window.mvErrorText(failure, action) : 'Could not ' + action + '. Try again.';
+        return show(form, [], {message: text + ' ' + t('What you entered is still here.')});
+      }
+      // Keeping what was typed, in this tab only. Hidden, password, file and
+      // secret-looking fields are never kept.
+      // Keyed by the form's name, not the address: a form posted to /users/invite
+      // that shows its result there must clear the copy kept on /users.
+      function keepKey(form) { return 'mv-keep:' + form.getAttribute('data-mv-keep'); }
+      function keepable(c) {
+        return !/^(password|file|hidden|submit|button|reset)$/.test(c.type) && !c.hasAttribute('data-mv-keep-off') &&
+          !SECRET.test(c.name || '') && !SECRET.test(c.id || '') && c.autocomplete !== 'one-time-code';
+      }
+      function keyOf(c) { return c.name || c.id; }
+      function save(form) {
+        var values = {};
+        controls(form).filter(keepable).forEach(function (c) {
+          var k = keyOf(c); if (!k) return;
+          if (c.type === 'checkbox' || c.type === 'radio') { values[k] = values[k] || []; if (c.checked) values[k].push(c.value); }
+          else if (c.tagName === 'SELECT' && c.multiple) values[k] = Array.prototype.filter.call(c.options, function (o) { return o.selected; }).map(function (o) { return o.value; });
+          else values[k] = c.value;
+        });
+        try { sessionStorage.setItem(keepKey(form), JSON.stringify({at: Date.now(), values: values})); } catch (_) {}
+      }
+      function stored(form) {
+        try {
+          var raw = JSON.parse(sessionStorage.getItem(keepKey(form)) || 'null');
+          if (!raw || typeof raw.values !== 'object' || Date.now() - raw.at > KEEP_HOURS * 3600000) return null;
+          return raw.values;
+        } catch (_) { return null; }
+      }
+      function forget(form) {
+        try { sessionStorage.removeItem(keepKey(form)); } catch (_) {}
+        var note = form.querySelector('.mv-keep-note'); if (note) note.remove();
+      }
+      function restore(form) {
+        var values = stored(form), changed = [];
+        if (!values) return false;
+        controls(form).filter(keepable).forEach(function (c) {
+          var k = keyOf(c); if (!k || !(k in values)) return;
+          var v = values[k], before = c.type === 'checkbox' || c.type === 'radio' ? c.checked : c.value;
+          if (c.type === 'checkbox' || c.type === 'radio') c.checked = Array.isArray(v) && v.indexOf(c.value) >= 0;
+          else if (c.tagName === 'SELECT' && c.multiple) Array.prototype.forEach.call(c.options, function (o) { o.selected = Array.isArray(v) && v.indexOf(o.value) >= 0; });
+          else if (c.tagName !== 'SELECT' || Array.prototype.some.call(c.options, function (o) { return o.value === v; })) c.value = v;
+          if ((c.type === 'checkbox' || c.type === 'radio' ? c.checked : c.value) !== before) changed.push(c);
+        });
+        // Pages react to the restored values; the stored copy is not rewritten meanwhile.
+        form.__mvRestoring = true;
+        try { changed.forEach(function (c) { c.dispatchEvent(new Event('change', {bubbles: true})); }); }
+        finally { form.__mvRestoring = false; }
+        if (changed.length) {
+          var section = form.closest('details');
+          while (section) { section.open = true; section = section.parentElement && section.parentElement.closest('details'); }
+        }
+        if (changed.length && !form.querySelector('.mv-keep-note')) {
+          var note = document.createElement('p'); note.className = 'mv-keep-note'; note.setAttribute('role', 'status');
+          note.appendChild(document.createTextNode(t('We kept what you typed here earlier. Check it, then save.') + ' '));
+          var reset = document.createElement('button'); reset.type = 'button'; reset.className = 'btn btn--ghost';
+          reset.textContent = t('Clear the form');
+          reset.addEventListener('click', function () { form.reset(); clear(form); controls(form).forEach(function (c) { c.dispatchEvent(new Event('change', {bubbles: true})); }); forget(form); });
+          note.appendChild(reset);
+          var box = summaryFor(form);
+          box.insertAdjacentElement('afterend', note);
+        }
+        return changed.length > 0;
+      }
+      function wireKeep(form) {
+        if (form.__mvKeep) return; form.__mvKeep = true;
+        var name = form.getAttribute('data-mv-keep');
+        var done = document.querySelectorAll('[data-mv-keep-done]');
+        for (var i = 0; i < done.length; i++) {
+          if ((done[i].getAttribute('data-mv-keep-done') || '').split(/\s+/).indexOf(name) >= 0) { forget(form); return wireSave(form); }
+        }
+        restore(form);
+        wireSave(form);
+      }
+      function wireSave(form) {
+        form.addEventListener('input', function () { if (!form.__mvRestoring) save(form); });
+        form.addEventListener('change', function () { if (!form.__mvRestoring) save(form); });
+      }
+      function wire(root) {
+        Array.prototype.forEach.call((root || document).querySelectorAll('form[data-mv-validate]'), function (form) { form.noValidate = true; });
+        Array.prototype.forEach.call((root || document).querySelectorAll('form[data-mv-keep]'), wireKeep);
+        // Errors the server rendered: the summary takes focus once, on load.
+        var shown = (root || document).querySelector('[data-mv-error-summary]:not([hidden])');
+        if (shown && shown.querySelector('a, p')) { setTitle(true); shown.focus(); }
+      }
+      // A summary link moves focus into its field (opening any closed
+      // section first) with the field's label in view.
+      document.addEventListener('click', function (event) {
+        var link = event.target && event.target.closest && event.target.closest('[data-mv-error-summary] a[href^="#"]');
+        if (!link) return;
+        var c = document.getElementById(decodeURIComponent(link.getAttribute('href').slice(1)));
+        if (!c) return;
+        event.preventDefault();
+        var disclosure = c.closest('details');
+        while (disclosure) { disclosure.open = true; disclosure = disclosure.parentElement && disclosure.parentElement.closest('details'); }
+        var label = c.labels && c.labels[0];
+        if (label && label.scrollIntoView) label.scrollIntoView({block: 'center'});
+        c.focus();
+      });
+      // Runs before the page's own submit handlers (capture), so a confirm
+      // dialog or a request never starts while a field still needs fixing.
+      document.addEventListener('submit', function (event) {
+        var form = event.target;
+        if (!(form instanceof HTMLFormElement) || !form.hasAttribute('data-mv-validate')) return;
+        // A button marked formnovalidate (e.g. Preview) submits without the check, as the browser would.
+        if (event.submitter && event.submitter.formNoValidate) return;
+        if (!validate(form)) { event.preventDefault(); event.stopImmediatePropagation(); }
+      }, true);
+      // A field that is being fixed loses its error at once; the summary stays until the next submit.
+      function fixing(event) {
+        var c = event.target;
+        if (c && c.form && c.getAttribute && c.getAttribute('aria-invalid') === 'true' && c.form.hasAttribute('data-mv-validate') &&
+            (!c.validity || c.validity.valid)) unmarkField(c);
+      }
+      document.addEventListener('input', fixing);
+      document.addEventListener('change', fixing);
+      window.mvFieldErrors = {validate: validate, show: show, fail: fail, clear: clear, restore: restore, forget: forget, wire: wire};
+      wire(document);
+    })();
+
     // Collapsible sidebar groups. Chat-first: groups start COLLAPSED so the
     // nav isn't a wall of every page — the group holding the active page is
     // always forced open, and any group the user pins open persists per-group
@@ -1100,7 +1874,10 @@
       document.querySelectorAll('.navgrp__toggle').forEach(function(btn) {
         const grp = btn.getAttribute('data-grp');
         const hasActive = btn.parentElement.querySelector('a.active');
-        const open = !!expanded[grp] || !!hasActive;
+        // An area the role's preset opens (areas navigation) starts open
+        // until the person closes it.
+        const preset = btn.getAttribute('data-grp-open') === 'true' && expanded[grp] !== false;
+        const open = !!expanded[grp] || !!hasActive || preset;
         btn.setAttribute('aria-expanded', open ? 'true' : 'false');
         btn.addEventListener('click', function() {
           const nowOpen = btn.getAttribute('aria-expanded') === 'true';
@@ -1181,7 +1958,12 @@
       });
       const topbar = document.querySelector('.topbar');
       function syncHeaderHeight() {
-        if (topbar) body.style.setProperty('--shell-topbar-h', Math.ceil(topbar.getBoundingClientRect().height) + 'px');
+        if (!topbar) return;
+        const height = Math.ceil(topbar.getBoundingClientRect().height) + 'px';
+        body.style.setProperty('--shell-topbar-h', height);
+        // The root reads it too: scroll-padding-top keeps focused elements
+        // and in-page link targets below the sticky bar (lightwork.css).
+        document.documentElement.style.setProperty('--shell-topbar-h', height);
       }
       // Status messages, display fonts and phone wrapping can grow the header.
       // Position navigation beneath its real height instead of covering controls.
@@ -1257,10 +2039,14 @@
           document.documentElement.style.fontSize = value === 'larger' ? '125%' : value === 'large' ? '112.5%' : '';
           return;
         }
-        if (['theme', 'font', 'density'].indexOf(key) === -1) return;
+        if (['theme', 'font', 'density', 'glass'].indexOf(key) === -1) return;
         if (key === 'theme') { document.body.dataset.themePreference = value; if (value === 'system') value = system.matches ? 'dark' : 'light'; }
         Array.from(document.body.classList).forEach(function (name) { if (name.startsWith(key + '-')) document.body.classList.remove(name); });
         document.body.classList.add(key + '-' + value);
+        // The browser's own chrome (phone address bar) follows the new canvas.
+        var chrome = key === 'theme' && document.querySelector('meta[name="theme-color"]');
+        var canvas = chrome && getComputedStyle(document.body).backgroundColor;
+        if (canvas && canvas !== 'rgba(0, 0, 0, 0)' && canvas !== 'transparent') chrome.setAttribute('content', canvas);
         window.dispatchEvent(new CustomEvent('lightwork:appearance-changed', {detail:{key:key,value:value}}));
       };
       var size = document.querySelector('meta[name="lightwork-text-size"]');

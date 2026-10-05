@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% from "_hero.html" import hero %}
-{% block title %}Executive Vendor Reports - Lightwork{% endblock %}
+{% block title %}Executive vendor reports - Lightwork{% endblock %}
 {% block head_extra %}
 <style nonce="{{ csp_style_nonce }}">
   .tper-grid { display:grid; gap:var(--space-3); grid-template-columns:repeat(auto-fit,minmax(min(100%,14rem),1fr)); }
@@ -24,7 +24,7 @@
      data-module-enabled="{{ 'true' if reports_module_enabled else 'false' }}"
      data-can-admin="{{ 'true' if reports_can_admin else 'false' }}"
      data-can-audit="{{ 'true' if reports_can_audit else 'false' }}">
-  {% call hero('Third-party management', 'Executive Vendor Reports',
+  {% call hero('Third-party management', 'Executive vendor reports',
                lede='Create a branded PDF that sums up the vendors, assessments, contracts and questionnaires you choose. Each report records exactly which records it used and says clearly when something could not be included.', title_id='tper-title') %}
     <div class="hero-statebox" aria-live="polite">
       <div class="hero-statebox__label">Availability</div>
@@ -40,7 +40,7 @@
   {% endif %}
   <p class="muted">Reports are plain text and your chosen colors only. Check each report against your current vendor list before sharing it.</p>
 
-  <div class="section-head"><h2>Your Reports</h2>
+  <div class="section-head"><h2>Your reports</h2>
     <fieldset class="tper-fieldset" id="tper-create-controls" data-tper-mutation data-authorized="{{ 'true' if reports_can_create else 'false' }}" disabled aria-disabled="true">
       <legend class="sr-only">Create a report</legend>
       <button class="btn btn--primary" id="tper-new" type="button">New report</button>
@@ -56,7 +56,7 @@
   </section>
 
   <section class="panel" id="tper-editor" hidden aria-labelledby="tper-create-title">
-    <h2 id="tper-create-title">New Executive Report</h2>
+    <h2 id="tper-create-title">New executive report</h2>
     <form id="tper-create-form" autocomplete="off" novalidate>
       <div class="tper-grid">
         <label>Organization name<input class="input" name="organization_name" maxlength="120" value="Lightwork" required></label>
@@ -68,7 +68,7 @@
         <label>Highlight color<input class="input" name="accent_color" type="color" value="#2cb1bc" required></label>
         <label>Text color<input class="input" name="text_color" type="color" value="#243b53" required></label>
       </div>
-      <h3>What to Include</h3>
+      <h3>What to include</h3>
       <p class="muted" id="tper-sources-status" role="status" aria-live="polite">Tick the records this report should sum up.</p>
       <div class="tper-sources" id="tper-sources"></div>
       <div class="tper-actions">

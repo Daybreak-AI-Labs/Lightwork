@@ -39,7 +39,7 @@
   }
   function plural(n, one, many) { return n + " " + (n === 1 ? one : many); }
   function when(ts) { return window.mvWhen ? window.mvWhen(ts) : ""; }
-  function say(text) { var s = $("hunt-status"); if (s) { s.textContent = text; } }
+  function say(text) { window.mvStatus($("hunt-status"), text); }
   function fail(text) {
     var e = $("hunt-error");
     if (e) { e.textContent = text; }
@@ -54,18 +54,15 @@
   }
 
   async function call(method, url, body, action, plainByStatus) {
-    var response;
-    try {
-      response = await fetch(url, { method: method, credentials: "same-origin",
-        headers: body ? { "Content-Type": "application/json" } : {}, body: body ? JSON.stringify(body) : undefined });
-    } catch (e) { fail(window.mvErrorText(e, action)); return null; }
-    if (!response.ok) {
-      fail((plainByStatus && plainByStatus[response.status]) || window.mvErrorText(response, action));
+    var data;
+    try { data = await window.mvFetchJSON(url, { method: method, body: body || undefined }, action); }
+    catch (error) {
+      fail((plainByStatus && plainByStatus[error.status]) || error.message);
       return null;
     }
     var e2 = $("hunt-error");
     if (e2) { e2.textContent = ""; }
-    try { return await response.json(); } catch (e) { return {}; }
+    return data || {};
   }
 
   // Turning a hunter on (shown when it is off).
@@ -76,11 +73,9 @@
       if (!ok) { return; }
       turnOn.disabled = true;
       try {
-        var r = await fetch("/api/v1/features/switches", { method: "POST", credentials: "same-origin",
-          headers: { "Content-Type": "application/json" }, body: JSON.stringify({ section: turnOn.dataset.section, enabled: true }) });
-        if (!r.ok) { $("hunt-turn-on-msg").textContent = window.mvErrorText(r, "turn this on"); turnOn.disabled = false; return; }
+        await window.mvFetchJSON("/api/v1/features/switches", { method: "POST", body: { section: turnOn.dataset.section, enabled: true } }, "turn this on");
         location.reload();
-      } catch (e) { $("hunt-turn-on-msg").textContent = window.mvErrorText(e, "turn this on"); turnOn.disabled = false; }
+      } catch (error) { $("hunt-turn-on-msg").textContent = error.message; turnOn.disabled = false; }
     });
   }
 
@@ -306,10 +301,8 @@
 
   async function load(keepStatus) {
     if (!keepStatus) { say("Loading…"); }
-    var r;
-    try { r = await fetch(api + "/summary", { credentials: "same-origin" }); } catch (e) { fail(window.mvErrorText(e, "load the findings")); return; }
-    if (!r.ok) { say(""); fail(window.mvErrorText(r, "load the findings")); return; }
-    summary = await r.json();
+    try { summary = await window.mvFetchJSON(api + "/summary", {}, "load the findings"); }
+    catch (error) { if (error.status) { say(""); } fail(error.message); return; }
     $("hunt-open").textContent = String(summary.open_findings || 0);
     $("hunt-investigations").textContent = String((summary.investigations || []).length);
     if ($("hunt-safety")) { $("hunt-safety").textContent = summary.reduced_autonomy ? "Not installed: automatic steps paused" : "Connected"; }
@@ -392,7 +385,7 @@
       tr.appendChild(el("td", null, SEVERITY[c.level] || human(c.level)));
       var act = el("td");
       act.appendChild(button("Remove", "btn--ghost", async function () {
-        var ok = await window.mvConfirm("Remove the check “" + c.title + "”?", { okText: "Remove" });
+        var ok = await window.mvConfirm("Remove the check “" + c.title + "”?", { okText: "Remove check" });
         if (!ok) { return; }
         var next = customChecks.slice(); next.splice(i, 1); saveChecks(next); renderChecks();
       }));

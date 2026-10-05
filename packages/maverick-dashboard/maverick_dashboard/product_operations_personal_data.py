@@ -111,7 +111,7 @@ def _fields(state, action, requests):
         return _scope_fields(state) + [_field("recall", "Allow personal recall and preference collection in this scope", "boolean", value=False)]
     if action in {"note", "note_source"}:
         fields = _scope_fields(state) + [
-            _field("note_id", "Owned note (first 200 in each scope; My Data shows all)", "select", depends_on="scope_id",
+            _field("note_id", "Owned note (first 200 in each scope; My data shows all)", "select", depends_on="scope_id",
                    choices_by={r["id"]: _choices((n["id"], n["note"][:160]) for n in r["notes"][:200]) for r in state["scopes"]})]
         if action == "note_source":
             return fields
@@ -293,7 +293,7 @@ def execute(request, _selection, args, prepared, _operation_id, *, action):
     actor = _authority(request, write=True)
     if action == "link_begin":
         row = native.personal_identity.begin(actor, args["channel"])
-        return Outcome("confirmed", "Private command created. Send it only to your configured channel bot, then independently confirm its displayed sender in My Data.", row)
+        return Outcome("confirmed", "Private command created. Send it only to your configured channel bot, then independently confirm its displayed sender in My data.", row)
     if action in {"link_confirm", "link_unlink"}:
         fn = native.personal_identity.confirm if action == "link_confirm" else native.personal_identity.unlink
         fn(actor, args["identity_id"], expected_revision=prepared["revision"])

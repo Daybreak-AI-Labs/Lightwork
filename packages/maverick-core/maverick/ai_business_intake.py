@@ -192,7 +192,7 @@ def form_contract() -> dict[str, Any]:
         ("high_risk_domains", "Potential high-risk use areas", authority._HIGH_RISK_DOMAINS),
         ("transparency_signals", "Transparency signals", authority._TRANSPARENCY_SIGNALS),
     ):
-        field("regulatory_context." + path, label, "multiple", "Specialist review signals", choices)
+        field("regulatory_context." + path, label, "multiple", "Expert review signals", choices)
     field("existing_asset_id", "Existing governed asset reference (optional)", "text", "Advanced", limit=64)
     return {"schema": INTAKE_SCHEMA, "fields": fields, "max_submission_bytes": _MAX_SUBMISSION_BYTES,
             "notice": NON_DETERMINATION_NOTICE}

@@ -191,8 +191,12 @@
     });
   }
   function canonicalizeSavedFlow(id) {
-    var path = '/flows/designer/' + encodeURIComponent(id);
-    if (window.location.pathname !== path || window.location.search) {
+    // The workflow builder's Steps mode keeps the saved flow in its own address,
+    // so a reload, Back and Copilot's flow controls stay on this tab.
+    var path = window.location.pathname === '/workflow-builder'
+      ? '/workflow-builder?mode=steps&flow=' + encodeURIComponent(id)
+      : '/flows/designer/' + encodeURIComponent(id);
+    if (window.location.pathname + window.location.search !== path) {
       window.history.replaceState(window.history.state, '', path);
     }
     canvas.setAttribute('data-flow-id', id);
@@ -307,7 +311,7 @@
   }
   function nodeById(id) { for (var i = 0; i < flow.nodes.length; i++) if (flow.nodes[i].id === id) return flow.nodes[i]; return null; }
   function newId() { var id; do { id = 'n' + (idSeq++); } while (nodeById(id)); return id; }
-  function say(t, err) { msg.textContent = t || ''; msg.style.color = err ? 'var(--danger)' : 'var(--muted)'; }
+  function say(t, err) { if (window.mvStatus) window.mvStatus(msg, t || '', {error: !!err}); else msg.textContent = t || ''; msg.style.color = err ? 'var(--danger)' : 'var(--muted)'; }
   function trunc(s, n) { s = String(s || ''); return s.length > n ? s.slice(0, n - 1) + '…' : s; }
 
   function summary(n) {
@@ -1843,7 +1847,7 @@
     }
     learnedInputPending = true;
     return prepare().catch(function (error) {
-      say(error.message || 'Could not open workflow inputs.', true);
+      say(error.message || 'Could not open workflow inputs. Refresh the page and try again.', true);
       return {status: 'unconfirmed'};
     }).finally(function () { learnedInputPending = false; });
   }
@@ -2250,7 +2254,7 @@
           var rm = document.createElement('button'); rm.className = 'btn btn--ghost btn--danger'; rm.type = 'button'; rm.textContent = 'Remove';
           rm.setAttribute('aria-label', 'Remove the start “' + t.name + '”');
           rm.addEventListener('click', async function () {
-            if (!(await window.mvConfirm('Remove “' + t.name + '”? The other app will no longer be able to start this flow.', { okText: 'Remove' }))) return;
+            if (!(await window.mvConfirm('Remove “' + t.name + '”? The other app will no longer be able to start this flow.', { okText: 'Remove start' }))) return;
             apiFetch('/api/v1/triggers/' + encodeURIComponent(t.name), { method: 'DELETE' })
               .then(function (r) { if (!r.ok) say(failText(r, 'remove it'), true); showTriggers(); })
               .catch(function (e) { say(failText(e, 'remove it'), true); });

@@ -142,7 +142,7 @@ _GENERIC = CopilotPageContext(
         "move from operating work to evidence, risk, privacy, security, and audit."
     ),
     capabilities=(
-        "Create and supervise governed goals and workflows.",
+        "Create and supervise governed tasks and workflows.",
         "Inspect signed operating evidence, controls, spend, and risk.",
     ),
     boundaries=(
@@ -200,9 +200,9 @@ _OPERATIONAL_GUIDES = (
      "Choose a status filter, open the task, then use Result, Steps, Plan or Problems to investigate it.",
      "A finished task is not proof that its answer is correct or approved for use.",
      "How do I find a failed task?", "Where can I see what a task did?"),
-    ("/deliverables", "Results", "Find saved answers and items awaiting sign-off, separate from running task history.",
+    ("/deliverables", "Results", "Find saved answers and items waiting for approval, separate from running task history.",
      "Open a result to read it; sharing, printing and downloads are on its task page.",
-     "Choose Review for an item awaiting sign-off, or open Finished work to inspect its saved answer.",
+     "Choose Review for an item waiting for approval, or open Finished work to inspect its saved answer.",
      "An available result may still need your review or sign-off before anyone relies on it.",
      "Where are my finished results?", "How do I download an answer?"),
     ("/automations", "Automations", "Manage schedules, connected-service starts, new-item starts and recent flow runs.",
@@ -213,7 +213,7 @@ _OPERATIONAL_GUIDES = (
     # Insights
     ("/overview", "Overview", "See recorded task momentum, current task states, recent work and department activity.",
      "Change the time range, open a recent task, or start a first task when the workspace is empty.",
-     "Choose a time range, then open a task from Recent goals or use Chat to start new work.",
+     "Choose a time range, then open a task from Recent tasks or use Chat to start new work.",
      "These counts describe recorded work; they do not by themselves prove business value.",
      "What is happening with our tasks?", "How do I start our first task?"),
     ("/ekko", "Ekko", "Record work you permit on this device and look for repeated steps Lightwork could take over.",
@@ -241,7 +241,7 @@ _OPERATIONAL_GUIDES = (
      "Check Your numbers, then Save and recalculate before interpreting a savings chart.",
      "Savings depend on entered assumptions; an estimate is not a verified financial result.",
      "What assumptions drive this estimate?", "How can I measure a real outcome?"),
-    ("/shoring", "Autonomous Shoring", "Track business areas, service targets, estimated savings and work waiting for a person.",
+    ("/shoring", "Autonomous shoring", "Track business areas, service targets, estimated savings and work waiting for a person.",
      "Add a business area, set optional service targets and review its waiting items.",
      "Open Book of Work, choose Add a business area and set the targets you will measure.",
      "The savings view uses entered targets and costs; check actual results before claiming a benefit.",
@@ -278,8 +278,8 @@ _OPERATIONAL_GUIDES = (
      "Saving or testing a connection does not authorize a later change in the outside system.",
      "How do I test a connection?", "Who can use a saved connection?"),
     ("/workspace/recovery", "Workspace recovery", "Create, inspect and test saved workspace copies before a recovery is needed.",
-     "Keep a recovery key, create a snapshot and test restore safely before using Restore This Workspace.",
-     "Start with Recovery Key, then Create snapshot and Test restore safely.",
+     "Keep a recovery key, create a snapshot and test restore safely before using Restore this workspace.",
+     "Start with Recovery key, then Create snapshot and Test restore safely.",
      "Keep the key away from the copies; a real restore replaces newer work in that workspace.",
      "How do I test a saved copy?", "What would a restore replace?"),
     ("/settings", "Settings", "Find models, connections, features, access and maintenance settings in one place.",
@@ -305,7 +305,7 @@ _OPERATIONAL_GUIDES = (
     # Common pages reached from those workspaces
     ("/help", "Help and diagnostics", "Prepare a support report or a reviewed draft about a task that stopped.",
      "Review the report on this page, then copy or download exactly the draft you intend to share.",
-     "Choose Prepare support report, or search for a stopped task under Report a Problem With a Task.",
+     "Choose Prepare support report, or search for a stopped task under Report a problem with a task.",
      "Nothing is sent automatically; share a reviewed download through your organization's support channel.",
      "How do I report a failed task?", "What does a support report contain?"),
     ("/account", "Your account", "Open your preferences, devices, access keys, permission requests and personal data controls.",
@@ -354,7 +354,7 @@ _CONTEXTS = tuple(
             path="/chat", title="Chat",
             summary="Describe the work you want Lightwork to do, add files if helpful, and choose how to start it. You can return to recent chats from the menu.",
             capabilities=(
-                "Start a task from your message, or draft a flow or specialist when those choices are available.",
+                "Start a task from your message, or draft a flow or agent when those choices are available.",
                 "Attach files, review the task budget, and continue work in a saved chat.",
             ),
             boundaries=(
@@ -396,7 +396,7 @@ _CONTEXTS = tuple(
         ),
         _registered(
             path="/workflows",
-            summary="Find your saved flows, reusable templates, and specialist instructions.",
+            summary="Find your saved flows, reusable templates, and agent playbooks.",
             capabilities=(
                 "Create and edit visual flows when the flow engine is on and you have operator access.",
                 "Review saved flows and their results from this page.",
@@ -415,44 +415,44 @@ _CONTEXTS = tuple(
         ),
         _registered(
             path="/agents",
-            summary="Browse specialists, check required actions, and review each specialist's guardrails and independence level.",
+            summary="Browse agents and specialists, check required actions, and review each one's guardrails and independence level.",
             capabilities=(
-                "Check whether required workflow actions are present before choosing a specialist.",
-                "Administrators can edit a specialist's independence by risk level and keep new specialists supervised.",
+                "Check whether required workflow actions are present before choosing an agent or specialist.",
+                "Administrators can edit the independence of an agent or specialist by risk level and keep new ones supervised.",
             ),
             boundaries=(
                 "A Can start label checks registered actions; live connections, permissions and the AI service are checked when work starts.",
-                "A server-configured specialist policy takes priority over the editor. The server checks authority and current approval evidence before ending supervision.",
+                "A server-configured independence policy takes priority over the editor. The server checks authority and current approval evidence before ending supervision.",
             ),
             next_steps=(
-                "Use the ready-first picker and open a specialist's job card to see its current setup.",
-                "If an action needs setup, follow Review setup. Administrators can review Independence in the specialist editor.",
+                "Use the ready-first picker and open a job card to see its current setup.",
+                "If an action needs setup, follow Review setup. Administrators can review Independence in the editor.",
             ),
             suggested_questions=(
-                "Why can this specialist not start?",
+                "Why can this agent or specialist not start?",
                 "What do Watch, Suggest, Ask, and Act mean?",
-                "Why is this specialist still supervised?",
+                "Why is this agent or specialist still supervised?",
             ),
         ),
         _registered(
             path="/workforce",
-            summary="See departments, specialist setup status, and how independently specialists may work.",
+            summary="See departments, specialist setup status, and how independently agents and specialists may work.",
             capabilities=(
                 "See how many specialists in each department have their required actions available.",
                 "Administrators can grant independence to a candidate after a current approval-record check.",
             ),
             boundaries=(
                 "Department counts check registered actions only; live connections, permissions and the AI service are checked when work starts.",
-                "Independence levels must be enabled, and a candidate's current approval record and specialist revision are rechecked before a grant.",
+                "Independence levels must be enabled, and a candidate's current approval record and version are rechecked before a grant.",
             ),
             next_steps=(
                 "Open a department to review the specialists that need setup.",
-                "Review each candidate's policy before granting independence; use the specialist editor to set per-risk levels.",
+                "Review each candidate's policy before granting independence; use the editor in Agent Factory to set per-risk levels.",
             ),
             suggested_questions=(
                 "Which departments need setup?",
-                "How do I change a specialist's independence?",
-                "What evidence is needed before a specialist graduates?",
+                "How do I change how independently an agent or specialist works?",
+                "What evidence is needed before an agent or specialist graduates?",
             ),
         ),
         _registered(
@@ -526,7 +526,7 @@ _CONTEXTS = tuple(
         CopilotPageContext(
             path="/users/departures", title="Employee departures",
             summary="Review employee access and retained work before deactivating an exact named identity.",
-            capabilities=("Preview owned work, memberships, connections and pending run-goal schedules.",
+            capabilities=("Preview owned work, memberships, connections and pending scheduled tasks.",
                           "Deactivate local access and record named responsibility for unresolved handoffs."),
             boundaries=("Removing local credentials does not revoke external provider consent.",
                         "Data and holds remain retained; a custodian receives no private-content access.",
@@ -638,7 +638,7 @@ _CONTEXTS = tuple(
                 "Extracted text is not persisted, but process-memory zeroization is not guaranteed.",
             ),
             next_steps=(
-                "Refresh status and confirm the tenant is enabled and configured for an operation attempt; status does not resolve artifact-specific authorities or prove them ready.",
+                "Refresh status and confirm the workspace is enabled and configured for an operation attempt; status does not resolve artifact-specific authorities or prove them ready.",
                 "Upload only an attested artifact with exact authority digests and revisions.",
                 "Have a distinct authorized human review the pending result.",
             ),
@@ -660,7 +660,7 @@ _CONTEXTS = tuple(
                 "Inspect audit integrity and apply authorized retention maintenance.",
             ),
             boundaries=(
-                "Tenant, actor, entity authority, entity digest, retention, and quotas are server-owned.",
+                "Workspace, actor, entity authority, entity digest, retention, and quotas are server-owned.",
                 "Task creation independently re-resolves the current inventory authority.",
                 "Local readiness does not prove an external workflow or customer has accepted the task outcome.",
             ),
@@ -688,7 +688,7 @@ _CONTEXTS = tuple(
             ),
             boundaries=(
                 "Agents provide decision support and never become autonomous authority.",
-                "Evidence, adapters, dispatchers, credentials, and tenant identity are server-owned.",
+                "Evidence, adapters, dispatchers, credentials, and workspace identity are server-owned.",
                 "Execution is default-off and requires durable token custody plus independent approval.",
             ),
             next_steps=(
@@ -777,12 +777,12 @@ _CONTEXTS = tuple(
                 "Every choice is bound to an exact policy and notice version.",
                 "Privacy signals can deny covered purposes; they never manufacture consent.",
                 "An enforcement result does not prove every tracker or destination in an estate is known.",
-                "The operator page cannot unlink, relink, choose a tenant, or submit identity subjects.",
+                "The operator page cannot unlink, relink, choose a workspace, or submit identity subjects.",
                 "Receipt rows are never moved or merged; the current link is an association projection.",
                 "Production IdP/JWKS operation and live multi-device acceptance remain external evidence.",
             ),
             next_steps=(
-                "Refresh the page and verify the consent authority is enabled for the active tenant.",
+                "Refresh the page and verify the consent authority is enabled for the active workspace.",
                 "Confirm the exact policy, notice, purpose, and jurisdiction before recording a choice.",
                 "Run the enforcement check before activating a tracker or destination.",
                 "Use a fresh public pairing and exact revisions for unlink, relink, or account transition.",
@@ -803,10 +803,10 @@ _CONTEXTS = tuple(
                 "Create an index definition pinned to one published data element.",
                 "Build or rebuild a revision-pinned HMAC index without persisting raw values.",
                 "Search one ready index and inspect bounded opaque profile matches.",
-                "Revoke indexes and verify tenant-local audit and integrity records.",
+                "Revoke indexes and verify workspace-local audit and integrity records.",
             ),
             boundaries=(
-                "The browser cannot choose tenant identity, actors, key material, key versions, retention, or quotas.",
+                "The browser cannot choose workspace identity, actors, key material, key versions, retention, or quotas.",
                 "Search is exact and intentionally excludes free-text, fuzzy, inferred, or cross-tenant discovery.",
                 "A ready local index does not prove customer privacy review or production-scale acceptance.",
             ),
@@ -824,7 +824,7 @@ _CONTEXTS = tuple(
         _registered(
             path="/consent/bulk-jobs",
             summary=(
-                "Run tenant-scoped, credit-limited asynchronous receipt exports "
+                "Run workspace-scoped, credit-limited asynchronous receipt exports "
                 "and governed consent-subject lifecycle actions."
             ),
             capabilities=(
@@ -833,17 +833,17 @@ _CONTEXTS = tuple(
                 "Inspect credits, progress, immutable history, retention, and integrity without exposing raw subject identifiers.",
             ),
             boundaries=(
-                "Tenant, principal, actor, worker, stores, paths, and provider authority are server-derived and cannot be supplied by the browser.",
+                "Workspace, principal, actor, worker, stores, paths, and provider authority are server-derived and cannot be supplied by the browser.",
                 "Each operation fails closed unless its real consent-store primitive is installed; a similarly shaped callback is not sufficient.",
                 "Local completion does not prove production volume, customer acceptance, regulator delivery, or an external provider effect.",
             ),
             next_steps=(
-                "Check readiness and the per-operation capability map before creating a job.",
+                "Check readiness and what each kind of change can do before starting a bulk change.",
                 "Confirm the credit reservation, exact profile revisions, and receipt identifiers before scheduling mutations.",
                 "Review terminal history and download integrity before relying on an export or action result.",
             ),
             suggested_questions=(
-                "Which bulk operations are ready for this tenant?",
+                "Which bulk operations are ready for this workspace?",
                 "What should I verify before scheduling a destructive action?",
                 "What does a successful export prove?",
             ),
@@ -860,7 +860,7 @@ _CONTEXTS = tuple(
                 "Expose only the active integrity-checked SDK projection while retaining bounded history, recovery, and audit evidence.",
             ),
             boundaries=(
-                "The browser cannot choose tenant, actor, authority digests, storage, retention, CSP nonce values, or signing material.",
+                "The browser cannot choose workspace, actor, authority digests, storage, retention, CSP nonce values, or signing material.",
                 "A CSP nonce requirement is configuration metadata; Lightwork never stores or publishes a reusable nonce value.",
                 "A locally active setting does not prove the SDK was installed on a customer property or accepted in live browsers.",
             ),
@@ -887,12 +887,12 @@ _CONTEXTS = tuple(
                 "Create a real privacy-rights opt-out case while retaining only bounded case and signed-result digests in this control plane.",
             ),
             boundaries=(
-                "The browser cannot select tenant, profile, property, origin, service, publication, policy, storage, or retention authority.",
+                "The browser cannot select workspace, profile, property, origin, service, publication, policy, storage, or retention authority.",
                 "A successful local submission proves the governed workflow ran; it does not prove every device or service honored the request.",
                 "Live mobile, email, connected-device, customer-estate, and legal acceptance require separate evidence.",
             ),
             next_steps=(
-                "Confirm public consent and privacy-rights intake readiness for the active tenant.",
+                "Confirm public consent and privacy-rights intake readiness for the active workspace.",
                 "Bind the experience to the exact active public client and independently review its device and service coverage.",
                 "Exercise revocation, retry, recovery, and representative live-device acceptance before relying on production coverage.",
             ),
@@ -919,7 +919,7 @@ _CONTEXTS = tuple(
                 "Local manifest analysis does not prove a native SDK, deployed-device behavior, completeness, scale, or customer acceptance.",
             ),
             next_steps=(
-                "Confirm tenant composition and application authority are ready before uploading extracted manifests.",
+                "Confirm workspace composition and application authority are ready before uploading extracted manifests.",
                 "Review cited completeness limits and have a different authorized person decide the exact result.",
                 "Run separate device, runtime-traffic, accessibility, recovery, and scale acceptance before relying on production coverage.",
             ),
@@ -995,7 +995,7 @@ _CONTEXTS = tuple(
             ),
             boundaries=(
                 "Sync queues only events reconstructed from immutable receipts.",
-                "Provider origins, DNS authority, signing keys, OAuth credentials, tenant identity, and destination mappings are server-controlled.",
+                "Provider origins, DNS authority, signing keys, OAuth credentials, workspace identity, and destination mappings are server-controlled.",
                 "Named adapters refuse redirects and remain unavailable without deployment-held credential references and independent reconciliation authority.",
                 "A local acknowledgement or ready state does not prove live provider interoperability, permissions, completeness, customer acceptance, or applied state.",
             ),
@@ -1048,7 +1048,7 @@ _CONTEXTS = tuple(
                 "Check fail-closed readiness and integrity and discover current and historical public receipt verification keys.",
             ),
             boundaries=(
-                "Tenant, principal, publication, service-client, signer and stored device authority are server-derived; the browser supplies only safe selectors, CAS revisions and attestation evidence.",
+                "Workspace, principal, publication, service-client, signer and stored device authority are server-derived; the browser supplies only safe selectors, CAS revisions and attestation evidence.",
                 "Platform attestation has no permissive fallback, and configured profile, rights and GPP/TCF callbacks are required before readiness.",
                 "Local and synthetic success does not prove app-store, live-device, accessibility, conformance, customer-estate or regulator acceptance.",
             ),
@@ -1075,7 +1075,7 @@ _CONTEXTS = tuple(
                 "Verify integrity and purge only retention-eligible operational records.",
             ),
             boundaries=(
-                "Tenant and actor are server-derived; the page accepts no raw profile or capability selector.",
+                "Workspace and actor are server-derived; the page accepts no raw profile or capability selector.",
                 "Authors cannot approve their own versions and every mutation uses an exact revision.",
                 "Only closed published values and trusted purposes are supported; protected traits are never inferred.",
             ),
@@ -1096,7 +1096,7 @@ _CONTEXTS = tuple(
                 "discoveries, and bridge only fresh approved mappings."
             ),
             capabilities=(
-                "Enroll an exact property, schedule scans, and explicitly run a leased job.",
+                "Add an exact website, schedule scans, and start a scan when you choose.",
                 "Inspect bounded reports and record versioned classification review.",
                 "Bridge fresh reviewed mappings and operate audit, recovery, and retention controls.",
             ),
@@ -1127,7 +1127,7 @@ _CONTEXTS = tuple(
                 "Inspect integrity and export a signed, content-free governance record.",
             ),
             boundaries=(
-                "The browser cannot select tenant, principal, property, report, inventory revision, or revocation set.",
+                "The browser cannot select workspace, principal, property, report, inventory revision, or revocation set.",
                 "Approval and local acceptance require different authenticated people and exact source pins.",
                 "Acceptance does not generate legal copy, mutate a site or app, call a provider, or publish a notice.",
             ),
@@ -1156,10 +1156,10 @@ _CONTEXTS = tuple(
                 "Bind an approved asset and optional verified domain to the exact enrolled client and consent publication.",
             ),
             boundaries=(
-                "Tenant, operator, consumer binding, permission authority, and signing keys are server-resolved.",
+                "Workspace, operator, consumer binding, permission authority, and signing keys are server-resolved.",
                 "Every grant and case authorization requires a requester plus two other distinct approvers.",
                 "The surface performs no identity proof, network call, provider write, or completeness inference.",
-                "Branding accepts no SVG, HTML, CSS, URL, raw storage path, caller-selected tenant, or encryption key.",
+                "Branding accepts no SVG, HTML, CSS, URL, raw storage path, caller-selected workspace, or encryption key.",
                 "Live DNS/TLS/CDN issuance and accessibility, brand, and customer acceptance remain external.",
             ),
             next_steps=(
@@ -1268,7 +1268,7 @@ _CONTEXTS = tuple(
                 "Local studio state is not evidence of live provider interoperability, customer usability, regulator acceptance, or compliance.",
             ),
             next_steps=(
-                "Confirm the active tenant, readiness state, and role before authoring a draft.",
+                "Confirm the active workspace, readiness state, and role before authoring a draft.",
                 "Use different principals for authoring, review, and approval before publication.",
                 "Validate runtime projections and recovery with the deployment-owned target before relying on them operationally.",
             ),
@@ -1364,17 +1364,17 @@ _CONTEXTS = tuple(
             ),
             capabilities=(
                 "Run the local SOC 2 observer and configured read-only AWS Security Hub, AWS Config, Azure Defender, Azure Policy, Google Cloud Security Command Center, GitHub security-stream, and Okta posture collectors.",
-                "Inspect exact definition and enrollment authority, jobs, runs, digest-only observations, alerts, retention, and integrity.",
-                "Run one bounded server-authorized scheduler cycle or let the configured leased scheduler operate across active tenants.",
+                "Inspect each source's setup and approval, its scans, recorded observations, alerts, retention, and integrity.",
+                "Run one bounded server-authorized scheduler cycle or let the configured leased scheduler operate across active workspaces.",
             ),
             boundaries=(
-                "The browser cannot choose a tenant, provider origin, asset scope, source selector, credential reference, transport, or raw provider payload.",
-                "Readiness resolves no credential value and performs no provider network request; collection rechecks the exact approved definition and active enrollment for every job.",
+                "The browser cannot choose a workspace, provider origin, asset scope, source selector, credential reference, transport, or raw provider payload.",
+                "Readiness resolves no credential value and performs no provider network request; collection rechecks the exact approved definition and active enrollment for every scan.",
                 "A configured source or successful observation does not prove estate completeness, control effectiveness, compliance, certification, licensed access, or live provider/customer acceptance.",
             ),
             next_steps=(
                 "Refresh readiness and resolve every missing stock source manifest or credential reference.",
-                "Register and independently approve the exact collector definition, then create the matching tenant enrollment using its current integrity digest.",
+                "Register and independently approve the exact collector definition, then create the matching workspace enrollment using its current integrity digest.",
                 "Run a bounded cycle, inspect incomplete/retry/dead-letter state, verify integrity, and obtain live provider and customer acceptance before relying on coverage.",
             ),
             suggested_questions=(
@@ -1417,9 +1417,9 @@ _CONTEXTS = tuple(
             ),
             capabilities=(
                 "Enroll, suspend, reactivate, or revoke an exact source and its schedule.",
-                "Lease, execute, fail, replay, and inspect bounded jobs through stock AWS S3, Azure Blob, Google Cloud Storage, Snowflake metadata, ServiceNow CMDB, and Microsoft Entra adapters.",
+                "Start, retry and inspect scans through stock AWS S3, Azure Blob, Google Cloud Storage, Snowflake metadata, ServiceNow CMDB, and Microsoft Entra adapters.",
                 "Propose and independently approve a classification, then operate its durable remediation outbox and digest-only governed data-map projection.",
-                "Inspect or enable the bounded managed remediation scheduler for tenant-derived retry and exact local ambiguity reconciliation.",
+                "Inspect or enable the bounded managed remediation scheduler for workspace-derived retry and exact local ambiguity reconciliation.",
             ),
             boundaries=(
                 "Raw secrets never enter the page; credentials and adapters are server-resolved.",
@@ -1431,7 +1431,7 @@ _CONTEXTS = tuple(
                 "Verify the exact source, credential reference, provider adapter, privacy review, and scan bounds.",
                 "Inspect completeness, truncation, and errors before proposing a classification.",
                 "Use a distinct authorized approver, then run and reconcile the durable outbox before treating the data map as current.",
-                "Confirm the tenant scheduler opt-in, bounded cycle status, recovery counter, and concurrency exclusion before relying on automatic retry.",
+                "Confirm the workspace scheduler opt-in, bounded cycle status, recovery counter, and concurrency exclusion before relying on automatic retry.",
             ),
             suggested_questions=(
                 "What does a discovery report prove?",
@@ -1528,21 +1528,21 @@ _CONTEXTS = tuple(
             capabilities=(
                 "Create a notice release from opaque content and evidence references.",
                 "Record independent approval, publication intent, rollback, withdrawal, revocation, and expiry.",
-                "Run one bounded tenant-derived local publication cycle through an exact server-owned target binding.",
+                "Run one bounded workspace-derived local publication cycle through an exact server-owned target binding.",
             ),
             boundaries=(
                 "Releases carry only digests and opaque references; raw notice content and key values are rejected.",
-                "Tenant, target property, consent reference, rule group, resource versions, and CAS revisions are server-derived.",
+                "Workspace, target property, consent reference, rule group, resource versions, and CAS revisions are server-derived.",
                 "The runtime mutates only Lightwork's local consent publication store; it has no website, provider, tag-manager, or SDK mutation path.",
                 "Local completion is not proof of customer browser behavior, provider acceptance, production deployment, or legal sufficiency.",
             ),
             next_steps=(
-                "Load runtime status and confirm configuration preflight is ready for the active tenant.",
+                "Load runtime status and confirm configuration preflight is ready for the active workspace.",
                 "Have an authorized person other than the author approve the exact release.",
                 "Verify the release digests and exact target binding before authorizing one local cycle.",
             ),
             suggested_questions=(
-                "Is the local publication runtime configured for this tenant?",
+                "Is the local publication runtime configured for this workspace?",
                 "What does a successful local publication prove?",
                 "How does rollback choose the exact prior bundle?",
             ),
@@ -1559,12 +1559,12 @@ _CONTEXTS = tuple(
                 "Inspect immutable history, integrity, retention queues, and recovery readiness.",
             ),
             boundaries=(
-                "Tenant, actor, vendor type, vendor authority, issuer, revocation, retention, and storage are server-owned.",
+                "Workspace, actor, vendor type, vendor authority, issuer, revocation, retention, and storage are server-owned.",
                 "Raw contracts, licensed templates, executable formulas, provider adapters, and recovery paths are not accepted.",
                 "Recovery preflight verifies readiness and integrity; actual backups remain server-configured administrator operations.",
             ),
             next_steps=(
-                "Confirm the tenant composition is enabled, configured, and ready.",
+                "Confirm the workspace composition is enabled, configured, and ready.",
                 "Use the exact enrolled vendor ID and revision before creating a record.",
                 "Review redaction, history, and integrity after material lifecycle changes.",
             ),
@@ -1604,7 +1604,7 @@ _CONTEXTS = tuple(
         _registered(
             path="/administration/document-vault",
             summary=(
-                "Custody bounded approved document bytes in tenant-private encrypted "
+                "Custody bounded approved document bytes in workspace-private encrypted "
                 "storage and deliver them only through one-time principal-bound grants."
             ),
             capabilities=(
@@ -1804,7 +1804,7 @@ _CONTEXTS = tuple(
                 "workflow and track a terminal, evidence-backed outcome."
             ),
             capabilities=(
-                "List tenant-local broker, record, outcome, proposal, and key-revision authority without raw subject fields or key material.",
+                "List workspace-local broker, record, outcome, proposal, and key-revision authority without raw subject fields or key material.",
                 "Propose broker enrollment/revocation, DROP record import/revocation, independent outcomes, and key lifecycle operations.",
                 "Apply every authority mutation through a different authenticated administrator with revision and idempotency checks.",
                 "Create a deletion or opt-out request from an enrolled DROP record.",
@@ -1820,7 +1820,7 @@ _CONTEXTS = tuple(
             ),
             next_steps=(
                 "Refresh status and distinguish local operation from request executability; zero active records means no DROP request can execute.",
-                "For a fresh tenant, enroll a broker and import a record through two-person authority proposals before creating a request.",
+                "For a fresh workspace, enroll a broker and import a record through two-person authority proposals before creating a request.",
                 "Use the exact external DROP ID, request type, approved template, and language.",
                 "Propose and independently approve outcome evidence before recording a terminal status.",
             ),
@@ -1944,11 +1944,11 @@ def _registered_page_context(path: str) -> CopilotPageContext | None:
     group = str(page.get("group") or "workspace")
     floor = str(page.get("floor") or "view")
     authority = {
-        "view": "You can read this page with viewing access. Changing records may require more access.",
-        "operate": "You need permission to run work to use this page's controls.",
-        "audit": "You need permission to review activity records to use this page.",
-        "admin": "You need installation administrator access to use this page.",
-    }.get(floor, "Lightwork checks your access before changing anything.")
+        "view": "Anyone who can open this page can look; some changes need more access.",
+        "operate": "Making changes here needs operator access.",
+        "audit": "This page is for people who review the audit record.",
+        "admin": "This page is for administrators.",
+    }.get(floor, "Lightwork checks your access again for every change.")
     return _ensure_read_only(
         CopilotPageContext(
             path=path,
@@ -1970,9 +1970,9 @@ def _registered_page_context(path: str) -> CopilotPageContext | None:
                 "After a change, check the result and saved record before relying on it.",
             ),
             suggested_questions=(
-                f"What can I inspect on {title}?",
-                "What access and setup does this page need?",
-                "What should I check after a change?",
+                f"What can I do on {title}?",
+                "Where do I start on this page?",
+                "What should I check before I rely on it?",
             ),
         )
     )
@@ -2098,7 +2098,7 @@ _PANEL_TIPS = {
     "/consent/native": "Registration needs a valid check from the device platform; local success does not prove live app acceptance.",
     "/consent/profile-data": "Authors cannot approve their own versions, and protected traits are never inferred.",
     "/consent/custom-indexes": "Search matches exact saved values. It does not search across workspaces or guess from similar data.",
-    "/consent/bulk-jobs": "A completed local job does not confirm that an outside service acted or received the result.",
+    "/consent/bulk-jobs": "A completed bulk change does not confirm that an outside service acted or received the result.",
     "/consent/publish-settings": "Lightwork keeps publishing keys and protected storage under administrator control.",
     "/consent/global-opt-out": "A local opt-out request does not confirm that every device or service honored it.",
     "/consent/application-scans": "The scan reviews submitted app information. It does not inspect a live device or network activity.",
@@ -2159,6 +2159,8 @@ def public_context(
         order = ("view", "operate", "audit", "admin")
         result["caller_permissions"] = [item for item in order if item in permissions]
         result["authority_notice"] = _authority_notice(permissions)
+        result["intro"] = intro_for(context)
+        result["suggestions"] = suggestions_for(context, permissions)
     return result
 
 
@@ -2175,6 +2177,26 @@ def _plain_lines(lines: tuple[str, ...], fallback: str) -> str:
     """Keep useful page copy while avoiding implementation terms in replies."""
     selected = [line for line in lines if not _INTERNAL_COPY.search(line)]
     return " ".join(selected[:2]) if selected else fallback
+def intro_for(context: CopilotPageContext, *, changes_enabled: bool = False) -> str:
+    """One short line on what Copilot can do here, instead of a list of boundaries."""
+    lead = (f"I can explain {context.title}, answer questions about it and take you to the right control."
+            if context.path != "/" else
+            "I can explain this page, answer questions about it and take you to the right control.")
+    return lead + (" Changes always need your confirmation." if changes_enabled
+                   else " I don't change anything for you.")
+
+
+def suggestions_for(context: CopilotPageContext, permissions: frozenset[str]) -> list[str]:
+    """Three things people come to this page to do, phrased as tasks."""
+    from .copilot_tasks import tasks_for
+
+    tasks = [task.label for task in tasks_for(context.path, permissions)]
+    for question in context.suggested_questions:
+        if len(tasks) >= 3:
+            break
+        if question not in tasks:
+            tasks.append(question)
+    return tasks[:3]
 
 
 def built_in_reply(
@@ -2320,8 +2342,10 @@ __all__ = [
     "CopilotPageContext",
     "built_in_reply",
     "context_for_page",
+    "intro_for",
     "is_action_request",
     "model_claims_completed_action",
     "public_context",
     "sanitize_model_reply",
+    "suggestions_for",
 ]

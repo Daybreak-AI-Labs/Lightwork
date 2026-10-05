@@ -2,14 +2,13 @@
 (function () {
   'use strict';
   async function call(path, body) {
-    var response = await fetch(path, {method: body ? 'POST' : 'GET', cache:'no-store',
-      headers:{'Content-Type':'application/json'}, body:body ? JSON.stringify(body) : undefined});
-    var data = await response.json();
-    if (!response.ok) {
-      var error = new Error(typeof data.message === 'string' ? data.message : typeof data.detail === 'string' ? data.detail : 'This change could not be reviewed. Your draft is kept.');
-      error.data = data; error.status = response.status; throw error;
+    try {
+      return await window.mvFetchJSON(path, {method: body ? 'POST' : 'GET', cache: 'no-store', body: body, plainDetail: true}, 'review this change');
+    } catch (error) {
+      error.data = error.payload || {};  // a conflict lists what changed
+      if (error.status && !window.mvPlainDetail(error.detail)) error.message = 'This change could not be reviewed. Your draft is kept. Try again.';
+      throw error;
     }
-    return data;
   }
   function shown(value) { return typeof value === 'string' ? value : JSON.stringify(value); }
   function pickReview(plan, changes) {
@@ -27,7 +26,7 @@
       });
       plan.items.forEach(function (item) {
         var section = document.createElement('section'), title = document.createElement('h3'); title.textContent = item.label + (item.automatic ? ' (dependent change)' : ''); section.appendChild(title);
-        var detail = document.createElement('p'); detail.textContent = item.scope + ': ' + item.source + ' to ' + item.resulting_source + '. ' + item.timing + '. Affects: ' + item.affected + '. Module: ' + item.module; section.appendChild(detail);
+        var detail = document.createElement('p'); detail.textContent = item.scope + ': ' + item.source + ' to ' + item.resulting_source + '. ' + item.timing + '. Affects: ' + item.affected + '. Area: ' + item.module; section.appendChild(detail);
         var before = document.createElement('pre'); before.textContent = 'Before: ' + shown(item.before) + '\nAfter: ' + shown(item.after); section.appendChild(before); dialog.appendChild(section);
       });
       plan.warnings.forEach(function (warning) { var p = document.createElement('p'); p.textContent = warning.label + ': ' + warning.warning; dialog.appendChild(p); });

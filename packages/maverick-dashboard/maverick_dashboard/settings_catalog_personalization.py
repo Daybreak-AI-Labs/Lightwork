@@ -26,6 +26,7 @@ def entries(S, C, Column):
         "font": (("default", "Default"), ("dyslexic", "Dyslexia-friendly")),
         "density": (("comfortable", "Comfortable"), ("compact", "Compact")),
         "text_size": (("standard", "Standard"), ("large", "Large"), ("larger", "Larger")),
+        "glass": (("off", "Off"), ("on", "On")),
     }
     for key, _label in choices:
         extra = {"choices_from": "preference_themes"} if key == "theme" else {"choices": options[key]} if key in options else {"max_length": 2000 if key == "custom_style" else 80}
@@ -36,9 +37,10 @@ def entries(S, C, Column):
                         **extra, **common))
     from maverick.product_operation_families import FAMILIES
     result.append(S("copilot", "operation_families", "Actions available through Copilot",
-                    "Choose which registered native controls Copilot can open. Each change still requires "
-                    "current access, a fresh before-and-after review and explicit confirmation. Enable Copilot "
-                    "actions in Features first. A family with no adapter on a page adds no capability.",
+                    "Choose which registered native controls Copilot can open. Controls that only show "
+                    "current status work as soon as their family is chosen. Controls that change something "
+                    "also need Copilot actions turned on in Features, current access, a fresh before-and-after "
+                    "review and explicit confirmation. A family with no adapter on a page adds no capability.",
                     "multiselect", "People & access", ["learning"], "maverick_dashboard.product_operations",
                     subgroup="Copilot actions", max_items=len(FAMILIES),
                     choices=tuple((name, name.capitalize()) for name in FAMILIES),
@@ -49,11 +51,11 @@ def entries(S, C, Column):
                     "unconfirmed. This reports startup configuration, separately from service health.",
                     "toggle", "People & access", True, "maverick.runtime_configuration", subgroup="Configuration status"))
     from maverick.config import EMPLOYEE_ACTIVATION_JOBS
-    result.append(S("dashboard", "employee_activation_jobs", "Approved first-job guides",
-                    "Choose the employee activation jobs this installation offers. Workspace choices may only narrow this catalog. Role selection never grants a department or tools; disabled departments remain hidden.",
+    result.append(S("dashboard", "employee_activation_jobs", "Approved first-task guides",
+                    "Choose the first-task guides this installation offers. Workspace choices may only narrow this catalog. Role selection never grants a department or tools; disabled departments remain hidden.",
                     "multiselect", "People & access", list(EMPLOYEE_ACTIVATION_JOBS), "maverick.config",
                     choices=tuple(EMPLOYEE_ACTIVATION_JOBS.items()), max_items=len(EMPLOYEE_ACTIVATION_JOBS),
-                    weaker="grow", warning="Additional guided jobs become available within each person's existing access."))
+                    weaker="grow", warning="Additional guided tasks become available within each person's existing access."))
     return result
 
 

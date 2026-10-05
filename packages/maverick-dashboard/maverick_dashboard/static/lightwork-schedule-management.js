@@ -17,15 +17,8 @@
   document.addEventListener('lightwork:workspace-changed',contextChanged);
   document.addEventListener('lightwork:connection-access-lost',contextChanged);
   async function request(url,body){
-    const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),15000);
-    try{
-      const response=await fetch(url,{method:body?'POST':'GET',headers:{'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined,cache:'no-store',signal:controller.signal});
-      if([401,403].includes(response.status)){contextChanged();throw new Error('Access changed. Sign in again or ask an administrator.');}
-      const data=await response.json();
-      if(!response.ok)throw new Error(response.status===409?'This schedule or its evidence changed. Refresh and review it again.':window.mvErrorText?mvErrorText(response,'update the schedule'):'The request was refused. Refresh and review.');
-      return data;
-    }catch(error){if(error.name==='AbortError'||error instanceof TypeError)throw new Error('Result not confirmed. Refresh schedules before another change. No request was replayed.');throw error;}
-    finally{clearTimeout(timer);}
+    return window.mvFetchJSON(url,{method:body?'POST':'GET',body,cache:'no-store',timeout:15000,onAccess:contextChanged,
+      messages:{401:'Access changed. Sign in again or ask an administrator.',403:'Access changed. Sign in again or ask an administrator.',409:'This schedule or its evidence changed. Refresh and review it again.'}},'update the schedule');
   }
   function refresh(){document.dispatchEvent(new CustomEvent('lightwork:schedules-changed'));}
   function panel(row,title){

@@ -77,11 +77,16 @@ def _approvals(world, principal: str, *, can_decide: bool, now: float) -> list[d
     return rows
 
 
-def _results(world, principal: str, *, owner_filter: str | None, now: float) -> list[dict[str, Any]]:
+def _results(world, principal: str, *, owner_filter: str | None, now: float,
+             seen: set[int] | frozenset[int] = frozenset()) -> tuple[list[dict[str, Any]], int]:
+    """Recent results, less those already seen in the app (and how many)."""
     since = now - RECENT_DAYS * 86400
-    out = []
+    out, skipped = [], 0
     for goal in world.list_goals(owner=owner_filter, limit=200, order="desc"):
         if goal.status in ("active", "pending") or float(goal.updated_at or 0) < since:
+            continue
+        if goal.id in seen:
+            skipped += 1
             continue
         summary = " ".join(str(goal.result or "").split())
         out.append({
@@ -93,7 +98,7 @@ def _results(world, principal: str, *, owner_filter: str | None, now: float) -> 
         })
         if len(out) >= MAX_ITEMS:
             break
-    return out
+    return out, skipped
 
 
 def _questions(world, principal: str, *, owner_filter: str | None) -> list[dict[str, Any]]:
@@ -113,7 +118,8 @@ def _questions(world, principal: str, *, owner_filter: str | None) -> list[dict[
             "goal_title": str(getattr(goal, "title", "") or "")[:200],
             "question": " ".join(str(question.question or "").split())[:400],
             "asked_at": float(question.asked_at or 0),
-            "href": f"/chat/goal/{question.goal_id}" if question.goal_id else "/chat",
+            # Opens the task with the answer box in view.
+            "href": f"/chat/goal/{question.goal_id}#question-panel" if question.goal_id else "/chat",
         })
         if len(out) >= MAX_ITEMS:
             break
@@ -152,13 +158,16 @@ def _expiring_keys(principal: str, *, owner_filter: str | None, now: float) -> l
 
 def compose_digest(world, principal: str, *, can_decide: bool, sees_everything: bool = False,
                    now: float | None = None, time_zone: str = "UTC",
-                   spend_limit: float | None = None) -> dict[str, Any]:
+                   spend_limit: float | None = None,
+                   seen_goal_ids: set[int] | frozenset[int] | None = None) -> dict[str, Any]:
     """Everything one person has waiting, as plain data.
 
     ``can_decide`` (the ``operate`` permission) shows the approvals queue they
     may decide; without it only their own requests appear. ``sees_everything``
     (a break-glass administrator) lifts the owner filter on results, questions
-    and spending, exactly like the Goals page.
+    and spending, exactly like the Goals page. Results in ``seen_goal_ids``
+    (already seen in the app) are left out; approvals and questions stay
+    because they still need the person.
     """
     current = time.time() if now is None else float(now)
     owner_filter = None if sees_everything else principal
@@ -176,13 +185,17 @@ def compose_digest(world, principal: str, *, can_decide: bool, sees_everything: 
         log.debug("digest spend lookup failed", exc_info=True)
         spend = {"dollars": 0.0, "runs": 0}
     local = datetime.fromtimestamp(current, tz=_zone(time_zone))
+    results, left_out = _results(world, principal, owner_filter=owner_filter, now=current,
+                                 seen=frozenset(seen_goal_ids or ()))
     digest = {
         "principal": principal,
         "generated_at": current,
         "date_label": local.strftime("%A %d %B %Y"),
         "local_date": local.strftime("%Y-%m-%d"),
+        "time_zone": time_zone or "UTC",
         "approvals": _approvals(world, principal, can_decide=can_decide, now=current),
-        "results": _results(world, principal, owner_filter=owner_filter, now=current),
+        "results": results,
+        "left_out_seen": left_out,
         "questions": _questions(world, principal, owner_filter=owner_filter),
         "expiring_keys": _expiring_keys(principal, owner_filter=owner_filter, now=current),
         "spending": {
@@ -203,9 +216,63 @@ def compose_digest(world, principal: str, *, can_decide: bool, sees_everything: 
     return digest
 
 
+def _seen_in_app(principal: str) -> frozenset[int]:
+    """Results this person already saw in the app are not repeated (NOT-2)."""
+    if not str(principal).startswith("user:"):
+        return frozenset()
+    try:
+        from .personal_notifications import PersonalInbox
+
+        return frozenset(PersonalInbox(principal).seen_goal_ids())
+    except Exception:  # noqa: BLE001 -- unreadable history repeats rather than hides
+        log.debug("digest seen-state lookup failed", exc_info=True)
+        return frozenset()
+
+
+def prepare_digest(world, principal: str, *, can_decide: bool, prefs: dict[str, Any],
+                   sees_everything: bool = False, now: float | None = None) -> dict[str, Any]:
+    """The summary exactly as it is sent: the scheduler, "Send my summary
+    now" and "Preview today's summary" all build it here."""
+    return compose_digest(world, principal, can_decide=can_decide, sees_everything=sees_everything,
+                          now=now, time_zone=str(prefs.get("time_zone") or "UTC"),
+                          seen_goal_ids=_seen_in_app(principal))
+
+
+def subject(digest: dict[str, Any]) -> str:
+    return f"Your Lightwork summary for {digest['date_label']}"
+
+
 # ----------------------------------------------------------------------------
 # Rendering
 # ----------------------------------------------------------------------------
+
+#: Why the person gets the summary at all (NOT-1); each item adds what it needs.
+WHY = "You get this because you turned on the daily summary in My work."
+
+
+def due_text(value: object, time_zone: str, *, label: str = "Decide by",
+             none: str = "No expiry is set") -> str:
+    from .personal_notifications import local_time_text
+
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        return none
+    return f"{label} {local_time_text(value, time_zone)}"
+
+
+def approval_line(row: dict[str, Any], time_zone: str) -> str:
+    """What one request needs from this person, and by when."""
+    need = ("Waiting on someone else's decision" if row.get("waiting_on") == "someone else"
+            else "Approve or reject it")
+    return f"#{row['id']} {row['action']} ({row['risk_label']}). {need}. {due_text(row.get('decide_by'), time_zone)}."
+
+
+def question_href(row: dict[str, Any]) -> str:
+    return f"/chat/goal/{row['goal_id']}#question-panel" if row.get("goal_id") else "/chat"
+
+
+def _link(base: str, href: str) -> str:
+    return base.rstrip("/") + href if base else ""
+
 
 def _spend_line(spend: dict[str, Any]) -> str:
     limit = spend.get("limit_dollars") or 0
@@ -218,18 +285,27 @@ def _spend_line(spend: dict[str, Any]) -> str:
 
 
 def render_text(digest: dict[str, Any], *, dashboard_url: str = "") -> str:
-    lines = [f"Your Lightwork summary for {digest['date_label']}", ""]
+    zone = str(digest.get("time_zone") or "UTC")
+
+    def opened(href: str) -> str:
+        link = _link(dashboard_url, href)
+        return f" Open: {link}" if link else ""
+
+    lines = [f"Your Lightwork summary for {digest['date_label']}", WHY, ""]
     if digest["approvals"]:
         lines.append(f"{len(digest['approvals'])} waiting for your decision:")
-        lines += [f"  - #{a['id']} {a['action']} ({a['risk_label']})" for a in digest["approvals"]]
+        lines += [f"  - {approval_line(a, zone)}{opened('/approvals#approval-' + str(a['id']))}"
+                  for a in digest["approvals"]]
         lines.append("")
     if digest["questions"]:
         lines.append(f"{len(digest['questions'])} question(s) an agent is waiting on:")
-        lines += [f"  - {q['question']}" for q in digest["questions"]]
+        lines += [f"  - {q['question']} The task waits until you answer.{opened(question_href(q))}"
+                  for q in digest["questions"]]
         lines.append("")
     if digest["results"]:
         lines.append(f"{len(digest['results'])} recent result(s):")
-        lines += [f"  - {r['title']} ({r['status_label']})" for r in digest["results"]]
+        lines += [f"  - {r['title']} ({r['status_label']}).{opened(r.get('href') or '/goals')}"
+                  for r in digest["results"]]
         lines.append("")
     if digest.get("expiring_keys"):
         lines.append(f"{len(digest['expiring_keys'])} access key(s) stop working within 7 days:")
@@ -240,7 +316,8 @@ def render_text(digest: dict[str, Any], *, dashboard_url: str = "") -> str:
         lines += ["Nothing is waiting for you today.", ""]
     lines.append(_spend_line(digest["spending"]))
     if dashboard_url:
-        lines += ["", f"Open My work: {dashboard_url.rstrip('/')}/me"]
+        lines += ["", f"Open My work: {dashboard_url.rstrip('/')}/me",
+                  f"Change or stop this summary: {dashboard_url.rstrip('/')}/me#daily-summary"]
     return "\n".join(lines)
 
 
@@ -254,12 +331,23 @@ def render_html(digest: dict[str, Any], *, dashboard_url: str = "") -> str:
         rows = "".join(f"<li>{item}</li>" for item in items)
         return f"<h2 style=\"font-size:16px;margin:18px 0 6px\">{esc(title)}</h2><ul>{rows}</ul>"
 
-    body = [f"<h1 style=\"font-size:20px\">Your Lightwork summary</h1><p>{esc(digest['date_label'])}</p>"]
+    zone = str(digest.get("time_zone") or "UTC")
+
+    def opened(href: str) -> str:
+        link = _link(dashboard_url, href)
+        return f" <a href=\"{esc(link)}\">Open</a>" if link else ""
+
+    body = [f"<h1 style=\"font-size:20px\">Your Lightwork summary</h1><p>{esc(digest['date_label'])}</p>",
+            f"<p>{esc(WHY)}</p>"]
     body.append(section(f"{len(digest['approvals'])} waiting for your decision", [
-        f"#{a['id']} {esc(a['action'])} <em>({esc(a['risk_label'])})</em>" for a in digest["approvals"]]))
-    body.append(section("Questions an agent is waiting on", [esc(q["question"]) for q in digest["questions"]]))
+        esc(approval_line(a, zone)) + opened("/approvals#approval-" + str(a["id"]))
+        for a in digest["approvals"]]))
+    body.append(section("Questions an agent is waiting on", [
+        esc(q["question"]) + " The task waits until you answer." + opened(question_href(q))
+        for q in digest["questions"]]))
     body.append(section("Recent results", [
-        f"{esc(r['title'])} <em>({esc(r['status_label'])})</em>" for r in digest["results"]]))
+        f"{esc(r['title'])} <em>({esc(r['status_label'])})</em>" + opened(r.get("href") or "/goals")
+        for r in digest["results"]]))
     body.append(section("Access keys that stop working within 7 days", [
         f"{esc(k['label'] or k['prefix'])} <em>(in {k['days_left']} day(s))</em>"
         for k in digest.get("expiring_keys", [])]))
@@ -268,7 +356,8 @@ def render_html(digest: dict[str, Any], *, dashboard_url: str = "") -> str:
     body.append(f"<p>{esc(_spend_line(digest['spending']))}</p>")
     if dashboard_url:
         link = esc(dashboard_url.rstrip("/") + "/me")
-        body.append(f"<p><a href=\"{link}\">Open My work</a></p>")
+        body.append(f"<p><a href=\"{link}\">Open My work</a> · "
+                    f"<a href=\"{link}#daily-summary\">Change or stop this summary</a></p>")
     return ("<!doctype html><html lang=\"en\"><body style=\"font-family:sans-serif;"
             "max-width:640px;margin:auto;color:#222\">" + "".join(body) + "</body></html>")
 
@@ -322,8 +411,7 @@ def _send_email(principal: str, digest: dict[str, Any], links: list[dict[str, An
     if not addresses:
         return False
     base = dashboard_url()
-    subject = f"Your Lightwork summary for {digest['date_label']}"
-    return any(send_email(address, subject, render_text(digest, dashboard_url=base),
+    return any(send_email(address, subject(digest), render_text(digest, dashboard_url=base),
                           html_body=render_html(digest, dashboard_url=base))
                for address in addresses)
 
@@ -402,10 +490,9 @@ def run_digest_cycle(world, *, principals: list[str], can_decide: Callable[[str]
             summary["skipped_unlinked"] += 1
             user_preferences.mark_digest_sent(principal, local_date)
             continue
-        digest = compose_digest(
-            world, principal, can_decide=can_decide(principal),
-            sees_everything=bool(sees_everything and sees_everything(principal)),
-            now=current, time_zone=prefs["time_zone"],
+        digest = prepare_digest(
+            world, principal, can_decide=can_decide(principal), prefs=prefs,
+            sees_everything=bool(sees_everything and sees_everything(principal)), now=current,
         )
         if digest["empty"] and not prefs.get("send_when_empty"):
             summary["skipped_empty"] += 1
@@ -427,9 +514,11 @@ __all__ = [
     "digest_senders",
     "due_now",
     "month_start",
+    "prepare_digest",
     "register_digest_sender",
     "render_html",
     "render_text",
     "run_digest_cycle",
     "send_digest",
+    "subject",
 ]

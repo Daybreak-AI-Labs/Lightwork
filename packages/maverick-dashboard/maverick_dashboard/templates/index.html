@@ -6,17 +6,17 @@
   {% set workspace_view = value_view is defined and value_view.scope == 'workspace' %}
   {% call hero('Your AI workforce', 'Overview',
                subtitle='The operating picture',
-               lede='Everything your workforce is doing right now — goals in
+               lede='Everything your workforce is doing right now — tasks in
                      flight, work delivered, and anything waiting on you.
                      Start new work from <a href="/chat">chat</a>, or manage
                      the teams on <a href="/workforce">Workforce</a>.' | safe) %}
     {{ state('Current state',
-             counts.total ~ ' goal' ~ ('' if counts.total == 1 else 's') ~ ' on record'
+             counts.total ~ ' task' ~ ('' if counts.total == 1 else 's') ~ ' on record'
                ~ (' in this workspace' if workspace_view else ''),
              badge=(counts.active ~ ' active') if counts.active else 'idle',
              badge_class='ok' if counts.active else 'idle',
              copy=counts.done ~ ' delivered · ' ~ counts.blocked ~ ' blocked. '
-               ~ ('Totals for the whole workspace; goal titles are not shown here.'
+               ~ ('Totals for the whole workspace; task titles are not shown here.'
                   if workspace_view else
                   'Spending and time limits apply when an administrator sets them.')) }}
   {% endcall %}
@@ -24,15 +24,15 @@
   {% if counts.total == 0 and value_view is defined and not value_view.can_operate %}
     {# Never tell a role that cannot start goals to start one. #}
     <div class="panel empty">
-      <h2 class="empty__title">No goals have run in this workspace yet</h2>
+      <h2 class="empty__title">No tasks have run in this workspace yet</h2>
       <p class="muted" style="max-width: 540px; margin: 0 auto;">
         The totals appear here as soon as people start work. Your role can follow
-        the results but not start goals; ask an administrator if you need to.
+        the results but not start tasks; ask an administrator if you need to.
       </p>
     </div>
   {% elif counts.total == 0 %}
     <div class="panel empty">
-      <h2 class="empty__title">Start your first goal</h2>
+      <h2 class="empty__title">Start your first task</h2>
       <p class="muted" style="max-width: 540px; margin: 0 auto 1.75rem;">
         Describe the outcome you want. Lightwork plans the work across a team
         of AI agents, uses this installation’s current settings, and streams results back here.
@@ -71,29 +71,26 @@
     <div class="bd-toolbar">
       <span class="bd-live"><span class="dot" aria-hidden="true"></span>Live
         <span class="bd-stamp" id="bd-stamp" role="status" aria-live="off">loading…</span></span>
-      <div class="bd-slicer" role="group" aria-label="Time range">
-        <button type="button" data-days="30" aria-pressed="false">30d</button>
-        <button type="button" data-days="90" class="on" aria-pressed="true">90d</button>
-        <button type="button" data-days="180" aria-pressed="false">180d</button>
-        <button type="button" data-days="365" aria-pressed="false">1y</button>
-      </div>
+      {% from "_tabs.html" import panel_tabs %}
+      {{ panel_tabs('Time range', [('30', '30d'), ('90', '90d'), ('180', '180d'), ('365', '1y')], '90', id='bd-range', data='days', controls=false, activation='manual') }}
     </div>
 
-    <div class="bd-kpis" id="bd-kpis"></div>
+    {% from "_board_kpis.html" import kpi_row %}
+    {{ kpi_row(['Total tasks', 'Active now', 'Delivered', 'Blocked']) }}
 
     <div class="viz-grid">
       <div class="panel viz-card viz-card--wide">
         <h2>Momentum</h2>
-        <p class="viz-sub">Goals started vs delivered over time (weekly at longer ranges). Hover for exact numbers.</p>
+        <p class="viz-sub">Tasks started vs delivered over time (weekly at longer ranges). Hover for exact numbers.</p>
         <div id="bd-momentum"></div>
       </div>
       <div class="panel viz-card">
-        <h2>Where goals stand</h2>
-        <p class="viz-sub">Every goal on record. Click a slice to filter the recent list.</p>
+        <h2>Where tasks stand</h2>
+        <p class="viz-sub">Every task on record. Click a slice to filter the recent list.</p>
         <div id="bd-mix"></div>
       </div>
       <div class="panel viz-card viz-card--wide">
-        <h2>Recent goals <span class="bd-chip flat" id="bd-recent-filter" hidden></span></h2>
+        <h2>Recent tasks <span class="bd-chip flat" id="bd-recent-filter" hidden></span></h2>
         <p class="viz-sub">The latest work, newest first.</p>
         <div id="bd-recent"></div>
         <p class="muted" style="margin: var(--space-3) 0 0;">
@@ -125,7 +122,7 @@
           <p><strong>{{ s.name }}</strong> <span class="muted">· {{ s.triggers|length }} trigger(s)</span></p>
         {% endfor %}
       {% else %}
-        <p class="muted">No skills yet. Lightwork turns finished work into reusable skills — they appear after the first multi-step goal completes.</p>
+        <p class="muted">No skills yet. Lightwork turns finished work into reusable skills — they appear after the first multi-step task finishes.</p>
       {% endif %}
     </div>
 
@@ -156,10 +153,10 @@
         });
         if (!rows.length) {
           B.empty(box, DATA.scope === 'workspace'
-            ? 'Goal titles are not shown in the whole-workspace view. The counts above cover everyone\'s goals.'
+            ? 'Task titles are not shown in the whole-workspace view. The counts above cover everyone\'s tasks.'
             : statusFilter
-              ? 'No recent goals with status "' + statusFilter + '".'
-              : 'No goals yet.');
+              ? 'No recent tasks with status "' + statusFilter + '".'
+              : 'No tasks yet.');
           return;
         }
         box.textContent = '';
@@ -199,7 +196,7 @@
         DATA = D;
         var k = document.getElementById('bd-kpis');
         k.textContent = '';
-        k.appendChild(B.kpi({ label: 'Total goals', value: D.totals.total,
+        k.appendChild(B.kpi({ label: 'Total tasks', value: D.totals.total,
           sub: 'all time on record',
           spark: D.daily.map(function (r) { return r.started; }) }));
         k.appendChild(B.kpi({ label: 'Active now', value: D.totals.active,
@@ -217,7 +214,7 @@
           x: 'd',
           series: [{ key: 'started', label: 'Started', cls: 'brand' },
                    { key: 'delivered', label: 'Delivered', cls: 'ok' }],
-          aria: 'Goals started and delivered per ' + (weekly ? 'week' : 'day') +
+          aria: 'Tasks started and delivered per ' + (weekly ? 'week' : 'day') +
                 ' over the last ' + D.days + ' days.',
           tipHead: function (r) { return (weekly ? 'Week of ' : '') + r.d; },
           xTick: function (r, i, n) {
@@ -253,8 +250,8 @@
         }
         B.donut(document.getElementById('bd-mix'), {
           segments: mix,
-          center: D.totals.total, centerSub: 'goals',
-          aria: 'Goal mix: ' + mixAria + ' of ' + D.totals.total + ' total.',
+          center: D.totals.total, centerSub: 'tasks',
+          aria: 'Task mix: ' + mixAria + ' of ' + D.totals.total + ' total.',
           onSlice: function (seg) {
             if (!seg.status) return;  // "Other" has no single status to filter on
             statusFilter = statusFilter === seg.status ? '' : seg.status;
@@ -269,7 +266,7 @@
               return { label: r.label, value_text: r.done + ' of ' + r.total,
                        pct: r.done / dmax * 100, pct_bg: r.total / dmax * 100,
                        title: r.label + ' — ' + r.done + ' delivered of ' + r.total };
-            }), 'Goals by department: delivered against taken on.');
+            }), 'Tasks by department: delivered against taken on.');
         } else {
           B.empty(document.getElementById('bd-domains'), 'No departmental work yet.');
         }

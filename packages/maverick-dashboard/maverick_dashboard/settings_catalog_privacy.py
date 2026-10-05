@@ -390,7 +390,7 @@ def _destination_fields(S, provider, name, section, sub, reader) -> list:
 def _consent_more_rows(S) -> tuple:
     native = _sub("Consent preferences", "phone and TV apps")
     index = _sub("Consent preferences", "custom search")
-    bulk = _sub("Consent preferences", "bulk jobs")
+    bulk = _sub("Consent preferences", "bulk changes")
     brand = _sub("Consent preferences", "Trust Center branding")
     opt_out = _sub("Consent preferences", "Global Opt-Out")
     nr = "maverick_dashboard.consent_native_composition"
@@ -460,29 +460,29 @@ def _consent_more_rows(S) -> tuple:
           weaker="lower", warning="Older search list history will be permanently deleted sooner."),
 
         S(f"{_CP}.bulk_jobs", "initial_credits", "Starting credits for each workspace",
-          "How many items a workspace can process in bulk jobs before it needs more credits.",
+          "How many items a workspace can process in bulk changes before it needs more credits.",
           "number", _P, 10000, br, subgroup=bulk, minimum=0, maximum=1000000000, integer=True,
           unit="credits", weaker="higher", warning="Workspaces will start with more credits."),
-        S(f"{_CP}.bulk_jobs", "max_jobs", "Bulk jobs kept", "The most bulk jobs kept for each "
+        S(f"{_CP}.bulk_jobs", "max_jobs", "Bulk changes kept", "The most bulk changes kept for each "
           "workspace.", "number", _P, 10000, br, subgroup=bulk, minimum=1, maximum=1000000,
-          integer=True, unit="jobs", weaker="higher", warning="More bulk jobs will be kept."),
-        S(f"{_CP}.bulk_jobs", "max_items_per_job", "Items in one bulk job",
-          "The most people one bulk job can cover.", "number", _P, 10000, br, subgroup=bulk,
+          integer=True, unit="changes", weaker="higher", warning="More bulk changes will be kept."),
+        S(f"{_CP}.bulk_jobs", "max_items_per_job", "Items in one bulk change",
+          "The most people one bulk change can cover.", "number", _P, 10000, br, subgroup=bulk,
           minimum=1, maximum=100000, integer=True, unit="items", weaker="higher",
-          warning="One bulk job will be able to change more people's consent at once."),
+          warning="One bulk change will be able to change more people's consent at once."),
         S(f"{_CP}.bulk_jobs", "max_artifact_bytes", "Largest bulk export file",
           "Bulk export files bigger than this are refused.", "number", _P, 16 * _MB, br,
           subgroup=bulk, minimum=1, maximum=256, integer=True, scale=_MB, unit="MB",
           weaker="higher", warning="Bigger export files of consent records will be made."),
-        S(f"{_CP}.bulk_jobs", "lease_seconds", "Time a worker holds a bulk job",
-          "How long one worker keeps a job before another may take it over.", "number", _P,
+        S(f"{_CP}.bulk_jobs", "lease_seconds", "Time a worker holds a bulk change",
+          "How long one worker keeps a bulk change before another may take it over.", "number", _P,
           60, br, subgroup=bulk, minimum=5, maximum=3600, integer=True, unit="seconds"),
-        S(f"{_CP}.bulk_jobs", "retention_seconds", "Keep bulk jobs for",
-          "Bulk jobs and their files older than this are removed.", "number", _P, 365 * _DAY,
+        S(f"{_CP}.bulk_jobs", "retention_seconds", "Keep bulk changes for",
+          "Bulk changes and their files older than this are removed.", "number", _P, 365 * _DAY,
           br, subgroup=bulk, minimum=1, maximum=3650, integer=True, scale=_DAY, unit="days",
-          weaker="lower", warning="Older bulk jobs and files will be permanently deleted sooner."),
+          weaker="lower", warning="Older bulk changes and files will be permanently deleted sooner."),
         S(f"{_CP}.bulk_jobs", "worker_batch_size", "Items handled per step",
-          "How many items a worker handles in one step of a bulk job.", "number", _P, 100, br,
+          "How many items a worker handles in one step of a bulk change.", "number", _P, 100, br,
           subgroup=bulk, minimum=1, maximum=500, integer=True, unit="items"),
 
         S(f"{_CP}.trust_center.branding", "enable", "Custom logos and web addresses",
@@ -725,17 +725,17 @@ def _automation_rows(S) -> tuple:
           "data use governance to be on.", "toggle", _P, False,
           "maverick.privacy_discovery_data_use_bridge", subgroup=found),
 
-        S(_REMEDIATION, "enable", "Fix findings through approved jobs",
-          "Approved fixes for discovery findings are queued as jobs and recorded in the data "
+        S(_REMEDIATION, "enable", "Fix findings through approved fixes",
+          "Approved fixes for discovery findings are queued and recorded in the data "
           "map. Turn this on together with the data map record below.", "toggle", _P, False,
           rr, subgroup=fixes),
-        S(_REMEDIATION, "max_attempts", "Tries for each fix", "How many times a fix job is "
+        S(_REMEDIATION, "max_attempts", "Tries for each fix", "How many times a fix is "
           "tried before it waits for a person.", "number", _P, 5, rr, subgroup=fixes,
           minimum=1, maximum=20, integer=True, unit="tries"),
-        S(_REMEDIATION, "retention_seconds", "Keep finished fix jobs for",
-          "Finished fix jobs older than this are removed.", "number", _P, 30 * _DAY, rr,
+        S(_REMEDIATION, "retention_seconds", "Keep finished fixes for",
+          "Finished fixes older than this are removed.", "number", _P, 30 * _DAY, rr,
           subgroup=fixes, minimum=1, maximum=3660, integer=True, scale=_DAY, unit="days",
-          weaker="lower", warning="Older fix jobs will be permanently deleted sooner."),
+          weaker="lower", warning="Older fixes will be permanently deleted sooner."),
         S(f"{_REMEDIATION}.data_map", "enable", "Record fixes in the data map",
           "Keep a record of each approved fix in the data map. Turn this on together with "
           "fixing findings above.", "toggle", _P, False, rr, subgroup=fixes),
@@ -745,8 +745,8 @@ def _automation_rows(S) -> tuple:
           weaker="lower", warning="Older data map fix records will be permanently deleted "
                                   "sooner."),
 
-        S(f"{_REMEDIATION}.scheduler", "enable", "Run fix jobs on a schedule",
-          "Retry and check fix jobs automatically in the background. Turning this on takes "
+        S(f"{_REMEDIATION}.scheduler", "enable", "Run fixes on a schedule",
+          "Retry and check fixes automatically in the background. Turning this on takes "
           "effect after a restart.", "toggle", _P, False, rr, subgroup=sched, restart=True),
         S(f"{_REMEDIATION}.scheduler", "interval_seconds", "Run every",
           "How often the background runner works.", "number", _P, 60, rr, subgroup=sched,
@@ -761,14 +761,14 @@ def _automation_rows(S) -> tuple:
         S(f"{_REMEDIATION}.scheduler", "tenant_limit", "Workspaces handled each run",
           "The most workspaces handled in one run.", "number", _P, 1000, rr, subgroup=sched,
           minimum=1, maximum=10000, integer=True, unit="workspaces"),
-        S(f"{_REMEDIATION}.scheduler", "worker_limit", "Fix jobs run each time",
-          "The most fix jobs run in one go.", "number", _P, 10, rr, subgroup=sched, minimum=1,
-          maximum=100, integer=True, unit="jobs"),
-        S(f"{_REMEDIATION}.scheduler", "reconcile_limit", "Unclear jobs checked each time",
-          "The most jobs with an unclear result that are checked again in one go.", "number",
-          _P, 10, rr, subgroup=sched, minimum=1, maximum=100, integer=True, unit="jobs"),
-        S(f"{_REMEDIATION}.scheduler", "lease_seconds", "Time a worker holds a fix job",
-          "How long one worker keeps a job before another may take it over.", "number", _P,
+        S(f"{_REMEDIATION}.scheduler", "worker_limit", "Fixes run each time",
+          "The most fixes run in one go.", "number", _P, 10, rr, subgroup=sched, minimum=1,
+          maximum=100, integer=True, unit="fixes"),
+        S(f"{_REMEDIATION}.scheduler", "reconcile_limit", "Unclear fixes checked each time",
+          "The most fixes with an unclear result that are checked again in one go.", "number",
+          _P, 10, rr, subgroup=sched, minimum=1, maximum=100, integer=True, unit="fixes"),
+        S(f"{_REMEDIATION}.scheduler", "lease_seconds", "Time a worker holds a fix",
+          "How long one worker keeps a fix before another may take it over.", "number", _P,
           60, rr, subgroup=sched, minimum=1, maximum=3600, integer=True, unit="seconds"),
         *_drop_and_notice_rows(S),
         *_public_rights_form_rows(S),
@@ -1033,8 +1033,9 @@ def _other_rows(S) -> tuple:
                   "before high-risk actions, may stop applying."),
         S("approval", "dashboard_wait_seconds", "Wait for a dashboard approval up to",
           "How long an agent waits for someone to approve a risky action on the Approvals "
-          "page. With no answer in time, the action is refused.", "number", "Safety",
-          5 * _MINUTE, "maverick.safety.consent", subgroup="Approvals", minimum=1, maximum=60,
+          "page. After 10 minutes the people who can decide get one in-app reminder. With "
+          "no answer in time, the action is refused.", "number", "Safety",
+          30 * _MINUTE, "maverick.safety.consent", subgroup="Approvals", minimum=1, maximum=60,
           integer=True, scale=_MINUTE, unit="minutes",
           env=("MAVERICK_CONSENT_DASHBOARD_TIMEOUT",)),
         S("approval", "undo_grace_seconds", "Allow undo after a decision for",
@@ -1053,6 +1054,33 @@ def _other_rows(S) -> tuple:
           warning="High-risk actions can be approved with a single click, without "
                   "restating what they will do.",
           env=("MAVERICK_APPROVAL_REQUIRE_ACKNOWLEDGEMENT",)),
+        S("approval", "separate_approver", "Who approves a risky action someone asked for",
+          "Whether the person who asked for a high or critical risk action may approve it "
+          "themselves. By default someone else must, whenever another person can decide "
+          "it; where nobody else can, the person who asked may approve it and the record "
+          "says so. Always means someone else, even if the request then waits until it "
+          "expires and the action is refused.", "select", "Safety", "when_available",
+          "maverick.safety.dual_control", subgroup="Approvals",
+          choices=(("when_available", "Someone else, when another approver is available (default)"),
+                   ("always", "Always someone else"),
+                   ("never", "The person who asked may approve it")),
+          weaker=True, order=("always", "when_available", "never"),
+          env=("MAVERICK_SEPARATE_APPROVER",),
+          aliases="self approval approve own request second approver four eyes "
+                  "segregation of duties",
+          warning="People will be able to approve high-risk actions they asked for "
+                  "themselves while someone else could decide them."),
+        S("approval", "record_checks", "Keep a record of approval checks",
+          "Each time Lightwork checks whether an action needs approval, it records when, the "
+          "risk level, the kind of action, the agent or specialist and whether it was allowed, "
+          "sent to a person or refused. Never the content or the command. The record lets you "
+          "see later what a different approval threshold would have done.", "toggle", "Safety",
+          True, "maverick.approval_checks", subgroup="Approvals",
+          aliases="approval history threshold preview record of approval checks"),
+        S("approval", "check_retention_days", "Keep approval checks for",
+          "How long the record of approval checks is kept. Older entries are removed a few "
+          "hundred at a time.", "number", "Safety", 90, "maverick.approval_checks",
+          subgroup="Approvals", minimum=1, maximum=3650, integer=True, unit="days"),
     )
 
 

@@ -503,6 +503,7 @@ def test_model_success_is_unverified_bounded_and_ignores_client_history(
     assert payload["reply"].startswith(
         "I haven't changed anything in Lightwork. Here's my answer: "
     )
+    assert "hasn't changed anything" in payload["warning"]
     assert "\n" not in payload["reply"]
     assert "\u202e" not in payload["reply"]
     assert len(payload["reply"].split()) <= 120

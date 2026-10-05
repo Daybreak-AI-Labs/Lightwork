@@ -1,8 +1,13 @@
 # Plugin qualification workbench
 
 Enable **Plugin qualification workbench** in Settings or the installer, then open
-Plugins. Set the immutable `sha256:` ID of an already installed, reviewed local
-Linux image containing the exact distribution and `maverick-agent[plugin-workbench]`.
+Plugins. Follow **Choose a practice environment** to Settings and choose **Load
+installed environments**. Select a named, already installed local Linux environment,
+review the change and save it. Copilot can open the same protected setting. Loading
+the list does not start a container or download anything. Saving verifies the exact
+selected environment again; missing or changed choices remain unavailable.
+The installation administrator supplies a reviewed environment containing the
+exact distribution and `maverick-agent[plugin-workbench]`.
 Channel checks also require `maverick-channels`; local gRPC checks require the `[grpc]` extra and generated plugin stubs already in the read-only image. Node checks require Node and the
 reviewed dependencies already in the image. Nothing pulls an image, installs a
 plugin, inherits provider credentials, mounts host work, or falls back to host
@@ -43,7 +48,12 @@ The Plugins page supplies a sample shape for each real interface:
   polls cancellation/deadlines, and never repeats a Call after a transport failure.
   Typed unknown outcomes prevent outer tool retries, including read-looking names.
 
-Enter synthetic input and the exact expected JSON result. A persona's result is a
+For a supported inspected tool, choose **Open guided practice check**. Ordinary
+questions handle required and optional values, lists, nested objects, numbers and
+yes/no choices; the expected answer uses the same guided controls. Review every
+input and expected value before confirming. A changed inspection or input schema
+requires a fresh review. Advanced interfaces retain their original sample controls.
+A persona's result is a
 JSON string. Skill results contain selected names and the rendered prompt. Channel
 results contain the structured reply, synthetic handler messages and send completion.
 Node and gRPC results preserve their hosts' string result contract. Inputs and outputs remain
@@ -90,7 +100,9 @@ requires a fresh review and explicit confirmation; durable operation receipts
 recover uncertain responses without redispatch. Turning Copilot off leaves the
 native Plugins journey available.
 
-Local trusted-fixture, API and existing process-host regressions were executed.
-No live provider, installed third-party plugin, or real qualification container was
-run during implementation. Per-image/container and installed-service acceptance
-must still be performed in the controlled qualification environment.
+The October 5 native browser journey used an actual restricted Python-tool
+container: inspected schema, ordinary input form, complete review, execution,
+lost-response recovery and the original single saved result. Changed schemas and
+accounts were refused; cleanup was verified. This qualifies that bounded local
+journey, not arbitrary third-party plugins, live services, Node/gRPC images or
+customer outcomes. Each installation still needs its own approved environment.

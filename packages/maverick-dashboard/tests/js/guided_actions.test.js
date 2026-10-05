@@ -5,6 +5,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const repo = path.resolve(__dirname,"../../../..");
 const {JSDOM} = require("jsdom");
+const {shell} = require('./_shell');
 const source = fs.readFileSync(path.join(repo,"packages/maverick-dashboard/maverick_dashboard/static/lightwork-guided-actions.js"),"utf8");
 const tick = () => new Promise(resolve => setImmediate(resolve));
 async function fixture(schema, payload, options={}) {
@@ -20,6 +21,7 @@ async function fixture(schema, payload, options={}) {
     if (options.schemaFailure) throw new Error("offline");
     return {ok:true,json:async () => ({paths:{"/api/x/items":{post:{requestBody:{content:{"application/json":{schema}}}}}},components:{schemas:{}}})};
   };
+  shell(w);
   w.eval(source); await tick();
   function field(name) { return [...d.querySelectorAll("fieldset")].find(node => node.querySelector(":scope > legend")?.textContent.startsWith(name)); }
   function fire(node,type="input") { node.dispatchEvent(new w.Event(type,{bubbles:true})); }
@@ -165,6 +167,7 @@ async function standaloneFixture(schema, value, options={}) {
   raw.defaultValue=value;raw.required=!!options.required;
   w.fetch=async()=>({ok:true,json:async()=>({paths:{"/api/items":{post:{requestBody:{content:{"application/json":{schema:{$ref:"#/components/schemas/Request"}}}}}}},components:{schemas:{Request:{type:"object",properties:{settings:schema}}}}})});
   form.addEventListener("submit",event=>{event.preventDefault();calls.push(raw.value);});
+  shell(w);
   w.eval(source);await tick();
   const fire=(node,type="input")=>node.dispatchEvent(new w.Event(type,{bubbles:true}));
   const field=key=>form.querySelector('[data-guided-field="'+key+'"]');
@@ -220,6 +223,7 @@ async function publishingFixture(schemas,options={}) {
   let release;
   const loaded=new Promise(resolve=>{release=resolve;});
   w.fetch=async(url,request)=>{if(url==="/openapi.json"){if(options.delayed)await loaded;return {ok:true,json:async()=>({paths,components:{schemas:{}}})};}calls.push({url,request});return {ok:!options.reject,json:async()=>options.reject?{detail:"The referenced notice version does not exist."}:{saved:true}};};
+  shell(w);
   const script=[...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].at(-1)[1];w.eval(script);w.eval(source);await tick();
   const fire=(node,type="input")=>node.dispatchEvent(new w.Event(type,{bubbles:true}));
   const choose=value=>{kind.value=value;fire(kind,"change");};

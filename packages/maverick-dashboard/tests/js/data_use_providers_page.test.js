@@ -6,6 +6,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const crypto = require("node:crypto");
 const { JSDOM } = require("jsdom");
+const {shell} = require('./_shell');
 
 const root = path.resolve(__dirname, "../../maverick_dashboard");
 const read = (name) => fs.readFileSync(path.join(root, name), "utf8");
@@ -41,6 +42,7 @@ async function page(options = {}) {
     }
     return reply(200, {});
   };
+  shell(w);
   w.eval(read("static/lightwork-consent-workbench.js"));
   [...read("templates/data_use_providers.html").matchAll(/<script>([\s\S]*?)<\/script>/g)].forEach((m) => w.eval(m[1]));
   await flush();
@@ -67,7 +69,7 @@ test("a connection is built from a column table, not typed documents", async () 
     form.querySelector("[name=map_field][data-key=email]").value = "EMAIL";
     form.querySelector("[name=map_mask][data-key=preserve_last4]").value = "SEC.POL.LAST4";
     const row = form.querySelector("[name=map_row]");
-    assert.match(row.parentElement.textContent, /Rows where Country is DE \(rule Eu only\)/);
+    assert.match(row.parentElement.textContent, /Rows where Country is DE \(rule Eu only\)/i);
     row.value = "SEC.POL.EU_ROWS";
     form.elements.field_inventory_complete.checked = true;
     form.dispatchEvent(new ui.w.Event("submit", { bubbles: true, cancelable: true }));

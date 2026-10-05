@@ -233,4 +233,4 @@ def test_create_goal_with_unknown_domain_400(monkeypatch):
         "title": "x", "domain": "no_such_pack_xyz",
     })
     assert resp.status_code == 400
-    assert "unknown specialist" in resp.json()["detail"]
+    assert "unknown agent or specialist" in resp.json()["detail"]

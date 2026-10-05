@@ -215,6 +215,9 @@
     var input = row.querySelector('[data-input]');
     if (control === 'toggle' && input) input.checked = data.value === true;
     else if ((control === 'select' || control === 'text' || control === 'path' || control === 'fingerprint') && input) {
+      if (input.hasAttribute('data-select-choices-url')) {
+        replaceSelectChoices(input, data.choices || [], data.value == null ? '' : String(data.value));
+      }
       input.value = data.value == null ? '' : String(data.value);
       var at = row.querySelector('[data-segment-at]');
       if (at) { at.setAttribute('data-at', String(data.segment_at == null ? -1 : data.segment_at)); segmentOptions(row); }
@@ -335,16 +338,13 @@
     say(row, 'Checking…');
     button.disabled = true;
     try {
-      var response = await window.fetch(API + '/test', {
-        method: 'POST', cache: 'no-store', credentials: 'same-origin',
-        headers: {'Content-Type': 'application/json', Accept: 'application/json'},
-        body: JSON.stringify({id: row.dataset.settingId, value: checkValue(row)})
-      });
-      var data = null;
-      try { data = await response.json(); } catch (ignore) { data = null; }
-      say(row, data && typeof data.message === 'string' ? data.message : errorText(response, 'run the check'));
+      var data = await window.mvFetchJSON(API + '/test', {method: 'POST', cache: 'no-store',
+        body: {id: row.dataset.settingId, value: checkValue(row)}}, 'run the check');
+      say(row, data && typeof data.message === 'string' ? data.message : errorText({status: 0}, 'run the check'));
     } catch (failure) {
-      say(row, errorText(failure, 'run the check'));
+      // A refused check still explains itself in plain words.
+      var told = failure && failure.payload && failure.payload.message;
+      say(row, typeof told === 'string' ? told : errorText(failure, 'run the check'));
     } finally {
       button.disabled = false;
     }
@@ -730,10 +730,7 @@
     if (!url) return [];
     if (loadedChoices[url]) return loadedChoices[url];
     try {
-      var response = await window.fetch(url, {cache: 'no-store', credentials: 'same-origin',
-                                              headers: {Accept: 'application/json'}});
-      if (!response.ok) throw response;
-      var data = await response.json();
+      var data = await window.mvFetchJSON(url, {cache: 'no-store'});
       loadedChoices[url] = data.choices || [];
     } catch (failure) {
       say(row, errorText(failure, 'load the list of tools'));
@@ -825,6 +822,85 @@
     select.appendChild(option);
     return option;
   }
+  // A local environment list is read only on an explicit Load/Refresh. A slow
+  // reply must never replace a newer draft, select a default or survive a
+  // changed account. The current immutable value stays separate from labels.
+  var lazySelectRows = [], lazySelectGeneration = 0;
+  function replaceSelectChoices(select, choices, keep) {
+    select.textContent = '';
+    choices.forEach(function (choice) {
+      addOption(select, choice.value, choice.label, choice.value === keep);
+    });
+    if (!choices.some(function (choice) { return choice.value === keep; })) {
+      addOption(select, keep, keep ? 'Previously selected practice environment · unavailable in this list'
+        : 'No practice environment selected', true);
+    }
+    select.value = keep;
+  }
+  function prepareSelectChoices(row) {
+    var select = row.querySelector('[data-select-choices-url]');
+    var button = row.querySelector('[data-select-choices-load]');
+    if (!select || !button || row.localChoices) return;
+    var state = {generation: 0, controller: null, loaded: false};
+    row.localChoices = state; lazySelectRows.push(row);
+    button.addEventListener('click', async function () {
+      if (state.controller || root.dataset.saving === '1') return;
+      var keep = select.value, ticket = ++state.generation;
+      var controller = new AbortController(); state.controller = controller;
+      var deadline = setTimeout(function () { controller.abort(); }, 20000);
+      var notice = row.querySelector('[data-select-choices-notice]');
+      button.disabled = true;
+      notice.textContent = 'Reading already installed environments…';
+      try {
+        var response = await fetch(select.dataset.selectChoicesUrl + (state.loaded ? '?refresh=true' : ''), {
+          credentials: 'same-origin', cache: 'no-store', signal: controller.signal,
+          headers: {Accept: 'application/json'}
+        });
+        var body = await response.text();
+        if (body.length > 160000) throw new Error('This environment list is too large. Your choice has been kept.');
+        var data = JSON.parse(body);
+        if (!response.ok) throw new Error(typeof data.detail === 'string' ? data.detail
+          : 'The installed environments could not be read. Keep your current choice and try again.');
+        if (!Array.isArray(data.choices) || data.choices.length > 129 ||
+            !data.choices.every(function (choice) { return choice && typeof choice.value === 'string' &&
+              (choice.value === '' || /^sha256:[a-f0-9]{64}$/.test(choice.value)) &&
+              typeof choice.label === 'string' && choice.label.length <= 1000; }) ||
+            typeof data.notice !== 'string' || data.notice.length > 2000)
+          throw new Error('This installed list could not be verified. Your choice has been kept.');
+        if (ticket !== state.generation || !row.isConnected) return;
+        // Preserve a choice changed while the read was in flight.
+        keep = select.value;
+        replaceSelectChoices(select, data.choices, keep);
+        notice.textContent = data.notice + (data.choices.length === 1
+          ? ' No eligible installed practice environment was found. Ask your installation administrator to provide one.' : '');
+        state.loaded = true; button.textContent = 'Refresh installed environments';
+      } catch (error) {
+        if (ticket === state.generation && row.isConnected) notice.textContent =
+          error.name === 'AbortError' ? 'Reading the list timed out. Your choice has been kept. Try refreshing later.'
+            : error.message || 'The installed list could not be read. Your choice has been kept.';
+      } finally {
+        clearTimeout(deadline);
+        if (state.controller === controller) state.controller = null;
+        if (ticket === state.generation && root.dataset.saving !== '1') button.disabled = false;
+      }
+    });
+  }
+  function clearSelectChoices() {
+    lazySelectGeneration++;
+    lazySelectRows = lazySelectRows.filter(function (row) { return row.isConnected; });
+    lazySelectRows.forEach(function (row) {
+      var state = row.localChoices, select = row.querySelector('[data-select-choices-url]');
+      state.generation++; if (state.controller) state.controller.abort(); state.controller = null; state.loaded = false;
+      var keep = select.value;
+      replaceSelectChoices(select, [{value: '', label: 'No practice environment selected'},
+        ...(keep ? [{value: keep, label: 'Previously selected practice environment · availability not checked'}] : [])], keep);
+      row.querySelector('[data-select-choices-load]').textContent = 'Load installed environments';
+      row.querySelector('[data-select-choices-load]').disabled = root.dataset.saving === '1';
+      row.querySelector('[data-select-choices-notice]').textContent = 'Your account or workspace changed. Load current installed choices before reviewing a change.';
+    });
+  }
+  document.addEventListener('lightwork:copilot-context-changed', clearSelectChoices);
+  window.addEventListener('lightwork:draft-context-changed', clearSelectChoices);
   function gridRows(row) {
     return Array.prototype.slice.call(row.querySelectorAll('[data-grid-row]'));
   }
@@ -1067,10 +1143,7 @@
     if (!column.choices_url) return column.choices || [];
     if (columnChoiceCache[column.choices_url]) return columnChoiceCache[column.choices_url];
     try {
-      var response = await window.fetch(column.choices_url, {cache: 'no-store', credentials: 'same-origin',
-                                                             headers: {Accept: 'application/json'}});
-      if (!response.ok) throw response;
-      var data = await response.json();
+      var data = await window.mvFetchJSON(column.choices_url, {cache: 'no-store'});
       columnChoiceCache[column.choices_url] = data.choices || [];
     } catch (failure) {
       say(row, errorText(failure, 'load the list of options'));
@@ -1183,15 +1256,17 @@
     say(row, file ? 'Working out the fingerprint…' : 'Reading the files on this server…');
     if (button) button.disabled = true;
     try {
-      var response = await window.fetch(url, {
-        method: 'POST', cache: 'no-store', credentials: 'same-origin',
-        headers: {'Content-Type': 'application/octet-stream', Accept: 'application/json'},
-        body: file || new Blob([])
-      });
-      var data = null;
-      try { data = await response.json(); } catch (ignore) { data = null; }
-      if (!response.ok || !data || !data.fingerprint) {
-        say(row, data && typeof data.message === 'string' ? data.message : errorText(response, 'work out the fingerprint'));
+      var data;
+      try {
+        data = await window.mvFetchJSON(url, {method: 'POST', cache: 'no-store',
+          headers: {'Content-Type': 'application/octet-stream'}, body: file || new Blob([])}, 'work out the fingerprint');
+      } catch (refused) {
+        var told = refused && refused.payload && refused.payload.message;
+        say(row, typeof told === 'string' ? told : errorText(refused, 'work out the fingerprint'));
+        return;
+      }
+      if (!data || !data.fingerprint) {
+        say(row, data && typeof data.message === 'string' ? data.message : errorText({status: 0}, 'work out the fingerprint'));
         return;
       }
       row.querySelector('[data-input]').value = data.fingerprint;
@@ -1249,12 +1324,62 @@
     if (level) await showPreview(level.closest('.settings-all-row'), level);
   });
 
+  // ---- what an approval threshold would have needed --------------------------
+  // Report only, from the recorded approval checks (approval_threshold_preview).
+  function count(n, one, many) { return n + ' ' + (n === 1 ? one : many); }
+  function approvalPreview(box, data) {
+    var days = data.days || 30, lead = document.createElement('p');
+    if (!data.enough) {
+      var title = document.createElement('strong');
+      title.textContent = 'Not enough recorded checks yet:';
+      lead.appendChild(title);
+      if (data.recording_started_at) {
+        var when = document.createElement('time');
+        when.setAttribute('data-mv-time', String(data.recording_started_at));
+        when.setAttribute('data-mv-time-mode', 'date');
+        when.textContent = new Date(data.recording_started_at * 1000).toLocaleDateString(undefined, {day: 'numeric', month: 'short', year: 'numeric'});
+        lead.appendChild(document.createTextNode(' recording started '));
+        lead.appendChild(when);
+        lead.appendChild(document.createTextNode('; a preview needs ' + days + ' days' + (data.reason === 'count'
+          ? ' and at least ' + data.minimum + ' checks (' + data.checks + ' so far in the last ' + days + ' days).' : '.')));
+      } else {
+        lead.appendChild(document.createTextNode(' none have been recorded; a preview needs ' + days + ' days.'));
+      }
+      box.appendChild(lead);
+      if (data.recording_on === false) {
+        var off = document.createElement('p');
+        off.className = 'muted';
+        off.textContent = 'Keep a record of approval checks is off, so no new checks are recorded.';
+        box.appendChild(off);
+      }
+      if (window.mvFormatTimes) window.mvFormatTimes(box);
+    } else {
+      var needed = data.actions
+        ? count(data.actions, 'action', 'actions') + ' by ' + (data.agents === 1 ? '1 agent or specialist' : data.agents + ' agents and specialists')
+        : 'no actions';
+      lead.textContent = 'In the last ' + days + ' days, ' + needed + ' would have needed approval at this level.' +
+        (data.refused ? ' ' + data.refused + ' would have been refused.' : '');
+      box.appendChild(lead);
+      var recorded = data.recorded || {}, basis = document.createElement('p');
+      basis.className = 'muted';
+      basis.textContent = 'Counted from the ' + count(data.checks, 'approval check', 'approval checks') + ' recorded in that time: ' +
+        (recorded.asked || 0) + ' went to a person, ' + (recorded.allowed || 0) + ' went ahead without asking and ' +
+        (recorded.refused || 0) + ' were refused. An action someone chose to always allow still goes ahead.';
+      box.appendChild(basis);
+    }
+    var only = document.createElement('p');
+    var strong = document.createElement('strong');
+    strong.textContent = 'Preview only. Nothing changes until you save.';
+    only.appendChild(strong);
+    box.appendChild(only);
+  }
+
   // ---- what saving a choice would also change -------------------------------
   async function showPreview(row, select) {
     var box = row.querySelector('[data-preview]');
     if (!box) return;
     box.textContent = '';
-    if (!select.value) return;
+    if (!select.value && !select.hasAttribute('data-preview-any')) return;
     box.textContent = 'Working out what this changes…';
     try {
       var response = await window.fetch(select.getAttribute('data-preview-url') + '?value=' +
@@ -1267,6 +1392,7 @@
         box.textContent = data && typeof data.message === 'string' ? data.message : errorText(response, 'work out what this changes');
         return;
       }
+      if (data.kind === 'approval_checks') { approvalPreview(box, data); return; }
       var lead = document.createElement('p');
       lead.textContent = (data.items || []).length
         ? 'Saving this also changes:' : 'Saving this changes nothing else: every setting it covers already matches.';
@@ -1325,6 +1451,7 @@
 
   // ---- a row put in the page (with the page, or loaded later) ---------------
   function prepareRow(row) {
+    prepareSelectChoices(row);
     if (row.querySelector('[data-grid]')) buildGrid(row, gridState(row));
     var select = row.querySelector('[data-segment-at]');
     if (select) {
@@ -1461,6 +1588,44 @@
   var changedOnly = document.getElementById('settings-all-changed');
   var status = document.getElementById('settings-all-filter-status');
   var empty = document.getElementById('settings-all-empty');
+  window.LightworkInstalledPracticeEnvironment = {open: async function (context) {
+    if (!/^[a-f0-9]{64}$/.test(context || '') || root.dataset.saving === '1') return false;
+    var ticket = lazySelectGeneration, controller = new AbortController();
+    var deadline = setTimeout(function () { controller.abort(); }, 20000);
+    async function currentContext() {
+      var response = await fetch(API + '?q=plugins%20workbench%20image', {credentials: 'same-origin',
+        cache: 'no-store', signal: controller.signal, headers: {Accept: 'application/json'}});
+      var text = await response.text(); if (text.length > 160000) return false;
+      var value = JSON.parse(text);
+      return response.ok && value.context === context && ticket === lazySelectGeneration;
+    }
+    try {
+      if (!await currentContext()) throw new Error('Your account or workspace changed. Reload Settings before choosing an environment.');
+      var row = rowById('plugins.workbench_image');
+      if (!row) {
+        if (!await fetchRows('q=plugins%20workbench%20image')) return false;
+        row = rowById('plugins.workbench_image');
+        if (!row || !await currentContext()) return false;
+      }
+      if (ticket !== lazySelectGeneration || !row.isConnected) return false;
+      if (search) search.value = 'plugins workbench image';
+      if (groupPick) groupPick.value = '';
+      if (changedOnly) changedOnly.checked = false;
+      var group = row.closest('.settings-all-group'), part = group && group.querySelector('[data-subgroup-pick]');
+      if (part) part.value = '';
+      root.querySelectorAll('details').forEach(function (section) { section.open = section.contains(row); });
+      updateFilter(); row.hidden = false;
+      row.scrollIntoView({block: 'start'});
+      var target = row.querySelector('[data-select-choices-load], [data-input], .settings-all-label');
+      if (target) { if (!target.matches('input,select,textarea,button')) target.tabIndex = -1; target.focus({preventScroll: true}); }
+      say(row, 'Choose Load installed environments to read current local choices. Review and save only the change you want.');
+      return true;
+    } catch (error) {
+      if (ticket === lazySelectGeneration) announce(error.name === 'AbortError'
+        ? 'Reading the protected setting timed out. Your drafts have been kept.' : error.message);
+      return false;
+    } finally { clearTimeout(deadline); }
+  }};
   function updateFilter() {
     var words = (search && search.value || '').trim().toLowerCase().split(/\s+/).filter(Boolean);
     var groupWanted = groupPick ? groupPick.value : '';

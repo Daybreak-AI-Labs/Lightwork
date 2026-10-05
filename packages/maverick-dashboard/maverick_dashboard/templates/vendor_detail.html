@@ -79,7 +79,7 @@
 
   <section class="panel" id="vd-replies" hidden aria-live="polite"></section>
 
-  <div class="section-head"><h2>Linked Records</h2><button type="button" class="btn btn--primary" data-vd-add="link">Link a record</button></div>
+  <div class="section-head"><h2>Linked records</h2><button type="button" class="btn btn--primary" data-vd-add="link">Link a record</button></div>
   <div class="panel{% if not vendor.links %} empty{% endif %}">
     {% if vendor.links %}
       <table>
@@ -96,7 +96,7 @@
     {% endif %}
   </div>
 
-  <div class="section-head"><h2>Monitoring Notes</h2><button type="button" class="btn btn--primary" data-vd-add="note">Add a note</button></div>
+  <div class="section-head"><h2>Monitoring notes</h2><button type="button" class="btn btn--primary" data-vd-add="note">Add a note</button></div>
   <div class="panel{% if not vendor.monitoring_notes %} empty{% endif %}">
     {% if vendor.monitoring_notes %}
       <table>
@@ -136,8 +136,7 @@
   var base = '/api/v1/vendors/' + encodeURIComponent(vendor);
 
   function post(path, body) {
-    return fetch(base + path, { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify(body) })
-      .then(function (r) { if (!r.ok) throw r; return r.json(); });
+    return window.mvFetchJSON(base + path, { method: 'POST', body: body });
   }
   function done() { msg.textContent = 'Saved. Updating the page…'; window.location.reload(); }
   function fail(action) { return function (f) { msg.textContent = window.mvErrorText(f, action); }; }
@@ -155,10 +154,7 @@
     revision = d.revision || revision;
   }
   function getQuestionnaires() {
-    return fetch(base + '/questionnaires', { headers: { Accept: 'application/json' } }).then(function (r) {
-      if (!r.ok) throw r;
-      return r.json();
-    });
+    return window.mvFetchJSON(base + '/questionnaires');
   }
   function appendReplies(box, title, group, questions) {
     var heading = document.createElement('h3');
@@ -233,10 +229,10 @@
   document.querySelectorAll('[data-vd-status]').forEach(function (b) {
     b.addEventListener('click', async function () {
       var to = b.getAttribute('data-vd-status');
-      var text = { under_review: 'Mark ' + name + ' as under review?',
-                   active: 'Mark ' + name + ' as active again?',
-                   offboarded: 'Stop using ' + name + '? It will be marked as no longer working with you.' }[to];
-      if (!(await window.mvConfirm(text, { okText: to === 'offboarded' ? 'Stop using' : 'Confirm' }))) return;
+      // Marking a vendor under review or active again is routine and can be
+      // changed back at once: only stopping work with them asks first.
+      if (to === 'offboarded' && !(await window.mvConfirm('Stop using ' + name + '? It will be marked as no longer working with you.',
+          { okText: 'Stop using ' + name }))) return;
       post('/status', { status: to, revision: revision }).then(done, fail('change the status'));
     });
   });

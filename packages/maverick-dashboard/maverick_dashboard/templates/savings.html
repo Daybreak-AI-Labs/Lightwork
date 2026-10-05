@@ -7,7 +7,7 @@
   .sv-pos { color: var(--success); }
   .sv-neg { color: var(--danger, #e2574c); }
   .sv-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr)); gap: var(--space-3); align-items: end; }
-  .sv-form .field { display: flex; flex-direction: column; gap: 4px; }
+  .sv-form .field { display: flex; flex-direction: column; gap: var(--space-1); }
   .sv-form label { font-size: var(--text-xs); color: var(--muted); }
   .sv-dept-input { width: 6.5rem; padding: 0.3rem 0.45rem; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-sunken); color: var(--text); }
   .sv-note { font-size: var(--text-xs); color: var(--muted); margin-top: var(--space-2); }
@@ -34,6 +34,8 @@
              copy='A directional estimate: it changes with the numbers below. For measured
                    results, run a workflow pilot.') }}
   {% endcall %}
+  {% from "_spend_freshness.html" import spend_freshness %}
+  {{ spend_freshness(spend_recorded_at) }}
   {# Whose tasks these numbers count, and on what assumptions (value_views). #}
   <p class="muted" id="sv-scope">{% if value_view.scope == 'workspace' %}These numbers cover the whole
     workspace, totals only. Task details are not shown here.{% else %}These numbers
@@ -47,12 +49,8 @@
   <div class="bd-toolbar">
     <span class="bd-live"><span class="dot" aria-hidden="true"></span>Live
       <span class="bd-stamp" id="bd-stamp" role="status" aria-live="off">loading…</span></span>
-    <div class="bd-slicer" role="group" aria-label="Time range">
-      <button type="button" data-days="30" aria-pressed="false">30 days</button>
-      <button type="button" data-days="90" class="on" aria-pressed="true">90 days</button>
-      <button type="button" data-days="180" aria-pressed="false">6 months</button>
-      <button type="button" data-days="365" aria-pressed="false">1 year</button>
-    </div>
+    {% from "_tabs.html" import panel_tabs %}
+    {{ panel_tabs('Time range', [('30', '30 days'), ('90', '90 days'), ('180', '6 months'), ('365', '1 year')], '90', id='bd-range', data='days', controls=false, activation='manual') }}
   </div>
 
   <div class="bd-kpis" id="bd-kpis"></div>
@@ -147,8 +145,8 @@
       <thead>
         <tr>
           <th scope="col">Department</th><th scope="col">Finished</th>
-          <th scope="col">Hourly Cost</th><th scope="col">Hours Per Task</th>
-          <th scope="col">Cost For People</th><th scope="col">Lightwork Cost</th>
+          <th scope="col">Hourly cost</th><th scope="col">Hours per task</th>
+          <th scope="col">Cost for people</th><th scope="col">Lightwork cost</th>
           <th scope="col">Saved</th>
         </tr>
       </thead>
@@ -263,7 +261,7 @@
 
   function render(D) {
     var rep = D.report;
-    if (!rep.available) throw new Error(rep.unavailable_reason || 'Savings history is unavailable.');
+    if (!rep.available) throw new Error(rep.unavailable_reason || 'Savings history is unavailable. Refresh the page and try again.');
     var k = document.getElementById('bd-kpis');
     k.textContent = '';
     // Show the assumptions next to the estimate; never a bare cost multiple.

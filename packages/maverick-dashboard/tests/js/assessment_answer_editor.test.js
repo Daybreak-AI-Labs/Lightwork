@@ -2,6 +2,7 @@
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs"), path = require("node:path"), vm = require("node:vm");
+const { fetchHelpers } = require('./_shell');
 const templates = path.resolve(__dirname, "../../maverick_dashboard/templates");
 
 function fixture() {
@@ -26,6 +27,9 @@ function fixture() {
     render: record => renders.push(record), reload: async () => {},
     el: (tag, cls, text = "") => { const element = new Element(tag); element.className = cls; element.textContent = text; return element; } };
   for (const name of ["sendBtn", "approveBtn", "rejectBtn", "acceptBtn", "triggerBtn"]) context[name] = new Element("button");
+  // The page script's window is this context; the shell's fetch helper sends through its fetch.
+  context.window = context;
+  context.mvFetchJSON = fetchHelpers(() => context.fetch).mvFetchJSON;
   vm.createContext(context);
   return { context, get, calls, renders, Element };
 }
@@ -103,7 +107,7 @@ test("a follow-up answer uses the follow-up endpoint and retains its open review
 
 test("intake quotes a single subject safely and opens only a verified created assessment", async () => {
   const ui = fixture(), opened = [];
-  ui.context.window = { mvAssessmentReview: { open: id => opened.push(id) } };
+  ui.context.mvAssessmentReview = { open: id => opened.push(id) };
   const source = fs.readFileSync(path.join(templates, "_workspace_worklist.html"), "utf8");
   vm.runInContext(source.slice(source.indexOf("  (function assessmentIntake()"), source.lastIndexOf("  </script>")), ui.context);
   ui.get("pw-start-type").value = "pia"; ui.get("pw-start-subject").value = 'Acme, "North"\nOffice';

@@ -50,13 +50,18 @@ class TestRosterAndView:
         ])
         response = client.get("/agents")
         assert response.status_code == 200
-        picker = response.text.split('<datalist id="agent-picker-list">', 1)[1].split("</datalist>", 1)[0]
-        assert picker.index('data-name="ready_pack"') < picker.index('data-name="blocked_pack"')
-        assert picker.index('data-name="blocked_pack"') < picker.index('data-name="unknown_pack"')
-        assert 'value="Ready specialist · Ready pack" data-name="ready_pack"' in picker
-        assert 'value="Ready specialist · Ready pack (ready-pack)" data-name="ready-pack"' in picker
-        assert " disabled" not in picker
+        # The picker searches /agents/picker (the page no longer ships every
+        # specialist): ready ones first, setup recovery still discoverable.
+        assert "Show those that need setup" in response.text
         assert "2 can start · 1 needs setup · 1 needs a setup check" in response.text
+        items = client.get("/agents/picker", params={"setup": "1"}).json()["items"]
+        names = [item["name"] for item in items]
+        assert names.index("ready_pack") < names.index("blocked_pack") < names.index("unknown_pack")
+        labels = {item["name"]: item["label"] for item in items}
+        assert labels["ready_pack"] == "Ready specialist · Ready pack"
+        assert labels["ready-pack"] == "Ready specialist · Ready pack (ready-pack)"
+        ready_only = client.get("/agents/picker").json()["items"]
+        assert {item["name"] for item in ready_only} == {"ready_pack", "ready-pack"}
 
     def test_unknown_setup_check_has_recovery_link(self, monkeypatch):
         from maverick import domain_edit
@@ -314,7 +319,7 @@ class TestOverrideLifecycle:
         state = rejected_override_view(name)
         assert state and state["generation"] and state["is_builtin"]
         page = client.get("/agents").text
-        assert "Specialists paused for setup review" in page
+        assert "Agents and specialists paused for setup review" in page
         assert f'data-name="{name}"' in page
         assert f'data-generation="{state["generation"]}"' in page
         assert "Restore original setup" in page
@@ -344,7 +349,7 @@ class TestOverrideLifecycle:
 
         state = rejected_override_view("custom_bad")
         assert state and not state["is_builtin"]
-        assert "Remove unavailable specialist" in client.get("/agents").text
+        assert "Remove unavailable agent" in client.get("/agents").text
         response = client.delete("/api/v1/agents/custom_bad/override", params={
             "expected_generation": state["generation"],
         })

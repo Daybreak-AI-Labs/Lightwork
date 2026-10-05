@@ -55,4 +55,4 @@ def test_pages_ship_the_board_skeleton_without_slicer(monkeypatch, tmp_path):
         for marker in markers:
             assert marker in t, (path, marker)
         # Neither payload is windowed — no time-range slicer on these boards.
-        assert "bd-slicer" not in t, path
+        assert 'aria-label="Time range"' not in t and "data-days=" not in t, path

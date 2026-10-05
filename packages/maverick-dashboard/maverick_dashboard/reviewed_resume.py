@@ -55,7 +55,7 @@ def specialist_setup_block(goal):
             return ""
     except Exception:
         pass  # An unavailable check is not evidence that setup was fixed.
-    return "This specialist still needs setup. Ask an administrator to review it, or start a different task."
+    return "This agent or specialist still needs setup. Ask an administrator to review it, or start a different task."
 
 
 def status(request, goal_id):
@@ -98,7 +98,7 @@ def apply(request, goal_id, background, payload):
         setup_block = specialist_setup_block(goal)
         if setup_block:
             raise product_error(409, "specialist_setup", setup_block,
-                next_action=next_action("Browse specialists", "/agents"))
+                next_action=next_action("Browse agents and specialists", "/agents"))
         limits(request, goal_id, payload.max_dollars)
         try:
             result = goal_resume.reserve(world, goal_id, actor=actor,

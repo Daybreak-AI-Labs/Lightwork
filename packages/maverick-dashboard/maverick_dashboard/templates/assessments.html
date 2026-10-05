@@ -36,10 +36,10 @@
   .pill.status-in_review{ color: var(--warn); border-color: currentColor; }
   .pill.status-needs_review{ color: var(--danger); border-color: currentColor; }
   .pill.status-reviewed{ color: var(--accent); border-color: currentColor; }
-  .dot{ width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+  .dot{ width: 9px; height: 9px; border-radius: var(--radius-round); display: inline-block; }
   .dot.ok{ background: var(--accent); } .dot.attention{ background: var(--danger); }
-  .lenses-mini{ display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-  .lenses-mini span{ display: inline-flex; gap: 4px; align-items: center; font-size: var(--text-xs); color: var(--muted); }
+  .lenses-mini{ display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
+  .lenses-mini span{ display: inline-flex; gap: var(--space-1); align-items: center; font-size: var(--text-xs); color: var(--muted); }
 
   .drift{ border: 1px solid var(--danger); color: var(--danger); background: color-mix(in srgb, var(--danger) 10%, transparent);
     border-radius: var(--radius-md); padding: var(--space-2) var(--space-3); font-size: var(--text-sm); margin-bottom: var(--space-3); }
@@ -52,9 +52,9 @@
   .finding__head{ display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
   .sev{ font-size: 10px; text-transform: uppercase; letter-spacing: .04em; padding: 1px 7px; border-radius: var(--radius-pill); border: 1px solid currentColor; }
   .sev.low{ color: var(--muted); } .sev.medium{ color: var(--warn); } .sev.high{ color: var(--danger); }
-  .finding__note{ color: var(--text); font-size: var(--text-sm); margin: 4px 0 0; }
-  .finding__mit{ color: var(--muted); font-size: var(--text-sm); margin: 2px 0 0; }
-  .finding__ev{ color: var(--accent); font-size: var(--text-xs); margin: 4px 0 0; }
+  .finding__note{ color: var(--text); font-size: var(--text-sm); margin: var(--space-1) 0 0; }
+  .finding__mit{ color: var(--muted); font-size: var(--text-sm); margin: var(--space-0-5) 0 0; }
+  .finding__ev{ color: var(--accent); font-size: var(--text-xs); margin: var(--space-1) 0 0; }
   .lens__actions{ display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap; margin-top: var(--space-2); }
   .as-empty{ color: var(--muted); text-align: center; padding: var(--space-6) var(--space-3);
     border: 1px dashed var(--glass-border); border-radius: var(--radius-lg); }
@@ -67,21 +67,21 @@
   {% from "_hero.html" import hero, state %}
   {% call hero('Governance', 'Assessments',
                subtitle='Continuous review',
-               lede='Privacy, security and AI-risk reviews of every agent
-                     and flow. Lightwork drafts each review from what the
-                     agent or flow is allowed to do; a person approves each
+               lede='Privacy, security and AI-risk reviews of every agent,
+                     specialist and flow. Lightwork drafts each review from what
+                     each one is allowed to do; a person approves each
                      part, and anything that changes later is flagged for a
                      fresh review.') %}
     {{ state('Current state', 'Checked every day',
              badge='automatic', badge_class='ok',
-             copy='Every agent and flow is re-checked daily; anything that
+             copy='Every agent, specialist and flow is re-checked daily; anything that
                    changed since it was approved shows up under Needs
                    attention.') }}
   {% endcall %}
 
   <div class="as-bar">
     <span class="pill" id="as-due-count" title="Subjects needing attention">—</span>
-    <button class="btn btn--ghost" type="button" id="as-sweep" title="Re-check every agent and flow now for changes — the same check that runs automatically each day">Re-check everything now</button>
+    <button class="btn btn--ghost" type="button" id="as-sweep" title="Re-check every agent, specialist and flow now for changes — the same check that runs automatically each day">Re-check everything now</button>
     <span class="as-bar__spacer"></span>
     <a class="btn btn--ghost" href="/api/v1/assessments/export?format=csv" id="as-export-csv">Download spreadsheet</a>
   </div>
@@ -106,16 +106,16 @@
         <div class="as-card__title">Assess a subject</div>
         {% if agents|length > 12 %}
         <label class="as-field">
-          <span>Find an agent</span>
+          <span>Find an agent or specialist</span>
           <input class="input" type="search" id="as-agent-filter" autocomplete="off"
                  placeholder="Type part of a name or department" aria-describedby="as-agent-filter-count">
           <span class="muted" id="as-agent-filter-count" role="status" aria-live="polite" style="font-size: var(--text-sm);"></span>
         </label>
         {% endif %}
         <label class="as-field">
-          <span>Agent</span>
-          <select id="as-agent" aria-label="Agent to assess" data-typeahead data-typeahead-placeholder="Type an agent or department name…">
-            <option value="">{{ 'Choose an agent…' if agents else 'No agents yet' }}</option>
+          <span>Agent or specialist</span>
+          <select id="as-agent" aria-label="Agent or specialist to assess" data-typeahead data-typeahead-placeholder="Type a name or department…">
+            <option value="">{{ 'Choose an agent or specialist…' if agents else 'No agents or specialists yet' }}</option>
             {% for group in agents|groupby('group') %}<optgroup label="{{ group.grouper }}">
               {% for a in group.list %}<option value="{{ a.name }}">{{ a.label }}</option>{% endfor %}
             </optgroup>{% endfor %}
@@ -172,7 +172,7 @@
     var selected = picker.options[picker.selectedIndex];
     if (selected && selected.disabled) picker.value = '';
     count.textContent = words.length
-      ? (shown ? shown + (shown === 1 ? ' agent matches.' : ' agents match.') : 'No agents match. Try other words.')
+      ? (shown ? shown + (shown === 1 ? ' match.' : ' matches.') : 'Nothing matches. Try other words.')
       : '';
   }
   filter.addEventListener('input', function () {
@@ -184,7 +184,7 @@
   'use strict';
   var LENS_LABEL = { privacy: 'Privacy', security: 'Security', ai_risk: 'AI risk' };
   var STATUS_LABEL = { draft: 'Draft', in_review: 'In review', needs_review: 'Needs review', reviewed: 'Reviewed' };
-  var KIND_LABEL = { agent: 'Agent', flow: 'Flow' };
+  var KIND_LABEL = { agent: 'Agent or specialist', flow: 'Flow' };
   var SEVERITY_LABEL = { low: 'Low', medium: 'Medium', high: 'High' };
   var CADENCE = [[0, 'Never'], [90, 'Every 3 months'], [180, 'Every 6 months'], [365, 'Every year']];
   function statusLabel(value) {
@@ -269,7 +269,7 @@
   }
 
   function renderList(items) {
-    if (!items.length) { listEl.innerHTML = '<div class="as-empty">No assessments yet. Choose an agent or flow under Assess a subject and press Run assessment.</div>'; return; }
+    if (!items.length) { listEl.innerHTML = '<div class="as-empty">No assessments yet. Choose an agent, specialist or flow under Assess a subject and press Run assessment.</div>'; return; }
     listEl.innerHTML = '';
     items.forEach(function (a) {
       var b = document.createElement('button');
@@ -354,22 +354,22 @@
       jfetch('/api/v1/assessments/' + a.kind + '/' + encodeURIComponent(a.subject) + '/refresh', {
         method: 'POST', body: JSON.stringify({ expected_revision: a.revision })
       }).then(responseData).then(function (result) {
-        if (!result.ok) { mutationFailure(result, a, 'Re-assessment failed.'); return; }
+        if (!result.ok) { mutationFailure(result, a, 'Re-assessment failed. Refresh the page and try again.'); return; }
         renderDetail(result.data); reload();
-      }).catch(function () { detailMessage('Re-assessment failed.', true); })
+      }).catch(function () { detailMessage('Re-assessment failed. Refresh the page and try again.', true); })
         .finally(function () { if (button.isConnected) button.disabled = false; });
     });
     document.getElementById('as-del').addEventListener('click', async function () {
-      if (!(await mvConfirm('Delete the assessment for ' + a.subject + '?', { okText: 'Delete' }))) return;
+      if (!(await mvConfirm('Delete the assessment for ' + a.subject + '?', { okText: 'Delete assessment' }))) return;
       var button = this; button.disabled = true;
       jfetch('/api/v1/assessments/' + a.kind + '/' + encodeURIComponent(a.subject)
         + '?expected_revision=' + encodeURIComponent(a.revision), { method: 'DELETE' })
         .then(function (response) {
           if (response.ok) { detailCard.hidden = true; current = null; reload(); return null; }
           return responseData(response).then(function (result) {
-            mutationFailure(result, a, 'Delete failed.');
+            mutationFailure(result, a, 'Delete failed. Refresh the page and try again.');
           });
-        }).catch(function () { detailMessage('Delete failed.', true); })
+        }).catch(function () { detailMessage('Delete failed. Refresh the page and try again.', true); })
         .finally(function () { if (button.isConnected) button.disabled = false; });
     });
     function decide(lens, decision, button) {
@@ -415,7 +415,7 @@
       .then(function (result) {
         if (!result.ok) {
           pageMessage('', false);
-          detailMessage(responseDetail(result, 'Could not reload the latest assessment.'), true);
+          detailMessage(responseDetail(result, 'Could not reload the latest assessment. Refresh the page and try again.'), true);
           return;
         }
         renderDetail(result.data);
@@ -433,13 +433,11 @@
   function reloadListSelection() { renderList(lastItems); }
 
   function reload() {
-    return jfetch('/api/v1/assessments').then(function (r) {
-      if (r.status === 403) { listEl.innerHTML = '<div class="as-empty">You need auditor access to see assessments. Ask your administrator.</div>'; return null; }
-      if (!r.ok) {
-        pageMessage('Could not load the assessment register. Reload to try again.', true);
-        return null;
-      }
-      return r.json();
+    return window.mvFetchJSON('/api/v1/assessments').catch(function (error) {
+      if (error.status === 403) { listEl.innerHTML = '<div class="as-empty">You need auditor access to see assessments. Ask your administrator.</div>'; return null; }
+      if (!error.status) throw error;
+      pageMessage('Could not load the assessment register. Reload to try again.', true);
+      return null;
     }).then(function (j) {
       if (!j) return;
       pageMessage('', false);
@@ -475,7 +473,7 @@
       { method: 'POST', body: JSON.stringify({ template: tplSel.value || null, expected_revision: 0 }) })
       .then(responseData)
       .then(function (res) {
-        if (!res.ok) { draftMsg.style.color = 'var(--danger)'; draftMsg.textContent = responseDetail(res, 'Could not run the assessment.'); return; }
+        if (!res.ok) { draftMsg.style.color = 'var(--danger)'; draftMsg.textContent = responseDetail(res, 'Could not run the assessment. Try again in a minute.'); return; }
         var label = agent || (flowSel.options[flowSel.selectedIndex] || {}).textContent || name;
         draftMsg.style.color = 'var(--accent)'; draftMsg.textContent = 'Assessed ' + label + '.';
         renderDetail(res.data); reload();
@@ -494,7 +492,7 @@
           pageMessage('Everything was re-checked.', false);
           reload();
         } else {
-          pageMessage(responseDetail(res, 'Could not re-check everything.'), true);
+          pageMessage(responseDetail(res, 'Could not re-check everything. Try again.'), true);
         }
       })
       .catch(function () {
@@ -503,7 +501,8 @@
       });
   });
 
-  reload();
+  // The shell's helpers (lightwork-ui.js) load after the page content.
+  if (window.mvFetchJSON) reload(); else document.addEventListener('DOMContentLoaded', reload);
 })();
 </script>
 <script src="/static/lightwork-typeahead.js" defer></script>

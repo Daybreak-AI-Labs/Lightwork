@@ -9,7 +9,7 @@
   function node(tag, text, parent) { var el = document.createElement(tag); if (text !== undefined) el.textContent = String(text); if (parent) parent.appendChild(el); return el; }
   function button(text, parent, handler) { var el = node('button', text, parent); el.type = 'button'; el.className = 'btn btn--ghost'; el.dataset.pwAction = ''; el.onclick = handler; return el; }
   function uid() { return crypto.randomUUID().replace(/-/g, ''); }
-  function status(message) { id('status').textContent = message; }
+  function status(message) { window.mvStatus(id('status'), message); }
   function closePrivateView() {
     generation++; model = null; source = null; pending = null; uncertain = true;
     controllers.forEach(function (controller) { controller.abort(); });
@@ -21,16 +21,19 @@
   function lock(value) { busy = value; root.querySelectorAll('[data-pw-action],#pw-confirm,#pw-refresh').forEach(function (el) { el.disabled = value || uncertain; }); id('check').disabled = value; id('retry-exact').disabled = value; id('cancel').hidden = !value; }
   async function call(path, body) {
     var controller = new AbortController(); controllers.add(controller);
-    var timer = setTimeout(function () { controller.abort(); }, 20000);
     try {
-      var response = await fetch(base + path, {method:body ? 'POST' : 'GET', credentials:'same-origin', cache:'no-store', signal:controller.signal,
-        headers:{'Content-Type':'application/json', 'X-Lightwork-Project-Context':context}, ...(body ? {body:JSON.stringify(body)} : {})});
-      var data = null; try { data = await response.json(); } catch (_) { /* Never display raw responses. */ }
-      if (!response.ok) { var error = new Error(data && typeof data.detail === 'string' ? data.detail : 'This project operation could not be confirmed. Your draft is kept.'); error.status = response.status; if (response.status === 401 || response.status === 403) { closePrivateView(); status(error.message); } throw error; }
+      var kept = 'This project operation could not be confirmed. Your draft is kept. Refresh the page and try again.', data;
+      try {
+        data = await window.mvFetchJSON(base + path, {method: body ? 'POST' : 'GET', cache: 'no-store', signal: controller.signal, timeout: 20000,
+          headers: {'X-Lightwork-Project-Context': context}, body: body, plainDetail: true, messages: {401: kept, 403: kept},
+          onAccess: function (error) { closePrivateView(); status(error.message); }}, body ? 'save the project change' : 'load the project');
+      } catch (error) {
+        if (error.status && !window.mvPlainDetail(error.detail)) error.message = kept;
+        throw error;
+      }
       if (!data || typeof data !== 'object' || (data.context && data.context !== context)) { closePrivateView(); status('The current account or workspace changed. Reload before continuing.'); var changed = new Error('The current account or workspace could not be confirmed. Reload before continuing.'); changed.status = 409; throw changed; }
       return data;
-    } catch (error) { if (controller.signal.aborted && !error.status) throw new Error('The wait ended before a result was confirmed. Your draft is kept.'); throw error; }
-    finally { clearTimeout(timer); controllers.delete(controller); }
+    } finally { controllers.delete(controller); }
   }
   function select(name, choices, empty, selected) {
     var el = id(name), current = selected === undefined ? Array.from(el.selectedOptions, function (option) { return option.value; }) : selected;
@@ -107,7 +110,7 @@
       var data = await call(project ? '/' + project : ''); if (started !== generation) return;
       if (project) { model = data; render(); } else {
         id('list').replaceChildren(); if (!data.projects.length) node('p', 'No active owned or explicitly shared project workspaces. Create a project from Projects to start.', id('list'));
-        data.projects.forEach(function (item) { var card = node('section', undefined, id('list')); card.className = 'panel'; var link = node('a', item.name, card); link.href = '/project-workspaces/' + item.project_id; node('p', item.outcome || 'Outcome not defined yet', card); node('p', item.owned ? 'Your project' : 'Shared planning', card); });
+        data.projects.forEach(function (item) { var card = node('section', undefined, id('list')); card.className = 'panel'; var link = node('a', item.name, card); link.href = root.dataset.planHref ? root.dataset.planHref.replace('{id}', encodeURIComponent(item.project_id)) : '/project-workspaces/' + item.project_id; node('p', item.outcome || 'Outcome not defined yet', card); node('p', item.owned ? 'Your project' : 'Shared planning', card); });
       }
       status(dirty.size ? 'Current status refreshed. Your unsaved editor values are kept; review them against the current workspace.' : 'Current workspace and source access checked.'); id('remedy').hidden = true;
       return true;
@@ -165,7 +168,7 @@
   id('details-form').onsubmit = function (event) { event.preventDefault(); review('details', detailsPayload(), 'details'); };
   id('milestone-form').onsubmit = function (event) { event.preventDefault(); review('milestone', milestonePayload(), 'milestone'); };
   id('milestone-select').onchange = async function () {
-    if (dirty.has('milestone') && !(await window.mvConfirm('Replace the current milestone draft with the selected saved milestone?'))) { id('milestone-select').value = selectedMilestone; return; }
+    if (dirty.has('milestone') && !(await window.mvConfirm('Replace your unsaved milestone draft with the saved milestone you chose? Your unsaved edits are lost.', {okText: 'Replace draft'}))) { id('milestone-select').value = selectedMilestone; return; }
     var saved = model.workspace.editor.milestones.find(function (row) { return row.id === id('milestone-select').value; }); restoreMilestone(saved || {id:uid()}); dirty.delete('milestone'); invalidate();
   };
   id('dependency-form').onsubmit = function (event) { event.preventDefault(); review('dependency', {id:id('dependent').value, prerequisite:id('prerequisite').value, required:id('required').value === 'true'}); };
@@ -175,7 +178,7 @@
   id('source-preview').onclick = function () { if (id('source').value) openSource('/' + project + '/sources/' + id('source').value, true); };
   id('add-source').onclick = function () { if (source) review('context', {kind:source.kind, source_id:source.source_id, version:source.version}); };
   id('confirm').onclick = apply; id('check').onclick = check; id('refresh').onclick = refresh;
-  id('retry-exact').onclick = async function () { if (!busy && uncertain && pending && await window.mvConfirm('Retry only this exact reviewed save? No new project change will be created.')) { uncertain = false; id('retry-exact').hidden = true; await apply(); } };
+  id('retry-exact').onclick = async function () { if (!busy && uncertain && pending) { uncertain = false; id('retry-exact').hidden = true; await apply(); } };
   id('back').onclick = function () { if (!busy && !uncertain) { pending = null; id('review-panel').hidden = true; } };
   id('cancel').onclick = function () { controllers.forEach(function (controller) { controller.abort(); }); };
   window.addEventListener('pagehide', function () { generation++; controllers.forEach(function (controller) { controller.abort(); }); Object.values(recovery).forEach(function (item) { if (item) item.dispose(); }); });

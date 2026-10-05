@@ -106,7 +106,30 @@ def verify_full_release_runtime() -> int:
     libpq_version = verify_release_database_runtime()
     verify_release_mathml_runtime()
     verify_release_metrics_runtime()
+    verify_release_plugin_runtime()
     return libpq_version
+
+
+def verify_release_plugin_runtime() -> None:
+    """Check the guided form validator and retained offline worker sources."""
+    from pathlib import Path
+
+    from jsonschema import ValidationError
+
+    from .sandbox.plugin_contracts import validate
+
+    schema = {"type": "object", "properties": {"count": {"type": "integer", "minimum": 1}},
+              "required": ["count"], "additionalProperties": False}
+    validate(schema, {"count": 2})
+    try:
+        validate(schema, {"count": "two"})
+    except ValidationError:
+        pass
+    else:
+        raise RuntimeError("Packaged plugin questions accepted an invalid answer")
+    for name in ("plugin_probe.py", "plugin_contracts.py"):
+        source = Path(__file__).parent / "sandbox" / name
+        compile(source.read_bytes(), str(source), "exec")
 
 
 def libpq_label(libpq_version: int) -> str:

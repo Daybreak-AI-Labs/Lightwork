@@ -2,6 +2,7 @@
 const test=require('node:test'), assert=require('node:assert/strict');
 const fs=require('node:fs'), path=require('node:path'), {webcrypto}=require('node:crypto');
 const {JSDOM}=require('jsdom');
+const {shell} = require('./_shell');
 const template=fs.readFileSync(path.join(__dirname,'../../maverick_dashboard/templates/graph_editor.html'),'utf8');
 const script=template.slice(template.indexOf('<script>')+8,template.lastIndexOf('</script>'));
 const tick=()=>new Promise(resolve=>setImmediate(resolve));
@@ -24,6 +25,7 @@ function page(handler) {
                      {id:2,title:'Other own task',parent_id:null,status:'pending',updated_at:1}],edges:[]};
   w.fetch=async(url,options={})=>{calls.push({url,options});return handler?handler(url,options,tree):result(tree);};
   const selections=[];doc.addEventListener('lightwork:copilot-selection',event=>selections.push(event.detail.selection));
+  shell(w);
   w.eval(script);
   return {dom,w,doc,calls,tree,selections,
     select(id){const input=doc.getElementById('ge-select');input.value=String(id);input.dispatchEvent(new w.Event('change'));},

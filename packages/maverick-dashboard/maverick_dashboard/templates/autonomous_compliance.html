@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Autonomous Compliance · Lightwork{% endblock %}
+{% block title %}{{ 'Overview · Compliance' if tab_host else 'Autonomous compliance' }} · Lightwork{% endblock %}
 {% block content %}
 <style>
   .acm-shell { max-width: 1180px; margin: 0 auto; padding: 1.25rem; }
@@ -10,7 +10,7 @@
   .acm-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr)); gap: .75rem; }
   .acm-card { text-decoration: none; color: inherit; gap: .6rem; }
   .acm-card__row { display: flex; align-items: center; justify-content: space-between; gap: .6rem; }
-  .acm-card__name { font-weight: 600; }
+  .acm-card__name { font-weight: var(--font-semibold); }
   .acm-card__path { color: var(--muted); font-size: var(--text-sm);  }
   .acm-legend { display: grid; grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); gap: .75rem; margin: .5rem 0 0; padding: 0; list-style: none; }
   .acm-legend li { display: flex; flex-direction: column; gap: .3rem; }
@@ -18,9 +18,17 @@
   .acm-price { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 1rem; }
   .acm-price p { margin: 0; max-width: 44rem; }
 </style>
-<div class="acm-shell">
+{% if tab_host %}
+{% from "_tabs.html" import host_header, panel_attrs %}{{ host_header(tab_host) }}
+{% endif %}
+<div class="acm-shell"{% if tab_host %} {{ panel_attrs(tab_host.selected) }}{% endif %}>
+  {% if tab_host %}
+  <h2>Autonomous Compliance</h2>
+  <p class="muted">Compliance, run by governed agents: one product, six suites, one workforce.
+    {{ module_count }} tools in {{ suites | length }} areas. The labels are explained at the bottom of the page.</p>
+  {% else %}
   {% from "_hero.html" import hero %}
-  {% call hero('Compliance, run by governed agents', 'Autonomous Compliance',
+  {% call hero('Compliance, run by governed agents', 'Autonomous compliance',
                subtitle='One product, six suites, one workforce',
                lede='Everything you need to run your compliance program, in six areas.
                      Pick a card to open that part of Lightwork. Each card says whether
@@ -31,6 +39,7 @@
              badge='Ready · Preview · Needs outside service', badge_class='info',
              copy='The labels are explained at the bottom of the page.') }}
   {% endcall %}
+  {% endif %}
 
   {% for suite in suites %}
   <section class="acm-suite" aria-labelledby="acm-suite-{{ suite.key }}">

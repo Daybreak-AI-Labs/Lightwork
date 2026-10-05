@@ -169,7 +169,7 @@ def _check_files(row, payload):
     return files
 
 
-def run_check(context, operation, fingerprint, sample, mode, *, authorize, expected=None):
+def run_check(context, operation, fingerprint, sample, mode, *, authorize, expected=None, input_schema_sha256=None):
     from .budget import Budget
     from .sandbox.research import ResearchContainerRunner, ResearchLimits
 
@@ -184,13 +184,16 @@ def run_check(context, operation, fingerprint, sample, mode, *, authorize, expec
         raise ValueError("Use an object sample smaller than 16 KiB; do not include credentials or private production data.")
     if len(json.dumps(expected, allow_nan=False).encode()) > 16384:
         raise ValueError("Expected sample result must be smaller than 16 KiB.")
+    if input_schema_sha256 is not None and not re.fullmatch(r"[a-f0-9]{64}", input_schema_sha256):
+        raise ValueError("Review the exact practice questions before starting this check.")
     expected_result = hashlib.sha256(json.dumps(expected, sort_keys=True, allow_nan=False).encode()).hexdigest()
     image = str(policy.get("workbench_image") or "")
     if not re.fullmatch(r"sha256:[a-f0-9]{64}", image):
         raise ValueError("Select a locally installed, reviewed immutable Linux image in Settings. No image is downloaded and host execution is forbidden.")
     initial = {"id": operation, "fingerprint": fingerprint, "plugin": row["name"], "distribution": row["distribution"],
                "version": row["version"], "mode": mode, "started_at": time.time(), "state": "running_or_interrupted",
-               "sample_sha256": _digest(sample), "expected_result_sha256": expected_result, "attempts": 0, "replay": "never", "external_outcome": "unknown"}
+               "sample_sha256": _digest(sample), "expected_result_sha256": expected_result, "input_schema_sha256": input_schema_sha256,
+               "attempts": 0, "replay": "never", "external_outcome": "unknown"}
     def reserve(state):
         if operation in state["checks"]:
             raise ValueError("This operation was already recorded. Refresh its result; it will not be replayed.")
@@ -210,7 +213,8 @@ def run_check(context, operation, fingerprint, sample, mode, *, authorize, expec
         yield
     try:
         payload = {"group": row.get("group", "maverick.tools"), "entry": row["entry"], "distribution": row["distribution"], "version": row["version"],
-                   "content_sha256": row.get("sandbox_content_sha256") or row["content_sha256"], "operation": operation, "sample": sample}
+                   "content_sha256": row.get("sandbox_content_sha256") or row["content_sha256"], "operation": operation,
+                   "sample": sample, "input_schema_sha256": input_schema_sha256}
         files = _check_files(row, payload)
         result = ResearchContainerRunner(image, limits=ResearchLimits(timeout_seconds=0.5 if mode == "timeout" else 15)).run(
             files,

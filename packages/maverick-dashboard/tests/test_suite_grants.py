@@ -443,8 +443,13 @@ def test_scoped_user_sees_filtered_agents_and_safe_workforce_recovery(monkeypatc
     assert "Capital Markets" not in workforce.text
 
     agents_page = c.get("/agents").text
-    assert "finance_ap" in agents_page
     assert "legal_contracts" not in agents_page
+    # The roster is searched through the page's picker endpoint, which is
+    # scoped the same way: the finance pack is found, another department's is not.
+    picker = {item["name"] for item in c.get(
+        "/agents/picker", params={"q": "finance_ap", "setup": "1"}).json()["items"]}
+    assert "finance_ap" in picker
+    assert c.get("/agents/picker", params={"q": "legal_contracts", "setup": "1"}).json()["items"] == []
     # Deep-linking another department's editor renders no config.
     selected = c.get("/agents?name=legal_contracts").text
     assert "legal_contracts" not in selected
@@ -513,7 +518,7 @@ def test_cross_suite_fork_is_hidden_from_compartments_without_both_grants(monkey
     _as(monkeypatch, "user:aero")
     response = c.get("/compartments", params={"q": "Private cross-suite sentinel"})
     assert response.status_code == 200
-    assert "No specialists match this search" in response.text
+    assert "No agents or specialists match this search" in response.text
 
 
 def test_cross_suite_fork_requires_both_grants_on_agent_and_deliverable_views(

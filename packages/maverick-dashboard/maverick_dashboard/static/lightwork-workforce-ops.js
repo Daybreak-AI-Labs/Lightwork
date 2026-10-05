@@ -7,6 +7,8 @@
   window.LWWorkforceOps = true;
   var J = window.LWJobs;
   var el = J.el, plural = J.plural;
+  // The roster mixes Lightwork's built-in specialists with agents built here.
+  function members(n) { return plural(n, 'agent or specialist', 'agents and specialists'); }
   var API = '/api/v1/workforce-ops';
   function $(id) { return document.getElementById(id); }
   function fill(id, nodes) {
@@ -42,28 +44,28 @@
   }
   function clearComparisonReview() { comparisonReview = null; $('wo-compare-review').hidden = true; }
   function comparisonAnswers(run) {
-    var nodes = [el('p', 'Recorded cost: $' + Number(run.spent_dollars || 0).toFixed(6) + '. The same model and fixed question versions were used. No instructions were changed.', 'muted')];
+    var nodes = [el('p', 'muted', 'Recorded cost: $' + Number(run.spent_dollars || 0).toFixed(6) + '. The same model and fixed question versions were used. No instructions were changed.')];
     if (run.baseline_current === false || run.questions_current === false)
-      nodes.push(el('p', 'The current instructions or saved questions have changed. This is a historical comparison; review a new comparison before making a decision.', 'muted'));
-    nodes.push(el('p', 'Phrase checks are literal. A source check detects a reference marker, not a verified source. These results do not establish correctness or business improvement.', 'muted'));
+      nodes.push(el('p', 'muted', 'The current instructions or saved questions have changed. This is a historical comparison; review a new comparison before making a decision.'));
+    nodes.push(el('p', 'muted', 'Phrase checks are literal. A source check detects a reference marker, not a verified source. These results do not establish correctness or business improvement.'));
     (run.case_snapshots || []).forEach(function (question) {
-      var section = el('section'); section.appendChild(el('h4', question.task)); section.appendChild(el('p', testCriteria(question), 'muted'));
-      var pair = el('div', null, 'wo-test-grid');
+      var section = el('section'); section.appendChild(el('h4', null, question.task)); section.appendChild(el('p', 'muted', testCriteria(question)));
+      var pair = el('div', 'wo-test-grid', null);
       ['current', 'proposed'].forEach(function (variant) {
-        var card = el('div', null, 'wo-answer-card'), answer = run.results.find(function (r) { return r.case_id === question.id && r.variant === variant; });
-        card.appendChild(el('h5', variant === 'current' ? 'Current instructions' : 'Proposed instructions'));
-        card.appendChild(el('p', answer ? answer.answer : 'Not checked.', 'wo-answer-text'));
+        var card = el('div', 'wo-answer-card', null), answer = run.results.find(function (r) { return r.case_id === question.id && r.variant === variant; });
+        card.appendChild(el('h5', null, variant === 'current' ? 'Current instructions' : 'Proposed instructions'));
+        card.appendChild(el('p', 'wo-answer-text', answer ? answer.answer : 'Not checked.'));
         if (answer) {
           var labels = {includes:'Required phrases', excludes:'Forbidden phrases', refusal:'Refusal', citation:'Source marker', empty_answer:'Answer present'};
-          card.appendChild(el('p', Object.keys(answer.checks).map(function (key) { return (labels[key] || 'Answer check') + ': ' + (answer.checks[key] === 1 ? 'Passed' : 'Needs review'); }).join(' · ')));
-          card.appendChild(el('p', 'Recorded answer cost: $' + Number(answer.spent_dollars || 0).toFixed(6), 'muted'));
+          card.appendChild(el('p', null, Object.keys(answer.checks).map(function (key) { return (labels[key] || 'Answer check') + ': ' + (answer.checks[key] === 1 ? 'Passed' : 'Needs review'); }).join(' · ')));
+          card.appendChild(el('p', 'muted', 'Recorded answer cost: $' + Number(answer.spent_dollars || 0).toFixed(6)));
         }
         pair.appendChild(card);
       });
       section.appendChild(pair); nodes.push(section);
     });
-    var instructions = el('details'); instructions.appendChild(el('summary', 'Instructions used'));
-    ['current', 'proposed'].forEach(function (variant) { instructions.appendChild(el('h4', variant === 'current' ? 'Current instructions' : 'Proposed instructions')); instructions.appendChild(el('p', run.comparison[variant + '_instructions'], 'wo-answer-text')); });
+    var instructions = el('details'); instructions.appendChild(el('summary', null, 'Instructions used'));
+    ['current', 'proposed'].forEach(function (variant) { instructions.appendChild(el('h4', null, variant === 'current' ? 'Current instructions' : 'Proposed instructions')); instructions.appendChild(el('p', 'wo-answer-text', run.comparison[variant + '_instructions'])); });
     nodes.push(instructions); return nodes;
   }
   function newRunId() {
@@ -106,9 +108,9 @@
     testBaseline = data.baseline_revision || ''; testInstructions = data.current_instructions || ''; testContext = data.context || '';
     $('wo-test-current-instructions').textContent = testInstructions;
     var list = [];
-    if (!testCases.length) list.push(el('p', 'No answer checks yet. Add one below.', 'muted'));
+    if (!testCases.length) list.push(el('p', 'muted', 'No answer checks yet. Add one below.'));
     else {
-      list.push(el('p', plural(testCases.length, 'saved check') + ' for this specialist. Choose up to 5 for the next run.'));
+      list.push(el('p', null, plural(testCases.length, 'saved check') + ' for this one. Choose up to 5 for the next run.'));
       var rows = testCases.map(function (c) {
         var choose = el('input'); choose.type = 'checkbox'; choose.className = 'wo-test-choice';
         choose.value = c.id; choose.checked = testCases.length <= 5;
@@ -116,9 +118,9 @@
         choose.addEventListener('change', updateRunAvailability);
         var actions = el('span');
         if (testAdmin) {
-          var edit = el('button', 'Edit', 'btn btn--ghost'); edit.type = 'button';
+          var edit = el('button', 'btn btn--ghost', 'Edit'); edit.type = 'button';
           edit.addEventListener('click', function () { editTest(c); });
-          var remove = el('button', 'Remove', 'btn btn--ghost'); remove.type = 'button';
+          var remove = el('button', 'btn btn--ghost', 'Remove'); remove.type = 'button';
           remove.addEventListener('click', async function () {
             if (!(await window.mvConfirm('Remove this answer check?', {okText: 'Remove check'}))) return;
             remove.disabled = true;
@@ -144,19 +146,19 @@
     run.textContent = pending ? 'Check original result' : 'Check answers';
     $('wo-test-new-run').hidden = !testAdmin || !pending;
     if (!data.live_enabled) {
-      var p = el('p', 'Live answer checks are off. An administrator can enable bounded model tests in All settings.', 'muted');
-      var link = el('a', 'Open All settings'); link.href = '/settings/all'; p.appendChild(document.createTextNode(' ')); p.appendChild(link);
+      var p = el('p', 'muted', 'Live answer checks are off. An administrator can enable bounded model tests in All settings.');
+      var link = el('a', null, 'Open All settings'); link.href = '/settings/all'; p.appendChild(document.createTextNode(' ')); p.appendChild(link);
       list.push(p); fill('wo-tests-list', list);
     }
     var history = data.runs || [];
-    if (!history.length) { fill('wo-test-history', el('p', 'No live checks have been run yet.', 'muted')); return; }
+    if (!history.length) { fill('wo-test-history', el('p', 'muted', 'No live checks have been run yet.')); return; }
     fill('wo-test-history', history.map(function (r) {
       var box = el('details');
       var state = r.state === 'done' ? (r.passed + ' of ' + r.total + ' passed')
         : r.state === 'stopped' ? 'Stopped after ' + r.results.length + ' answers'
           : r.state === 'prepared' ? 'Not started' : 'Result uncertain after ' + r.results.length + ' answers';
-      box.appendChild(el('summary', J.when(r.started_at) + ' · ' + state));
-      if (r.message) box.appendChild(el('p', r.message));
+      box.appendChild(el('summary', null, J.when(r.started_at) + ' · ' + state));
+      if (r.message) box.appendChild(el('p', null, r.message));
       if (r.comparison) {
         var questionCount = r.case_snapshots.length;
         var currentPassed = r.results.filter(function (answer) { return answer.variant === 'current' && answer.passed; }).length;
@@ -166,8 +168,8 @@
         comparisonAnswers(r).forEach(function (node) { box.appendChild(node); });
         return box;
       }
-      box.appendChild(el('p', 'Model: ' + r.model + '. Recorded cost: ' + J.money(r.spent_dollars) +
-        '. Each check used the specialist instructions shown by this version; no actions or company knowledge were used.', 'muted'));
+      box.appendChild(el('p', 'muted', 'Model: ' + r.model + '. Recorded cost: ' + J.money(r.spent_dollars) +
+        '. Each check used the instructions shown by this version; no actions or company knowledge were used.'));
       if (r.results.length) box.appendChild(J.table(['Question', 'Answer', 'Result'], r.results.map(function (answer) {
         return [answer.task, answer.answer, answer.passed ? 'Passed' : 'Needs review'];
       })));
@@ -182,7 +184,7 @@
     $('wo-test-current-instructions').textContent = ''; fill('wo-test-history', null); updateRunAvailability();
     clearTestEditor();
     if (!specialist) {
-      fill('wo-tests-list', el('p', 'Choose a specialist to see its answer checks.', 'muted'));
+      fill('wo-tests-list', el('p', 'muted', 'Choose an agent or specialist to see its answer checks.'));
       fill('wo-test-history', null);
       document.querySelectorAll('#wo-my-tests .wo-test-admin').forEach(function (n) { n.hidden = true; });
       return;
@@ -211,49 +213,49 @@
       var data = await J.request(API + '/test-suite/specialists');
       var select = $('wo-test-specialist');
       (data.specialists || []).forEach(function (s) {
-        var option = el('option', s.label); option.value = s.value; select.appendChild(option);
+        var option = el('option', null, s.label); option.value = s.value; select.appendChild(option);
       });
       var requested = new URLSearchParams(location.search).get('specialist');
       if (requested && (data.specialists || []).some(function (s) { return s.value === requested; })) select.value = requested;
       await loadCustomerTests();
-    } catch (failure) { $('wo-test-status').textContent = await J.problem(failure, 'list the specialists'); }
+    } catch (failure) { $('wo-test-status').textContent = await J.problem(failure, 'list the agents and specialists'); }
   }
 
   // ---- what each specialist can do -------------------------------------------------
   var suitesLoaded = false;
   function loadInventory() {
     var suite = $('wo-inv-suite').value;
-    fill('wo-inv', el('p', 'Loading…', 'muted'));
+    fill('wo-inv', el('p', 'muted', 'Loading…'));
     J.request(API + '/inventory' + (suite ? '?suite=' + encodeURIComponent(suite) : '')).then(function (d) {
       if (!suitesLoaded) {
-        d.suites.forEach(function (s) { var o = el('option', s.label); o.value = s.value; $('wo-inv-suite').appendChild(o); });
+        d.suites.forEach(function (s) { var o = el('option', null, s.label); o.value = s.value; $('wo-inv-suite').appendChild(o); });
         suitesLoaded = true;
       }
       var facts = [
-        plural(d.specialists, 'specialist') + ' in ' + plural(d.departments, 'department') + ', including ' + plural(d.builders, 'builder') + '.',
+        members(d.specialists) + ' in ' + plural(d.departments, 'department') + ', including ' + plural(d.builders, 'builder') + '.',
         d.can_change_things_while_drafting
-          ? plural(d.can_change_things_while_drafting, 'specialist') + ' that should only draft can reach tools that change things. Review these below.'
-          : 'No specialist that only drafts can reach tools that change things.',
-        plural(d.sign_off_enforced, 'specialist') + ' must have a person sign off their work' +
+          ? plural(d.can_change_things_while_drafting, 'agent or specialist', 'agents and specialists') + ' that should only draft can reach tools that change things. Review these below.'
+          : 'No agent or specialist that only drafts can reach tools that change things.',
+        members(d.sign_off_enforced) + ' must have a person approve their work' +
           (d.sign_off_only_asked ? '; ' + plural(d.sign_off_only_asked, 'more') + ' only ask for it in their instructions.' : '.'),
-        plural(d.extra_refusals, 'specialist') + ' refuse extra kinds of requests for their field; ' +
-          plural(d.with_deliverable, 'specialist') + ' produce a defined piece of work.',
+        members(d.extra_refusals) + ' refuse extra kinds of requests for their field; ' +
+          members(d.with_deliverable) + ' produce a defined piece of work.',
         d.levels_enabled === false
-          ? 'Independence levels are turned off, so every specialist follows the same approval rules.'
+          ? 'Independence levels are turned off, so every agent and specialist follows the same approval rules.'
           : 'Independence: ' + Object.keys(RUNGS).map(function (r) { return RUNGS[r] + ' ' + ((d.independence || {})[r] || 0); }).join(', ') +
-            '. ' + plural(d.still_supervised, 'specialist') + ' still supervised while new.'
+            '. ' + members(d.still_supervised) + ' still supervised while new.'
       ];
       var nodes = [el('ul')];
-      facts.forEach(function (f) { nodes[0].appendChild(el('li', f)); });
+      facts.forEach(function (f) { nodes[0].appendChild(el('li', null, f)); });
       if (d.flagged.length) {
-        nodes.push(el('h3', 'Specialists to review'));
-        nodes.push(J.table(['Specialist', 'Can reach'], d.flagged.map(function (f) {
+        nodes.push(el('h3', null, 'Agents and specialists to review'));
+        nodes.push(J.table(['Name', 'Can reach'], d.flagged.map(function (f) {
           return [f.specialist, f.can_reach.map(window.mvHuman || String).join(', ')];
         })));
       }
       fill('wo-inv', nodes);
     }).catch(async function (failure) {
-      fill('wo-inv', el('p', await J.problem(failure, 'load the specialist inventory')));
+      fill('wo-inv', el('p', null, await J.problem(failure, 'load the list of agents and specialists')));
     });
   }
 
@@ -281,34 +283,34 @@
 
     J.wire($('wo-lint-run'), async function () {
       return { url: API + '/setup-check', init: { method: 'POST', json: {} } };
-    }, { status: $('wo-lint-status'), out: $('wo-lint-out'), action: 'check the specialists', render: function (d) {
-      var head = el('p', 'Checked ' + plural(d.specialists, 'specialist') + ': ' + plural(d.must_fix, 'problem') + ' to fix and ' +
+    }, { status: $('wo-lint-status'), out: $('wo-lint-out'), action: 'check the agents and specialists', render: function (d) {
+      var head = el('p', null, 'Checked ' + members(d.specialists) + ': ' + plural(d.must_fix, 'problem') + ' to fix and ' +
         plural(d.could_improve, 'thing') + ' that could be better.');
       if (!d.findings.length) return head;
       var rows = d.findings.map(function (f) {
         return [f.specialist, f.must_fix.join(' ') || '—', f.could_improve.join(' ') || '—'];
       });
-      var nodes = [head, J.table(['Specialist', 'Must fix', 'Could be better'], rows)];
-      if (d.more) nodes.push(el('p', plural(d.more, 'more specialist') + ' not shown.', 'muted'));
+      var nodes = [head, J.table(['Name', 'Must fix', 'Could be better'], rows)];
+      if (d.more) nodes.push(el('p', 'muted', plural(d.more, 'more agent or specialist', 'more agents and specialists') + ' not shown.'));
       nodes.push(J.technical(d.findings.slice(0, 50).map(function (f) { return f.specialist + ': ' + f.technical.join(' | '); })));
       return nodes;
     } });
 
     J.request(API + '/test-suite').then(function (d) {
-      var nodes = [el('p', plural(d.cases, 'test') + ' across ' + plural(d.specialists, 'specialist') + '. ' +
+      var nodes = [el('p', null, plural(d.cases, 'test') + ' across ' + plural(d.specialists, 'specialist') + '. ' +
         (d.problems ? plural(d.problems, 'test') + ' need fixing: each must name a real specialist and say what a good answer looks like.'
           : 'Every test is complete.'))];
       var box = el('details');
-      box.appendChild(el('summary', 'Show the tests'));
+      box.appendChild(el('summary', null, 'Show the tests'));
       box.appendChild(J.table(['Specialist', 'Task', 'A good answer'], d.list.map(function (c) {
         return [c.specialist, c.task, c.expects.join('; ')];
       })));
       nodes.push(box);
       if (d.technical.length) nodes.push(J.technical(d.technical));
-      nodes.push(el('p', 'Running the tests live needs a separate test run with an AI provider; this only checks the tests themselves.', 'muted'));
+      nodes.push(el('p', 'muted', 'Running the tests live needs a separate test run with an AI provider; this only checks the tests themselves.'));
       fill('wo-suite', nodes);
     }).catch(async function (failure) {
-      fill('wo-suite', el('p', await J.problem(failure, 'load the test suite')));
+      fill('wo-suite', el('p', null, await J.problem(failure, 'load the test suite')));
     });
 
     $('wo-test-specialist').addEventListener('change', loadCustomerTests);
@@ -362,7 +364,7 @@
       var done = await J.follow(started.job, {status: $('wo-test-run-status'), out: $('wo-test-run-out'),
         action: 'check the answers', render: function (d) {
           var r = d.run;
-          return el('p', r.state === 'done' ? r.passed + ' of ' + r.total + ' answers passed. Open Previous checks to review them.'
+          return el('p', null, r.state === 'done' ? r.passed + ' of ' + r.total + ' answers passed. Open Previous checks to review them.'
             : (r.message || 'The check stopped early. Open Previous checks for completed answers.'));
         }});
       if (!done || done.state === 'failed') await readOriginal(specialist, id);
@@ -426,9 +428,9 @@
       selected.forEach(function (row) { revisions[row.id] = row.revision; });
       comparisonReview = {specialist:specialist, case_ids:ids, case_revisions:revisions, proposed_instructions:proposed,
         baseline_revision:testBaseline, expected_context:testContext};
-      var pair = el('div', null, 'wo-test-grid');
+      var pair = el('div', 'wo-test-grid', null);
       [['Current instructions', testInstructions], ['Proposed instructions', proposed]].forEach(function (item) {
-        var card = el('div', null, 'wo-answer-card'); card.appendChild(el('h4', item[0])); card.appendChild(el('p', item[1], 'wo-answer-text')); pair.appendChild(card);
+        var card = el('div', 'wo-answer-card', null); card.appendChild(el('h4', null, item[0])); card.appendChild(el('p', 'wo-answer-text', item[1])); pair.appendChild(card);
       });
       fill('wo-compare-reviewed', [J.table(['Question', 'Passing answer'], selected.map(function (row) { return [row.task, testCriteria(row)]; })), pair]);
       $('wo-compare-review').hidden = false; $('wo-compare-review').focus();
@@ -470,18 +472,18 @@
         var further = $('wo-up-days').options[$('wo-up-days').options.length - 1].value !== String(days);
         var body = 'Tasks with a due date appear here, overdue ones first.' + (further ? ' Choose a longer period above to look further ahead.' : '');
         fill('wo-up', window.mvEmpty ? window.mvEmpty('Nothing is due in ' + period, body, null, {compact: true})
-          : el('p', 'Nothing is due in ' + period + '. ' + body, 'muted'));
+          : el('p', 'muted', 'Nothing is due in ' + period + '. ' + body));
         return;
       }
       fill('wo-up', J.table(['Task', 'Due', 'Department', 'Waiting on you'], d.tasks.map(function (t) {
-        var link = el('a', t.title || 'Task');
+        var link = el('a', null, t.title || 'Task');
         link.href = '/chat/goal/' + encodeURIComponent(t.task);
-        var due = el('span', (t.overdue ? 'Overdue: ' : '') + J.when(t.due), t.overdue ? 'badge blocked' : '');
+        var due = el('span', t.overdue ? 'badge blocked' : '', (t.overdue ? 'Overdue: ' : '') + J.when(t.due));
         return [link, due, t.department ? (window.mvHuman ? window.mvHuman(t.department) : t.department) : '—',
           t.questions ? plural(t.questions, 'question') : '—'];
       })));
     }).catch(async function (failure) {
-      fill('wo-up', el('p', await J.problem(failure, 'load the tasks coming due')));
+      fill('wo-up', el('p', null, await J.problem(failure, 'load the tasks coming due')));
     });
   }
   if ($('wo-upcoming-root')) {

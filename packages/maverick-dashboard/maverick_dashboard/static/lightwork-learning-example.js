@@ -107,11 +107,12 @@
     }
   }
   async function request(path, options, absolute = false) {
-    const response = await fetch(absolute ? path : base + path, { credentials: 'same-origin', cache: 'no-store',
-      headers: { 'Content-Type': 'application/json' }, ...options });
-    let body = null;
-    try { body = await response.json(); } catch (_) { /* No response text is safe customer copy. */ }
-    return { status: response.status, ok: response.ok, body };
+    // A refusal's body can carry the current record (an audit-pending
+    // decision), so it is handed back with the status; no response text is
+    // shown as customer copy.
+    const opts = { cache: 'no-store', ...options, headers: { 'Content-Type': 'application/json', ...(options && options.headers) } };
+    try { return { status: 200, ok: true, body: await window.mvFetchJSON(absolute ? path : base + path, opts) }; }
+    catch (error) { return { status: error.status, ok: false, body: error.payload || null }; }
   }
   function auditPending(result) {
     return result.body && (result.body.status === 'audit_pending'

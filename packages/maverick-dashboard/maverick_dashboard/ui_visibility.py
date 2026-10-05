@@ -304,7 +304,7 @@ PAGES: tuple[dict, ...] = (
     # exception desk — the Shoring P&L (Savings) sits underneath it.
     {
         "path": "/shoring",
-        "label": "Autonomous Shoring",
+        "label": "Autonomous shoring",
         "aliases": "Hand a team's work to Lightwork",
         "group": "Observe",
         "icon": "fleets",
@@ -428,7 +428,7 @@ PAGES: tuple[dict, ...] = (
     # heads the Govern group as the front door to the compliance surface.
     {
         "path": "/autonomous-compliance",
-        "label": "Autonomous Compliance",
+        "label": "Autonomous compliance",
         "group": "Govern",
         "icon": "compliance",
         "floor": "view",
@@ -527,7 +527,7 @@ PAGES: tuple[dict, ...] = (
     # tracker observations, and downstream preference synchronization.
     {
         "path": "/consent",
-        "label": "Consent & Preferences",
+        "label": "Consent and preferences",
         "group": "Consent",
         "icon": "check",
         "floor": "operate",
@@ -722,7 +722,7 @@ PAGES: tuple[dict, ...] = (
     },
     {
         "path": "/governance/inventory",
-        "label": "Governance Inventory",
+        "label": "Governance inventory",
         "group": "AI oversight",
         "icon": "overview",
         "floor": "view",
@@ -814,7 +814,7 @@ PAGES: tuple[dict, ...] = (
     },
     {
         "path": "/third-party/executive-reports",
-        "label": "Executive Vendor Reports",
+        "label": "Executive vendor reports",
         "group": "Third parties",
         "icon": "shield",
         "floor": "view",
@@ -834,7 +834,7 @@ PAGES: tuple[dict, ...] = (
     },
     {
         "path": "/third-party/lifecycle",
-        "label": "Third-Party Lifecycle",
+        "label": "Third-party lifecycle",
         "group": "Third parties",
         "icon": "shield",
         "floor": "operate",
@@ -844,7 +844,7 @@ PAGES: tuple[dict, ...] = (
     },
     {
         "path": "/third-party/collaboration",
-        "label": "Third-Party Collaboration",
+        "label": "Third-party collaboration",
         "group": "Third parties",
         "icon": "shield",
         "floor": "operate",
@@ -1086,7 +1086,7 @@ PAGES: tuple[dict, ...] = (
     # verify one offline. Audit floor, like the log it draws from.
     {
         "path": "/audit/receipts",
-        "label": "Trust Receipts",
+        "label": "Trust receipts",
         "group": "Govern",
         "icon": "audit",
         "floor": "audit",
@@ -1127,7 +1127,7 @@ PAGES: tuple[dict, ...] = (
     },
     {
         "path": "/trust",
-        "label": "Agent Trust",
+        "label": "Agent trust",
         "group": "Govern",
         "icon": "agents",
         "floor": "view",
@@ -1409,6 +1409,168 @@ for _pg in PAGES:
     if _pg["path"] in _NAV_FOLD:
         _pg["in_nav"] = False
 
+# Where each page lives in the job-named navigation ("areas", off by default:
+# ``[dashboard] navigation``): its area and the section inside that area, kept
+# beside the entries above (which other code and tests read whole). One area
+# per page; "Account" and "Help" are the account and help menus, and
+# "Ask" is the Ask button. Placement only -- who may open a page still comes
+# from its floor and default above, never from its area.
+PAGE_AREAS: dict[str, tuple[str, str]] = {
+    "/my-data": ("Account", "My data"),
+    "/account": ("Account", "Your account"),
+    "/content-access": ("Evidence & audit", "Content access"),
+    "/preferences": ("Account", "Preferences"),
+    "/today": ("Home", "Home"),
+    "/workflow-readiness": ("Settings", "Setup"),
+    "/code": ("Work", "Code changes"),
+    "/me": ("Home", "Home"),
+    "/outcome-pilots": ("Work", "Workflows"),
+    "/commitment-reviews": ("Work", "Promise reviews"),
+    "/research": ("Agents", "Learning"),
+    "/project-reviews": ("Work", "Projects"),
+    "/deliverable-bundles": ("Work", "Results"),
+    "/task-handoffs": ("Work", "Tasks"),
+    "/action-center": ("Work", "Approvals"),
+    "/start": ("Home", "Home"),
+    "/chat": ("Ask", "Ask"),
+    "/companion": ("Ask", "My companion"),
+    "/goals": ("Work", "Tasks"),
+    "/goal-builder": ("Ask", "Ask"),
+    "/graph-editor": ("Work", "Tasks"),
+    "/projects": ("Work", "Projects"),
+    "/deliverables": ("Work", "Results"),
+    "/agents": ("Agents", "Build an agent"),
+    "/roles": ("Agents", "Workforce"),
+    "/workforce": ("Agents", "Workforce"),
+    "/workflows": ("Work", "Workflows"),
+    "/flows/designer": ("Work", "Workflows"),
+    "/workflow-builder": ("Work", "Workflows"),
+    "/automations": ("Work", "Automations"),
+    "/fleets": ("Agents", "Workforce"),
+    "/overview": ("Home", "Home"),
+    "/ekko": ("Agents", "Discover work to automate"),
+    "/oversight": ("Rules & safety", "Overview"),
+    "/discovery": ("Rules & safety", "What Lightwork can do"),
+    "/run-tree": ("Evidence & audit", "Task replay"),
+    "/spend": ("Costs & value", "Spend"),
+    "/savings": ("Costs & value", "Savings"),
+    "/shoring": ("Work", "Hand over a team's work"),
+    "/billing": ("Costs & value", "Billing"),
+    "/providers": ("Settings", "AI providers"),
+    "/settings/local-ai": ("Settings", "AI providers"),
+    "/settings/security-installation": ("Settings", "Advanced"),
+    "/benchmarks": ("Settings", "Advanced"),
+    "/perf": ("Settings", "Advanced"),
+    "/flows/analytics": ("Work", "Workflows"),
+    "/cortex": ("Agents", "Knowledge"),
+    "/knowledge-access": ("Agents", "Knowledge"),
+    "/learning": ("Agents", "Learning"),
+    "/learning/approval-challenges": ("Agents", "Learning"),
+    "/learning/instructions": ("Agents", "Learning"),
+    "/learned": ("Agents", "Learning"),
+    "/walkthroughs": ("Evidence & audit", "Task replay"),
+    "/facts": ("Agents", "Knowledge"),
+    "/plan-tree-3d": ("Work", "Tasks"),
+    "/autonomous-compliance": ("Risk & compliance", "Compliance"),
+    "/approvals": ("Work", "Approvals"),
+    "/agent-control-plane": ("Rules & safety", "Agent controls"),
+    "/privacy": ("Privacy", "Overview"),
+    "/privacy/data-discovery": ("Privacy", "Find personal data"),
+    "/privacy/regulatory-intelligence": ("Privacy", "Law research"),
+    "/privacy/rights-orchestration": ("Privacy", "Requests"),
+    "/privacy/rights-consumer-delivery": ("Privacy", "Requests"),
+    "/privacy/notice-governance": ("Privacy", "Notices"),
+    "/consent": ("Privacy", "Consent"),
+    "/consent/publishing": ("Privacy", "Consent"),
+    "/consent/experiments": ("Privacy", "Consent"),
+    "/consent/delivery": ("Privacy", "Consent"),
+    "/consent/public-clients": ("Privacy", "Consent"),
+    "/consent/native": ("Privacy", "Consent"),
+    "/consent/profile-data": ("Privacy", "Consent"),
+    "/consent/custom-indexes": ("Privacy", "Consent"),
+    "/consent/bulk-jobs": ("Privacy", "Consent"),
+    "/consent/publish-settings": ("Privacy", "Consent"),
+    "/consent/global-opt-out": ("Privacy", "Consent"),
+    "/consent/application-scans": ("Privacy", "Consent"),
+    "/consent/scan-inventory": ("Privacy", "Consent"),
+    "/consent/scan-notice-proposals": ("Privacy", "Consent"),
+    "/consent/trust-center-authority": ("Privacy", "Consent"),
+    "/data-use": ("Privacy", "Data use rules"),
+    "/data-use/providers": ("Privacy", "Data use rules"),
+    "/governance-agents": ("Risk & compliance", "AI risk"),
+    "/governance/inventory": ("Risk & compliance", "AI risk"),
+    "/ai-evidence-analysis": ("Risk & compliance", "Assessments"),
+    "/assess/evidence-autopopulation": ("Risk & compliance", "Assessments"),
+    "/ai-entity-tasks": ("Risk & compliance", "AI risk"),
+    "/assurance/cloud-agents": ("Rules & safety", "Outside agents"),
+    "/privacy/drop": ("Privacy", "Requests"),
+    "/security": ("Risk & compliance", "Security"),
+    "/third-party/vendor-onboarding": ("Risk & compliance", "Vendors"),
+    "/third-party/contracts": ("Risk & compliance", "Vendors"),
+    "/third-party/executive-reports": ("Risk & compliance", "Vendors"),
+    "/third-party/intelligence": ("Risk & compliance", "Vendors"),
+    "/third-party/lifecycle": ("Risk & compliance", "Vendors"),
+    "/third-party/collaboration": ("Risk & compliance", "Vendors"),
+    "/security/threats": ("Risk & compliance", "Security"),
+    "/security/soc": ("Risk & compliance", "Security"),
+    "/security/report": ("Risk & compliance", "Security"),
+    "/security/assurance": ("Risk & compliance", "AI risk"),
+    "/security/governance": ("Risk & compliance", "AI risk"),
+    "/finance": ("Risk & compliance", "Financial controls"),
+    "/partner": ("Settings", "Partner fleet"),
+    "/permissions": ("Rules & safety", "What Lightwork can do"),
+    "/simulate": ("Rules & safety", "Test a rule"),
+    "/redact": ("Rules & safety", "Redaction check"),
+    "/safety": ("Rules & safety", "Screening"),
+    "/assessments": ("Risk & compliance", "Assessments"),
+    "/compliance": ("Risk & compliance", "Compliance"),
+    "/compliance/grc-studio": ("Risk & compliance", "Compliance"),
+    "/compliance/policy-links": ("Risk & compliance", "Compliance"),
+    "/compliance/scoping": ("Risk & compliance", "Compliance"),
+    "/compliance/scope-actions": ("Risk & compliance", "Compliance"),
+    "/compliance/scope-actions/mapping": ("Risk & compliance", "Compliance"),
+    "/compliance/continuous-evidence": ("Risk & compliance", "Compliance"),
+    "/compliance/obligations": ("Rules & safety", "Regulations and rules"),
+    "/compartments": ("Rules & safety", "What Lightwork can do"),
+    "/audit": ("Evidence & audit", "Activity log"),
+    "/audit/receipts": ("Evidence & audit", "Trust receipts"),
+    "/immune": ("Rules & safety", "Safety monitoring"),
+    "/audit/evolution-ledger": ("Evidence & audit", "Learning history"),
+    "/replay": ("Evidence & audit", "Task replay"),
+    "/trust": ("Rules & safety", "Outside agents"),
+    "/external-agents": ("Rules & safety", "Outside agents"),
+    "/skills": ("Agents", "Skills"),
+    "/store": ("Agents", "Skills"),
+    "/templates": ("Ask", "Start from a template"),
+    "/tools": ("Agents", "Tools"),
+    "/connections": ("Settings", "Connections"),
+    "/plugins": ("Agents", "Tools"),
+    "/styles": ("Agents", "Response styles"),
+    "/mcp": ("Agents", "Tools"),
+    "/channels": ("Settings", "Chat apps"),
+    "/administration/document-vault": ("Evidence & audit", "Document vault"),
+    "/workspace/recovery": ("Settings", "Backup & recovery"),
+    "/settings": ("Settings", "General"),
+    "/companion/admin": ("Settings", "People & roles"),
+    "/users": ("Settings", "People & roles"),
+    "/settings/sessions": ("Account", "Sessions"),
+    "/spending-limits": ("Costs & value", "Spending limits"),
+    "/tenants": ("Settings", "Workspaces"),
+    "/workspace/tenant": ("Settings", "Workspaces"),
+    "/cache": ("Settings", "Advanced"),
+    "/embed-demo": ("Settings", "Advanced"),
+    "/help": ("Help", "Help & diagnostics"),
+    "/notifications": ("Account", "Notifications"),
+    "/my-work": ("Work", "Tasks"),
+    "/conversations": ("Ask", "Conversations"),
+    "/get-started/employee": ("Home", "Home"),
+    "/project-workspaces": ("Work", "Projects"),
+    "/devices": ("Account", "Devices"),
+    "/access-requests": ("Account", "Permission requests"),
+    "/budget": ("Costs & value", "Budget"),
+    "/cost-reconciliation": ("Costs & value", "Compare cost records"),
+    "/provider-spending": ("Costs & value", "Provider spending"),
+}
 _PAGES_BY_PATH = {p["path"]: p for p in PAGES}
 
 # What people see for each registry group. The short keys stay stable because
@@ -1462,6 +1624,192 @@ SYNONYMS: dict[str, tuple[str, ...]] = {
     "/access-requests": ("request access", "ask for permission"),
     "/shoring": ("hand a team's work", "hand over a team's work"),
 }
+
+# The sidebar's "Pinned pages" for someone who has not chosen any yet: a
+# starting set for their role, in order. Defaults only -- the first change a
+# person makes saves their own list -- and a page the person cannot open is
+# never offered (see pin_preset). "approver" and "privacy-officer" are the
+# names the Users page derives for those custom roles; any other custom role
+# starts from the preset its name or strongest permission suggests.
+PIN_PRESETS: dict[str, tuple[str, ...]] = {
+    "admin": ("/settings", "/users", "/audit"),
+    "operator": ("/goals", "/approvals", "/deliverables"),
+    "approver": ("/approvals", "/goals", "/deliverables"),
+    "privacy-officer": ("/privacy/rights-orchestration", "/privacy"),
+    "auditor": ("/audit", "/audit/receipts", "/assessments"),
+    "viewer": ("/deliverables", "/overview"),
+}
+_PRESET_BY_PERMISSION = (("admin", "admin"), ("operate", "operator"), ("audit", "auditor"), ("view", "viewer"))
+
+
+def pin_preset(role: str | None, allowed) -> list[str]:
+    """The starting pins for ``role``: the first preset that offers at least
+    one page in ``allowed`` (the pages the person may open), keeping only
+    those pages. A role's own preset comes first, then one its name suggests,
+    then one for its strongest permission."""
+    if not role:
+        return []
+    names = [role] if role in PIN_PRESETS else []
+    names += [name for word, name in (("privacy", "privacy-officer"), ("approv", "approver")) if word in role]
+    held = rbac.permissions_for(role)
+    names += [name for permission, name in _PRESET_BY_PERMISSION if permission in held]
+    for name in names:
+        pages = [path for path in PIN_PRESETS[name] if path in allowed]
+        if pages:
+            return pages
+    return []
+
+
+# The job-named navigation ("areas" mode, ``[dashboard] navigation``): each
+# area's title (also its sidebar entry), its hub page, and its sections in
+# order. A page's area and section come from PAGE_AREAS. Ask is the Ask
+# button; Account and Help are the account and help menus, not sidebar areas.
+AREAS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
+    ("Ask", "/chat", ("Ask", "Conversations", "Start from a template", "My companion")),
+    ("Home", "/today", ("Home",)),
+    ("Work", "/goals", ("Tasks", "Approvals", "Results", "Projects", "Workflows", "Automations",
+                        "Code changes", "Promise reviews", "Hand over a team's work")),
+    ("Agents", "/workforce", ("Workforce", "Build an agent", "Skills", "Tools", "Knowledge", "Learning",
+                              "Discover work to automate", "Response styles")),
+    ("Rules & safety", "/oversight", ("Overview", "Agent controls", "What Lightwork can do", "Screening",
+                                      "Safety monitoring", "Outside agents", "Test a rule", "Redaction check",
+                                      "Regulations and rules")),
+    ("Privacy", "/privacy", ("Overview", "Requests", "Find personal data", "Notices", "Consent",
+                             "Data use rules", "Law research")),
+    ("Risk & compliance", "/compliance", ("Compliance", "Assessments", "Security", "Financial controls",
+                                          "AI risk", "Vendors")),
+    ("Evidence & audit", "/audit", ("Activity log", "Task replay", "Trust receipts", "Learning history",
+                                    "Document vault", "Content access")),
+    ("Costs & value", "/spend", ("Spend", "Savings", "Billing", "Budget", "Provider spending",
+                                 "Compare cost records", "Spending limits")),
+    ("Settings", "/settings", ("General", "Setup", "AI providers", "Connections", "Chat apps", "People & roles",
+                               "Workspaces", "Backup & recovery", "Partner fleet", "Advanced")),
+    ("Account", "/account", ("Your account", "Preferences", "Notifications", "Devices", "Sessions", "My data",
+                             "Permission requests")),
+    ("Help", "/help", ("Help & diagnostics",)),
+)
+SIDEBAR_AREAS: tuple[str, ...] = ("Home", "Work", "Agents", "Rules & safety", "Privacy", "Risk & compliance",
+                                  "Evidence & audit", "Costs & value", "Settings")
+_AREA_BY_TITLE = {title: (hub, sections) for title, hub, sections in AREAS}
+
+# Starting layouts per role (report section 5): the order of the sidebar's
+# areas, which areas start open, the start page, and sections moved to the
+# front of an area, and the order of Home's views (its page tabs: Today, My
+# work, Overview) -- the workforce snapshot comes before personal work for an
+# administrator. Defaults only -- floors still decide what anyone sees,
+# and each person can reorder, hide and pin. Areas a preset does not name
+# follow in the standard order.
+_HOME_PERSONAL = ("/today", "/me", "/overview")
+AREA_PRESETS: dict[str, dict] = {
+    "employee": {"order": ("Home", "Work", "Agents"), "open": ("Work",), "start": "/home",
+                 "home": _HOME_PERSONAL},
+    "approver": {"order": ("Home", "Work", "Rules & safety", "Evidence & audit"), "open": ("Work",),
+                 "start": "/approvals", "first": {"Work": ("Approvals",)}, "home": _HOME_PERSONAL},
+    "privacy-officer": {"order": ("Home", "Work", "Privacy", "Risk & compliance", "Evidence & audit"),
+                        "open": ("Privacy",), "start": "/privacy", "home": _HOME_PERSONAL},
+    "admin": {"order": SIDEBAR_AREAS, "open": ("Work", "Settings"), "start": "/home",
+              "home": ("/today", "/overview", "/me")},
+}
+_AREA_PRESET_BY_PERMISSION = (("admin", "admin"), ("operate", "employee"), ("audit", "approver"),
+                              ("view", "employee"))
+
+
+def area_preset_name(role: str | None) -> str:
+    """The starting layout for ``role``: its own name, one its name suggests
+    ("privacy", "approv"), then its strongest permission. Auth off (the local
+    owner, who sees everything) starts from the administrator's layout."""
+    if role is None:
+        return "admin"
+    if role in AREA_PRESETS:
+        return role
+    for word, name in (("privacy", "privacy-officer"), ("approv", "approver")):
+        if word in role:
+            return name
+    held = rbac.permissions_for(role) if role else set()
+    for permission, name in _AREA_PRESET_BY_PERMISSION:
+        if permission in held:
+            return name
+    return "employee"
+
+
+# Pages that open their section even though their name differs from it:
+# the everyday job comes before the rarer one ("Privacy requests" before
+# "California DROP requests"; "AI governance" before its workbenches).
+SECTION_LEADS = frozenset({"/privacy/rights-orchestration", "/security/governance"})
+
+
+def section_lead(hub: str, section: str):
+    """Sort key for a section's pages: the area's hub first, then a section
+    lead, the page named like the section, then pages the classic sidebar
+    lists."""
+    def key(link: dict) -> tuple[bool, bool, bool, bool]:
+        return (link["href"] != hub, link["href"] not in SECTION_LEADS,
+                link["label"].casefold() != section.casefold(),
+                not _PAGES_BY_PATH[link["href"]].get("in_nav", True))
+    return key
+
+
+def _area_sections(title: str, pages: list[dict], first: tuple[str, ...], lead: tuple[str, ...] = ()) -> list[dict]:
+    hub, order = _AREA_BY_TITLE[title]
+    order = (*first, *(name for name in order if name not in first))
+    sections: dict[str, list[dict]] = {name: [] for name in order}
+    for link in pages:
+        sections.setdefault(link["section"], []).append(link)
+    result = []
+    for name, links in sections.items():
+        if not links:
+            continue
+        links.sort(key=section_lead(hub, name))
+        # The preset's own order for these pages comes first (Home's views).
+        links.sort(key=lambda link: lead.index(link["href"]) if link["href"] in lead else len(lead))
+        result.append({"title": name, "href": links[0]["href"], "links": links,
+                       "off": all(link.get("off") for link in links)})
+    return result
+
+
+def area_nav(
+    finder: list[dict], role: str | None, *, off: frozenset[str] = frozenset(), can_turn_on: bool = False,
+    layout: list[str] | None = None,
+) -> dict:
+    """The areas navigation built from ``finder`` (``finder_pages`` after the
+    request's own filtering): only pages the viewer may already open, so an
+    area with nothing for them is left out. A page whose module is switched
+    off is dropped, or marked ``off`` for someone who can turn it on -- the
+    sidebar's rule. ``layout`` is the person's own order of sidebar areas
+    (areas left out are hidden); without one, the role's preset applies."""
+    preset_name = area_preset_name(role)
+    preset = AREA_PRESETS[preset_name]
+    by_area: dict[str, list[dict]] = {}
+    for group in finder:
+        for link in group["links"]:
+            spot = PAGE_AREAS.get(link["href"])
+            if spot is None or (link["href"] in off and not can_turn_on):
+                continue
+            by_area.setdefault(spot[0], []).append(
+                {**link, "area": spot[0], "section": spot[1], "off": link["href"] in off})
+    areas = []
+    for title, hub, _sections in AREAS:
+        if title not in by_area:
+            continue
+        sections = _area_sections(title, by_area[title], preset.get("first", {}).get(title, ()),
+                                  preset["home"] if title == "Home" else ())
+        hrefs = [link["href"] for section in sections for link in section["links"]]
+        areas.append({"title": title, "hub": hub, "href": hub if hub in hrefs else hrefs[0],
+                      "open": title in preset["open"], "sections": sections,
+                      "sidebar": title in SIDEBAR_AREAS})
+    order = list(layout) if layout else [*preset["order"], *SIDEBAR_AREAS]
+    rank = {title: index for index, title in reversed(list(enumerate(order)))}
+    sidebar = sorted((area for area in areas if area["sidebar"] and area["title"] in rank),
+                     key=lambda area: rank[area["title"]])
+    return {"preset": preset_name, "start": preset["start"], "sidebar": sidebar,
+            "by_title": {area["title"]: area for area in areas}}
+
+
+def place(path: str) -> tuple[str, str] | None:
+    """The (area, section) of the registry page governing ``path``."""
+    page = page_for(path)
+    return PAGE_AREAS.get(page["path"]) if page else None
+
 
 # Lockout guard: the pages an admin needs to *undo* a bad matrix save. Always
 # visible + reachable for the admin role, no matter what the store says.
@@ -1833,4 +2181,6 @@ __all__ = [
     "switched_off_paths",
     "HEADINGS",
     "SYNONYMS",
+    "PIN_PRESETS",
+    "pin_preset",
 ]

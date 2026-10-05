@@ -442,7 +442,7 @@ def _customizations_preview(raw: bytes) -> dict[str, Any]:
                 errors, _ = lint_profile(load_domain(path))
             except Exception as exc:  # noqa: BLE001 -- a bad file is a finding
                 errors = [str(exc)]
-            items.append({"kind": "Specialist", "name": label, "ok": not errors})
+            items.append({"kind": "Agent or specialist", "name": label, "ok": not errors})
             technical += [f"domains/{path.name}: {e}" for e in errors[:3]]
         roles_file = root / "roles.toml"
         if roles_file.is_file():

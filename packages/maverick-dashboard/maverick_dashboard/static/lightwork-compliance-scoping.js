@@ -11,6 +11,7 @@
   var statusEl = document.getElementById('cs-status');
   var records = { questionnaires: [], assessments: [], scopes: [], reports: [] };
   var answering = null;
+  var names = {};
 
   var STATUS = {
     pending_review: ['Waiting for approval', 'warn'], published: ['Ready to use', 'active'],
@@ -26,7 +27,7 @@
     ['control_owner', 'Control owner'], ['evidence_owner', 'Evidence owner'],
   ];
 
-  function say(text) { statusEl.textContent = text; }
+  function say(text) { window.mvStatus(statusEl, text); }
   function fail(failure, action) { say(R.errorText(failure, action)); }
   function statusBadge(value) {
     var s = STATUS[value] || [R.human(value), 'info'];
@@ -34,15 +35,18 @@
   }
   // "ref:question-org-size" -> "Org size"; "framework-eu-privacy" -> "Eu privacy".
   function label(ref) {
-    return R.human(String(ref || '').replace(/^(ref|evidence):/, '').replace(/^(question|framework|control|overlap)[-_]/, ''));
+    return names[ref] || R.human(String(ref || '').replace(/^(ref|evidence):/, '').replace(/^(question|framework|control|overlap)[-_]/, ''));
   }
   function questionnaireName(id, version) {
-    return label(id) + (version ? ' (version ' + version + ')' : '');
+    var q = records.questionnaires.find(function (row) { return row.questionnaire_id === id && (!version || row.version === version); });
+    return (q && q.display_names && q.display_names[id] || label(id)) + (version ? ' (version ' + version + ')' : '');
   }
 
   function load() {
     return R.call('GET', API + '/records').then(function (body) {
       records = body;
+      names = {};
+      records.questionnaires.slice().reverse().forEach(function (q) { Object.assign(names, q.display_names || {}); });
       render();
       say(records.assessments.length ? '' : 'Start an assessment to work out which controls apply to you.');
     }).catch(function (f) {
@@ -88,13 +92,14 @@
     var latest = {};
     records.questionnaires.forEach(function (q) { latest[q.questionnaire_id] = Math.max(latest[q.questionnaire_id] || 0, q.version); });
     R.table(document.getElementById('cs-questionnaires'), [
-      { label: 'Questionnaire', value: function (q) { return label(q.questionnaire_id); } },
+      { label: 'Questionnaire', value: function (q) { return q.display_names && q.display_names[q.questionnaire_id] || label(q.questionnaire_id); } },
       { label: 'Version', value: function (q) { return q.version; } },
       { label: 'Questions', value: function (q) { return q.questions; } },
       { label: 'Status', value: function (q) { return statusBadge(q.status); } },
     ], records.questionnaires, [
       { label: 'Approve for use', kind: 'primary', when: function (q) { return canAdmin && q.status !== 'published'; }, run: publishQuestionnaire },
-    ], { text: 'No questionnaires yet. Add one from a file your compliance team provides.' });
+      { label: 'Review a new version', run: function (q) { window.LightworkComplianceQuestionnaire.open(q.questionnaire_id); } },
+    ], { text: 'No questionnaires yet. Build one here and have a different administrator approve it.' });
   }
 
   function find(kind, key, value) {
@@ -115,7 +120,9 @@
     });
   }
 
-  document.getElementById('cs-add-questionnaire').addEventListener('click', function () {
+  document.getElementById('cs-add-questionnaire').addEventListener('click', function () { window.LightworkComplianceQuestionnaire.open(); });
+  document.addEventListener('lightwork:questionnaire-saved', load);
+  document.getElementById('cs-import-questionnaire').addEventListener('click', function () {
     R.form('Add a questionnaire', [
       { key: 'name', label: 'Questionnaire name', type: 'text', required: true, placeholder: 'For example: Annual scoping' },
     ], 'Choose file').then(function (values) {
@@ -170,7 +177,7 @@
 
   function fieldFor(q, index) {
     var wrap = R.el('fieldset', 'panel');
-    var legend = R.el('legend', '', label(q.question_ref));
+    var legend = R.el('legend', '', q.display_name || label(q.question_ref));
     wrap.appendChild(legend);
     wrap.appendChild(R.el('p', 'muted', DOMAINS[q.domain] || R.human(q.domain)));
     var id = 'cs-q-' + index;
@@ -186,14 +193,14 @@
     } else if (q.answer_type === 'single_choice') {
       control = R.el('select', 'select'); control.id = id;
       var blank = R.el('option', '', 'Choose an answer'); blank.value = ''; control.appendChild(blank);
-      q.options.forEach(function (o) { var op = R.el('option', '', label(o)); op.value = o; control.appendChild(op); });
+      q.options.forEach(function (o) { var op = R.el('option', '', (q.option_labels || {})[o] || label(o)); op.value = o; control.appendChild(op); });
       var lab = R.el('label', '', 'Answer'); lab.setAttribute('for', id); wrap.appendChild(lab);
     } else if (q.answer_type === 'multi_choice') {
       control = R.el('div');
       q.options.forEach(function (o, j) {
         var l = R.el('label');
         var c = R.el('input'); c.type = 'checkbox'; c.name = id; c.value = o; c.id = id + '-' + j;
-        l.appendChild(c); l.appendChild(document.createTextNode(' ' + label(o) + ' '));
+        l.appendChild(c); l.appendChild(document.createTextNode(' ' + ((q.option_labels || {})[o] || label(o)) + ' '));
         control.appendChild(l);
       });
     } else if (q.answer_type === 'integer') {
@@ -302,6 +309,7 @@
   // ---- scopes -------------------------------------------------------------
   function viewScope(s) {
     R.call('GET', API + '/scopes/' + encodeURIComponent(s.scope_id)).then(function (scope) {
+      Object.assign(names, scope.display_names || {});
       var box = document.getElementById('cs-scope-detail');
       box.textContent = '';
       box.appendChild(R.el('h2', '', 'Scope results'));
@@ -310,7 +318,7 @@
       R.table(ctl, [
         { label: 'Control', value: function (c) { return label(c.control_ref); } },
         { label: 'Framework', value: function (c) { return label(c.framework_ref); } },
-        { label: 'Why it applies', value: function (c) { return (c.reason_codes || []).map(R.human).join(', '); } },
+        { label: 'Why it applies', value: function (c) { return (c.reason_codes || []).map(label).join(', '); } },
       ], scope.control_applicability, null, { text: 'No controls apply.' });
       box.appendChild(ctl);
       var owners = scope.responsibility_assignments || {};

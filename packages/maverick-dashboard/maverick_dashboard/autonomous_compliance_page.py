@@ -12,7 +12,7 @@ the capability review supports.
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, Response
 from fastapi.templating import Jinja2Templates
 
 from .auth import require_permission
@@ -76,6 +76,28 @@ def visible_suites(suites, not_ready) -> list:
     return out
 
 
+def landing_context() -> dict:
+    """The landing's suites, cards and labels (the page, and the Compliance
+    page's Overview tab)."""
+    from maverick import compliance_catalog as catalog
+
+    from . import ui_visibility
+
+    catalog_suites = visible_suites(catalog.suites(), ui_visibility.not_ready_paths())
+    return {
+        "suites": catalog_suites,
+        "module_count": sum(len(s.modules) for s in catalog_suites),
+        "status_order": catalog.STATUS_ORDER,
+        "status_labels": catalog.STATUS_LABELS,
+        "status_meanings": {**catalog.STATUS_MEANINGS, **STATUS_MEANINGS},
+        "module_summaries": MODULE_SUMMARIES,
+        # Each card names its page exactly as the sidebar and heading do.
+        "page_names": {page["path"]: page["label"] for page in ui_visibility.PAGES},
+        "status_badge_class": catalog.STATUS_BADGE_CLASS,
+        "pricing_mailto": PRICING_MAILTO,
+    }
+
+
 def create_autonomous_compliance_page_router(
     templates: Jinja2Templates,
 ) -> APIRouter:
@@ -83,46 +105,40 @@ def create_autonomous_compliance_page_router(
 
     if not isinstance(templates, Jinja2Templates):
         raise TypeError(
-            "Autonomous Compliance page requires a Jinja template authority"
+            "Autonomous compliance page requires a Jinja template authority"
         )
     router = APIRouter(tags=["autonomous-compliance"])
 
     @router.get(PAGE_PATH, response_class=HTMLResponse, include_in_schema=False)
-    async def landing(request: Request) -> HTMLResponse:
+    async def landing(request: Request) -> Response:
         require_permission(request, "view")
         if any(
             key not in {"theme", "density", "font", "lang"}
             for key in request.query_params
         ):
             raise HTTPException(
-                status_code=404, detail="Autonomous Compliance unavailable"
+                status_code=404, detail="Autonomous compliance unavailable"
             )
-        from maverick import compliance_catalog as catalog
+        # In areas navigation the landing is the Compliance page's Overview tab.
+        from .navigation_api import areas_redirect
 
-        from . import ui_visibility
-
-        catalog_suites = visible_suites(catalog.suites(), ui_visibility.not_ready_paths())
+        moved = areas_redirect(request)
+        if moved is not None:
+            return moved
         response = templates.TemplateResponse(
-            request,
-            "autonomous_compliance.html",
-            {
-                "suites": catalog_suites,
-                "module_count": sum(len(s.modules) for s in catalog_suites),
-                "status_order": catalog.STATUS_ORDER,
-                "status_labels": catalog.STATUS_LABELS,
-                "status_meanings": {**catalog.STATUS_MEANINGS, **STATUS_MEANINGS},
-                "module_summaries": MODULE_SUMMARIES,
-                # Each card names its page exactly as the sidebar and heading do.
-                "page_names": {page["path"]: page["label"] for page in ui_visibility.PAGES},
-                "status_badge_class": catalog.STATUS_BADGE_CLASS,
-                "pricing_mailto": PRICING_MAILTO,
-            },
+            request, "autonomous_compliance.html", landing_context()
         )
-        response.headers["Cache-Control"] = "no-store, private, max-age=0"
-        response.headers["X-Robots-Tag"] = "noindex, nofollow, noarchive"
-        return response
+        return with_landing_headers(response)
 
     return router
 
 
-__all__ = ["MODULE_SUMMARIES", "PAGE_PATH", "PRICING_MAILTO", "create_autonomous_compliance_page_router"]
+def with_landing_headers(response: Response) -> Response:
+    """The landing's own caching and indexing headers, wherever it renders."""
+    response.headers["Cache-Control"] = "no-store, private, max-age=0"
+    response.headers["X-Robots-Tag"] = "noindex, nofollow, noarchive"
+    return response
+
+
+__all__ = ["MODULE_SUMMARIES", "PAGE_PATH", "PRICING_MAILTO", "create_autonomous_compliance_page_router",
+           "landing_context", "with_landing_headers"]

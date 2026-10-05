@@ -137,12 +137,12 @@ def test_pages_ship_the_board_skeleton(monkeypatch, tmp_path):
                          ("/workforce", "bd-depts")):
         t = c.get(path).text
         assert "/static/board.js" in t, path
-        assert 'class="bd-slicer"' in t and 'id="bd-stamp"' in t, path
+        assert 'aria-label="Time range"' in t and 'data-days="90"' in t and 'id="bd-stamp"' in t, path
         assert marker in t, path
 
 
 def test_overview_empty_still_offers_first_goal(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     t = _client().get("/overview").text
-    assert "Start your first goal" in t
+    assert "Start your first task" in t
     assert "bd-momentum" not in t   # no board over an empty record

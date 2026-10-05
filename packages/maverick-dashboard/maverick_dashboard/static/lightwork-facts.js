@@ -22,14 +22,16 @@
     selectFacts([]);
   }
   async function request(url, options) {
-    var response = await fetch(url, Object.assign({cache:'no-store', credentials:'same-origin'}, options || {}));
-    if (response.status === 401 || response.status === 403) {
-      clearPrivate(); var denied=new Error('Access changed. Sign in or choose an authorized workspace.'); denied.accessChanged=true; throw denied;
+    var payload;
+    try {
+      payload = await window.mvFetchJSON(url, Object.assign({cache: 'no-store',
+        onAccess: function (error) { clearPrivate(); error.accessChanged = true; }}, options || {}), options && options.method ? 'save the fact' : 'load the facts');
+    } catch (error) {
+      if (error.status && !error.accessChanged) error.message = 'The request could not be completed. Your draft is preserved. Try again.';
+      throw error;
     }
-    if (!response.ok) { var failure = new Error('The request could not be completed. Your draft is preserved.'); failure.status = response.status; throw failure; }
-    if (response.status === 204) return null;
-    var payload = await response.json();
-    if (payload.context !== context) { clearPrivate(); var changed=new Error('Your account or workspace changed. Reload to continue.'); changed.accessChanged=true; throw changed; }
+    if (payload === null) return null;  // No Content
+    if (payload.context !== context) { clearPrivate(); var changed = new Error('Your account or workspace changed. Reload to continue.'); changed.accessChanged = true; throw changed; }
     return payload;
   }
   function setBusy(value) {

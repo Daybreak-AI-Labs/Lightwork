@@ -71,7 +71,7 @@ def test_page_renders_with_one_h1_and_every_suite(client: TestClient) -> None:
     parser = _CardBadges()
     parser.feed(body)
     assert parser.h1 == 1
-    assert "Autonomous Compliance" in body
+    assert "Autonomous compliance" in body
     for suite in page.visible_suites(catalog.suites(), ui_visibility.not_ready_paths()):
         assert escape(suite.label) in body
         assert f'id="acm-suite-{suite.key}"' in body

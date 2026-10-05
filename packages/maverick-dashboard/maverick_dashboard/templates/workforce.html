@@ -19,12 +19,8 @@
   <div class="bd-toolbar">
     <span class="bd-live"><span class="dot" aria-hidden="true"></span>Live
       <span class="bd-stamp" id="bd-stamp" role="status" aria-live="off">loading…</span></span>
-    <div class="bd-slicer" role="group" aria-label="Time range">
-      <button type="button" data-days="30" aria-pressed="false">30d</button>
-      <button type="button" data-days="90" class="on" aria-pressed="true">90d</button>
-      <button type="button" data-days="180" aria-pressed="false">180d</button>
-      <button type="button" data-days="365" aria-pressed="false">1y</button>
-    </div>
+    {% from "_tabs.html" import panel_tabs %}
+    {{ panel_tabs('Time range', [('30', '30d'), ('90', '90d'), ('180', '180d'), ('365', '1y')], '90', id='bd-range', data='days', controls=false, activation='manual') }}
   </div>
 
   <div class="bd-kpis" id="bd-kpis"></div>
@@ -93,7 +89,9 @@
           'No description yet. View the team to see its specialists before you deploy it.' }}</p>
         <p>
           <span class="badge">{{ d.headcount }} catalog specialists</span>
-          <span class="badge dept-readiness" role="status">Checking actions…</span>
+          {# Plain text, not role=status: it fills in once on load for every
+             department, and dozens of announcements on load are noise. #}
+          <span class="badge dept-readiness">Checking actions…</span>
           {% if not entitlements.get(d.key) %}<span class="badge">Add-on required</span>{% endif %}
         </p>
         <p>
@@ -394,7 +392,7 @@
 
   <div class="section-head"><h2 id="fa-autonomy-title">How independently specialists work</h2></div>
   <section class="panel" aria-labelledby="fa-autonomy-title">
-    <p class="muted" id="fa-autonomy-status" role="status" aria-live="polite">Loading…</p>
+    <p class="muted" id="fa-autonomy-status">Loading…</p>
     <div id="fa-autonomy"></div>
   </section>
   {% include "_workforce_ops.html" %}

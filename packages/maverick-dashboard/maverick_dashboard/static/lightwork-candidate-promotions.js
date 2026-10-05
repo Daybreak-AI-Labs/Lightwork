@@ -36,23 +36,11 @@
     return readJSON(BASE + path, method, body, action);
   }
 
+  // A reply that cannot be confirmed is never shown as an answer; the saved
+  // release decisions are the source of truth.
   async function readJSON(url, method = 'GET', body, action = 'read the saved release') {
-    let response;
-    const controller = new AbortController();
-    const deadline = setTimeout(() => controller.abort(), 20000);
-    try {
-      response = await fetch(url, {
-        method,
-        cache: 'no-store',
-        signal: controller.signal,
-        headers: body ? {'Accept':'application/json', 'Content-Type':'application/json'} : {'Accept':'application/json'},
-        body: body ? JSON.stringify(body) : undefined,
-      });
-      if (!response.ok) throw new Error(typeof window.mvErrorText === 'function'
-        ? window.mvErrorText(response, action) : 'Could not ' + action + '. Refresh before continuing.');
-      return await response.json();
-    } catch (_) { throw new Error('Lightwork could not confirm this reply. Refresh saved release decisions before continuing.'); }
-    finally { clearTimeout(deadline); }
+    try { return await window.mvFetchJSON(url, {method, cache: 'no-store', body, timeout: 20000}, action); }
+    catch (_) { throw new Error('Lightwork could not confirm this reply. Refresh saved release decisions before continuing.'); }
   }
 
   // The shared in-page dialog; the browser's own box only when it is missing.
@@ -101,7 +89,7 @@
       message(candidate.local_release ? (candidate.local_release.name || 'Selected workflow') + ': ' + label(result.state) + '.' : 'Candidate ' + candidate.candidate_id + ' is now updated.');
     } catch (error) {
       try { await refresh(); message('The reply could not be confirmed. Current release decisions were refreshed; inspect the saved result before trying another action.', true); }
-      catch (_) { message(error.message || 'Candidate promotion action failed. Refresh before trying again.', true); }
+      catch (_) { message(error.message || 'That didn\'t work. Refresh the page and try again.', true); }
     } finally {
       setBusy(false);
     }
@@ -284,12 +272,12 @@
       candidate.local_release ? 'Prepare approved workflow' : 'Stage candidate', candidate, 'stage',
       candidate.local_release ? 'Prepare this approved workflow version and keep its exact previous published rules available for restoration? Nothing is published yet.' : 'Stage this exact candidate after another current rights and artifact check?', 'btn btn--primary'));
     if (candidate.state === 'staged') item.appendChild(actionButton(
-      candidate.local_release ? 'Publish for a controlled trial' : 'Start canary', candidate, 'activate',
-      candidate.local_release ? 'Publish this exact prepared workflow version for a controlled trial? New runs will use these rules. The previous published rules remain available for restoration.' : 'Activate this staged candidate as a canary? Lightwork will retain the compatible rollback target.', 'btn btn--primary'));
+      candidate.local_release ? 'Publish for a controlled trial' : 'Start a limited trial', candidate, 'activate',
+      candidate.local_release ? 'Publish this exact prepared workflow version for a controlled trial? New runs will use these rules. The previous published rules remain available for restoration.' : 'Start this staged candidate as a limited trial? Lightwork will keep the version it can roll back to.', 'btn btn--primary'));
     if (candidate.state === 'canary') {
       const assess = actionButton(
-        candidate.local_release ? 'Check actual trial runs' : 'Assess canary and apply rollback rules', candidate, 'canary',
-        candidate.local_release ? 'Check the recorded failures of actual runs from this publication? If its acceptance rules fail, Lightwork restores the retained previous rules. This check does not establish answer accuracy or business improvement.' : 'Read the current canary observations and immediately roll back if a declared invariant fails?', 'btn btn--primary');
+        candidate.local_release ? 'Check actual trial runs' : 'Check the trial and apply rollback rules', candidate, 'canary',
+        candidate.local_release ? 'Check the recorded failures of actual runs from this publication? If its acceptance rules fail, Lightwork restores the retained previous rules. This check does not establish answer accuracy or business improvement.' : 'Read the current trial results and roll back at once if a declared rule fails?', 'btn btn--primary');
       if (candidate.local_release && !candidate.local_release.can_assess) {
         assess.disabled = true;
         assess.dataset.unavailable = 'true';
@@ -363,7 +351,7 @@
     setBusy(true);
     try { await refresh(); shown = true; }
     catch (error) {
-      message(error.message || 'Candidate promotions could not be loaded.', true);
+      message(error.message || 'Candidate promotions could not be loaded. Refresh the page and try again.', true);
       // Nothing was ever shown: clear the list's "Loading…"; the status line
       // above it says what happened and what to do.
       if (!shown) list.replaceChildren();

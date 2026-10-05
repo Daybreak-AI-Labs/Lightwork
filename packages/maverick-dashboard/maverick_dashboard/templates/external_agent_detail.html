@@ -4,7 +4,7 @@
 {% block content %}
 {% from "_back_link.html" import back_link with context %}
   {% set _LIFECYCLE = {'active': 'Active', 'suspended': 'Paused', 'revoked': 'Access blocked', 'contained': 'Blocked for rule breaks', 'expired': 'Access expired'} %}
-  {% set _MEMORY = {'lesson': 'lessons', 'semantic': 'facts', 'procedural': 'how-to notes', 'episodic': 'run summaries'} %}
+  {% set _MEMORY = {'lesson': 'lessons', 'semantic': 'facts', 'procedural': 'how-to notes', 'episodic': 'task summaries'} %}
   <h1 class="page-title">{{ _name }}</h1>
   <p class="page-subtitle">{{ a.platform_label }}{% if a.description %} · {{ a.id }}{% endif %} · {{ back_link('/external-agents', 'Outside agents') }}</p>
 
@@ -34,6 +34,30 @@
 
   {% include "_external_agent_actions.html" %}
 
+  {% if access %}
+  <details class="panel" id="agent-access">
+    <summary><strong>Check access</strong> <span class="badge">{{ access.label }}</span> <span class="sub">— what this agent can do here, and which rule allows it</span></summary>
+    <h2 style="font-size: var(--text-md, 1rem); margin: var(--space-4) 0 var(--space-2);">Actions by risk</h2>
+    <table>
+      <caption class="sr-only">What this agent may do at each risk level</caption>
+      <thead><tr><th scope="col">Actions</th><th scope="col">Answer</th><th scope="col">What it means</th><th scope="col">Rule that decides it</th></tr></thead>
+      <tbody>
+      {% for t in access.tiers %}
+        <tr><th scope="row">{{ t.title }}</th><td><span class="badge{% if t.level == 'refused' %} failure{% endif %}">{{ t.label }}</span></td><td>{{ t.means }}</td><td>{{ t.rule }}.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    <p class="sub">It runs on {{ access.platform }}, so Lightwork checks each action before the agent takes it. Your risk ratings for its actions always win over what it reports.</p>
+    <h2 style="font-size: var(--text-md, 1rem); margin: var(--space-4) 0 var(--space-2);">Actions it may use</h2>
+    <p>{% if access.allowed %}Only: {{ access.allowed | map('humanize') | join(', ') }}.{% else %}Any action, within the risk answers above.{% endif %}
+      {% if access.blocked %}Never: {{ access.blocked | map('humanize') | join(', ') }}.{% endif %}</p>
+    <p>{% if access.data_scopes %}Shared knowledge it may read: {{ access.data_scopes | map('humanize') | join(', ') }}.{% else %}It may not read shared knowledge.{% endif %}</p>
+    <h2 style="font-size: var(--text-md, 1rem); margin: var(--space-4) 0 var(--space-2);">Spending limit</h2>
+    <p>{% if access.spending.limit is not none %}It may report {{ access.spending.limit | money }} {{ 'per month' if access.spending.period == 'monthly' else 'in total' }}: {{ access.spending.spent | money }} used, {{ access.spending.remaining | money }} left.{% if access.spending.over %} Further actions are refused until an administrator resets its spending.{% endif %}{% else %}It has no spending limit of its own.{% endif %}</p>
+    <p class="muted mv-freshness" data-mv-freshness>{% if a.last_run_at %}Spending updated {{ a.last_run_at | datetime }}, when it last reported a task.{% else %}No spending reported yet.{% endif %}</p>
+  </details>
+  {% endif %}
+
   {% macro execution_card(entry) %}
   <article class="panel" style="margin-top: var(--space-3); overflow-wrap: anywhere;">
     <h3>{{ entry.connector }} · {{ entry.action }}</h3>
@@ -58,6 +82,7 @@
 
   <div class="panel">
     <h2 style="margin-top:0">Spend and budget</h2>
+    <p class="muted mv-freshness" data-mv-freshness>{% if a.last_run_at %}Spending updated {{ a.last_run_at | datetime }}, when it last reported a task.{% else %}No spending reported yet.{% endif %}</p>
     <table>
       <thead><tr><th scope="col">Period</th><th scope="col">Amount</th></tr></thead>
       <tbody>
@@ -66,8 +91,8 @@
                 {% if a.over_budget %}<span class="badge failure">Over budget</span>{% endif %}</td></tr>
         <tr><td>Reported by the agent, all time</td><td>{{ a.spent_dollars | money }}</td></tr>
         <tr><td>Recorded by Lightwork</td>
-            <td>{{ a.record.get('runs', 0) }} run{{ '' if a.record.get('runs', 0) == 1 else 's' }} · {{ a.record.get('dollars', 0) | money }}</td></tr>
-        <tr><td>Runs that took longer than allowed</td><td>{{ a.wall_violations }}</td></tr>
+            <td>{{ a.record.get('runs', 0) }} task{{ '' if a.record.get('runs', 0) == 1 else 's' }} · {{ a.record.get('dollars', 0) | money }}</td></tr>
+        <tr><td>Tasks that took longer than allowed</td><td>{{ a.wall_violations }}</td></tr>
       </tbody>
     </table>
   </div>
@@ -100,7 +125,7 @@
   {% endif %}
 
   <div class="panel">
-    <h2 style="margin-top:0">Recent runs</h2>
+    <h2 style="margin-top:0">Recent tasks</h2>
     {% if a.episodes %}
     <table>
       <thead><tr><th scope="col">Task</th><th scope="col">Outcome</th><th scope="col">Cost</th><th scope="col">When</th></tr></thead>
@@ -119,8 +144,8 @@
     </table>
     {% else %}
     <div class="mv-empty">
-      <p class="mv-empty__title">No runs yet</p>
-      <p class="mv-empty__body">When the agent reports work, or starts a live run, it shows up here.</p>
+      <p class="mv-empty__title">No tasks yet</p>
+      <p class="mv-empty__body">When the agent reports work, or starts a live task, it shows up here.</p>
       <a class="btn btn--ghost" href="/external-agents">Back to outside agents</a>
     </div>
     {% endif %}

@@ -223,5 +223,5 @@ async def job_status(job_id: str, request: Request) -> dict:
     require_global_permission(request, "admin")
     job = ops_jobs.get(job_id[:32])
     if job is None or job["kind"] != "workspace-keys":
-        raise HTTPException(404, "That job is no longer listed.")
+        raise HTTPException(404, "That task is no longer listed. Start it again if needed.")
     return {"job": ops_jobs.public(job)}

@@ -54,6 +54,7 @@ release-runtime = [
     # the supported SQL driver, local MathML conversion and metrics collector.
     "sqlalchemy>=2.0,<3", "psycopg[binary,pool]>=3.3.5,<4",
     "latex2mathml>=3.77", "prometheus-client>=0.20",
+    "jsonschema>=4.18,<5",
 ]
 azure      = ["openai>=1.30,<4", "azure-identity>=1.25.3,<2"]
 openrouter = ["openai>=1.30,<4"]

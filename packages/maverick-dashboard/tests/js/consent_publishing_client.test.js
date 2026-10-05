@@ -4,6 +4,7 @@ const assert=require("node:assert/strict");
 const fs=require("node:fs"),path=require("node:path");
 const {webcrypto}=require("node:crypto");
 const {JSDOM}=require("jsdom");
+const {shell} = require('./_shell');
 const root=path.resolve(__dirname,"../../maverick_dashboard");
 const read=name=>fs.readFileSync(path.join(root,name),"utf8");
 const flush=async()=>{for(let i=0;i<30;i++){await new Promise(setImmediate);await new Promise(r=>setTimeout(r,2));}};
@@ -32,6 +33,7 @@ async function page(options={}){
     if(u.pathname.endsWith("/withdraw")&&options.withdrawStatus)return reply(options.withdrawStatus,{detail:"publication revision is 3, expected 2"});
     return reply(201,{ok:true});
   };
+  shell(w);
   w.eval(read("static/lightwork-consent-workbench.js"));
   w.eval(read("static/lightwork-consent-publishing.js"));
   await flush();

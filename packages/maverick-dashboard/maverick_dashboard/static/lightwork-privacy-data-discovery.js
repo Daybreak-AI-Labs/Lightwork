@@ -62,7 +62,7 @@
       throw problem("Server response exceeded the 2 MiB safety limit.", "response_too_large", response.status);
     }
     if (!response.body || typeof response.body.getReader !== "function") {
-      throw problem("Server response stream is unavailable.", "response_stream_unavailable", response.status);
+      throw problem("The reply could not be read. Refresh the page and try again.", "response_stream_unavailable", response.status);
     }
     var reader = response.body.getReader();
     var chunks = [];
@@ -138,7 +138,7 @@
   var COMPLETENESS = { complete: "Fully checked", partial: "Partly checked", truncated: "Stopped at a limit", failed: "Could not finish" };
   var DECISION = { confirmed: "Correct", reclassified: "Different kind of data", false_positive: "Not personal data" };
 
-  function say(text) { statusEl.textContent = text; }
+  function say(text) { window.mvStatus(statusEl, text); }
   function fail(f, action) { say(R.errorText(f, action)); }
   function badge(map, v) { var s = map[v] || [R.human(v), "info"]; return R.badge(s[0], s[1]); }
   function provider(name) { return PROVIDERS[name] || R.human(name); }
@@ -446,7 +446,7 @@
       box.appendChild(R.el("p", "", (d.added_finding_sha256 || []).length + " new item(s), " + (d.removed_finding_sha256 || []).length +
         " no longer found, " + (d.unchanged_count || 0) + " unchanged."));
     } catch (f) {
-      if (f && f.status === 409) { say("These two scans used different protection keys, so they cannot be compared."); return; }
+      if (f && f.status === 409) { say("These two scans used different protection keys, so they cannot be compared. Choose two scans made with the same key."); return; }
       fail(f, "compare the scans");
     }
   }

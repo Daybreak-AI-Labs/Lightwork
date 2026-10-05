@@ -157,6 +157,7 @@
   </div>
 
   {% include "_learning_loop.html" %}
+  {% include "_learning_jobs.html" %}
   {% include "_learned_ops.html" %}
 
   <style>
@@ -169,18 +170,10 @@
   <script>
     (function () {
       var msg = document.getElementById('gt-msg');
-      function say(text) { if (msg) msg.textContent = text; }
+      function say(text) { window.mvStatus(msg, text); }
       async function post(url, body, action) {
-        try {
-          var r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(body || {}) });
-          if (!r.ok) {
-            var j = await r.json().catch(function () { return {}; });
-            say(r.status === 404 && window.mvPlainDetail(j.detail) || window.mvErrorText(r, action));
-            return null;
-          }
-          return await r.json().catch(function () { return {}; });
-        } catch (e) { say(window.mvErrorText(e, action)); return null; }
+        try { return (await window.mvFetchJSON(url, { method: 'POST', body: body || {} }, action)) || {}; }
+        catch (e) { say(e.status === 404 && window.mvPlainDetail(e.detail) || e.message); return null; }
       }
 
       // Suggested test cases: one decision per click, then reload -- positions

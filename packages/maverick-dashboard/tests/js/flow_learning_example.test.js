@@ -4,6 +4,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const { JSDOM } = require("jsdom");
+const {shell} = require('./_shell');
 const base = path.resolve(__dirname, "../../maverick_dashboard");
 const html = fs.readFileSync(path.join(base, "templates/flow_run.html"), "utf8");
 const scriptPath = path.join(base, "static/lightwork-learning-example.js");
@@ -22,6 +23,7 @@ async function harness(first = reply(200, accepted())) {
     calls.push({ url, options });
     return new Promise((resolve, reject) => pending.push({ resolve, reject }));
   };
+  shell(dom.window);
   dom.window.eval(source);
   const get = id => dom.window.document.getElementById("le-" + id);
   assert.ok(get("card"), "The actual run template must contain the learning example card.");

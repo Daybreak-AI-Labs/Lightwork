@@ -20,7 +20,7 @@ HEADERS = {"Cache-Control": "private, no-store"}
 # credentials, access grants, identifiers, or deployment data leave the server.
 PORTABLE = frozenset({
     "persona.style", "persona.name", "persona.addendum",
-    "dashboard.theme", "dashboard.density",
+    "dashboard.theme", "dashboard.density", "dashboard.glass",
     "budget.max_wall_seconds", "budget.max_tool_calls", "budget.max_output_tokens",
     "models.vision", "speculative.draft_model", "verification.cross_family_model",
 })
@@ -52,6 +52,14 @@ def _can_export(setting) -> bool:
 def _impact(setting):
     from .settings_runtime_status import impact
     return impact(setting)
+
+
+def _present_value(setting, value):
+    # Keep immutable identities in accepted audit evidence; name them only in
+    # the customer projection, without contacting Docker during history reads.
+    if setting.id == "plugins.workbench_image":
+        return catalog.display_value(setting, value)
+    return page._audit_value(setting, value)
 
 
 @router.post('/api/v1/settings/catalog/review')
@@ -90,12 +98,12 @@ def review(request: Request, body: page.CatalogUpdate):
                                 if requested and requested.inherit else 'dashboard setting')
             items.append({
                 'id': setting.id, 'label': setting.label,
-                'before': page._audit_value(setting, change['old']),
-                'after': page._audit_value(setting, change['new']),
+                'before': _present_value(setting, change['old']),
+                'after': _present_value(setting, change['new']),
                 'source': page._resolve(setting, layers)['source'], 'resulting_source': resulting_source,
                 'scope': 'Organization / installation', 'restart': setting.restart,
                 'affected': 'Authorized workspaces inheriting this organization setting',
-                'module': setting.reader,
+                'module': setting.group,
                 'automatic': requested is None,
                 **_impact(setting),
             })
@@ -209,7 +217,7 @@ def history(request: Request):
             restorable = _can_export(setting) and old is not None
             events.append({'id': key, 'label': setting.label, 'actor': payload.get('actor', 'Unknown'),
                            'at': datetime.fromtimestamp(event['ts'], timezone.utc).isoformat(),
-                           'before': page._audit_value(setting, old), 'after': page._audit_value(setting, new),
+                           'before': _present_value(setting, old), 'after': _present_value(setting, new),
                            'before_revision': payload.get('before_revision'), 'after_revision': payload.get('after_revision'),
                            'restorable': restorable,
                            'restore_value': page._form_value(setting, old) if restorable else None})
@@ -297,7 +305,8 @@ def search(request: Request, q: str = Query('', max_length=200)):
                                     ('theme','Your theme','theme colors appearance system'),
                                     ('font','Your font','font dyslexia accessibility'),
                                     ('density','Your page spacing','density display compact'),
-                                    ('text_size','Your text size','text size reading accessibility')]:
+                                    ('text_size','Your text size','text size reading accessibility'),
+                                    ('glass','Your glass effects','glass blur translucent transparency appearance')]:
             if personal:
                 add(title, '/preferences#preference-' + key, aliases, scope='Personal', role='Signed-in member',
                     value=str(personal['values'][key]) or 'Inherited', source=personal['sources'][key])

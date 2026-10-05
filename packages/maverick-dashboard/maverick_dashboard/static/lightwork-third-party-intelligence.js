@@ -35,7 +35,7 @@
   function label(list, value) { var m = list.filter(function (p) { return p[0] === value; })[0]; return m ? m[1] : R.human(value); }
   function opts(list) { return list.map(function (p) { return { value: p[0], label: p[1] }; }); }
   function badge(value) { var s = STATE[value] || [R.human(value), "idle"]; return R.badge(s[0], s[1]); }
-  function say(text) { statusLine.textContent = text; }
+  function say(text) { window.mvStatus(statusLine, text); }
   function fail(action) { return function (f) { var t = f && f.plain ? f.plain : R.errorText(f, action); say(t); if (window.mvToast) { window.mvToast(t, { error: true }); } }; }
   function plain(text) { var e = new Error("plain"); e.plain = text; return e; }
   function api(method, path, body) { return R.call(method, API + path, body); }
@@ -171,7 +171,7 @@
     api("POST", "/provider-runtime/sources/" + encodeURIComponent(s.source_id) + "/readiness").then(function (d) {
       say(d.ready ? "The connection is ready. Lightwork will try it on the next collection." : "The connection isn't ready yet. Ask your IT team to check the connection key.");
     }, function (f) {
-      say(f && f.status === 403 ? "This source isn't approved for watching for changes, so it can't be collected automatically." : R.errorText(f, "test the connection"));
+      say(f && f.status === 403 ? "This source isn't approved for watching for changes, so it can't be collected automatically. Collect it by hand, or ask an administrator to approve it." : R.errorText(f, "test the connection"));
     });
   }
   function recordSnapshot(s) {

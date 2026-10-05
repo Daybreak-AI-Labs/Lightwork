@@ -68,7 +68,7 @@
   // Fetch failures from another site come back as a TypeError; say it plainly.
   function plain(e) {
     if (e && e.name === "TypeError") return "Blocked — this page is not allowed to read your Lightwork data.";
-    return (e && e.message) || "Could not load this right now.";
+    return (e && e.message) || "Could not load this right now. Refresh the page and try again.";
   }
 
   class LightworkAnalytics extends HTMLElement {
@@ -110,7 +110,7 @@
         if (!r.ok) {
           const e = new Error(r.status === 401 || r.status === 403
             ? "Sign-in needed — ask your administrator for an access key."
-            : "Could not load this right now.");
+            : "Could not load this right now. Refresh the page and try again.");
           throw e;
         }
         return r.json();

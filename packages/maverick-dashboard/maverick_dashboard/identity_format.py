@@ -66,6 +66,49 @@ _PERMISSION_LABELS = {
     "view": "View",
 }
 
+# What each built-in role lets a person do. The same sentence is shown wherever
+# a role is chosen (invite, role change, workspace member) and on the access
+# check, so a role reads the same everywhere.
+_ROLE_DESCRIPTIONS = {
+    "admin": ("Runs Lightwork. Manages people and roles, settings, provider keys and "
+              "secrets, plus everything an operator and an auditor can do."),
+    "operator": ("Does the work. Starts and cancels tasks, approves or denies actions "
+                 "waiting for a decision, and uses tools. Can't change settings or "
+                 "manage people."),
+    "auditor": ("Reviews the record. Reads the history of what happened and reports, "
+                "and nothing else, so reviews stay independent."),
+    "viewer": "Looks but doesn't touch. Sees dashboards and results.",
+}
+
+# Each permission atom as the power a person reads, most basic first.
+POWERS = (
+    ("view", "View work and results"),
+    ("operate", "Run and change work, and decide approvals"),
+    ("audit", "Read the activity record"),
+    ("admin", "Manage people, settings and policy"),
+)
+
+
+def role_description(role: object, permissions=(), description: object = "") -> str:
+    """One plain sentence for a built-in or custom role.
+
+    A custom role reads as its administrator's own description (when given)
+    followed by the powers its permission atoms grant, so even an undescribed
+    role says what it allows."""
+    slug = "" if role is None else str(role).strip()
+    if slug in _ROLE_DESCRIPTIONS:
+        return _ROLE_DESCRIPTIONS[slug]
+    held = set(permissions or ())
+    powers = [text.lower() for atom, text in POWERS if atom in held]
+    if not powers:
+        allows = "Allows nothing yet."
+    elif len(powers) == 1:
+        allows = f"Can {powers[0]}."
+    else:
+        allows = "Can " + ", ".join(powers[:-1]) + " and " + powers[-1] + "."
+    own = " ".join(str(description or "").split()).rstrip(".")
+    return f"{own}. {allows}" if own else allows
+
 
 @dataclass(frozen=True)
 class Identity:
@@ -185,8 +228,10 @@ def humanize(value: object) -> str:
 
 __all__ = [
     "Identity",
+    "POWERS",
     "humanize_principal",
     "role_label",
+    "role_description",
     "permission_label",
     "humanize",
 ]

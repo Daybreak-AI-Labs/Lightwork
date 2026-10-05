@@ -1,6 +1,7 @@
 'use strict';
 const {test} = require('node:test'), assert = require('node:assert/strict');
 const fs = require('node:fs'), path = require('node:path'), {JSDOM} = require('jsdom');
+const {shell} = require('./_shell');
 const folder = path.resolve(__dirname, '../../maverick_dashboard');
 
 function read(name) { return fs.readFileSync(path.join(folder, name), 'utf8'); }
@@ -16,6 +17,7 @@ function response(value, status = 200) {
 async function fixture(markup, script, route, {confirm = true, url = 'https://lightwork.example/'} = {}) {
   const dom = new JSDOM('<main>' + markup + '</main>', {url, runScripts: 'outside-only'});
   const {window} = dom, calls = [], confirms = [], opened = [];
+  shell(window);
   window.fetch = async (u, options = {}) => { calls.push({url: u, options}); return route(u, options); };
   window.mvConfirm = async (message) => { confirms.push(message); return confirm; };
   window.mvErrorText = (failure, action) => 'Could not ' + action + '.';
@@ -27,6 +29,14 @@ async function fixture(markup, script, route, {confirm = true, url = 'https://li
   const settle = async () => { for (let i = 0; i < 20; i++) await new Promise((done) => setImmediate(done)); };
   await settle();
   return {window, document: window.document, calls, confirms, opened, settle};
+}
+// The shell's shared helpers (mvFetchJSON) load before page scripts, as in
+// base.html; this fixture's own stand-ins for the other helpers are kept.
+function withShell(window) {
+  const kept = Object.fromEntries(Object.keys(window).filter((k) => k.startsWith('mv')).map((k) => [k, window[k]]));
+  if (!window.matchMedia) window.matchMedia = () => ({matches: false, addEventListener() {}, removeEventListener() {}});
+  window.eval(fs.readFileSync(path.resolve(__dirname, '../../maverick_dashboard/static/lightwork-ui.js'), 'utf8'));
+  Object.assign(window, kept);
 }
 function submit(ui, form) { form.dispatchEvent(new ui.window.Event('submit', {cancelable: true})); }
 
@@ -40,6 +50,7 @@ test('one-step client setup sends the form and shows the link once', async (t) =
     throw new Error('unexpected request ' + url);
   });
   t.after(() => ui.window.close());
+  withShell(ui.window);
   ui.window.eval(read('static/lightwork-tenants.js'));
   const form = ui.document.getElementById('tenant-add');
   assert.equal(form.querySelector('[data-onboard-roles]').options.length, 2);

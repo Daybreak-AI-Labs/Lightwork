@@ -6,6 +6,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const crypto = require("node:crypto");
 const { JSDOM } = require("jsdom");
+const {shell} = require('./_shell');
 
 const root = path.resolve(__dirname, "../../maverick_dashboard");
 const read = (name) => fs.readFileSync(path.join(root, name), "utf8");
@@ -41,6 +42,7 @@ async function page(options = {}) {
     if (url.endsWith("/links") && method === "POST") return reply(201, { link_id: "plink-2", private_capability: "ACCESS-CODE-ONCE" });
     return reply(200, {});
   };
+  shell(w);
   w.eval(read("static/lightwork-consent-workbench.js"));
   [...read("templates/policy_publication_links.html").matchAll(/<script>([\s\S]*?)<\/script>/g)].forEach((m) => w.eval(m[1]));
   await flush();

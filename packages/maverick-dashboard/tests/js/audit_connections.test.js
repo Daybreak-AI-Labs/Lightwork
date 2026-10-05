@@ -4,6 +4,7 @@ const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const path=require('node:path');
 const {JSDOM}=require('jsdom');
+const {shell} = require('./_shell');
 const tick=()=>new Promise(resolve=>setTimeout(resolve,0));
 const response=(body,status=200)=>({ok:status>=200&&status<300,status,json:async()=>body});
 const source=fs.readFileSync(path.join(__dirname,'../../maverick_dashboard/static/lightwork-connections.js'),'utf8');
@@ -12,7 +13,7 @@ function fixture(fetch){
   const html=raw.replace(/\{%[\s\S]*?%\}/g,'').replace(/\{\{[\s\S]*?\}\}/g,'').replace('data-can-manage=""','data-can-manage="true"');
   const dom=new JSDOM(html,{url:'http://localhost/connections',runScripts:'outside-only'});
   dom.window.lightworkConnectionImpact={review:async()=> 'a'.repeat(64)};
-  dom.window.fetch=fetch;dom.window.mvConfirm=async()=>true;dom.window.eval(source);return dom;
+  shell(dom.window);dom.window.fetch=fetch;dom.window.mvConfirm=async()=>true;dom.window.eval(source);return dom;
 }
 const record={name:'friendly-account',connector:'long_tail',revision:'original',has_token:true,base_url:'https://service.example',access:'owner',allowed_principals:[]};
 

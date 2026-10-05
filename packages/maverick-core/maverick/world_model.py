@@ -28,6 +28,7 @@ from dataclasses import dataclass, fields
 from pathlib import Path
 from typing import Any
 
+from .approval_checks import SQLITE_SCHEMA as _APPROVAL_CHECK_SCHEMA
 from .attachment_submissions import SQLITE_SCHEMA as _ATTACHMENT_SUBMISSION_SCHEMA
 from .deadline_alerts import SQLITE_SCHEMA as _DEADLINE_ALERT_SCHEMA
 from .event_admission import SQLITE_SCHEMA as _EVENT_ADMISSION_SCHEMA
@@ -60,7 +61,7 @@ log = logging.getLogger(__name__)
 # intentional override from the untouched compatibility constant.
 _INITIAL_DEFAULT_DB = data_dir("world.db")
 DEFAULT_DB = _INITIAL_DEFAULT_DB
-SCHEMA_VERSION = 47
+SCHEMA_VERSION = 48
 DEFAULT_BUSY_TIMEOUT_MS = 5000
 WAL_SWITCH_BUSY_TIMEOUT_MS = 50
 WAL_SWITCH_RETRY_SECONDS = 5.0
@@ -433,6 +434,9 @@ CREATE TABLE IF NOT EXISTS harness_corpus (
 
 
 MIGRATIONS: dict[int, list[str]] = {
+    # v48: one row per approval-gate decision (no content), for previewing a
+    # threshold change later (maverick.approval_checks).
+    48: _APPROVAL_CHECK_SCHEMA,
     # Reconcile both draft histories without changing their earlier fingerprints.
     # The teardown draft used v42 for these tables, so its databases may have
     # skipped the companion draft's v42 receipt table. Ensure both sets at v47.
@@ -2719,6 +2723,34 @@ class WorldModel:
         params.append(limit)
         rows = self._read_all(sql, tuple(params))
         return [_episode_spend_from_row(r) for r in rows]
+
+    def episode_costs_since(self, since: float, *, limit: int = 100_000) -> list[tuple[str, float, float]]:
+        """Finished runs that ended at or after ``since``, oldest first, as
+        ``(owner, ended_at, cost_dollars)``. Read-only history for previewing a
+        spending limit before it is saved."""
+        rows = self._read_all(
+            "SELECT COALESCE(g.owner, '') AS owner, e.ended_at AS ended_at, "
+            "COALESCE(e.cost_dollars, 0) AS cost FROM episodes e JOIN goals g ON e.goal_id = g.id "
+            "WHERE e.ended_at IS NOT NULL AND e.ended_at >= ? ORDER BY e.ended_at ASC, e.id ASC LIMIT ?",
+            (float(since), int(limit)),
+        )
+        return [(str(r["owner"] or ""), float(r["ended_at"]), float(r["cost"] or 0.0)) for r in rows]
+
+    def task_costs_for(self, *, domain: str = "", execution_principal: str = "",
+                       limit: int = 500) -> list[float]:
+        """What the most recent finished tasks run by one specialist (``domain``)
+        or one agent (``execution_principal``) cost, newest first: the sum of
+        each task's finished runs. Read-only history for "typical cost"."""
+        column, value = ("g.domain", domain) if domain else ("g.execution_principal", execution_principal)
+        if not value:
+            return []
+        rows = self._read_all(
+            "SELECT SUM(COALESCE(e.cost_dollars, 0)) AS cost, MAX(e.ended_at) AS ended "
+            f"FROM episodes e JOIN goals g ON e.goal_id = g.id WHERE {column} = ? "
+            "AND e.ended_at IS NOT NULL GROUP BY e.goal_id ORDER BY ended DESC LIMIT ?",
+            (str(value), int(limit)),
+        )
+        return [float(r["cost"] or 0.0) for r in rows]
 
     def episode_exists(self, goal_id: int, episode_id: int) -> bool:
         """True if ``episode_id`` belongs to ``goal_id``. A single indexed

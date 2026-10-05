@@ -4,20 +4,14 @@
   var busy = {};
   function human(value) { return String(value || '').replace(/[_-]/g, ' '); }
   async function read(url, options) {
-    var response;
-    try { response = await fetch(url, Object.assign({credentials: 'same-origin', cache: 'no-store'}, options || {})); }
-    catch (_) { throw new Error(options && options.method === 'POST'
-      ? 'The save result could not be confirmed. Check the flow’s version history before trying again.'
-      : 'The current flow could not be checked. Refresh and try again.'); }
-    var body = null;
-    try { body = await response.json(); } catch (_) { /* Keep raw errors out of the page. */ }
-    if (!response.ok) {
-      var detail = body && body.detail;
-      var error = new Error(typeof detail === 'string' ? detail : 'The current flow could not be checked. Refresh and try again.');
-      error.status = response.status;
+    var writing = options && options.method === 'POST';
+    try { return await window.mvFetchJSON(url, Object.assign({cache: 'no-store', plainDetail: true}, options || {}), writing ? 'save the flow' : 'check the current flow'); }
+    catch (error) {
+      if (!error.status) throw new Error(writing
+        ? 'The save result could not be confirmed. Check the flow’s version history before trying again.'
+        : 'The current flow could not be checked. Refresh and try again.');
       throw error;
     }
-    return body;
   }
   async function prepare(flowId, proposal, preferredTool) {
     var key = flowId + ':' + proposal.node_id;

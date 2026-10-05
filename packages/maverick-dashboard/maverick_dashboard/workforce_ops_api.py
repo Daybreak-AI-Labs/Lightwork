@@ -33,7 +33,7 @@ _FINDINGS = (
     ("effort", "Its effort level is not a level Lightwork recognises."),
     ("both allowed and denied", "Some tools are both allowed and blocked. Blocked wins."),
     ("persona under", "Its description of who it is, is very short."),
-    ("description is empty", "It has no description for the list of specialists."),
+    ("description is empty", "It has no description for the list of agents and specialists."),
     ("no knowledge_sources", "It has no reference sources to base its work on."),
     ("no deny_tools", "It does not explicitly block any tools."),
     ("read-only pack", "It only reads, but does not explicitly block tools that change things."),
@@ -223,9 +223,9 @@ def _test_profile(request: Request, name: str):
     from maverick.domain import available_domains
     profile = available_domains().get(name)
     if profile is None:
-        raise HTTPException(status_code=404, detail="Choose a specialist from the list.")
+        raise HTTPException(status_code=404, detail="Choose an agent or specialist from the list.")
     if not domain_suites_allowed(request, name):
-        raise HTTPException(status_code=403, detail="You cannot access this specialist's department.")
+        raise HTTPException(status_code=403, detail="You cannot access the department this one belongs to.")
     return profile
 
 
@@ -416,7 +416,7 @@ def _start_customer_test_job(request: Request, specialist: str, *, operation_id:
         existing = saved.run_by_id(operation_id)
         if existing is not None:
             if existing["specialist"] != specialist:
-                raise HTTPException(status_code=409, detail="That test request belongs to another specialist.")
+                raise HTTPException(status_code=409, detail="That test request belongs to another agent or specialist.")
             if existing.get("comparison") or proposed_instructions is not None:
                 _match_test_comparison(existing, actor, proposed_instructions, baseline_revision, case_revisions)
             if existing["state"] != "prepared":
@@ -456,7 +456,7 @@ def _start_customer_test_job(request: Request, specialist: str, *, operation_id:
             raise ValueError("The reviewed account or workspace changed. No further answers were sent.")
         if (model_for_role(specialist) != model
                 or saved.instruction_digest(saved.answer_system(current), model) != instruction_hash):
-            raise ValueError("This specialist or its model changed. No further tests were sent.")
+            raise ValueError("Its instructions or model changed. No further tests were sent.")
         if comparison and {case["id"]: case["revision"] for case in saved.snapshot(specialist, case_ids)} != case_revisions:
             raise ValueError("A selected question changed. No further comparison answers were sent.")
         if job.cancelled:

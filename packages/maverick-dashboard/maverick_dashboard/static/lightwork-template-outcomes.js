@@ -11,7 +11,7 @@
       const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),15000);
       try{
         const response=await fetch('/api/v1/templates/'+encodeURIComponent(card.dataset.templateName)+'/outcomes',{cache:'no-store',signal:controller.signal});
-        const data=await response.json().catch(()=>({}));if(!response.ok)throw new Error(typeof data.detail==='string'?data.detail:'Evidence is unavailable.');
+        const data=await response.json().catch(()=>({}));if(!response.ok)throw new Error(typeof data.detail==='string'?data.detail:'Evidence is unavailable. Refresh the page and try again.');
         if(invalid)return;if(context&&data.context!==context){invalid=true;throw new Error('Account changed. Reload Templates.');}context=data.context;
         body.replaceChildren(node('p',data.note));
         for(const evidence of data.evidence){

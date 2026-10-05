@@ -119,12 +119,35 @@ def enabled_families() -> set[str]:
     return {value for value in chosen if isinstance(value, str) and value in FAMILIES}
 
 
+def _read_gate(request):
+    """Controls that only show current status are on by default: they read
+    through each page's own authorization and change nothing."""
+    auth.require_permission(request, "view")
+    if config.config_source_errors(include_tenant=True):
+        raise HTTPException(503, "Copilot controls are unavailable because this workspace's settings "
+                                 "could not be read. Use the page's own controls.")
+
+
 def _gate(request):
+    """Controls that change something stay behind ``[features]
+    copilot_operations`` (off by default) plus a sealed review and an explicit
+    confirmation: the confirmation each page asks for (a typed reason, a
+    passphrase) cannot be guaranteed for every adapter, so changes are opt-in."""
     auth.require_permission(request, "view")
     if (config.config_source_errors(include_tenant=True)
             or config.load_global_config().get("features", {}).get("copilot_operations", False) is not True
             or config.get_features().get("copilot_operations") is not True):
         raise HTTPException(403, "Copilot actions are turned off or their configuration is unavailable. Use the native page controls.")
+
+
+def _writes_enabled(request) -> bool:
+    try:
+        _gate(request)
+    except HTTPException as exc:
+        if exc.status_code == 403:
+            return False
+        raise
+    return True
 
 
 def _context(request):
@@ -150,6 +173,7 @@ def _adapter_modules():
         product_operations_companion_admin,
         product_operations_companion_conversation,
         product_operations_compliance_mappings,
+        product_operations_compliance_questionnaires,
         product_operations_connections,
         product_operations_consent_jobs,
         product_operations_conversation,
@@ -171,6 +195,7 @@ def _adapter_modules():
         product_operations_knowledge,
         product_operations_learning_cycles,
         product_operations_learning_history,
+        product_operations_learning_jobs,
         product_operations_learning_lessons,
         product_operations_learning_program,
         product_operations_local_runtime,
@@ -178,6 +203,7 @@ def _adapter_modules():
         product_operations_notifications,
         product_operations_outcome_pilots,
         product_operations_personal_data,
+        product_operations_plugin_environment,
         product_operations_plugins,
         product_operations_preferences,
         product_operations_projects,
@@ -207,6 +233,7 @@ def _adapter_modules():
         product_operations_companion_conversation,
         product_operations_commitments,
         product_operations_compliance_mappings,
+        product_operations_compliance_questionnaires,
         product_operations_tasks,
         product_operations_task_launch,
         product_operations_task_map,
@@ -231,6 +258,7 @@ def _adapter_modules():
         product_operations_knowledge,
         product_operations_learning_cycles,
         product_operations_learning_history,
+        product_operations_learning_jobs,
         product_operations_instruction_capture,
         product_operations_installation_security,
         product_operations_learning_lessons,
@@ -239,6 +267,7 @@ def _adapter_modules():
         product_operations_today,
         product_operations_activation,
         product_operations_devices,
+        product_operations_plugin_environment,
         product_operations_plugins,
         product_operations_projects,
         product_operations_stop,
@@ -284,10 +313,12 @@ def _page(value):
 
 
 def _adapter(request, page, selection, identifier):
-    _gate(request)
+    _read_gate(request)
     adapter = adapters().get(identifier)
     if adapter is None or not any(fnmatchcase(_page(page), path) for path in adapter.pages):
         raise HTTPException(404, "This action is not registered for the selected page.")
+    if adapter.execute is not None:
+        _gate(request)
     if adapter.family not in enabled_families():
         raise HTTPException(403, "Your administrator has not enabled this Copilot action family. Use its native controls.")
     try:
@@ -302,7 +333,7 @@ def _adapter(request, page, selection, identifier):
 def _response(value, *, background=None, delete_cookies=()):
     response = JSONResponse(value, headers={"Cache-Control": "private, no-store"}, background=background)
     for name in delete_cookies:
-        if name in {"mvk_theme", "mvk_font", "mvk_density", "mvk_text_size", "mvk_lang"}:
+        if name in {"mvk_theme", "mvk_font", "mvk_density", "mvk_text_size", "mvk_glass", "mvk_lang"}:
             response.delete_cookie(name, path="/")
     return response
 
@@ -310,13 +341,20 @@ def _response(value, *, background=None, delete_cookies=()):
 @router.post("/catalog")
 def catalog(request: Request, body: ContextInput):
     _same_origin(request)
-    _gate(request)
+    # Status-only controls are listed by default; controls that change
+    # something appear only when Copilot actions are turned on. With nothing
+    # to list the catalog is simply empty -- a turned-off feature is not a
+    # permission failure.
+    _read_gate(request)
+    writes = _writes_enabled(request)
     page, selection = _page(body.page), _selection(body.selection)
     original_context = _context(request)
     families = enabled_families()
     items = []
     for adapter in adapters().values():
         if not any(fnmatchcase(page, path) for path in adapter.pages):
+            continue
+        if not writes and (adapter.execute is not None or adapter.family not in enabled_families()):
             continue
         try:
             state = adapter.snapshot(request, selection)
@@ -335,8 +373,8 @@ def catalog(request: Request, body: ContextInput):
                       "blocked": blocked, "revision": state.revision, "source": state.source,
                       "summary": state.summary, "details": state.details, "fields": state.fields,
                       "confirmation_required": adapter.execute is not None})
-    _gate(request)
-    if original_context != _context(request):
+    _read_gate(request)
+    if original_context != _context(request) or writes != _writes_enabled(request):
         raise HTTPException(409, "Your account, workspace or access changed while these controls were read. Reopen Copilot to check current controls.")
     return _response({"schema": 1, "page": page, "selection": selection,
                       "context": original_context, "checked_at": time.time(), "operations": items})
@@ -483,13 +521,16 @@ def _model_proposal(message, choices):
 @router.post("/propose")
 async def propose(request: Request, body: ProposeInput):
     _same_origin(request)
-    _gate(request)
+    _read_gate(request)
+    writes = _writes_enabled(request)
     if body.context != _context(request):
         raise HTTPException(409, "The account or workspace changed. Refresh available actions.")
     normalized = " ".join(body.message.lower().strip().rstrip(".?!").split())
     matches, available = [], []
     for adapter in adapters().values():
         if adapter.family not in enabled_families() or not any(fnmatchcase(_page(body.page), path) for path in adapter.pages):
+            continue
+        if adapter.execute is not None and not writes:
             continue
         try:
             state = adapter.snapshot(request, _selection(body.selection))
@@ -511,7 +552,7 @@ async def propose(request: Request, body: ProposeInput):
                 source = "model"
             except Exception:
                 operation, source = None, "built_in_fallback"
-    _gate(request)
+    _read_gate(request)
     if body.context != _context(request):
         raise HTTPException(409, "Your context changed. Refresh the available controls.")
     if operation:

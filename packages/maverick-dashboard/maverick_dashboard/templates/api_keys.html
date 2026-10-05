@@ -97,24 +97,14 @@
     }
     async function request(url, options) {
       options = options || {};
-      var init = {method: options.method || 'GET', cache: 'no-store', credentials: 'same-origin',
-        headers: {Accept: 'application/json'}};
-      if (options.json !== undefined) {
-        init.headers['Content-Type'] = 'application/json';
-        init.body = JSON.stringify(options.json);
+      // Plain sentences only: a validation reply that is already one, else the shared wording.
+      try {
+        return await window.mvFetchJSON(url, {method: options.method || 'GET', cache: 'no-store', body: options.json});
+      } catch (error) {
+        var plain = (error.status === 400 || error.status === 422) && window.mvPlainDetail(error.detail);
+        if (plain) error.message = plain;
+        throw error;
       }
-      var response;
-      try { response = await window.fetch(url, init); }
-      catch (e) { throw new Error(window.mvErrorText(e)); }
-      var data = null;
-      try { data = await response.json(); } catch (e) { data = null; }
-      if (!response.ok) {
-        // Plain sentences only: a validation reply that is already one, else the shared wording.
-        var detail = data && data.detail;
-        throw new Error((response.status === 400 || response.status === 422) && window.mvPlainDetail(detail) ||
-          window.mvErrorText({status: response.status, detail: detail}));
-      }
-      return data;
     }
     function when(ts) {
       if (!ts) return 'never';
@@ -171,8 +161,8 @@
         if (['active', 'expiring', 'rotating'].indexOf(k.status) !== -1) {
           var revoke = el('button', 'btn btn--ghost', 'Revoke'); revoke.type = 'button';
           revoke.setAttribute('aria-label', 'Revoke key ' + k.label);
-          revoke.addEventListener('click', function () {
-            if (window.confirm('Revoke "' + k.label + '"? Anything using it will stop working now.')) act(k, 'revoke');
+          revoke.addEventListener('click', async function () {
+            if (await window.mvConfirm('Revoke the key "' + k.label + '"? Anything using it stops working now, and a revoked key can\'t be turned back on.', {okText: 'Revoke key'})) act(k, 'revoke');
           });
           actions.appendChild(revoke);
         }
@@ -245,7 +235,7 @@
           if (!a.disabled_at) {
             var b = el('button', 'btn btn--ghost', 'Disable ' + a.slug); b.type = 'button';
             b.addEventListener('click', async function () {
-              if (!window.confirm('Disable "' + a.slug + '"? All of its keys stop working now.')) return;
+              if (!(await window.mvConfirm('Disable the service account "' + a.slug + '"? All of its keys stop working now.', {okText: 'Disable service account'}))) return;
               try { await request('/api/v1/service-accounts/' + encodeURIComponent(a.slug) + '/disable', {method: 'POST', json: {}}); await load(); }
               catch (e) { $('ak-sa-msg').textContent = e.message; }
             });
@@ -281,7 +271,8 @@
         $('ak-sa-name').value = ''; $('ak-sa-desc').value = ''; await load();
       } catch (e) { $('ak-sa-msg').textContent = e.message; }
     });
-    load();
+    // The shell's helpers (lightwork-ui.js) load after the page content.
+    if (window.mvFetchJSON) load(); else document.addEventListener('DOMContentLoaded', load);
   })();
   </script>
 {% endblock %}

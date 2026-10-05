@@ -172,6 +172,7 @@ test("empty update and malformed collaborator references fail before transport",
 
 // ---- page behaviour (jsdom) -------------------------------------------
 const { JSDOM } = require("jsdom");
+const {shell: loadShell} = require("./_shell");
 const pageTemplate = fs.readFileSync(path.resolve(__dirname, "../../maverick_dashboard/templates/ai_entity_tasks.html"), "utf8");
 const pageSource = fs.readFileSync(path.resolve(__dirname, "../../maverick_dashboard/static/lightwork-ai-entity-tasks.js"), "utf8");
 const pageBody = pageTemplate.slice(pageTemplate.indexOf('<div class="aet-shell"'), pageTemplate.lastIndexOf("{% endblock %}", pageTemplate.indexOf("{% block scripts_extra %}")))
@@ -206,6 +207,7 @@ function page(t) {
     if (key.startsWith("POST /api/v1/ai-entity-tasks") && !key.includes("operations")) return streamed({ ...TASK, task_id: "task-2" }, 201);
     return streamed({ count: 0, items: [] });
   };
+  loadShell(w);
   w.eval(pageSource);
   const settle = async () => { for (let i = 0; i < 40; i += 1) await new Promise((r) => setImmediate(r)); };
   return { w, calls, settle, $: (id) => w.document.getElementById(id) };
@@ -263,6 +265,7 @@ function settledPage(t, answer, moduleEnabled = "") {
   w.mvErrorText = (failure, action) => "Could not " + action + ". Try again in a few minutes.";
   const calls = [];
   w.fetch = async (url) => { calls.push(String(url)); return answer(String(url)); };
+  loadShell(w);
   w.eval(pageSource);
   const settle = async () => { for (let i = 0; i < 40; i += 1) await new Promise((r) => setImmediate(r)); };
   return { w, calls, settle, text: (id) => w.document.getElementById(id).textContent };

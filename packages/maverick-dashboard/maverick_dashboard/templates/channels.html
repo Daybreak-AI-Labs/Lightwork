@@ -243,7 +243,7 @@
   <div class="section-head"><h2>Other chat apps set up during installation</h2></div>
   <div class="panel">
     <table>
-      <thead><tr><th scope="col">Chat App</th><th scope="col">Turned On</th><th scope="col">Status</th></tr></thead>
+      <thead><tr><th scope="col">Chat app</th><th scope="col">Turned On</th><th scope="col">Status</th></tr></thead>
       <tbody>
       {% for channel in channel_inventory %}
         <tr>
@@ -282,7 +282,7 @@
     .ch-result:empty { display: none; }
     .ch-result--ok { color: var(--success); }
     .ch-result--failed { color: var(--danger); }
-    .ch-spinner { width: 0.9rem; height: 0.9rem; border: 2px solid var(--border); border-top-color: var(--brand); border-radius: 50%; animation: ch-spin 0.8s linear infinite; }
+    .ch-spinner { width: 0.9rem; height: 0.9rem; border: 2px solid var(--border); border-top-color: var(--brand); border-radius: var(--radius-round); animation: ch-spin 0.8s linear infinite; }
     @keyframes ch-spin { to { transform: rotate(360deg); } }
     @media (prefers-reduced-motion: reduce) { .ch-spinner { animation: none; } }
   </style>
@@ -368,7 +368,7 @@
             var status = document.querySelector('[data-ch-status="' + form.getAttribute('data-ch-check') + '"]');
             if (status && body.readiness_html) status.innerHTML = body.readiness_html;
             summarize();
-            if (window.mvToast) window.mvToast(body.message || (body.ok ? 'Test passed.' : 'Test failed.'), {error: !body.ok});
+            if (window.mvToast) window.mvToast(body.message || (body.ok ? 'Test passed.' : 'Test failed. Check the channel settings, then test again.'), {error: !body.ok});
           })
           .catch(function (e) {
             result.className = 'ch-result ch-result--failed';

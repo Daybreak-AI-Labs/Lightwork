@@ -232,7 +232,8 @@ def _principal(request: Request, tenant_id: str) -> str:
 
 def _jsonable(value: Any) -> Any:
     if is_dataclass(value) and not isinstance(value, type):
-        return {key: _jsonable(item) for key, item in asdict(value).items()}
+        return {key: _jsonable(item) for key, item in asdict(value).items()
+                if key != "display_names" or item}
     if isinstance(value, Mapping):
         return {str(key): _jsonable(item) for key, item in value.items()}
     if isinstance(value, (list, tuple)):
@@ -381,6 +382,7 @@ def create_compliance_scoping_router(  # noqa: C901, PLR0915
                     "questions": len(q.questions),
                     "rules": len(q.rules),
                     "created_at": q.created_at,
+                    **({"display_names": dict(q.display_names)} if q.display_names else {}),
                 }
                 for q in listed["questionnaires"]
             ],
@@ -539,7 +541,16 @@ def create_compliance_scoping_router(  # noqa: C901, PLR0915
             assessment_id,
             limit=limit,
         )
-        return {"items": _jsonable(items), "count": len(items)}
+        assessment = await call(scoping, store.get_assessment, tenant, assessment_id)
+        questionnaire = await call(scoping, store.get_questionnaire, tenant,
+                                   assessment.questionnaire_id, assessment.questionnaire_version)
+        rendered = _jsonable(items)
+        if questionnaire.display_names:
+            for question in rendered:
+                question["display_name"] = questionnaire.display_names.get(question["question_ref"], "")
+                question["option_labels"] = {option: questionnaire.display_names.get(option, option)
+                                             for option in question["options"]}
+        return {"items": rendered, "count": len(items)}
 
     @router.post("/assessments/{assessment_id}/responses/{question_id}")
     async def record_response(
@@ -587,7 +598,13 @@ def create_compliance_scoping_router(  # noqa: C901, PLR0915
     async def get_scope(request: Request, scope_id: ObjectPath):
         require_permission(request, "view")
         scoping, tenant, store = bound_authority(request)
-        return _jsonable(await call(scoping, store.get_scope, tenant, scope_id))
+        scope = await call(scoping, store.get_scope, tenant, scope_id)
+        result = _jsonable(scope)
+        questionnaire = await call(scoping, store.get_questionnaire, tenant,
+                                   scope.questionnaire_id, scope.questionnaire_version)
+        if questionnaire.display_names:
+            result["display_names"] = dict(questionnaire.display_names)
+        return result
 
     async def scope_projection(request: Request, scope_id: str, field: str):
         require_permission(request, "view")

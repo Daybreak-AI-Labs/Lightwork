@@ -3,6 +3,7 @@ const {test} = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs'), path = require('node:path');
 const {JSDOM} = require('jsdom');
+const {shell} = require('./_shell');
 
 const script = fs.readFileSync(path.resolve(__dirname,
   '../../maverick_dashboard/static/lightwork-commitment-viability.js'), 'utf8');
@@ -54,6 +55,7 @@ function setup(project = item => item) {
     return reply(project(review(url.endsWith('/a')?'a':'b',url.endsWith('/a')?'First review':'Second review')));
   };
   d.addEventListener('lightwork:copilot-selection', event => selections.push(event.detail.selection));
+  shell(w);
   w.eval(script);
   return {dom,w,d,calls,selections,delayNextRead:callback => {releaseRead=callback;}};
 }

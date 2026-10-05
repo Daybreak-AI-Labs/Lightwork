@@ -16,7 +16,7 @@
     if (text != null) node.textContent = String(text);
     return node;
   }
-  function say(node, text) { if (node) node.textContent = String(text || ''); }
+  function say(node, text) { window.mvStatus(node, String(text || '')); }
   function plural(n, one, many) { return n + ' ' + (n === 1 ? one : (many || one + 's')); }
   function human(value) { return window.mvHuman ? window.mvHuman(value) : String(value || ''); }
   function when(stamp) {
@@ -29,26 +29,13 @@
   }
   async function failText(failure, action) {
     // A server sentence written for people is shown as is.
-    try {
-      if (failure && typeof failure.clone === 'function') {
-        var body = await failure.clone().json();
-        var plain = window.mvPlainDetail ? window.mvPlainDetail(body && body.detail) : '';
-        if (plain) return plain;
-      }
-    } catch (ignored) { /* not a readable body */ }
+    var plain = window.mvPlainDetail ? window.mvPlainDetail(failure && failure.detail) : '';
+    if (plain) return plain;
     return errorText(failure, action);
   }
   async function request(url, options) {
     options = options || {};
-    var init = {method: options.method || 'GET', credentials: 'same-origin', cache: 'no-store',
-      headers: {Accept: 'application/json'}};
-    if (options.json !== undefined) {
-      init.headers['Content-Type'] = 'application/json';
-      init.body = JSON.stringify(options.json);
-    }
-    var response = await window.fetch(url, init);
-    if (!response.ok) throw response;
-    return response.json();
+    return window.mvFetchJSON(url, {method: options.method || 'GET', cache: 'no-store', body: options.json});
   }
   async function confirmed(message, okText) {
     return window.mvConfirm ? window.mvConfirm(message, {okText: okText}) : false;
@@ -128,7 +115,7 @@
       try {
         var state = await request(statusUrl);
         if (state.state === 'ready') { done(null, statusUrl + '/download'); return; }
-        if (state.state === 'failed') { done(state.message || 'The download could not be prepared.'); return; }
+        if (state.state === 'failed') { done(state.message || 'The download could not be prepared. Try again.'); return; }
       } catch (failure) { done(await failText(failure, 'prepare the download')); return; }
       if (tries > 400) { done('This is taking too long. Try again later.'); return; }
       setTimeout(poll, 2000);
@@ -221,7 +208,7 @@
       var receipt = null;
       if (file) {
         if (file.size > 4096) { say(result, 'That file is too large to be a checkpoint receipt.'); return; }
-        try { receipt = await readFile(file); } catch (e) { say(result, 'That file could not be read.'); return; }
+        try { receipt = await readFile(file); } catch (e) { say(result, 'That file could not be read. Choose it again, or try a different file.'); return; }
       }
       say(result, 'Checking…');
       try {
@@ -336,7 +323,7 @@
       if (!f) return;
       if (f.size > 4096) { say(msg, 'That file is too large to be a public key.'); return; }
       var text;
-      try { text = await readFile(f); } catch (e) { say(msg, 'That file could not be read.'); return; }
+      try { text = await readFile(f); } catch (e) { say(msg, 'That file could not be read. Choose it again, or try a different file.'); return; }
       await pin({key: text.trim()});
       file.value = '';
     });
@@ -580,7 +567,7 @@
         {key: 'name', label: 'Name (' + p.name + ')', type: 'text', required: true}], {okText: 'Erase documents'}) : null;
       if (!typed) return;
       if (String(typed.name || '').trim().toLowerCase() !== p.name.trim().toLowerCase()) {
-        say(out, 'The name you typed does not match. Nothing was erased.');
+        say(out, 'The name you typed does not match. Nothing was erased. Type the exact name to continue.');
         return;
       }
       say(out, 'Erasing…');
@@ -686,7 +673,7 @@
       var f = file.files[0];
       if (!f) return;
       if (f.size > 2 * 1024 * 1024) { say(out, 'That spreadsheet is too large.'); return; }
-      try { sheetText = await readFile(f); } catch (e) { say(out, 'That file could not be read.'); return; }
+      try { sheetText = await readFile(f); } catch (e) { say(out, 'That file could not be read. Choose it again, or try a different file.'); return; }
       var lines = sheetText.split(/\r?\n/).filter(function (l) { return l.trim(); });
       header = (lines[0] || '').split(',').map(function (h) { return h.trim().replace(/^"|"$/g, ''); });
       rowCount = Math.max(0, lines.length - 1);
@@ -834,7 +821,7 @@
       var f = $('ops-network-file') && $('ops-network-file').files[0];
       if (f) {
         if (f.size > 512 * 1024) { say(out, 'That file is too large.'); return; }
-        try { body.graph = await readFile(f); } catch (e) { say(out, 'That file could not be read.'); return; }
+        try { body.graph = await readFile(f); } catch (e) { say(out, 'That file could not be read. Choose it again, or try a different file.'); return; }
       }
       say(out, 'Checking every assistant. This can take a little while…');
       try {

@@ -19,6 +19,7 @@ class FeedbackChangeIn(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     rating: str = Field(pattern=r"^(up|down)$")
     note: str = Field(default="", max_length=500)
+    reason: str = Field(default="", pattern=r"^(|wrong|incomplete|not_asked|unclear|too_long|other)$")
     revision: str = Field(pattern=r"^[a-f0-9]{64}$")
     expected_context: str = Field(pattern=r"^[a-f0-9]{64}$")
     operation_id: str = Field(pattern=r"^[a-f0-9]{32}$")
@@ -26,8 +27,11 @@ class FeedbackChangeIn(BaseModel):
 
 def public(value, goal):
     return {"operation_id": value["operation_id"], "rating": value["rating"], "note": value["note"],
-            "recorded_at": value["recorded_at"], "current_result": value["revision"] == store.version(goal),
-            "observation": value["observation"], "replayed": value.get("replayed", False), "legacy": False}
+            "reason": value.get("reason", ""), "reason_label": store.REASONS.get(value.get("reason", ""), ""),
+            "acknowledgement": _acknowledgement(value), "recorded_at": value["recorded_at"], "current_result": value["revision"] == store.version(goal),
+            "observation": value["observation"], "replayed": value.get("replayed", False), "legacy": False,
+            "signal_note": ("Your feedback is saved. The optional learning signal is unconfirmed and will not be submitted again."
+                            if value["observation"] == "started" else "")}
 
 
 def read(request, goal_id, operation_id=None):
@@ -44,6 +48,7 @@ def read(request, goal_id, operation_id=None):
         if (legacy and legacy.get("rating") in {"up", "down"} and isinstance(legacy.get("note", ""), str)
                 and type(legacy.get("ts")) in (int, float) and math.isfinite(legacy["ts"]) and legacy["ts"] > 0):
             feedback = {"operation_id": None, "rating": legacy["rating"], "note": legacy.get("note", "")[:500],
+                        "reason_label": store.REASONS.get(legacy.get("reason"), "") if isinstance(legacy.get("reason"), str) else "",
                         "recorded_at": legacy["ts"], "current_result": False, "observation": "not_known", "replayed": False,
                         "legacy": True, "message": "Earlier feedback: the answer version was not recorded"}
     _world, current = task_signoff_operations.authorized(request, goal_id)
@@ -81,16 +86,21 @@ def _submit_reviewed(request, goal_id, payload):
     if payload.expected_context != context_for(request):
         raise product_error(409, "context_changed", "Your account, workspace or access changed. Reopen the authorized answer before giving feedback.")
     actor = api._supervisor(request)
+    if payload.reason and payload.rating != "down":
+        raise HTTPException(422, "Choose Needs improvement to include a reason, or remove the reason before saving Useful.")
+    previous = store.latest(world, goal_id, goal.owner or "")
     try:
         value = store.record(world, goal_id, rating=payload.rating, note=payload.note, revision=payload.revision,
-                             owner=goal.owner or "", context=payload.expected_context, actor=actor, operation_id=payload.operation_id)
+                             owner=goal.owner or "", context=payload.expected_context, actor=actor, operation_id=payload.operation_id, reason=payload.reason)
     except GoalMutationConflict as exc:
         raise product_error(409, "stale_version", "The reviewed answer or feedback changed. Your note is kept; review the current saved answer before giving feedback.",
                             next_action=next_action("Review the saved answer", f"/chat/goal/{goal_id}#feedback")) from exc
     # Only the caller that admitted the receipt may attempt the optional signal.
     # A crash or a lost response never authorizes another learning attempt.
     if not value.get("replayed"):
-        store.observed(world, goal_id, payload.operation_id, actor, "started")
+        from maverick.consequence import ConsequenceWriteUncertain
+
+        value = store.observed(world, goal_id, payload.operation_id, actor, "started")
         def authorize_signal():
             # No world read here: the native fence rechecks every source field.
             auth.require_permission(request, "operate")
@@ -99,12 +109,42 @@ def _submit_reviewed(request, goal_id, payload):
                 raise HTTPException(409, "The feedback's account or workspace changed.")
         try:
             recorded = store.observe(world, goal_id, value, authorize=authorize_signal)
+        except ConsequenceWriteUncertain:
+            # The durable write may exist. Keep the original attempt unconfirmed
+            # rather than promising failure or repeating an optional signal.
+            pass
         except Exception:
             # Failure of optional learning never changes the accepted feedback.
-            recorded = False
-        value = store.observed(world, goal_id, payload.operation_id, actor, "recorded" if recorded else "not_recorded")
+            value = store.observed(world, goal_id, payload.operation_id, actor, "not_recorded")
+        else:
+            value = store.observed(world, goal_id, payload.operation_id, actor, "recorded" if recorded else "not_recorded")
     _world, current = task_signoff_operations.authorized(request, goal_id)
-    return {"context": context_for(request), "feedback": public(value, current) if value["owner"] == (current.owner or "") else None}
+    feedback = public(value, current) if value["owner"] == (current.owner or "") else None
+    if feedback is None:
+        return {"context": context_for(request), "feedback": None}
+    from . import goal_feedback_store
+    follow_up = (not value.get("replayed") and goal_feedback_store.should_follow_up(
+        actor, value.get("agent", ""), previous=previous, rating=payload.rating, world=world))
+    return {"context": context_for(request), "feedback": feedback, "saved": True, "training_completed": False,
+            "acknowledgement": _acknowledgement(value),
+            "follow_up": {"question": "What would make this better?"} if follow_up else None}
+
+
+def _acknowledgement(value):
+    """Describe only the accepted receipt's actual optional learning state."""
+    from .agent_changelog import agent_kind
+
+    noun = agent_kind(value.get("agent", ""))
+    if value["observation"] == "recorded":
+        text = ("Thanks. Saved with this task and recorded as a learning signal. Your workspace's "
+                f"learning policy decides how it is used to improve this {noun}.")
+    elif value["observation"] in {"not_started", "started"}:
+        text = "Thanks. Saved with this task. The optional learning signal is unconfirmed and will not be submitted again."
+    else:
+        text = f"Thanks. Saved with this task. It was not recorded as a learning signal, so it does not change this {noun}."
+    if value.get("reason") or value.get("note"):
+        text += f" The administrators' summary shows counts and the reasons picked for this {noun}, not what you wrote."
+    return text
 
 
 @router.get("/{goal_id}/answer-feedback")

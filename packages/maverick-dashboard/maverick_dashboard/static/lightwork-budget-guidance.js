@@ -23,10 +23,7 @@
   // connection, a non-JSON reply) gets one plain sentence, never raw text.
   function errorMessage(error) { var business = window.mvBusinessError && window.mvBusinessError(error); return business ? business.message : 'Budget details could not be refreshed. Try again in a moment.'; }
   async function call(url, options, signal) {
-    var response = await fetch(url, Object.assign({credentials: 'same-origin', cache: 'no-store', signal: signal}, options || {}));
-    var value = await response.json();
-    if (!response.ok) { var error = new Error(value.detail && (value.detail.message || value.detail) || 'Budget request failed.'); error.detail = value.detail; error.status = response.status; throw error; }
-    return value;
+    return window.mvFetchJSON(url, Object.assign({cache: 'no-store', signal: signal}, options || {}), 'check the budget');
   }
   function paragraph(parent, source, values) { if (source) parent.appendChild(node('p', source, values)); }
   function render(value) {
@@ -35,7 +32,7 @@
     out.replaceChildren();
     paragraph(out, 'Effective task ceiling: {amount}; time ceiling: {duration}.', {amount:money(value.effective.max_dollars), duration:value.effective.max_wall_seconds === undefined ? text('Unavailable') : value.effective.max_wall_seconds === null ? text('Not configured') : text('{count} seconds', {count:number(value.effective.max_wall_seconds)})});
     if (value.headroom_complete) paragraph(out, 'Current usable headroom: {amount}', {amount:money(value.headroom)});
-    else paragraph(out, 'Headroom is unavailable because at least one required ledger or identity is unknown.');
+    else paragraph(out, 'Headroom is unavailable because at least one required ledger or identity is unknown. Refresh the preview, or ask your administrator to check the spending records.');
     if (value.binding_ceiling) paragraph(out, 'Binding ceiling: {ceiling}.', {ceiling:dimension(value.binding_ceiling)});
     paragraph(out, value.admission_allowed ? 'Dispatch will recheck authority and allowance before paid work.' : 'A current limit or accounting uncertainty may block paid work. Review the details before starting.');
     paragraph(out, 'Daily reset: {local} (midnight UTC). Provider periods are shown separately.', {local:date(value.reset_at)});
@@ -47,7 +44,7 @@
       else paragraph(section, 'Cap {cap}; acknowledged {confirmed}; reserved {reserved}; unknown reservations {unknown}; remaining {remaining}.', {cap:money(row.cap), confirmed:money(row.confirmed), reserved:money(row.reserved), unknown:row.unknown_amount ? text('Amount unavailable') : money(row.unknown), remaining:money(row.remaining)});
       if (row.basis) paragraph(section, row.basis); out.appendChild(section);
     });
-    paragraph(out, value.provider_coverage || 'Provider coverage unavailable.');
+    paragraph(out, value.provider_coverage || 'Provider coverage unavailable. Refresh the preview in a minute.');
     (value.providers || []).forEach(function (row) {
       var section = node('section'); section.className = 'panel'; section.appendChild(content('h2', row.provider));
       paragraph(section, 'Period {period}; {state}; ceiling {cap}; remaining {remaining}.', {period:period(row.period), state:state(row.state), cap:money(row.cap), remaining:money(row.remaining)});
@@ -63,10 +60,10 @@
       value.task_receipts.forEach(function (row) { paragraph(out, '{reference}: {provider}, {period}, {state}; projected {projected}, recorded {actual}; basis {basis}.', {reference:row.reference, provider:row.provider, period:period(row.period), state:state(row.state), projected:money(row.projected), actual:money(row.actual), basis:state(row.cost_basis)}); });
     }
     var forecast = document.getElementById('budget-forecast'); forecast.replaceChildren();
-    paragraph(forecast, value.forecast.message || value.forecast.price_basis || states[value.forecast.state] || 'Forecast unavailable.');
+    paragraph(forecast, value.forecast.message || value.forecast.price_basis || states[value.forecast.state] || 'Forecast unavailable. Refresh the preview in a minute.');
     if (value.forecast.state === 'available' && !value.forecast.items.length) paragraph(forecast, 'No owned active schedule is currently due before the daily reset.');
     value.forecast.items.forEach(function (row) { var item = node('p'); item.appendChild(link(row.title, row.href, true)); item.appendChild(node('span', ' — {date}: {risk}. ', {date:date(row.due_at), risk:text(row.risk)})); item.appendChild(node('span', row.detail)); forecast.appendChild(item); });
-    if (value.warnings_state !== 'available') paragraph(out, 'Budget notices could not be refreshed; the ledger preview remains separate.');
+    if (value.warnings_state !== 'available') paragraph(out, 'Budget notices could not be refreshed; the ledger preview remains separate. Refresh the page and try again.');
     (value.warnings || []).forEach(function (row) {
       var match = /^(person|workspace|provider:[a-z0-9_.-]+) allowance crossed ([0-9]+)%; review scheduled work$/.exec(row.label || '');
       if (match) paragraph(out, '{dimension} allowance crossed {percent}; review scheduled work', {dimension:dimension(match[1]), percent:i18n ? i18n.number(Number(match[2])/100, {style:'percent'}) : match[2] + '%'});

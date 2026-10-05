@@ -131,7 +131,7 @@ FEATURE_LABELS = {
     "skills": "Skills library",
     "world_model": "Shared memory across tasks",
     "streaming": "Show replies as they are written",
-    "pack_editing": "Edit specialist teams",
+    "pack_editing": "Edit agents and specialists",
     "role_editing": "Edit agent roles",
     "scheduling": "Scheduled workflows",
     "triggers": "Start workflows from other apps",
@@ -147,7 +147,7 @@ FEATURE_HELP = {
     "outcome_measurement": "Compare how long work took before and after Lightwork, using your own numbers.",
     "commitment_viability": "See whether reported capacity and stock can cover two accepted orders, and what needs a decision before an option closes.",
     "guided_onboarding": "Offer a step-by-step path to your first finished piece of work.",
-    "action_center": "Collect approvals, sign-offs and reviews waiting for you in one list.",
+    "action_center": "Collect approvals and reviews waiting for you in one list.",
     "draft_recovery": "Keep a private, encrypted copy of unfinished work so it survives a closed tab.",
     "support_center": "Let administrators prepare a support report to send to the Lightwork team. Nothing is sent automatically.",
     "record_search": "Find vendors, evidence, assessments, tasks and reports by name.",
@@ -158,7 +158,7 @@ FEATURE_HELP = {
 
 # The core agent roles, as a title and one line on what each does.
 AGENT_ROLES = {
-    "orchestrator": ("Planner", "Breaks a task into steps and hands each step to the right specialist."),
+    "orchestrator": ("Planner", "Breaks a task into steps and hands each step to the right agent or specialist."),
     "researcher": ("Researcher", "Finds and reads sources, and gathers the facts a task needs."),
     "coder": ("Coder", "Writes and changes code."),
     "coding": ("Coding assistant", "Helps with smaller coding steps inside a larger task."),

@@ -147,9 +147,12 @@ async def _call(function, *args):
 async def support_page(request: Request):
     require_permission(request, "view")
     from .app import templates
+    from .help_menu import help_request
+    from .help_topics import TOPICS
     response = templates.TemplateResponse(request, "support.html", {"support_context": context_for(request),
         "can_prepare_support": has_global_permission(request, "admin") and _enabled(),
-        "support_enabled": _enabled()})
+        "support_enabled": _enabled(), "help_request": await run_in_threadpool(help_request, request),
+        "help_topics": TOPICS})
     response.headers["Cache-Control"] = "private, no-store"
     return response
 

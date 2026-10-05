@@ -18,31 +18,20 @@
   // A plain server sentence is shown as is; anything else gets the shared
   // plain message.
   async function failText(failure, action) {
-    try {
-      if (failure && typeof failure.clone === 'function') {
-        var body = await failure.clone().json();
-        var plain = window.mvPlainDetail ? window.mvPlainDetail(body && body.detail) : '';
-        if (plain) return plain;
-      }
-    } catch (ignored) { /* not a readable body */ }
+    var plain = window.mvPlainDetail ? window.mvPlainDetail(failure && failure.detail) : '';
+    if (plain) return plain;
     return errorText(failure, action);
   }
   async function request(url, options) {
     options = options || {};
-    var init = {method: options.method || 'GET', cache: 'no-store', credentials: 'same-origin',
-      headers: {Accept: 'application/json'}};
-    if (options.json !== undefined) {
-      init.headers['Content-Type'] = 'application/json';
-      init.body = JSON.stringify(options.json);
-    } else if (options.body !== undefined) {
-      init.headers['Content-Type'] = options.type || 'application/octet-stream';
+    var init = {method: options.method || 'GET', cache: 'no-store', raw: !!options.raw, body: options.json};
+    if (options.json === undefined && options.body !== undefined) {
+      init.headers = {'Content-Type': options.type || 'application/octet-stream'};
       init.body = options.body;
     }
-    var response = await window.fetch(url, init);
-    if (!response.ok) throw response;
-    return options.raw ? response : response.json();
+    return window.mvFetchJSON(url, init);
   }
-  function say(node, text) { if (node) node.textContent = text || ''; }
+  function say(node, text) { window.mvStatus(node, text || ''); }
   function badge(ok, yes, no) { return el('span', 'badge ' + (ok ? 'ok' : 'warn'), ok ? yes : no); }
   function money(value) {
     var n = Number(value) || 0;
@@ -326,8 +315,8 @@
     try {
       var data = await request('/api/v1/workforce/posture');
       box.textContent = '';
-      say(status, data.levels_enabled ? 'Each specialist has its own level of independence.' :
-        'Independence levels are turned off, so every specialist follows the same approval rules.');
+      say(status, data.levels_enabled ? 'Each agent and specialist has its own level of independence.' :
+        'Independence levels are turned off, so every agent and specialist follows the same approval rules.');
       // With levels off the per-level split is not applied to anything, so it
       // is not shown: the line above already says every specialist is treated alike.
       if (data.levels_enabled) {
@@ -348,11 +337,11 @@
       }
       var cands = data.graduation_candidates || [];
       if (!cands.length) {
-        box.appendChild(el('p', 'muted', 'No specialist has earned more independence yet. They qualify after a run of approved work.'));
+        box.appendChild(el('p', 'muted', 'No agent or specialist has earned more independence yet. They qualify after a series of approved tasks.'));
         return;
       }
       box.appendChild(el('h3', null, 'Ready for more independence'));
-      box.appendChild(table(['Specialist', 'Approved work', 'Approval rate', 'Next step'], cands.map(function (c) {
+      box.appendChild(table(['Name', 'Approved work', 'Approval rate', 'Next step'], cands.map(function (c) {
         var link = el('a', null, window.mvHuman ? window.mvHuman(c.name) : c.name);
         link.href = '/agents?name=' + encodeURIComponent(c.name) + '#agent-autonomy';
         var action = el('span');
@@ -457,8 +446,6 @@
     var status = $('fa-lessons-status');
     var out = $('fa-lessons-out');
     $('fa-lessons-export').addEventListener('click', async function () {
-      var ok = await window.mvConfirm('Download your most recent lessons to share with another Lightwork installation? Only the lessons are included, never tasks or customer details. The other installation must trust yours before it can use them.', {okText: 'Download'});
-      if (!ok) return;
       say(status, 'Packaging lessons…');
       try {
         var response = await request('/api/v1/learning-exchange/export', {method: 'POST', raw: true,
@@ -522,7 +509,7 @@
       try {
         var response = await request('/api/v1/customizations/export', {raw: true});
         saveBlob(await response.blob(), 'Lightwork-customizations.zip');
-        say(status, 'Downloaded ' + plural(Number(response.headers.get('X-Lightwork-Specialists') || 0), 'specialist change') +
+        say(status, 'Downloaded ' + plural(Number(response.headers.get('X-Lightwork-Specialists') || 0), 'agent or specialist change', 'agent and specialist changes') +
           ' and ' + plural(Number(response.headers.get('X-Lightwork-Roles') || 0), 'role change') + '.');
       } catch (failure) {
         say(status, await failText(failure, 'download customizations'));
@@ -547,13 +534,13 @@
         var load = el('button', 'btn btn--primary', 'Load these customizations');
         load.type = 'button';
         load.addEventListener('click', async function () {
-          var ok = await window.mvConfirm('Load ' + plural(preview.usable, 'customization') + '? Matching specialists and roles in this workspace are replaced by the ones in the file.', {okText: 'Load'});
+          var ok = await window.mvConfirm('Load ' + plural(preview.usable, 'customization') + '? Matching agents, specialists and roles in this workspace are replaced by the ones in the file.', {okText: 'Load'});
           if (!ok) return;
           load.disabled = true;
           try {
             var result = await request('/api/v1/customizations/load', {method: 'POST', body: raw, type: 'application/zip'});
             out.textContent = '';
-            say(status, 'Loaded ' + plural(result.specialists, 'specialist change') + ' and ' + plural(result.roles, 'role change') +
+            say(status, 'Loaded ' + plural(result.specialists, 'agent or specialist change', 'agent and specialist changes') + ' and ' + plural(result.roles, 'role change') +
               (result.skipped ? '; ' + result.skipped + ' skipped.' : '.'));
             technical(out, result.technical);
           } catch (failure) {

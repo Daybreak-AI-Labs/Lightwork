@@ -34,6 +34,10 @@
 
 {% block content %}
 <style>
+  .agent-access { margin-bottom: var(--space-3); }
+  .agent-access > summary { cursor: pointer; }
+  .agent-access__head { font-size: var(--text-md, 1rem); margin: var(--space-4) 0 var(--space-2); }
+  .agent-access__list { margin: 0; padding-inline-start: 1.2rem; }
   /* Agent Factory — the two-column "build a specialist + department roster"
      composition. Glass throughout; every agent-form id the save/validate
      script reads is preserved (the tool chips + approval toggle sync into the
@@ -49,7 +53,20 @@
   .af-grid{ display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
     gap: var(--space-5); align-items: start; }
   .af-grid > *, .af-card, .af-picker, .fld { min-width: 0; }
-  @media (max-width: 900px){ .af-grid{ grid-template-columns: minmax(0, 1fr); } }
+  /* The specialist search (lightwork-agent-picker.js): an opaque list under
+     the field, so the field itself never moves while results change. */
+  .af-combo{ position: relative; flex: 1; min-width: 0; }
+  .af-combo .input{ width: 100%; }
+  .af-combo__list{ position: absolute; z-index: 30; inset-inline: 0; top: calc(100% + 4px); margin: 0;
+    padding: var(--space-1) 0; list-style: none; max-height: 18rem; overflow-y: auto;
+    background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius-md); box-shadow: var(--shadow-lg); }
+  .af-combo__option{ display: flex; flex-direction: column; gap: var(--space-0-5); min-height: 24px;
+    padding: var(--space-2) var(--space-3); cursor: pointer; }
+  .af-combo__option:hover{ background: var(--row-hover); }
+  .af-combo__option[aria-selected="true"]{ background: var(--brand-subtle); outline: 2px solid var(--brand); outline-offset: -2px; }
+  .af-combo__note{ color: var(--muted); font-size: var(--text-xs); }
+  .af-combo__status{ min-height: 1.4em; margin: var(--space-1) 0 0; }
+  @media (max-width: 880px){ .af-grid{ grid-template-columns: minmax(0, 1fr); } }
   .af-card{ border: 1px solid var(--glass-border); border-radius: var(--radius-lg);
     background: var(--glass-soft); box-shadow: var(--shadow-sm), var(--glass-edge);
     -webkit-backdrop-filter: blur(14px) saturate(150%); backdrop-filter: blur(14px) saturate(150%);
@@ -57,7 +74,7 @@
   .af-card__title{ font-weight: var(--font-semibold); font-size: var(--text-lg); margin: 0 0 var(--space-4); }
   .fld{ margin: 0 0 var(--space-4); }
   .fld > label{ display: block; font-weight: var(--font-semibold); margin-bottom: var(--space-2); }
-  .fld .sub{ font-weight: 400; color: var(--muted); }
+  .fld .sub{ font-weight: var(--font-normal); color: var(--muted); }
   .af-card input[type="text"], .af-card textarea, .af-card select{
     width: 100%; min-width: 0; max-width: 100%; background: var(--surface-sunken); border: 1px solid var(--border); color: var(--text);
     border-radius: var(--radius-md); padding: 0.55rem 0.7rem; font: inherit;
@@ -74,7 +91,7 @@
     transition: border-color .12s ease, background .12s ease; }
   .chip:hover{ border-color: var(--border-strong); }
   .chip.on{ border-color: var(--brand-border); background: var(--brand-subtle); }
-  .chip .tick{ color: var(--brand-hi); font-weight: 700; }
+  .chip .tick{ color: var(--brand-hi); font-weight: var(--font-bold); }
   .chip.add{ border-style: dashed; color: var(--muted); }
 
   /* guardrails */
@@ -84,7 +101,7 @@
   .switch{ width: 42px; height: 24px; border-radius: var(--radius-pill); background: var(--border);
     position: relative; cursor: pointer; flex: none; border: 0; transition: background .16s; }
   .switch::after{ content: ""; position: absolute; top: 2px; inset-inline-start: 2px; width: 20px; height: 20px;
-    border-radius: 50%; background: #fff; transition: transform .16s; }
+    border-radius: var(--radius-round); background: #fff; transition: transform .16s; }
   .switch[aria-pressed="true"]{ background: var(--brand); }
   .switch[aria-pressed="true"]::after{ transform: translateX(18px); }
   [dir="rtl"] .switch[aria-pressed="true"]::after{ transform: translateX(-18px); }
@@ -154,8 +171,8 @@
      it is the main action, so the header link steps back to a plain button. #}
   {% set agents_actions %}<a class="btn{% if not selected %} btn--primary{% endif %}" href="/agents?new=1#agent-form">New custom agent</a>{% endset %}
   {% call hero('Build your workforce', 'Agent Factory',
-               subtitle='Hire & tailor specialists',
-               lede='Describe a specialist in plain English — its job, the
+               subtitle='Build agents and tailor specialists',
+               lede='Describe an agent in plain English — its job, the
                      tools it can reach, and its guardrails — and Lightwork
                      tailors it for you. Saving updates only what you change;
                      anything that would weaken the safety limits is
@@ -174,7 +191,7 @@
       <span class="af-ekko__eyebrow">Digital workforce intelligence</span>
       <span class="af-ekko__title"><strong>EKKO</strong><em>Work Discovery</em></span>
       <p>Listens to approved work activity and maps recurring processes into evidence-backed first passes
-        for Lightwork flows and specialists.</p>
+        for Lightwork flows, agents and specialists.</p>
     </span>
     <span class="btn" aria-hidden="true">Open Work Discovery →</span>
   </a>
@@ -185,14 +202,14 @@
 
   {% if rejected_agents %}
   <section class="af-card" id="agent-setup-review" aria-labelledby="agent-setup-review-title" style="margin-bottom: var(--space-4);">
-    <h2 id="agent-setup-review-title" class="af-card__title">Specialists paused for setup review</h2>
-    <p class="muted">These specialists cannot run. Restore a standard specialist to its original setup, or remove an unavailable custom specialist.</p>
+    <h2 id="agent-setup-review-title" class="af-card__title">Agents and specialists paused for setup review</h2>
+    <p class="muted">These cannot run. Restore a specialist to its original setup, or remove an unavailable custom agent.</p>
     {% for item in rejected_agents %}
     <div style="display:flex; align-items:center; gap:var(--space-3); flex-wrap:wrap; padding:var(--space-2) 0; border-top:1px solid var(--hairline);">
       <strong>{{ item.name | humanize }}</strong>
       {% if item.generation %}
       <button type="button" class="btn btn--ghost af-recover" data-name="{{ item.name }}" data-generation="{{ item.generation }}" data-builtin="{{ '1' if item.is_builtin else '0' }}">
-        {{ 'Restore original setup' if item.is_builtin else 'Remove unavailable specialist' }}
+        {{ 'Restore original setup' if item.is_builtin else 'Remove unavailable agent' }}
       </button>
       {% else %}
       <span class="muted">Installation support must repair this setup.</span>
@@ -210,19 +227,19 @@
         const question = builtIn
           ? 'Restore “' + name + '” to its original setup? Its custom limits will be removed. The built-in policy may allow more; review it after restoring.'
           : 'Remove “' + name + '”? Its saved custom setup will be removed.';
-        if (!(await mvConfirm(question, { okText: builtIn ? 'Restore specialist' : 'Remove specialist' }))) return;
+        if (!(await mvConfirm(question, { okText: builtIn ? 'Restore specialist' : 'Remove agent' }))) return;
         button.disabled = true;
         button.setAttribute('aria-busy', 'true');
         try {
           const path = '/api/v1/agents/' + encodeURIComponent(name)
             + '/override?expected_generation=' + encodeURIComponent(button.dataset.generation);
           const response = await fetch(path, { method: 'DELETE' });
-          if (!response.ok) throw new Error('This specialist changed or could not be restored. Refresh and try again.');
+          if (!response.ok) throw new Error(builtIn ? 'This specialist changed or could not be restored. Refresh and try again.' : 'This agent changed or could not be removed. Refresh and try again.');
           const result = await response.json();
           if (!result.removed) throw new Error('No saved setup was removed. Refresh to check its status.');
           window.location.href = builtIn ? '/agents?name=' + encodeURIComponent(name) : '/agents';
         } catch (error) {
-          status.textContent = error.message || 'Could not restore this specialist.';
+          status.textContent = error.message || (builtIn ? 'Could not restore this specialist. Refresh the page and try again.' : 'Could not remove this agent. Refresh the page and try again.');
           button.disabled = false;
           button.removeAttribute('aria-busy');
         }
@@ -233,7 +250,7 @@
 
   <details class="af-card" id="jd-card" style="margin-bottom: var(--space-4);">
     <summary style="cursor: pointer; font-weight: 600;">Hire from a job description
-      <span class="muted" style="font-weight: 400;">— paste a JD to meet the specialists you already employ, or draft a new one</span>
+      <span class="muted" style="font-weight: 400;">— paste a job description to meet the agents and specialists you already have, or draft a new agent</span>
     </summary>
     <div style="margin-top: 0.8rem;">
       <div class="fld">
@@ -244,9 +261,9 @@
         <label for="jd-file" class="sub">or upload</label>
         <input id="jd-file" type="file" accept=".txt,.md,.pdf,.docx,.doc,.odt">
         <span style="flex: 1;"></span>
-        <button type="button" class="btn" id="jd-match">Find matching specialists</button>
+        <button type="button" class="btn" id="jd-match">Find matches</button>
         {% if editable %}
-        <button type="button" class="btn" id="jd-draft">Draft a new specialist</button>
+        <button type="button" class="btn" id="jd-draft">Draft a new agent</button>
         {% endif %}
       </div>
       <div id="jd-msg" role="status" aria-live="polite" class="muted" style="min-height: 1.2rem;"></div>
@@ -256,13 +273,13 @@
 
   {% if editable %}
   <details class="af-card" id="biz-setup" style="margin-bottom: var(--space-4);">
-    <summary style="cursor: pointer; font-weight: 600;">Set up a specialist for your business
+    <summary style="cursor: pointer; font-weight: 600;">Set up an agent for your business
       <span class="muted" style="font-weight: 400;">— describe what you do, review the draft, then add it with your documents</span>
     </summary>
     <form id="biz-form" style="margin-top: 0.8rem;" novalidate>
-      <div class="fld"><label for="biz-name">Name for your new specialist</label>
+      <div class="fld"><label for="biz-name">Name for your new agent</label>
         <input id="biz-name" class="input" type="text" maxlength="120" placeholder="For example, Acme customer support" required>
-        <p class="sub">Give it a name that sets it apart from the specialists already in your workspace.</p></div>
+        <p class="sub">Give it a name that sets it apart from the agents and specialists already in your workspace.</p></div>
       <div class="fld"><label for="biz-what">What does the business do?</label>
         <textarea id="biz-what" class="textarea" rows="4" maxlength="4000"></textarea></div>
       <div class="fld"><label for="biz-industry">Industry (optional)</label>
@@ -272,23 +289,24 @@
           <option value="ai">Draft it with AI (counts toward your spending limits, at most $0.50)</option>
           <option value="plain">Draft it from a standard outline (no AI)</option>
         </select></div>
-      <button type="submit" class="btn" id="biz-draft">Draft the specialist</button>
+      <button type="submit" class="btn" id="biz-draft">Draft the agent</button>
     </form>
     <p id="biz-status" role="status" aria-live="polite" tabindex="-1" class="muted"></p>
     <div id="biz-review" hidden>
       <div id="biz-summary"></div>
       <div class="fld"><label for="biz-docs">Documents it should know (optional, up to 10)</label>
         <input id="biz-docs" type="file" multiple accept=".txt,.md,.pdf,.docx,.doc,.odt,.csv,.png,.jpg,.jpeg"></div>
-      <button type="button" class="btn" id="biz-approve">Add this specialist</button>
+      <button type="button" class="btn" id="biz-approve">Add this agent</button>
       <button type="button" class="btn btn--ghost" id="biz-discard">Discard the draft</button>
     </div>
   </details>
   {% endif %}
 
   <div class="af-grid">
-    <!-- ============ LEFT: build a specialist ============ -->
+    <!-- ============ LEFT: build an agent or tailor a specialist ============ -->
     <div class="af-card">
-      <div class="af-card__title">Build a specialist</div>
+      {% set kind_word = 'agent' if creating else selected_kind %}
+      <div class="af-card__title">{{ 'Tailor a specialist' if (selected and selected_kind == 'specialist') else ('Edit an agent' if selected else 'Build an agent or tailor a specialist') }}</div>
       <p class="muted" style="font-size: var(--text-sm); margin: calc(-1 * var(--space-3)) 0 var(--space-4);">
         Three steps: describe the job, choose the tools it may use, set its
         guardrails. Nothing changes until you save.
@@ -296,57 +314,95 @@
 
       <div class="fld af-picker">
         {% if agents %}
-        <label for="agent-picker">Start from a specialist <span class="sub">— search {{ agents|length }} prebuilt specialists</span></label>
+        <label for="agent-picker">Start from an existing one <span class="sub">— search {{ agents|length }} agents and specialists</span></label>
         <div style="display:flex; gap:var(--space-2); align-items:center;">
-          {# A searchable picker, not a 2,000-option dropdown: type to filter,
-             pick to open. Navigation happens only on an exact match. #}
-          <input id="agent-picker" list="agent-picker-list" type="text" autocomplete="off"
-                 spellcheck="false" style="flex:1;" class="input"
-                 aria-label="Choose a specialist to tailor"
-                 placeholder="Type to search, for example “forecasting” or “onboarding”"
-                 value="{{ selected.picker_label if selected else '' }}">
-          <datalist id="agent-picker-list">
-            {% for a in agents | sort(attribute='readiness.state') %}
-            <option value="{{ a.picker_label }}" data-name="{{ a.name }}" label="{{ a.readiness.label }}{% if a.is_override %} · Customized{% endif %}"></option>
-            {% endfor %}
-          </datalist>
+          {# Search as you type: each search asks /agents/picker for the best
+             matches (the page no longer ships all 2,000+ specialists).
+             Navigation happens on a chosen match or an exact name. #}
+          <div class="af-combo">
+            <input id="agent-picker" type="text" autocomplete="off" spellcheck="false" class="input"
+                   role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="agent-picker-list"
+                   aria-label="Choose an agent or specialist to tailor" data-picker-src="/agents/picker"
+                   placeholder="Type to search, for example “forecasting” or “onboarding”"
+                   value="{{ selected.picker_label if selected else '' }}">
+            <ul id="agent-picker-list" class="af-combo__list" role="listbox" aria-label="Matching agents and specialists" hidden></ul>
+          </div>
           <button type="button" class="btn" id="agent-picker-open">Open</button>
           {% if editable %}
           <span class="sub">or</span>
           <a class="btn" href="/agents?new=1#agent-form" id="btn-new-agent">＋ New custom agent</a>
           {% endif %}
         </div>
+        <p class="sub af-combo__status" id="agent-picker-status" role="status" aria-live="polite"></p>
+        <label class="sub" style="display:inline-flex;align-items:center;gap:var(--space-2);margin-top:var(--space-2);">
+          <input id="agent-show-needs-setup" type="checkbox"> Show those that need setup
+        </label>
+        <script src="{{ static_url('lightwork-agent-picker.js') if static_url is defined else '/static/lightwork-agent-picker.js' }}" defer></script>
         {% set ready_count = agents | selectattr('readiness.state', 'equalto', 'action_ready') | list | length %}
         {% set setup_count = agents | selectattr('readiness.state', 'equalto', 'needs_setup') | list | length %}
         {% set unknown_count = agents | selectattr('readiness.state', 'equalto', 'unknown') | list | length %}
-        <p class="sub" style="margin:var(--space-1) 0 0;">{{ ready_count }} can start · {{ setup_count }} {{ 'needs' if setup_count == 1 else 'need' }} setup · {{ unknown_count }} {{ 'needs' if unknown_count == 1 else 'need' }} a setup check. Search any specialist to see what it needs. Live connections, permissions and the AI service are checked when work starts.</p>
+        <p class="sub" style="margin:var(--space-1) 0 0;">{{ ready_count }} can start · {{ setup_count }} {{ 'needs' if setup_count == 1 else 'need' }} setup · {{ unknown_count }} {{ 'needs' if unknown_count == 1 else 'need' }} a setup check. Search for one to see what it needs. Live connections, permissions and the AI service are checked when work starts.</p>
         {% elif editable %}
         <a class="btn" href="/agents?new=1#agent-form" id="btn-new-agent">＋ New custom agent</a>
         {% endif %}
       </div>
 
       {% if selected %}
-      <div class="panel" role="status" style="margin-bottom:var(--space-3);">
+      <div class="panel" style="margin-bottom:var(--space-3);">
         <strong>{{ selected.readiness.label }}</strong>
         {% if selected.readiness.state == 'needs_setup' %}
         {% if selected.readiness.missing_labels %}
         <p class="muted">Required actions are unavailable here: {{ selected.readiness.missing_labels | join(', ') }}.</p>
-        {% else %}<p class="muted">This specialist cannot start while its department is turned off.</p>{% endif %}
+        {% else %}<p class="muted">This {{ kind_word }} cannot start while its department is turned off.</p>{% endif %}
         <a href="{{ selected.readiness.fix_url }}">Review setup</a>
         {% elif selected.readiness.state == 'unknown' %}
-        <p class="muted">Lightwork could not check this specialist's required actions. Ask an administrator to review setup before assigning work. <a href="{{ selected.readiness.fix_url }}">Review setup</a></p>
+        <p class="muted">Lightwork could not check this {{ kind_word }}'s required actions. Ask an administrator to review setup before assigning work. <a href="{{ selected.readiness.fix_url }}">Review setup</a></p>
         {% else %}
         <p class="muted">The required actions are present. Live connections, permissions and the AI service are checked when work starts.</p>
         {% endif %}
       </div>
       <div style="display:flex; gap:var(--space-2); align-items:center; margin-bottom:var(--space-3);">
         <button type="button" class="btn" id="btn-jobcard">📋 View job card</button>
-        <span class="sub">the specialist's job description, manager scorecard &amp; cost tier</span>
+        <span class="sub">the {{ kind_word }}'s job description, manager scorecard &amp; cost tier</span>
       </div>
+      {% if access %}
+      <details class="panel agent-access" id="agent-access">
+        <summary><strong>Check access</strong> <span class="badge">{{ access.label }}{% if access.customized %} · Customized{% endif %}</span> <span class="sub">— what this {{ access.noun }} can do, and which rule allows it</span></summary>
+        <h3 class="agent-access__head">Independence by risk</h3>
+        <table>
+          <caption class="sr-only">How this {{ access.noun }} handles consequential actions at each risk level</caption>
+          <thead><tr><th scope="col">Actions</th><th scope="col">Level</th><th scope="col">What it does</th><th scope="col">Rule that sets it</th></tr></thead>
+          <tbody>
+          {% for t in access.tiers %}
+            <tr><th scope="row">{{ t.title }}</th><td><span class="badge">{{ t.label }}</span></td><td>{{ t.means }}</td><td>{{ t.rule }}.</td></tr>
+          {% endfor %}
+          </tbody>
+        </table>
+        <p class="sub">Allowed actions, the highest risk it may take ({{ access.max_risk if access.max_risk else 'not set' }}), approvals and its refusals apply at every level.</p>
+        <h3 class="agent-access__head">Actions</h3>
+        <p><strong>{{ access.readiness.label or 'Setup check unavailable' }}.</strong>
+          {% if access.required %}Its steps need: {{ access.required | map('humanize') | join(', ') }}.{% else %}Its steps need no particular action.{% endif %}
+          {% if access.readiness.missing_labels %}Not available here yet: {{ access.readiness.missing_labels | join(', ') }}.{% endif %}</p>
+        <p>{% if access.allowed %}It may use: {{ access.allowed | map('humanize') | join(', ') }}.{% else %}It may use only the actions its steps need.{% endif %}
+          {% if access.blocked %}Never: {{ access.blocked | map('humanize') | join(', ') }}.{% endif %}</p>
+        <h3 class="agent-access__head">Spending limits</h3>
+        {% if access.spending_error %}
+        <p role="alert"><strong>That didn't work.</strong> The spending limits could not be read, so paid work stops until they can be read again.</p>
+        {% else %}
+        <ul class="agent-access__list">
+          <li>{% if access.task_ceiling is not none %}Each task it works on stops at <strong>{{ access.task_ceiling | money }}</strong>, the spending limit per task for everyone.{% else %}There is no spending limit per task.{% endif %}</li>
+          <li>{% if access.workspace_limit %}The whole workspace may spend {{ access.workspace_limit.limit.amount | money }} {{ 'per day' if access.workspace_limit.limit.period == 'day' else 'per month' }}: {{ access.workspace_limit.remaining | money }} left.{% else %}The workspace has no spending limit.{% endif %}</li>
+          {% from "_typical_cost.html" import typical_cost_text %}<li class="typical-cost" id="agent-typical-cost">{{ typical_cost_text(typical_cost) }}</li>
+          <li>Tasks it works on also count against the spending limit of the person who starts them. There is no separate limit for one {{ access.noun }}.</li>
+        </ul>
+        {% if access.workspace_limit %}{% from "_spend_freshness.html" import spend_freshness %}{{ spend_freshness(access.workspace_limit.spend_recorded_at, live=true) }}{% endif %}
+        {% endif %}
+      </details>
+      {% endif %}
       {% endif %}
       {% if selected or creating %}
       <div id="agent-msg" role="status" aria-live="polite" class="muted" style="min-height: 1.2rem;"></div>
-      <form id="agent-form" data-name="{{ selected.name if selected else '' }}" data-generation="{{ selected.generation if selected else 'new' }}" data-creating="{{ '1' if creating else '' }}" data-has-base="{{ '1' if selected and selected.base_allow_tools is not none else '0' }}" data-base-allow="{{ selected.base_allow_tools | join(' ') if selected and selected.base_allow_tools is not none else '' }}" data-base-risk="{{ selected.base_max_risk or '' if selected else '' }}">
+      <form id="agent-form" data-name="{{ selected.name if selected else '' }}" data-generation="{{ selected.generation if selected else 'new' }}" data-creating="{{ '1' if creating else '' }}" data-has-base="{{ '1' if selected and selected.base_allow_tools is not none else '0' }}" data-base-allow="{{ selected.base_allow_tools | join(' ') if selected and selected.base_allow_tools is not none else '' }}" data-base-risk="{{ selected.base_max_risk or '' if selected else '' }}" data-kind="{{ kind_word }}">
         {% if creating %}
         <div class="fld">
           <label for="f-new-id">Short name <span class="sub">— filled in from the name below; change it if you like</span></label>
@@ -360,15 +416,15 @@
         <div class="fld">
           <label for="f-persona">What should it do? <span class="sub">— plain English</span></label>
           <textarea id="f-persona" name="persona" rows="6" placeholder="Describe the job in plain English — what it handles, how it should behave, what 'done' looks like.">{{ selected.persona if selected else '' }}</textarea>
-          <p class="sub" style="margin: var(--space-1) 0 0; font-size: var(--text-sm);">The clearer the brief, the better the specialist — say what it handles, and what a finished result looks like.</p>
+          <p class="sub" style="margin: var(--space-1) 0 0; font-size: var(--text-sm);">The clearer the brief, the better the {{ kind_word }} — say what it handles, and what a finished result looks like.</p>
         </div>
 
         <div class="fld">
           <label>Allowed actions <span class="sub">— what it can use</span></label>
-          <div class="chips" id="skill-chips" aria-label="Tools this specialist can use"></div>
+          <div class="chips" id="skill-chips" aria-label="Tools this {{ kind_word }} can use"></div>
           {# The chips sync into this hidden input, which the save script reads. #}
           <input id="f-allow" name="allow_tools" type="hidden" value="{{ selected.allow_tools|join(' ') if selected else '' }}">
-          <p class="sub" style="margin: var(--space-2) 0 0; font-size: var(--text-sm);">{% if selected and selected.base_allow_tools is not none %}You can remove or restore this specialist’s built-in actions here. To give it different actions, create a custom specialist.{% else %}Select an action to allow it; select it again to remove access. Anything not allowed here stays out of reach.{% endif %}</p>
+          <p class="sub" style="margin: var(--space-2) 0 0; font-size: var(--text-sm);">{% if selected and selected.base_allow_tools is not none %}You can remove or restore this specialist’s built-in actions here. To give it different actions, create a custom agent.{% else %}Select an action to allow it; select it again to remove access. Anything not allowed here stays out of reach.{% endif %}</p>
           <p class="sub" id="agent-actions-error" role="alert" hidden></p>
         </div>
 
@@ -413,12 +469,12 @@
                  data-config-override="{{ '1' if auto and auto.config_override else '0' }}"
                  data-pack="{{ auto.pack | tojson | forceescape if auto else '' }}">
           <h3>Independence</h3>
-          <p class="sub">Set how this specialist handles consequential actions. Allowed actions, risk limits, approvals and hard refusals still apply.</p>
+          <p class="sub">Set how this {{ kind_word }} handles consequential actions. Allowed actions, risk limits, approvals and hard refusals still apply.</p>
           {% if auto and not auto.levels_enabled %}
           <p class="muted" role="status">Independence levels are off for this workspace. These choices take effect only after an installation administrator turns on <a href="/settings/all?id=workforce.levels">Per-agent independence levels</a>.</p>
           {% endif %}
           {% if auto and auto.config_override %}
-          <p class="muted" role="status">This specialist has a server-configured independence policy. An installation administrator must remove that override before editing it here.</p>
+          <p class="muted" role="status">This {{ kind_word }} has a server-configured independence policy. An installation administrator must remove that override before editing it here.</p>
           {% endif %}
           {% for risk, title in [('default', 'Usual actions'), ('low', 'Low-risk actions'), ('medium', 'Medium-risk actions'), ('high', 'High-risk actions')] %}
           {% set chosen = auto[risk] if auto else ('suggest' if risk == 'default' else none) %}
@@ -434,7 +490,7 @@
           {% endfor %}
           <label class="sub" for="f-auto-onboarding">
             <input id="f-auto-onboarding" type="checkbox"{% if not auto or auto.onboarding %} checked{% endif %}{% if not editable or (auto and auto.config_override) %} disabled{% endif %}>
-            Supervise this specialist while it is new
+            Supervise this {{ kind_word }} while it is new
           </label>
           <p class="sub">Supervision lowers each chosen level by one step. An overall approval record can support ending supervision only when every level is Ask or lower. Act on its own needs proof for the specific actions it would take.</p>
         </section>
@@ -464,7 +520,7 @@
 
         {% if editable %}
         <div class="af-actions">
-          <button type="button" class="btn btn--primary" id="btn-save">{{ 'Create custom agent' if creating else 'Save specialist' }}</button>
+          <button type="button" class="btn btn--primary" id="btn-save">{{ 'Create custom agent' if creating else ('Save specialist' if selected_kind == 'specialist' else 'Save agent') }}</button>
           <button type="button" class="btn" id="btn-validate">Check settings</button>
           {% if not creating %}<button type="button" class="btn btn--ghost" id="btn-reset">Reset to built-in</button>{% endif %}
         </div>
@@ -475,12 +531,32 @@
 
       {% if selected and (selected.errors or selected.warnings) %}
       <div class="panel" style="margin-top: 1rem;">
-        {% for e in selected.errors %}<div>⛔ {{ e }}</div>{% endfor %}
-        {% for w in selected.warnings %}<div class="muted">⚠ {{ w }}</div>{% endfor %}
+        {% for e in selected.plain_errors %}<div>⛔ {{ e }}</div>{% endfor %}
+        {% for w in selected.plain_warnings %}<div class="muted">⚠ {{ w }}</div>{% endfor %}
+        <details class="muted"><summary>Technical details</summary>
+          {% for e in selected.errors %}<div>{{ e }}</div>{% endfor %}
+          {% for w in selected.warnings %}<div>{{ w }}</div>{% endfor %}
+        </details>
       </div>
       {% endif %}
+      {% if selected %}
+      {# Who changed this agent or specialist, when, and what -- the same record answers cite. #}
+      <section class="panel" id="agent-changelog" aria-labelledby="agent-changelog-title" style="margin-top: 1rem;">
+        <h3 id="agent-changelog-title" style="margin-top: 0;">Change history</h3>
+        {% if agent_changes %}
+        <ul class="agent-changelog__list">
+          {% for row in agent_changes %}
+          <li><span class="muted">{{ row.ts | datetime }} · {{ 'Every agent and specialist' if row.agent == '*' else ('This specialist' if selected_kind == 'specialist' else 'This agent') }} · {{ (row.by | identity).name if (row.by and show_change_authors) else ('An administrator' if row.by else 'The administrator on this computer') }}</span>
+            <div>{{ row.changes | join('; ') }}</div></li>
+          {% endfor %}
+        </ul>
+        {% else %}
+        <p class="muted">No changes recorded yet. Saved changes to this {{ selected_kind }}'s instructions, allowed actions or AI model appear here, and answers show when the {{ selected_kind }} last changed.</p>
+        {% endif %}
+      </section>
+      {% endif %}
       {% else %}
-      <p class="muted">Pick a specialist above to tailor it — or start a <a href="/agents?new=1#agent-form">new custom agent</a>.</p>
+      <p class="muted">Pick an agent or specialist above to tailor it — or start a <a href="/agents?new=1#agent-form">new custom agent</a>.</p>
       {% endif %}
     </div>
 
@@ -537,7 +613,12 @@
     var afToolList = null;
     function toolChoices() {
       if (!afToolList) {
-        afToolList = fetch('/api/v1/tools').then(function (r) { return r.ok ? r.json() : { tools: [] }; })
+        // The editor mounts while the page is parsed, before the shell's
+        // helpers (lightwork-ui.js) load at the end of the page.
+        var shellReady = window.mvFetchJSON ? Promise.resolve()
+          : new Promise(function (done) { document.addEventListener('DOMContentLoaded', done); });
+        afToolList = shellReady.then(function () { return window.mvFetchJSON('/api/v1/tools'); })
+          .catch(function () { return { tools: [] }; })
           .then(function (j) {
             return (j.tools || []).map(function (t) { return { value: t.name, label: humanName(t.name) }; })
               .sort(function (a, b) { return a.label.localeCompare(b.label); });
@@ -593,27 +674,7 @@
     }
     function mountToolPicks() { document.querySelectorAll('.af-toolpick').forEach(mountToolPick); }
 
-    // Open the chosen prebuilt specialist from the search box.
-    (function () {
-      var picker = document.getElementById('agent-picker');
-      if (!picker) return;
-      function go() {
-        var v = picker.value.trim(); if (!v) return false;
-        var match = Array.prototype.find.call(document.querySelectorAll('#agent-picker-list option'), function (o) {
-          return o.value.toLowerCase() === v.toLowerCase() || o.dataset.name === v;
-        });
-        if (!match) return false;
-        location.href = '/agents?name=' + encodeURIComponent(match.dataset.name);
-        return true;
-      }
-      picker.addEventListener('change', go);
-      var open = document.getElementById('agent-picker-open');
-      if (open) open.addEventListener('click', function () {
-        if (!go()) {
-          mvToast('Choose a specialist from the list.', { error: true });
-        }
-      });
-    })();
+    // The prebuilt-specialist search is static/lightwork-agent-picker.js.
 
     // ---- JD hiring: match the roster / draft a new specialist from a JD ----
     // Runs BEFORE the chips/risk initializers below so a drafted pack stashed in
@@ -632,7 +693,7 @@
         });
       }
       function say(text, ok) {
-        if (jdMsg) { jdMsg.textContent = text; jdMsg.style.color = ok ? 'var(--accent)' : 'var(--danger)'; }
+        if (jdMsg) { if (window.mvStatus) window.mvStatus(jdMsg, text, {error: !ok}); else jdMsg.textContent = text; jdMsg.style.color = ok ? 'var(--accent)' : 'var(--danger)'; }
       }
 
       // --- prefill the editor from a drafted pack (set BEFORE initializers run) ---
@@ -685,7 +746,7 @@
 
       function renderMatches(list) {
         if (!list.length) {
-          results.innerHTML = '<p class="muted">No matches — draft a new specialist instead.</p>';
+          results.innerHTML = '<p class="muted">No matches — draft a new agent instead.</p>';
           return;
         }
         var rows = list.map(function (m, i) {
@@ -699,7 +760,7 @@
             + (readiness.state === 'needs_setup'
               ? 'Needs setup' + (readiness.missing_labels && readiness.missing_labels.length
                 ? ': ' + esc(readiness.missing_labels.join(', ')) : '') + '.'
-              : 'Setup could not be checked.')
+              : 'Setup could not be checked. Refresh the page and try again.')
             + ' <a href="' + esc(fix) + '">Review setup</a> before assigning work.</div>';
           return '<div class="panel" style="margin: 0.5rem 0; padding: 0.6rem 0.8rem;">'
             + '<div style="display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap;">'
@@ -707,14 +768,14 @@
             + (m.department ? '<span class="muted">' + esc(m.department) + '</span>' : '')
             + '<span class="muted" style="margin-left: auto;">' + relevance + '</span>'
             + '<button type="button" class="btn jd-hire-btn" data-pack="' + esc(m.name) + '"'
-            + (ready ? '' : ' disabled title="Review setup before assigning this specialist"') + '>Add to team…</button>'
+            + (ready ? '' : ' disabled title="Review setup before assigning this one"') + '>Add to team…</button>'
             + '</div>'
             + '<div class="muted" style="font-size: var(--text-sm);">' + esc(m.description || '') + '</div>'
             + (terms ? '<div class="muted" style="font-size: var(--text-xs);">Matched on: ' + esc(terms) + '</div>' : '')
             + setup
             + '</div>';
         }).join('');
-        results.innerHTML = '<p class="muted" style="margin-top: 0.6rem;">Existing specialists, ranked by relevance. Shared terms are a clue, not a readiness check.</p>' + rows;
+        results.innerHTML = '<p class="muted" style="margin-top: 0.6rem;">Existing agents and specialists, ranked by relevance. Shared terms are a clue, not a readiness check.</p>' + rows;
       }
 
       matchBtn.addEventListener('click', function () {
@@ -779,27 +840,27 @@
       if (draftBtn) draftBtn.addEventListener('click', function () {
         var text = (jdText.value || '').trim();
         if (!text) { say('Paste the job description first — the draft is built from it.', false); return; }
-        var ask = mvForm('Draft a new specialist', [
+        var ask = mvForm('Draft a new agent', [
               { key: 'title', label: 'Role title', type: 'text', required: true,
                 placeholder: 'e.g. Accounts Payable Specialist' },
             ], { okText: 'Draft' });
         ask.then(function (vals) {
           var title = vals && (vals.title || '').trim();
           if (!title) return;
-          say('Drafting a new specialist from the job description…', true);
+          say('Drafting a new agent from the job description…', true);
           fetch('/api/v1/agents/jd/draft', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ role_title: title, jd_text: text }),
           }).then(function (r) { return r.json().catch(function () { throw new Error('The result could not be confirmed. Refresh the page to check.'); }).then(function (j) { return { ok: r.ok, r: r, j: j }; }); })
             .then(function (res) {
-              if (!res.ok) { say(plainError(res.r, 'draft the specialist'), false); return; }
+              if (!res.ok) { say(plainError(res.r, 'draft the agent'), false); return; }
               sessionStorage.setItem('jd-draft', JSON.stringify({
                 draft: res.j.draft || {}, source: res.j.draft_source,
                 aiAttempted: !!res.j.ai_attempted,
               }));
               location.href = '/agents?new=1#agent-form';
             })
-            .catch(function (e) { say(plainError(e, 'draft the specialist'), false); });
+            .catch(function (e) { say(plainError(e, 'draft the agent'), false); });
         });
       });
     })();
@@ -1057,7 +1118,7 @@
         return (idInput ? idInput.value : '').trim().toLowerCase().replace(/[^a-z0-9_]+/g, '_').replace(/^_+|_+$/g, '');
       }
       const words = (s) => s.split(/\s+/).filter(Boolean);
-      function show(text, ok) { msg.textContent = text; msg.style.color = ok ? 'var(--accent)' : 'var(--danger)'; }
+      function show(text, ok) { if (window.mvStatus) window.mvStatus(msg, text, {error: !ok}); else msg.textContent = text; msg.style.color = ok ? 'var(--accent)' : 'var(--danger)'; }
       function fieldMessage(field, text) {
         ['agent-actions-error', 'agent-risk-error'].forEach(function (id) {
           var note = document.getElementById(id);
@@ -1066,6 +1127,10 @@
         var note = document.getElementById(field === 'actions' ? 'agent-actions-error'
           : field === 'risk' ? 'agent-risk-error' : '');
         if (note) { note.textContent = text; note.hidden = false; note.style.color = 'var(--danger)'; }
+      }
+      function kindWord() {
+        var form = document.getElementById('agent-form');
+        return form && form.dataset.kind === 'specialist' ? 'specialist' : 'agent';
       }
       function saveProblem(detail) {
         var raw = typeof detail === 'string' ? detail : '';
@@ -1077,12 +1142,12 @@
         };
         var denied = raw.match(/declared tool ['"]([^'"]+)['"] is denied by this pack/i);
         if (denied) return { field: 'actions', text: humanName(denied[1])
-          + ' is blocked for this specialist. Remove it from Allowed actions or the work steps.' };
+          + ' is blocked for this ' + kindWord() + '. Remove it from Allowed actions or the work steps.' };
         if (/max_risk cannot be raised/i.test(raw)) return {
-          field: 'risk', text: 'This specialist’s built-in risk limit cannot be raised. Choose a lower level or create a custom specialist.',
+          field: 'risk', text: 'This specialist’s built-in risk limit cannot be raised. Choose a lower level or create a custom agent.',
         };
         if (/exceeds max_risk/i.test(raw)) return {
-          field: 'risk', text: 'An allowed action needs a higher risk level. Remove that action, or choose a higher level if this specialist permits it.',
+          field: 'risk', text: 'An allowed action needs a higher risk level. Remove that action, or choose a higher level if this ' + kindWord() + ' permits it.',
         };
         if (/deny_tools cannot remove/i.test(raw)) return {
           field: 'actions', text: 'A built-in blocked action cannot be unblocked here. Keep its original safety limit.',
@@ -1129,7 +1194,7 @@
         // "Require approval to finish": gate the final step (or add a review step).
         if (window.__afApprovalOn && window.__afApprovalOn()) {
           if (steps.length) { if (!steps[steps.length - 1].gate) steps[steps.length - 1].gate = 'review'; }
-          else steps.push({ name: 'Final review', instruction: 'Human sign-off before finishing.', tools: [], gate: 'review' });
+          else steps.push({ name: 'Final review', instruction: 'A person approves the result before it is finished.', tools: [], gate: 'review' });
         }
         return steps;
       }
@@ -1180,29 +1245,23 @@
         button.disabled = false;
       }
       async function call(method, path, body) {
-        const opts = { method, headers: {} };
-        if (body !== undefined) { opts.headers['Content-Type'] = 'application/json'; opts.body = JSON.stringify(body); }
-        let r;
-        try { r = await fetch(path, opts); }
-        catch (error) { throw new Error(plainError(error, 'reach Lightwork')); }
-        if (!r.ok) {
-          var body = await r.json().catch(function () { return {}; });
-          var problem = r.status === 422 ? saveProblem(body.detail)
-            : { field: '', text: plainError({ status: r.status, detail: body.detail }, 'save these settings') };
-          var failure = new Error(problem.text);
-          failure.field = problem.field;
-          throw failure;
-        }
         let data;
-        try { data = await r.json(); }
-        catch (e) { throw new Error('The result could not be confirmed. Refresh the page to check.'); }
-        return { status: r.status, data };
+        try { data = await window.mvFetchJSON(path, { method, body }, 'save these settings'); }
+        catch (failure) {
+          if (failure.unreadable) throw new Error('The result could not be confirmed. Refresh the page to check.');
+          var problem = failure.status === 422 ? saveProblem(failure.detail)
+            : { field: '', text: failure.status ? plainError({ status: failure.status, detail: failure.detail }, 'save these settings') : plainError(failure, 'reach Lightwork') };
+          var refused = new Error(problem.text);
+          refused.field = problem.field;
+          throw refused;
+        }
+        return { status: 200, data };
       }
       document.getElementById('btn-validate').addEventListener('click', async () => {
         try {
           fieldMessage('', '');
           const name = targetName();
-          if (!name) { show('Give your specialist a name first.', false); return; }
+          if (!name) { show('Give your ' + kindWord() + ' a name first.', false); return; }
           const { data } = await call('POST', `/api/v1/agents/${name}/validate`, payload());
           if (data.errors && data.errors.length) {
             var problem = saveProblem(data.errors.join('; '));
@@ -1212,26 +1271,26 @@
           else if (data.warnings && data.warnings.length) show('Looks good, with notes: ' + data.warnings.join('; '), true);
           else show('Looks good.', true);
         } catch (error) {
-          show(error instanceof Error ? error.message : 'Request failed.', false);
+          show(error instanceof Error ? error.message : 'That didn\'t work. Refresh the page and try again.', false);
           fieldMessage(error && error.field, error && error.message);
         }
       });
       const saveBtn = document.getElementById('btn-save');
       saveBtn.addEventListener('click', async () => {
         const name = targetName();
-        if (!name) { show('Give your specialist a name first.', false); return; }
+        if (!name) { show('Give your ' + kindWord() + ' a name first.', false); return; }
         if (!beginMutation(saveBtn)) return;
         try {
           fieldMessage('', '');
           if (!(await mvConfirm(
-            (creating ? 'Create the specialist “' : 'Save the specialist “') + name + '”? Its allowed actions, steps and independence settings take effect for everyone who uses it.',
-            { okText: creating ? 'Create agent' : 'Deploy specialist' }
+            (creating ? 'Create the agent “' : 'Save your changes to the ' + kindWord() + ' “') + name + '”? Its allowed actions, steps and independence settings take effect for everyone who uses it.',
+            { okText: creating ? 'Create agent' : (kindWord() === 'specialist' ? 'Save specialist' : 'Save agent') }
           ))) return;
           await call('POST', `/api/v1/agents/${name}/override`, payload());
           show(creating ? 'Custom agent created.' : 'Deployed.', true);
           window.location.search = '?name=' + encodeURIComponent(name);
         } catch (error) {
-          show(error instanceof Error ? error.message : 'Request failed.', false);
+          show(error instanceof Error ? error.message : 'That didn\'t work. Refresh the page and try again.', false);
           fieldMessage(error && error.field, error && error.message);
         } finally {
           finishMutation(saveBtn);
@@ -1244,13 +1303,13 @@
         try {
           if (!(await mvConfirm(
             'Reset “' + name + '” to how it came? This removes your limits on allowed actions, risk, blocked actions and independence. The built-in policy may allow more. Review its policy after resetting.',
-            { okText: 'Reset specialist' }
+            { okText: kindWord() === 'specialist' ? 'Reset specialist' : 'Reset agent' }
           ))) return;
           await call('DELETE', `/api/v1/agents/${name}/override?expected_generation=${encodeURIComponent(form.dataset.generation)}`);
           show('Reset to how it came.', true);
           window.location.search = '?name=' + encodeURIComponent(name);
         } catch (error) {
-          show(error instanceof Error ? error.message : 'Request failed.', false);
+          show(error instanceof Error ? error.message : 'That didn\'t work. Refresh the page and try again.', false);
         } finally {
           finishMutation(resetBtn);
         }
@@ -1268,7 +1327,7 @@
     .jc-wrap { padding:var(--space-5); }
     .jc-head { display:flex; align-items:flex-start; gap:var(--space-3); }
     .jc-head h2 { margin:0; font-size:var(--text-xl); }
-    .jc-role { color:var(--muted); font-size:var(--text-sm); margin-top:2px; }
+    .jc-role { color:var(--muted); font-size:var(--text-sm); margin-top: var(--space-0-5); }
     .jc-close { margin-inline-start:auto; border:0; background:transparent;
                 color:var(--muted); font-size:1.3rem; cursor:pointer; }
     .jc-cards { display:grid; grid-template-columns:repeat(4,1fr);
@@ -1285,16 +1344,16 @@
                  margin:0 0 var(--space-2); }
     .jc-sec p { margin:0; font-size:var(--text-sm); line-height:1.5; }
     .jc-steps { margin:0; padding-inline-start:1.1rem; font-size:var(--text-sm); }
-    .jc-steps li { margin-bottom:4px; }
+    .jc-steps li { margin-bottom: var(--space-1); }
     .jc-chips { display:flex; flex-wrap:wrap; gap:6px; }
     .jc-chip { font-size:var(--text-xs); border:1px solid var(--hairline);
-               border-radius:var(--radius-pill); padding:2px 10px;
+               border-radius:var(--radius-pill); padding: var(--space-0-5) 10px;
                background:var(--surface-sunken); }
     .jc-chip.deny { border-color:var(--danger); color:var(--danger); }
     .jc-tier { display:inline-flex; align-items:center; gap:6px; }
     .jc-tier select { font-size:var(--text-sm); }
     .jc-band { font-size:var(--text-xs); font-weight:var(--font-semibold);
-               border-radius:var(--radius-pill); padding:2px 10px; }
+               border-radius:var(--radius-pill); padding: var(--space-0-5) 10px; }
     .jc-band.low { background:var(--success-subtle); color:var(--accent); }
     .jc-band.medium { background:var(--info-subtle); color:var(--info); }
     .jc-band.high { background:var(--warn-subtle); color:var(--warn); }
@@ -1312,7 +1371,7 @@
         </div>
         <button type="button" class="btn btn--ghost jc-close" id="jc-close">Close</button>
       </div>
-      <div class="jc-sec" role="status"><h3>Can this specialist start?</h3>
+      <div class="jc-sec"><h3>Can this {{ 'specialist' if selected_kind == 'specialist' else 'agent' }} start?</h3>
         <p><strong>{{ selected.readiness.label }}</strong></p>
         {% if selected.readiness.state == 'needs_setup' %}
         {% if selected.readiness.missing_labels %}<p class="muted">Required actions: {{ selected.readiness.missing_labels | join(', ') }}. <a href="{{ selected.readiness.fix_url }}">Review setup</a></p>
@@ -1336,7 +1395,7 @@
         {% if editable %}<p><a href="#agent-autonomy" id="jc-autonomy-open">Review independence settings</a></p>{% endif %}
       </div>
       <div class="jc-cards" id="jc-stats"></div>
-      <p class="muted" id="jc-stats-note">Finishing a run does not prove the result was useful. Approved deliverables require a person's sign-off; this card does not estimate savings or return on investment without customer evidence.</p>
+      <p class="muted" id="jc-stats-note">Finishing a task does not prove the result was useful. A result that needs approval counts only after a person approves it; this card does not estimate savings or return on investment without customer evidence.</p>
       <div class="jc-sec"><h3>Cost level</h3>
         <div class="jc-tier">
           <span class="jc-band" id="jc-band"></span>
@@ -1402,21 +1461,20 @@
       chips(el('jc-tools'), (jd.tools||[]).map(function(t){ return window.mvHuman?mvHuman(t):t; }));
       chips(el('jc-guard'), jd.guardrails, 'deny');
       el('jc-stats').innerHTML =
-        stat(Number(sc.runs)||0, 'Runs') +
-        stat(Number(sc.completed)||0, 'Finished runs') +
-        stat(Number(sc.delivered)||0, 'Approved deliverables') +
+        stat(Number(sc.runs)||0, 'Tasks') +
+        stat(Number(sc.completed)||0, 'Finished tasks') +
+        stat(Number(sc.delivered)||0, 'Approved results') +
         stat(money(sc.cost), 'AI cost');
       var band=ct.band||'unknown';
       var b=el('jc-band'); b.className='jc-band '+band; b.textContent=ct.model?(ct.label||band)+' cost':'Model unavailable';
-      el('jc-model').textContent=ct.model?('Configured agent model: '+ct.model):'The configured model could not be checked.';
+      el('jc-model').textContent=ct.model?('Configured agent model: '+ct.model):'The configured model could not be checked. Refresh the page and try again.';
       var bandSet=el('jc-band-set');
       if(bandSet){bandSet.value=ct.overridden?band:'';bandSet.dataset.original=bandSet.value;bandSet.dataset.model=ct.model||'';bandSet.disabled=!ct.model;}
     }
     function open(){
       dlg.showModal();
       el('jc-name').textContent='Loading…';
-      fetch('/api/v1/agents/'+encodeURIComponent(NAME)+'/jobcard')
-        .then(function(r){ return r.json(); }).then(render)
+      window.mvFetchJSON('/api/v1/agents/'+encodeURIComponent(NAME)+'/jobcard').then(render)
         .catch(function(){ el('jc-name').textContent='Could not load the job card. Close it and try again.'; });
     }
     var btn=el('btn-jobcard'); if(btn) btn.addEventListener('click', open);

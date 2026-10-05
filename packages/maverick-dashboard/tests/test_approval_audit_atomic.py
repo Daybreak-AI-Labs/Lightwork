@@ -5,6 +5,7 @@ import contextlib
 import time
 from concurrent.futures import ThreadPoolExecutor
 from threading import Barrier
+from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
@@ -314,6 +315,13 @@ def test_unreconcilable_commit_outcome_is_explicit_and_retry_keyed():
     from maverick_dashboard import api
 
     class UnavailableWorld:
+        @staticmethod
+        def get_approval(approval_id):
+            # The request someone else asked for: the separate-approver check
+            # before the vote has nothing to refuse.
+            return SimpleNamespace(id=approval_id, status="pending", risk="high",
+                                   approvals_required=1, requested_by="u:bob")
+
         @staticmethod
         def approval_audit_event_id(*_args):
             return "approval-v1-stable"

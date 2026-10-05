@@ -4,6 +4,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const { JSDOM } = require("jsdom");
+const {shell} = require('./_shell');
 
 const source = fs.readFileSync(path.resolve(__dirname, "../../maverick_dashboard/static/lightwork-security-hunt.js"), "utf8");
 const envHtml = `<div id="hunt-root" data-hunt="environment" data-api="/api/v1/security/soc">
@@ -45,6 +46,7 @@ async function fixture({ confirm = true, form = null } = {}) {
     return json({ status: "triaged" });
   };
   const settle = async () => { for (let i = 0; i < 30; i++) await new Promise((done) => setImmediate(done)); };
+  shell(window);
   window.eval(source);
   await settle();
   return { window, doc: window.document, calls, settle };

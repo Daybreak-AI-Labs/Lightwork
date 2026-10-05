@@ -4,4 +4,4 @@
 {% from "_assets.html" import asset -%}
 {% if journey_i18n_asset %}<link rel="preload" as="script" href="{{ journey_i18n_asset }}">{% endif %}
 <link rel="preload" as="script" href="{{ asset('lightwork-i18n.js') }}">
-<link rel="stylesheet" href="{{ asset('lightwork-i18n.css') }}">
+{#- The translation-coverage and bidirectional-text rules live in lightwork.css. -#}

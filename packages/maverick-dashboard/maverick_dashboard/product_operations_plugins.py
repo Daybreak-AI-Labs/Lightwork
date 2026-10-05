@@ -2,13 +2,13 @@
 from __future__ import annotations
 
 import json
-from typing import Literal
 
 from fastapi import HTTPException
 from maverick import plugin_workbench as workbench
 from maverick.governed_operations import digest
 from pydantic import Field
 
+from . import plugin_practice_forms_api as practice
 from . import plugin_workbench_api as native
 from .draft_api import context_for
 from .product_operations import Adapter, EmptyInput, Outcome, Preview, Snapshot, StrictInput
@@ -25,14 +25,8 @@ def snapshot(request, selection, kind="status"):
     choices = [{"value": row["fingerprint"], "label": row["name"] + " / " + row["version"]}
                for row in value["plugins"] if row["eligible"]]
     fields = []
-    if kind in {"check", "publish", "migrate"}:
+    if kind in {"check", "inspect", "publish", "migrate"}:
         fields.append({"name": "fingerprint", "label": "Exact plugin version", "kind": "select", "choices": choices, "required": True})
-    if kind == "check":
-        fields.extend([
-            {"name": "mode", "label": "Check", "kind": "select", "choices": [{"value": key, "label": label} for key, label in
-             (("sample", "Validate and execute sample"), ("timeout", "Observe bounded timeout"), ("cancellation", "Observe cancellation"))], "required": True},
-            {"name": "sample_json", "label": "Synthetic input JSON (no private data)", "kind": "textarea", "value": "{}", "required": True},
-            {"name": "expected_json", "label": "Exact expected result JSON", "kind": "textarea", "value": "null", "required": True}])
     if kind == "publish":
         fields.append({"name": "rollback", "label": "Affected-work review and rollback plan", "kind": "textarea", "required": True})
     if kind == "cancel":
@@ -43,14 +37,11 @@ def snapshot(request, selection, kind="status"):
         fields.append({"name": "pin", "label": "Stopped task or workflow pin", "kind": "select", "required": True,
             "choices": [{"value": item["id"], "label": item["label"]} for item in value["pins"]]})
     return Snapshot(digest(value), "Plugin qualification ledger", "Readiness is restricted-container evidence; no live capability is accepted.",
-        details=value, fields=fields, blocked="No eligible installed plugin is available." if kind in {"check", "publish", "migrate"} and not choices else "")
+        details=value, fields=fields, blocked="No eligible installed plugin is available." if kind in {"check", "inspect", "publish", "migrate"} and not choices else "")
 
 
 class CheckInput(StrictInput):
     fingerprint: str = Field(pattern=r"^[a-f0-9]{64}$")
-    mode: Literal["sample", "timeout", "cancellation"]
-    sample_json: str = Field(max_length=16384)
-    expected_json: str = Field(max_length=16384)
 
 
 class PublishInput(StrictInput):
@@ -137,6 +128,51 @@ def recover_check(request, selection, arguments, prepared, operation):
     return None
 
 
+def inspect_prepare(request, selection, arguments):
+    selected = workbench.selected(arguments["fingerprint"])
+    native._authority(request)
+    return Preview("Read this exact plugin's practice questions once inside the already installed reviewed restricted image. No tool action, network, credentials, host writes or downloads are permitted. Reading questions does not qualify this plugin.",
+                   changes=[{"label": "Selected plugin", "after": selected["name"]},
+                            {"label": "Installed version", "after": selected["version"]},
+                            {"label": "Action", "after": "Read ordinary practice questions without invoking an action"}],
+                   native={"context": context_for(request)})
+
+
+def _inspection_outcome(row, fingerprint, status):
+    details = {"plugin": row["plugin"], "version": row["version"], "notice": row["notice"]}
+    if row["state"] == "ready":
+        details["plugin_practice_page"] = {"fingerprint": fingerprint, "receipt": row["receipt"]}
+    return Outcome(status if row["state"] == "ready" else "unconfirmed", row["notice"], details)
+
+
+def inspect_execute(request, selection, arguments, prepared, operation):
+    row = practice.inspect_current(request, practice.InspectIn(context=prepared["context"], fingerprint=arguments["fingerprint"],
+                                                              operation_id=operation, confirm=True))
+    return _inspection_outcome(row, arguments["fingerprint"], "confirmed")
+
+
+def inspect_recover(request, selection, arguments, prepared, operation):
+    from maverick import plugin_practice_forms
+
+    native._authority(request, prepared["context"])
+    try:
+        row = practice.project(plugin_practice_forms.read_contract(prepared["context"], operation, fingerprint=arguments["fingerprint"],
+                               authorize=lambda: native._authority(request, prepared["context"])))
+    except LookupError:
+        return None
+    except (ValueError, PermissionError) as exc:
+        raise HTTPException(409, str(exc)) from exc
+    return _inspection_outcome(row, arguments["fingerprint"], "replayed")
+
+
+def guided_prepare(request, selection, arguments):
+    row = practice.current(request, arguments["fingerprint"])
+    if row["state"] != "ready":
+        raise HTTPException(409, row["notice"] + " Choose Read a plugin's practice questions first.")
+    return Preview("Open this exact inspected plugin's ordinary questions and expected-answer controls. Complete its named fields and review the full practice answers before explicitly running a restricted check. No check starts from this handoff.",
+                   native={"plugin_practice_page": {"fingerprint": arguments["fingerprint"], "receipt": row["receipt"]}})
+
+
 def check(request, selection, arguments, prepared, operation):
     native._authority(request, prepared["context"])
     recovered = recover_check(request, selection, arguments, prepared, operation)
@@ -200,8 +236,10 @@ def entries():
     shared = {"family": "plugins", "direct_ui": "/plugins", "pages": ("/plugins",)}
     return (
         Adapter("plugins.status", "Review plugin qualification", input_model=EmptyInput, snapshot=snapshot, prepare=prepare, **shared),
-        Adapter("plugins.check", "Run a sandbox plugin check", input_model=CheckInput,
-                snapshot=lambda r, s: snapshot(r, s, "check"), prepare=prepare, execute=check, recover=recover_check, **shared),
+        Adapter("plugins.inspect", "Read a plugin's practice questions", input_model=CheckInput,
+                snapshot=lambda r, s: snapshot(r, s, "inspect"), prepare=inspect_prepare, execute=inspect_execute, recover=inspect_recover, read_recovery=inspect_recover, **shared),
+        Adapter("plugins.check", "Open a guided plugin practice check", input_model=CheckInput,
+                snapshot=lambda r, s: snapshot(r, s, "check"), prepare=guided_prepare, **shared),
         Adapter("plugins.publish", "Publish scoped plugin readiness", input_model=PublishInput,
                 snapshot=lambda r, s: snapshot(r, s, "publish"), prepare=prepare, execute=publish, recover=recover_publish, **shared),
         Adapter("plugins.migrate", "Migrate a stopped-work plugin pin", input_model=MigrateInput,

@@ -8,10 +8,8 @@
     busy = true; pending = new AbortController(); var own = pending, timer = setTimeout(function () { own.abort(); }, 20000);
     var status = document.getElementById('today-pin-status'); status.textContent = 'Saving your template pins.';
     try {
-      var response = await fetch('/api/v1/preferences', {method: 'POST', credentials: 'same-origin', cache: 'no-store', signal: own.signal,
-        headers: {'Content-Type': 'application/json'}, body: JSON.stringify({context: model.context, expected_revision: model.revision, scope: 'personal', changes: {template_favorites: pins}})});
-      var result = await response.json();
-      if (!response.ok) throw new Error(typeof result.detail === 'string' ? result.detail : 'Your pins could not be saved. Refresh the current source before trying again.');
+      var result = await window.mvFetchJSON('/api/v1/preferences', {method: 'POST', cache: 'no-store', signal: own.signal, plainDetail: true,
+        body: {context: model.context, expected_revision: model.revision, scope: 'personal', changes: {template_favorites: pins}}}, 'save your template pins');
       if (result.context !== model.context) throw new Error('Your account or workspace changed. Refresh Today.');
       window.location.reload();
     } catch (error) { status.textContent = own.signal.aborted ? 'The save response was interrupted. Refresh to check the saved pins before trying again.' : error.message; }

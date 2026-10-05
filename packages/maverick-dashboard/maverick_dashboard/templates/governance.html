@@ -14,10 +14,10 @@
   .gov-actions { display:flex; flex-wrap:wrap; gap:var(--space-2); align-items:center; }
   .gov-table { overflow-x:auto; }
   .gov-table caption { text-align:left; color:var(--muted); padding:0 0 var(--space-2); }
-  .gov-cite { color:var(--muted); font-size:var(--text-sm); font-weight:400; }
+  .gov-cite { color:var(--muted); font-size:var(--text-sm); font-weight: var(--font-normal); }
   .gov-element { margin:var(--space-3) 0; }
   .gov-element textarea, .gov-element input { width:100%; }
-  .gov-render { max-height:28rem; overflow:auto; padding:var(--space-3); border:1px solid var(--border); border-radius:8px; }
+  .gov-render { max-height:28rem; overflow:auto; padding:var(--space-3); border:1px solid var(--border); border-radius: var(--radius-md); }
   .gov-trainings { display:grid; gap:var(--space-2); }
   .gov-training-row { display:grid; grid-template-columns:minmax(0,2fr) minmax(0,1fr) auto; gap:var(--space-2); align-items:end; }
 </style>
@@ -650,25 +650,12 @@
   const IFU_ITEMS = {{ ifu_items|tojson }};
   const ASSET_NAMES = {{ ASSET_NAMES|tojson }};
   const nameOf = assetId => ASSET_NAMES[assetId] || "this AI system";
-  const status = (id, text) => { const el = document.getElementById(id); if (el) el.textContent = text; };
-  // A failed request becomes one plain sentence; call sites add what failed.
-  const reason = failure => (typeof window.mvErrorText === "function"
-    ? window.mvErrorText(failure)
-    : "Something went wrong. Please try again.");
+  const status = (id, text) => { const el = document.getElementById(id); if (el && window.mvStatus) window.mvStatus(el, text); else if (el) el.textContent = text; };
   const say = (id, error, action) => status(id, "Could not " + action + ". " + ((error && error.message) || "Please try again."));
-  const failure = response => {
-    const error = new Error(reason(response));
-    error.status = response.status;
-    return error;
-  };
-  const send = async (url, options) => {
-    let response;
-    try { response = await fetch(url, Object.assign({credentials: "same-origin"}, options)); }
-    catch (networkError) { throw new Error(reason(networkError)); }
-    if (!response.ok) throw failure(response);
-    try { return await response.json(); }
-    catch { throw new Error("Lightwork sent back something unexpected. Refresh the page and try again."); }
-  };
+  // Requests go through the shell's mvFetchJSON (lightwork-ui.js), which loads
+  // after the page content; a failure is one plain sentence without the action.
+  const shellReady = window.mvFetchJSON ? Promise.resolve() : new Promise(done => document.addEventListener("DOMContentLoaded", done));
+  const send = async (url, options) => { await shellReady; return window.mvFetchJSON(url, options); };
   const post = (base, path, body) => send(base + path, {
     method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body),
   });
@@ -722,7 +709,7 @@
       });
       status("gov-attention-status", "Alerts refreshed.");
     }
-    catch (error) { status("gov-attention-status", error.message || "Alerts could not be refreshed."); }
+    catch (error) { status("gov-attention-status", error.message || "Alerts could not be refreshed. Refresh the page and try again."); }
     finally { refreshAttention.disabled = false; }
   });
   const grcRun = document.getElementById("gov-grc-run");
@@ -1313,7 +1300,7 @@
         status("agent-check-result", human(action) + ": " + (DECISION[verdict.decision] || "Unknown.") + (verdict.reason ? " " + verdict.reason : ""));
       } catch (error) { say("agent-check-result", error, "check the action"); }
     });
-    const CHAIN = {valid: "The record is complete and has not been changed.", broken: "Warning: this record has been changed since it was written.", missing: "No actions were recorded for this task.", unavailable: "The record could not be read."};
+    const CHAIN = {valid: "The record is complete and has not been changed.", broken: "Warning: this record has been changed since it was written.", missing: "No actions were recorded for this task.", unavailable: "The record could not be read. Refresh the page and try again."};
     const listInto = (id, lines, note) => {
       const holder = document.getElementById(id); holder.replaceChildren();
       if (note) { const p = document.createElement("p"); p.textContent = note; holder.appendChild(p); }

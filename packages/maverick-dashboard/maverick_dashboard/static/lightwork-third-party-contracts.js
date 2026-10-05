@@ -40,7 +40,7 @@
   var OPERATORS = [["add", "Add up"], ["subtract", "Subtract"], ["multiply", "Multiply"], ["divide", "Divide"], ["minimum", "Smallest of"], ["maximum", "Largest of"], ["count", "Count filled in"]];
 
   function F(name) { return form.elements.namedItem(name); }
-  function say(el, text) { if (el) { el.textContent = text; } }
+  function say(el, text) { window.mvStatus(el, text); }
   function fail(el, action) { return function (f) { say(el, f && f.plain ? f.plain : R.errorText(f, action)); }; }
   function plain(text) { var e = new Error("plain"); e.plain = text; return e; }
   // Same-origin, uncached, redirect-refusing requests whose answers are read
@@ -339,7 +339,7 @@
     if (!S.vendors.length) { say(formStatus, "Add the vendor on the Third-party Intelligence page first; contracts are linked to those vendors."); }
     F("record_kind").disabled = !!r;
     F("vendor_id").disabled = !!r;
-    document.getElementById("tpc-editor-title").textContent = r ? "Edit " + words(r.title_ref) : "Add a Contract or Engagement";
+    document.getElementById("tpc-editor-title").textContent = r ? "Edit " + words(r.title_ref) : "Add a contract or engagement";
     if (r) {
       var l = r.lifecycle || {};
       F("record_kind").value = r.record_kind;

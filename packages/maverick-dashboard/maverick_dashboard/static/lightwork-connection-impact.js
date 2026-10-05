@@ -7,14 +7,8 @@
   const clear=()=>{lost=true;serial++;panel.replaceChildren(node('p','Access or workspace changed. Reload Connections.'));};
   document.addEventListener('lightwork:workspace-changed',clear);document.addEventListener('lightwork:connection-access-lost',clear);
   async function request(name,path,body){
-    const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),20000);
-    try{
-      const response=await fetch('/api/v1/connections/'+encodeURIComponent(name)+path,{method:body?'POST':'GET',headers:{'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined,cache:'no-store',signal:controller.signal});
-      const result=await response.json().catch(()=>({}));
-      if(response.status===401||response.status===403){clear();document.dispatchEvent(new Event('lightwork:connection-access-lost'));}
-      if(!response.ok)throw new Error(typeof result.detail==='string'?result.detail:'The connection review is unavailable.');
-      return result;
-    }finally{clearTimeout(timer);}
+    return window.mvFetchJSON('/api/v1/connections/'+encodeURIComponent(name)+path,{method:body?'POST':'GET',body,cache:'no-store',timeout:20000,plainDetail:true,
+      onAccess:()=>{clear();document.dispatchEvent(new Event('lightwork:connection-access-lost'));}},body?'review the connection change':'load the connection review');
   }
   function button(label,fn){const item=node('button',label);item.className='btn';item.type='button';item.addEventListener('click',fn);return item;}
   function render(value){
@@ -47,16 +41,15 @@
     for(const item of value.items.filter(row=>value.can_rebind&&row.kind==='discovery_source')){
       const repair=button('Rebind '+item.title,()=>mutate(repair,'/rebind-source',{...body(),source_id:item.id,source_revision:item.revision,operation_id:crypto.randomUUID().replace(/-/g,'')},'Rebind this exact source to the selected current credential? Its resource and evidence settings stay fixed. No scan or historical action starts.'));panel.append(repair);
     }
-    const capabilities=node('fieldset');capabilities.append(node('legend','Check the exact read your job needs'));
-    if(!value.capabilities.length)capabilities.append(node('p','This adapter has no fixed read-capability probe here. A general service check does not qualify task access. Use the dedicated source access check where available, or review the provider permissions for the declared job.'));
+    const capabilities=node('fieldset');capabilities.append(node('legend','Check the exact read your task needs'));
+    if(!value.capabilities.length)capabilities.append(node('p','This connection has no built-in read check here. A general service check does not prove a task can read the data. Use the source access check where available, or review the provider permissions for the task.'));
     for(const capability of value.capabilities){
       const row=node('div');row.append(node('h3',capability.label),node('p','Minimum access: '+capability.minimum_scope+'. No write permission is tested.'));
       const label=node('label',capability.resource_label),resource=node('input');resource.className='input';resource.maxLength=256;label.append(resource);row.append(label);
       const check=button('Review read-only check',async()=>{
         if(busy||lost||!resource.value.trim())return;busy=true;check.disabled=true;
         try{
-          if(!await mvConfirm('Read only the metadata for this exact resource? No business record is created or changed, and no blocked task is resumed.',{okText:'Check this read'}))return;
-          const result=await request(value.name,'/capability-check',{context:value.context,expected_revision:value.revision,capability:capability.id,resource:resource.value.trim(),confirm:true});
+                    const result=await request(value.name,'/capability-check',{context:value.context,expected_revision:value.revision,capability:capability.id,resource:resource.value.trim(),confirm:true});
           status.textContent=result.verified?'This exact resource read was verified at '+(window.mvTimeAbsolute ? window.mvTimeAbsolute(result.tested_at) : new Date(result.tested_at*1000).toLocaleTimeString())+'. Write access and future access remain unverified. No task was resumed.':'The exact resource read was not verified: '+result.outcome.replace(/_/g,' ')+'. Other connections remain available.';
         }catch(error){status.textContent=error.message;}
         finally{busy=false;check.disabled=false;}

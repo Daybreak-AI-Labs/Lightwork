@@ -256,3 +256,15 @@ def test_failed_run_finalization_keeps_provider_cause_and_safe_work_log():
     assert explain_stop(world.goal.result).kind == "provider_unavailable"
     assert world.events == [("error", "The AI service is not responding.")]
     assert "secret provider payload" not in lifecycle.summary + world.goal.result
+
+
+def test_a_paused_ai_service_reads_as_paused_not_as_a_lightwork_fault():
+    from maverick.circuit_breaker import CircuitOpen
+
+    saved = exception_stop_text(CircuitOpen("llm:anthropic breaker OPEN; skipping dispatch"))
+    assert saved == "provider_error:paused"
+    stop = explain_stop(saved)
+    assert stop.kind == "provider_paused"
+    assert "paused after repeated errors" in stop.message and "kept" in stop.message
+    assert "checks again" in stop.action
+    assert "anthropic" not in stop.message + stop.action

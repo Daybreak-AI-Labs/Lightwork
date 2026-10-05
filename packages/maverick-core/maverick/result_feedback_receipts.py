@@ -2,11 +2,17 @@
 from __future__ import annotations
 
 import json
+import math
 import time
 
 from .goal_mutations import GoalMutationConflict, _fingerprint, _receipt, _record, _transaction
 
 KIND = "result_feedback"
+REASONS = {
+    "wrong": "Wrong or inaccurate", "incomplete": "Missing something",
+    "not_asked": "Not what I asked for", "unclear": "Hard to understand",
+    "too_long": "Too long", "other": "Something else",
+}
 
 
 def version(goal):
@@ -14,10 +20,14 @@ def version(goal):
                          "updated_at": float(goal.updated_at), "result": goal.result or ""})
 
 
-def record(world, goal_id, *, rating, note, revision, owner, context, actor, operation_id):
-    if rating not in {"up", "down"} or not isinstance(note, str) or len(note) > 500:
+def record(world, goal_id, *, rating, note, revision, owner, context, actor, operation_id, reason=""):
+    if (rating not in {"up", "down"} or not isinstance(note, str) or len(note) > 500
+            or not isinstance(reason, str) or (reason and reason not in REASONS) or (reason and rating != "down")):
         raise ValueError("Choose a rating and keep the optional note within 500 characters.")
     material = {"rating": rating, "note": note, "revision": revision, "owner": owner, "context": context}
+    # Empty reasons preserve the fingerprint of previously accepted requests.
+    if reason:
+        material["reason"] = reason
     fingerprint = _fingerprint(material)
     with _transaction(world, goal_id) as (execute, encode, decode, _postgres, _tenant):
         previous = _receipt(execute, decode, goal_id, KIND, operation_id, actor, fingerprint)
@@ -33,7 +43,8 @@ def record(world, goal_id, *, rating, note, revision, owner, context, actor, ope
                           (goal_id,)).fetchone()
         exact_episode = (episode is not None and episode[1] is not None and decode(episode[2]) == binding["result"])
         value = {"operation_id": operation_id, "actor": actor, "owner": owner, "context": context,
-                 "revision": revision, "rating": rating, "note": note, "recorded_at": time.time(),
+                 "revision": revision, "rating": rating, "note": note, "reason": reason,
+                 "agent": binding["domain"] or "", "recorded_at": time.time(),
                  "episode_id": int(episode[0]) if exact_episode else None,
                  "episode_ended_at": float(episode[1]) if exact_episode else None,
                  "observation": "not_started", "replayed": False}
@@ -64,11 +75,16 @@ def observe(world, goal_id, value, *, authorize):
                 or int(episode[0]) != value["episode_id"] or episode[1] != value["episode_ended_at"]
                 or decode(episode[2]) != binding["result"]):
             return False
-        return consequence.record_outcome(goal_id, value["episode_id"], 1.0 if value["rating"] == "up" else 0.0, kind="feedback")
+        return consequence.record_outcome(goal_id, value["episode_id"], 1.0 if value["rating"] == "up" else 0.0,
+                                          kind="feedback", source="human_feedback")
 
 
-def rated_goals(world, *, owner=None):
-    """Bound the existing signal summary to the latest 5,000 native receipts."""
+def summary_rows(world, *, owner=None):
+    """Latest bounded native feedback, projected without private comments.
+
+    Agent identity comes from the reviewed original goal, never from the client.
+    Earlier receipts without that identity remain under the general/unknown group.
+    """
     from .world_model import _dec_field
     if hasattr(world, "_writing"):
         decode = _dec_field
@@ -77,8 +93,26 @@ def rated_goals(world, *, owner=None):
         decode = _unseal
     rows = world.query("SELECT g.id,g.owner,r.receipt FROM goals g JOIN goal_mutation_receipts r ON r.goal_id=g.id "
                        "WHERE r.kind=?" + (" AND COALESCE(g.owner,'')=?" if owner is not None else "") +
-                       " ORDER BY r.created_at DESC LIMIT 5000", (KIND, owner) if owner is not None else (KIND,))
-    return {int(row["id"]) for row in rows if json.loads(decode(row["receipt"]))["owner"] == (row["owner"] or "")}
+                       " ORDER BY r.created_at DESC,r.operation_id DESC LIMIT 5000", (KIND, owner) if owner is not None else (KIND,))
+    latest = {}
+    for row in rows:
+        try:
+            value = json.loads(decode(row["receipt"]))
+            key = (int(row["id"]), row["owner"] or "")
+            if (key in latest or value["owner"] != key[1] or value["rating"] not in {"up", "down"}
+                    or type(value["recorded_at"]) not in (int, float) or not math.isfinite(value["recorded_at"])):
+                continue
+            latest[key] = {"goal_id": key[0], "owner": key[1], "by": value["actor"],
+                           "agent": value.get("agent", ""), "rating": value["rating"],
+                           "reason": value.get("reason", ""), "ts": value["recorded_at"]}
+        except (KeyError, TypeError, ValueError):
+            continue
+    return list(latest.values())
+
+
+def rated_goals(world, *, owner=None):
+    """Distinct tasks in the same bounded private-free native projection."""
+    return {row["goal_id"] for row in summary_rows(world, owner=owner)}
 
 
 def receipt(world, goal_id, operation_id, actor):

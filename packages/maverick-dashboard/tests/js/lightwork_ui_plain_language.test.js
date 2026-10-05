@@ -76,8 +76,8 @@ test("a 503 says turned off only when the server said so", () => {
 test("server messages pass only when they are already plain sentences", () => {
   const w = load();
   assert.equal(w.mvPlainDetail("Pick a later date."), "Pick a later date.");
-  assert.equal(w.mvPlainDetail("Shorten the goal to 10,000 characters or fewer. Move additional instructions to Add details."),
-    "Shorten the goal to 10,000 characters or fewer. Move additional instructions to Add details.");
+  assert.equal(w.mvPlainDetail("Shorten the task to 10,000 characters or fewer. Move additional instructions to Add details."),
+    "Shorten the task to 10,000 characters or fewer. Move additional instructions to Add details.");
   for (const raw of ["privacy_ops is not enabled", "select an active tenant", "Body must be a JSON object.",
     "The expected_revision is stale.", "Request failed (error 500).", "Path /api/v1/x was not found.",
     "An authenticated principal is required.", { detail: "x" }, null]) {
@@ -120,8 +120,8 @@ test("starting a task explains failures in plain sentences", async () => {
       /^Too many requests right now\. Try again in 30 seconds\.$/],
     [() => ({ ok: false, status: 400, headers: { get: () => null }, json: async () => ({ detail: "The selected AI model route is incomplete (anthropic: ANTHROPIC_API_KEY). An administrator can run 'maverick init'." }) }),
       /An AI model needs to be set up first\. Ask an administrator to finish setup in Settings\./],
-    [() => ({ ok: false, status: 422, headers: { get: () => null }, json: async () => ({ detail: "Shorten the goal to 10,000 characters or fewer. Move additional instructions to Add details." }) }),
-      /^Shorten the goal to 10,000 characters/],
+    [() => ({ ok: false, status: 422, headers: { get: () => null }, json: async () => ({ detail: "Shorten the task to 10,000 characters or fewer. Move additional instructions to Add details." }) }),
+      /^Shorten the task to 10,000 characters/],
     [() => { throw new TypeError("Failed to fetch"); }, /^Lightwork is not responding\. Check your connection and try again\.$/],
   ];
   for (const [reply, expected] of cases) {

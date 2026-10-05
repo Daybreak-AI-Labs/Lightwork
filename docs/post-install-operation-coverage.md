@@ -378,3 +378,44 @@ Each delivered journey needs evidence for cancellation, stale state, repeated
 clicks, permission changes, pending audit recording, interrupted requests and
 recovery, plus keyboard and narrow-screen inspection. Do not retire this register
 on the strength of component test counts alone.
+
+## October 5 delivered controls and recovery
+
+- Compliance questionnaire creation now uses named topics, ordinary questions,
+  business choices, conditional questions and named control groups. The native
+  page and Copilot share exact source-version review and original-save recovery;
+  independent publication remains a separate decision. The 320px native journey
+  exercised saving, a lost reply, a conflicting newer publication and an actual
+  assessment using the published questions. Imported unsupported structures
+  remain identified; licensed control text is not supplied by this builder.
+- Inspected plugin inputs now have ordinary nested, list, number and yes/no
+  controls with a complete expected-answer review. The actual restricted Python
+  worker checks the exact reviewed schema before dispatch. The native/Copilot
+  phone journey recovered the original single result after a lost response;
+  changed schemas and accounts were refused. Node/gRPC and arbitrary third-party
+  plugins still require their own installed environment qualification.
+- Settings offers a named, explicitly loaded list of already installed local
+  Linux practice environments. Review and save inspect the exact selected
+  immutable identity again. Unrelated settings never read Docker; loading and
+  choosing never start containers. Named customer history preserves raw exact
+  identities and configuration revisions in the original accepted audit record.
+- Outcome recording distinguishes reported business results, human ratings and
+  local execution verdicts. A later local rating cannot replace a reported
+  business result. Independent workers reread new complete records; failed or
+  uncertain persistence cannot report a successful save. Recording an unknown
+  outcome never becomes an instruction to repeat the original work.
+- Initial and live Chat withhold an answer overtaken by an edit or access change.
+  Assurance attaches only to the matching completed native run. Events equal to
+  its start/end timestamps are ambiguous and cannot support a “Checked” claim.
+  Copilot's read-only catalog remains available with mutation controls disabled.
+- Learning and Learned list the signed-in person's retained background learning
+  tasks after navigation or reload. Native controls and Copilot read recorded
+  observations and review a cooperative stop against the exact current task.
+  Interrupted stop replies recover the original request without another stop.
+  The phone journey distinguishes stopping from stopped, refuses another account
+  and stale access, and clears old-account results. These are the current process's
+  bounded 40 records; a restart can lose them. Missing records never prove failure
+  or authorize an automatic retry. Stopping does not undo completed work.
+
+These are bounded native product journeys and installed-package checks, not
+customer-outcome evidence or completion of the 28 research hypotheses.

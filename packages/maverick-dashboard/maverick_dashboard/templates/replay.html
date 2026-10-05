@@ -1,9 +1,11 @@
 {% extends "base.html" %}
 {% block title %}Task replay · Lightwork{% endblock %}
 {% block content %}
+{% from "_tabs.html" import tab_bar, panel_attrs %}
 {% if goal %}
   <h1 class="page-title">Task replay</h1>
   <p class="page-subtitle">{{ goal.title }}</p>
+  {% if replay_tabs %}{{ tab_bar('Task replay views', replay_tabs, '') }}<div {{ panel_attrs('') }}>{% endif %}
 
   <div class="panel">
     {% set _cs = replay.chain.status %}
@@ -57,16 +59,16 @@
     </table>
     {% else %}
     {% if replay.read_report and replay.read_report.failures %}
-    <p class="muted">No readable audit events are available for this run. The read is incomplete.</p>
+    <p class="muted">No readable audit events are available for this task. The read is incomplete.</p>
     {% else %}
-    <p class="muted">No audit events recorded for this run yet.</p>
+    <p class="muted">No audit events recorded for this task yet.</p>
     {% endif %}
     {% endif %}
   </div>
 
   <section class="panel" aria-labelledby="io-steps-title">
-    <h2 id="io-steps-title">Recorded Steps</h2>
-    <p class="muted">When step-by-step recording is on, each run keeps a sealed recording of everything its
+    <h2 id="io-steps-title">Recorded steps</h2>
+    <p class="muted">When step-by-step recording is on, each task keeps a sealed recording of everything its
       agents posted. Lightwork checks the seal before showing it.</p>
     <div class="io-row">
       <label class="io-field"><span>Show</span>
@@ -82,9 +84,11 @@
     .io-field { display: flex; flex-direction: column; gap: var(--space-1); }
   </style>
   <script src="/static/lightwork-insight-ops.js" defer></script>
+  {% if replay_tabs %}</div>{% endif %}
 {% else %}
   <h1 class="page-title">Task replay</h1>
   <p class="page-subtitle">See everything a task did, step by step, check that the record hasn't been altered, and download evidence for auditors.</p>
+  {% if replay_tabs %}{{ tab_bar('Task replay views', replay_tabs, '') }}<div {{ panel_attrs('') }}>{% endif %}
   {% if can_open_page('/walkthroughs') %}<p class="muted">To show a finished task to your team, <a href="/walkthroughs">make a video walkthrough</a>.</p>{% endif %}
   <div class="panel">
     {% if goals %}
@@ -104,5 +108,6 @@
     <p class="muted">No tasks yet. Start a task, then come back here to replay it.</p>
     {% endif %}
   </div>
+  {% if replay_tabs %}</div>{% endif %}
 {% endif %}
 {% endblock %}

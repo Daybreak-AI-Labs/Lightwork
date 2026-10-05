@@ -7,7 +7,7 @@
   if (window.LWJobs) return;
   var POLL_MS = 1500;
 
-  function el(tag, text, cls) {
+  function el(tag, cls, text) {
     var node = document.createElement(tag);
     if (cls) node.className = cls;
     if (text != null) node.textContent = text;
@@ -20,12 +20,9 @@
   // A failed request as one sentence. Our routes write their refusals for
   // people; anything else gets the shared wording.
   async function problem(failure, action) {
-    if (failure && typeof failure.json === 'function' && [404, 409, 413, 422, 503].indexOf(failure.status) >= 0) {
-      try {
-        var body = await failure.clone().json();
-        var text = window.mvPlainDetail ? window.mvPlainDetail(body.detail) : '';
-        if (text) return text;
-      } catch (e) { /* fall through */ }
+    if (failure && [404, 409, 413, 422, 503].indexOf(failure.status) >= 0) {
+      var text = window.mvPlainDetail ? window.mvPlainDetail(failure.detail) : '';
+      if (text) return text;
     }
     if (failure && failure.status === 403) return 'Only an administrator can ' + action + '.';
     return typeof window.mvErrorText === 'function' ? window.mvErrorText(failure, action) : 'Could not ' + action + '.';
@@ -33,17 +30,12 @@
 
   async function request(url, opts) {
     opts = opts || {};
-    var init = { method: opts.method || 'GET', credentials: 'same-origin', headers: {} };
-    if (opts.json !== undefined) {
-      init.headers['Content-Type'] = 'application/json';
-      init.body = JSON.stringify(opts.json);
-    } else if (opts.body !== undefined) {
-      init.headers['Content-Type'] = opts.type || 'application/octet-stream';
+    var init = { method: opts.method || 'GET', raw: !!opts.raw, body: opts.json };
+    if (opts.json === undefined && opts.body !== undefined) {
+      init.headers = { 'Content-Type': opts.type || 'application/octet-stream' };
       init.body = opts.body;
     }
-    var r = await window.fetch(url, init);
-    if (!r.ok) throw r;
-    return opts.raw ? r : r.json();
+    return window.mvFetchJSON(url, init);
   }
 
   function saveBlob(blob, name) {
@@ -57,10 +49,10 @@
   }
 
   function technical(lines, title) {
-    var box = el('details', null, 'lw-ops-tech');
-    box.appendChild(el('summary', title || 'Technical details'));
+    var box = el('details', 'lw-ops-tech');
+    box.appendChild(el('summary', null, title || 'Technical details'));
     var list = el('ul');
-    (lines || []).forEach(function (t) { if (t !== '' && t != null) list.appendChild(el('li', String(t))); });
+    (lines || []).forEach(function (t) { if (t !== '' && t != null) list.appendChild(el('li', null, String(t))); });
     box.appendChild(list);
     return box;
   }
@@ -68,7 +60,7 @@
   function table(headers, rows) {
     var t = el('table');
     var head = el('tr');
-    headers.forEach(function (h) { var th = el('th', h); th.scope = 'col'; head.appendChild(th); });
+    headers.forEach(function (h) { var th = el('th', null, h); th.scope = 'col'; head.appendChild(th); });
     var thead = el('thead'); thead.appendChild(head); t.appendChild(thead);
     var body = el('tbody');
     rows.forEach(function (cells) {
@@ -112,18 +104,18 @@
     return new Promise(function (resolve) {
       var stop = null;
       function show(j) {
-        ui.status.textContent = j.state === 'failed' ? (j.problem || 'This job could not finish.') : STATE_TEXT[j.state] || '';
+        ui.status.textContent = j.state === 'failed' ? (j.problem || 'This task could not finish. Start it again, or check Settings for what stopped it.') : STATE_TEXT[j.state] || '';
         if (j.can_stop && !stop) {
-          stop = el('button', 'Stop', 'btn btn--ghost');
+          stop = el('button', 'btn btn--ghost', 'Stop');
           stop.type = 'button';
           stop.addEventListener('click', async function () {
-            if (!(await window.mvConfirm('Stop this job? It stops at the next safe point and keeps what it has already done.',
+            if (!(await window.mvConfirm('Stop this task? It stops at the next safe point and keeps what it has already done.',
               { okText: 'Stop' }))) return;
             stop.disabled = true;
             try {
               await request('/api/v1/learning-ops/jobs/' + encodeURIComponent(j.id) + '/stop', { method: 'POST', json: {} });
             } catch (failure) {
-              ui.status.textContent = await problem(failure, 'stop the job');
+              ui.status.textContent = await problem(failure, 'stop the task');
               stop.disabled = false;
             }
           });
@@ -141,7 +133,7 @@
             try {
               tick((await request('/api/v1/learning-ops/jobs/' + encodeURIComponent(j.id))).job);
             } catch (failure) {
-              ui.status.textContent = await problem(failure, 'check on the job');
+              ui.status.textContent = await problem(failure, 'check on the task');
               resolve(null);
             }
           }, POLL_MS);

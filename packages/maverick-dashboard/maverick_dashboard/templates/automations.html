@@ -19,7 +19,7 @@
   .auto__what label, .auto__days label { display: inline-flex; gap: var(--space-1); align-items: center; }
   .auto__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-2); }
   .auto__url { font-family: ui-monospace, SFMono-Regular, Menlo, "Roboto Mono", monospace; font-size: var(--text-xs); }
-  .auto__runs { color: var(--muted); font-size: var(--text-xs); margin-top: 4px; }
+  .auto__runs { color: var(--muted); font-size: var(--text-xs); margin-top: var(--space-1); }
   .auto__run { text-decoration: none; border-bottom: 1px dashed currentColor; }
   .auto__run--done { color: var(--muted); }
   .auto__run--failed, .auto__run--error { color: var(--danger); font-weight: var(--font-semibold); }
@@ -72,7 +72,7 @@
                    action_label='Create a schedule', action_href='#auto-new-sched', id='auto-sched-empty', hidden=true) }}
     <details id="auto-new-sched" class="auto__new">
       <summary><span role="heading" aria-level="3">Create a schedule</span></summary>
-      <form id="auto-new-form" novalidate>
+      <form id="auto-new-form" novalidate data-mv-validate data-mv-keep="automation-schedule">
         <fieldset class="auto__what">
           <legend>What should run?</legend>
           <label><input type="radio" name="what" value="workflow" checked> A saved workflow</label>
@@ -411,7 +411,7 @@
         forgetSchedules(); schedStatus.textContent=response.status===401 ? 'Sign in again to view your schedules.' : 'Schedules are not accessible. Check workspace access and scheduling settings with an administrator.';
         document.getElementById('auto-sched-signin').hidden=response.status!==401; return;
       }
-      if (!response.ok) throw new Error('Schedules unavailable.');
+      if (!response.ok) throw new Error('Schedules unavailable. Refresh the page and try again.');
       data=await response.json();
       if (serial!==schedSerial) return;
       if (!Array.isArray(data.schedules) || typeof data.context!=='string' || data.schedules.some(function (item) { return !item || typeof item.id!=='number'; })) throw new Error('Unreadable schedules.');
@@ -428,7 +428,7 @@
     if (schedCount) schedCount.textContent=items.length+(items.length===1 ? ' schedule' : ' schedules');
     if (schedEmpty) schedEmpty.hidden=items.length>0;
     items.forEach(function (s) {
-      var li = el('li', 'mv-row'); li.dataset.schedule=JSON.stringify(s);
+      var li = el('li', 'mv-row'); li.dataset.schedule=JSON.stringify(s); li.dataset.scheduleId=String(s.id);
       var main = el('div', 'mv-row__main');
       main.appendChild(el('div', 'mv-row__title', s.title || 'Untitled task'));
       main.appendChild(el('div', 'mv-row__sub', cronText(s.cron) + (s.zone ? ' (' + String(s.zone).replace(/_/g, ' ') + ' time)' : '') + (fmtWhen(s.next_run) ? ' · next run ' + fmtWhen(s.next_run) : '')));
@@ -445,14 +445,40 @@
     var h = document.getElementById(id);
     if (h) h.focus();
   }
+  // A deleted row leaves the list at once and the toast offers Undo
+  // (window.mvUndo); the delete is sent when that time is up.
+  function rowWith(list, key, value) {
+    return list ? Array.prototype.find.call(list.children, function (li) { return li.dataset[key] === String(value); }) || null : null;
+  }
+  function deleteWithUndo(row, heading, message, url, action, reload, latest) {
+    if (row) row.hidden = true;
+    refocus(heading);
+    mvUndo(message, {
+      action: action, latest: latest,
+      run: function (keepalive) { return fetch(url, { method: 'DELETE', keepalive: keepalive }); },
+      undo: function () { if (row) { row.hidden = false; var b = row.querySelector('button'); if (b) b.focus(); } },
+      done: reload
+    });
+  }
   async function delSchedule(id) {
     if (!schedReady) return;
-    if (!(await mvConfirm('Delete this schedule? It will stop running.'))) return;
-    try {
-      var r = await fetch('/api/v1/schedules/' + encodeURIComponent(id), { method: 'DELETE' });
-      if (r.ok) { mvToast('Schedule deleted'); loadSchedules(); refocus('auto-sched-h'); }
-      else { mvFail(r, 'delete the schedule'); }
-    } catch (e) { mvFail(e, 'delete the schedule'); }
+    var row = rowWith(schedList, 'scheduleId', id), s = {};
+    try { s = JSON.parse(row ? row.dataset.schedule : '{}'); } catch (e) { s = {}; }
+    var name = s.title || 'Untitled task', url = '/api/v1/schedules/' + encodeURIComponent(id);
+    var next = Number(s.next_run) * 1000;
+    // Too close to its next run for a safe undo window: ask, then delete now.
+    if (next && next - Date.now() < 30000) {
+      if (!(await mvConfirm('Delete the schedule “' + name + '”? Its next run is due within a minute, so it is deleted now and can’t be brought back.',
+          { okText: 'Delete schedule', cancelText: 'Keep schedule', danger: true }))) return;
+      try {
+        var r = await fetch(url, { method: 'DELETE' });
+        if (r.ok) { mvToast('Schedule deleted'); loadSchedules(); refocus('auto-sched-h'); }
+        else { mvFail(r, 'delete the schedule'); }
+      } catch (e) { mvFail(e, 'delete the schedule'); }
+      return;
+    }
+    deleteWithUndo(row, 'auto-sched-h', 'Schedule “' + name + '” deleted.', url, 'delete the schedule', loadSchedules,
+      next ? next - 15000 : undefined);
   }
 
   var trigList = document.getElementById('auto-trig-list');
@@ -470,7 +496,7 @@
     if (trigEmpty) trigEmpty.hidden = items.length > 0;
     var base = window.location.origin + (data.webhook_url || '/webhook/run');
     items.forEach(function (t) {
-      var li = el('li', 'mv-row');
+      var li = el('li', 'mv-row'); li.dataset.trigger = t.name;
       var main = el('div', 'mv-row__main');
       main.appendChild(el('div', 'mv-row__title', t.name));
       var pcount = t.params ? Object.keys(t.params).length : 0;
@@ -493,13 +519,10 @@
       trigList.appendChild(li);
     });
   }
-  async function delTrigger(name) {
-    if (!(await mvConfirm('Delete “' + name + '”? Other apps will no longer be able to start this workflow.', { okText: 'Delete' }))) return;
-    try {
-      var r = await fetch('/api/v1/triggers/' + encodeURIComponent(name), { method: 'DELETE' });
-      if (r.ok) { mvToast('Deleted'); loadTriggers(); refocus('auto-trig-h'); }
-      else { mvFail(r, 'delete it'); }
-    } catch (e) { mvFail(e, 'delete it'); }
+  function delTrigger(name) {
+    deleteWithUndo(rowWith(trigList, 'trigger', name), 'auto-trig-h',
+      'Start “' + name + '” deleted. Other apps can no longer start this workflow.',
+      '/api/v1/triggers/' + encodeURIComponent(name), 'delete the start', loadTriggers);
   }
 
   // Run history (provenance): "N runs · ✓X · ✗Y · #ids" with drill-down links.
@@ -797,9 +820,8 @@
     async function loadTargetChoices() {
       await Promise.all(['template', 'flow'].map(async function (kind) {
         try {
-          var response = await fetch('/api/v1/' + (kind === 'template' ? 'templates' : 'flows'));
-          if (!response.ok) throw new Error('Could not load ' + (kind === 'template' ? 'workflows' : 'flows') + '. Refresh to try again.');
-          var data = await response.json(), items = kind === 'template' ? data.templates : data.flows;
+          var data = await window.mvFetchJSON('/api/v1/' + (kind === 'template' ? 'templates' : 'flows'), {}, 'load the ' + (kind === 'template' ? 'workflows' : 'flows'));
+          var items = data && (kind === 'template' ? data.templates : data.flows);
           if (!Array.isArray(items)) throw new Error('The workflow list could not be read. Refresh to try again.');
           targetCatalog[kind] = kind === 'template' ? items : items.filter(function (item) { return item.published; }).map(function (item) { return { name: item.id, title: item.name || item.id }; });
         } catch (e) { targetErrors[kind] = e.message; }
@@ -1081,6 +1103,7 @@
         }
         actions.appendChild(delBtn('Delete ' + t.name, function () { delEventTrigger(t.name); }));
         li.appendChild(actions);
+        li.dataset.eventTrigger = t.name;
         evList.appendChild(li);
       });
       return true;
@@ -1116,12 +1139,9 @@
       into.textContent = bits.join(' · ');
     }
     async function delEventTrigger(name) {
-      if (!(await mvConfirm('Delete “' + name + '”? Lightwork will stop checking for new items.', { okText: 'Delete' }))) return;
-      try {
-        var r = await fetch('/api/v1/event-triggers/' + encodeURIComponent(name), { method: 'DELETE' });
-        if (r.ok) { mvToast('Deleted'); loadEventTriggers(); }
-        else { mvFail(r, 'delete it'); }
-      } catch (e) { mvFail(e, 'delete it'); }
+      deleteWithUndo(rowWith(evList, 'eventTrigger', name), 'auto-event-h',
+        'Automation “' + name + '” deleted. Lightwork stops checking for new items.',
+        '/api/v1/event-triggers/' + encodeURIComponent(name), 'delete the automation', loadEventTriggers);
     }
     evForm.addEventListener('submit', async function (ev) {
       ev.preventDefault();
@@ -1297,16 +1317,16 @@
     async function testConn(name, label, btn) {
       if (btn) { btn.disabled = true; }
       try {
-        var r = await fetch('/api/v1/oauth/' + encodeURIComponent(name) + '/test', { method: 'POST' });
-        var body = {};
-        try { body = await r.json(); } catch (e) { body = {}; }
-        if (r.ok && body.ok) { mvToast(label + ' is connected and working'); loadOAuth(); }
-        else if (r.ok || r.status === 401) {
+        var body = null, refused = null;
+        try { body = (await window.mvFetchJSON('/api/v1/oauth/' + encodeURIComponent(name) + '/test', { method: 'POST' }, 'test ' + label)) || {}; }
+        catch (e) { if (!e.status) throw e; refused = e; }
+        if (body && body.ok) { mvToast(label + ' is connected and working'); loadOAuth(); }
+        else if (body || refused.status === 401) {
           oMsg.textContent = label + ' needs to be reconnected.';
           var again = el('button', 'btn', 'Reconnect ' + label); again.type = 'button';
           again.addEventListener('click', function () { reconnect(name); });
           oMsg.appendChild(document.createTextNode(' ')); oMsg.appendChild(again);
-        } else { mvFail(r, 'test ' + label); }
+        } else { mvFail(refused, 'test ' + label); }
       } catch (e) { mvFail(e, 'test ' + label); }
       finally { if (btn) { btn.disabled = false; } }
     }
@@ -1385,12 +1405,11 @@
     function statusText(st) { return STATUS_WORDS[st] || mvHuman(st || 'unknown'); }
     var ORIGIN_WORDS = { webhook: 'started by another app', schedule: 'started on schedule', event_trigger: 'started by a new item', retry: 'retry' };
     async function loadFlows() {
-      var r;
-      try { r = await fetch('/api/v1/flows'); } catch (e) { return; }
-      if (r.status === 403) { flowsSection.hidden = true; return; }  // engine off
-      if (!r.ok) { flowsSection.hidden = true; return; }
+      var data;
+      try { data = await window.mvFetchJSON('/api/v1/flows'); }
+      catch (e) { if (e.status) flowsSection.hidden = true; return; }  // a refusal: the engine is off
       flowsSection.hidden = false;
-      var flows = (await r.json()).flows || [];
+      var flows = (data && data.flows) || [];
       flowsCount.textContent = flows.length ? (flows.length + (flows.length === 1 ? ' flow' : ' flows')) : '';
       flowsEmpty.hidden = flows.length > 0;
       flowsList.textContent = '';
@@ -1431,16 +1450,14 @@
       }
       flowsMsg.textContent = 'Starting…';
       try {
-        var r = await fetch('/api/v1/flows/' + encodeURIComponent(id) + '/run', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ data: data }),
-        });
-        var j;
-        try { j = await r.json(); }
-        catch (e) { flowsMsg.textContent = 'The run could not be confirmed. Check Recent runs before trying again.'; return; }
-        if (r.ok && j) { flowsMsg.textContent = 'Run started. It appears under Recent runs.'; }
-        else { flowsMsg.textContent = plainError(r, 'start the run'); }
+        var j = await window.mvFetchJSON('/api/v1/flows/' + encodeURIComponent(id) + '/run', { method: 'POST', body: { data: data } }, 'start the run');
+        flowsMsg.textContent = j ? 'Run started. It appears under Recent runs.' : 'The run could not be confirmed. Check Recent runs before trying again.';
         setTimeout(loadFlowRuns, 500);
-      } catch (e) { flowsMsg.textContent = plainError(e, 'start the run'); }
+      } catch (e) {
+        if (e.unreadable) { flowsMsg.textContent = 'The run could not be confirmed. Check Recent runs before trying again.'; return; }
+        flowsMsg.textContent = e.message;
+        if (e.status) setTimeout(loadFlowRuns, 500);
+      }
     }
     async function loadFlowRuns() {
       var r;

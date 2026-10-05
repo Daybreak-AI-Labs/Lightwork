@@ -16,14 +16,15 @@ change is made. Long work runs as a background job the page polls.
 from __future__ import annotations
 
 import json
+import math
 import re
 import tempfile
 from pathlib import Path
 from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Query, Request
-from fastapi.responses import FileResponse, Response
-from pydantic import BaseModel, Field
+from fastapi.responses import FileResponse, JSONResponse, Response
+from pydantic import BaseModel, ConfigDict, Field
 from starlette.concurrency import run_in_threadpool
 
 from . import learning_jobs as jobs
@@ -120,6 +121,14 @@ class HarvestIn(BaseModel):
 
 class ConfirmIn(BaseModel):
     confirm: bool = False
+
+
+class JobStopIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    context: str = Field(pattern=r"^[a-f0-9]{64}$")
+    revision: str = Field(pattern=r"^[a-f0-9]{64}$")
+    operation: str = Field(pattern=r"^[a-f0-9]{32}$")
+    confirm: Literal[True]
 
 
 class ModifyRunIn(BaseModel):
@@ -253,8 +262,139 @@ def _job_or_404(request: Request, job_id: str) -> jobs.Job:
     job = jobs.get(job_id) if _JOB_ID.fullmatch(job_id) else None
     if job is None or not _can_see(request, job):
         raise HTTPException(status_code=404, detail=(
-            "That job is no longer on record. Lightwork may have restarted; start it again."))
+            "The original task result is no longer available. Lightwork may have restarted. This does not mean the work failed; do not repeat it automatically."))
     return job
+
+
+_LEARNING_KINDS = {"self_harness_run", "self_harness_corpus_quality", "self_harness_clash",
+                   "self_harness_transfer", "flywheel", "self_modify_run"}
+_JOB_STATES = {"running": "Working", "stopping": "Stopping at the next safe point",
+               "done": "Finished", "stopped": "Stopped early", "failed": "Stopped with a problem"}
+_RESULT_COUNTS = {"patterns_found": "Patterns found", "ideas_tried": "Ideas tried",
+                  "passed_testing": "Passed practice checks", "adopted": "Lessons adopted",
+                  "retired": "Lessons retired", "removed": "Cases removed", "tested": "Ideas checked",
+                  "tasks": "Completed tasks reviewed", "tried": "Lessons tried"}
+
+
+def _history_job(request, job_id):
+    require_permission(request, "view")
+    job = _job_or_404(request, job_id)
+    if (job.kind not in _LEARNING_KINDS or job.started_by != _actor(request)
+            or job.workspace != _workspace()):
+        raise HTTPException(404, "Choose one of your retained learning tasks in this workspace.")
+    return job
+
+
+def _result_counts(result):
+    """Expose observations, never retained private lesson or case text."""
+    rows = []
+    if not isinstance(result, dict):
+        return rows
+    sources = result.get("reports") or result.get("targets") or [result]
+    if not isinstance(sources, list):
+        return rows
+    from .plain_labels import model_label
+    for source in sources[:20]:
+        if not isinstance(source, dict):
+            continue
+        values = {}
+        for key, label in _RESULT_COUNTS.items():
+            value = source.get(key)
+            if type(value) in (int, float) and math.isfinite(value) and value >= 0:
+                values[label] = value
+        if source.get("paused_for_calibration") is True:
+            values["Decision"] = "Paused for its learning checks"
+        if source.get("promotion_gate_off") is True:
+            values["Activation"] = "Learning permission was off"
+        if values:
+            rows.append({"label": model_label(source["model"]) if isinstance(source.get("model"), str) else "Recorded observations", "counts": values})
+    return rows
+
+
+def current_learning_job(request, job_id):
+    from .draft_api import context_for
+    job = _history_job(request, job_id)
+    try:
+        current = jobs.reviewed_view(job)
+    except jobs.JobRefused as exc:
+        raise HTTPException(409, str(exc)) from exc
+    value = current["job"]
+    original = jobs.stop_receipt(job, None, _actor(request), context_for(request))
+    result = {"context": context_for(request), "revision": current["revision"],
+            "job": {key: value[key] for key in ("id", "label", "started_at", "finished_at", "state", "can_stop", "problem")},
+            "status": _JOB_STATES[value["state"]], "observations": _result_counts(value["result"]),
+            "original_stop": {"operation": original["operation"]} if original else None,
+            "notice": "Completed work remains recorded. A stop does not undo earlier work. These results remain available only while this Lightwork process retains them; they do not establish improved business results."}
+    _history_job(request, job_id)
+    if result["context"] != context_for(request):
+        raise HTTPException(409, "Your account or workspace changed. Read current tasks again.")
+    return result
+
+
+def current_learning_jobs(request):
+    require_permission(request, "view")
+    rows = [current_learning_job(request, job.id) for job in jobs.listed()
+            if job.kind in _LEARNING_KINDS and job.started_by == _actor(request)
+            and job.workspace == _workspace() and _can_see(request, job)]
+    require_permission(request, "view")
+    for row in rows:
+        _history_job(request, row["job"]["id"])
+    return {"jobs": rows, "notice": "Your recent learning tasks in this workspace. Up to 40 tasks are retained in this Lightwork process. A restart or older-record removal can make an original outcome unavailable; absence does not mean it failed, and work is never repeated here."}
+
+
+def reviewed_learning_stop(request, job_id, body: JobStopIn):
+    from maverick.authority_effects import authority_effect_fence
+
+    from .draft_api import context_for
+    with authority_effect_fence():
+        from .app import _require_same_origin
+        _require_same_origin(request)
+        job = _history_job(request, job_id)
+        if body.context != context_for(request):
+            raise HTTPException(409, "Your account or workspace changed. Read the current task again. Nothing was stopped.")
+        def before_stop():
+            require_permission(request, "view")
+            if not _can_see(request, job) or job.started_by != _actor(request) or job.workspace != _workspace():
+                raise HTTPException(403, "Your permission or workspace changed. Nothing was stopped.")
+            _record(request, "job_stop", installation=job.needs_global, job=job.kind,
+                    phase="prepared", operation=body.operation, reviewed_revision=body.revision)
+        try:
+            receipt = jobs.cancel_reviewed(job, body.revision, body.operation, _actor(request), body.context, before_stop)
+        except jobs.JobRefused as exc:
+            raise HTTPException(409, str(exc)) from exc
+    return {"receipt": {"requested_at": receipt["requested_at"], "message": "The original reviewed stop was requested. Work stops at its next safe point; completed changes remain."},
+            "current": current_learning_job(request, job_id)}
+
+
+def original_learning_stop(request, job_id, operation):
+    from .draft_api import context_for
+    job = _history_job(request, job_id)
+    if not re.fullmatch(r"[a-f0-9]{32}", operation):
+        raise HTTPException(404, "Choose the original saved stop request.")
+    row = jobs.stop_receipt(job, operation, _actor(request), context_for(request))
+    return {"confirmed": row is not None, "current": current_learning_job(request, job_id),
+            "message": "The original reviewed stop request is recorded. No stop or work was repeated." if row else
+                       "The original stop is unconfirmed. Current progress is shown; its state cannot prove that request succeeded. Nothing was repeated."}
+
+
+@router.get("/job-history")
+async def learning_job_history(request: Request):
+    return JSONResponse(await run_in_threadpool(current_learning_jobs, request), headers={"Cache-Control": "private, no-store"})
+
+
+@router.get("/job-history/{job_id}")
+async def learning_job_history_item(request: Request, job_id: str):
+    return JSONResponse(await run_in_threadpool(current_learning_job, request, job_id), headers={"Cache-Control": "private, no-store"})
+
+
+@router.post("/job-history/{job_id}/stop")
+async def learning_job_history_stop(request: Request, job_id: str, body: JobStopIn):
+    return JSONResponse(await run_in_threadpool(reviewed_learning_stop, request, job_id, body), headers={"Cache-Control": "private, no-store"})
+
+
+@router.get("/job-history/{job_id}/stop/{operation}")
+async def learning_job_original_stop(request: Request, job_id: str, operation: str):
+    return JSONResponse(await run_in_threadpool(original_learning_stop, request, job_id, operation), headers={"Cache-Control": "private, no-store"})
 
 
 @router.get("/jobs/{job_id}")
@@ -268,12 +408,12 @@ async def stop_job(request: Request, job_id: str) -> dict:
     require_permission(request, "view")
     job = _job_or_404(request, job_id)
     if not job.cancellable:
-        raise HTTPException(status_code=409, detail="This job cannot be stopped part-way. Let it finish.")
+        raise HTTPException(status_code=409, detail="This task cannot be stopped part-way. Let it finish.")
     if job.active:
         await run_in_threadpool(lambda: _record(request, "job_stop", installation=job.needs_global,
                                                 job=job.kind))
     if not jobs.cancel(job):
-        raise HTTPException(status_code=409, detail="This job has already finished.")
+        raise HTTPException(status_code=409, detail="This task has already finished. Refresh to see its result.")
     return {"job": job.view()}
 
 
@@ -656,7 +796,7 @@ def _modify_reason(reason: str) -> str:
     for needle, sentence in _MODIFY_REFUSALS:
         if needle in text:
             return sentence
-    return "The experiment could not run. Nothing was changed."
+    return "The experiment could not run. Nothing was changed. Try again."
 
 
 @router.post("/self-modify/run")

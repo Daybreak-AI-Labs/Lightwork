@@ -6,8 +6,8 @@ def entries(setting):
     group, reader = "Chat channels", "maverick.conversation_inbox"
     return (
         setting("conversation_inbox", "enabled", "Keep conversation responsive during tasks",
-                "Save reviewed task guidance and editable queued messages with durable receipts. Separate tasks remain subject to current permissions, task ownership and spending limits.",
-                "toggle", group, False, reader),
+                "Let people send messages while a task runs: guidance the task reads at its next safe point, the next task in the conversation, or a separate task. On by default. Separate tasks remain subject to current permissions, task ownership and spending limits.",
+                "toggle", group, True, reader),
         setting("conversation_inbox", "guidance", "Allow reviewed guidance during a task",
                 "Task owners review additional instructions before delivery at a safe checkpoint. Guidance never starts a separate task.",
                 "toggle", group, True, reader),

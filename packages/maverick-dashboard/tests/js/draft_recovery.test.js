@@ -5,6 +5,7 @@ const fs=require('node:fs');
 const path=require('node:path');
 const {webcrypto}=require('node:crypto');
 const {JSDOM}=require('jsdom');
+const {shell} = require('./_shell');
 const source=fs.readFileSync(path.resolve(__dirname,'../../maverick_dashboard/static/lightwork-draft-recovery.js'),'utf8');
 const guided=fs.readFileSync(path.resolve(__dirname,'../../maverick_dashboard/static/lightwork-guided-actions.js'),'utf8');
 const tick=()=>new Promise(resolve=>setImmediate(resolve));
@@ -125,6 +126,8 @@ test('guided recovery keeps raw request references and separate resource drafts 
   d.querySelector('form').addEventListener('submit',()=>{submits++;});
   w.mvDraftRecovery={create:options=>{adapters.push(options);return {};}};
   w.fetch=async()=>({ok:true,json:async()=>({paths:{'/first':{post:{requestBody:{content:{'application/json':{schema:{type:'object'}}}}}},'/second':{post:{requestBody:{content:{'application/json':{schema:{type:'object'}}}}}}},components:{schemas:{}}})});
+  shell(w);  // guided actions read their definitions through the shell's mvFetchJSON
+  w.mvDraftRecovery={create:options=>{adapters.push(options);return {};}};
   w.eval(guided);await tick();
   const adapter=adapters[0],raw=d.querySelector('textarea[name=payload]'),select=d.getElementById('kind');
   select.value='second';select.dispatchEvent(new w.Event('change',{bubbles:true}));raw.value='{"expected_revision":2,"idempotency_key":"second-request"}';raw.dispatchEvent(new w.Event('change',{bubbles:true}));

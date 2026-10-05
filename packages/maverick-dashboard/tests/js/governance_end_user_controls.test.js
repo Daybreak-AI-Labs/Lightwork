@@ -5,6 +5,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
 const { JSDOM } = require("jsdom");
+const {shell} = require('./_shell');
 const editor = require("../../maverick_dashboard/static/lightwork-consent-policy-editor.js");
 
 test("an unavailable consent editor visibly blocks policy publication while other consent tools remain usable", async () => {
@@ -16,6 +17,7 @@ test("an unavailable consent editor visibly blocks policy publication while othe
   Object.defineProperty(w,"crypto",{value:require("node:crypto").webcrypto});
   w.TextEncoder=TextEncoder;
   w.fetch=async(url,options)=>{calls.push({url,options});return {ok:true,json:async()=>({profiles:[],policies:[],trackers:[]})};};
+  shell(w);
   w.eval(helper);
   assert.doesNotThrow(()=>w.eval(script));await new Promise(resolve=>setImmediate(resolve));
   assert.equal(d.getElementById("cp-policy-controls").disabled,true);

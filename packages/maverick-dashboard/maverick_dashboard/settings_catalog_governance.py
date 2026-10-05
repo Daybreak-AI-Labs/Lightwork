@@ -129,7 +129,7 @@ def entries(S, C, Column) -> tuple:  # noqa: ARG001 -- filled by the group
         *_outbound_vendors(S),
         S("swarm", "finding_post_max_chars", "Length of helper findings shared with the team",
           "How much of each helper agent's final answer is posted for the other helpers to "
-          "read. The full answer still reaches the lead agent and the run record.", "number",
+          "read. The full answer still reaches the lead agent and the task record.", "number",
           "Spending & limits", 1500, "maverick.agent", minimum=200, maximum=100000,
           integer=True, unit="characters", env=("MAVERICK_FINDING_POST_MAX_CHARS",)),
     )

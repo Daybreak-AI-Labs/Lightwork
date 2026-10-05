@@ -21,9 +21,16 @@ function slice(template, start, end) {
   return text.slice(from, to + end.length);
 }
 
-async function page(markup, script, reply, { confirm = true } = {}) {
+async function page(markup, script, reply, { confirm = true, shell = true } = {}) {
   const dom = new JSDOM('<main>' + strip(markup) + '</main>', { url: 'https://app.example/x', runScripts: 'outside-only' });
   const w = dom.window, calls = [], asked = [];
+  // shell: the page script uses the shell's shared helpers (mvFetchJSON,
+  // mvStatus), which load before any page script as in base.html; the stubs
+  // below still stand in for the rest.
+  if (shell) {
+    w.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} });
+    w.eval(read('static/lightwork-ui.js'));
+  }
   w.mvErrorText = (failure, action) => 'Could not ' + action + '. Plain message.';
   w.mvConfirm = async message => { asked.push(message); return confirm; };
   w.mvWhen = () => 'soon';
@@ -98,7 +105,7 @@ test('the schedule picker sends plain choices and a chosen time zone, never a ty
     if (url.endsWith('/options')) return { zones: ['UTC', 'Europe/Paris'], workflows: [], tasks: [{ id: 4, title: 'Weekly notes' }] };
     if (url.endsWith('/preview')) return { cron: '0 9 * * *', zone: 'UTC', next_runs: [1, 2, 3] };
     return { id: 1, next_run: 5 };
-  });
+  }, { shell: true });
   t.after(() => ui.w.close());
   ui.$('auto-new-sched').open = true;
   ui.$('auto-new-sched').dispatchEvent(new ui.w.Event('toggle'));
@@ -244,7 +251,7 @@ test('a run at its first approval is kept as an example with plain, editable dat
   });
   t.after(() => ui.w.close());
   assert.equal(ui.$('lx-enroll').hidden, false);
-  assert.match(ui.$('lx-describe').textContent, /hasn’t seen what “lookup” gives back yet/);
+  assert.match(ui.$('lx-describe').textContent, /hasn’t seen what “lookup” gives back yet/i);
   assert.equal(ui.d.querySelectorAll('#lx-describe select').length, 5, 'every part has a kind chosen from a list');
   const groups = Array.from(ui.d.querySelectorAll('#lx-describe fieldset'));
   const result = groups.find(g => /gives back/.test(g.querySelector('legend').textContent));

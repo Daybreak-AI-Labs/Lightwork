@@ -251,12 +251,20 @@ def _installation_mode(risk: str | None = None) -> str:
     env = os.environ.get("MAVERICK_CONSENT_MODE")
     if env:
         return env.strip().lower()
+    return installation_mode_for(_configured_mode(), risk)
+
+
+def installation_mode_for(configured: str, risk: str | None = None) -> str:
+    """The mode an action at ``risk`` gets when ``[safety] consent_mode`` is
+    ``configured`` ("" when unset) and no environment variable overrides it.
+    The approval-threshold preview asks this for a choice not yet saved; the
+    gate asks it for the saved one, so both always agree."""
     # The same choice made in the dashboard (``[safety] consent_mode``); the
-    # environment variable above still wins. A value this module does not know
+    # environment variable still wins. A value this module does not know
     # fails closed to asking a person.
-    configured = _configured_mode()
+    configured = str(configured or "").strip().lower()
     if configured:
-        return configured
+        return configured if configured in _CONSENT_MODES else "ask"
     # Enterprise mode flips the default to 'ask' so destructive actions are gated
     # (a person decides; headless runs are denied) when handling sensitive data.
     try:
@@ -779,13 +787,23 @@ def require_person(
     return _emit(ConsentDecision(False, "no-decision", risk, ts), action, scope, detail)
 
 
+# A risky step waits this long (seconds) for a decision on the Approvals page
+# unless [approval] dashboard_wait_seconds says otherwise: 30 minutes, with
+# one in-app reminder to the people who can decide after 10 (see the
+# dashboard's approval_reminders).
+DEFAULT_DASHBOARD_WAIT_SECONDS = 1800.0
+# A parked request's card never stays approvable longer than this.
+_CARD_LIFETIME_CAP_SECONDS = 3600.0
+
+
 def _dashboard_timeout() -> float:
     """How long (seconds) to wait for a dashboard approval before giving up.
 
     A timeout falls through to the interactive/non-tty path (fail-open),
     so a dashboard that's never opened doesn't wedge the agent forever.
     ``MAVERICK_CONSENT_DASHBOARD_TIMEOUT`` wins; otherwise ``[approval]
-    dashboard_wait_seconds`` (set on Settings > All settings) applies.
+    dashboard_wait_seconds`` (set on Settings > All settings) applies;
+    default 1800 (30 minutes).
     """
     raw = os.environ.get("MAVERICK_CONSENT_DASHBOARD_TIMEOUT", "")
     if not raw.strip():
@@ -798,11 +816,17 @@ def _dashboard_timeout() -> float:
         if isinstance(value, (int, float)) and not isinstance(value, bool) \
                 and math.isfinite(value):
             return max(0.0, float(value))
-        raw = "300"
+        return DEFAULT_DASHBOARD_WAIT_SECONDS
     try:
         return max(0.0, float(raw))
     except ValueError:
-        return 300.0
+        return DEFAULT_DASHBOARD_WAIT_SECONDS
+
+
+def _approval_card_ttl() -> float:
+    """How long a parked request's card stays approvable (seconds): the
+    dashboard wait, at least a minute and never more than an hour."""
+    return max(60.0, min(_dashboard_timeout(), _CARD_LIFETIME_CAP_SECONDS))
 
 
 def dashboard_wait_seconds() -> float:
@@ -1073,14 +1097,16 @@ def require_operation_consent(
     allow_auto_approve: bool = False,
     consult_ledger: bool = False,
     require_fresh_person: bool = False,
-    ttl_seconds: float = 300.0,
+    ttl_seconds: float | None = None,
     display_command: str | None = None,
 ) -> ConsentPermit:
     """Obtain a one-use exact-operation permit for a mutating boundary.
 
     ``require_fresh_person`` sends the committed card to an explicit reviewer
     regardless of silent consent or standing grants. ``display_command`` is
-    the exact command shown to whoever may read the card.
+    the exact command shown to whoever may read the card. ``ttl_seconds``
+    defaults to the dashboard wait (capped at an hour), so a person deciding
+    late in the wait is not refused as expired.
     """
 
     from ..approval_cards import ApprovalCardError, build_approval_card, digest
@@ -1120,7 +1146,7 @@ def require_operation_consent(
         )
         display_detail = _card_label(detail, "Review this exact operation.")
         display_provenance = _card_label(provenance, "operation-consent")
-        ttl = float(ttl_seconds)
+        ttl = _approval_card_ttl() if ttl_seconds is None else float(ttl_seconds)
         if not math.isfinite(ttl) or ttl <= 0:
             raise ApprovalCardError("consent permit ttl must be positive and finite")
         card = build_approval_card(
@@ -1247,7 +1273,7 @@ def _dashboard_approval_card(
         input_versions={"request_sha256": digest(request)},
         credential_versions={"state": "not_applicable"},
         budget=_operation_budget(runtime_budget, None),
-        expires_at=time.time() + max(60.0, min(_dashboard_timeout(), 3600.0)),
+        expires_at=time.time() + _approval_card_ttl(),
         known_effects=[effect],
         unresolved_assumptions=[
             "This compatibility caller supplied no operation-specific credential metadata."
@@ -1587,6 +1613,11 @@ def _emit(
         source=decision.source,
         decided_by=decision.actor,
     )
+    # One content-free row per decision, for previewing a threshold change.
+    from ..approval_checks import record_decision
+
+    record_decision(risk=decision.risk, action=action, granted=decision.granted,
+                    source=decision.source)
     return decision
 
 
@@ -1600,6 +1631,7 @@ __all__ = [
     "require_operation_consent",
     "require_person",
     "grant_persistent",
+    "installation_mode_for",
     "revoke",
     "list_grants",
 ]

@@ -96,10 +96,10 @@
     catch (_error) { throw failure("Lightwork sent an answer this page could not read. Please try again."); }
   }
   function show(label, payload) {
-    statusNode.textContent = label;
+    window.mvStatus(statusNode, label);
     outputNode.textContent = payload === undefined ? "" : JSON.stringify(payload, null, 2);
   }
-  function busy(label) { statusNode.textContent = label; outputNode.textContent = ""; }
+  function busy(label) { window.mvStatus(statusNode, label); outputNode.textContent = ""; }
 
   // ---- confirmed, single-flight changes ----------------------------------------
   function confirmDestructive(message, okText) { return R.confirm(message, okText); }
@@ -441,7 +441,7 @@
     var record = S.reports.filter(function (r) { return r.report_id === requested; })[0];
     try {
       if (!record) { record = await requestJson("/reports/" + encodeURIComponent(requested)); }
-      if (!record || record.report_id !== requested) { throw failure("The linked report couldn't be found."); }
+      if (!record || record.report_id !== requested) { throw failure("The linked report couldn't be found. Refresh the page to see the latest."); }
       showReport(record);
     } catch (error) { show(messageOf(error, "open the linked report")); }
   });

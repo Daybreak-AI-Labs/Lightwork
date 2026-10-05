@@ -214,7 +214,7 @@ def test_failures_become_one_plain_sentence(client):
         raise RuntimeError("secret internals /etc/passwd")
     job = learning_jobs.start("broken", "Broken", broken, started_by="u", problem=job_problem)
     done = _wait(client, job.view())
-    assert done["problem"] == "This job stopped because of a problem. Nothing more was changed."
+    assert done["problem"] == "This task stopped because of a problem. Work completed before the failure may remain. Read its current result before deciding what to do next; do not repeat it automatically."
 
 
 # ---- improvement flywheel ------------------------------------------------------------

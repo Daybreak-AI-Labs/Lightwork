@@ -4,6 +4,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const { JSDOM } = require("jsdom");
+const {shell} = require('./_shell');
 
 const source = fs.readFileSync(
   path.resolve(__dirname, "../../maverick_dashboard/static/lightwork-red-team-schedules.js"), "utf8");
@@ -46,6 +47,7 @@ async function fixture({ admin = true, items = [SCHEDULE], listStatus = 200, con
     return new Response(JSON.stringify(answer.body), { status: answer.status, headers: { "Content-Type": "application/json" } });
   };
   const settle = async () => { for (let i = 0; i < 30; i++) await new Promise((done) => setImmediate(done)); };
+  shell(window);
   window.eval(source);
   await settle();
   return { window, doc: window.document, calls, settle };

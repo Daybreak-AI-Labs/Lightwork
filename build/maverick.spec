@@ -13,9 +13,11 @@ _datas = (
     + collect_data_files('maverick_dashboard')
     + collect_data_files('maverick_shield')
     + collect_data_files('latex2mathml')
+    + collect_data_files('jsonschema_specifications')
     # Copied into the offline worker at runtime; PYZ bytecode is not a source
     # resource. Retain this one reviewed standalone script in frozen builds.
     + collect_data_files('maverick', includes=['sandbox/document_engine.py'], include_py_files=True)
+    + collect_data_files('maverick', includes=['sandbox/plugin_probe.py', 'sandbox/plugin_contracts.py'], include_py_files=True)
 )
 for _dist in (
     'maverick-agent', 'maverick-shield', 'maverick-channels',
@@ -24,6 +26,7 @@ for _dist in (
     'openai', 'openpyxl', 'lxml', 'pypdf', 'pdfplumber', 'pdfminer.six', 'pypdfium2',
     'sqlalchemy', 'psycopg', 'psycopg-binary', 'psycopg-pool',
     'latex2mathml', 'prometheus-client',
+    'jsonschema', 'jsonschema-specifications', 'referencing', 'rpds-py',
 ):
     try:
         _datas += copy_metadata(_dist)
@@ -79,7 +82,11 @@ a = Analysis(
       + collect_submodules('psycopg_binary')
       + collect_submodules('psycopg_pool')
       + collect_submodules('latex2mathml')
-      + collect_submodules('prometheus_client'),
+      + collect_submodules('prometheus_client')
+      + collect_submodules('jsonschema')
+      + collect_submodules('jsonschema_specifications')
+      + collect_submodules('referencing')
+      + collect_submodules('rpds'),
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

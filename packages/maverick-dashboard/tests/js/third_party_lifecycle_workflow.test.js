@@ -4,6 +4,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const { JSDOM } = require("jsdom");
+const {shell} = require('./_shell');
 
 const folder = path.resolve(__dirname, "../../maverick_dashboard");
 const markup = fs.readFileSync(path.join(folder, "templates/third_party_lifecycle.html"), "utf8")
@@ -62,6 +63,7 @@ async function fixture({ admin = true, intercept = () => undefined } = {}) {
     }
     return new Response(JSON.stringify(reply), { status: reply.__status || 200, headers: { "Content-Type": "application/json" } });
   };
+  shell(window);
   window.eval(helpers);
   window.eval(source);
   async function settle() { for (let i = 0; i < 40; i++) await new Promise((r) => setImmediate(r)); }

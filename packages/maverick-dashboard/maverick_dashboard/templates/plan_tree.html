@@ -3,7 +3,7 @@
 {% block content %}
 <style>
   #plan-tree {
-    width: 100%; height: 560px; border-radius: 6px;
+    width: 100%; height: 560px; border-radius: var(--radius-sm);
     background: var(--bg); border: 1px solid var(--border);
   }
   .legend { display: flex; gap: 0.75rem; flex-wrap: wrap; margin-bottom: 1rem; align-items: center; }
@@ -16,7 +16,7 @@
   .tree li { position: relative; padding: 0.35rem 0 0.35rem 1rem; }
   .tree .node {
     display: inline-flex; align-items: center; gap: 0.5rem;
-    padding: 0.25rem 0.5rem; border-radius: 4px; background: var(--surface-1);
+    padding: 0.25rem 0.5rem; border-radius: var(--radius-xs); background: var(--surface-1);
     border: 1px solid var(--border);
   }
   .tree .nid { color: var(--muted); }
@@ -181,7 +181,7 @@
         statusEl.textContent = (stopped ? 'Task ' : 'Live — ') + String(tree.status || 'running').replace(/_/g, ' ') + '. Refreshed ' + lastRefresh + '.';
       } catch (e) {
         failures++;
-        statusEl.textContent = (e.name === 'AbortError' ? 'Plan refresh timed out.' : 'Plan updates unavailable.')
+        statusEl.textContent = (e.name === 'AbortError' ? 'Plan refresh timed out.' : 'Plan updates unavailable. Refresh the page and try again.')
           + (lastRefresh ? ' Showing older data from ' + lastRefresh + '.'
             : list.querySelector('a') ? ' Showing the plan captured when this page loaded; it may be out of date.'
               : ' No current plan was loaded.') + ' Choose Refresh plan to retry.';

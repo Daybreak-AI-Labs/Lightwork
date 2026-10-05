@@ -18,7 +18,8 @@
   function dirty() {
     var editor = panel.querySelector('#edit-text'), note = panel.querySelector('#signoff-note'), feedback = panel.querySelector('#feedback-note');
     return !!((editor && (editor.readOnly || editor.value !== editor.dataset.savedText)) || (note && note.value.trim()) ||
-      pendingFeedback || (feedback && feedback.value !== (feedback.dataset.savedText || '')));
+      pendingFeedback || panel.querySelector('[data-reason][aria-pressed="true"]') ||
+      (feedback && feedback.value !== (feedback.dataset.savedText || '')));
   }
   function clearPrivate() {
     denied = true; generation++;
@@ -111,36 +112,32 @@
         btns.forEach(function (b) { if (b) b.disabled = true; });
         msg.style.color = 'var(--muted)';
         say(msg, 'Recording…');
-        fetch('/api/v1/goals/' + goalId + '/signoff', {
-          method: 'POST', headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({
+        window.mvFetchJSON('/api/v1/goals/' + goalId + '/signoff', {
+          method: 'POST',
+          body: {
             decision: decision,
             expected_updated_at: reviewedUpdatedAt,
             note: (note && note.value.trim()) || null,
             operation_id: identity,
             expected_context: panel.dataset.context,
-          }),
-        }).then(function (r) {
-          if (r.ok) { return r.json().then(function (j) {
-            if (!j.receipt) { uncertain(); return; }
-            sessionStorage.removeItem(key); pendingSignoff = null;
-            if (note && j.receipt.changed) note.value = '';
-            say(msg, j.receipt.message); window.mvRefreshAnswerPanel();
-          }); }
-          return r.json().catch(function () { return {}; }).then(function (j) {
-            msg.style.color = 'var(--danger)';
-            window.mvRenderError(msg, r, 'record the sign-off', j);
-            if ([401,403,404].includes(r.status)) { clearPrivate(); return; }
-            if (r.status < 500) {
-              sessionStorage.removeItem(key); pendingSignoff = null;
-              if (r.status === 409) window.mvRefreshAnswerPanel();
-              else btns.forEach(function (b) { if (b) b.disabled = false; });
-            }
-            else uncertain();
-          });
+          },
+        }, 'record the approval').then(function (j) {
+          if (!j || !j.receipt) { uncertain(); return; }
+          sessionStorage.removeItem(key); pendingSignoff = null;
+          if (note && j.receipt.changed) note.value = '';
+          say(msg, j.receipt.message); window.mvRefreshAnswerPanel();
         }).catch(function (e) {
           msg.style.color = 'var(--danger)';
-          uncertain();
+          // No answer (offline, timed out or unreadable): the outcome is unknown.
+          if (!e.status) { uncertain(); return; }
+          window.mvRenderError(msg, e, 'record the approval', e.payload || {});
+          if ([401,403,404].includes(e.status)) { clearPrivate(); return; }
+          if (e.status < 500) {
+            sessionStorage.removeItem(key); pendingSignoff = null;
+            if (e.status === 409) window.mvRefreshAnswerPanel();
+            else btns.forEach(function (b) { if (b) b.disabled = false; });
+          }
+          else uncertain();
         });
       }
       if (approve) approve.addEventListener('click', function () { submit('approved'); });
@@ -157,12 +154,28 @@
       var note = panel.querySelector('#feedback-note'), save = panel.querySelector('#feedback-save');
       var cancel = panel.querySelector('#feedback-cancel'), recover = panel.querySelector('#feedback-recover');
       var current = panel.querySelector('#feedback-saved'), review = panel.querySelector('#feedback-review');
-      var key = 'lightwork-answer-feedback:' + context + ':' + goalId, binding = null, chosen = null;
+      var key = 'lightwork-answer-feedback:' + context + ':' + goalId, binding = null, chosen = null, chosenReason = '';
+      var reasonChips = Array.from(panel.querySelectorAll('[data-reason]'));
+      var reasonQuestion = panel.querySelector('#feedback-reason-q');
+      var reasonGroup = reasonChips.length ? reasonChips[0].closest('[role="group"]') : null;
+      function reasons(rating) {
+        if (reasonGroup) reasonGroup.hidden = rating !== 'down';
+        if (reasonQuestion) { reasonQuestion.hidden = rating !== 'down'; say(reasonQuestion, 'What was wrong? This is optional.'); }
+        chosenReason = '';
+        reasonChips.forEach(function (chip) { chip.setAttribute('aria-pressed', 'false'); });
+      }
+      reasonChips.forEach(function (chip) {
+        chip.addEventListener('click', function () {
+          if (feedbackBusy || pendingFeedback || chosen !== 'down') return;
+          chosenReason = chosenReason === chip.dataset.reason ? '' : chip.dataset.reason;
+          reasonChips.forEach(function (other) { other.setAttribute('aria-pressed', String(other.dataset.reason === chosenReason)); });
+        });
+      });
       try { pendingFeedback = JSON.parse(sessionStorage.getItem(key) || 'null'); } catch (_) {}
       if (pendingFeedback && (!/^[a-f0-9]{32}$/.test(pendingFeedback.id) || !/^[a-f0-9]{64}$/.test(pendingFeedback.revision))) pendingFeedback = null;
       function live() { return !denied && document.getElementById('answer-panel') === panel && panel.dataset.context === context; }
       function lock() {
-        [up,down,save,cancel].forEach(function (button) { button.disabled = feedbackBusy || !!pendingFeedback || !binding; });
+        [up,down,save,cancel].concat(reasonChips).forEach(function (button) { button.disabled = feedbackBusy || !!pendingFeedback || !binding; });
         note.readOnly = feedbackBusy || !!pendingFeedback;
         review.disabled = feedbackBusy; recover.disabled = feedbackBusy; recover.hidden = !pendingFeedback;
       }
@@ -177,6 +190,7 @@
         say(label, (value.rating === 'up' ? 'Useful' : 'Needs improvement') +
           (value.legacy ? ' · earlier feedback: the answer version was not recorded' : value.current_result ? ' · current answer' : ' · earlier answer') + ' · ' + window.mvWhen(value.recorded_at));
         current.appendChild(label);
+        if (value.reason_label) { var reason = document.createElement('p'); say(reason, value.reason_label); current.appendChild(reason); }
         if (value.note) { var text = document.createElement('p'); sourceText(text, value.note); text.style.whiteSpace='pre-wrap'; current.appendChild(text); }
         if (!chosen) show(value.current_result ? value.rating : '');
       }
@@ -202,10 +216,11 @@
       function accepted(value, original) {
         if (!value || !pendingFeedback || value.operation_id !== pendingFeedback.id) throw new Error('The original feedback could not be confirmed.');
         display(value); forget();
-        if (value.current_result) { note.dataset.savedText = note.value; form.hidden=true; chosen=null; }
+        if (value.current_result) { note.dataset.savedText = note.value; form.hidden=true; chosen=null; reasons(null); }
         say(msg, (original ? 'Your original feedback is saved.' : 'Feedback saved.') +
           (value.current_result ? '' : ' It applies to the earlier answer you reviewed.') +
-          ' Feedback does not confirm that training completed.');
+          ' Feedback does not confirm that training completed.' +
+          (value.acknowledgement ? ' ' + value.acknowledgement : value.signal_note ? ' ' + value.signal_note : ''));
       }
       async function check(original) {
         if (feedbackBusy) return;
@@ -224,7 +239,7 @@
       }
       function choose(rating) {
         if (!binding || pendingFeedback || feedbackBusy) return;
-        chosen=rating; show(rating); form.hidden=false;
+        chosen=rating; show(rating); reasons(rating); form.hidden=false;
         say(panel.querySelector('#feedback-choice'), rating === 'up' ? 'You selected Useful.' : 'You selected Needs improvement.');
         note.focus();
       }
@@ -234,15 +249,18 @@
         try { sessionStorage.setItem(key, JSON.stringify(pendingFeedback)); }
         catch (_) { pendingFeedback=null; say(msg, 'Your browser could not keep the original feedback reference. Allow session storage before saving; your note is kept.'); return; }
         feedbackBusy=true; lock(); say(msg, 'Saving your feedback…');
-        try { var value = await request(null, {rating:chosen,note:note.value,revision:binding,expected_context:context,operation_id:pendingFeedback.id});
+        try { var value = await request(null, {rating:chosen,note:note.value,reason:chosenReason,revision:binding,expected_context:context,operation_id:pendingFeedback.id});
           accepted(value.feedback, false);
+          if (value.follow_up && value.follow_up.question) {
+            say(msg, msg.textContent + ' ' + value.follow_up.question + ' You can select Needs improvement again to add an optional reason or note.');
+          }
         } catch (error) { if (live()) { if (error.refused) { forget(); binding=null; }
           say(msg, error.message + ' Your note is kept. ' + (pendingFeedback ? 'Check your original feedback before another save; nothing will be submitted again by that check.' : 'Review the current answer before trying again.')); } }
         finally { feedbackBusy=false; if (live()) lock(); }
       });
       up.addEventListener('click', function () { choose('up'); }); down.addEventListener('click', function () { choose('down'); });
       review.addEventListener('click', function () { check(false); }); recover.addEventListener('click', function () { check(true); });
-      cancel.addEventListener('click', function () { form.hidden=true; chosen=null; note.value=''; note.dataset.savedText=''; show(''); });
+      cancel.addEventListener('click', function () { form.hidden=true; chosen=null; reasons(null); note.value=''; note.dataset.savedText=''; show(''); });
       panel.querySelector('#feedback-copilot').addEventListener('click', function () {
         document.dispatchEvent(new CustomEvent('lightwork:product-selection', {detail:{kind:'goal',id:Number(goalId)}}));
         var fab=document.getElementById('mv-copilot-fab'); if (fab) fab.click();
@@ -334,7 +352,7 @@
           if (!response.ok || !receipt.revision) throw response;
           reviewedAt = receipt.revision; savedText = textEl.value; textEl.dataset.savedText = savedText; pendingEdit = null;
           setTimeout(function () { window.mvRefreshAnswerPanel(); }, 0);
-          say(editMsg, 'Revision saved. Previous versions are kept; any earlier sign-off was cleared. Learning is a separate, policy-governed process.');
+          say(editMsg, 'Revision saved. Previous versions are kept; any earlier approval was cleared. Learning is a separate, policy-governed process.');
         } catch (failure) {
           editMsg.style.color = 'var(--danger)';
           say(editMsg, '{error} Your draft is kept. Retry uses the same save reference.', {error:cgErr(failure, 'save your edit')});

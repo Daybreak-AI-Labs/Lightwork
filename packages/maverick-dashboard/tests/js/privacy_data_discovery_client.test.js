@@ -83,7 +83,8 @@ test("browser client uses safe DOM sinks and same-origin credentials", () => {
     "utf8",
   );
   assert.match(source, /credentials: "same-origin"/);
-  assert.match(source, /statusEl\.textContent = text/);
+  // The status line is written through the shell's mvStatus, a textContent sink.
+  assert.match(source, /window\.mvStatus\(statusEl, text\)/);
   assert.match(source, /pdd-work/);
   assert.match(source, /\/remediation\/work/);
   assert.match(source, /can\.audit|canAudit/);

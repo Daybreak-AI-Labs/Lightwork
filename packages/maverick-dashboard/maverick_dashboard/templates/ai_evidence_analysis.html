@@ -88,7 +88,7 @@
         <label class="sr-only" for="analysis-filter">Show</label>
         <select class="select" id="analysis-filter"><option value="">All analyses</option><option value="pending_review" selected>Waiting for review</option><option value="review_approved">Approved</option><option value="review_rejected">Rejected</option><option value="revoked">Withdrawn</option></select>
       </div>
-      <div class="evidence-table"><table><caption class="sr-only">Evidence analyses and the actions you can take</caption>
+      <div class="evidence-table" role="region" tabindex="0" aria-labelledby="analyses-title"><table><caption class="sr-only">Evidence analyses and the actions you can take</caption>
         <thead><tr><th scope="col">Document</th><th scope="col">Criteria</th><th scope="col">Result</th><th scope="col">Status</th><th scope="col">Created</th><th scope="col">Actions</th></tr></thead>
         <tbody id="analyses-rows"><tr><td colspan="6">{{ 'Loading…' if evidence_module_enabled else 'Analyses appear here once AI evidence analysis is turned on.' }}</td></tr></tbody></table></div>
     </section>

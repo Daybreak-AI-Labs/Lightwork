@@ -15,7 +15,7 @@ from datetime import datetime, timedelta, timezone
 def policy():
     from . import config
     if config.config_source_errors(include_tenant=True):
-        raise ValueError("Budget guidance policy is unavailable.")
+        raise ValueError("Budget guidance policy is unavailable. Refresh the page and try again.")
     values = config.load_config().get("budget") or {}
     thresholds = values.get("warning_thresholds", [.8, .95, 1.0])
     if (not isinstance(thresholds, list) or not thresholds or len(thresholds) > 10
@@ -95,7 +95,7 @@ personal-quota headroom explicitly unavailable rather than an invented identity.
             candidates.append((result["effective"]["max_dollars"], "task"))
     except (ValueError, OSError, RuntimeError):
         result.update(available=False, headroom_complete=False, admission_allowed=False)
-        result["task_error"] = "Task budget policy could not be resolved. No allowance has been assumed."
+        result["task_error"] = "Task budget policy could not be resolved. No allowance has been assumed. Refresh the page and try again."
 
     try:
         quota_policy = _quota_config()
@@ -122,7 +122,7 @@ personal-quota headroom explicitly unavailable rather than an invented identity.
             if holds["unknown_amount"] or (token_cap and usage["in_tokens"] + usage["out_tokens"] >= token_cap):
                 result["admission_allowed"] = False
     except (ValueError, OSError, RuntimeError):
-        result["person"] = {"state": "unavailable", "message": "Personal usage or policy is unavailable; unknown is not zero."}
+        result["person"] = {"state": "unavailable", "message": "Personal usage or policy is unavailable; unknown is not zero. Refresh the page and try again."}
         result.update(headroom_complete=False, admission_allowed=False)
 
     try:
@@ -142,7 +142,7 @@ personal-quota headroom explicitly unavailable rather than an invented identity.
         else:
             result["workspace"] = {"state": "not_bound", "message": "No workspace allowance is bound to this runtime."}
     except (ValueError, OSError, RuntimeError):
-        result["workspace"] = {"state": "unavailable", "message": "Workspace accounting is unavailable or has an unknown amount. Nothing was refunded or reset."}
+        result["workspace"] = {"state": "unavailable", "message": "Workspace accounting is unavailable or has an unknown amount. Nothing was refunded or reset. Refresh the page and try again."}
         result.update(headroom_complete=False, admission_allowed=False)
 
     _provider_projection(result, provider, goal_id, candidates)
@@ -188,7 +188,7 @@ def _provider_projection(result, provider, goal_id, candidates):
                 result["admission_allowed"] = False
     except (ValueError, OSError, RuntimeError):
         result.update(headroom_complete=False, admission_allowed=False)
-        result["provider_error"] = "Provider reservation accounting could not be read. A missing receipt is not evidence of zero cost."
+        result["provider_error"] = "Provider reservation accounting could not be read. A missing receipt is not evidence of zero cost. Refresh the page and try again."
 
 
 def _warnings_store():
@@ -247,5 +247,6 @@ def warning_sources(principal):
     return [{"ref": row["id"], "version": row["id"], "category": "blocked", "goal_id": None,
              "project_id": None, "title": "Budget needs attention",
              "label": f"{row['dimension']} allowance crossed {row['threshold']:.0%}; review scheduled work",
-             "href": "/budget"}
+             "href": "/budget", "reason": "Your spending allowance crossed a warning level",
+             "action": "Review the work scheduled against your allowance"}
             for row in rows if row.get("principal") == principal and row.get("day") == today]

@@ -693,3 +693,24 @@ def test_assurance_forms_script_is_served():
     assert response.status_code == 200
     assert "javascript" in response.headers["content-type"]
     assert "window.LWAssuranceForms" in response.text
+
+
+def test_governance_record_fields_are_labelled_in_plain_words():
+    from pathlib import Path
+
+    from maverick_dashboard import app as app_module
+
+    source = (Path(app_module.__file__).parent / "templates" / "_governance_operations.html").read_text()
+    block = source[source.index("const FIELD_LABELS = {"):source.index("const fieldLabel = key =>")]
+    labels = dict(re.findall(r'(\w+): "([^"]+)"', block))
+    # Every record list shows the plain label, not the raw key.
+    assert 'dt.textContent = fieldLabel(key);' in source
+    assert "dt.textContent = words(key);" not in source
+    for key, plain in {"sysparm_query": "ServiceNow search", "four_eyes_approved": "Approved by a second person",
+                       "projection": "Summary", "asset_binding": "Linked AI system",
+                       "media_bytes_persisted": "Media file stored"}.items():
+        assert labels[key] == plain
+    developer = re.compile(r"\b(projection|binding|sysparm|cursor|idempotent|payload|schema|manifest|"
+                           r"canonical|plane|seam|adapter|sink|dispatch|params|uri|hex|arn|"
+                           r"determination|supersession|persisted|truncated|lease)\b", re.IGNORECASE)
+    assert not [label for label in labels.values() if developer.search(label)]

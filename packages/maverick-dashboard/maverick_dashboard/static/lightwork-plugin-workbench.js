@@ -7,11 +7,9 @@
   const clear=()=>{lost=true;serial++;list.replaceChildren();status.textContent='Access changed. Reload Plugins in the current workspace.';};
   document.addEventListener('lightwork:workspace-changed',clear);
   async function call(path,body){
-    const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),55000);
-    try{const response=await fetch('/api/v1/plugins/workbench'+path,{method:body?'POST':'GET',headers:{'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined,cache:'no-store',signal:controller.signal});
-      const value=await response.json().catch(()=>({}));if([401,403].includes(response.status)){clear();throw new Error(typeof value.detail==='string'?value.detail:'Permission is unavailable.');}
-      if(!response.ok)throw new Error(typeof value.detail==='string'?value.detail:'The workbench is unavailable.');return value;
-    }finally{clearTimeout(timer);}
+    return window.mvFetchJSON('/api/v1/plugins/workbench'+path,{method:body?'POST':'GET',body,cache:'no-store',timeout:55000,plainDetail:true,onAccess:clear,
+      messages:{401:'Permission is unavailable. Refresh the page and try again.',403:'Permission is unavailable. Refresh the page and try again.'}},
+      body?'finish the workbench step':'load the workbench');
   }
   function button(label,fn){const item=node('button',label);item.type='button';item.className='btn';item.addEventListener('click',fn);return item;}
   async function mutate(control,path,body,question){
@@ -46,13 +44,9 @@
           const link=node('a','Review workflow');link.href=pin.href;label.append(link);panel.append(label);
           const migrate=button('Review workflow version migration',()=>mutate(migrate,'/migrate-flow',{run_id:pin.run_id,fingerprint:plugin.fingerprint,previous:pin.fingerprint},'Migrate this stopped workflow to the qualified version? Review prior outcomes first. This does not resume it or replay an action.'));panel.append(migrate);
         }
-        const sampleLabel=node('label','Synthetic sample arguments (JSON; no credentials or private data)'),sample=node('textarea');sample.className='input';sample.value=JSON.stringify(plugin.sample_example||{},null,2);sample.maxLength=16384;sampleLabel.append(sample);panel.append(sampleLabel);
-        const expectedLabel=node('label','Expected result (JSON; string results need quotes)'),expected=node('textarea');expected.className='input';expected.value='null';expected.maxLength=16384;expectedLabel.append(expected);panel.append(expectedLabel);
-        const modeLabel=node('label','Check'),mode=node('select');for(const [key,label] of [['sample','Validate schema and run this sample'],['timeout','Verify bounded timeout with a deliberately slow synthetic sample'],['cancellation','Verify cancellation with a deliberately slow synthetic sample']]){const option=node('option',label);option.value=key;mode.append(option);}modeLabel.append(mode);panel.append(modeLabel);
-        const check=button('Review sandbox check',()=>{
-          let parsed,expectedResult;try{parsed=JSON.parse(sample.value);expectedResult=JSON.parse(expected.value);}catch(_){status.textContent='Enter valid JSON sample arguments.';sample.focus();return;}
-          mutate(check,'/check',{fingerprint:plugin.fingerprint,operation_id:crypto.randomUUID().replace(/-/g,''),mode:mode.value,sample:parsed,expected:expectedResult},'Run this exact plugin version once in the reviewed local Linux image? Network, credentials and host writes are unavailable. No live service or write capability will be qualified.');
-        });check.disabled=!plugin.eligible;panel.append(check);
+        const practice=node('section');practice.className='plg-practice';panel.append(practice);
+        if(plugin.eligible&&window.LightworkPluginPractice)window.LightworkPluginPractice.mount(practice,plugin,context);
+        else practice.append(node('p','Approve this installed version and its declared access before reading its ordinary practice questions. No check has started.'));
         const rollbackLabel=node('label','Affected-work review and rollback plan'),rollback=node('textarea');rollback.className='input';rollback.maxLength=2000;rollbackLabel.append(rollback);panel.append(rollbackLabel);
         const publish=button('Publish scoped readiness',()=>mutate(publish,'/publish',{fingerprint:plugin.fingerprint,rollback:rollback.value},'Publish sandbox-only readiness for this exact plugin version after reviewing affected work and the rollback plan? External service acceptance remains unverified.'));panel.append(publish);
         for(const receipt of value.publications.filter(row=>row.fingerprint===plugin.fingerprint))panel.append(node('p','Published scope: '+receipt.scope+'. Check observations: '+JSON.stringify(receipt.observations||[])+'. Rollback: '+receipt.rollback));

@@ -15,7 +15,7 @@
   var S = { status: null, setup: [], definitions: [], enrollments: [], runs: [], jobs: [], alerts: [] };
   var STATUS = { observed: ["Passing", "ok"], failed: ["Failing", "danger"], unknown: ["Couldn't tell", "warn"] };
 
-  function say(text) { live.textContent = text; }
+  function say(text) { window.mvStatus(live, text); }
   function fail(action) { return function (f) { var t = R.errorText(f, action); say(t); if (window.mvToast) { window.mvToast(t, { error: true }); } }; }
   function api(method, path, body) { return R.call(method, API + path, body); }
   function setCycleReady(ready) {

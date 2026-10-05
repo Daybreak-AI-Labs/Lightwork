@@ -17,6 +17,35 @@
         <span class="sr-only" id="answer-result-label">{{ ui("Goal result") }}</span><div id="result" tabindex="0" aria-labelledby="answer-result-label" class="prose" data-markdown lang="und" dir="auto" data-user-content>{{ goal.result or '' }}</div>
       {% endif %}
       <div id="answer-run-details-slot">{% include "_chat_answer_run_details.html" %}</div>
+      {# How far to trust this answer, read from the task's own record:
+         whether the extra check reviewed it, which agent version answered,
+         and whether the backup model stood in (answer_checks.py). #}
+      {% if answer_check %}
+      <div class="answer-facts" id="answer-facts">
+        <p class="answer-check" id="answer-check" data-state="{{ answer_check.state }}">
+          <span class="answer-check__label">{{ ui(answer_check.label) }}</span><span class="answer-check__reason">{{ ui(answer_check.reason) }}</span>
+        </p>
+        {% if answer_fallback %}<p class="answer-fallback" id="answer-fallback">{{ ui('The backup AI model was used for this answer because the main one was unavailable.') }}</p>{% endif %}
+        {% if answer_agent %}
+        <p class="answer-agent" id="answer-agent">
+          {# Owner glossary: a built-in pack is a specialist; anything else is an agent. #}
+          {% if answer_agent.kind == 'specialist' %}{{ ui('Specialist history: {agent}', agent=answer_agent.agent) }}{% else %}{{ ui('Agent history: {agent}', agent=answer_agent.agent) }}{% endif %} ·
+          {% if answer_agent.updated_text %}{{ ui('Last recorded change: {date}', date=answer_agent.updated_text) }}{% else %}{{ ui('no recorded changes') }}{% endif %}
+        </p>
+        {% if answer_agent.history_note %}<p class="muted">{{ ui(answer_agent.history_note) }}</p>{% endif %}
+        {% if answer_agent.changed_since %}
+        <p class="answer-agent__since" id="answer-agent-since">{% if answer_agent.kind == 'specialist' %}{{ ui('This specialist has changed since this answer:') }}{% else %}{{ ui('This agent has changed since this answer:') }}{% endif %}
+          {% for row in answer_agent.changed_since %}{{ row.date_text }}, {{ row.changes | join('; ') }}{% if not loop.last %} · {% endif %}{% endfor %}</p>
+        {% endif %}
+        {% if answer_agent.changes %}
+        <details class="answer-agent__changes">
+          <summary>{% if answer_agent.kind == 'specialist' %}{{ ui('What changed in this specialist') }}{% else %}{{ ui('What changed in this agent') }}{% endif %}</summary>
+          <ul>{% for row in answer_agent.changes %}<li>{{ row.date_text }}: {{ row.changes | join('; ') }}</li>{% endfor %}</ul>
+        </details>
+        {% endif %}
+        {% endif %}
+      </div>
+      {% endif %}
       {% if deliverable and deliverable.gate %}
         <div class="signoff" id="signoff">
           {% if signoff %}
@@ -29,14 +58,14 @@
               <a class="btn btn--ghost" href="/api/v1/goals/{{ goal.id }}/deliverable.csv">{{ ui("Download for hand-off (CSV)") }}</a>
             {% endif %}
           {% elif goal.status == 'done' and can_operate %}
-            <p class="signoff__prompt">{{ ui('A manager must approve this before it is acted on.' if deliverable.gate == 'approval' else 'A reviewer must sign off before this is acted on.') }}</p>
+            <p class="signoff__prompt">{{ ui('A manager must approve this before it is acted on.' if deliverable.gate == 'approval' else 'A reviewer must approve this before it is acted on.') }}</p>
             <textarea lang="und" dir="auto" data-user-content id="signoff-note" class="input" rows="2" placeholder="Optional review note…" aria-label="Review note"></textarea>
             <div class="signoff__actions">
               <button id="signoff-approve" class="btn btn--primary" type="button" data-decision="approved">{{ ui("Approve") }}</button>
               <button id="signoff-reject" class="btn btn--ghost" type="button" data-decision="rejected">{{ ui("Reject") }}</button>
             </div>
           {% else %}
-            <p class="signoff__prompt muted">{% if goal.status == 'done' %}An authorized task owner must review this result before sharing.{% else %}{{ ui('Approval opens when the result is finished.' if deliverable.gate == 'approval' else 'Sign-off opens when the result is finished.') }}{% endif %}</p>
+            <p class="signoff__prompt muted">{% if goal.status == 'done' %}An authorized task owner must review this result before sharing.{% else %}{{ ui('Approval opens when the result is finished.') }}{% endif %}</p>
           {% endif %}
           <div class="signoff__actions">
             <button id="signoff-copilot" class="btn btn--ghost" type="button">{{ ui("Review result with Copilot") }}</button>
@@ -49,7 +78,7 @@
         {% if goal.status in ('blocked', 'failed') %}
         <p><a class="btn btn--ghost" href="/tasks/{{ goal.id }}/diagnostics">{{ ui("Review safe task diagnostics") }}</a> · <a class="btn btn--ghost" href="/help?task={{ goal.id }}#issue-report">{{ ui("Prepare support report") }}</a></p>
         {% endif %}
-        {# Always-available thumbs up/down (unlike the gated sign-off above): any
+        {# Always-available thumbs up/down (unlike the gated approval above): any
            finished result can be rated, and the verdict grounds a real outcome
            into the learning loop. #}
         {% if can_operate %}<div id="feedback" class="feedback" role="group" aria-label="{{ ut('Rate this result') }}" lang="{{ ul('Rate this result') }}">
@@ -63,6 +92,12 @@
           <div id="feedback-saved" class="muted" style="flex-basis:100%;overflow-wrap:anywhere;"></div>
           <form id="feedback-form" hidden style="flex-basis:100%;min-width:0;">
             <p id="feedback-choice" class="muted"></p>
+            <div class="feedback-reason__chips" role="group" aria-labelledby="feedback-reason-q">
+              <p id="feedback-reason-q">{{ ui('What was wrong? This is optional.') }}</p>
+              {% for key, label in feedback_reasons %}
+              <button type="button" class="btn btn--ghost feedback-reason__chip" data-reason="{{ key }}" aria-pressed="false">{{ ui(label) }}</button>
+              {% endfor %}
+            </div>
             <label for="feedback-note">{{ ui('What should be better? (optional)') }}</label>
             <textarea id="feedback-note" class="input" rows="3" maxlength="500" lang="und" dir="auto" data-user-content
                       aria-describedby="feedback-note-help" style="width:100%;box-sizing:border-box;"></textarea>

@@ -454,18 +454,15 @@ window.LWBoard = (function () {
             clearInterval(poll);
             return;
           }
-          var why = window.mvErrorText ? window.mvErrorText(e, 'load the board') : 'Could not load the board.';
+          var why = window.mvErrorText ? window.mvErrorText(e, 'load the board') : 'Could not load the board. Refresh the page and try again.';
           stamp(why + (updated ? ' Previous view retained: ' + updated + '.' : '') + ' Trying again in a minute.');
         }).finally(function () { clearTimeout(timeout); if (request === generation) active = null; });
     }
-    document.querySelectorAll('.bd-slicer button').forEach(function (b) {
+    // The time range is a shared tab bar (_tabs.html, lightwork-tabs.js),
+    // which marks the chosen range; the arrow keys only move between ranges
+    // and Enter or Space loads one.
+    document.querySelectorAll('[role="tab"][data-days]').forEach(function (b) {
       b.addEventListener('click', function () {
-        document.querySelectorAll('.bd-slicer button').forEach(function (x) {
-          x.classList.remove('on');
-          x.setAttribute('aria-pressed', 'false');
-        });
-        b.classList.add('on');
-        b.setAttribute('aria-pressed', 'true');
         days = parseInt(b.dataset.days, 10) || 90;
         load();
       });

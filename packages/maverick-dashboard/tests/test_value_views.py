@@ -76,7 +76,7 @@ def test_a_read_only_role_sees_workspace_totals_but_no_task_content():
     for page in ("/overview", "/spend", "/savings"):
         html = client.get(page, headers=_as("audrey")).text
         assert "private vendor review" not in html and "private payroll" not in html, page
-    assert "2 goals on record in this workspace" in client.get("/overview", headers=_as("audrey")).text
+    assert "2 tasks on record in this workspace" in client.get("/overview", headers=_as("audrey")).text
     # Someone who runs tasks still counts only their own work.
     mine = client.get("/api/v1/dashboards/overview", headers=_as("alice")).json()
     assert mine["scope"] == "own" and mine["totals"]["total"] == 1
@@ -86,11 +86,11 @@ def test_a_read_only_role_sees_workspace_totals_but_no_task_content():
 def test_read_only_roles_are_not_told_to_start_work_they_cannot_start():
     for user in ("audrey", "vic"):
         overview = client.get("/overview", headers=_as(user)).text
-        assert "Start your first goal" not in overview and 'action="/chat/send"' not in overview
-        assert "No goals have run in this workspace yet" in overview
+        assert "Start your first task" not in overview and 'action="/chat/send"' not in overview
+        assert "No tasks have run in this workspace yet" in overview
         assert 'href="/chat">Start a task' not in client.get("/savings", headers=_as(user)).text
         assert ">Start a task<" not in client.get("/spend", headers=_as(user)).text
-    assert "Start your first goal" in client.get("/overview", headers=_as("alice")).text
+    assert "Start your first task" in client.get("/overview", headers=_as("alice")).text
 
 
 def test_the_savings_estimate_shows_its_assumptions(tmp_path):

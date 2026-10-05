@@ -5,6 +5,7 @@ const {test}=require("node:test");
 const assert=require("node:assert/strict");
 const fs=require("node:fs"),path=require("node:path");
 const {JSDOM}=require("jsdom");
+const {shell} = require('./_shell');
 const root=path.resolve(__dirname,"../../maverick_dashboard");
 const read=name=>fs.readFileSync(path.join(root,name),"utf8");
 const flush=async()=>{for(let i=0;i<20;i++){await new Promise(setImmediate);await new Promise(r=>setTimeout(r,2));}};
@@ -40,6 +41,7 @@ async function page(handler){
     const body=init.body?JSON.parse(init.body):null;calls.push({url,method:init.method||"GET",body});
     return handler(url,body,calls.length);
   };
+  shell(w);
   w.eval(read("static/lightwork-settings-all.js"));
   await flush();
   return {dom,w,d,calls,confirms};
@@ -149,6 +151,7 @@ test("a row's saved password is never shown, and an empty box keeps it",async()=
   const w=dom.window,d=w.document,calls=[];
   w.mvConfirm=async()=>true;w.mvErrorText=(f,a)=>"Could not "+a+".";w.mvToast=()=>{};
   w.fetch=async(url,init={})=>{calls.push(JSON.parse(init.body));return reply(200,{changed:["federation.peers"],groups:[]});};
+  shell(w);
   w.eval(read("static/lightwork-settings-all.js"));
   await flush();
   try{
@@ -187,6 +190,7 @@ test("themes: rows are named by the person and colours come from colour pickers"
   const w=dom.window,d=w.document,calls=[];
   w.mvConfirm=async()=>true;w.mvErrorText=(f,a)=>"Could not "+a+".";w.mvToast=()=>{};
   w.fetch=async(url,init={})=>{calls.push(JSON.parse(init.body));return reply(200,{changed:["dashboard.themes"],groups:[]});};
+  shell(w);
   w.eval(read("static/lightwork-settings-all.js"));
   await flush();
   try{

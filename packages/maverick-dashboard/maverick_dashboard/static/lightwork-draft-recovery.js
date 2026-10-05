@@ -103,10 +103,10 @@
       if (response.status === 401 || response.status === 403) throw new Error('Your access changed. Sign in again before managing recovery storage.');
       var data; try { data = await response.json(); } catch (_error) { throw new Error('Recovery storage could not confirm this request. Refresh the summary before trying again.'); }
       if (!response.ok) throw new Error(failText(response, body ? 'free the recovery space' : 'load the recovery storage summary',
-        response.status === 409 ? 'Recovery storage changed. Refresh the summary before trying again.' : 'Recovery storage is unavailable.'));
+        response.status === 409 ? 'Recovery storage changed. Refresh the summary before trying again.' : 'Recovery storage is unavailable. Refresh the page and try again.'));
       if (!data || data.context !== context || !/^[0-9a-f]{64}$/.test(data.version) ||
           !['capacity','saved','discarded','available'].every(function (key) { return Number.isInteger(data[key]) && data[key] >= 0; }) ||
-          data.saved + data.discarded + data.available !== data.capacity) throw new Error('The recovery storage summary could not be verified.');
+          data.saved + data.discarded + data.available !== data.capacity) throw new Error('The recovery storage summary could not be verified. Refresh the page and try again.');
       return data;
     }
     function showStorage(data, prefix) {
@@ -123,7 +123,7 @@
       if (storageBusy || !storageSnapshot || !storageSnapshot.discarded || disposed) return;
       var selected = storageSnapshot; storageBusy = true; storageControls();
       try {
-        if (!(await confirmed('Free space from ' + selected.discarded + ' already discarded recovery copies? Open editors will check their saved version before saving again.'))) return;
+        if (!(await confirmed('Free space from ' + selected.discarded + ' already discarded recovery copies? Open editors will check their saved version before saving again.', 'Free space'))) return;
         showStorage(await storageCall({expected_version:selected.version}), 'Discarded recovery space freed. ');
       } catch (error) { storageSnapshot = null; storageStatus.textContent = error.message; }
       finally { storageBusy = false; storageControls(); }
@@ -196,10 +196,10 @@
       if (!response.ok) {
         var error = new Error(response.status === 409
           ? 'A newer recovery copy was saved from another tab or window. Review it before continuing.'
-          : failText(response, 'save the recovery copy', 'Recovery storage could not confirm this request.'));
+          : failText(response, 'save the recovery copy', 'Recovery storage could not confirm this request. Refresh the page and try again.'));
         error.status = response.status; throw error;
       }
-      if (!data || data.context !== context || data.slot !== slot || !Number.isInteger(data.revision) || data.revision < 0 || !Object.prototype.hasOwnProperty.call(data, 'payload') || (data.payload !== null && (typeof data.payload !== 'object' || Array.isArray(data.payload)))) throw new Error('The recovery copy could not be verified for this workspace.');
+      if (!data || data.context !== context || data.slot !== slot || !Number.isInteger(data.revision) || data.revision < 0 || !Object.prototype.hasOwnProperty.call(data, 'payload') || (data.payload !== null && (typeof data.payload !== 'object' || Array.isArray(data.payload)))) throw new Error('The recovery copy could not be verified for this workspace. Refresh the page and try again.');
       assertSafe(data.payload); return data;
     }
     async function initialize() {
@@ -221,7 +221,7 @@
       pendingOperation = operation;
       try {
         var data = await call('PUT', operation);
-        if (data.revision !== operation.expected_revision + 1 || !same(data.payload, operation.payload)) throw new Error('The saved recovery copy did not match the submitted draft.');
+        if (data.revision !== operation.expected_revision + 1 || !same(data.payload, operation.payload)) throw new Error('The saved recovery copy did not match the submitted draft. Try again.');
         revision = data.revision; remote = data.payload; pendingOperation = null; failed = false; lastSaved = JSON.stringify(operation.payload);
         status.textContent = data.payload ? 'Recovery copy saved. You control when this work is saved, run, or published.' : 'Recovery copy discarded. Your editor contents have been kept.';
         return true;
@@ -250,13 +250,13 @@
       compactControls();
       if (changed && initialized && !blocked) schedule();
     }
-    async function confirmed(message) { return typeof root.mvConfirm === 'function' ? root.mvConfirm(message) : root.confirm(message); }
-    async function review(message, action) {
+    async function confirmed(message, okText) { return typeof root.mvConfirm === 'function' ? root.mvConfirm(message, {okText: okText}) : root.confirm(message); }
+    async function review(message, action, okText) {
       if (running || !initialized) return;
       running = true; controls();
       try {
         var before = JSON.stringify(read()), candidate = remote, expected = revision;
-        if (!(await confirmed(message))) return;
+        if (!(await confirmed(message, okText))) return;
         var latest = await call('GET');
         if (latest.revision !== expected || !same(latest.payload, candidate)) {
           remote = latest.payload; revision = latest.revision; blocked = true;
@@ -264,7 +264,7 @@
         }
         if (before !== JSON.stringify(read())) { status.textContent = 'Your newer editor changes have been kept. Review again before continuing.'; return; }
         await action(candidate);
-      } catch (error) { status.textContent = error.message || 'Could not restore this copy. Current work has been kept.'; }
+      } catch (error) { status.textContent = error.message || 'Could not restore this copy. Current work has been kept. Try again.'; }
       finally { running = false; controls(); }
     }
     async function restoreCopy() {
@@ -273,16 +273,16 @@
         await options.restore(candidate);
         blocked = false; changed = false; failed = false; lastSaved = JSON.stringify(read());
         status.textContent = 'Recovery copy restored for review. Nothing was run, saved to the live resource, or published.';
-      });
+      }, 'Restore recovery copy');
     }
-    async function replaceReviewed(payload, message) {
+    async function replaceReviewed(payload, message, okText) {
       await review(message, async function () {
         running = false; pendingOperation = null;
         if (await persist(payload())) { blocked = false; changed = false; lastSaved = JSON.stringify(read()); }
-      });
+      }, okText);
     }
-    async function keepCurrent() { await replaceReviewed(read, 'Replace the recovery copy with the current editor draft? The live resource is unchanged.'); }
-    async function discardCopy() { await replaceReviewed(function () { return null; }, 'Discard the saved recovery copy? Your current editor contents will stay here.'); }
+    async function keepCurrent() { await replaceReviewed(read, 'Replace the recovery copy with the current editor draft? The live resource is unchanged.', 'Keep current draft'); }
+    async function discardCopy() { await replaceReviewed(function () { return null; }, 'Discard the saved recovery copy? It can\'t be restored. Your current editor contents will stay here.', 'Discard recovery copy'); }
     async function retryRecovery() {
       if (running) return;
       if (!initialized) { await initialize(); return; }

@@ -201,7 +201,7 @@
     var response = await fetch((base || API) + path, opts);
     var text = await response.text(), parsed;
     try { parsed = JSON.parse(text); } catch (_error) { var bad = new Error("Request failed: the server returned an invalid JSON response."); bad.status = response.ok ? 0 : response.status; throw bad; }
-    if (!response.ok) { var failure = new Error(parsed && typeof parsed.detail === "string" ? parsed.detail : "Request failed."); failure.status = response.status; throw failure; }
+    if (!response.ok) { var failure = new Error(parsed && typeof parsed.detail === "string" ? parsed.detail : "That didn't work. Refresh the page and try again."); failure.status = response.status; throw failure; }
     return parsed;
   }
   var CW = window.LightworkConsentWorkbench;
@@ -348,7 +348,7 @@
         await run("POST", "/contexts/" + encodeURIComponent(f.context_ref.value) + "/rights-authorizations/for-case", {case_id: f.case_id.value, expected_context_revision: Number(f.expected_context_revision.value), valid_until: endOfDay(f.valid_until.value), idempotency_key: f.idempotency_key.value});
         event.currentTarget.hidden = true; say("Request linked. Two other people must now approve it below."); await load();
       } catch (error) {
-        if (error && error.status === 409) { say("Could not link the request. The person first needs approved access to make privacy requests.", true); return; }
+        if (error && error.status === 409) { say("Could not link the request. The person first needs approved access to make privacy requests; approve their access, then link it again.", true); return; }
         fail(error, "link the request");
       }
     });

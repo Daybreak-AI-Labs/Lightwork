@@ -2,6 +2,7 @@
 const {test}=require("node:test"),assert=require("node:assert/strict");
 const fs=require("node:fs"),path=require("node:path");
 const {JSDOM}=require("jsdom");
+const {shell} = require('./_shell');
 const folder=path.resolve(__dirname,"../../maverick_dashboard/templates");
 const template=fs.readFileSync(path.join(folder,"connections.html"),"utf8");
 const script=fs.readFileSync(path.join(folder,"../static/lightwork-connections.js"),"utf8");
@@ -14,6 +15,7 @@ async function fixture(records=[],intercept=()=>undefined) {
   const el=id=>window.document.getElementById("cx-"+id);
   async function settle(){for(let i=0;i<15;i++)await new Promise(done=>setImmediate(done));}
   function change(id,value){el(id).value=value;el(id).dispatchEvent(new window.Event("change",{bubbles:true}));}
+  shell(window);
   window.eval(script);await settle();return{window,calls,el,change,settle};
 }
 test("AWS discovery credentials use guided fields, stay outside drafts, and clear after acknowledged save",async t=>{

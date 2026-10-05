@@ -20,7 +20,7 @@
     if (noMatches) noMatches.hidden = !query || found > 0;
   }
   if (search) search.addEventListener('input', filterControls);
-  function button(text, parent, handler) { var control = node('button', text, parent); control.type = 'button'; control.className = 'btn btn--ghost'; control.addEventListener('click', handler); return control; }
+  function button(text, parent, handler) { var control = node('button', text, parent); control.type = 'button'; control.disabled = busy; control.className = 'btn btn--ghost'; control.addEventListener('click', handler); return control; }
   function context() {
     if (overrideSelection) return overrideSelection;
     var approval = window.location.hash.match(/^#approval-([1-9]\d*)$/);
@@ -40,6 +40,10 @@
       try { return {kind: 'flow', id: decodeURIComponent(flow[1])}; } catch (_) { return {}; }
     }
     var query = new URLSearchParams(window.location.search);
+    // The workflow builder's Steps mode is the flow designer's editor for ?flow=<id>.
+    var builderFlow = query.get('flow');
+    if (window.location.pathname === '/workflow-builder' && query.get('mode') === 'steps' &&
+        builderFlow && /^[A-Za-z0-9_-]{1,120}$/.test(builderFlow)) return {kind: 'flow', id: builderFlow};
     var selectedGoal = query.get('goal_id');
     if (window.location.pathname === '/budget' && selectedGoal && /^[1-9]\d*$/.test(selectedGoal)) return {goal_id: Number(selectedGoal)};
     var thread = query.get('thread');
@@ -124,6 +128,60 @@
           else { var savedLink = node('a', 'Open saved learning points', savedDestination); savedLink.href = '/learning#learning-review'; }
           return;
         }
+        if (entry[0] === 'installed_practice_environment') {
+          var environment = entry[1], environmentStarted = generation;
+          if (!environment || Array.isArray(environment) || Object.keys(environment).join(',') !== 'context' ||
+              !/^[a-f0-9]{64}$/.test(environment.context || '')) return;
+          var environmentDestination = node('dd', undefined, list);
+          var environmentForm = window.LightworkInstalledPracticeEnvironment;
+          if (environmentForm && typeof environmentForm.open === 'function') button('Choose an installed practice environment', environmentDestination, async function (event) {
+            if (!active(environmentStarted) || busy) return;
+            event.currentTarget.disabled = true;
+            try {
+              var opened = await environmentForm.open(environment.context);
+              if (!active(environmentStarted)) return;
+              status.textContent = opened ? 'The practice environment setting is open.' :
+                'This setting could not be opened. Check your current access in Settings.';
+              if (opened) {
+                var close = document.getElementById('mv-copilot-close'); if (close) close.click();
+              }
+            } catch (_) {
+              if (active(environmentStarted)) status.textContent = 'This setting could not be opened. Check your current access in Settings.';
+            } finally { if (active(environmentStarted)) event.currentTarget.disabled = false; }
+          });
+          else {
+            var environmentLink = node('a', 'Choose an installed practice environment', environmentDestination);
+            environmentLink.href = '/settings/all?id=plugins.workbench_image'; environmentLink.className = 'btn btn--ghost';
+          }
+          return;
+        }
+        if (entry[0] === 'plugin_practice_page') {
+          var practice = entry[1], practiceStarted = generation;
+          if (!practice || Array.isArray(practice) || Object.keys(practice).sort().join(',') !== 'fingerprint,receipt' ||
+              !/^[a-f0-9]{64}$/.test(practice.fingerprint || '') || !/^[a-f0-9]{32}$/.test(practice.receipt || '')) return;
+          var practiceDestination = node('dd', undefined, list);
+          var practiceForm = window.LightworkPluginPractice;
+          if (practiceForm && typeof practiceForm.open === 'function') button('Open guided practice check', practiceDestination, async function (event) {
+            if (!active(practiceStarted) || busy) return;
+            event.currentTarget.disabled = true;
+            try {
+              var opened = await practiceForm.open(practice.fingerprint, practice.receipt);
+              if (!active(practiceStarted)) return;
+              status.textContent = opened ? 'The guided practice check is open in Plugins.' :
+                'This inspection changed or is unavailable. Read the original inspection in Plugins.';
+              if (opened) {
+                var close = document.getElementById('mv-copilot-close'); if (close) close.click();
+              }
+            } catch (_) {
+              if (active(practiceStarted)) status.textContent = 'The guided check could not be opened. Check current access in Plugins.';
+            } finally { if (active(practiceStarted)) event.currentTarget.disabled = false; }
+          });
+          else {
+            var practiceLink = node('a', 'Open guided practice checks', practiceDestination);
+            practiceLink.href = '/plugins#plugin-workbench'; practiceLink.className = 'btn btn--ghost';
+          }
+          return;
+        }
         if (entry[0] === 'knowledge_request_page') {
           var page = entry[1], started = generation;
           if (!page || Array.isArray(page) || Object.keys(page).sort().join(',') !== 'cursor,view' ||
@@ -180,7 +238,7 @@
     try {
       var fresh = await request('/catalog', payload());
       if (!active(started)) return null;
-      if (fresh.schema !== 1 || !Array.isArray(fresh.operations) || JSON.stringify(fresh.selection) !== JSON.stringify(context())) throw new Error('The current record could not be confirmed.');
+      if (fresh.schema !== 1 || !Array.isArray(fresh.operations) || JSON.stringify(fresh.selection) !== JSON.stringify(context())) throw new Error('The current record could not be confirmed. Refresh the page and try again.');
       if (previous && previous.context !== fresh.context) {
         clear(formHost); selected = null;
         document.dispatchEvent(new CustomEvent('lightwork:copilot-context-changed'));
@@ -192,7 +250,10 @@
         if (item.blocked) control.title = item.blocked;
       });
       filterControls();
-      status.textContent = uncertainty || 'Current controls for this page. Changes require a separate review and confirmation.';
+      var changes = fresh.operations.some(function (item) { return item.confirmation_required === true; });
+      status.textContent = uncertainty || (changes
+        ? 'Current controls for this page. Changes require a separate review and confirmation.'
+        : 'Current status for this page. These controls show information or open the page\'s own form; nothing changes unless you confirm there.');
       return fresh;
     } catch (error) {
       if (active(started)) {
@@ -373,6 +434,40 @@
     });
     launch.className = 'btn btn--primary'; launch.focus(); nativeLink(item, formHost);
   }
+  async function openQuestionnaireForm(item, fresh, started) {
+    var selection = context(), native = window.LightworkComplianceQuestionnaire;
+    var review = await request('/prepare', Object.assign(payload(), {
+      operation: item.id, context: fresh.context, revision: item.revision, arguments: {}
+    }));
+    if (!active(started)) return;
+    var details = review.details || {};
+    if (review.read_only !== true || review.operation !== item.id || details.form_handoff !== 'compliance-questionnaire' ||
+        !/^[a-f0-9]{64}$/.test(details.context || '') || !native || typeof native.openCreate !== 'function')
+      throw new Error('The questionnaire form is unavailable. Open questionnaire design to continue.');
+    clear(formHost); node('h3', item.label, formHost); node('p', review.summary, formHost);
+    var launch = button('Choose and review questions', formHost, async function () {
+      if (busy || !active(started)) return;
+      if (JSON.stringify(context()) !== JSON.stringify(selection)) {
+        status.textContent = 'Your selection changed. Refresh current controls before opening the form.'; return;
+      }
+      lock(true);
+      try {
+        var result = await native.openCreate({host: formHost, context: details.context,
+          active: function () { return active(started) && JSON.stringify(context()) === JSON.stringify(selection); }});
+        if (!active(started)) return;
+        clear(formHost);
+        status.textContent = result && result.confirmed === true ? 'Questionnaire saved for independent approval.' :
+          result === null || result && result.status === 'cancelled' ? 'Questionnaire form closed. Check questionnaire design for any saved or pending request.' :
+          'The save is not confirmed. Check the original request in questionnaire design before trying again.';
+        node('p', status.textContent, formHost);
+        if (result && result.confirmed === true && result.result) renderData(formHost, result.result);
+        nativeLink(item, formHost);
+      } catch (_) {
+        if (active(started)) { status.textContent = 'The form result is not confirmed. Open questionnaire design to check the original request.'; nativeLink(item, formHost); }
+      } finally { lock(false); }
+    });
+    launch.className = 'btn btn--primary'; launch.focus(); nativeLink(item, formHost);
+  }
   async function openOperation(id) {
     if (busy) return false;
     var started = generation; lock(true);
@@ -387,6 +482,10 @@
       }
       if (item.id === 'consent.jobs.create') {
         await openConsentJobForm(item, fresh, started);
+        return true;
+      }
+      if (item.id === 'compliance.questionnaire.build') {
+        await openQuestionnaireForm(item, fresh, started);
         return true;
       }
       if (['learning.workflow_refine', 'learning.rule_teach', 'learning.rule_refine'].includes(item.id)) {

@@ -3,6 +3,7 @@ const {test} = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs'), path = require('node:path');
 const {JSDOM} = require('jsdom');
+const {shell} = require('./_shell');
 const script = fs.readFileSync(path.resolve(
   __dirname, '../../maverick_dashboard/static/lightwork-outcome-accounting.js',
 ), 'utf8');
@@ -200,6 +201,7 @@ async function fixture(response, context = 'alice') {
     calls.push({url, options});
     return typeof response === 'function' ? response(url, options, calls.length) : response;
   };
+  shell(dom.window);
   dom.window.eval(script);
   await settle();
   return {dom, host: dom.window.document.getElementById('op-accounting-summary'), calls};
@@ -411,14 +413,14 @@ test('refuses portfolio count, context, money, overflow, cursor, and record mism
     await t.test('invalid portfolio projection', async t => {
       const ui = await fixture({ok: true, json: async () => value});
       t.after(() => ui.dom.window.close());
-      assert.match(ui.host.textContent, /invalid|do not reconcile|does not reconcile|did not match/);
+      assert.match(ui.host.textContent, /invalid|do not reconcile|does not reconcile|did not match|do not add up|must be an amount of money|not the one this page asked for|not a valid link to the next page/);
       assert.equal(ui.host.querySelector('.op-accounting-record'), null);
       assert.equal(ui.host.querySelector('script'), null);
     });
   }
   const ui = await fixture({ok: false, status: 403, json: async () => { throw new SyntaxError('<script>secret</script>'); }});
   t.after(() => ui.dom.window.close());
-  assert.match(ui.host.textContent, /unavailable/);
+  assert.match(ui.host.textContent, /unavailable|do not have permission/);
   assert.doesNotMatch(ui.host.textContent, /secret/);
 });
 
@@ -426,5 +428,5 @@ test('invalid page context prevents every request', async t => {
   const ui = await fixture({ok: true, json: async () => payload()}, 'alice&#10;other');
   t.after(() => ui.dom.window.close());
   assert.equal(ui.calls.length, 0);
-  assert.match(ui.host.textContent, /context is invalid/);
+  assert.match(ui.host.textContent, /accounting context contains characters this page cannot show/);
 });

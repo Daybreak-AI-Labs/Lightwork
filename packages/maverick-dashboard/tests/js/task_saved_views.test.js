@@ -1,6 +1,7 @@
 'use strict';
 const test=require('node:test'), assert=require('node:assert/strict'), fs=require('node:fs'), path=require('node:path');
 const {JSDOM}=require('jsdom');
+const {shell} = require('./_shell');
 const base=path.resolve(__dirname,'../../maverick_dashboard');
 const html=fs.readFileSync(path.join(base,'templates/_task_saved_views.html'),'utf8');
 const source=fs.readFileSync(path.join(base,'static/lightwork-task-views.js'),'utf8');
@@ -12,6 +13,7 @@ function page(handler) {
   w.LightworkTaskFilters={current:()=>({q:'quarterly report',status:'failed'})};
   w.fetch=async(url,options={})=>{calls.push({url,options});return handler ? handler(url,options,state) : response(state);};
   w.setTimeout=callback=>{timers.push(callback);return timers.length;};w.clearTimeout=()=>{};
+  shell(w);
   w.eval(source);
   return {dom,w,d,calls,state,expire(){timers.at(-1)();},prepare(label='Quarterly'){
     d.getElementById('task-view-name').value=label;
