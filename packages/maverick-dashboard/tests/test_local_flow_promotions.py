@@ -72,6 +72,14 @@ def test_native_rule_only_practice_independent_copilot_release_canary_and_restor
     assert published.status_code == 200, published.text
     with tenant_scope(tenant=TENANT):
         prior_release = store.load_published_bundle(source.id)[1]
+        original_inputs = {"quantity": 2, "unit_price": 3}
+        queued_case = store.FlowRun(run_id=store.new_run_id(), flow_id=baseline.id, status="queued", owner=OWNER,
+            input_data=original_inputs, definition_digest=prior_release["definition_digest"], definition_version=baseline.version,
+            definition_revision=baseline.revision, release_digest=prior_release["release_digest"], release_id=prior_release["release_id"])
+        store.save_run(queued_case)
+        original_case = execution.execute(baseline, owner=OWNER, run_id=queued_case.run_id, data=original_inputs,
+            agent_runner=no_work, action_runner=no_work)
+        assert original_case.status == "completed" and original_case.data["total"] == 5
         candidate = store.save_flow(attach_learned_operator(baseline, "calculate", _artifact(True)),
             expected_version=baseline.version, expected_revision=baseline.revision)
         practice = execution.execute(candidate, owner=OWNER, data={"quantity": 2, "unit_price": 3},
@@ -80,8 +88,34 @@ def test_native_rule_only_practice_independent_copilot_release_canary_and_restor
         stopped = execution.execute(candidate, owner=OWNER, data={"quantity": 30, "unit_price": 3},
             agent_runner=no_work, action_runner=no_work, record_outcomes=False)
         assert stopped.status == "failed"
+    comparisons = "/api/v1/research/flow-comparisons"
+    options = harness.client.get(comparisons, params={"flow_id": source.id})
+    assert options.status_code == 200, options.text
+    checked = options.json()
+    original = harness.client.get(comparisons + "/case", params={"flow_id": source.id,
+        "run_id": original_case.run_id, "output": "total"})
+    assert original.status_code == 200, original.text
+    compare_body = {"context": checked["context"], "confirm": True, "authorize_case_use": True,
+        "operation": "a" * 32, "flow_id": source.id, "version": candidate.version, "revision": candidate.revision,
+        "baseline_release": checked["baseline_release"], "output": "total",
+        "cases": [{"run_id": original_case.run_id, "source_version": original.json()["version"], "expected": "6"}]}
+    refusal = harness.client.post(comparisons, json={**compare_body, "authorize_case_use": False})
+    assert refusal.status_code == 409, refusal.text
+    paired = harness.client.post(comparisons, json=compare_body)
+    assert paired.status_code == 200, paired.text
+    pair = paired.json()
+    assert pair["summary"]["baseline_matches"] == 0 and pair["summary"]["candidate_matches"] == 1
+    assert pair["cases"][0]["inputs"] == original_inputs
+    assert pair["cases"][0]["results"]["baseline"]["result"] == "5"
+    assert pair["cases"][0]["results"]["candidate"]["result"] == "6"
+    with tenant_scope(tenant=TENANT):
+        before_readback = len(store.list_runs(flow_id=source.id, owner=OWNER))
+    assert harness.client.post(comparisons, json=compare_body).json()["id"] == pair["id"]
+    assert harness.client.get(comparisons + "/" + pair["id"]).status_code == 200
+    with tenant_scope(tenant=TENANT):
+        assert len(store.list_runs(flow_id=source.id, owner=OWNER)) == before_readback
     prepared = harness.client.post(LOCAL + "/prepare", json={**rule_body, "version": candidate.version,
-                                                           "practice_run": practice.run_id})
+                                                           "practice_run": practice.run_id, "comparison_id": pair["id"]})
     assert prepared.status_code == 200, prepared.text
     assert "No release was activated" in prepared.text
     assert app.state.local_flow_promotions_installed is True
@@ -102,6 +136,8 @@ def test_native_rule_only_practice_independent_copilot_release_canary_and_restor
     admin_context = harness.client.get(BASE, headers=admin_headers).json()["context"]
     exact = harness.client.get(LOCAL + "/review/order-total-release", headers=admin_headers)
     assert exact.status_code == 200 and exact.json()["steps"][0]["examples"] == _artifact(True)["examples"]
+    assert exact.json()["known_case_comparison"]["candidate_matches"] == 1
+    assert exact.json()["known_case_comparison"]["reviewed_cases"][0]["inputs"] == original_inputs
 
     def decide(action, **extra):
         current = harness.client.get(BASE + "/order-total-release", headers=admin_headers).json()["candidate"]
@@ -113,6 +149,8 @@ def test_native_rule_only_practice_independent_copilot_release_canary_and_restor
     assert decide("review", approve=True, reason_code="reviewed_scope", note="Checked complete examples, domain and readiness limits")["state"] == "authorized"
     assert decide("stage")["state"] == "staged"
     assert decide("activate")["state"] == "canary"
+    assert harness.client.get(comparisons, params={"flow_id": source.id}).json()["can_compare"] is False
+    assert harness.client.get(comparisons + "/" + pair["id"]).json()["state"] == "done"
     early = harness.client.get(BASE + "/order-total-release", headers=admin_headers).json()["candidate"]
     assert early["local_release"]["can_assess"] is False
     refusal = harness.client.post(BASE + "/order-total-release/canary", headers=admin_headers,

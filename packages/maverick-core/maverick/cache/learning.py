@@ -40,9 +40,12 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import math
+import os
 import string
 import threading
 import time
+from collections import OrderedDict
 from collections.abc import Callable
 from pathlib import Path
 
@@ -59,6 +62,16 @@ log = logging.getLogger(__name__)
 DEFAULT_TTL_DAYS = 30.0
 MAX_ENTRIES = 500
 _DAY_SECONDS = 86_400.0
+_MAX_SHARED_INSTANCES = 128
+
+
+def _source_current(entry: dict, owner: str) -> bool:
+    """Native recall requires a still-permitted source and its original owner."""
+    from ..learning_content import allowed
+
+    return (isinstance(owner, str) and type(entry.get("content_version")) is int
+            and entry["content_version"] == 1 and type(entry.get("goal_id")) is int
+            and entry["goal_id"] > 0 and allowed(entry, owner=owner))
 
 
 def enabled() -> bool:
@@ -155,6 +168,8 @@ class LearningCache:
         verified_by: str,
         ttl_days: float = DEFAULT_TTL_DAYS,
         tags: list[str] | None = None,
+        source_goal_id: int | None = None,
+        source_owner: str | None = None,
     ) -> str:
         """Store a VERIFIED result for ``task``; returns the entry key.
 
@@ -168,8 +183,9 @@ class LearningCache:
                 "verified_by is required: name the verifier that checked this result "
                 "(e.g. 'verifier:goal-123')"
             )
-        if float(ttl_days) <= 0:
-            raise ValueError("ttl_days must be > 0")
+        ttl = float(ttl_days)
+        if not math.isfinite(ttl) or ttl <= 0:
+            raise ValueError("ttl_days must be finite and > 0")
         from ..safety.secret_detector import scan
         found = scan(str(result)) + scan(str(task))
         if found:
@@ -179,6 +195,9 @@ class LearningCache:
                 "(the cache file outlives the run; redact before storing)"
             )
         now = float(self._clock())
+        expires_at = now + ttl * _DAY_SECONDS
+        if not math.isfinite(now) or not math.isfinite(expires_at):
+            raise ValueError("Learning cache expiry must be finite")
         key = task_key(task)
         entry = {
             "task": normalize(task),
@@ -186,20 +205,28 @@ class LearningCache:
             "verified_by": verified_by.strip(),
             "tags": [str(t) for t in (tags or [])],
             "stored_at": now,
-            "expires_at": now + float(ttl_days) * _DAY_SECONDS,
+            "expires_at": expires_at,
             "last_used": now,
         }
+        bound_source = source_goal_id is not None or source_owner is not None
+        if bound_source:
+            entry.update(content_version=1, goal_id=source_goal_id, owner=source_owner)
+            if not _source_current(entry, source_owner):
+                raise ValueError("Learning cache source authority is unavailable")
         with self._lock:
+            if bound_source and not _source_current(entry, source_owner):
+                raise ValueError("Learning cache source authority changed before saving")
             self._entries[key] = entry
             self._evict_locked()
             self._save_locked()
         return key
 
-    def get(self, task: str) -> dict | None:
+    def get(self, task: str, *, source_owner: str | None = None) -> dict | None:
         """Return the entry for ``task`` (TTL-enforced), or ``None``.
 
-        A hit bumps ``last_used`` (the LRU clock) and persists it so recency
-        survives across runs; an expired entry is dropped on sight.
+        Native task recall must pass its exact owner. Such reads withhold
+        unbound legacy results and recheck source permission before delivery.
+        Omitting the owner retains the explicit generic maintenance helper.
         """
         key = task_key(task)
         now = float(self._clock())
@@ -209,13 +236,21 @@ class LearningCache:
                 self._misses += 1
                 return None
             from .eviction import is_expired
-            if is_expired(now, entry.get("expires_at", 0.0)):
+            expires_at = entry.get("expires_at", 0.0)
+            if (type(expires_at) not in (int, float) or not math.isfinite(expires_at)
+                    or is_expired(now, expires_at)):
                 del self._entries[key]
                 self._save_locked()
                 self._misses += 1
                 return None
+            if source_owner is not None and not _source_current(entry, source_owner):
+                self._misses += 1
+                return None
             entry["last_used"] = now
             self._save_locked()
+            if source_owner is not None and not _source_current(entry, source_owner):
+                self._misses += 1
+                return None
             self._hits += 1
             return dict(entry)
 
@@ -255,24 +290,31 @@ class LearningCache:
             }
 
 
-_shared: LearningCache | None = None
+_shared: OrderedDict[tuple[str | None, str], LearningCache] = OrderedDict()
 _shared_lock = threading.Lock()
 
 
 def shared() -> LearningCache:
-    """Process-wide cache at the default path (built on first use)."""
-    global _shared
+    """Bounded lazy instances for each current exact tenant and data path."""
+    from ..paths import current_tenant_id, data_dir
+
+    path = data_dir("learning_cache.json")
+    key = (current_tenant_id(), os.path.normcase(os.path.abspath(path)))
     with _shared_lock:
-        if _shared is None:
-            _shared = LearningCache()
-        return _shared
+        cache = _shared.get(key)
+        if cache is None:
+            cache = LearningCache(path)
+            _shared[key] = cache
+        _shared.move_to_end(key)
+        while len(_shared) > _MAX_SHARED_INSTANCES:
+            _shared.popitem(last=False)
+        return cache
 
 
 def reset_shared() -> None:
-    """Drop the process-wide instance (tests / tenant switch)."""
-    global _shared
+    """Drop all process-wide instances (tests / explicit maintenance)."""
     with _shared_lock:
-        _shared = None
+        _shared.clear()
 
 
 __all__ = [

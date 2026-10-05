@@ -238,8 +238,8 @@
         });
         box.appendChild(calls);
       }
-      if (!data.paused_services.length && !data.recent_calls.length) return 'No AI services have been called since Lightwork started.';
-      return data.paused_services.length ? 'Some services are paused after errors. Lightwork retries them automatically.' : 'All services are working.';
+      if (!data.paused_services.length && !data.recent_calls.length) return 'No connection pauses or recent requests are recorded on this server.';
+      return data.paused_services.length ? 'These recorded connections were paused after errors. After cooldown, the next request may check a connection. An older connection can remain listed after settings change.' : 'No connection pauses are recorded. This does not confirm that every connected service is available.';
     }
   };
   // Technical rows (kernel wording) stay inside the collapsed details.

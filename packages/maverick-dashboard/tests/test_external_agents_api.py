@@ -88,6 +88,58 @@ def test_enroll_mint_and_roster_roundtrip():
     assert client.get("/api/v1/external-agents/ghost").status_code == 404
 
 
+def test_connected_change_readback_and_copilot_use_safe_native_metadata_only(monkeypatch):
+    from maverick import external_agents as xa
+    from maverick_dashboard import product_operations as operations
+
+    assert _enroll(description="Order helper").status_code == 201
+    with xa._sidecar_locked():
+        data = xa._load_sidecar()
+        data["sf-quotebot"]["executions"] = {
+            "synthetic-unknown": {"status": "indeterminate", "connector": "salesforce", "op": "patch",
+                "created_at": time.time(), "finished_at": time.time(),
+                "digest": "PRIVATE-SYNTHETIC-DIGEST", "path": "/private/customer/record", "body": {"private": "PRIVATE-SYNTHETIC-BODY"}},
+            "synthetic-confirmed": {"status": "executed", "connector": "jira", "op": "post", "created_at": time.time()-1},
+            "synthetic-accepted": {"status": "accepted", "connector": "jira", "op": "post", "created_at": time.time()-2},
+        }
+        xa._save_sidecar(data)
+    before = xa.registry_path().read_bytes()
+
+    def forbidden(*_args, **_kwargs):
+        pytest.fail("Reading execution metadata must not repair an approval, write authority or contact a connector")
+
+    monkeypatch.setattr(xa, "_save_sidecar", forbidden)
+    monkeypatch.setattr(xa, "execute_status", forbidden)
+    monkeypatch.setattr(xa, "_perform_execution", forbidden)
+    response = client.get("/api/v1/external-agents/sf-quotebot")
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "private, no-store"
+    detail = response.json()
+    assert detail["execution_readback"][0]["status"] == "Result unknown — check connected service"
+    assert detail["execution_readback"][1]["status"] == "Request completed"
+    assert detail["execution_readback"][2]["status"] == "Accepted; completion unconfirmed"
+    assert "Completion has not been confirmed" in detail["execution_readback"][2]["notice"]
+    assert detail["execution_readback"][0]["action"] == "Update"
+    page = client.get("/external-agents/sf-quotebot")
+    assert page.status_code == 200 and "Recent connected changes" in page.text
+    assert page.headers["cache-control"] == "private, no-store"
+    assert client.get("/static/lightwork-external-agent-executions.js").status_code == 200
+    monkeypatch.setattr(operations, "_gate", lambda _request: None)
+    monkeypatch.setattr(operations, "enabled_families", lambda: {"connections"})
+    selection = {"kind": "external_agent", "id": "sf-quotebot"}
+    catalog = client.post("/api/v1/copilot/product-operations/catalog",
+        json={"page": "/external-agents/sf-quotebot", "selection": selection}).json()
+    action = next(row for row in catalog["operations"] if row["id"] == "external_agents.execution_status")
+    read = client.post("/api/v1/copilot/product-operations/prepare", json={
+        "page": "/external-agents/sf-quotebot", "selection": selection, "operation": action["id"],
+        "context": catalog["context"], "revision": action["revision"], "arguments": {}})
+    assert read.status_code == 200 and read.json()["read_only"] is True
+    assert "No connected service was contacted" in read.text
+    combined = response.text + page.text + str(catalog) + read.text
+    assert "PRIVATE-SYNTHETIC" not in combined and "/private/customer/record" not in combined
+    assert xa.registry_path().read_bytes() == before
+
+
 def test_enroll_validates_platform_and_surface():
     assert _enroll(platform="skynet").status_code == 400
     _enroll()

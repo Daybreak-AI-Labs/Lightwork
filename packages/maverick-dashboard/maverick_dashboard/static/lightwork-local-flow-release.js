@@ -7,6 +7,7 @@
   let state = null, busy = false;
   const flow = form.elements.namedItem('flow_id');
   const run = form.elements.namedItem('practice_run');
+  const comparison = form.elements.namedItem('comparison_id');
   const rules = document.getElementById('local-flow-release-rules');
   const open = document.getElementById('local-flow-release-open');
   const current = document.getElementById('local-flow-release-current');
@@ -29,6 +30,10 @@
   function show() {
     const row = selected();
     const chosenRun = run.value;
+    const chosenComparison = comparison.value;
+    comparison.replaceChildren(new Option('Readiness only; no answer comparison', ''));
+    (row?.comparisons || []).forEach(item => comparison.appendChild(new Option(item.cases + ' known cases · compared ' + new Date(item.when * 1000).toLocaleString(), item.id, false, item.id === chosenComparison)));
+    document.getElementById('local-flow-release-compare').href = '/learning/flow-checks' + (row ? '?workflow=' + encodeURIComponent(row.id) : '');
     run.replaceChildren(new Option('Choose a practice run', ''));
     (row?.practice_runs || []).forEach(item => run.appendChild(new Option(row.name + ' · version ' + row.version + ' · practice completed ' + new Date(item.created * 1000).toLocaleString(), item.id, false, item.id === chosenRun)));
     current.textContent = row ? 'Saved version ' + row.version + ' · ' + (row.rules_only ? 'Uses learned rules only' : 'May fall back to AI') + ' · ' + (row.published ? 'Published baseline version ' + row.baseline_version : 'Publish a baseline first') : '';
@@ -53,8 +58,9 @@
     if (busy) return;
     const row = selected();
     if (!row) return;
-    const prompt = path === '/rules-only' ? 'Save a rule-only draft? If its learned rules cannot answer an input, it will stop instead of calling AI. Existing publication is unchanged.' : 'Authorize a current independent release administrator to publish only this exact reviewed version and restore its retained baseline? Its instructions and teaching examples are shared for that review. No release starts now.';
+    const prompt = path === '/rules-only' ? 'Save a rule-only draft? If its learned rules cannot answer an input, it will stop instead of calling AI. Existing publication is unchanged.' : 'Authorize a current independent release administrator to publish only this exact reviewed version and restore its retained baseline? Its instructions, teaching examples and any selected real-case inputs, expected answers and comparison results are shared for that review. No release starts now.';
     const practice = run.value;
+    const compared = comparison.value;
     const operationContext = state.context;
     let submitted = false, outcome = '';
     lock(true);
@@ -63,7 +69,8 @@
       if (!confirm) return;
       submitted = true;
       const result = await request(path, {context: state.context, confirm: true, flow_id: row.id,
-        version: row.version, revision: row.revision, practice_run: path === '/prepare' ? practice : ''});
+        version: row.version, revision: row.revision, practice_run: path === '/prepare' ? practice : '',
+        comparison_id: path === '/prepare' ? compared : ''});
       outcome = result.detail;
     } catch (_) { outcome = 'The reply could not be confirmed. No action was repeated. Inspect the refreshed saved versions and release decisions before continuing.'; }
     finally { lock(false); show(); }
@@ -76,7 +83,7 @@
         const prepared = state.prepared;
         if (path === '/rules-only' && saved?.revision === row.revision && saved?.version === row.version + 1 && saved?.rules_only)
           outcome = 'Rule-only draft is saved. The current saved version was verified. Publish a baseline, then change and practice the next version.';
-        if (path === '/prepare' && prepared?.flow_id === row.id && prepared?.version === row.version && prepared?.practice_run === practice)
+        if (path === '/prepare' && prepared?.flow_id === row.id && prepared?.version === row.version && prepared?.practice_run === practice && prepared?.comparison_id === compared)
           outcome = 'The exact release review is prepared and verified. Request independent approval below; no publication changed.';
       }
       status.textContent = outcome;

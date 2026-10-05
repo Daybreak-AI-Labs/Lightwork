@@ -128,8 +128,8 @@ class CircuitBreaker:
                 self._stats.opened_at = now
                 self._stats.opened_mono = now_mono
 
-    def call(self, fn: Callable[[], T]) -> T:
-        """Run ``fn`` if allowed; raise ``CircuitOpen`` otherwise."""
+    def admit(self) -> bool:
+        """Admit one manually observed call; return whether it owns the probe."""
         probe_started = False
         with self._lock:
             self._tick()
@@ -149,6 +149,16 @@ class CircuitBreaker:
                     )
                 self._probe_in_flight = True
                 probe_started = True
+        return probe_started
+
+    def release_probe(self) -> None:
+        """Abandon an owned probe after a local refusal, without a health result."""
+        with self._lock:
+            self._probe_in_flight = False
+
+    def call(self, fn: Callable[[], T]) -> T:
+        """Run ``fn`` if allowed; raise ``CircuitOpen`` otherwise."""
+        probe_started = self.admit()
         try:
             result = fn()
         except Exception:

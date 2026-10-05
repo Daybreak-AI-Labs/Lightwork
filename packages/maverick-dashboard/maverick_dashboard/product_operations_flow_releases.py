@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+from datetime import datetime, timezone
 from functools import partial
 
 from fastapi import HTTPException, Response
@@ -17,6 +18,7 @@ from .product_operations import Adapter, EmptyInput, Outcome, Preview, Snapshot,
 class FlowChoice(StrictInput):
     flow: str = Field(min_length=1, max_length=128)
     practice: str = Field(default="", max_length=128)
+    comparison: str = Field(default="", pattern=r"^(?:FCP-[a-f0-9]{32})?$")
 
 
 class CandidateChoice(StrictInput):
@@ -41,9 +43,13 @@ def _plain_state(state):
 
 def _result_details(row):
     report = native._projection(row).get("local_release", {})
+    comparison = dict(report.get("known_case_comparison", {"scope": "No known-case answer comparison was included."}))
+    if "when" in comparison:
+        comparison["recorded"] = datetime.fromtimestamp(comparison.pop("when"), timezone.utc).strftime("%d %b %Y, %H:%M UTC")
     return {"result": _plain_state(row["state"]), "workflow": report.get("name", "Selected workflow"),
             "saved_version": report.get("version"), "published_baseline_version": report.get("baseline_version"),
             "actual_trial_runs": report.get("observed_runs", 0), "evidence_limit": report.get("evidence"),
+            "known_case_comparison": comparison,
             "restore_behavior": report.get("rollback"),
             "open": {"label": "Open release decisions", "href": "/research#research-promotions"}}
 
@@ -61,6 +67,10 @@ def setup_snapshot(request, _selection, *, rules_only):
                            for index, run in enumerate(row["practice_runs"])] for row in flows},
                        "choices": [{"value": run["id"], "label": row["name"] + " · saved version " + str(row["version"]) + " · practice " + str(index + 1)}
                                    for row in flows for index, run in enumerate(row["practice_runs"])]})
+        fields.append({"name": "comparison", "label": "Known-case comparison", "kind": "select", "required": False,
+                       "depends_on": "flow", "choices_by": {row["id"]: [{"value": "", "label": "Readiness only; no answer comparison"}, *[
+                           {"value": check["id"], "label": str(check["cases"]) + " selected known cases"} for check in row.get("comparisons", [])]] for row in flows},
+                       "choices": [{"value": "", "label": "Readiness only; no answer comparison"}]})
     blocked = "No saved taught workflow is ready for this step. Open the native release preparation controls." if not flows else ""
     return Snapshot(digest([value["context"], flows]), "Current owned taught workflow versions and practice records",
                     "Save a draft that stops when learned rules cannot answer." if rules_only else
@@ -75,20 +85,24 @@ def setup_prepare(request, selection, arguments, *, rules_only):
     row = next((flow for flow in _call(lambda: local.choices(request))["flows"] if flow["id"] == arguments["flow"]), None)
     if row is None or not rules_only and arguments["practice"] not in {run["id"] for run in row["practice_runs"]}:
         raise HTTPException(409, "Choose a current saved workflow and its own completed practice.")
+    if arguments.get("comparison") and arguments["comparison"] not in {check["id"] for check in row.get("comparisons", [])}:
+        raise HTTPException(409, "Choose a current known-case comparison for these exact saved and published rules.")
     return Preview("Save rule-only behavior as a new draft. Existing publication is unchanged." if rules_only else
-                   "Authorize a current independent release administrator to publish only this exact reviewed version and restore its retained baseline. Share this version's instructions, input rules and teaching examples for that review. No release is activated.",
+                   "Authorize a current independent release administrator to publish only this exact reviewed version and restore its retained baseline. Share its instructions, teaching examples and any selected real-case inputs, expected answers and paired results for that exact review. No release is activated.",
                    changes=[{"label": "Workflow", "after": row["name"]},
                             {"label": "Saved version", "after": row["version"]},
                             {"label": "AI fallback", "after": "Stops when rules do not agree"}],
                    native={"flow": row["id"], "version": row["version"], "revision": row["revision"],
-                           "practice": arguments["practice"]})
+                           "practice": arguments["practice"], "comparison": arguments.get("comparison", "")})
 
 
 def setup_execute(request, _selection, arguments, prepared, _operation, *, rules_only):
-    if prepared.get("flow") != arguments["flow"] or prepared.get("practice") != arguments["practice"]:
+    if (prepared.get("flow") != arguments["flow"] or prepared.get("practice") != arguments["practice"]
+            or prepared.get("comparison", "") != arguments.get("comparison", "")):
         raise HTTPException(409, "The selected workflow or practice changed. Review again.")
     body = local.Selection(context=context_for(request), confirm=True, flow_id=arguments["flow"],
-                           version=prepared["version"], revision=prepared["revision"], practice_run=arguments["practice"])
+                           version=prepared["version"], revision=prepared["revision"], practice_run=arguments["practice"],
+                           comparison_id=arguments.get("comparison", ""))
     result = _call(lambda: local.prepare_local_release(request, body, rules_only=rules_only))
     return Outcome("confirmed", result["detail"], {"open": {"label": "Open saved release controls", "href": "/research#local-flow-release"}})
 
@@ -100,7 +114,8 @@ def setup_recover(request, _selection, arguments, prepared, _operation, *, rules
             record = local._target_record()
             if (record["tenant"] != tenant or record["owner"] != actor or record["flow_id"] != arguments["flow"]
                     or record["version"] != prepared["version"] or record["flow_revision"] != prepared["revision"]
-                    or record["practice_run"] != arguments["practice"]):
+                    or record["practice_run"] != arguments["practice"]
+                    or record.get("comparison_id", "") != arguments.get("comparison", "")):
                 return None
             local._practice(record)
         except Exception:

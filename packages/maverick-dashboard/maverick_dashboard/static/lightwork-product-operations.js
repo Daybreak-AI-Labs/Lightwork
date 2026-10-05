@@ -23,6 +23,8 @@
   function button(text, parent, handler) { var control = node('button', text, parent); control.type = 'button'; control.className = 'btn btn--ghost'; control.addEventListener('click', handler); return control; }
   function context() {
     if (overrideSelection) return overrideSelection;
+    var approval = window.location.hash.match(/^#approval-([1-9]\d*)$/);
+    if (approval && ['/approvals', '/oversight'].includes(window.location.pathname) && Number.isSafeInteger(Number(approval[1]))) return {kind: 'approval', id: Number(approval[1])};
     var goal = window.location.pathname.match(/^\/(?:chat\/goal|tasks)\/(\d+)(?:\/|$)/);
     if (goal) return {kind: 'goal', id: Number(goal[1]), goal_id: Number(goal[1])};
     var dsar = window.location.pathname.match(/^\/privacy\/dsar\/(DSAR-[0-9a-f]{10})$/);
@@ -168,6 +170,7 @@
       }
       control = node(choices ? 'select' : spec.kind === 'textarea' ? 'textarea' : 'input', undefined, row);
       control.id = id; control.name = spec.name; control.className = 'input'; control.required = spec.required === true;
+      if (!choices && spec.kind === 'boolean') control.classList.remove('input');
       if (choices && spec.kind === 'multiselect') control.multiple = true;
       if (choices) choices.forEach(function (choice, index) { var option = node('option', choice.label, control); option.value = String(index); option._typedValue = choice.value; if (spec.kind === 'multiselect' ? Array.isArray(spec.value) && spec.value.indexOf(choice.value) >= 0 : choice.value === spec.value) option.selected = true; });
       else { if (control.tagName !== 'TEXTAREA') control.type = spec.kind === 'boolean' ? 'checkbox' : spec.kind === 'number' ? 'number' : spec.kind === 'datetime-local' ? 'datetime-local' : 'text'; if (spec.kind === 'number') { control.step = 'any'; control.min = '0'; } control.maxLength = spec.max_length || 2000; control.value = spec.value === null || spec.value === undefined ? '' : String(spec.value); if (spec.kind === 'boolean') control.checked = spec.value === true; }
@@ -382,5 +385,8 @@
     generation += 1; cancelRequests(); overrideSelection = event.detail && event.detail.selection || null; catalog = null; selected = null; clear(formHost); clear(buttons);
     document.dispatchEvent(new CustomEvent('lightwork:copilot-context-changed'));
     if (!panel.hidden) refresh();
+  });
+  if (['/approvals', '/oversight'].includes(window.location.pathname)) window.addEventListener('hashchange', function () {
+    document.dispatchEvent(new CustomEvent('lightwork:copilot-selection', {detail: {selection: null}}));
   });
 }());

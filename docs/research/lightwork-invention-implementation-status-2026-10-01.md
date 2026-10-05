@@ -94,6 +94,28 @@ research mechanisms or changes the status counts.
 
 ## Earlier research directions
 
+The October 5 bounded F01/F02 native path now joins actual retained published
+runs, owner-labeled expected answers, complete frozen baseline/candidate
+executions, verified source and replay receipts, and the installed independent
+release and exact restoration adapter. Designer provides ordinary case controls;
+Copilot opens them, reads saved results and operates the existing release
+decisions. This specific local rule-only journey passed native and Chromium
+checks. Its constraints and source limits are recorded in the
+[post-install coverage register](../post-install-operation-coverage.md). It
+establishes a usable bounded implementation, without claiming held-out accuracy,
+causal customer lift, universal workflow coverage or research novelty.
+
+October 5 runtime corrections add two specific foundations. F03 outside-agent
+requests now retain distinct unknown-effect and asynchronous-acceptance states,
+with read-only recent receipts in the ordinary page and authorized Copilot;
+neither state automatically repeats an action or claims a business result.
+Native AI circuit admission also binds the admitted tenant/connection and
+permits one cooldown probe, keeping local spending refusals separate from
+provider outages. F05 learned-answer recall now requires the original task's
+current ownership and learning permission, isolates the cache by tenant/path,
+and withholds unbound legacy answers. These are concrete runtime repairs, not
+proof that an entire research direction or installation has been qualified.
+
 | ID | Status | Present code and exact remaining boundary |
 | --- | --- | --- |
 | P01 | Research only | A [feature-prefix transition model](https://github.com/Daybreak-AI-Labs/Lightwork/blob/1c27445dda93e21e2eb38ef2dde5193646832da8/packages/maverick-core/maverick/generative_world_model.py#L1-L25) generalizes within a fixed representation. It does not discover missing state distinctions and revise representation and procedure together. |

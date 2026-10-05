@@ -1375,6 +1375,73 @@ def test_failed_connector_write_reports_failed_status(monkeypatch):
     assert st["status"] == "failed"
 
 
+@pytest.mark.parametrize("failure", ["raised", "metadata", "legacy", "accepted"])
+def test_uncertain_connector_change_retains_identity_and_never_refires(monkeypatch, failure):
+    from maverick import governed_actions
+    from maverick.connector_attempts import ConnectorAttempt, ConnectorResult
+    from maverick.world_model import WorldModel
+
+    class UncertainConn(_FakeConn):
+        def write(self, params):
+            self.writes.append(dict(params))
+            if failure == "raised":
+                raise TimeoutError("reply lost after remote write")
+            if failure == "metadata":
+                return ConnectorResult("unconfirmed", ConnectorAttempt(
+                    request_id="attempt-one", attempt=1, operation="mutation",
+                    dispatch_may_have_happened=True, outcome_unknown=True,
+                ))
+            if failure == "accepted":
+                return ConnectorResult('{"pending":true}', ConnectorAttempt(
+                    request_id="attempt-one", attempt=1, operation="mutation",
+                    status_code=202, dispatch_may_have_happened=True,
+                ))
+            return "INDETERMINATE: reconcile the remote record"
+
+    conn = _wire_fakecrm(monkeypatch, UncertainConn())
+    phases, outcomes = [], []
+    real_record, real_audit = governed_actions.record_tool_lineage, xa._audit_execution
+
+    def record(*args, **kwargs):
+        phases.append(kwargs.get("phase"))
+        return real_record(*args, **kwargs)
+
+    def audit(*args, **kwargs):
+        outcomes.append(args[3])
+        return real_audit(*args, **kwargs)
+
+    monkeypatch.setattr(governed_actions, "record_tool_lineage", record)
+    monkeypatch.setattr(xa, "_audit_execution", audit)
+    _enroll(max_risk="high")
+    parked = xa.execute("sf-quotebot", _write_request())
+    eid = parked["execution_id"]
+    digest = xa._load_sidecar()["sf-quotebot"]["executions"][eid]["digest"]
+    assert WorldModel().decide_approval(
+        parked["approval_id"], "approved", decided_by="admin@corp.test"
+    )
+    committed = xa.execute_commit("sf-quotebot", eid, _write_request())
+    expected = "accepted" if failure == "accepted" else "indeterminate"
+    assert committed["status"] == committed["rule"] == expected
+    assert outcomes == [expected]
+    assert phases == ["prepare", "commit" if failure == "accepted" else "indeterminate"]
+    status = xa.execute_status("sf-quotebot", eid)
+    assert status["status"] == expected
+    assert status["request_sha256"] == digest
+    assert "will not run again" in status["reason"]
+    retained = xa._load_sidecar()["sf-quotebot"]["executions"][eid]
+    assert retained["finished_at"] and retained["digest"] == digest
+    original_bytes = xa.registry_path().read_bytes()
+    detail = xa.agent_detail("sf-quotebot")
+    assert detail["executions"][0]["status"] == expected
+    assert detail["execution_coverage"]["displayed_count"] == 1
+    assert not ({"digest", "path", "body", "request_sha256"} & detail["executions"][0].keys())
+    assert xa.registry_path().read_bytes() == original_bytes
+    replay = xa.execute_commit("sf-quotebot", eid, _write_request())
+    assert replay["status"] == expected
+    assert replay["rule"] == "already_finished"
+    assert len(conn.writes) == 1
+
+
 def test_roster_and_status_surface_execution_counters(monkeypatch):
     _wire_fakecrm(monkeypatch)
     _enroll(max_risk="high")

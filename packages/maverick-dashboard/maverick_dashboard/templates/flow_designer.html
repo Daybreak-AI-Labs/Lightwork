@@ -456,6 +456,7 @@
 </div>
 
 {% if flow_id %}{% include "_workflow_explanation.html" %}{% endif %}
+{% if flow_id %}<a class="btn btn--ghost" href="/learning/flow-checks?workflow={{ flow_id|urlencode }}">Compare saved rules on real cases</a>{% endif %}
 
 <!-- Outside all view-specific containers: the same conversation is available
      from the default Steps view and the advanced Canvas. -->

@@ -264,7 +264,8 @@ def execute(flow: Flow, *, agent_runner: AgentRunner, action_runner: ActionRunne
             inputs: dict | None = None, record_outcomes: bool = True,
             agent_budget_dollars: float = DEFAULT_AGENT_BUDGET, origin: str = "manual",
             now: Callable[[], float] | None = None,
-            episode_capture: ActionEpisodeCapture | None = None) -> store.FlowRun:
+            episode_capture: ActionEpisodeCapture | None = None,
+            execution_guard: Callable[[], None] | None = None) -> store.FlowRun:
     """Run ``flow`` (or resume a paused run) with live executors, persisting the
     resulting :class:`~.store.FlowRun`. ``run_id`` pre-assigns a fresh run's id
     (so a caller can hand it back for polling); ``decision`` is the human verdict
@@ -497,6 +498,8 @@ def execute(flow: Flow, *, agent_runner: AgentRunner, action_runner: ActionRunne
                 durations[node_id] = durations.get(node_id, 0.0) + dt
 
     def _on_node(node: FlowNode, status: str, outcome: float | None) -> None:
+        if execution_guard is not None:
+            execution_guard()
         with trace_lock:
             entry: dict = {"status": status, "outcome": outcome}
             if node.id in durations:

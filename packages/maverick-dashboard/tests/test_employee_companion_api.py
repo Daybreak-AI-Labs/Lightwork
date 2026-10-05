@@ -1103,6 +1103,125 @@ def test_copilot_reviews_and_clears_only_owned_current_companion_history(environ
     assert environment.client.post(base + "/execute", headers=headers, json=payload).status_code == 403
 
 
+def _conversation_copilot(environment, monkeypatch):
+    from maverick.governed_operations import digest
+    from maverick_dashboard import product_operations as operations
+    from maverick_dashboard import product_operations_companion_conversation as controls
+
+    monkeypatch.setattr(operations, "_gate", lambda _request: None)
+    monkeypatch.setattr(operations, "enabled_families", lambda: {"preferences"})
+    monkeypatch.setattr(operations, "_context", lambda request: digest([
+        request.headers.get("X-Test-Principal"), request.headers.get("X-Test-Tenant")]))
+    monkeypatch.setattr(operations, "adapters", lambda: {entry.id: entry for entry in controls.entries()})
+    monkeypatch.setattr(companion.companion_model, "draft_limits", lambda: {
+        "max_dollars": 0.25, "max_input_tokens": 16000, "max_output_tokens": 2000,
+        "max_wall_seconds": 90, "max_tool_calls": 0})
+    base = "/api/v1/copilot/product-operations"
+    selection = {"kind": "own_companion"}
+
+    def prepare(operation="companion.draft", message="Please draft my private update"):
+        catalog = _ok(environment.client.post(base + "/catalog", headers=_headers(),
+            json={"page": "/companion", "selection": selection}))
+        item = next(row for row in catalog["operations"] if row["id"] == operation)
+        return environment.client.post(base + "/prepare", headers=_headers(), json={
+            "page": "/companion", "selection": selection, "operation": operation,
+            "context": catalog["context"], "revision": item["revision"],
+            "arguments": {"message": message} if operation == "companion.draft" else {}})
+
+    return base, prepare
+
+
+def test_copilot_conversation_runs_native_once_and_recovers_exact_retained_reply(environment, draft_generation, monkeypatch):
+    environment.policy(allowed_tools=["task_status", "draft_reply"])
+    world = environment.worlds["acme"]
+    goal = world.create_goal("Alice's reviewable work", owner=ALICE)
+    world.create_goal("Bob's secret work", owner=BOB)
+    base, prepare = _conversation_copilot(environment, monkeypatch)
+    read = _ok(prepare("companion.work"))
+    assert read["read_only"] and "Alice's reviewable work" in str(read)
+    assert "Bob's secret work" not in str(read) and draft_generation.calls == []
+    review = _ok(prepare())
+    assert "Maximum AI spend" in str(review) and "$0.25" in str(review)
+    assert draft_generation.calls == []
+    payload = {"token": review["token"], "confirmed": True}
+    assert environment.client.post(base + "/execute", headers=_headers(),
+        json={**payload, "confirmed": False}).status_code == 400
+    original_generate = draft_generation.generate
+
+    def outside_fence(**arguments):
+        # Another thread must obtain the authority fence while generation runs.
+        from maverick.authority_effects import authority_effect_fence
+
+        def acquire():
+            with authority_effect_fence():
+                return True
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            assert pool.submit(acquire).result(timeout=3)
+        return original_generate(**arguments)
+    monkeypatch.setattr(companion.companion_model, "generate_draft", outside_fence)
+    accepted = _ok(environment.client.post(base + "/execute", headers=_headers(), json=payload))
+    assert accepted["status"] == "queued"
+    assert len(draft_generation.dispatched) == 1
+    assert [row["goal_id"] for row in draft_generation.dispatched[0]["tasks"]] == [goal]
+    recovered = _ok(environment.client.post(base + "/execute", headers=_headers(), json=payload))
+    assert recovered["status"] == "replayed" and recovered["details"]["draft_to_review"] == draft_generation.reply
+    assert len(draft_generation.calls) == 1
+    request_id = recovered["details"]["open_reply"]["href"].split("?reply=")[1]
+    assert environment.request_status(request_id)["retained_reply"]["content"] == draft_generation.reply
+    for actor, tenant in ((BOB, "acme"), (ADMIN, "acme"), (ALICE, "globex")):
+        assert environment.request_status(request_id, actor=actor, tenant=tenant)["retained_reply"] is None
+        assert environment.client.post(base + "/execute", headers=_headers(actor, tenant), json=payload).status_code == 409
+    current = environment.view()
+    _ok(environment.client.request("DELETE", BASE + "/history", headers=_headers(context=current["context"]),
+        json={"expected_revision": current["history_revision"]}))
+    withheld = _ok(environment.client.post(base + "/execute", headers=_headers(), json=payload))
+    assert withheld["status"] == "unconfirmed" and draft_generation.reply not in str(withheld)
+    assert environment.request_status(request_id)["retained_reply"] is None
+    assert len(draft_generation.calls) == 1
+
+
+@pytest.mark.parametrize("changed", ["policy", "task", "route", "allowance", "membership"])
+def test_copilot_conversation_refuses_changed_review_before_provider(environment, draft_generation, monkeypatch, changed):
+    environment.policy(allowed_tools=["task_status", "draft_reply"])
+    base, prepare = _conversation_copilot(environment, monkeypatch)
+    reviewed = _ok(prepare())
+    if changed == "policy":
+        environment.policy(allowed_tools=["task_status"])
+    elif changed == "task":
+        environment.worlds["acme"].create_goal("Work created after review", owner=ALICE)
+    elif changed == "route":
+        monkeypatch.setattr(companion.companion_model, "prepare_route", lambda: companion.companion_model.CompanionModelRoute(
+            model="mock:companion-test-route", provider="mock", fingerprint="b" * 64, tenant=current_tenant_id_strict()))
+    elif changed == "allowance":
+        monkeypatch.setattr(companion.companion_model, "draft_limits", lambda: {"max_dollars": 0.5})
+    else:
+        environment.memberships["acme"][ALICE] = None
+    response = environment.client.post(base + "/execute", headers=_headers(),
+        json={"token": reviewed["token"], "confirmed": True})
+    assert response.status_code == (403 if changed == "membership" else 409)
+    assert draft_generation.calls == []
+
+
+def test_copilot_conversation_unsaved_answers_handoff_and_physical_revocation(environment, draft_generation, monkeypatch):
+    environment.policy(allowed_tools=["task_status", "draft_reply"], retention_days=0)
+    base, prepare = _conversation_copilot(environment, monkeypatch)
+    refused = prepare()
+    assert refused.status_code == 409 and "Ask companion" in refused.text
+    environment.policy(allowed_tools=["task_status", "draft_reply"], retention_days=7)
+    reviewed = _ok(prepare())
+
+    def revoke():
+        environment.active[ALICE] = False
+    draft_generation.before_dispatch = revoke
+    accepted = _ok(environment.client.post(base + "/execute", headers=_headers(),
+        json={"token": reviewed["token"], "confirmed": True}))
+    assert accepted["status"] == "queued" and draft_generation.dispatched == []
+    environment.active[ALICE] = True
+    stopped = _ok(environment.client.post(base + "/execute", headers=_headers(),
+        json={"token": reviewed["token"], "confirmed": True}))
+    assert stopped["status"] == "unconfirmed" and len(draft_generation.calls) == 1
+
+
 def test_copilot_admin_policy_uses_native_revision_and_current_membership(environment, monkeypatch):
     from maverick.governed_operations import digest
     from maverick_dashboard import product_operations as operations

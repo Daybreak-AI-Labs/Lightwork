@@ -1510,6 +1510,9 @@ from . import local_flow_promotions  # noqa: E402
 
 app.include_router(local_flow_promotions.router)
 app.include_router(local_flow_promotions.asset_router)
+from . import local_flow_comparisons  # noqa: E402
+
+app.include_router(local_flow_comparisons.router)
 from . import instruction_capture_api  # noqa: E402
 
 app.include_router(instruction_capture_api.router)
@@ -6895,13 +6898,13 @@ async def external_agent_scorecard(request: Request, agent_id: str) -> HTMLRespo
     wall violations, credentials)."""
     from maverick import external_agents as xa
 
-    try:
-        detail = xa.agent_detail(agent_id)
-    except xa.ExternalAgentsError as e:
-        raise HTTPException(status_code=404, detail=str(e)) from e
+    from .external_agent_detail_service import detail_for
+
+    detail = await run_in_threadpool(detail_for, request, agent_id)
     can_manage = xa.enabled() and xa.entitled() and has_permission(request, "admin")
     return templates.TemplateResponse(
-        request, "external_agent_detail.html", {"a": detail, "can_manage": can_manage}
+        request, "external_agent_detail.html", {"a": detail, "can_manage": can_manage},
+        headers={"Cache-Control": "private, no-store"}
     )
 
 
@@ -12452,6 +12455,7 @@ async def shell_copilot_js() -> FileResponse:
 @app.get("/static/lightwork-deliverable-bundles.js")
 @app.get("/static/lightwork-deliverable-sharing.js")
 @app.get("/static/lightwork-employee-companion.js")
+@app.get("/static/lightwork-external-agent-executions.js")
 @app.get("/static/lightwork-file-selection.js")
 @app.get("/static/lightwork-my-work.js")
 @app.get("/static/lightwork-permission-requests.js")

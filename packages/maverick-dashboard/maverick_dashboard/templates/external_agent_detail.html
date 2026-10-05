@@ -34,6 +34,28 @@
 
   {% include "_external_agent_actions.html" %}
 
+  {% macro execution_card(entry) %}
+  <article class="panel" style="margin-top: var(--space-3); overflow-wrap: anywhere;">
+    <h3>{{ entry.connector }} · {{ entry.action }}</h3>
+    <p class="badge {{ entry.tone }}">{{ entry.status }}</p>
+    {% if entry.notice %}<p>{{ entry.notice }}</p>{% endif %}
+    <p class="muted">Requested {{ entry.created_at | datetime if entry.created_at else 'time unavailable' }}{% if entry.claimed_at %} · Started {{ entry.claimed_at | datetime }}{% endif %}{% if entry.finished_at %} · Recorded {{ entry.finished_at | datetime }}{% endif %}</p>
+    <details><summary>Execution reference</summary><p>{{ entry.execution_id }}</p></details>
+  </article>
+  {% endmacro %}
+  <section class="panel" id="xa-executions" data-agent="{{ a.id }}" aria-labelledby="xa-execution-heading">
+    <h2 id="xa-execution-heading" style="margin-top:0">Recent connected changes</h2>
+    <p>Saved outcomes for changes requested by this agent. If a result is unknown, check the connected service before submitting another request. This page never retries a change.</p>
+    <div class="mv-row__actions" style="flex-wrap:wrap"><button class="btn btn--ghost" id="xa-execution-refresh" type="button">Reload saved status</button><button class="btn btn--ghost" id="xa-execution-copilot" type="button">Ask Copilot about these changes</button></div>
+    <p class="muted" id="xa-execution-coverage">Showing {{ a.execution_coverage.displayed_count }} of {{ a.execution_coverage.retained_count }} retained records. Latest {{ a.execution_coverage.limit }} at most, kept for {{ a.execution_coverage.retention_seconds // 3600 }} hours. This is not a complete activity archive.</p>
+    <p class="muted" id="xa-execution-status" role="status" aria-live="polite">Saved status loaded. No connected change or retry was sent.</p>
+    <div id="xa-execution-rows">
+      {% for entry in a.execution_readback[:3] %}{{ execution_card(entry) }}{% endfor %}
+      {% if a.execution_readback | length > 3 %}<details data-earlier-executions><summary>Earlier retained changes ({{ (a.execution_readback | length) - 3 }})</summary>{% for entry in a.execution_readback[3:] %}{{ execution_card(entry) }}{% endfor %}</details>{% endif %}
+      {% if not a.execution_readback %}<p>No connected changes remain in this local execution ledger. Older records may have expired.</p>{% endif %}
+    </div>
+  </section>
+
   <div class="panel">
     <h2 style="margin-top:0">Spend and budget</h2>
     <table>
@@ -104,3 +126,4 @@
     {% endif %}
   </div>
 {% endblock %}
+{% block scripts_extra %}<script src="{{ asset('lightwork-external-agent-executions.js') }}" defer></script>{% endblock %}

@@ -29,6 +29,11 @@ def providers_snapshot(request, selection):
             for row in current["providers"] if row["routed"] or row["configured"]]
     details = {"overall": current["verdict_label"], "next_step": current["reason"],
                "services": rows, "href": "/settings"}
+    from .system_checks_api import _diagnostics
+
+    observed = _diagnostics()
+    details.update(recorded_connection_pauses=observed["paused_services"], recent_calls=observed["recent_calls"],
+                   observation_scope="Recent local records only. A pause can belong to an older connection configuration. No service was contacted or work retried; no recorded pause does not establish availability.")
     return Snapshot(digest(details), "Current AI service and model routing status",
                     current["summary"] + ". " + current["reason"], details=details)
 
@@ -127,7 +132,7 @@ def entries():
     return [Adapter("models.provider_status", "Check AI service status", "models", "/settings",
                     (*pages, "/providers"),
                     EmptyInput, providers_snapshot, providers_prepare,
-                    aliases=("which ai services are connected", "which ai provider is in use", "check model connection")),
+                    aliases=("which ai services are connected", "which ai provider is in use", "check model connection", "which services are paused")),
             Adapter("models.guidance", "Compare model capabilities", "models", "/settings", pages, EmptyInput, snapshot,
                     lambda request, selection, args: Preview("Current model evidence", native=snapshot(request, selection).details)),
             Adapter("models.test", "Run a bounded model test", "models", "/settings", pages, TestInput, test_snapshot, prepare_test, execute_test, recover_test),

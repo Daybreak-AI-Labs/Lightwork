@@ -735,9 +735,9 @@
     <div data-maintenance-out="encryption"></div>
   </div>
 
-  <div class="section-head" data-settings-group="maintenance"><h2>Live service status</h2></div>
+  <div class="section-head" data-settings-group="maintenance"><h2 id="maintenance-service-status">Recent service status</h2></div>
   <div class="panel" data-settings-group="maintenance" data-maintenance="diagnostics">
-    <p class="muted settings-lead">Which AI services Lightwork is calling right now, and any it has paused after repeated errors.</p>
+    <p class="muted settings-lead">Recent requests and recorded connection pauses on this server. Checking this view does not contact a service or retry work.</p>
     <p class="settings-row-form"><button type="button" class="btn" data-maintenance-run="diagnostics">Check services</button>
       <a class="btn btn--ghost" href="/help">Prepare a support report</a></p>
     <p class="muted" role="status" aria-live="polite" data-maintenance-status="diagnostics"></p>

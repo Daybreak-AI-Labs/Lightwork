@@ -150,6 +150,11 @@ def _practice(record):
                    sorted((key, row.get("status"), row.get("outcome")) for key, row in run.nodes.items())])
     if result != record["practice_result"]:
         raise CandidatePromotionConflict("The recorded practice result changed. Prepare a new review.")
+    if record.get("comparison_id"):
+        from .local_flow_comparisons import validate_release
+        comparison = validate_release(record["comparison_id"], record)
+        if comparison["binding"] != record.get("comparison_binding"):
+            raise CandidatePromotionConflict("The known-case comparison changed. Prepare a new release review.")
     return flow, root, bundle_sha, size, result
 
 
@@ -174,8 +179,16 @@ def run_admission(tenant, principal, run_id):
         authority = _owner_authority(tenant, principal)
         artifact = ArtifactCommitment("taught-flow", "bundle", f"artifact:flow-bundle/{flow.id}/{root}", bundle_sha, size)
         protocol = _sha(PROTOCOL)
+        evaluator = "native-flow-practice"
+        if record.get("comparison_id"):
+            from .local_flow_comparisons import PROTOCOL as comparison_protocol
+            from .local_flow_comparisons import validate_release
+            comparison = validate_release(record["comparison_id"], record)
+            result = _sha([result, comparison["binding"], comparison["results"]])
+            protocol = _sha([PROTOCOL, comparison_protocol])
+            evaluator = "native-flow-known-cases"
         study = StudyClaim(_sha([record["run_id"], result, PROTOCOL]), "qualified", result,
-                           "native-flow-practice", "v1", protocol)
+                           evaluator, "v1", protocol)
         admission = TrustedStudyAdmission(tenant, run_id, _sha([flow.id, root]), result, bundle_sha,
                                          study, (artifact,), _sha([record["binding"], authority]))
         return RunPromotionAdmission(tenant, principal, "flow-run:" + record["practice_run"], run_id,
@@ -231,6 +244,21 @@ def release_status(manifest, *, review=False):
               "current_release": "candidate" if current else "previous" if active and active[1]["release_digest"] == record["baseline"]["release_digest"] else "other",
               "evidence": "Exact-version practice is readiness evidence. The latest 1,000 retained runs are checked for this activation's failures, not correctness or business improvement.",
               "rollback": "Restores the previous published rules with a fresh authorization. Waiting work from either old release stays revoked. Your saved draft is kept."}
+    if record.get("comparison_id"):
+        from .local_flow_comparisons import summary, validate_release
+        try:
+            comparison = validate_release(record["comparison_id"], record)
+            result["known_case_comparison"] = summary(comparison)
+            if review:
+                def plain(value):
+                    return "Yes" if value is True else "No" if value is False else str(value) if value is not None else "No result recorded"
+                result["known_case_comparison"]["reviewed_cases"] = [
+                    {"expected": plain(case["expected"]), "inputs": case["inputs"],
+                     "baseline": plain(pair["baseline"]["result"]), "candidate": plain(pair["candidate"]["result"]),
+                     "baseline_matched": pair["baseline"]["matches"], "candidate_matched": pair["candidate"]["matches"]}
+                    for case, pair in zip(comparison["cases"], comparison["results"], strict=True)]
+        except (CandidatePromotionConflict, CandidatePromotionDenied):
+            result["known_case_comparison"] = {"scope": "The original cases are no longer available or their exact binding changed. No current agreement result is claimed."}
     if review:
         names = {key: node.label or "Step " + str(index + 1) for index, (key, node) in enumerate(root.nodes.items())}
         result["steps"] = [{"label": node.label or "Step " + str(index + 1), "kind": node.kind,
@@ -418,6 +446,7 @@ class Selection(BaseModel):
     version: int = Field(ge=1)
     revision: str = Field(min_length=1, max_length=128)
     practice_run: str = Field(default="", max_length=128)
+    comparison_id: str = Field(default="", pattern=r"^(?:FCP-[a-f0-9]{32})?$")
 
 
 def choices(request):
@@ -426,6 +455,8 @@ def choices(request):
 
     tenant, actor, context = _binding(request, Response())
     flows = []
+    from .local_flow_comparisons import records as comparisons
+    comparison_rows = comparisons().list(limit=1000) if getattr(request.app.state, "local_flow_promotions_installed", False) else []
     for flow in store.list_flows():
         if flow.owner != actor:
             continue
@@ -437,10 +468,14 @@ def choices(request):
         runs = [run for run in store.list_runs(flow_id=flow.id, owner=actor)
                 if run.dry_run and run.status == runner.STATUS_COMPLETED and run.definition_digest == root]
         published = store.load_published_bundle(flow.id)
+        checks = [{"id": row["id"], "when": row["created_at"], "cases": len(row["cases"])}
+                  for row in comparison_rows if row.get("flow_id") == flow.id and row.get("owner") == actor
+                  and row.get("root") == root and row.get("state") == "done" and published and row.get("baseline") == published[1]]
         flows.append({"id": flow.id, "name": flow.name, "version": flow.version, "revision": flow.revision,
                       "rules_only": all(node.learned_fallback is False for node in flow.nodes.values() if node.kind == "agent"),
                       "published": published is not None, "practice_runs": [{"id": run.run_id, "created": run.created} for run in runs[:50]],
                       "baseline_version": published[0].version if published else None,
+                      "comparisons": checks[-50:],
                       "href": "/flows/" + flow.id})
     prepared = None
     try:
@@ -448,7 +483,7 @@ def choices(request):
         if record["tenant"] == tenant and record["owner"] == actor:
             _practice(record)
             prepared = {"flow_id": record["flow_id"], "version": record["version"],
-                        "practice_run": record["practice_run"]}
+                        "practice_run": record["practice_run"], "comparison_id": record.get("comparison_id", "")}
     except (CandidatePromotionUnavailable, CandidatePromotionConflict, CandidatePromotionDenied):
         pass
     return {"context": context, "enabled": candidate_promotion_enabled(), "flows": flows, "prepared": prepared,
@@ -494,6 +529,10 @@ def prepare_local_release(request, payload, *, rules_only=False):
         material = {"tenant": tenant, "owner": actor, "flow_id": flow.id, "root": root, "bundle_sha": bundle_sha,
                     "version": flow.version, "flow_revision": flow.revision, "baseline": baseline[1],
                     "practice_run": run.run_id, "practice_result": result}
+        if payload.comparison_id:
+            from .local_flow_comparisons import validate_release
+            comparison = validate_release(payload.comparison_id, material)
+            material.update(comparison_id=comparison["id"], comparison_binding=comparison["binding"])
         material["release_authorization"] = {"owner": actor, "bundle_sha": bundle_sha,
             "baseline_release": baseline[1]["release_id"], "flow_revision": flow.revision,
             "scope": "independent_publish_and_retained_restore"}

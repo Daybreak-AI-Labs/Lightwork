@@ -200,6 +200,13 @@
       line(item, 'Actual finished release runs', release.observed_runs || 0);
       line(item, 'Evidence limit', release.evidence);
       line(item, 'Restore behavior', release.rollback || 'Retained release must be checked before restoration.');
+      const known = release.known_case_comparison;
+      if (known?.cases) {
+        line(item, 'Selected known cases', known.cases);
+        line(item, 'Expected answers matched', 'Published rules: ' + known.baseline_matches + ' · proposed rules: ' + known.candidate_matches);
+        line(item, 'Local replay time', 'Published rules: ' + known.baseline_elapsed_ms + ' ms · proposed rules: ' + known.candidate_elapsed_ms + ' ms');
+      }
+      if (known?.scope) line(item, 'Comparison scope', known.scope);
       if (canManage) {
         const review = element('button', 'Read exact workflow instructions and examples', 'btn btn--ghost');
         review.type = 'button';
@@ -210,6 +217,14 @@
             const report = await readJSON('/api/v1/research/local-flow-release/review/' + encodeURIComponent(candidate.candidate_id));
             const previous = item.querySelector('[data-local-release-review]'); if (previous) previous.remove();
             const panel = element('div', undefined, 'research-advanced'); panel.dataset.localReleaseReview = 'true';
+            (report.known_case_comparison?.reviewed_cases || []).forEach((example, index) => {
+              const section = element('section'); section.appendChild(element('strong', 'Selected real case ' + (index + 1)));
+              line(section, 'Expected final answer', example.expected);
+              line(section, 'Published-rule answer', example.baseline + ' · ' + (example.baseline_matched ? 'Matches expected answer' : 'Does not match'));
+              line(section, 'Proposed-rule answer', example.candidate + ' · ' + (example.candidate_matched ? 'Matches expected answer' : 'Does not match'));
+              Object.entries(example.inputs || {}).forEach(([name, value]) => line(section, name.replace(/_/g, ' '), typeof value === 'object' ? Object.entries(value).map(([key, item]) => key.replace(/_/g, ' ') + ': ' + String(item)).join(' · ') : String(value)));
+              panel.appendChild(section);
+            });
             (report.steps || []).forEach(step => {
               const section = element('section'); section.appendChild(element('strong', step.label));
               if (step.instructions) line(section, 'Work instructions', step.instructions);

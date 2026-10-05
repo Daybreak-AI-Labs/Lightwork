@@ -113,18 +113,20 @@ def _check_admission(actor: str, tenant: str) -> None:
 
 
 def _turn_budget():
-    configured = resolve_budget_caps()
-    caps = {
-        key: ceiling if configured.get(key) is None else min(ceiling, configured[key])
-        for key, ceiling in _TURN_CAPS.items()
-    }
-    budget = budget_from_config(**caps)
+    budget = budget_from_config(**draft_limits())
     if getattr(budget, "_tenant_refusal", None):
         raise CompanionModelUnavailable("This workspace's AI allowance is unavailable or exhausted.")
     if budget.max_input_tokens <= 0 or budget.max_output_tokens <= 0:
         raise CompanionModelUnavailable("The configured token allowance does not permit an AI reply.")
     budget.check()
     return budget
+
+
+def draft_limits() -> dict:
+    """Review the effective native ceilings without dispatching an AI request."""
+    configured = resolve_budget_caps()
+    return {key: ceiling if configured.get(key) is None else min(ceiling, configured[key])
+            for key, ceiling in _TURN_CAPS.items()}
 
 
 def _bounded_context(history: list[dict], tasks: list[dict]) -> str:

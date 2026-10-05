@@ -14806,16 +14806,13 @@ async def external_agent_reset_budget(request: Request, agent_id: str) -> dict:
 
 
 @router.get("/external-agents/{agent_id}")
-async def external_agent_detail(request: Request, agent_id: str) -> dict:
+async def external_agent_detail(request: Request, agent_id: str, response: Response) -> dict:
     """One enrolled agent: roster row + its Operating Record footprint
     (spend, recent episodes)."""
-    require_page_permission(request, "/external-agents")
-    from maverick import external_agents as xa
+    from .external_agent_detail_service import detail_for
 
-    try:
-        return xa.agent_detail(agent_id)
-    except xa.ExternalAgentsError as e:
-        raise HTTPException(status_code=404, detail=str(e)) from e
+    response.headers["Cache-Control"] = "private, no-store"
+    return await run_in_threadpool(detail_for, request, agent_id)
 
 
 @router.post("/external-agents/{agent_id}/credentials")
@@ -15191,6 +15188,68 @@ def _approval_decision_response(world, event, audit_delivered: bool) -> Response
     )
 
 
+def _decide_approval(request: Request, approval_id: int, payload: dict, status: str, *,
+                     binding: str | None = None, reviewed: dict | None = None) -> Response:
+    """The synchronous native queue decision, shared with typed Copilot controls.
+
+    The HTTP routes retain their exact statuses, headers and denial-note
+    behavior. Copilot additionally binds the queued material at this effect
+    boundary; callers cannot provide a substitute authority or actor.
+    """
+    from .approval_authority import require_approval_authority
+
+    if status not in {"approved", "denied"}:
+        raise HTTPException(422, "Choose approve or reject.")
+    approving = status == "approved"
+    require_approval_authority(request, action="approval.approve" if approving else "approval.deny",
+                               resource=str(approval_id))
+    who, world = _supervisor(request), _world()
+    _require_settings_decider(request, world, approval_id, who, approving=approving)
+    from .approval_queue_operations import guard, require_review
+
+    vote_guard = reviewed
+    if reviewed is None:
+        original = world.get_approval(approval_id)
+        event_id = world.approval_audit_event_id(approval_id, status, who)
+        if original is not None and world.get_approval_audit_event(event_id) is None:
+            vote_guard = guard(world, original, who, status,
+                               request.headers.get("X-Lightwork-Approval-Binding", "") if binding is None else binding,
+                               bind_state=False)
+    if approving:
+        if binding is None:
+            _require_current_decision_card(world, approval_id, request)
+        else:
+            require_current_decision_card(world, approval_id, binding)
+        _require_acknowledgement(world, approval_id, payload, who, channel="dashboard")
+    reason = " ".join(str(payload.get("reason") or "").split())[:2000] if not approving else ""
+    before = world.get_approval(approval_id) if reason else None
+    if reviewed is not None:
+        require_review(request, world, approval_id, status, reviewed)
+    event = (_record_vote_or_raise(world, approval_id, status, who) if vote_guard is None
+             else _record_vote_or_raise(world, approval_id, status, who, reviewed_card=vote_guard))
+    delivered = _audit_approval_decision(world, event)
+    if reason and delivered and before is not None:
+        from maverick import audit
+        from maverick.safety.secret_detector import redact
+
+        try:
+            reason, _matches = redact(reason)
+        except Exception:
+            reason = "Reason removed because redaction failed."
+        label = _safe_action_label(before)
+        if not audit.audit_event(
+            audit.EventKind.CONSENT_RESULT,
+            agent=who,
+            actor=who,
+            action="approval_rejection_reason",
+            approval_id=int(approval_id),
+            reason=reason,
+            summary=f"{who} rejected '{label}' and gave a reason: {reason}",
+        ):
+            log.warning("approval rejection reason audit write failed (approval_id=%s)", approval_id)
+    return _approval_decision_response(world, event, delivered)
+
+
 @router.post(
     "/approvals/{approval_id}/approve",
     status_code=204,
@@ -15218,21 +15277,9 @@ async def approve_approval(request: Request, approval_id: int) -> Response:
     the JSON body (see ``_require_acknowledgement``)."""
     from .approval_authority import require_approval_authority
 
-    require_approval_authority(
-        request, action="approval.approve", resource=str(approval_id),
-    )
+    require_approval_authority(request, action="approval.approve", resource=str(approval_id))
     payload = await _decision_payload(request)
-    who = _supervisor(request)
-    world = _world()
-    _require_settings_decider(request, world, approval_id, who, approving=True)
-    _require_current_decision_card(world, approval_id, request)
-    _require_acknowledgement(world, approval_id, payload, who, channel="dashboard")
-    event = _record_vote_or_raise(world, approval_id, "approved", who)
-    return _approval_decision_response(
-        world,
-        event,
-        _audit_approval_decision(world, event),
-    )
+    return _decide_approval(request, approval_id, payload, "approved")
 
 
 @router.post(
@@ -15259,37 +15306,9 @@ async def deny_approval(request: Request, approval_id: int) -> Response:
     then refuses it. An optional JSON ``reason`` is written to the audit log."""
     from .approval_authority import require_approval_authority
 
-    require_approval_authority(
-        request, action="approval.deny", resource=str(approval_id),
-    )
+    require_approval_authority(request, action="approval.deny", resource=str(approval_id))
     payload = await _decision_payload(request)
-    who = _supervisor(request)
-    world = _world()
-    _require_settings_decider(request, world, approval_id, who, approving=False)
-    reason = " ".join(str(payload.get("reason") or "").split())[:2000]
-    before = world.get_approval(approval_id) if reason else None
-    event = _record_vote_or_raise(world, approval_id, "denied", who)
-    delivered = _audit_approval_decision(world, event)
-    if reason and delivered and before is not None:
-        from maverick import audit
-        from maverick.safety.secret_detector import redact
-
-        try:
-            reason, _matches = redact(reason)
-        except Exception:
-            reason = "Reason removed because redaction failed."
-        label = _safe_action_label(before)
-        if not audit.audit_event(
-            audit.EventKind.CONSENT_RESULT,
-            agent=who,
-            actor=who,
-            action="approval_rejection_reason",
-            approval_id=int(approval_id),
-            reason=reason,
-            summary=f"{who} rejected '{label}' and gave a reason: {reason}",
-        ):
-            log.warning("approval rejection reason audit write failed (approval_id=%s)", approval_id)
-    return _approval_decision_response(world, event, delivered)
+    return _decide_approval(request, approval_id, payload, "denied")
 
 
 @router.post("/approvals/{approval_id}/undo")

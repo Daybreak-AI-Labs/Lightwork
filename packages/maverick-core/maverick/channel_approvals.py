@@ -383,7 +383,8 @@ def audit_approval_decision(world, event) -> bool:
 # The vote itself (shared by the dashboard routes and every channel).
 # ----------------------------------------------------------------------------
 
-def record_vote(world: Any, approval_id: int, status: str, who: str) -> Any:
+def record_vote(world: Any, approval_id: int, status: str, who: str, *,
+                reviewed_card: dict | None = None) -> Any:
     """Apply one approver's vote and return its outbox event.
 
     Under N-of-M dual control a vote can be refused for segregation-of-duties
@@ -399,7 +400,13 @@ def record_vote(world: Any, approval_id: int, status: str, who: str) -> Any:
     """
     event_id = world.approval_audit_event_id(approval_id, status, who)
     try:
-        event = world.decide_approval_audited(approval_id, status, decided_by=who)
+        event = (world.decide_approval_audited(approval_id, status, decided_by=who)
+                 if reviewed_card is None else world.decide_approval_audited(
+                     approval_id, status, decided_by=who, reviewed_card=reviewed_card))
+    except ChannelApprovalRefused:
+        # A known atomic review refusal is not a lost commit acknowledgement.
+        # Never replace it with an unrelated pre-existing vote's readback.
+        raise
     except Exception as decision_error:
         try:
             event = world.get_approval_audit_event(event_id)
