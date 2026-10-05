@@ -227,8 +227,11 @@ token = "${MAVERICK_DASHBOARD_TOKEN}"
 # every page in one of nine job-named areas (Home, Work, Agents, Rules &
 # safety, Privacy, Risk & compliance, Evidence & audit, Costs & value,
 # Settings) with local tabs and an "Area › Section" breadcrumb, and starts
-# each role from its own layout. Who may open a page never changes. Run the
-# tree test in docs/research/tree-test/ before switching everyone.
+# each role from its own layout. Who may open a page never changes. Pages
+# merged into another page's tab forward there (/run-tree opens Task replay's
+# Branches tab, /flows/designer the workflow builder's Steps mode) for anyone
+# that page admits; everyone else, and classic mode, keeps the old address.
+# Run the tree test in docs/research/tree-test/ before switching everyone.
 # navigation_personal = true lets each person choose for themselves in Your
 # preferences. Settings > All settings and the setup wizard set both.
 # navigation = "classic"

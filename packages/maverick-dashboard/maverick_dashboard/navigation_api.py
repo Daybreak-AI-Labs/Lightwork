@@ -325,18 +325,38 @@ def area_context(request: Request, role, finder_pages, off_pages, can_turn_on) -
     shown = {area["title"] for area in nav["sidebar"]}
     nav["hidden"] = [area for area in nav["by_title"].values() if area["sidebar"] and area["title"] not in shown]
     nav["here"] = None
-    for area in nav["by_title"].values():  # link straight to an address's new home
-        area["href"] = redirect_target(area["href"]) or area["href"]
+    allowed = {link["href"] for group in finder_pages for link in group["links"]}
+    homes: dict[str, str] = {}
+
+    def home(href: str) -> str:
+        # Link straight to an address's new home -- only for people the new
+        # home admits; everyone else keeps the old address, which still works.
+        if href not in homes:
+            target = redirect_target(href)
+            page = page_for(target.split("?")[0]) if target else None
+            admitted = target and (page is None or page["path"] in allowed) and _admits(request, target)
+            homes[href] = target if admitted else href
+        return homes[href]
+
+    for area in nav["by_title"].values():
+        area["href"] = home(area["href"])
         for section in area["sections"]:
-            section["href"] = redirect_target(section["href"]) or section["href"]
+            section["href"] = home(section["href"])
+            listed = {link["href"] for link in section["links"]}
+            kept = []
             for link in section["links"]:
-                link["href"] = redirect_target(link["href"]) or link["href"]
+                moved = home(link["href"])
+                if moved != link["href"] and moved.split("?")[0] in listed:
+                    continue  # its job is now a tab of a page this section already lists
+                link["href"] = moved
+                kept.append(link)
+            section["links"] = kept
     page = page_for("/today" if request.url.path == "/home" else request.url.path)
     spot = place(page["path"]) if page else None
     area = nav["by_title"].get(spot[0]) if spot else None
     if area is not None:
         section = next((item for item in area["sections"] if item["title"] == spot[1]), None)
-        nav["here"] = {"area": area, "section": section, "path": redirect_target(page["path"]) or page["path"],
+        nav["here"] = {"area": area, "section": section, "path": home(page["path"]),
                        "label": page["label"], "hub": page["path"] == area["hub"]}
     # Ctrl+K shows each page as "Area › Section".
     for group in finder_pages:
@@ -349,28 +369,28 @@ def area_context(request: Request, role, finder_pages, off_pages, can_turn_on) -
 
 # Old addresses that move in areas mode (report section 5): (old, new, ready,
 # why it waits). In classic mode none fires. A redirect fires in areas mode
-# only once its new address holds the old page's job; until the merge it
-# depends on is built, sending people there would hide the old page's
-# content, so it waits. Two more need a decision first and are not listed:
-# /goal-builder (compose-form field parity) and /flows/designer (product
-# decision). A held redirect also needs areas_redirect() called in its old
-# page's handler when it is switched on.
+# only once its new address holds the old page's job, and only for someone
+# the new address admits (see may_open); everyone else keeps the old page.
+# One more needs a decision first and is not listed: /goal-builder
+# (compose-form field parity). A held redirect also needs areas_redirect()
+# called in its old page's handler when it is switched on.
 REDIRECTS: tuple[tuple[str, str, bool, str], ...] = (
     ("/today", "/home", True, ""),
     ("/me", "/home", False, "Home does not yet show My work's questions, spending and chat accounts."),
     ("/overview", "/home", False, "Home does not yet show the Overview's activity and statistics."),
     ("/action-center", "/approvals?view=all", False, "Approvals does not yet hold the Action Center's other kinds."),
     ("/my-work", "/goals?owner=me&include=background", False, "Tasks does not yet list background work."),
-    ("/plan-tree-3d", "/graph-editor?view=3d", False, "The task map has no 3D view yet."),
+    ("/plan-tree-3d", "/graph-editor?view=3d", True, ""),
     ("/tasks/{id}/diagnostics", "/goals/{id}/diagnostics", True, ""),
     ("/project-workspaces", "/projects", False, "Projects does not yet hold project workspaces."),
     ("/project-workspaces/{id}", "/projects/{id}?tab=plan", False, "A project has no Plan tab yet."),
-    ("/run-tree", "/replay?tab=branches", False, "Task replay has no Branches tab yet."),
-    ("/walkthroughs", "/replay?tab=video", False, "Task replay has no Video tab yet."),
-    ("/trust", "/external-agents?tab=access", False, "Outside agents has no Access tab yet."),
-    ("/discovery", "/permissions?tab=inventory", False, "Permissions has no Inventory tab yet."),
-    ("/autonomous-compliance", "/compliance?tab=overview", False, "Compliance has no Overview tab yet."),
-    ("/cortex", "/knowledge-access", False, "Retire only after checking whether anyone uses its diagnostics."),
+    ("/run-tree", "/replay?tab=branches", True, ""),
+    ("/walkthroughs", "/replay?tab=video", True, ""),
+    ("/trust", "/external-agents?tab=access", True, ""),
+    ("/discovery", "/permissions?tab=inventory", True, ""),
+    ("/autonomous-compliance", "/compliance?tab=overview", True, ""),
+    ("/cortex", "/knowledge-access?tab=diagnostics", True, ""),
+    ("/flows/designer", "/workflow-builder?mode=steps", True, ""),
 )
 
 
@@ -392,6 +412,57 @@ def redirect_target(path: str) -> str | None:
     return None
 
 
+def _knowledge_access_open(request: Request) -> bool:
+    from .knowledge_access_api import page_available
+
+    return page_available(request)
+
+
+# New homes whose page checks more than the page policy before it renders.
+_PAGE_CHECKS = {"/knowledge-access": _knowledge_access_open}
+
+
+def _admits(request: Request, target: str) -> bool:
+    check = _PAGE_CHECKS.get(target.split("?")[0])
+    try:
+        return check is None or bool(check(request))
+    except Exception:  # an unreadable check keeps the old address
+        return False
+
+
+def may_open(request: Request, path: str) -> bool:
+    """Whether this person may open ``path``: the same page policy that
+    answers 403 for a hidden page (``enforce_page_visibility``), plus the
+    page's own entry check where it has one. Tabs that hold a retired page's
+    job show only to people who may open that page, and a forward fires only
+    for people its new address admits, so no one sees more or less."""
+    from . import ui_visibility
+
+    address = path.split("?")[0]
+    page = ui_visibility.page_for(address)
+    if page is not None:
+        try:
+            role = _app()._page_role(request, global_scope=page.get("scope") == "global")
+            if not ui_visibility.is_visible(page, role):
+                return False
+        except Exception:  # an unreadable policy opens nothing
+            return False
+    return _admits(request, address)
+
+
+def _with_query(target: str, query: str) -> str:
+    """``target`` keeping the old address's own query values (``?goal=7``)."""
+    if not query:
+        return target
+    from urllib.parse import parse_qsl, urlencode
+
+    base, _, own = target.partition("?")
+    pairs = parse_qsl(own, keep_blank_values=True)
+    taken = {key for key, _value in pairs}
+    pairs += [(key, value) for key, value in parse_qsl(query, keep_blank_values=True) if key not in taken]
+    return f"{base}?{urlencode(pairs)}" if pairs else base
+
+
 def areas_on(request: Request) -> bool:
     try:
         return navigation_choice(request)[0] == "areas"
@@ -400,12 +471,13 @@ def areas_on(request: Request) -> bool:
 
 
 def areas_redirect(request: Request) -> RedirectResponse | None:
-    """In areas mode, the redirect from an old address to its new one; in
-    classic mode (the default) always None, so old addresses stay as they are."""
+    """In areas mode, the redirect from an old address to its new one (keeping
+    its query values) for someone the new address admits; otherwise, and
+    always in classic mode (the default), None, so the old page answers."""
     target = redirect_target(request.url.path)
-    if target is None or not areas_on(request):
+    if target is None or not areas_on(request) or not may_open(request, target):
         return None
-    return RedirectResponse(target, status_code=303)
+    return RedirectResponse(_with_query(target, request.url.query), status_code=303)
 
 
 def preset_start(request: Request) -> str | None:

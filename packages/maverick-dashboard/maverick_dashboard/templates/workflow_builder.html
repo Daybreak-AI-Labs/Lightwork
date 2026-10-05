@@ -146,6 +146,7 @@
 
   <h1 class="page-title">{{ ui("Workflow builder") }}</h1>
   <p class="page-subtitle">{{ ui("Describe what you want or provide a document. Lightwork drafts it for you to refine, save and run. You can also build it by hand.") }} <a href="/goal-builder">{{ ui("manual builder") }}</a>.</p>
+  {% if builder_modes %}{% from "_tabs.html" import tab_bar, panel_attrs %}{{ tab_bar('Workflow builder modes', builder_modes, '') }}<div {{ panel_attrs('') }}>{% endif %}
 
   <div class="wf">
     <div class="seg" role="group" aria-label="{{ ut('What to build') }}" lang="{{ ul('What to build') }}">
@@ -444,6 +445,7 @@
     <button class="btn" type="button" id="workflow-versions-refresh">{{ ui("Refresh version review") }}</button>
     <div id="workflow-versions-content"></div>
   </section>
+  {% if builder_modes %}</div>{% endif %}
 {% endblock %}
 {% block scripts_extra %}
   <script src="/static/lightwork-template-connections.js"></script>
