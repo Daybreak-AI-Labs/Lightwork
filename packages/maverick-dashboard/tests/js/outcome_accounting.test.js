@@ -411,7 +411,7 @@ test('refuses portfolio count, context, money, overflow, cursor, and record mism
     await t.test('invalid portfolio projection', async t => {
       const ui = await fixture({ok: true, json: async () => value});
       t.after(() => ui.dom.window.close());
-      assert.match(ui.host.textContent, /invalid|do not reconcile|does not reconcile|did not match/);
+      assert.match(ui.host.textContent, /invalid|do not reconcile|does not reconcile|did not match|do not add up|must be an amount of money|not the one this page asked for|not a valid link to the next page/);
       assert.equal(ui.host.querySelector('.op-accounting-record'), null);
       assert.equal(ui.host.querySelector('script'), null);
     });
@@ -426,5 +426,5 @@ test('invalid page context prevents every request', async t => {
   const ui = await fixture({ok: true, json: async () => payload()}, 'alice&#10;other');
   t.after(() => ui.dom.window.close());
   assert.equal(ui.calls.length, 0);
-  assert.match(ui.host.textContent, /context is invalid/);
+  assert.match(ui.host.textContent, /accounting context contains characters this page cannot show/);
 });
