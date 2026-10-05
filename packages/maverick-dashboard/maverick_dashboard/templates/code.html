@@ -28,7 +28,7 @@
       <h2 id="ic-repo-title">Code projects</h2>
       {% if can_admin and module_on %}<button type="button" class="btn btn--primary" id="code-add">Add a code project</button>{% endif %}
     </div>
-    <div class="ic-table-wrap"><table class="ic-table"><caption>Code projects and how they are protected</caption>
+    <div class="ic-table-wrap" role="region" tabindex="0" aria-labelledby="ic-repo-caption"><table class="ic-table"><caption id="ic-repo-caption">Code projects and how they are protected</caption>
       <thead><tr><th scope="col">Name</th><th scope="col">Main branch</th><th scope="col">Protection</th><th scope="col">Tests</th><th scope="col">Last updated</th><th scope="col">Actions</th></tr></thead>
       <tbody id="ic-repo-rows"><tr><td colspan="6">Loading.</td></tr></tbody></table></div>
   </section>
@@ -79,7 +79,7 @@
       <h2 id="ic-prop-title">Proposed changes</h2>
       {% if can_admin and module_on %}<button type="button" class="btn btn--ghost" id="code-merge-approved">Merge all approved changes</button>{% endif %}
     </div>
-    <div class="ic-table-wrap"><table class="ic-table"><caption>Changes the agents built and where each one stands</caption>
+    <div class="ic-table-wrap" role="region" tabindex="0" aria-labelledby="ic-prop-caption"><table class="ic-table"><caption id="ic-prop-caption">Changes the agents built and where each one stands</caption>
       <thead><tr><th scope="col">Change</th><th scope="col">Code project</th><th scope="col">Files changed</th><th scope="col">Tests</th><th scope="col">Independent review</th><th scope="col">Status</th><th scope="col">Actions</th></tr></thead>
       <tbody id="ic-prop-rows"><tr><td colspan="7">Loading.</td></tr></tbody></table></div>
   </section>

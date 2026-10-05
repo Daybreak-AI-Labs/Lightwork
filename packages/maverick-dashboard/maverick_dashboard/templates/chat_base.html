@@ -262,26 +262,26 @@
       {{ ui('Copilot') }}
     </button>
     <div class="cs-halt">
+      {# Same markup as base.html: the label turns live after the first read. #}
       {% if can_halt %}
       <a href="#" id="halt-pill" class="halt-pill" role="button" data-can-halt="true"
          aria-label="{{ ut('Emergency stop: stop or resume work') }}" lang="{{ ul('Emergency stop: stop or resume work') }}">
-        <span class="dot" aria-hidden="true"></span><span id="halt-label" aria-live="polite">{{ ui('checking') }}</span>
+        <span class="dot" aria-hidden="true"></span><span id="halt-label">{{ ui('checking') }}</span>
       </a>
       {% else %}
       <span id="halt-pill" class="halt-pill" data-can-halt="false" aria-disabled="true"
-            aria-label="{{ ut('Emergency stop status. Halt permission is required to change it.') }}" lang="{{ ul('Emergency stop status. Halt permission is required to change it.') }}"
             title="{{ ut('You do not have permission to stop or resume this work.') }}">
-        <span class="dot" aria-hidden="true"></span><span id="halt-label" aria-live="polite">{{ ui('checking') }}</span>
+        <span class="dot" aria-hidden="true"></span><span class="sr-only" lang="{{ ul('Emergency stop status. Halt permission is required to change it.') }}">{{ ut('Emergency stop status. Halt permission is required to change it.') }}</span><span id="halt-label">{{ ui('checking') }}</span>
       </span>
       {% endif %}
     </div>
-    <p class="muted cs-workspace" aria-label="{{ ut('Active workspace') }}" lang="{{ ul('Active workspace') }}">{{ ui('Workspace:') }} <a href="/workspace/tenant">{% if workspace_tenant_name %}<bdi lang="und" dir="auto" data-user-content>{{ workspace_tenant_name }}</bdi>{% else %}{{ ui('Main workspace') }}{% endif %}</a></p>
+    <p class="muted cs-workspace">{{ ui('Workspace:') }} <a href="/workspace/tenant">{% if workspace_tenant_name %}<bdi lang="und" dir="auto" data-user-content>{{ workspace_tenant_name }}</bdi>{% else %}{{ ui('Main workspace') }}{% endif %}</a></p>
     <div class="cs-account">
       <a class="cs-avatar" href="/account" aria-label="{{ t('chrome.account') }}" title="{{ t('chrome.account') }}"{% if lang and page_lang and lang != page_lang %} lang="{{ lang }}"{% endif %}><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="5.5" r="2.6"/><path d="M3 13.5a5 5 0 0 1 10 0"/></svg></a>
       {% if show_settings_link %}<a href="/settings">{{ ui("Settings") }}</a>{% endif %}
       <a href="/help" aria-label="{{ ut('Help and diagnostics') }}" title="{{ ut('Help and diagnostics') }}" lang="{{ ul('Help and diagnostics') }}">{{ ui('Help') }}</a>
       <a href="{{ docs_learn_more.url if docs_learn_more else docs_home }}" target="_blank" rel="noopener noreferrer"
-         aria-label="Documentation (opens in a new tab)" title="Documentation (opens in a new tab)">Docs</a>
+         aria-label="Docs (opens in a new tab)" title="Docs (opens in a new tab)">Docs</a>
       {% include "_display_preferences.html" %}
       <span class="cs-spacer"></span>
       {% if show_logout %}<a href="/auth/logout">{{ ui("Sign out") }}</a>{% endif %}

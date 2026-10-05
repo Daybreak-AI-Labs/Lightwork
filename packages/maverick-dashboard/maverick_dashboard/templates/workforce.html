@@ -93,7 +93,9 @@
           'No description yet. View the team to see its specialists before you deploy it.' }}</p>
         <p>
           <span class="badge">{{ d.headcount }} catalog specialists</span>
-          <span class="badge dept-readiness" role="status">Checking actions…</span>
+          {# Plain text, not role=status: it fills in once on load for every
+             department, and dozens of announcements on load are noise. #}
+          <span class="badge dept-readiness">Checking actions…</span>
           {% if not entitlements.get(d.key) %}<span class="badge">Add-on required</span>{% endif %}
         </p>
         <p>
@@ -444,7 +446,7 @@
 
   <div class="section-head"><h2 id="fa-autonomy-title">How independently specialists work</h2></div>
   <section class="panel" aria-labelledby="fa-autonomy-title">
-    <p class="muted" id="fa-autonomy-status" role="status" aria-live="polite">Loading…</p>
+    <p class="muted" id="fa-autonomy-status">Loading…</p>
     <div id="fa-autonomy"></div>
   </section>
   {% include "_workforce_ops.html" %}

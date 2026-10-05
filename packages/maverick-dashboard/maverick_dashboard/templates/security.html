@@ -222,7 +222,9 @@
       <div class="num">{{ insights.crosswalk_links }}</div>
       <div class="label">Matches between frameworks</div>
     </div>
-    <div class="sec-scroll">
+    {# Scroll boxes are named regions a keyboard can focus and scroll
+       (axe scrollable-region-focusable; WCAG 2.1.1). #}
+    <div class="sec-scroll" role="region" tabindex="0" aria-label="Controls matched across frameworks">
       <table aria-label="Controls matched across frameworks">
         <thead><tr><th scope="col">Control</th>{% for framework in insights.crosswalk_frameworks %}<th scope="col">{{ framework.label }}</th>{% endfor %}</tr></thead>
         <tbody>
@@ -310,7 +312,7 @@
         <div class="sec-form__actions"><button class="btn" type="submit">Add control</button><span role="status" class="muted"></span></div>
       </form>
     </details>
-    <div class="sec-scroll"><table><thead><tr><th scope="col">Control</th><th scope="col">Framework</th><th scope="col">Status</th><th scope="col">Owner</th></tr></thead><tbody>
+    <div class="sec-scroll" role="region" tabindex="0" aria-label="Controls table"><table><thead><tr><th scope="col">Control</th><th scope="col">Framework</th><th scope="col">Status</th><th scope="col">Owner</th></tr></thead><tbody>
     {% for row in records.controls %}
       {% set impl = row.get('implementation_status') or 'not_started' %}
       <tr><td>{{ row.get('title') or row.get('control_id') }}<br><span class="muted">{{ row.get('control_id') or '' }}</span>
@@ -348,7 +350,7 @@
       <div class="wide" id="sec-evidence-hits"></div>
     </div>
     <p class="muted">What Lightwork finds in evidence is only a suggestion. A reviewer must approve or reject it before it can change a control.</p>
-    <div class="sec-scroll"><table><thead><tr><th scope="col">Evidence</th><th scope="col">Where from</th><th scope="col">What was found</th><th scope="col">Review</th></tr></thead><tbody>
+    <div class="sec-scroll" role="region" tabindex="0" aria-label="Evidence table"><table><thead><tr><th scope="col">Evidence</th><th scope="col">Where from</th><th scope="col">What was found</th><th scope="col">Review</th></tr></thead><tbody>
     {% for row in records.evidence %}
       <tr>
         <td>{{ row.get('title') or 'Evidence' }}</td>
@@ -398,7 +400,7 @@
       {{ pick_list('evidence_ids', 'Evidence behind it', evidence_items, help='Choose at least one.') }}
       <div class="sec-form__actions"><button class="btn" type="submit">Add risk</button><span role="status" class="muted"></span></div>
     </form>
-    <div class="sec-scroll"><table><thead><tr><th scope="col">Risk</th><th scope="col">Before fixes</th><th scope="col">After fixes</th><th scope="col">Plan</th><th scope="col">Owner</th></tr></thead><tbody>
+    <div class="sec-scroll" role="region" tabindex="0" aria-label="Risks table"><table><thead><tr><th scope="col">Risk</th><th scope="col">Before fixes</th><th scope="col">After fixes</th><th scope="col">Plan</th><th scope="col">Owner</th></tr></thead><tbody>
     {% for row in records.risks %}<tr><td>{{ row.get('title') or 'Risk' }}<details class="sec-details"><summary>Manage this risk</summary>
       <form class="sec-action" data-endpoint="/api/v1/security/risks/{{ row.id }}/treatment">
         <label>Plan<select class="select" name="treatment">{% for t in ['mitigate','accept','transfer','avoid'] %}<option value="{{ t }}">{{ status_words[t] }}</option>{% endfor %}</select></label>
@@ -433,7 +435,7 @@
       {{ pick_list('control_ids', 'Related controls', control_items) }}
       <div class="sec-form__actions"><button class="btn" type="submit">Add fix plan</button><span role="status" class="muted"></span></div>
     </form>
-    <div class="sec-scroll"><table><thead><tr><th scope="col">Problem</th><th scope="col">Owner</th><th scope="col">Due</th><th scope="col">Status</th></tr></thead><tbody>
+    <div class="sec-scroll" role="region" tabindex="0" aria-label="Fix plans table"><table><thead><tr><th scope="col">Problem</th><th scope="col">Owner</th><th scope="col">Due</th><th scope="col">Status</th></tr></thead><tbody>
     {% for row in records.poams %}<tr><td>{{ row.get('finding') or 'Fix plan' }}<details class="sec-details"><summary>Update</summary>
       <form class="sec-action" data-endpoint="/api/v1/security/poams/{{ row.id }}" data-method="PATCH"><label>Status<select class="select" name="status">{% for st in ['open','in_progress','blocked','complete','accepted','closed'] %}<option value="{{ st }}"{% if st == row.get('status','open') %} selected{% endif %}>{{ status_words[st] }}</option>{% endfor %}</select></label><label>Note<input class="input" name="note" maxlength="2000"></label><input type="hidden" name="expected_revision" value="{{ row.revision }}"><button class="btn" type="submit">Save</button><span role="status" class="muted"></span></form>
       <form class="sec-action" data-endpoint="/api/v1/security/poams/{{ row.id }}/review"><label>Why it needs another look<input class="input" name="reason" required maxlength="1000"></label><input type="hidden" name="expected_revision" value="{{ row.revision }}"><button class="btn" type="submit">Ask for a review</button><span role="status" class="muted"></span></form></details></td>
@@ -450,7 +452,7 @@
       {% for key,label in [('independent_assurance','Independent audit report (for example SOC 2)'),('encryption','Encrypts your data'),('mfa','Second sign-in step and limited access'),('incident_sla','Promises to report incidents quickly'),('subprocessors','Controls their own suppliers'),('vulnerability_management','Fixes security flaws'),('business_continuity','Plans for outages'),('data_deletion','Deletes your data when you leave')] %}<label>{{ label }}<select class="select" name="posture.{{ key }}"><option value="null">Not checked</option><option value="true">Yes</option><option value="false">No</option></select></label>{% endfor %}
       <div class="sec-form__actions"><button class="btn" type="submit">Assess vendor</button><span role="status" class="muted"></span></div>
     </form>
-    <div class="sec-scroll"><table><thead><tr><th scope="col">Vendor</th><th scope="col">Risk</th><th scope="col">Decision</th><th scope="col">Owner</th></tr></thead><tbody>{% for row in records.vendors %}<tr><td>{{ row.get('name') or 'Vendor' }}</td><td>{{ status_words.get(row.get('residual_risk')) or (row.get('residual_risk') | humanize) or '—' }}</td><td><span class="badge {{ 'done' if row.get('status') == 'approved' else 'warn' }}">{{ status_words.get(row.get('status','pending_review')) or (row.get('status') | humanize) }}</span>
+    <div class="sec-scroll" role="region" tabindex="0" aria-label="Vendors table"><table><thead><tr><th scope="col">Vendor</th><th scope="col">Risk</th><th scope="col">Decision</th><th scope="col">Owner</th></tr></thead><tbody>{% for row in records.vendors %}<tr><td>{{ row.get('name') or 'Vendor' }}</td><td>{{ status_words.get(row.get('residual_risk')) or (row.get('residual_risk') | humanize) or '—' }}</td><td><span class="badge {{ 'done' if row.get('status') == 'approved' else 'warn' }}">{{ status_words.get(row.get('status','pending_review')) or (row.get('status') | humanize) }}</span>
       <form class="sec-action" data-endpoint="/api/v1/security/vendors/{{ row.id }}/decision"><label>Decision<select class="select" name="decision"><option value="approved">Approve</option><option value="needs_work">Needs more work</option><option value="rejected">Reject</option></select></label><label>Why<input class="input" name="rationale" required maxlength="4000"></label><input type="hidden" name="expected_revision" value="{{ row.revision }}"><button class="btn" type="submit">Save decision</button><span role="status" class="muted"></span></form></td><td>{{ (row.get('owner') | identity) if row.get('owner') else '—' }}</td></tr>{% else %}<tr><td colspan="4" class="sec-empty">No vendors assessed yet.</td></tr>{% endfor %}</tbody></table></div>
   </section>
 
@@ -461,7 +463,7 @@
       <label>Review every<select class="select" name="review_cadence_days"><option value="90">3 months</option><option value="180">6 months</option><option value="365" selected>Year</option><option value="730">2 years</option></select></label>
       <label class="wide">Link to the policy document<input class="input" name="content_ref" type="url" maxlength="2000" placeholder="https://"></label>
       <div class="sec-form__actions"><button class="btn" type="submit">Add policy</button><span role="status" class="muted"></span></div></form>
-    <div class="sec-scroll"><table><thead><tr><th scope="col">Policy</th><th scope="col">Status</th><th scope="col">Owner</th><th scope="col">Actions</th></tr></thead><tbody>
+    <div class="sec-scroll" role="region" tabindex="0" aria-label="Policies table"><table><thead><tr><th scope="col">Policy</th><th scope="col">Status</th><th scope="col">Owner</th><th scope="col">Actions</th></tr></thead><tbody>
     {% for row in records.policies %}
       {% set policy_status = row.get('status','draft') %}
       <tr><td>{% if row.get('content_ref') and (row.get('content_ref').startswith('https://') or row.get('content_ref').startswith('http://')) %}<a href="{{ row.get('content_ref') }}" rel="noopener">{{ row.get('title') or 'Policy' }}</a>{% else %}{{ row.get('title') or 'Policy' }}{% endif %}</td><td>{{ status_words.get(policy_status) or (policy_status | humanize) }}</td><td>{{ (row.get('owner') | identity) if row.get('owner') else '—' }}</td><td>
@@ -506,7 +508,7 @@
       {{ pick_list('clock_ids', 'Reporting deadlines that might apply', clocks, help='Lightwork tracks each deadline once you confirm it applies.') }}
       {{ pick_list('mitre_techniques', 'Kind of attack (if known)', attack_techniques) }}
       <div class="sec-form__actions"><button class="btn" type="submit">Open incident</button><span role="status" class="muted"></span></div></form>
-    <div class="sec-scroll"><table><thead><tr><th scope="col">Incident</th><th scope="col">Seriousness and status</th><th scope="col">Reporting deadlines</th><th scope="col">Response</th></tr></thead><tbody>
+    <div class="sec-scroll" role="region" tabindex="0" aria-label="Incidents table"><table><thead><tr><th scope="col">Incident</th><th scope="col">Seriousness and status</th><th scope="col">Reporting deadlines</th><th scope="col">Response</th></tr></thead><tbody>
     {% for row in records.incidents %}
       {% set contained = row.get('timeline',[]) | selectattr('phase','equalto','containment') | list %}
       {% set eradicated = row.get('timeline',[]) | selectattr('phase','equalto','eradication') | list %}
@@ -535,7 +537,7 @@
       <label class="wide">What it covers<textarea class="textarea" name="scope" required maxlength="4000"></textarea></label>
       <label>Due<input class="input" name="due_at" type="datetime-local" data-epoch data-omit-empty></label>
       <div class="sec-form__actions"><button class="btn" type="submit">Add audit</button><span role="status" class="muted"></span></div></form>
-    <div class="sec-scroll"><table><thead><tr><th scope="col">Audit</th><th scope="col">Status</th><th scope="col">Work so far</th><th scope="col">Actions</th></tr></thead><tbody>
+    <div class="sec-scroll" role="region" tabindex="0" aria-label="Audits table"><table><thead><tr><th scope="col">Audit</th><th scope="col">Status</th><th scope="col">Work so far</th><th scope="col">Actions</th></tr></thead><tbody>
     {% for row in records.audits %}
       {% set audit_status = row.get('status','planned') %}
       <tr><td>{{ row.get('name') or 'Audit' }}<br><span class="muted">{{ row.get('framework') or '' }}</span></td><td>{{ status_words.get(audit_status) or (audit_status | humanize) }}</td><td>{{ row.get('evidence_requests',[])|length }} evidence requests<br>{{ row.get('control_tests',[])|length }} tests<br>{{ row.get('findings',[])|length }} findings</td><td><details class="sec-details"><summary>Manage this audit</summary>

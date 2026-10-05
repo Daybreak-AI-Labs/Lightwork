@@ -79,7 +79,7 @@
 
     // Reusable feedback primitives, on every page that extends base.html.
     // Prefer these over the browser's native dialogs. Contract: docs/ui-primitives.md.
-    //   window.mvToast(message, {error}) -> transient status/alert toast
+    //   window.mvToast(message, {error, quiet}) -> transient status/alert toast
     //   window.mvConfirm(message, {okText}) -> Promise<bool> (native <dialog>;
     //     focus-returning, not re-entrant; falls back to window.confirm)
     //   window.mvCopy(text) -> copy to clipboard with a toast (+ fallback)
@@ -96,6 +96,10 @@
         var t = document.createElement('div');
         t.className = 'mv-toast' + (opts.error ? ' mv-toast--error' : '');
         t.textContent = (opts.error ? '⚠ ' : '') + String(message);
+        // quiet: the page already says these words where the person is (its
+        // own status line or a focus move), so the toast is shown, not read
+        // a second time.
+        if (opts.quiet) t.setAttribute('aria-hidden', 'true');
         if(window.LightworkI18n){t.lang=window.LightworkI18n.languageFor(String(message));t.dir='auto';}
         target.appendChild(t);
         setTimeout(function () {
@@ -713,9 +717,13 @@
             : 'Stop status unavailable');
         // A late catalog translates the current verified state, never an older
         // pending label. Authority checks and status reads stay immediate.
-        label.dataset.i18n = copy;
-        if (window.LightworkI18n) window.LightworkI18n.set(label, copy);
-        else { label.textContent = copy; label.lang = 'en'; label.dir = 'ltr'; }
+        // The words are rewritten only when they change: the 15-second poll
+        // must not repeat the same announcement from the live label.
+        if (label.dataset.i18n !== copy) {
+          label.dataset.i18n = copy;
+          if (window.LightworkI18n) window.LightworkI18n.set(label, copy);
+          else { label.textContent = copy; label.lang = 'en'; label.dir = 'ltr'; }
+        }
         renderBanner(armed && !pending);
         renderChatStop(state);
         if (canHalt) {
@@ -870,7 +878,14 @@
           pill.click();
         }
       });
-      refresh();
+      // The label turns into a polite live region only once the first read
+      // has settled and the page has finished loading (the localization pass
+      // rewrites the label at DOMContentLoaded): loading a page must not
+      // announce "Emergency stop", while a later stop, resume or lost status
+      // is still announced.
+      const loaded = document.readyState === 'complete' ? Promise.resolve()
+        : new Promise(function (resolve) { window.addEventListener('load', resolve, {once: true}); });
+      Promise.all([refresh(), loaded]).then(function () { label.setAttribute('aria-live', 'polite'); });
       setInterval(refresh, 15000);
     })();
 
@@ -1181,7 +1196,12 @@
       });
       const topbar = document.querySelector('.topbar');
       function syncHeaderHeight() {
-        if (topbar) body.style.setProperty('--shell-topbar-h', Math.ceil(topbar.getBoundingClientRect().height) + 'px');
+        if (!topbar) return;
+        const height = Math.ceil(topbar.getBoundingClientRect().height) + 'px';
+        body.style.setProperty('--shell-topbar-h', height);
+        // The root reads it too: scroll-padding-top keeps focused elements
+        // and in-page link targets below the sticky bar (lightwork.css).
+        document.documentElement.style.setProperty('--shell-topbar-h', height);
       }
       // Status messages, display fonts and phone wrapping can grow the header.
       // Position navigation beneath its real height instead of covering controls.

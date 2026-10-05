@@ -221,6 +221,10 @@
         "Reading the code project for the first time."));
       if (w.notes.length) {
         var wrap = el("div", "ic-table-wrap");
+        // A named region a keyboard can focus and scroll, like the page's own tables.
+        wrap.tabIndex = 0;
+        wrap.setAttribute("role", "region");
+        wrap.setAttribute("aria-label", "Notes to Lightwork found in " + w.repo);
         var t = el("table", "ic-table");
         t.appendChild(el("caption", null, "Notes to Lightwork found in " + w.repo));
         var hr = el("tr");
