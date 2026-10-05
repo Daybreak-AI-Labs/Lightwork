@@ -34,7 +34,7 @@
 <script>
 (function () {
   var counts = document.getElementById('ac-queue-counts'), box = document.getElementById('ac-queue-failed');
-  function el(tag, text, cls) { var e = document.createElement(tag); if (text != null) e.textContent = text; if (cls) e.className = cls; return e; }
+  function el(tag, cls, text) { var e = document.createElement(tag); if (text != null) e.textContent = text; if (cls) e.className = cls; return e; }
   async function load() {
     counts.textContent = 'Loading…'; box.textContent = '';
     try {
@@ -42,23 +42,23 @@
       if (!r.ok) throw r;
       var q = await r.json();
       counts.textContent = q.waiting + ' waiting · ' + q.running + ' running · ' + q.finished + ' finished · ' + q.failed + ' failed';
-      if (!q.failed_items.length) { box.append(el('p', 'Nothing has failed.', 'muted')); return; }
+      if (!q.failed_items.length) { box.append(el('p', 'muted', 'Nothing has failed.')); return; }
       var table = el('table'), head = el('thead'), row = el('tr');
-      ['What', 'Problem', 'Tries', 'When', ''].forEach(function (h) { var th = el('th', h); th.scope = 'col'; row.append(th); });
+      ['What', 'Problem', 'Tries', 'When', ''].forEach(function (h) { var th = el('th', null, h); th.scope = 'col'; row.append(th); });
       head.append(row); table.append(head);
       var body = el('tbody');
       q.failed_items.forEach(function (item) {
         var tr = el('tr');
-        tr.append(el('td', item.what + (item.title ? ': ' + item.title : '')));
-        var problem = el('td', item.problem);
-        if (item.needs_operator) problem.append(el('span', ' An operator must resume it on the server.', 'muted'));
+        tr.append(el('td', null, item.what + (item.title ? ': ' + item.title : '')));
+        var problem = el('td', null, item.problem);
+        if (item.needs_operator) problem.append(el('span', 'muted', ' An operator must resume it on the server.'));
         tr.append(problem);
-        tr.append(el('td', String(item.attempts)));
-        tr.append(el('td', window.mvWhen ? mvWhen(item.failed_at) : ''));
+        tr.append(el('td', null, String(item.attempts)));
+        tr.append(el('td', null, window.mvWhen ? mvWhen(item.failed_at) : ''));
         var cell = el('td');
         if (item.detail) {
-          var d = el('details'); d.append(el('summary', 'Technical details')); d.append(el('p', item.detail, 'muted'));
-          var copy = el('button', 'Copy for support', 'btn btn--ghost'); copy.type = 'button';
+          var d = el('details'); d.append(el('summary', null, 'Technical details')); d.append(el('p', 'muted', item.detail));
+          var copy = el('button', 'btn btn--ghost', 'Copy for support'); copy.type = 'button';
           copy.addEventListener('click', function () { if (window.mvCopy) mvCopy(item.detail); });
           d.append(copy); cell.append(d);
         }

@@ -16,11 +16,11 @@
     (Array.isArray(nodes) ? nodes : [nodes]).forEach(function (n) { if (n) box.appendChild(n); });
   }
   function addOptions(select, models) {
-    models.forEach(function (m) { var o = el('option', m.label); o.value = m.value; select.appendChild(o); });
+    models.forEach(function (m) { var o = el('option', null, m.label); o.value = m.value; select.appendChild(o); });
   }
 
   function settingsLink() {
-    var a = el('a', 'Open All settings', 'btn btn--ghost');
+    var a = el('a', 'btn btn--ghost', 'Open All settings');
     a.href = '/settings/all';
     return a;
   }
@@ -29,15 +29,15 @@
     var box = $('lpo-holdout');
     box.textContent = '';
     if (!plan.hold_out.set_up) {
-      box.appendChild(el('p', 'Choose where to keep it first, in ' + plan.places.hold_out + '.', 'muted'));
+      box.appendChild(el('p', 'muted', 'Choose where to keep it first, in ' + plan.places.hold_out + '.'));
       box.appendChild(settingsLink());
       return;
     }
     if (plan.hold_out.exists) {
-      box.appendChild(el('p', 'The hold-out record is set up. Check it with “Check the hold-out record” above.', 'muted'));
+      box.appendChild(el('p', 'muted', 'The hold-out record is set up. Check it with “Check the hold-out record” above.'));
       return;
     }
-    var btn = el('button', 'Set up the hold-out record', 'btn btn--primary');
+    var btn = el('button', 'btn btn--primary', 'Set up the hold-out record');
     btn.type = 'button';
     btn.addEventListener('click', async function () {
       if (!(await window.mvConfirm('Set up the hold-out record now? This can only be done once; it is never replaced afterwards.',
@@ -46,8 +46,8 @@
       try {
         var d = await J.request(API + '/hold-out/set-up', { method: 'POST', json: { confirm: true } });
         box.textContent = '';
-        box.appendChild(el('p', 'The hold-out record is set up. Write down its record number and keep it somewhere separate from this server, so anyone can later confirm the record was never swapped:'));
-        box.appendChild(el('p', d.record_number, 'lpo-number'));
+        box.appendChild(el('p', null, 'The hold-out record is set up. Write down its record number and keep it somewhere separate from this server, so anyone can later confirm the record was never swapped:'));
+        box.appendChild(el('p', 'lpo-number', d.record_number));
         say('lpo-holdout-status', '');
       } catch (failure) {
         say('lpo-holdout-status', await J.problem(failure, 'set up the hold-out record'));
@@ -77,12 +77,12 @@
       { okText: 'Check by meaning' }))) return null;
     return { url: API + '/clash-check', init: { method: 'POST', json: { model_id: $('lpo-clash-model').value || null } } };
   }, { status: $('lpo-clash-status'), out: $('lpo-clash-out'), action: 'check the lessons', render: function (d) {
-    var head = el('p', (d.pairs.length ? plural(d.pairs.length, 'pair') + ' of lessons may contradict each other.'
+    var head = el('p', null, (d.pairs.length ? plural(d.pairs.length, 'pair') + ' of lessons may contradict each other.'
       : 'No lessons contradict each other.') + ' Spent ' + J.money(d.spent) + '.');
     if (!d.pairs.length) return head;
     var ul = el('ul');
-    d.pairs.forEach(function (p) { ul.appendChild(el('li', '“' + p.first + '” and “' + p.second + '”')); });
-    return [head, ul, el('p', 'Remove whichever lesson is wrong from the lessons list above.', 'muted')];
+    d.pairs.forEach(function (p) { ul.appendChild(el('li', null, '“' + p.first + '” and “' + p.second + '”')); });
+    return [head, ul, el('p', 'muted', 'Remove whichever lesson is wrong from the lessons list above.')];
   } });
 
   J.wire($('lpo-transfer-run'), async function () {
@@ -93,9 +93,9 @@
     return { url: API + '/transfer', init: { method: 'POST', json: { source: source,
       target: $('lpo-transfer-target').value || null, retry_judged: $('lpo-transfer-retry').checked } } };
   }, { status: $('lpo-transfer-status'), out: $('lpo-transfer-out'), action: 'try the lessons', render: function (d) {
-    if (!d.targets.length) return el('p', 'There were no lessons to try.', 'muted');
+    if (!d.targets.length) return el('p', 'muted', 'There were no lessons to try.');
     return d.targets.map(function (t) {
-      var p = el('p', (window.mvHuman ? window.mvHuman(t.model) : t.model) + ': tried ' + plural(t.tried, 'lesson') + ', ' +
+      var p = el('p', null, (window.mvHuman ? window.mvHuman(t.model) : t.model) + ': tried ' + plural(t.tried, 'lesson') + ', ' +
         plural(t.on_trial.length, 'lesson') + ' now on trial.');
       return p;
     });
@@ -147,7 +147,7 @@
         ? 'Replacing would change the test cases from ' + d.total_now + ' to ' + d.total_after + '.'
         : 'This would add ' + plural(d.added, 'new test case') + '. Existing ones stay as they are.');
       var nodes = [J.table(['Model', 'Test cases now', 'After'], d.keys.map(function (k) { return [k.label, String(k.now), String(k.after)]; }))];
-      var apply = el('button', replace ? 'Replace the test cases' : 'Add these test cases', replace ? 'btn btn--danger' : 'btn btn--primary');
+      var apply = el('button', replace ? 'btn btn--danger' : 'btn btn--primary', replace ? 'Replace the test cases' : 'Add these test cases');
       apply.type = 'button';
       apply.addEventListener('click', async function () {
         var msg = replace

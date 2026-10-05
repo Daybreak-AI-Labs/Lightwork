@@ -10,7 +10,7 @@
   var admin = root.getAttribute('data-admin') === '1';
   function $(id) { return document.getElementById(id); }
   function say(id, text) { var el = $(id); if (el) el.textContent = String(text || ''); }
-  function el(tag, text, cls) {
+  function el(tag, cls, text) {
     var node = document.createElement(tag);
     if (cls) node.className = cls;
     if (text != null) node.textContent = text;
@@ -51,9 +51,9 @@
   }
   function technical(pairs) {
     var box = el('details');
-    box.appendChild(el('summary', 'Technical details'));
+    box.appendChild(el('summary', null, 'Technical details'));
     var list = el('ul');
-    pairs.forEach(function (p) { if (p[1] != null && p[1] !== '') list.appendChild(el('li', p[0] + ': ' + p[1])); });
+    pairs.forEach(function (p) { if (p[1] != null && p[1] !== '') list.appendChild(el('li', null, p[0] + ': ' + p[1])); });
     box.appendChild(list);
     return box;
   }
@@ -68,17 +68,17 @@
   function refineRow(p) {
     var tr = el('tr');
     var what = el('td');
-    what.appendChild(el('strong', p.title));
-    what.appendChild(el('div', p.target, 'muted'));
-    what.appendChild(el('div', p.change));
-    if (p.rationale) what.appendChild(el('div', 'Why: ' + p.rationale, 'muted'));
+    what.appendChild(el('strong', null, p.title));
+    what.appendChild(el('div', 'muted', p.target));
+    what.appendChild(el('div', null, p.change));
+    if (p.rationale) what.appendChild(el('div', 'muted', 'Why: ' + p.rationale));
     what.appendChild(technical([['Reference', p.technical && p.technical.reference],
       ['Approval number', p.technical && p.technical.approval_number],
       ['Fingerprint', p.technical && p.technical.fingerprint]]));
     tr.appendChild(what);
-    tr.appendChild(el('td', p.failure));
-    var st = el('td', statusText(p));
-    if (p.proposed_at) st.appendChild(el('div', 'Suggested ' + when(p.proposed_at), 'muted'));
+    tr.appendChild(el('td', null, p.failure));
+    var st = el('td', null, statusText(p));
+    if (p.proposed_at) st.appendChild(el('div', 'muted', 'Suggested ' + when(p.proposed_at)));
     tr.appendChild(st);
     if (admin) {
       var act = el('td');
@@ -86,7 +86,7 @@
       if (p.can_revert) act.appendChild(button('Undo', 'btn btn--danger', function (b) { undoChange(p, b); }));
       if (!p.can_apply && !p.can_revert) {
         if (p.status === 'pending') {
-          var link = el('a', 'Decide it under Approvals', 'btn btn--ghost');
+          var link = el('a', 'btn btn--ghost', 'Decide it under Approvals');
           link.href = '/approvals';
           act.appendChild(link);
         } else act.textContent = '—';
@@ -96,7 +96,7 @@
     return tr;
   }
   function button(label, cls, onClick) {
-    var b = el('button', label, cls);
+    var b = el('button', cls, label);
     b.type = 'button';
     b.addEventListener('click', function () { onClick(b); });
     return b;
@@ -112,14 +112,14 @@
           (data.switch_place ? ' To turn them on, go to ' + data.switch_place + '.' : '');
       say('llp-ref-state', state);
       if (!data.enabled) {
-        var on = el('a', 'Open All settings', 'btn btn--ghost');
+        var on = el('a', 'btn btn--ghost', 'Open All settings');
         on.href = '/settings/all';
         $('llp-ref-state').appendChild(document.createTextNode(' '));
         $('llp-ref-state').appendChild(on);
       }
       if (!data.proposals.length) {
         var tr = el('tr');
-        var td = el('td', admin && data.enabled
+        var td = el('td', null, admin && data.enabled
           ? 'No changes have been suggested yet. Use "Suggest a change" below when an agent keeps making the same mistake.'
           : 'No changes have been suggested yet.');
         td.colSpan = admin ? 4 : 3;
@@ -130,12 +130,12 @@
       }
       var list = $('llp-in-force');
       list.textContent = '';
-      if (!data.in_force.length) list.appendChild(el('li', 'No suggested changes are in use.', 'muted'));
+      if (!data.in_force.length) list.appendChild(el('li', 'muted', 'No suggested changes are in use.'));
       data.in_force.forEach(function (r) {
         var li = el('li');
-        li.appendChild(el('strong', r.title + ' (' + r.target + ')'));
-        li.appendChild(el('div', r.change));
-        li.appendChild(el('div', 'Applied ' + when(r.applied_at), 'muted'));
+        li.appendChild(el('strong', null, r.title + ' (' + r.target + ')'));
+        li.appendChild(el('div', null, r.change));
+        li.appendChild(el('div', 'muted', 'Applied ' + when(r.applied_at)));
         list.appendChild(li);
       });
       var box = $('llp-propose-box');
@@ -144,7 +144,7 @@
       var rows = $('llp-ref-rows');
       rows.textContent = '';
       var tr = el('tr');
-      var td = el('td', await problem(failure, 'load the suggested changes'));
+      var td = el('td', null, await problem(failure, 'load the suggested changes'));
       td.colSpan = admin ? 4 : 3;
       tr.appendChild(td);
       rows.appendChild(tr);
@@ -163,9 +163,9 @@
     }
   }
   function previewBox(lines) {
-    var box = el('div', null, 'llp-preview');
+    var box = el('div', 'llp-preview');
     box.setAttribute('role', 'status');
-    lines.forEach(function (l) { box.appendChild(el('p', l[1] ? l[0] + ' ' + l[1] : l[0])); });
+    lines.forEach(function (l) { box.appendChild(el('p', null, l[1] ? l[0] + ' ' + l[1] : l[0])); });
     return box;
   }
   function showPreview(b, box) {
@@ -271,15 +271,15 @@
   function lessonAction(row) {
     var cell = el('td');
     var details = el('details');
-    details.appendChild(el('summary', 'Remove lesson'));
-    var label = el('label', 'Why remove this lesson?');
-    var reason = el('textarea', null, 'textarea');
+    details.appendChild(el('summary', null, 'Remove lesson'));
+    var label = el('label', null, 'Why remove this lesson?');
+    var reason = el('textarea', 'textarea');
     reason.rows = 2;
     reason.maxLength = 1000;
     reason.required = true;
     label.appendChild(reason);
     details.appendChild(label);
-    details.appendChild(el('p', 'Only this lesson in this part of the work will be removed. Past work stays in the activity record.', 'muted'));
+    details.appendChild(el('p', 'muted', 'Only this lesson in this part of the work will be removed. Past work stays in the activity record.'));
     details.appendChild(button('Confirm removal', 'btn btn--danger', function (b) { withdrawLesson(row, reason, b); }));
     cell.appendChild(details);
     return cell;
@@ -290,25 +290,25 @@
     return get('/efficacy?model_id=' + encodeURIComponent(model())).then(function (data) {
       rows.textContent = '';
       if (!data.lessons.length) {
-        var tr = el('tr'); var td = el('td', 'This model has no currently available shared lessons.'); td.colSpan = admin ? 5 : 4;
+        var tr = el('tr'); var td = el('td', null, 'This model has no currently available shared lessons.'); td.colSpan = admin ? 5 : 4;
         tr.appendChild(td); rows.appendChild(tr); return;
       }
       data.lessons.forEach(function (r) {
         var tr = el('tr');
-        var lesson = el('td', r.text);
-        lesson.appendChild(el('div', r.scope_label, 'muted'));
+        var lesson = el('td', null, r.text);
+        lesson.appendChild(el('div', 'muted', r.scope_label));
         tr.appendChild(lesson);
-        tr.appendChild(el('td', String(r.went_well)));
-        tr.appendChild(el('td', String(r.did_not)));
-        var rate = el('td', pct(r.rate));
-        if (r.recent_rate != null) rate.appendChild(el('div', 'Lately ' + pct(r.recent_rate), 'muted'));
+        tr.appendChild(el('td', null, String(r.went_well)));
+        tr.appendChild(el('td', null, String(r.did_not)));
+        var rate = el('td', null, pct(r.rate));
+        if (r.recent_rate != null) rate.appendChild(el('div', 'muted', 'Lately ' + pct(r.recent_rate)));
         tr.appendChild(rate);
         if (admin) tr.appendChild(lessonAction(r));
         rows.appendChild(tr);
       });
     }).catch(async function (failure) {
       rows.textContent = '';
-      var tr = el('tr'); var td = el('td', await problem(failure, 'load the lesson results')); td.colSpan = admin ? 5 : 4;
+      var tr = el('tr'); var td = el('td', null, await problem(failure, 'load the lesson results')); td.colSpan = admin ? 5 : 4;
       tr.appendChild(td); rows.appendChild(tr);
     });
   }
@@ -317,29 +317,29 @@
     if (!model()) return Promise.resolve();
     return get('/conflicts?model_id=' + encodeURIComponent(model())).then(function (data) {
       list.textContent = '';
-      if (!data.pairs.length) { list.appendChild(el('li', 'No lessons seem to contradict each other.', 'muted')); return; }
+      if (!data.pairs.length) { list.appendChild(el('li', 'muted', 'No lessons seem to contradict each other.')); return; }
       data.pairs.forEach(function (p) {
-        list.appendChild(el('li', '“' + p.first + '” may contradict “' + p.second + '”. Remove whichever is wrong from the lessons above.'));
+        list.appendChild(el('li', null, '“' + p.first + '” may contradict “' + p.second + '”. Remove whichever is wrong from the lessons above.'));
       });
     }).catch(async function (failure) {
       list.textContent = '';
-      list.appendChild(el('li', await problem(failure, 'check for clashing lessons')));
+      list.appendChild(el('li', null, await problem(failure, 'check for clashing lessons')));
     });
   }
   function loadLog() {
     var list = $('llp-log');
     return get('/log?limit=30').then(function (data) {
       list.textContent = '';
-      if (!data.events.length) { list.appendChild(el('li', 'Nothing has been learned or removed yet.', 'muted')); return; }
+      if (!data.events.length) { list.appendChild(el('li', 'muted', 'Nothing has been learned or removed yet.')); return; }
       data.events.forEach(function (e) {
         var li = el('li');
-        li.appendChild(el('strong', (when(e.when) || 'Recently') + ': ' + e.what));
-        if (e.lesson) li.appendChild(el('div', '“' + e.lesson + '”'));
+        li.appendChild(el('strong', null, (when(e.when) || 'Recently') + ': ' + e.what));
+        if (e.lesson) li.appendChild(el('div', null, '“' + e.lesson + '”'));
         list.appendChild(li);
       });
     }).catch(async function (failure) {
       list.textContent = '';
-      list.appendChild(el('li', await problem(failure, 'see the learning activity'), 'muted'));
+      list.appendChild(el('li', 'muted', await problem(failure, 'see the learning activity')));
     });
   }
   function modelChanged() { publishModel(); return Promise.all([loadEfficacy(), loadConflicts()]); }
@@ -348,11 +348,11 @@
       var previous = model();
       picker.textContent = '';
       if (!data.models.length) {
-        var empty = el('option', 'No models yet'); empty.value = '';
+        var empty = el('option', null, 'No models yet'); empty.value = '';
         picker.appendChild(empty);
         picker.disabled = true;
         $('llp-eff-rows').textContent = '';
-        var row = el('tr'); var cell = el('td', 'No currently available shared lessons.'); cell.colSpan = admin ? 5 : 4;
+        var row = el('tr'); var cell = el('td', null, 'No currently available shared lessons.'); cell.colSpan = admin ? 5 : 4;
         row.appendChild(cell); $('llp-eff-rows').appendChild(row);
         $('llp-conf').textContent = '';
         publishModel();
@@ -360,7 +360,7 @@
       }
       picker.disabled = false;
       data.models.forEach(function (m) {
-        var o = el('option', m.label); o.value = m.value; picker.appendChild(o);
+        var o = el('option', null, m.label); o.value = m.value; picker.appendChild(o);
       });
       if (data.models.some(function (m) { return m.value === previous; })) picker.value = previous;
       return modelChanged();
@@ -380,24 +380,24 @@
       var data = await get('/preview?min_support=' + encodeURIComponent(support) +
         (model() ? '&model_id=' + encodeURIComponent(model()) : ''));
       if (!data.enabled) {
-        box.appendChild(el('p', 'Self-coaching is off, so there is nothing to preview.' +
-          (data.switch_place ? ' Turn on ' + data.switch_place + '.' : ''), 'muted'));
+        box.appendChild(el('p', 'muted', 'Self-coaching is off, so there is nothing to preview.' +
+          (data.switch_place ? ' Turn on ' + data.switch_place + '.' : '')));
       } else if (!data.weaknesses.length) {
-        box.appendChild(el('p', 'No repeated mistakes found in the last ' + plural(data.scanned, 'failure', 'failures') +
-          ' (' + data.eligible + ' could be used for this model). Nothing would change.', 'muted'));
+        box.appendChild(el('p', 'muted', 'No repeated mistakes found in the last ' + plural(data.scanned, 'failure', 'failures') +
+          ' (' + data.eligible + ' could be used for this model). Nothing would change.'));
       } else {
         var ul = el('ul');
         data.weaknesses.forEach(function (w) {
           var li = el('li');
-          li.appendChild(el('strong', 'Seen ' + plural(w.times, 'time', 'times') + ': ' + w.pattern));
-          if (w.would_add) li.appendChild(el('div', 'Would try the lesson: “' + w.would_add + '”'));
+          li.appendChild(el('strong', null, 'Seen ' + plural(w.times, 'time', 'times') + ': ' + w.pattern));
+          if (w.would_add) li.appendChild(el('div', null, 'Would try the lesson: “' + w.would_add + '”'));
           ul.appendChild(li);
         });
         box.appendChild(ul);
-        box.appendChild(el('p', 'This is only a preview. Nothing was changed.', 'muted'));
+        box.appendChild(el('p', 'muted', 'This is only a preview. Nothing was changed.'));
       }
     } catch (failure) {
-      box.appendChild(el('p', await problem(failure, 'see the preview')));
+      box.appendChild(el('p', null, await problem(failure, 'see the preview')));
     } finally {
       previewBtn.disabled = false;
     }
@@ -410,15 +410,15 @@
     holdoutBtn.disabled = true;
     try {
       var data = await get('/holdout');
-      if (!data.configured) box.appendChild(el('p', 'No hold-out record is set up, so there is nothing to check.', 'muted'));
-      else if (!data.verified) box.appendChild(el('p', 'The hold-out record did not pass the check. It may be incomplete or changed. Ask your administrator to look into it.'));
+      if (!data.configured) box.appendChild(el('p', 'muted', 'No hold-out record is set up, so there is nothing to check.'));
+      else if (!data.verified) box.appendChild(el('p', null, 'The hold-out record did not pass the check. It may be incomplete or changed. Ask your administrator to look into it.'));
       else {
-        box.appendChild(el('p', 'The hold-out record is complete and untouched: ' + plural(data.events, 'entry', 'entries') +
+        box.appendChild(el('p', null, 'The hold-out record is complete and untouched: ' + plural(data.events, 'entry', 'entries') +
           ', ' + plural(data.checks_used, 'test use', 'test uses') + ' recorded.'));
         box.appendChild(technical([['Record', data.technical.ledger], ['Latest fingerprint', data.technical.latest_fingerprint]]));
       }
     } catch (failure) {
-      box.appendChild(el('p', await problem(failure, 'see the hold-out check')));
+      box.appendChild(el('p', null, await problem(failure, 'see the hold-out check')));
     } finally {
       holdoutBtn.disabled = false;
     }
@@ -429,13 +429,13 @@
     var head = 'Found ' + plural(r.patterns_found, 'repeated mistake', 'repeated mistakes') + ', tried ' +
       plural(r.ideas_tried, 'idea', 'ideas') + ', ' + r.passed_testing + ' passed testing, ' +
       plural(r.adopted, 'new lesson', 'new lessons') + ' adopted, ' + plural(r.retired, 'old lesson', 'old lessons') + ' retired.';
-    div.appendChild(el('p', head));
-    if (r.paused_for_calibration) div.appendChild(el('p', 'New lessons are paused until the quality checker is reliable again.', 'muted'));
-    else if (r.promotion_gate_off) div.appendChild(el('p', 'Nothing new can be adopted until you turn on ' +
-      (r.gate_place || 'adopting proven improvements on the Learning page') + '.', 'muted'));
+    div.appendChild(el('p', null, head));
+    if (r.paused_for_calibration) div.appendChild(el('p', 'muted', 'New lessons are paused until the quality checker is reliable again.'));
+    else if (r.promotion_gate_off) div.appendChild(el('p', 'muted', 'Nothing new can be adopted until you turn on ' +
+      (r.gate_place || 'adopting proven improvements on the Learning page') + '.'));
     if (r.new_lessons.length) {
       var ul = el('ul');
-      r.new_lessons.forEach(function (ln) { ul.appendChild(el('li', ln)); });
+      r.new_lessons.forEach(function (ln) { ul.appendChild(el('li', null, ln)); });
       div.appendChild(ul);
     }
     return div;
@@ -488,15 +488,15 @@
     if (!(await window.mvConfirm(msg, { okText: remove ? 'Check and remove' : 'Check test cases' }))) return null;
     return { url: API + '/corpus-quality', init: { method: 'POST', json: { model_id: model() || null, remove_weak: remove, confirm: remove } } };
   }, runUi('check the test cases', function (data) {
-    if (!data.configured) return el('p', 'No test cases are set up yet, so there is nothing to check.', 'muted');
-    if (!data.cases.length) return el('p', 'There are no test cases for this model yet.', 'muted');
+    if (!data.configured) return el('p', 'muted', 'No test cases are set up yet, so there is nothing to check.');
+    if (!data.cases.length) return el('p', 'muted', 'There are no test cases for this model yet.');
     var weak = data.cases.filter(function (c) { return !c.useful; }).length;
-    var head = el('p', plural(data.cases.length, 'test case', 'test cases') + ' checked. ' +
+    var head = el('p', null, plural(data.cases.length, 'test case', 'test cases') + ' checked. ' +
       (weak ? weak + (weak === 1 ? ' is' : ' are') + ' too easy to show whether a lesson helps.' : 'All of them can show whether a lesson helps.') +
       (data.removed ? ' Removed ' + plural(data.removed, 'test case', 'test cases') + '.' : ''));
     var ul = el('ul');
     data.cases.forEach(function (c) {
-      ul.appendChild(el('li', c.task + ': ' + (c.useful ? 'useful' : 'too easy') +
+      ul.appendChild(el('li', null, c.task + ': ' + (c.useful ? 'useful' : 'too easy') +
         (c.baseline_rate != null ? ' (passed ' + Math.round(c.baseline_rate * 100) + '% without help)' : '')));
     });
     return [head, ul];

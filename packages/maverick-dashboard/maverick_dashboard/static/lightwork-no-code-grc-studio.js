@@ -377,7 +377,7 @@
   var status = {};
 
   // ---------- small helpers ----------
-  function el(tag, text, cls) {
+  function el(tag, cls, text) {
     var node = document.createElement(tag);
     if (cls) { node.className = cls; }
     if (text !== undefined && text !== null) { node.textContent = String(text); }
@@ -424,7 +424,7 @@
     return readBoundedJson(response);
   }
   function button(label, handler, cls, aria) {
-    var node = el("button", label, cls || "btn btn--ghost");
+    var node = el("button", cls || "btn btn--ghost", label);
     node.type = "button";
     if (aria) { node.setAttribute("aria-label", aria); }
     node.addEventListener("click", function () {
@@ -624,19 +624,19 @@
     versionList.replaceChildren();
     $("grcs-list-count").textContent = allRows.length + (allRows.length === 1 ? " version" : " versions");
     if (!rows.length) {
-      var tr = el("tr"); var td = el("td", allRows.length ? "No versions match these filters." : "No blueprints yet." + (permissions.operate ? " Choose “Start a new blueprint” to build one." : ""));
+      var tr = el("tr"); var td = el("td", null, allRows.length ? "No versions match these filters." : "No blueprints yet." + (permissions.operate ? " Choose “Start a new blueprint” to build one." : ""));
       td.colSpan = 5; tr.appendChild(td); versionList.appendChild(tr);
       listStatus.textContent = "";
       return;
     }
     rows.forEach(function (row) {
       var tr = el("tr");
-      var th = el("th", nameOf(row)); th.scope = "row"; tr.appendChild(th);
-      tr.appendChild(el("td", "Version " + row.version));
-      var badgeCell = el("td"); badgeCell.appendChild(el("span", STATE_LABEL[row.state] || human(row.state), "badge " + (STATE_BADGE[row.state] || "idle")));
+      var th = el("th", null, nameOf(row)); th.scope = "row"; tr.appendChild(th);
+      tr.appendChild(el("td", null, "Version " + row.version));
+      var badgeCell = el("td"); badgeCell.appendChild(el("span", "badge " + (STATE_BADGE[row.state] || "idle"), STATE_LABEL[row.state] || human(row.state)));
       tr.appendChild(badgeCell);
-      tr.appendChild(el("td", when(row.updated_at)));
-      var actions = el("td"); var box = el("div", null, "grcs-actions");
+      tr.appendChild(el("td", null, when(row.updated_at)));
+      var actions = el("td"); var box = el("div", "grcs-actions", null);
       var label = nameOf(row) + " version " + row.version;
       rowActions(row, permissions).forEach(function (action) {
         var spec = ACTIONS[action];
@@ -665,28 +665,28 @@
     var blueprint = row.blueprint || {};
     $("grcs-view-title").textContent = nameOf(row) + " — version " + row.version;
     body.replaceChildren();
-    body.appendChild(el("p", (STATE_LABEL[row.state] || human(row.state)) + ". " + summaryOf(blueprint) + "."));
+    body.appendChild(el("p", null, (STATE_LABEL[row.state] || human(row.state)) + ". " + summaryOf(blueprint) + "."));
     (blueprint.objects || []).forEach(function (object) {
-      body.appendChild(el("h3", human(object.label_ref) + " (" + (KIND_LABEL[object.kind] || human(object.kind)) + ")"));
+      body.appendChild(el("h3", null, human(object.label_ref) + " (" + (KIND_LABEL[object.kind] || human(object.kind)) + ")"));
       var list = el("ul");
       (object.fields || []).forEach(function (field) {
         var bits = [TYPE_LABEL[field.field_type] || human(field.field_type)];
         if (field.required) { bits.push("required"); }
         if (field.options && field.options.length) { bits.push("choices: " + field.options.map(human).join(", ")); }
-        list.appendChild(el("li", human(field.label_ref) + " — " + bits.join(", ")));
+        list.appendChild(el("li", null, human(field.label_ref) + " — " + bits.join(", ")));
       });
       body.appendChild(list);
     });
     if ((blueprint.rules || []).length) {
-      body.appendChild(el("h3", "Rules"));
+      body.appendChild(el("h3", null, "Rules"));
       var rules = el("ul");
-      blueprint.rules.forEach(function (rule) { rules.appendChild(el("li", describeRule(rule))); });
+      blueprint.rules.forEach(function (rule) { rules.appendChild(el("li", null, describeRule(rule))); });
       body.appendChild(rules);
     }
     if ((blueprint.report_views || []).length) {
-      body.appendChild(el("h3", "Reports"));
+      body.appendChild(el("h3", null, "Reports"));
       var reports = el("ul");
-      blueprint.report_views.forEach(function (view) { reports.appendChild(el("li", human(view.title_ref) + " — columns: " + view.columns.map(human).join(", "))); });
+      blueprint.report_views.forEach(function (view) { reports.appendChild(el("li", null, human(view.title_ref) + " — columns: " + view.columns.map(human).join(", "))); });
       body.appendChild(reports);
     }
     panel.hidden = false;
@@ -761,12 +761,12 @@
         (result.items || []).forEach(function (item) {
           var snapshot = item.snapshot || {};
           var tr = el("tr");
-          tr.appendChild(el("td", when(snapshot.updated_at)));
-          tr.appendChild(el("td", EVENT_LABEL[item.event_type] || human(item.event_type)));
-          tr.appendChild(el("td", STATE_LABEL[snapshot.state] || human(snapshot.state)));
+          tr.appendChild(el("td", null, when(snapshot.updated_at)));
+          tr.appendChild(el("td", null, EVENT_LABEL[item.event_type] || human(item.event_type)));
+          tr.appendChild(el("td", null, STATE_LABEL[snapshot.state] || human(snapshot.state)));
           list.appendChild(tr);
         });
-        if (!list.children.length) { var tr = el("tr"); var td = el("td", "Nothing recorded yet."); td.colSpan = 3; tr.appendChild(td); list.appendChild(tr); }
+        if (!list.children.length) { var tr = el("tr"); var td = el("td", null, "Nothing recorded yet."); td.colSpan = 3; tr.appendChild(td); list.appendChild(tr); }
         $("grcs-history-title").textContent = "History of " + nameOf(row) + " version " + row.version;
         $("grcs-history-panel").hidden = false;
         $("grcs-history-title").focus();
@@ -838,14 +838,14 @@
     fieldset.querySelectorAll("input:checked").forEach(function (input) { checked[input.value] = true; });
     Array.prototype.slice.call(fieldset.querySelectorAll("label")).forEach(function (node) { node.remove(); });
     (object ? object.fields : []).forEach(function (field) {
-      var label = el("label", null, "grcs-check");
+      var label = el("label", "grcs-check", null);
       var input = document.createElement("input");
       input.type = "checkbox"; input.name = name; input.value = field.field_id; input.checked = Boolean(checked[field.field_id]);
-      label.appendChild(input); label.appendChild(el("span", human(field.label_ref)));
+      label.appendChild(input); label.appendChild(el("span", null, human(field.label_ref)));
       fieldset.appendChild(label);
     });
     if (!object || !object.fields.length) {
-      var hint = el("label", "Add fields in step 2 first.", "muted");
+      var hint = el("label", "muted", "Add fields in step 2 first.");
       fieldset.appendChild(hint);
     }
   }
@@ -864,13 +864,13 @@
 
   function listItem(text, removeLabel, onRemove) {
     var li = el("li");
-    li.appendChild(el("span", text));
+    li.appendChild(el("span", null, text));
     li.appendChild(button("Remove", function () { onRemove(); renderComposer(); }, "btn btn--ghost", removeLabel));
     return li;
   }
   function renderList(id, items, emptyText) {
     var target = $(id); target.replaceChildren();
-    if (!items.length) { target.appendChild(el("li", emptyText, "muted")); return; }
+    if (!items.length) { target.appendChild(el("li", "muted", emptyText)); return; }
     items.forEach(function (item) { target.appendChild(item); });
   }
   function describeRule(rule) {
@@ -1188,7 +1188,7 @@
       var result = await request("/operations/retention?limit=1000");
       var items = result.items || [];
       renderList("grcs-retention-list", items.map(function (item) {
-        return el("li", nameOf(item) + " version " + item.version + " — " + (STATE_LABEL[item.state] || human(item.state)) + ", due " + when(item.retention_due_at));
+        return el("li", null, nameOf(item) + " version " + item.version + " — " + (STATE_LABEL[item.state] || human(item.state)) + ", due " + when(item.retention_due_at));
       }), "No versions are due for deletion.");
       report(items.length ? items.length + " sent-back versions are due for deletion." : "No versions are due for deletion.");
       return items.length;
@@ -1216,9 +1216,9 @@
       statusLine.textContent = items.length ? "" : "No backups yet.";
       items.forEach(function (item) {
         var tr = el("tr");
-        tr.appendChild(el("td", when(item.created_at)));
+        tr.appendChild(el("td", null, when(item.created_at)));
         var cell = el("td");
-        var outcome = el("span", "", "muted");
+        var outcome = el("span", "muted", "");
         cell.appendChild(button("Check it", async function () {
           try {
             var verified = await request("/operations/recovery/backups/" + encodeURIComponent(item.backup_id));

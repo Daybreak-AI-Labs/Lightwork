@@ -559,6 +559,57 @@
         mvToast(text, { error: true });
         return text;
       };
+      // One JSON request: the page's cookies, JSON in and out, and a plain
+      // sentence on failure. Resolves to the parsed body (null when empty).
+      // Rejects with an Error whose message is mvErrorText(failure, action)
+      // (or a business error's own message) and which keeps status, detail,
+      // payload and headers, so mvFeatureOff(error) and
+      // mvRenderError(el, error, action, error.payload) still work.
+      //   const data = await mvFetchJSON('/api/v1/x', {method: 'POST', body: {...}}, 'save the policy');
+      window.mvFetchJSON = async function (url, opts, action) {
+        var options = Object.assign({ credentials: 'same-origin' }, opts || {});
+        var headers = Object.assign({ Accept: 'application/json' }, options.headers || {});
+        var body = options.body;
+        var raw = body == null || typeof body === 'string' || (typeof FormData !== 'undefined' && body instanceof FormData) ||
+          (typeof Blob !== 'undefined' && body instanceof Blob) || (typeof URLSearchParams !== 'undefined' && body instanceof URLSearchParams) ||
+          (typeof ArrayBuffer !== 'undefined' && body instanceof ArrayBuffer);
+        if (!raw) {
+          options.body = JSON.stringify(body);
+          if (!headers['Content-Type']) headers['Content-Type'] = 'application/json';
+        }
+        options.headers = headers;
+        var response;
+        try { response = await fetch(url, options); }
+        catch (cause) {
+          var offline = new Error(window.mvErrorText(cause, action));
+          // Same name as the cause (TypeError, AbortError), so passing this
+          // error to mvErrorText or mvFieldErrors.fail gives the same words.
+          offline.status = 0; offline.cause = cause; offline.name = (cause && cause.name) || 'Error';
+          throw offline;
+        }
+        var payload = null;
+        try { payload = await response.json(); } catch (_) { payload = null; }
+        if (response.ok) return payload;
+        var failure = { status: response.status, detail: payload && payload.detail, headers: response.headers };
+        var error = new Error(window.mvErrorText(failure, action));
+        error.status = failure.status; error.detail = failure.detail; error.headers = failure.headers; error.payload = payload;
+        throw error;
+      };
+      // One inline status line next to the control it reports on. Sets the
+      // words and, unless the page made the element a live region itself,
+      // announces them: politely (role=status), or at once (role=alert) for
+      // an error, which also gets the error style. Empty text clears it.
+      window.mvStatus = function (element, text, opts) {
+        if (!element) return null;
+        var error = !!(opts && opts.error);
+        if (!element.hasAttribute('aria-live') && (!element.hasAttribute('role') || element.hasAttribute('data-mv-status'))) {
+          element.setAttribute('data-mv-status', '');
+          element.setAttribute('role', error ? 'alert' : 'status');
+        }
+        element.classList.toggle('mv-status--error', error);
+        element.textContent = text == null ? '' : String(text);
+        return element;
+      };
       // A stored value (status, kind, slug) as a readable label:
       // "pending_review" -> "Pending review", "ai_act" -> "AI Act".
       var WORDS = { ai: 'AI', api: 'API', id: 'ID', ids: 'IDs', url: 'URL', sso: 'SSO',

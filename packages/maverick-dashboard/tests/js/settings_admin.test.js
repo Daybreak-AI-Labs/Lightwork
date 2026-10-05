@@ -10,6 +10,15 @@ function response(value, status = 200) {
   return new Response(JSON.stringify(value), {status, headers: {'Content-Type': 'application/json'}});
 }
 
+// The shell's shared helpers (mvFetchJSON, mvStatus) load before page
+// scripts, as in base.html; this fixture's own stand-ins are kept.
+function withShell(window) {
+  const kept = Object.fromEntries(Object.keys(window).filter((k) => k.startsWith('mv')).map((k) => [k, window[k]]));
+  if (!window.matchMedia) window.matchMedia = () => ({matches: false, addEventListener() {}, removeEventListener() {}});
+  window.eval(fs.readFileSync(path.join(folder, 'static/lightwork-ui.js'), 'utf8'));
+  Object.assign(window, kept);
+}
+
 async function fixture(route, {confirm = true, typed = 'acme'} = {}) {
   const dom = new JSDOM(markup, {url: 'https://lightwork.example/settings', runScripts: 'outside-only'});
   const {window} = dom, calls = [], confirms = [], copies = [], forms = [];
@@ -19,6 +28,7 @@ async function fixture(route, {confirm = true, typed = 'acme'} = {}) {
   window.mvCopy = (text) => copies.push(text);
   window.mvErrorText = (failure, action) => 'Could not ' + action + '.';
   window.mvWhen = () => 'today';
+  withShell(window);
   window.eval(script);
   const settle = async () => { for (let i = 0; i < 12; i++) await new Promise((done) => setImmediate(done)); };
   return {window, document: window.document, calls, confirms, copies, forms, settle};

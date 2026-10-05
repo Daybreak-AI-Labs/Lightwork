@@ -23,6 +23,15 @@ function response(value, status = 200) {
 }
 const ADMIN = {can: {installation_admin: true}};
 
+// The shell's shared helpers (mvFetchJSON) load before page scripts, as in
+// base.html; this fixture's own stand-ins for the other helpers are kept.
+function withShell(window) {
+  const kept = Object.fromEntries(Object.keys(window).filter((k) => k.startsWith('mv')).map((k) => [k, window[k]]));
+  if (!window.matchMedia) window.matchMedia = () => ({matches: false, addEventListener() {}, removeEventListener() {}});
+  window.eval(read('static/lightwork-ui.js'));
+  Object.assign(window, kept);
+}
+
 async function fixture(markup, route, {confirm = true} = {}) {
   const dom = new JSDOM('<!doctype html><body>' + markup + '</body>', {url: 'https://lightwork.example/', runScripts: 'outside-only'});
   const {window} = dom, calls = [], confirms = [];
@@ -38,6 +47,7 @@ async function fixture(markup, route, {confirm = true} = {}) {
   window.mvWhen = () => 'today';
   window.URL.createObjectURL = () => 'blob:x';
   window.URL.revokeObjectURL = () => {};
+  withShell(window);
   window.eval(script);
   const settle = async () => { for (let i = 0; i < 20; i++) await new Promise((done) => setImmediate(done)); };
   await settle();
@@ -275,6 +285,7 @@ test('the connectors panel stays hidden from people who are not installation adm
   const dom = new JSDOM('<!doctype html><body>' + markup + '</body>', {url: 'https://lightwork.example/', runScripts: 'outside-only'});
   const calls = [];
   dom.window.fetch = async (url) => { calls.push(url); return response({can: {installation_admin: false}}); };
+  withShell(dom.window);
   dom.window.eval(script);
   for (let i = 0; i < 20; i++) await new Promise((done) => setImmediate(done));
   t.after(() => dom.window.close());

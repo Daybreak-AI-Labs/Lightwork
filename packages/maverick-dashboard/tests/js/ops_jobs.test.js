@@ -40,7 +40,7 @@ test("a job is polled until it finishes and its result is shown", async (t) => {
   const J = ui.window.LWJobs;
   J.wire(ui.doc.getElementById("go"), async () => ({ url: "/start", init: { method: "POST", json: {} } }),
     { status: ui.doc.getElementById("status"), out: ui.doc.getElementById("out"), action: "do it",
-      render: (r) => J.el("p", "Counted " + r.n) });
+      render: (r) => J.el("p", null, "Counted " + r.n) });
   ui.doc.getElementById("go").click();
   await ui.settle();
   assert.equal(ui.doc.getElementById("status").textContent, "Finished.");
@@ -76,7 +76,7 @@ test("a failed job shows its plain problem and no result", async (t) => {
   const J = ui.window.LWJobs;
   const status = ui.doc.getElementById("status");
   await J.run("/start", { method: "POST", json: {} }, { status, out: ui.doc.getElementById("out"), action: "do it",
-    render: () => J.el("p", "should not render") });
+    render: () => J.el("p", null, "should not render") });
   assert.equal(status.textContent, "It reached its spending limit and stopped.");
   assert.equal(ui.doc.getElementById("out").textContent, "");
 });

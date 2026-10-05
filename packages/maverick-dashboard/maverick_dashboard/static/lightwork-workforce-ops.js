@@ -72,9 +72,9 @@
     testCases = data.cases || [];
     testLiveEnabled = !!data.live_enabled;
     var list = [];
-    if (!testCases.length) list.push(el('p', 'No answer checks yet. Add one below.', 'muted'));
+    if (!testCases.length) list.push(el('p', 'muted', 'No answer checks yet. Add one below.'));
     else {
-      list.push(el('p', plural(testCases.length, 'saved check') + ' for this specialist. Choose up to 5 for the next run.'));
+      list.push(el('p', null, plural(testCases.length, 'saved check') + ' for this specialist. Choose up to 5 for the next run.'));
       var rows = testCases.map(function (c) {
         var choose = el('input'); choose.type = 'checkbox'; choose.className = 'wo-test-choice';
         choose.value = c.id; choose.checked = testCases.length <= 5;
@@ -82,9 +82,9 @@
         choose.addEventListener('change', updateRunAvailability);
         var actions = el('span');
         if (testAdmin) {
-          var edit = el('button', 'Edit', 'btn btn--ghost'); edit.type = 'button';
+          var edit = el('button', 'btn btn--ghost', 'Edit'); edit.type = 'button';
           edit.addEventListener('click', function () { editTest(c); });
-          var remove = el('button', 'Remove', 'btn btn--ghost'); remove.type = 'button';
+          var remove = el('button', 'btn btn--ghost', 'Remove'); remove.type = 'button';
           remove.addEventListener('click', async function () {
             if (!(await window.mvConfirm('Remove this answer check?', {okText: 'Remove check'}))) return;
             remove.disabled = true;
@@ -110,21 +110,21 @@
     run.textContent = pending ? 'Check original result' : 'Check answers';
     $('wo-test-new-run').hidden = !testAdmin || !pending;
     if (!data.live_enabled) {
-      var p = el('p', 'Live answer checks are off. An administrator can enable bounded model tests in All settings.', 'muted');
-      var link = el('a', 'Open All settings'); link.href = '/settings/all'; p.appendChild(document.createTextNode(' ')); p.appendChild(link);
+      var p = el('p', 'muted', 'Live answer checks are off. An administrator can enable bounded model tests in All settings.');
+      var link = el('a', null, 'Open All settings'); link.href = '/settings/all'; p.appendChild(document.createTextNode(' ')); p.appendChild(link);
       list.push(p); fill('wo-tests-list', list);
     }
     var history = data.runs || [];
-    if (!history.length) { fill('wo-test-history', el('p', 'No live checks have been run yet.', 'muted')); return; }
+    if (!history.length) { fill('wo-test-history', el('p', 'muted', 'No live checks have been run yet.')); return; }
     fill('wo-test-history', history.map(function (r) {
       var box = el('details');
       var state = r.state === 'done' ? (r.passed + ' of ' + r.total + ' passed')
         : r.state === 'stopped' ? 'Stopped after ' + r.results.length + ' answers'
           : r.state === 'prepared' ? 'Not started' : 'Result uncertain after ' + r.results.length + ' answers';
-      box.appendChild(el('summary', J.when(r.started_at) + ' · ' + state));
-      if (r.message) box.appendChild(el('p', r.message));
-      box.appendChild(el('p', 'Model: ' + r.model + '. Recorded cost: ' + J.money(r.spent_dollars) +
-        '. Each check used the specialist instructions shown by this version; no actions or company knowledge were used.', 'muted'));
+      box.appendChild(el('summary', null, J.when(r.started_at) + ' · ' + state));
+      if (r.message) box.appendChild(el('p', null, r.message));
+      box.appendChild(el('p', 'muted', 'Model: ' + r.model + '. Recorded cost: ' + J.money(r.spent_dollars) +
+        '. Each check used the specialist instructions shown by this version; no actions or company knowledge were used.'));
       if (r.results.length) box.appendChild(J.table(['Question', 'Answer', 'Result'], r.results.map(function (answer) {
         return [answer.task, answer.answer, answer.passed ? 'Passed' : 'Needs review'];
       })));
@@ -135,7 +135,7 @@
     var specialist = $('wo-test-specialist').value;
     clearTestEditor();
     if (!specialist) {
-      fill('wo-tests-list', el('p', 'Choose a specialist to see its answer checks.', 'muted'));
+      fill('wo-tests-list', el('p', 'muted', 'Choose a specialist to see its answer checks.'));
       fill('wo-test-history', null);
       document.querySelectorAll('#wo-my-tests .wo-test-admin').forEach(function (n) { n.hidden = true; });
       return;
@@ -161,7 +161,7 @@
       var data = await J.request(API + '/test-suite/specialists');
       var select = $('wo-test-specialist');
       (data.specialists || []).forEach(function (s) {
-        var option = el('option', s.label); option.value = s.value; select.appendChild(option);
+        var option = el('option', null, s.label); option.value = s.value; select.appendChild(option);
       });
       var requested = new URLSearchParams(location.search).get('specialist');
       if (requested && (data.specialists || []).some(function (s) { return s.value === requested; })) select.value = requested;
@@ -173,10 +173,10 @@
   var suitesLoaded = false;
   function loadInventory() {
     var suite = $('wo-inv-suite').value;
-    fill('wo-inv', el('p', 'Loading…', 'muted'));
+    fill('wo-inv', el('p', 'muted', 'Loading…'));
     J.request(API + '/inventory' + (suite ? '?suite=' + encodeURIComponent(suite) : '')).then(function (d) {
       if (!suitesLoaded) {
-        d.suites.forEach(function (s) { var o = el('option', s.label); o.value = s.value; $('wo-inv-suite').appendChild(o); });
+        d.suites.forEach(function (s) { var o = el('option', null, s.label); o.value = s.value; $('wo-inv-suite').appendChild(o); });
         suitesLoaded = true;
       }
       var facts = [
@@ -194,16 +194,16 @@
             '. ' + plural(d.still_supervised, 'specialist') + ' still supervised while new.'
       ];
       var nodes = [el('ul')];
-      facts.forEach(function (f) { nodes[0].appendChild(el('li', f)); });
+      facts.forEach(function (f) { nodes[0].appendChild(el('li', null, f)); });
       if (d.flagged.length) {
-        nodes.push(el('h3', 'Specialists to review'));
+        nodes.push(el('h3', null, 'Specialists to review'));
         nodes.push(J.table(['Specialist', 'Can reach'], d.flagged.map(function (f) {
           return [f.specialist, f.can_reach.map(window.mvHuman || String).join(', ')];
         })));
       }
       fill('wo-inv', nodes);
     }).catch(async function (failure) {
-      fill('wo-inv', el('p', await J.problem(failure, 'load the specialist inventory')));
+      fill('wo-inv', el('p', null, await J.problem(failure, 'load the specialist inventory')));
     });
   }
 
@@ -232,33 +232,33 @@
     J.wire($('wo-lint-run'), async function () {
       return { url: API + '/setup-check', init: { method: 'POST', json: {} } };
     }, { status: $('wo-lint-status'), out: $('wo-lint-out'), action: 'check the specialists', render: function (d) {
-      var head = el('p', 'Checked ' + plural(d.specialists, 'specialist') + ': ' + plural(d.must_fix, 'problem') + ' to fix and ' +
+      var head = el('p', null, 'Checked ' + plural(d.specialists, 'specialist') + ': ' + plural(d.must_fix, 'problem') + ' to fix and ' +
         plural(d.could_improve, 'thing') + ' that could be better.');
       if (!d.findings.length) return head;
       var rows = d.findings.map(function (f) {
         return [f.specialist, f.must_fix.join(' ') || '—', f.could_improve.join(' ') || '—'];
       });
       var nodes = [head, J.table(['Specialist', 'Must fix', 'Could be better'], rows)];
-      if (d.more) nodes.push(el('p', plural(d.more, 'more specialist') + ' not shown.', 'muted'));
+      if (d.more) nodes.push(el('p', 'muted', plural(d.more, 'more specialist') + ' not shown.'));
       nodes.push(J.technical(d.findings.slice(0, 50).map(function (f) { return f.specialist + ': ' + f.technical.join(' | '); })));
       return nodes;
     } });
 
     J.request(API + '/test-suite').then(function (d) {
-      var nodes = [el('p', plural(d.cases, 'test') + ' across ' + plural(d.specialists, 'specialist') + '. ' +
+      var nodes = [el('p', null, plural(d.cases, 'test') + ' across ' + plural(d.specialists, 'specialist') + '. ' +
         (d.problems ? plural(d.problems, 'test') + ' need fixing: each must name a real specialist and say what a good answer looks like.'
           : 'Every test is complete.'))];
       var box = el('details');
-      box.appendChild(el('summary', 'Show the tests'));
+      box.appendChild(el('summary', null, 'Show the tests'));
       box.appendChild(J.table(['Specialist', 'Task', 'A good answer'], d.list.map(function (c) {
         return [c.specialist, c.task, c.expects.join('; ')];
       })));
       nodes.push(box);
       if (d.technical.length) nodes.push(J.technical(d.technical));
-      nodes.push(el('p', 'Running the tests live needs a separate test run with an AI provider; this only checks the tests themselves.', 'muted'));
+      nodes.push(el('p', 'muted', 'Running the tests live needs a separate test run with an AI provider; this only checks the tests themselves.'));
       fill('wo-suite', nodes);
     }).catch(async function (failure) {
-      fill('wo-suite', el('p', await J.problem(failure, 'load the test suite')));
+      fill('wo-suite', el('p', null, await J.problem(failure, 'load the test suite')));
     });
 
     $('wo-test-specialist').addEventListener('change', loadCustomerTests);
@@ -313,7 +313,7 @@
       var done = await J.follow(started.job, {status: $('wo-test-run-status'), out: $('wo-test-run-out'),
         action: 'check the answers', render: function (d) {
           var r = d.run;
-          return el('p', r.state === 'done' ? r.passed + ' of ' + r.total + ' answers passed. Open Previous checks to review them.'
+          return el('p', null, r.state === 'done' ? r.passed + ' of ' + r.total + ' answers passed. Open Previous checks to review them.'
             : (r.message || 'The check stopped early. Open Previous checks for completed answers.'));
         }});
       if (!done || done.state === 'failed') await readOriginal(specialist, id);
@@ -379,18 +379,18 @@
         var further = $('wo-up-days').options[$('wo-up-days').options.length - 1].value !== String(days);
         var body = 'Tasks with a due date appear here, overdue ones first.' + (further ? ' Choose a longer period above to look further ahead.' : '');
         fill('wo-up', window.mvEmpty ? window.mvEmpty('Nothing is due in ' + period, body, null, {compact: true})
-          : el('p', 'Nothing is due in ' + period + '. ' + body, 'muted'));
+          : el('p', 'muted', 'Nothing is due in ' + period + '. ' + body));
         return;
       }
       fill('wo-up', J.table(['Task', 'Due', 'Department', 'Waiting on you'], d.tasks.map(function (t) {
-        var link = el('a', t.title || 'Task');
+        var link = el('a', null, t.title || 'Task');
         link.href = '/chat/goal/' + encodeURIComponent(t.task);
-        var due = el('span', (t.overdue ? 'Overdue: ' : '') + J.when(t.due), t.overdue ? 'badge blocked' : '');
+        var due = el('span', t.overdue ? 'badge blocked' : '', (t.overdue ? 'Overdue: ' : '') + J.when(t.due));
         return [link, due, t.department ? (window.mvHuman ? window.mvHuman(t.department) : t.department) : '—',
           t.questions ? plural(t.questions, 'question') : '—'];
       })));
     }).catch(async function (failure) {
-      fill('wo-up', el('p', await J.problem(failure, 'load the tasks coming due')));
+      fill('wo-up', el('p', null, await J.problem(failure, 'load the tasks coming due')));
     });
   }
   if ($('wo-upcoming-root')) {

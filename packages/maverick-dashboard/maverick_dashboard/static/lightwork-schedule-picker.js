@@ -14,7 +14,7 @@
     if (text != null) node.textContent = text;
     return node;
   }
-  function say(text) { $('preview').textContent = text; }
+  function say(text, error) { window.mvStatus($('preview'), text, { error: !!error }); }
   const fields = window.mvFieldErrors;
   // Problems are written next to their field and listed in a summary at the
   // top of the form (mvFieldErrors); nothing typed is cleared.
@@ -30,13 +30,7 @@
     } else if (!$('rerun').value) error($('rerun'), 'Choose the earlier task to run again.');
   });
   function failed(failure) {
-    if (fields) fields.fail(form, failure, 'create the schedule'); else say(failText(failure, 'create the schedule'));
-  }
-  function failText(failure, what) {
-    return typeof window.mvErrorText === 'function' ? window.mvErrorText(failure, what) : 'Could not ' + what + '. Please try again.';
-  }
-  async function errorOf(response) {
-    return typeof window.mvErrorResponse === 'function' ? window.mvErrorResponse(response) : response;
+    if (fields) fields.fail(form, failure, 'create the schedule'); else say(failure.message, true);
   }
   function human(value) { return typeof window.mvHuman === 'function' ? window.mvHuman(value) : String(value).replace(/[-_]+/g, ' '); }
   function when(epoch) {
@@ -78,23 +72,18 @@
   }
   async function preview() {
     try {
-      const response = await fetch('/api/v1/schedules/preview', {
-        method: 'POST', credentials: 'same-origin', cache: 'no-store', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ timetable: timetable() })
-      });
-      if (!response.ok) { say(failText(response, 'check the timetable')); return; }
-      const data = await response.json();
+      const data = await window.mvFetchJSON('/api/v1/schedules/preview',
+        { method: 'POST', cache: 'no-store', body: { timetable: timetable() } }, 'check the timetable');
       const runs = Array.isArray(data.next_runs) ? data.next_runs.filter(n => typeof n === 'number') : [];
       say(runs.length ? 'Next runs: ' + runs.map(when).join(' · ') : 'This timetable has no upcoming runs.');
-    } catch (error) { say(failText(error, 'check the timetable')); }
+    } catch (error) { say(error.message, true); }
   }
   function schedulePreview() { sync(); clearTimeout(previewTimer); previewTimer = setTimeout(preview, 300); }
   async function load() {
     try {
-      const response = await fetch('/api/v1/schedules/options', { credentials: 'same-origin', cache: 'no-store' });
-      if (!response.ok) return;
-      options = await response.json();
+      options = await window.mvFetchJSON('/api/v1/schedules/options', { cache: 'no-store' });
     } catch (_) { return; }
+    if (!options) return;
     const workflow = $('workflow');
     workflow.replaceChildren(make('option', null, (options.workflows || []).length ? 'Choose a workflow' : 'No saved workflows yet'));
     workflow.firstChild.value = '';
@@ -140,12 +129,7 @@
     }
     busy = true; $('save').disabled = true;
     try {
-      const response = await fetch('/api/v1/schedules/add', {
-        method: 'POST', credentials: 'same-origin', cache: 'no-store', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body)
-      });
-      if (!response.ok) { failed(await errorOf(response)); return; }
-      const data = await response.json();
+      const data = await window.mvFetchJSON('/api/v1/schedules/add', { method: 'POST', cache: 'no-store', body: body }, 'create the schedule');
       if (fields) { fields.clear(form); fields.forget(form); }
       say('Schedule created. Next run ' + when(data.next_run) + '.');
       if (typeof window.mvToast === 'function') window.mvToast('Schedule created');

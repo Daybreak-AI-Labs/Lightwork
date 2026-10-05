@@ -9,13 +9,11 @@
     return window.mvErrorText ? window.mvErrorText(failure, action) : 'Could not ' + action + '. Please try again.';
   }
   async function send(url, method, body) {
-    var response = await window.fetch(url, {
-      method: method, credentials: 'same-origin',
-      headers: {'Content-Type': 'application/json'},
-      body: body === undefined ? undefined : JSON.stringify(body)
-    });
-    if (!response.ok) throw response;
-    return response.status === 204 ? {} : response.json().catch(function () { return {}; });
+    return (await window.mvFetchJSON(url, {method: method, body: body})) || {};
+  }
+  // A plain server explanation (a duplicate name), when it is one.
+  function plainDetail(failure) {
+    return window.mvPlainDetail ? window.mvPlainDetail(failure && failure.detail) : '';
   }
   function reloadSoon() { window.setTimeout(function () { window.location.reload(); }, 350); }
   function base(id) { return '/api/v1/admin/tenants/' + encodeURIComponent(id); }
@@ -74,8 +72,7 @@
         if (window.mvToastAfterReload) window.mvToastAfterReload('Workspace "' + name + '" created.');
         reloadSoon();
       } catch (failure) {
-        var plain = '';
-        try { if (failure && typeof failure.clone === 'function') { var body = await failure.clone().json(); plain = window.mvPlainDetail ? window.mvPlainDetail(body && body.detail) : ''; } } catch (ignored) {}
+        var plain = plainDetail(failure);
         addMsg.textContent = plain || errorText(failure, 'create the workspace');
         if (window.mvToast) window.mvToast(addMsg.textContent, {error: true});
       }
@@ -163,8 +160,7 @@
         if (window.mvToastAfterReload) window.mvToastAfterReload(rowMsg.textContent);
         reloadSoon();
       } catch (failure) {
-        var plain = '';
-        try { if (failure && typeof failure.clone === 'function') { var body = await failure.clone().json(); plain = window.mvPlainDetail ? window.mvPlainDetail(body && body.detail) : ''; } } catch (ignored) {}
+        var plain = plainDetail(failure);
         rowMsg.textContent = plain || errorText(failure, 'restore the workspace');
         button.disabled = false;
       }

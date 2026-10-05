@@ -903,6 +903,8 @@
       margin-inline-start: 0.5em; color: var(--muted); font-size: var(--text-xs);
       font-weight: var(--font-medium); letter-spacing: normal; text-transform: none; white-space: nowrap;
     }
+    /* An error in a status line written by window.mvStatus. */
+    .mv-status--error { color: var(--color-danger); }
     .mv-form__err { color: var(--danger, #dc2626); font-size: var(--text-sm); min-height: 1em; margin: 0 0 var(--space-2); }
     /* One form-field pattern (templates/_form_field.html + mvFieldErrors):
        label, hint, error next to the field, and an error summary on top. */
