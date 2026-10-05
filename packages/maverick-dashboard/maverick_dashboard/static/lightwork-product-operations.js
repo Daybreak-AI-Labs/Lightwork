@@ -101,7 +101,10 @@
         control.dataset.available = item.available === true ? 'true' : 'false'; control.disabled = busy || !item.available;
         if (item.blocked) control.title = item.blocked;
       });
-      status.textContent = uncertainty || 'Current controls for this page. Changes require a separate review and confirmation.';
+      var changes = fresh.operations.some(function (item) { return item.confirmation_required === true; });
+      status.textContent = uncertainty || (changes
+        ? 'Current controls for this page. Changes require a separate review and confirmation.'
+        : 'Current status for this page. These controls show information or open the page\'s own form; nothing changes unless you confirm there.');
       return fresh;
     } catch (error) {
       if (active(started)) { catalog = null; clear(buttons); clear(formHost); selected = null; host.hidden = false; status.textContent = error.message; }

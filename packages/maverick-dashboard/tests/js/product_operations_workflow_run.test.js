@@ -11,6 +11,7 @@ const source = fs.readFileSync(path.resolve(__dirname,
 const turn = () => new Promise(resolve => setImmediate(resolve));
 
 function setup(release = "a".repeat(64), config = {}) {
+  // config.confirm marks the listed control as one that changes something itself.
   const dom = new JSDOM('<aside id="mv-copilot"><section id="mv-product-operations">' +
     '<p id="mv-product-operation-status"></p><div id="mv-product-operation-buttons"></div>' +
     '<div id="mv-product-operation-form"></div></section></aside>',
@@ -19,7 +20,7 @@ function setup(release = "a".repeat(64), config = {}) {
   const catalog = {schema: 1, selection: {kind: "flow", id: "owned"}, context: "c".repeat(64),
     checked_at: 1, operations: [{id: "learning.workflow_run", label: "Run this published workflow",
       available: true, revision: "reviewed-release", source: "Current published workflow",
-      summary: "Run the published procedure", confirmation_required: false}]};
+      summary: "Run the published procedure", confirmation_required: config.confirm === true}]};
   const fetch = async (url, options) => {
     const body = JSON.parse(options.body); calls.push({url, body});
     if (url.endsWith("/propose") && config.proposeFailure) throw Error("private transport detail");
@@ -75,4 +76,16 @@ test("a failed control suggestion does not claim a control opened or expose tran
   assert.match(message, /could not be completed/);
   assert.doesNotMatch(message, /private transport detail/);
   assert.equal(ui.document.querySelector('#mv-product-operation-form').textContent, '');
+});
+
+test("the status line never says controls change nothing when one opens a form or needs confirmation", async () => {
+  const plain = setup();
+  plain.window.LightworkProductOperations.open(); await turn();
+  const text = plain.document.querySelector('#mv-product-operation-status').textContent;
+  assert.match(text, /open the page's own form; nothing changes unless you confirm there/);
+  assert.doesNotMatch(text, /change nothing/);
+  const writes = setup("a".repeat(64), {confirm: true});
+  writes.window.LightworkProductOperations.open(); await turn();
+  assert.match(writes.document.querySelector('#mv-product-operation-status').textContent,
+    /Changes require a separate review and confirmation/);
 });
