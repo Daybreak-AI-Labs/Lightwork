@@ -1346,8 +1346,14 @@ _LIMIT_ERRORS = {
 
 
 @router.get("/spending-limits", response_class=HTMLResponse)
-def spending_limits_page(request: Request, saved: str = "", error: str = "") -> HTMLResponse:
-    """Admin: workspace and per-person spending limits (none by default)."""
+def spending_limits_page(request: Request, saved: str = "", error: str = "",
+                         preview: str = "", amount: str = "", period: str = "",
+                         principal: str = "") -> HTMLResponse:
+    """Admin: workspace and per-person spending limits (none by default).
+
+    ``?preview=workspace|default|person`` with an amount and period replays
+    the last 30 days of finished tasks against that limit, report-only:
+    nothing is saved until the administrator presses Save."""
     auth.require_permission(request, "admin")
     from maverick import spending_limits
     from maverick.paths import current_tenant_id
@@ -1375,9 +1381,12 @@ def spending_limits_page(request: Request, saved: str = "", error: str = "") -> 
         organization_cap = float(record.max_daily_dollars) if record else 0.0
     except Exception:  # noqa: BLE001 -- the organization cap is informational here
         pass
+    replay, replay_error = _limit_preview(preview, amount, period, principal)
     return _app().templates.TemplateResponse(request, "spending_limits.html", {
         "view": view,
         "alert_at": _alert_points(),
+        "preview": replay, "preview_error": replay_error,
+        "draft": {"scope": preview, "amount": amount, "period": period, "principal": principal},
         "periods": [(p, spending_limits.PERIOD_LABELS[p]) for p in spending_limits.PERIODS],
         "workspace_periods": [(p, spending_limits.PERIOD_LABELS[p])
                               for p in spending_limits.WORKSPACE_PERIODS],
@@ -1387,6 +1396,20 @@ def spending_limits_page(request: Request, saved: str = "", error: str = "") -> 
         "error": _LIMIT_ERRORS.get(error, ""),
         "load_error": load_error,
     })
+
+
+def _limit_preview(scope: str, amount: str, period: str, principal: str) -> tuple[dict | None, str]:
+    """The report-only replay for a proposed limit, or a plain error."""
+    if scope not in ("workspace", "default", "person"):
+        return None, ""
+    from maverick import spending_limits
+    from maverick.spending_limit_preview import preview
+    try:
+        return preview(scope, amount, period, principal=principal, world=_app()._world()), ""
+    except spending_limits.SpendingLimitError as exc:
+        return None, _LIMIT_ERRORS.get(exc.code, _LIMIT_ERRORS["amount"])
+    except Exception:  # noqa: BLE001 -- the preview is advice; say it is unavailable
+        return None, "The task history could not be read, so there is no preview. Saving still works."
 
 
 def _alert_points() -> str:

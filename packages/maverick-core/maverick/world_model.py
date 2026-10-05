@@ -2720,6 +2720,18 @@ class WorldModel:
         rows = self._read_all(sql, tuple(params))
         return [_episode_spend_from_row(r) for r in rows]
 
+    def episode_costs_since(self, since: float, *, limit: int = 100_000) -> list[tuple[str, float, float]]:
+        """Finished runs that ended at or after ``since``, oldest first, as
+        ``(owner, ended_at, cost_dollars)``. Read-only history for previewing a
+        spending limit before it is saved."""
+        rows = self._read_all(
+            "SELECT COALESCE(g.owner, '') AS owner, e.ended_at AS ended_at, "
+            "COALESCE(e.cost_dollars, 0) AS cost FROM episodes e JOIN goals g ON e.goal_id = g.id "
+            "WHERE e.ended_at IS NOT NULL AND e.ended_at >= ? ORDER BY e.ended_at ASC, e.id ASC LIMIT ?",
+            (float(since), int(limit)),
+        )
+        return [(str(r["owner"] or ""), float(r["ended_at"]), float(r["cost"] or 0.0)) for r in rows]
+
     def episode_exists(self, goal_id: int, episode_id: int) -> bool:
         """True if ``episode_id`` belongs to ``goal_id``. A single indexed
         lookup -- callers must not scan list_episodes to check existence."""

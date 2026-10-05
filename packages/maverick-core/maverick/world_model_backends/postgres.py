@@ -3123,6 +3123,25 @@ class PostgresWorldModel:
         return [EpisodeSpend(r[0], r[1], r[2], r[3], _unseal(r[4]),
                              r[5], r[6], r[7], r[8], r[9], r[10]) for r in rows]
 
+    def episode_costs_since(self, since: float, *, limit: int = 100_000) -> list[tuple[str, float, float]]:
+        """Finished runs that ended at or after ``since``, oldest first, as
+        ``(owner, ended_at, cost_dollars)`` -- the SQLite backend's contract,
+        inside the active tenant."""
+        frag, fparams = _tenant_scope("g.tenant_id")
+        sql = ("SELECT COALESCE(g.owner, ''), e.ended_at, COALESCE(e.cost_dollars, 0) "
+               "FROM episodes e JOIN goals g ON g.id = e.goal_id "
+               "WHERE e.ended_at IS NOT NULL AND e.ended_at >= %s")
+        params: list = [float(since)]
+        if frag:
+            sql += " AND " + frag
+            params += fparams
+        sql += " ORDER BY e.ended_at ASC, e.id ASC LIMIT %s"
+        params.append(int(limit))
+        with self._tx() as cur:
+            cur.execute(sql, tuple(params))
+            rows = cur.fetchall()
+        return [(str(r[0] or ""), float(r[1]), float(r[2] or 0.0)) for r in rows]
+
     def episode_exists(self, goal_id: int, episode_id: int) -> bool:
         frag, fparams = _tenant_scope("g.tenant_id")
         table = "episodes e"

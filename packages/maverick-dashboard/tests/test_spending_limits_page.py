@@ -123,3 +123,51 @@ def test_spend_page_freshness_comes_from_the_newest_cost(client):
     dash_app._world_cache.clear()
     page = client.get("/spend").text
     assert f'data-mv-time="{(newest.ended_at or newest.started_at):.3f}"' in page
+
+
+def _finished_task(owner, cost):
+    from maverick import world_model
+    from maverick.quotas import UsageLedger
+    UsageLedger().record(owner, cost, 0, 0)  # so the person is listed for a personal limit
+    w = world_model.open_world()
+    gid = w.create_goal("Weekly report", owner=owner)
+    w.end_episode(w.start_episode(gid), "Done", "success", cost_dollars=cost)
+
+
+def test_preview_reports_what_a_stricter_limit_would_have_stopped_and_saves_nothing(client):
+    import re
+
+    from maverick import spending_limits
+    _finished_task("user:alice", 6.0)
+    _finished_task("user:alice", 6.0)
+    _finished_task("user:bob", 1.0)
+    page = client.get("/spending-limits", params={
+        "preview": "workspace", "choice": "limit", "amount": "10", "period": "month"}).text
+    text = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", page))
+    assert "Preview only. Nothing changes until you save." in text
+    assert "In the last 30 days, 2 tasks by 2 people would have stopped at $10.00 per month, of 3 finished." in text
+    assert spending_limits.load()["workspace"] is None  # report-only
+    # The form keeps the previewed amount so Save applies exactly that.
+    assert 'value="10.00"' in page
+    # Every form offers the preview, which never asks the "raise the limit" question.
+    assert page.count('name="preview" value=') == 3
+    assert "event.submitter.name === 'preview'" in page
+
+
+def test_preview_for_one_person_and_a_bad_amount(client):
+    _finished_task("user:alice", 6.0)
+    page = client.get("/spending-limits", params={
+        "preview": "person", "principal": "user:alice", "amount": "5", "period": "task"}).text
+    assert "1 task</strong> would have stopped at $5.00 per task, of 1 finished." in page
+    page = client.get("/spending-limits", params={"preview": "default", "amount": "-3", "period": "day"}).text
+    assert "No preview." in page and "Enter the limit as an amount in dollars" in page
+
+
+def test_saving_a_limit_is_recorded_in_the_audit_log(client, monkeypatch):
+    import maverick.audit as audit
+    events = []
+    monkeypatch.setattr(audit, "audit_event", lambda kind, **kw: events.append((kind, kw)) or True)
+    r = client.post("/spending-limits/workspace", data={"choice": "limit", "amount": "75", "period": "day"},
+                    follow_redirects=False)
+    assert r.status_code == 303
+    assert events, "saving a spending limit must write an audit record"

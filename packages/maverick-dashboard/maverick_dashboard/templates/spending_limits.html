@@ -4,28 +4,48 @@
   {% from "_hero.html" import hero, state %}
   {% macro who(principal) %}{% set p = principal | identity %}<span title="{{ p.raw }}">{{ p.name }}{% if p.detail %} <span class="muted" style="font-weight: normal;">· {{ p.detail }}</span>{% endif %}</span>{% endmacro %}
   {% macro describe(limit) %}{% if limit %}{{ limit.amount | money }} {{ period_labels[limit.period] }}{% else %}No limit{% endif %}{% endmacro %}
-  {% macro limit_fields(prefix, limit, options) %}
+  {% macro limit_fields(prefix, limit, options, scope='') %}
+    {% set drafted = draft.scope == scope and preview is not none %}
     <fieldset style="border: 0; padding: 0; margin: 0; display: flex; flex-direction: column; gap: var(--space-2);">
       <legend class="muted" style="font-size: var(--text-sm); padding: 0 0 var(--space-1);">Choose one</legend>
       <label style="display: flex; gap: var(--space-2); align-items: center;">
-        <input type="radio" name="choice" value="none" {% if not limit %}checked{% endif %} />
+        <input type="radio" name="choice" value="none" {% if not limit and not drafted %}checked{% endif %} />
         No limit
       </label>
       <label style="display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap;">
-        <input type="radio" name="choice" value="limit" {% if limit %}checked{% endif %} />
+        <input type="radio" name="choice" value="limit" {% if limit or drafted %}checked{% endif %} />
         Limit spending to
         <span style="display: inline-flex; align-items: center; gap: var(--space-1);">$
           <input class="ctl" type="number" name="amount" min="0.01" step="0.01" inputmode="decimal"
                  style="width: 8rem;" aria-label="{{ prefix }} amount in dollars"
-                 value="{% if limit %}{{ '%.2f' | format(limit.amount) }}{% endif %}" />
+                 value="{% if drafted %}{{ '%.2f' | format(preview.limit.amount) }}{% elif limit %}{{ '%.2f' | format(limit.amount) }}{% endif %}" />
         </span>
         <select class="ctl" name="period" aria-label="{{ prefix }} resets">
           {% for value, label in options %}
-          <option value="{{ value }}" {% if limit and limit.period == value %}selected{% elif not limit and value == 'month' %}selected{% endif %}>{{ label }}</option>
+          <option value="{{ value }}" {% if drafted %}{% if preview.limit.period == value %}selected{% endif %}{% elif limit and limit.period == value %}selected{% elif not limit and value == 'month' %}selected{% endif %}>{{ label }}</option>
           {% endfor %}
         </select>
       </label>
     </fieldset>
+  {% endmacro %}
+  {# Report-only: what the proposed limit would have stopped in recorded history. #}
+  {% macro preview_button(scope) %}<button type="submit" class="btn btn--ghost" formmethod="get" formaction="/spending-limits#limit-preview" formnovalidate name="preview" value="{{ scope }}">Preview</button>{% endmacro %}
+  {% macro preview_result(scope) %}
+    {% if draft.scope == scope and (preview or preview_error) %}
+    <div class="panel" id="limit-preview" tabindex="-1" role="status" style="margin: var(--space-3) 0 0;">
+      {% if preview_error %}
+      <p style="margin: 0;"><strong>No preview.</strong> {{ preview_error }}</p>
+      {% else %}
+      <p style="margin: 0 0 var(--space-2);"><strong>Preview only. Nothing changes until you save.</strong></p>
+      <p style="margin: 0;">
+        {% if not preview.considered %}No tasks finished in the last {{ preview.days }} days{% if scope == 'person' %} for this person{% endif %}, so there is nothing to compare this limit with.
+        {% elif preview.tasks %}In the last {{ preview.days }} days, <strong>{{ preview.tasks }} task{{ '' if preview.tasks == 1 else 's' }}</strong>{% if scope != 'person' %} by <strong>{{ preview.people }} {{ 'person' if preview.people == 1 else 'people' }}</strong>{% endif %} would have stopped at {{ preview.limit.amount | money }} {{ period_labels[preview.limit.period] }}, of {{ preview.considered }} finished.
+        {% else %}In the last {{ preview.days }} days, none of the {{ preview.considered }} finished task{{ '' if preview.considered == 1 else 's' }} would have stopped at {{ preview.limit.amount | money }} {{ period_labels[preview.limit.period] }}.{% endif %}
+      </p>
+      <p class="muted" style="margin: var(--space-2) 0 0; font-size: var(--text-sm);">Counted from the recorded cost of finished tasks. Work still running is not included.</p>
+      {% endif %}
+    </div>
+    {% endif %}
   {% endmacro %}
 
   {% from "_empty_state.html" import empty_state %}
@@ -78,9 +98,11 @@
     <form method="post" action="/spending-limits/workspace" data-limit-form="the workspace"
           data-limit-amount="{{ view.workspace.amount if view.workspace else '' }}"
           style="display: flex; flex-wrap: wrap; gap: var(--space-4); align-items: flex-end;">
-      {{ limit_fields('Workspace limit', view.workspace, workspace_periods) }}
+      {{ limit_fields('Workspace limit', view.workspace, workspace_periods, 'workspace') }}
+      {{ preview_button('workspace') }}
       <button type="submit" class="btn">Save workspace limit</button>
     </form>
+    {{ preview_result('workspace') }}
   </div>
 
   <div class="section-head"><h2>Everyone</h2></div>
@@ -94,9 +116,11 @@
     <form method="post" action="/spending-limits/default" data-limit-form="everyone"
           data-limit-amount="{{ view.default.amount if view.default else '' }}"
           style="display: flex; flex-wrap: wrap; gap: var(--space-4); align-items: flex-end;">
-      {{ limit_fields('Limit for everyone', view.default, periods) }}
+      {{ limit_fields('Limit for everyone', view.default, periods, 'default') }}
+      {{ preview_button('default') }}
       <button type="submit" class="btn">Save limit for everyone</button>
     </form>
+    {{ preview_result('default') }}
   </div>
 
   <div class="section-head"><h2>People</h2></div>
@@ -139,7 +163,7 @@
         <span>Person</span>
         <select class="ctl" name="principal" required>
           {% for row in view.people %}
-          <option value="{{ row.principal }}">{{ (row.principal | identity).name }}{% if (row.principal | identity).detail %} · {{ (row.principal | identity).detail }}{% endif %}</option>
+          <option value="{{ row.principal }}"{% if draft.scope == 'person' and draft.principal == row.principal %} selected{% endif %}>{{ (row.principal | identity).name }}{% if (row.principal | identity).detail %} · {{ (row.principal | identity).detail }}{% endif %}</option>
           {% endfor %}
         </select>
       </label>
@@ -147,19 +171,22 @@
         <span>Amount</span>
         <span style="display: inline-flex; align-items: center; gap: var(--space-1);">$
           <input class="ctl" type="number" name="amount" min="0.01" step="0.01" inputmode="decimal"
-                 required style="width: 8rem;" aria-label="Personal limit in dollars" />
+                 required style="width: 8rem;" aria-label="Personal limit in dollars"
+                 value="{% if draft.scope == 'person' and preview %}{{ '%.2f' | format(preview.limit.amount) }}{% endif %}" />
         </span>
       </label>
       <label style="display: flex; flex-direction: column; gap: var(--space-1);">
         <span>Resets</span>
         <select class="ctl" name="period">
           {% for value, label in periods %}
-          <option value="{{ value }}" {% if value == 'month' %}selected{% endif %}>{{ label }}</option>
+          <option value="{{ value }}" {% if (draft.scope == 'person' and preview and preview.limit.period == value) or ((draft.scope != 'person' or not preview) and value == 'month') %}selected{% endif %}>{{ label }}</option>
           {% endfor %}
         </select>
       </label>
+      {{ preview_button('person') }}
       <button type="submit" class="btn">Save personal limit</button>
     </form>
+    {{ preview_result('person') }}
     {% else %}
     {{ empty_state('Nobody has been added yet',
                    'People with a role appear here with what they spent, ready for a personal limit. Add people on the Users page.',
@@ -177,6 +204,8 @@
     'use strict';
     function guard(form, question) {
       form.addEventListener('submit', function (event) {
+        // A preview saves nothing, so it never needs the confirmation.
+        if (event.submitter && event.submitter.name === 'preview') return;
         if (form.dataset.confirmed === 'true') { delete form.dataset.confirmed; return; }
         var q = question();
         if (!q) return;
