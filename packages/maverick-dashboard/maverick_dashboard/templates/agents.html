@@ -1340,7 +1340,7 @@
           else if (data.warnings && data.warnings.length) show('Looks good, with notes: ' + data.warnings.join('; '), true);
           else show('Looks good.', true);
         } catch (error) {
-          show(error instanceof Error ? error.message : 'Request failed.', false);
+          show(error instanceof Error ? error.message : 'That didn\'t work. Refresh the page and try again.', false);
           fieldMessage(error && error.field, error && error.message);
         }
       });
@@ -1359,7 +1359,7 @@
           show(creating ? 'Custom agent created.' : 'Deployed.', true);
           window.location.search = '?name=' + encodeURIComponent(name);
         } catch (error) {
-          show(error instanceof Error ? error.message : 'Request failed.', false);
+          show(error instanceof Error ? error.message : 'That didn\'t work. Refresh the page and try again.', false);
           fieldMessage(error && error.field, error && error.message);
         } finally {
           finishMutation(saveBtn);
@@ -1378,7 +1378,7 @@
           show('Reset to how it came.', true);
           window.location.search = '?name=' + encodeURIComponent(name);
         } catch (error) {
-          show(error instanceof Error ? error.message : 'Request failed.', false);
+          show(error instanceof Error ? error.message : 'That didn\'t work. Refresh the page and try again.', false);
         } finally {
           finishMutation(resetBtn);
         }

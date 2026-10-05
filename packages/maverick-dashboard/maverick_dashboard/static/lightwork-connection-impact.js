@@ -12,7 +12,7 @@
       const response=await fetch('/api/v1/connections/'+encodeURIComponent(name)+path,{method:body?'POST':'GET',headers:{'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined,cache:'no-store',signal:controller.signal});
       const result=await response.json().catch(()=>({}));
       if(response.status===401||response.status===403){clear();document.dispatchEvent(new Event('lightwork:connection-access-lost'));}
-      if(!response.ok)throw new Error(typeof result.detail==='string'?result.detail:'The connection review is unavailable.');
+      if(!response.ok)throw new Error(typeof result.detail==='string'?result.detail:'The connection review is unavailable. Refresh the page and try again.');
       return result;
     }finally{clearTimeout(timer);}
   }

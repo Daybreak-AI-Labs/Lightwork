@@ -179,7 +179,7 @@
         typeof detail.message === "string" && detail.message) {
       return detail.message;
     }
-    return "Control plane request failed.";
+    return "That didn't work. Refresh the page and try again.";
   }
 
   function utf8ByteLength(value) {
@@ -239,7 +239,7 @@
     var text = await boundedResponseText(response);
     var payload;
     try { payload = text ? JSON.parse(text) : {}; }
-    catch (_error) { throw failServer("The reply could not be read."); }
+    catch (_error) { throw failServer("The reply could not be read. Refresh the page and try again."); }
     if (!response.ok) {
       var detail = responseDetail(payload);
       var responseError = fail(plainFailure(response.status, detail, response.headers));
@@ -513,7 +513,7 @@
   }
 
   function fleetScopeFromForm() {
-    if (!fleetForm) { throw fail("Group actions are unavailable."); }
+    if (!fleetForm) { throw fail("Group actions are unavailable. Refresh the page and try again."); }
     var form = new FormData(fleetForm);
     var scope = String(form.get("scope") || "");
     if (scope === "workspace" && workspaceScopeKnown) {
@@ -576,7 +576,7 @@
   }
 
   function fleetActionFromForm() {
-    if (!fleetForm || !fleetVerb) { throw fail("Group actions are unavailable."); }
+    if (!fleetForm || !fleetVerb) { throw fail("Group actions are unavailable. Refresh the page and try again."); }
     var form = new FormData(fleetForm);
     var verb = String(fleetVerb.value || "");
     var allowed = (verb === "suspend" || verb === "resume") ? canOperate : canAdmin;

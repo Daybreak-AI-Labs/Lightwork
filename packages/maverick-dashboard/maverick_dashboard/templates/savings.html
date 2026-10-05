@@ -263,7 +263,7 @@
 
   function render(D) {
     var rep = D.report;
-    if (!rep.available) throw new Error(rep.unavailable_reason || 'Savings history is unavailable.');
+    if (!rep.available) throw new Error(rep.unavailable_reason || 'Savings history is unavailable. Refresh the page and try again.');
     var k = document.getElementById('bd-kpis');
     k.textContent = '';
     // Show the assumptions next to the estimate; never a bare cost multiple.

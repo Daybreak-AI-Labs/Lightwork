@@ -24,7 +24,7 @@
       throw bad;
     }
     if (!response.ok) {
-      var failure = new Error(body && typeof body.detail === "string" ? body.detail : "Request failed.");
+      var failure = new Error(body && typeof body.detail === "string" ? body.detail : "That didn't work. Refresh the page and try again.");
       failure.status = response.status;
       throw failure;
     }

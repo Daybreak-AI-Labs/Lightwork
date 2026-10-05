@@ -121,7 +121,7 @@
   function safeMessage(error) {
     return error instanceof ProjectionError
       ? error.message
-      : 'Outcome accounting could not be verified.';
+      : 'Outcome accounting could not be verified. Refresh the page and try again.';
   }
   function status(value, label, allowed) {
     const row = object(value, label);
@@ -790,9 +790,9 @@
           headers: {'X-Lightwork-Pilot-Context': context},
         },
       );
-      if (!response.ok) fail('Outcome record evidence is unavailable.');
+      if (!response.ok) fail('Outcome record evidence is unavailable. Refresh the page and try again.');
       let data;
-      try { data = await response.json(); } catch (_) { fail('Outcome record evidence could not be read.'); }
+      try { data = await response.json(); } catch (_) { fail('Outcome record evidence could not be read. Refresh the page and try again.'); }
       const detail = validateDetail(data, summary);
       if (generation !== renderGeneration || !region.isConnected) return;
       renderDetail(detail, region);
@@ -938,7 +938,7 @@
     }
     if (!response.ok) fail('Outcome accounting is unavailable. Refresh the page to try again.');
     let data;
-    try { data = await response.json(); } catch (_) { fail('Outcome accounting could not be read.'); }
+    try { data = await response.json(); } catch (_) { fail('Outcome accounting could not be read. Refresh the page and try again.'); }
     if (requestNumber !== pageRequest) return false;
     render(data, requestedCursor);
     host.setAttribute('aria-busy', 'false');

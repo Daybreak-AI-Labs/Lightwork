@@ -1824,7 +1824,7 @@
     } catch (error) {
       clear(policyTarget); clear(exceptionTarget); clear(evaluationTarget);
       emptyRow(policyTarget, 4, "Rules could not be loaded. No policy-coverage conclusion is shown.");
-      emptyRow(exceptionTarget, 5, "Exceptions could not be loaded. No authorization conclusion is shown.");
+      emptyRow(exceptionTarget, 5, "Exceptions could not be loaded. Refresh the page and try again. No authorization conclusion is shown.");
       emptyRow(evaluationTarget, 5, "Saved checks could not be loaded. No validation conclusion is shown.");
       setStatus("ai-policy-management-load-status", plainMessage(error, "AI use rules are not available right now."));
     }
@@ -2041,7 +2041,7 @@
     const failures = [scoreResult, signalResult].filter(item => item.status === "rejected");
     if (failures.length) {
       const first = failures[0];
-      setStatus("dynamic-risk-asset-status", plainMessage(first.reason, "Some risk details could not be loaded."));
+      setStatus("dynamic-risk-asset-status", plainMessage(first.reason, "Some risk details could not be loaded. Refresh the page and try again."));
     } else {
       setStatus("dynamic-risk-asset-status", "Score and signals shown. This was not a live check of the system.");
     }
@@ -2437,7 +2437,7 @@
         conformityEvidenceBox.appendChild(label);
       });
     } catch (error) {
-      conformityEvidenceBox.replaceChildren(note(plainMessage(error, "The case evidence could not be loaded.")));
+      conformityEvidenceBox.replaceChildren(note(plainMessage(error, "The case evidence could not be loaded. Refresh the page and try again.")));
     }
   };
   const loadConformityCases = async (limit = 100) => {
@@ -3660,7 +3660,7 @@
     } catch (error) {
       grcSources = [];
       select.replaceChildren(new Option("Records could not be loaded", ""));
-      setStatus("grc-outbound-preview-status", plainMessage(error, "Records could not be loaded."));
+      setStatus("grc-outbound-preview-status", plainMessage(error, "Records could not be loaded. Refresh the page and try again."));
     }
   };
   if (grcPreview) grcPreview.elements.source_kind.addEventListener("change", () => { void loadGrcSources(); });

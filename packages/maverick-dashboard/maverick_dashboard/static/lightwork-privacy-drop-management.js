@@ -72,7 +72,7 @@
     if (!response.ok) {
       var failure = new Error(
         payload && typeof payload.detail === "string" ?
-          payload.detail : "The operation failed."
+          payload.detail : "That didn't work. Refresh the page and try again."
       );
       failure.status = response.status;
       throw failure;

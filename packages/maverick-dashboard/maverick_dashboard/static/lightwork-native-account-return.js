@@ -45,7 +45,7 @@
       let result;try{result=await invoke('prepare_oauth_return',{context,ticket});}catch(_){throw new Error('The registered account-return port is unavailable, or this dashboard’s desktop authorization could not be verified. Cancel other sign-in attempts, then retry.');}
       if(!result||!/^[a-f0-9]{64}$/.test(result.handle)||result.context!==context||result.return_profile!==profile||result.callback_uri!==callback||result.expires_in!==600){
         if(result&&typeof result.handle==='string'){try{await invoke('cancel_oauth_return',{handle:result.handle,context,ticket});}catch(_) {}}
-        throw new Error('The native account-return address could not be verified.');
+        throw new Error('The native account-return address could not be verified. Refresh the page and try again.');
       }
       attempt={handle:result.handle,context,state:null,launched:false,cancelling:false,prepareTicket:ticket,launchTicket:null};
       return {callback_uri:callback,return_profile:profile,handle:result.handle};

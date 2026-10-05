@@ -96,7 +96,7 @@
       message('Candidate ' + candidate.candidate_id + ' is now updated.');
       await refresh();
     } catch (error) {
-      message(error.message || 'Candidate promotion action failed.', true);
+      message(error.message || 'That didn\'t work. Refresh the page and try again.', true);
     } finally {
       setBusy(false);
     }
@@ -288,7 +288,7 @@
     setBusy(true);
     try { await refresh(); shown = true; }
     catch (error) {
-      message(error.message || 'Candidate promotions could not be loaded.', true);
+      message(error.message || 'Candidate promotions could not be loaded. Refresh the page and try again.', true);
       // Nothing was ever shown: clear the list's "Loading…"; the status line
       // above it says what happened and what to do.
       if (!shown) list.replaceChildren();

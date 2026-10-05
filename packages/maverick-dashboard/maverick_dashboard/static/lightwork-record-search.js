@@ -59,7 +59,7 @@
           if(!response.ok)throw new Error('Approved content search is unavailable. Sign in with an authorized account and choose a knowledge workspace.');
           var value=await response.json(); if(current!==generation)return;
           if(value.context!==context||!Array.isArray(value.items))throw new Error('Your account or workspace changed. Reload to search.');
-          purpose.replaceChildren();value.items.forEach(function(item){if(!/^[a-z][a-z0-9_.-]{0,63}$/.test(item.code))throw new Error('Available uses could not be verified.');var option=doc.createElement('option');option.value=item.code;option.textContent=global.mvHuman?global.mvHuman(item.code):item.code;purpose.appendChild(option);});
+          purpose.replaceChildren();value.items.forEach(function(item){if(!/^[a-z][a-z0-9_.-]{0,63}$/.test(item.code))throw new Error('Available uses could not be verified. Refresh the page and try again.');var option=doc.createElement('option');option.value=item.code;option.textContent=global.mvHuman?global.mvHuman(item.code):item.code;purpose.appendChild(option);});
           if(!purpose.options.length){status.textContent='No permitted uses are available for your account.';return;}
         }catch(error){if(current===generation)status.textContent=error.message;return;}
       }

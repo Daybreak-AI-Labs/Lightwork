@@ -138,7 +138,7 @@
     var response = await fetch(API + path, opts);
     var body;
     try { body = await response.json(); } catch (_error) { var bad = new Error("Request failed: the server returned an invalid JSON response."); bad.status = response.ok ? 0 : response.status; throw bad; }
-    if (!response.ok) { var failure = new Error(body && typeof body.detail === "string" ? body.detail : "Request failed."); failure.status = response.status; throw failure; }
+    if (!response.ok) { var failure = new Error(body && typeof body.detail === "string" ? body.detail : "That didn't work. Refresh the page and try again."); failure.status = response.status; throw failure; }
     return body;
   }
   var CW = window.LightworkConsentWorkbench;

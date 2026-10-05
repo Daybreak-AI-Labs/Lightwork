@@ -295,7 +295,7 @@
     var advertised = Number(response.headers.get("content-length") || "0");
     if (advertised > MAX_RESPONSE_BYTES) {
       if (response.body && typeof response.body.cancel === "function") { await response.body.cancel(); }
-      throw problem("That is too large to show here.");
+      throw problem("That is too large to show here. Narrow the search or choose fewer records.");
     }
     var text;
     if (response.body && typeof response.body.getReader === "function") {
@@ -309,7 +309,7 @@
         total += read.value.byteLength;
         if (total > MAX_RESPONSE_BYTES) {
           await reader.cancel();
-          throw problem("That is too large to show here.");
+          throw problem("That is too large to show here. Narrow the search or choose fewer records.");
         }
         parts.push(decoder.decode(read.value, { stream: true }));
       }
@@ -317,7 +317,7 @@
       text = parts.join("");
     } else {
       text = await response.text();
-      if (new TextEncoder().encode(text).length > MAX_RESPONSE_BYTES) { throw problem("That is too large to show here."); }
+      if (new TextEncoder().encode(text).length > MAX_RESPONSE_BYTES) { throw problem("That is too large to show here. Narrow the search or choose fewer records."); }
     }
     var payload = null;
     try { payload = text ? JSON.parse(text) : {}; } catch (_error) { payload = null; }
@@ -453,7 +453,7 @@
       reader.onload = function () {
         try { resolve(JSON.parse(String(reader.result || ""))); } catch (_error) { reject(problem("That file could not be read. Choose a file saved from this studio.")); }
       };
-      reader.onerror = function () { reject(problem("That file could not be read.")); };
+      reader.onerror = function () { reject(problem("That file could not be read. Choose it again, or try a different file.")); };
       reader.readAsText(file);
     });
   }

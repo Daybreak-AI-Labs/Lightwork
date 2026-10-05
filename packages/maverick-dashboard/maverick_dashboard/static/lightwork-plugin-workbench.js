@@ -9,8 +9,8 @@
   async function call(path,body){
     const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),55000);
     try{const response=await fetch('/api/v1/plugins/workbench'+path,{method:body?'POST':'GET',headers:{'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined,cache:'no-store',signal:controller.signal});
-      const value=await response.json().catch(()=>({}));if([401,403].includes(response.status)){clear();throw new Error(typeof value.detail==='string'?value.detail:'Permission is unavailable.');}
-      if(!response.ok)throw new Error(typeof value.detail==='string'?value.detail:'The workbench is unavailable.');return value;
+      const value=await response.json().catch(()=>({}));if([401,403].includes(response.status)){clear();throw new Error(typeof value.detail==='string'?value.detail:'Permission is unavailable. Refresh the page and try again.');}
+      if(!response.ok)throw new Error(typeof value.detail==='string'?value.detail:'The workbench is unavailable. Refresh the page and try again.');return value;
     }finally{clearTimeout(timer);}
   }
   function button(label,fn){const item=node('button',label);item.type='button';item.className='btn';item.addEventListener('click',fn);return item;}

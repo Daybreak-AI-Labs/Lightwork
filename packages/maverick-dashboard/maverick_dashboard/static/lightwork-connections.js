@@ -37,7 +37,7 @@
           var denied = await response.json().catch(function () { return {}; });
           clearAccess();
           if (denied.detail && denied.detail.code === 'connections_disabled') inventoryStatus.textContent = 'Connections are turned off. An administrator can enable them in Settings.';
-          throw Object.assign(new Error('Connection access is unavailable.'), {status:response.status});
+          throw Object.assign(new Error('Connection access is unavailable. Refresh the page and try again.'), {status:response.status});
         }
         var data = await response.json().catch(function () { throw new Error('Unreadable response.'); });
         if (!response.ok) throw Object.assign(new Error('Request refused.'), {status:response.status});

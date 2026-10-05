@@ -190,7 +190,7 @@
   async function parseResponse(response) {
     const payload = await readBoundedJson(response);
     if (!response.ok) {
-      const message = payload && typeof payload.detail === "string" ? payload.detail : "The operation failed.";
+      const message = payload && typeof payload.detail === "string" ? payload.detail : "That didn't work. Refresh the page and try again.";
       throw failure("request_failed", message, response.status);
     }
     return payload;

@@ -354,9 +354,9 @@
       jfetch('/api/v1/assessments/' + a.kind + '/' + encodeURIComponent(a.subject) + '/refresh', {
         method: 'POST', body: JSON.stringify({ expected_revision: a.revision })
       }).then(responseData).then(function (result) {
-        if (!result.ok) { mutationFailure(result, a, 'Re-assessment failed.'); return; }
+        if (!result.ok) { mutationFailure(result, a, 'Re-assessment failed. Refresh the page and try again.'); return; }
         renderDetail(result.data); reload();
-      }).catch(function () { detailMessage('Re-assessment failed.', true); })
+      }).catch(function () { detailMessage('Re-assessment failed. Refresh the page and try again.', true); })
         .finally(function () { if (button.isConnected) button.disabled = false; });
     });
     document.getElementById('as-del').addEventListener('click', async function () {
@@ -367,9 +367,9 @@
         .then(function (response) {
           if (response.ok) { detailCard.hidden = true; current = null; reload(); return null; }
           return responseData(response).then(function (result) {
-            mutationFailure(result, a, 'Delete failed.');
+            mutationFailure(result, a, 'Delete failed. Refresh the page and try again.');
           });
-        }).catch(function () { detailMessage('Delete failed.', true); })
+        }).catch(function () { detailMessage('Delete failed. Refresh the page and try again.', true); })
         .finally(function () { if (button.isConnected) button.disabled = false; });
     });
     function decide(lens, decision, button) {
@@ -475,7 +475,7 @@
       { method: 'POST', body: JSON.stringify({ template: tplSel.value || null, expected_revision: 0 }) })
       .then(responseData)
       .then(function (res) {
-        if (!res.ok) { draftMsg.style.color = 'var(--danger)'; draftMsg.textContent = responseDetail(res, 'Could not run the assessment.'); return; }
+        if (!res.ok) { draftMsg.style.color = 'var(--danger)'; draftMsg.textContent = responseDetail(res, 'Could not run the assessment. Try again in a minute.'); return; }
         var label = agent || (flowSel.options[flowSel.selectedIndex] || {}).textContent || name;
         draftMsg.style.color = 'var(--accent)'; draftMsg.textContent = 'Assessed ' + label + '.';
         renderDetail(res.data); reload();

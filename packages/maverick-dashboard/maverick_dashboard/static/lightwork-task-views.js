@@ -28,7 +28,7 @@
           var data = await response.json();
           if (data.detail && data.detail.code === 'context_changed') { invalidate(); throw new Error('Context changed.'); }
           if (!response.ok) throw new Error(response.status === 409 ? 'Saved views changed. Refresh and review again; your view name is kept.' : 'The request could not be confirmed. Refresh saved views before trying again.');
-          if (!data || !Array.isArray(data.views) || typeof data.revision !== 'string' || typeof data.context !== 'string') throw new Error('The saved-view response could not be verified.');
+          if (!data || !Array.isArray(data.views) || typeof data.revision !== 'string' || typeof data.context !== 'string') throw new Error('The saved-view response could not be verified. Refresh the page and try again.');
           if (state && state.context !== data.context) { invalidate(); throw new Error('Context changed.'); }
           return data;
         })(),

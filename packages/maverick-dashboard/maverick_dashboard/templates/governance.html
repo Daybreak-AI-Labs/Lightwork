@@ -1313,7 +1313,7 @@
         status("agent-check-result", human(action) + ": " + (DECISION[verdict.decision] || "Unknown.") + (verdict.reason ? " " + verdict.reason : ""));
       } catch (error) { say("agent-check-result", error, "check the action"); }
     });
-    const CHAIN = {valid: "The record is complete and has not been changed.", broken: "Warning: this record has been changed since it was written.", missing: "No actions were recorded for this task.", unavailable: "The record could not be read."};
+    const CHAIN = {valid: "The record is complete and has not been changed.", broken: "Warning: this record has been changed since it was written.", missing: "No actions were recorded for this task.", unavailable: "The record could not be read. Refresh the page and try again."};
     const listInto = (id, lines, note) => {
       const holder = document.getElementById(id); holder.replaceChildren();
       if (note) { const p = document.createElement("p"); p.textContent = note; holder.appendChild(p); }

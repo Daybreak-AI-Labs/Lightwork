@@ -146,7 +146,7 @@
           const states = {awaiting_review:'waiting for independent approval', authorized:'approved for staging', staged:'staged',
             canary:'in monitored rollout', active:'active', rolled_back:'rolled back', uncertain:'outcome uncertain',
             denied:'denied', blocked:'blocked', not_advancing:'not advancing', unavailable:'unavailable'};
-          feedback.replaceChildren(node('span', (deployed[result.deployment_state] || 'Release status is unavailable.') +
+          feedback.replaceChildren(node('span', (deployed[result.deployment_state] || 'Release status is unavailable. Refresh the page and try again.') +
             ' Promotion is ' + (states[result.promotion_state] || 'under review') + '. Case release exposure and causal lift remain unverified. '));
           const link = node('a', 'Open candidate approval, promotion and rollback'); link.href = '/research#research-promotions'; feedback.append(link);
         } catch (error) { feedback.textContent = error.message + ' Recheck the candidate in Research before continuing.'; }

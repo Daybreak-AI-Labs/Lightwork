@@ -221,7 +221,7 @@
       var receipt = null;
       if (file) {
         if (file.size > 4096) { say(result, 'That file is too large to be a checkpoint receipt.'); return; }
-        try { receipt = await readFile(file); } catch (e) { say(result, 'That file could not be read.'); return; }
+        try { receipt = await readFile(file); } catch (e) { say(result, 'That file could not be read. Choose it again, or try a different file.'); return; }
       }
       say(result, 'Checking…');
       try {
@@ -336,7 +336,7 @@
       if (!f) return;
       if (f.size > 4096) { say(msg, 'That file is too large to be a public key.'); return; }
       var text;
-      try { text = await readFile(f); } catch (e) { say(msg, 'That file could not be read.'); return; }
+      try { text = await readFile(f); } catch (e) { say(msg, 'That file could not be read. Choose it again, or try a different file.'); return; }
       await pin({key: text.trim()});
       file.value = '';
     });
@@ -686,7 +686,7 @@
       var f = file.files[0];
       if (!f) return;
       if (f.size > 2 * 1024 * 1024) { say(out, 'That spreadsheet is too large.'); return; }
-      try { sheetText = await readFile(f); } catch (e) { say(out, 'That file could not be read.'); return; }
+      try { sheetText = await readFile(f); } catch (e) { say(out, 'That file could not be read. Choose it again, or try a different file.'); return; }
       var lines = sheetText.split(/\r?\n/).filter(function (l) { return l.trim(); });
       header = (lines[0] || '').split(',').map(function (h) { return h.trim().replace(/^"|"$/g, ''); });
       rowCount = Math.max(0, lines.length - 1);
@@ -834,7 +834,7 @@
       var f = $('ops-network-file') && $('ops-network-file').files[0];
       if (f) {
         if (f.size > 512 * 1024) { say(out, 'That file is too large.'); return; }
-        try { body.graph = await readFile(f); } catch (e) { say(out, 'That file could not be read.'); return; }
+        try { body.graph = await readFile(f); } catch (e) { say(out, 'That file could not be read. Choose it again, or try a different file.'); return; }
       }
       say(out, 'Checking every assistant. This can take a little while…');
       try {

@@ -31,7 +31,7 @@
       throw failure("Server response exceeded the 64 KiB safety limit.", "response_too_large", response.status);
     }
     if (!response.body || typeof response.body.getReader !== "function") {
-      throw failure("Server response stream is unavailable.", "response_stream_unavailable", response.status);
+      throw failure("The reply could not be read. Refresh the page and try again.", "response_stream_unavailable", response.status);
     }
     var reader = response.body.getReader();
     var chunks = [];
@@ -65,7 +65,7 @@
     if (!response.ok) {
       var detail = payload && typeof payload.detail === "string"
         ? payload.detail.slice(0, 500)
-        : "Consent bulk-job request failed.";
+        : "The bulk request didn't work. Refresh the page and try again.";
       if (response.status === 422 && payload && Array.isArray(payload.detail)) {
         var invalidField = payload.detail.find(function (issue) {
           return issue && Array.isArray(issue.loc) && issue.loc[0] === "body" &&
