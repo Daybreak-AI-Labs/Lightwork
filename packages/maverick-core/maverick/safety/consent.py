@@ -1605,6 +1605,11 @@ def _emit(
         source=decision.source,
         decided_by=decision.actor,
     )
+    # One content-free row per decision, for previewing a threshold change.
+    from ..approval_checks import record_decision
+
+    record_decision(risk=decision.risk, action=action, granted=decision.granted,
+                    source=decision.source)
     return decision
 
 

@@ -1351,10 +1351,20 @@ def pick_approvals() -> dict[str, Any]:
         ],
         default="when_available - Someone else, whenever another approver is available (default).",
     ).split()[0]
+    record_checks = _q_confirm(
+        "  Keep a record of each approval check (when, risk, kind of action, agent and "
+        "outcome; never the content) so you can preview a threshold change later?",
+        default=True,
+    )
+    retention = _safe_int(
+        _q_text("  Days to keep that record", default="90"), default=90,
+    ) if record_checks else 90
     return {
         "undo_grace_seconds": max(0, min(undo_seconds, 3600)),
         "require_acknowledgement": bool(require_ack),
         "separate_approver": separate,
+        "record_checks": bool(record_checks),
+        "check_retention_days": max(1, min(retention, 3650)),
     }
 
 

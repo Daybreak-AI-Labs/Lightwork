@@ -1070,6 +1070,17 @@ def _other_rows(S) -> tuple:
                   "segregation of duties",
           warning="People will be able to approve high-risk actions they asked for "
                   "themselves while someone else could decide them."),
+        S("approval", "record_checks", "Keep a record of approval checks",
+          "Each time Lightwork checks whether an action needs approval, it records when, the "
+          "risk level, the kind of action, the agent or specialist and whether it was allowed, "
+          "sent to a person or refused. Never the content or the command. The record lets you "
+          "see later what a different approval threshold would have done.", "toggle", "Safety",
+          True, "maverick.approval_checks", subgroup="Approvals",
+          aliases="approval history threshold preview record of approval checks"),
+        S("approval", "check_retention_days", "Keep approval checks for",
+          "How long the record of approval checks is kept. Older entries are removed a few "
+          "hundred at a time.", "number", "Safety", 90, "maverick.approval_checks",
+          subgroup="Approvals", minimum=1, maximum=3650, integer=True, unit="days"),
     )
 
 

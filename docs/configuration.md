@@ -143,6 +143,12 @@ require_acknowledgement = true
 # decide it, else the requester (recorded as a self-approval); "always" =
 # always someone else; "never" = the requester may approve it.
 separate_approver       = "when_available"
+# One row per approval check: when, workspace, risk, kind of action, agent or
+# specialist, and whether it was allowed, sent to a person or refused. Never
+# the content, arguments or command. For previewing a threshold change later;
+# rows older than check_retention_days are pruned a few hundred at a time.
+record_checks           = true
+check_retention_days    = 90
 
 [sandbox]
 backend = "local"                   # local | docker | ssh | podman | devcontainer | firecracker | kubernetes

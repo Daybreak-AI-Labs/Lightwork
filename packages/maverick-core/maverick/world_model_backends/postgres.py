@@ -38,6 +38,7 @@ from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from urllib.parse import quote
 
+from ..approval_checks import POSTGRES_SCHEMA as _APPROVAL_CHECK_SCHEMA_PG
 from ..attachment_submissions import POSTGRES_SCHEMA as _ATTACHMENT_SUBMISSION_SCHEMA
 from ..deadline_alerts import POSTGRES_SCHEMA as _DEADLINE_ALERT_SCHEMA_PG
 from ..event_admission import POSTGRES_SCHEMA as _EVENT_ADMISSION_SCHEMA
@@ -746,6 +747,8 @@ MIGRATIONS.append((47, [
     *_WEBHOOK_SUBSCRIPTION_SCHEMA_PG,
     *_DEADLINE_ALERT_SCHEMA_PG,
 ]))
+# v48: approval-gate decisions without content (maverick.approval_checks).
+MIGRATIONS.append((48, _APPROVAL_CHECK_SCHEMA_PG))
 
 _PG_SCHEMA_VERSION = MIGRATIONS[-1][0]
 

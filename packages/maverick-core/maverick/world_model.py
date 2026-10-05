@@ -28,6 +28,7 @@ from dataclasses import dataclass, fields
 from pathlib import Path
 from typing import Any
 
+from .approval_checks import SQLITE_SCHEMA as _APPROVAL_CHECK_SCHEMA
 from .attachment_submissions import SQLITE_SCHEMA as _ATTACHMENT_SUBMISSION_SCHEMA
 from .deadline_alerts import SQLITE_SCHEMA as _DEADLINE_ALERT_SCHEMA
 from .event_admission import SQLITE_SCHEMA as _EVENT_ADMISSION_SCHEMA
@@ -60,7 +61,7 @@ log = logging.getLogger(__name__)
 # intentional override from the untouched compatibility constant.
 _INITIAL_DEFAULT_DB = data_dir("world.db")
 DEFAULT_DB = _INITIAL_DEFAULT_DB
-SCHEMA_VERSION = 47
+SCHEMA_VERSION = 48
 DEFAULT_BUSY_TIMEOUT_MS = 5000
 WAL_SWITCH_BUSY_TIMEOUT_MS = 50
 WAL_SWITCH_RETRY_SECONDS = 5.0
@@ -433,6 +434,9 @@ CREATE TABLE IF NOT EXISTS harness_corpus (
 
 
 MIGRATIONS: dict[int, list[str]] = {
+    # v48: one row per approval-gate decision (no content), for previewing a
+    # threshold change later (maverick.approval_checks).
+    48: _APPROVAL_CHECK_SCHEMA,
     # Reconcile both draft histories without changing their earlier fingerprints.
     # The teardown draft used v42 for these tables, so its databases may have
     # skipped the companion draft's v42 receipt table. Ensure both sets at v47.
