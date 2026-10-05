@@ -90,6 +90,8 @@ KNOWN_SECTIONS = frozenset({
     "retention", "role_assignments", "roles", "routing", "safety",
     "sandbox", "screening", "search", "security", "self_learning",
     "sharing", "shield", "skill_synthesis", "skills", "security_ops",
+    # [support] the Help menu's status page and support contact (config.get_support).
+    "support",
     "shoring",
     "system", "telemetry", "template_registries", "tenancy", "thinking",
     "tools", "tui", "value", "verification", "voice", "webhooks", "workforce",

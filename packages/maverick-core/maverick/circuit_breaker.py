@@ -178,6 +178,7 @@ class CircuitBreaker:
                 "total_successes": self._stats.total_successes,
                 "last_failure_at": self._stats.last_failure_at,
                 "opened_at": self._stats.opened_at,
+                "cooldown_seconds": self.cooldown_seconds,
             }
 
 

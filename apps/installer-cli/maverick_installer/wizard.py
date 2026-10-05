@@ -6896,6 +6896,33 @@ def pick_webhooks() -> tuple[dict[str, Any], list[str]]:
     return cfg, envs
 
 
+def pick_support() -> dict[str, Any]:
+    """Help and support links, asked with the daily summary. Returns the
+    ``[support]`` table (empty when skipped).
+
+    ``status_page_url``: a public service-status page the Help menu links to.
+    ``contact_email``: where "Get help from a person" requests are addressed;
+    without one people send them to their Lightwork administrator. Nothing is
+    ever sent automatically (``maverick.config.get_support``)."""
+    if not _q_confirm(
+        "Add a service-status page or a support contact to the Help menu? Without them, people send help requests to their Lightwork administrator.",
+        default=False,
+    ):
+        return {}
+    support: dict[str, Any] = {}
+    url = _q_text("  Public service-status page (https://..., empty for none):", default="").strip()
+    if url.startswith("https://") and len(url) <= 308 and not any(c in url for c in " \"'<>"):
+        support["status_page_url"] = url
+    elif url:
+        console.print("[yellow]Skipped: the status page must be a secure https:// address.[/yellow]")
+    email = _q_text("  Support contact email (empty: people ask their administrator):", default="").strip()
+    if "@" in email and " " not in email and "." in email.rsplit("@", 1)[-1]:
+        support["contact_email"] = email
+    elif email:
+        console.print("[yellow]Skipped: that is not an email address.[/yellow]")
+    return support
+
+
 def pick_deliverable_handoff() -> tuple[dict[str, Any], list[str]]:
     """System-of-record hand-off for APPROVED deliverables. Returns
     (config, env_vars_needed).
@@ -9736,6 +9763,7 @@ def write_config(
     a2a: dict[str, Any] | None = None,
     my_work: dict[str, Any] | None = None,
     notifications_email: dict[str, Any] | None = None,
+    support: dict[str, Any] | None = None,
     web_search_enabled: bool = False,
     skills: dict[str, Any] | None = None,
     self_learning: dict[str, Any] | None = None,
@@ -9934,6 +9962,7 @@ def write_config(
     lines += _cfg_deadline_alerts(deadline_alerts)
     lines += _cfg_table("notifications.email", notifications_email)
     lines += _cfg_table("my_work", my_work)
+    lines += _cfg_table("support", support)
     lines += _cfg_table("webhooks", webhooks)
     lines += _cfg_table("deliverables", deliverables)
     lines += _cfg_table("personas", personas)
@@ -11262,6 +11291,8 @@ def run(fast: bool = False, resume: bool = False) -> int:
 
     _announce()
     my_work_cfg, notifications_email, summary_envs = _daily_summary_step(state, channels)
+    support_cfg = state.get("_support") if isinstance(state.get("_support"), dict) else pick_support()
+    state["_support"] = support_cfg
     _save_partial(state)
 
     _announce()
@@ -11347,6 +11378,7 @@ def run(fast: bool = False, resume: bool = False) -> int:
         a2a=a2a_cfg,
         my_work=my_work_cfg,
         notifications_email=notifications_email,
+        support=support_cfg,
         web_search_enabled=web_search_enabled,
         skills=signed_skills
         if (
