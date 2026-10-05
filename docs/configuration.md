@@ -513,10 +513,11 @@ allow_mcp_acquisition = false # starting third-party MCP remains a separate opt-
 allow_provider_egress = false # extra learning-only model calls may cross providers
 preflight = true           # default uses a local redacted catalog match; the
                            # LLM needs-analysis call requires provider egress above
-distill_local = true
+distill_local = true       # stages a suggestion; review and add it from Skills
 auto_distill = false       # a model writes a recallable skill straight from each
                            #   finished run (untrusted run text: keep off unless
                            #   reviewed). MAVERICK_AUTO_DISTILL, when set, decides.
+                           #   Existing saved and built-in skills are never replaced.
 provision_packs = true     # equip a freshly-approved pack with the skills + tools
                            #   its workflow needs at creation time (capability
                            #   provisioning at pack-birth). Default on once

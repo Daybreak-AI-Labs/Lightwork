@@ -240,8 +240,9 @@ LEARNING_SUBSYSTEMS: list[dict] = [
      "env": "MAVERICK_SELF_LEARNING",
      "how": "[self_learning] enable — or MAVERICK_SELF_LEARNING=0 to opt out"},
     {"key": "distill_local", "section": "self_learning", "config_key": "distill_local",
-     "label": "Turn repeated successes into skills",
-     "description": "Write a reusable skill from work that went well, on this server.",
+     "label": "Suggest skills from repeated successes",
+     "description": "Prepare a reusable skill suggestion on this server. Review and add it "
+                    "from Skills before future tasks use it.",
      "env": "MAVERICK_DISTILL_LOCAL",
      "how": "[self_learning] distill_local — or MAVERICK_DISTILL_LOCAL=0"},
     {"key": "failure_telemetry", "section": "telemetry", "config_key": "failure_modes",
@@ -251,6 +252,7 @@ LEARNING_SUBSYSTEMS: list[dict] = [
      "env": "MAVERICK_FAILURE_TELEMETRY",
      "how": "[telemetry] failure_modes or MAVERICK_FAILURE_TELEMETRY=0"},
     {"key": "budget_tuning", "section": "budget", "config_key": "self_tuning",
+     "default": False,
      "label": "Suggest task limits from experience",
      "description": "Learn how much each kind of task really needs and suggest a "
                     "spending limit for it. A limit you set always wins.",

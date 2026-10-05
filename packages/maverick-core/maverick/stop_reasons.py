@@ -85,6 +85,13 @@ def _rx(*parts: str) -> re.Pattern[str]:
 # (kind, pattern, message, action, link, link_label) -- first match wins.
 _RULES: tuple[tuple[str, re.Pattern[str], str, str, str | None, str | None], ...] = (
     (
+        "pilot_prepared",
+        _rx(r"^Prepared for a workflow pilot\. Start this task after the pilot plan is frozen\.$"),
+        "This task is ready for its workflow pilot.",
+        "Review and freeze the pilot plan and spending limit before starting.",
+        "/outcome-pilots", "Open Workflow pilot plan",
+    ),
+    (
         "process_restart",
         _rx(r"\[process restarted mid-run\]\s*$"),
         "Lightwork restarted while this task was running.",
@@ -104,7 +111,7 @@ _RULES: tuple[tuple[str, re.Pattern[str], str, str, str | None, str | None], ...
             r"Error code: 429\b"),
         "The AI service is busy right now.",
         "Try again in a few minutes. If it keeps happening, ask an administrator to check the service account.",
-        None, None,
+        AI_PROVIDER_KEYS_HREF, "Check AI connection",
     ),
     (
         "provider_model_not_found",
@@ -119,7 +126,7 @@ _RULES: tuple[tuple[str, re.Pattern[str], str, str, str | None, str | None], ...
             r"Error code: 5\d\d\b"),
         "The AI service is not responding.",
         "Try again when the service is back. Ask an administrator to check the AI connection if it continues.",
-        None, None,
+        AI_PROVIDER_KEYS_HREF, "Check AI connection",
     ),
     (
         "provider_connection",
@@ -150,6 +157,14 @@ _RULES: tuple[tuple[str, re.Pattern[str], str, str, str | None, str | None], ...
         _rx(r"^halted$", r"HALT file", r"is halted"),
         "Lightwork is stopped by an emergency stop.",
         "An administrator can clear the emergency stop; then try again.",
+        None, None,
+    ),
+    (
+        "awaiting_input",
+        _rx(r"^Paused: waiting for you to answer",
+            r"^Paused: the assistant said it needs more information"),
+        "Lightwork needs more information to continue.",
+        "Open the task and answer its question, or send a follow-up message.",
         None, None,
     ),
     (
@@ -197,6 +212,13 @@ _RULES: tuple[tuple[str, re.Pattern[str], str, str, str | None, str | None], ...
         "/agents", "Browse specialists",
     ),
     (
+        "internal_error",
+        _rx(r"^Stopped: the assistant ran into an error"),
+        "Something went wrong inside Lightwork.",
+        _GENERIC_ACTION,
+        None, None,
+    ),
+    (
         "provider_not_ready",
         _rx(r"api[_ ]?key", r"provider", r"ConnectError", r"connection (refused|reset|error)",
             r"could not (reach|connect)", r"model route", r"AuthenticationError",
@@ -233,7 +255,8 @@ _RULES: tuple[tuple[str, re.Pattern[str], str, str, str | None, str | None], ...
 # Text a person should never have to read: identifiers, paths, code.
 _TECHNICAL = _rx(r"\b\w+(Error|Exception)\b", r"Traceback", r"'[^' ]+'", r"\"[^\" ]+\"",
                  r"(^|[\s(])/[\w.-]+/", r"[A-Za-z]:\\", r"\btenant\b", r"\bprincipal\b",
-                 r"\buser:[\w.@-]+", r"<[^>]+>", r"\b0x[0-9a-f]+\b")
+                 r"\buser:[\w.@-]+", r"<[^>]+>", r"\b0x[0-9a-f]+\b",
+                 r"\bmaverick\s+(resume|unhalt|answer)\b")
 
 
 def _bounded(text: str, limit: int) -> str:

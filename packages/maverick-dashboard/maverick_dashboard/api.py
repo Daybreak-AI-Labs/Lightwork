@@ -2003,14 +2003,16 @@ def goal_events(
 
     open_ids = open_question_ids(w, g)
     stop = stop_payload(g.status, g.result)
+    from ._event_stream import event_payload
+
     return GoalEventsResponse(
         status=g.status,
-        result=g.result,
+        result=stop["message"] if stop else g.result,
         reason_code=_goal_reason_code(g, open_ids),
         stop=stop,
         next_id=events[-1].id if events else since,
         events=[
-            GoalEventOut(id=e.id, agent=e.agent, kind=e.kind, content=e.content, ts=e.ts)
+            GoalEventOut(**event_payload(e))
             for e in events
         ],
         has_more=has_more,
@@ -17202,7 +17204,7 @@ def _learning_components(subsystems: list[dict], on_by_key: dict) -> list[dict]:
         managed = bool(s.get("env")) and s["env"] in os.environ
         section = cfg.get(s["section"]) if isinstance(cfg.get(s["section"]), dict) else {}
         raw = section.get(s["config_key"])
-        wanted = on if managed else (raw if isinstance(raw, bool) else governed_learning_default())
+        wanted = on if managed else (raw if isinstance(raw, bool) else s.get("default", governed_learning_default()))
         needs = s.get("needs")
         waiting = bool(wanted and not on and needs and not on_by_key.get(needs, False))
         rows.append({

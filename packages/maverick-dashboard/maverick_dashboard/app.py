@@ -9229,7 +9229,7 @@ async def run_events_firehose(
 
     from fastapi import WebSocketDisconnect
 
-    from ._event_stream import TERMINAL_RUN_STATUSES, replay_cursor
+    from ._event_stream import TERMINAL_RUN_STATUSES, event_payload, replay_cursor
     from .auth import websocket_authorized
 
     if not websocket_authorized(websocket, principal):
@@ -9265,15 +9265,7 @@ async def run_events_firehose(
             events = await run_in_threadpool(w.goal_events, goal_id, since_id=last, limit=500)
             for e in events:
                 last = e.id
-                await websocket.send_json(
-                    {
-                        "id": e.id,
-                        "agent": e.agent,
-                        "kind": e.kind,
-                        "content": e.content,
-                        "ts": e.ts,
-                    }
-                )
+                await websocket.send_json(event_payload(e))
             g = await run_in_threadpool(w.get_goal, goal_id)
             if g is None or (g.status in TERMINAL_RUN_STATUSES and len(events) < 500):
                 await websocket.send_json(
@@ -12284,7 +12276,7 @@ def api_goal_events_legacy(
     since: int = 0,
     limit: int = 200,
 ) -> dict:
-    from ._event_stream import TERMINAL_RUN_STATUSES, event_page, replay_cursor
+    from ._event_stream import TERMINAL_RUN_STATUSES, event_page, event_payload, replay_cursor
 
     w = _world()
     g = w.get_goal(goal_id)
@@ -12295,17 +12287,15 @@ def api_goal_events_legacy(
 
     since = replay_cursor(since)
     events, has_more = event_page(w, goal_id, since, limit)
+    stop = stop_payload(g.status, g.result)
     return {
         "status": g.status,
-        "result": g.result or "",
-        "stop": stop_payload(g.status, g.result),
+        "result": stop["message"] if stop else g.result or "",
+        "stop": stop,
         "next_id": events[-1].id if events else since,
         "has_more": has_more,
         "terminal": g.status in TERMINAL_RUN_STATUSES and not has_more,
-        "events": [
-            {"id": e.id, "agent": e.agent, "kind": e.kind, "content": e.content, "ts": e.ts}
-            for e in events
-        ],
+        "events": [event_payload(e) for e in events],
     }
 
 

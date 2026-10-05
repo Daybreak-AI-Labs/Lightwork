@@ -119,6 +119,13 @@ client drives the poll cadence (suggest 2-3s). For push-based streaming use
 Server-Sent Events at `GET /api/v1/goals/{id}/events/stream` (supports
 `Last-Event-ID`) or the WebSocket at `/ws/v1/runs/{id}/events`.
 
+These customer activity transports project readable progress rather than raw
+internal prompts, model scratch text or tool-result envelopes. Durable IDs,
+timestamps and useful findings are preserved; the original event records remain
+in the stored run evidence. An action activity describes a request, not a receipt
+of a completed external effect. A stopped task's event response returns its plain
+`stop.message` as `result`; diagnostic stop text belongs to the technical record.
+
 A goal with status `blocked` is not running, but it is not always finished:
 
 - `needs_input: true` -- the task asked a question and is waiting for a

@@ -1298,6 +1298,9 @@ def distill(
                               if not line.startswith(("source:", "source_goal_ids:")))
             lineage = f"\nsource_goal_ids: {source_id}" if source_id else ""
             text = f"---\n{front}\nsource: auto-distilled-provider-v1{lineage}\n---\n{match[2]}"
+        generated = Skill.parse(text, target_dir / ".validating")
+        if generated.name in {skill.name for skill in load_builtin_skills()}:
+            raise ValueError("automatic learning cannot replace a built-in skill")
         # Route distilled skills through the SAME validation + shield scan
         # as install_skill (#396 quality gate). A skill distilled from a
         # trajectory can inherit injected content from tool output, and its
@@ -1327,7 +1330,7 @@ def distill(
                 raise ValueError("learning audit unavailable")
 
         return _validate_and_write(text, target_dir, before_save=_authorize_write,
-                                   internal_distillation=True)
+                                   replace_existing=False, internal_distillation=True)
     except Exception as e:
         log.warning("distilled skill rejected (not written): %s", e)
         return None

@@ -1,6 +1,6 @@
 # Post-install operation coverage
 
-Source review: October 1, 2026; selected journeys updated October 4. This is a working gap register against the
+Source review: October 1, 2026; selected journeys updated October 5. This is a working gap register against the
 [customer experience contract](./customer-experience-contract.md), not a claim
 that the entire platform has been inventoried or accepted. A working backend,
 command or settings file does not complete a customer operation.
@@ -25,6 +25,9 @@ real provider effects and customer acceptance remain to be qualified.
 
 | Customer job | Current in-product path | Remaining boundary |
 | --- | --- | --- |
+| Read a task's activity (UX-268) | Chat polling, both event streams and WebSocket use one readable projection. Internal role/brief prompts, prior-failure memory, model scratch text, raw tool envelopes and diagnostic errors are replaced with plain activity; useful findings remain visible. The exact durable event records are retained. | Action activity describes a request, not proof that an external effect completed. Actual action receipts and final results remain the evidence for completion. |
+| Recover a stopped task (UX-294, UX-313) | Provider stops open the AI setup route for an installation administrator and offer a review of a retry without unrelated spending controls. Stopped-task event results and outbound failure callbacks use plain explanations without terminal commands. A prepared pilot retains its separate start review and allowance review. Live updates preserve a pending restart confirmation. | A retry still needs current admission and explicit confirmation; changing an AI key or service does not establish that the next run will succeed. |
+| Edit workflow run controls through Copilot (UX-672) | Designer Copilot can change typed run questions, the time zone and simultaneous-run limit. Removing a step heals approval-expiry and switch-case routes. All changes use the existing draft patch validation and normal save/publish path. | Generated proposals still require customer review; this does not publish or start work automatically. |
 | Collect and close a personal-data request ([UX-020](../USER_EXPERIENCE_AUDIT.md#ux-020--p1--trust--dsar-export-files-are-kept-forever-in-plaintext-after-the-request-is-closed)) | For access and portability, Privacy now says **Data collected** after fulfillment and warns that collection is not delivery. An officer can explicitly download the verified package for review; the server audits access authorization before returning it. Closing an authentic saved export reports removal or an explicit cleanup failure with retry. | The stored `fulfilled` state and access event are not browser-save or delivery receipts. Redaction, a controlled handoff and proof of response remain open; older closed exports need a sweep, and requests left open need retention handling. |
 | Manage API credentials ([UX-087](../USER_EXPERIENCE_AUDIT.md#ux-087--p1--feature--only-one-all-powerful-shared-bearer-token-for-the-whole-rest-api-no-per-userper-app-api-keys-scopes-expiry-or-overlap-rotation)) | Named API keys have owner, expiry, rotation and revocation. An API-key bearer can list permitted keys but cannot create, rotate or revoke keys, create service accounts or disable them. The shared approval queue, paused workflow decisions and selected security, consent, content-access, finance, governance and vendor review decisions require `approvals:decide`. An approval-only key cannot use unrelated operator routes. | `tasks:write` still reaches other operator actions; `settings:write` still reaches all administrator-gated controls, including many domain approvals. Some decisions also require task or admin scope. Remaining domain reviews and installed integration behavior need qualification. |
 | Check provider spending ([UX-088](../USER_EXPERIENCE_AUDIT.md#ux-088--p1--perf--provider-spend-ledger-grows-by-one-never-pruned-row-per-model-call-and-is-rewritten-whole-twice-per-call-accounting-cost-grows-linearly-then-all-ai-calls-are-blocked-at-16-mb)) | An indexed local SQLite ledger replaces healthy JSON accounting after migration. The hot status read now seeks live holds and unknown receipts instead of scanning settled history; Provider Spending exposes health and recovery guidance. | Each active call still hashes the full database to check its seal, so cost grows with history. Larger-scale, damaged-ledger and installed-workspace recovery acceptance remain open. |
@@ -146,6 +149,12 @@ voice are unavailable. Deadline-driven purge, replicated policy
 authority and existing task/chat administrator visibility remain separate work.
 
 ## Learning operations
+
+Automatic provider skill generation now refuses both saved-name collisions and built-in names.
+It cannot overwrite a reviewed company procedure. Learning settings distinguish locally
+staged suggestions from the separately enabled automatic provider-writing path.
+The Learning page also reports spending-limit learning as off unless it was explicitly
+enabled, matching its runtime default instead of showing an unmet request to turn it on.
 
 The current review groups seven learning families into 36 operations covering
 readiness, configuration, source selection, retention, review, permission for

@@ -67,13 +67,13 @@ def _systems(S) -> tuple:
           "Give a newly approved agent the catalog skills and tools its work needs. Each new "
           "tool still needs approval.", "toggle", group, True, "maverick.provision",
           subgroup=_LEARN),
-        S("self_learning", "distill_local", "Turn repeated successes into skills",
-          "Write a reusable skill from work that went well, on this server, without asking "
-          "an AI model.", "toggle", group, True, "maverick.skill.distillation_local",
+        S("self_learning", "distill_local", "Suggest skills from repeated successes",
+          "Prepare a reusable skill suggestion from completed work on this server, without "
+          "asking an AI model. Review and add it from Skills before future tasks use it.", "toggle", group, True, "maverick.skill.distillation_local",
           subgroup=_LEARN, env=("MAVERICK_DISTILL_LOCAL",)),
         S("self_learning", "auto_distill", "Let an AI model write skills from finished tasks",
           "After each finished task, an AI model writes a new saved skill from it straight "
-          "away, without the overnight checks.", "toggle", group, False,
+          "away, without the overnight checks. It cannot replace a saved or built-in skill.", "toggle", group, False,
           "maverick.orchestrator", subgroup=_LEARN, env=("MAVERICK_AUTO_DISTILL",),
           weaker=True,
           warning="An AI model will write new saved skills straight from finished tasks, and "

@@ -16,9 +16,33 @@ from pathlib import Path
 
 import pytest
 from maverick.budget import Budget
-from maverick.orchestrator import _finished_webhook_payload, run_goal
+from maverick.orchestrator import _finished_webhook_payload, _webhook_public_payload, run_goal
 from maverick.sandbox import LocalBackend
 from maverick.world_model import WorldModel
+
+
+def test_blocked_webhook_sends_plain_stop_without_raw_error_or_terminal_command():
+    original = {
+        "goal_id": 7, "status": "blocked",
+        "result": "Stopped: the assistant ran into an error and couldn't finish.\n"
+                  "Detail: private provider reply\n"
+                  "You can try again with: maverick resume 7\n[100 input tokens]",
+    }
+    outgoing = _webhook_public_payload("goal_finished", original)
+    assert outgoing["goal_id"] == 7
+    assert outgoing["stop"]["kind"] == "internal_error"
+    assert outgoing["result"] == outgoing["stop"]["message"]
+    assert "private provider reply" not in str(outgoing)
+    assert "maverick resume" not in str(outgoing)
+    assert "maverick resume" in original["result"]
+
+
+def test_unclassified_webhook_result_never_sends_raw_stop_text():
+    outgoing = _webhook_public_payload("goal_finished", {
+        "goal_id": 8, "status": "failed", "result": "private customer detail without technical markers",
+    })
+    assert outgoing["result"] == "The run stopped before finishing."
+    assert "private customer detail" not in str(outgoing)
 
 
 def test_gated_terminal_result_is_withheld_until_persisted_approval(tmp_path: Path):
