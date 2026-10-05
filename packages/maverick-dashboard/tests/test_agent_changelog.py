@@ -41,11 +41,11 @@ def test_pack_changes_are_described_in_plain_words():
 
 def test_entries_are_newest_first_and_include_workspace_wide_changes():
     changelog.record("proc_po_chaser", ["Changed its instructions"], by="user:alice")
-    changelog.record(changelog.EVERY_AGENT, ["Changed the default AI model for every agent"], by="user:bob")
+    changelog.record(changelog.EVERY_AGENT, ["Changed the default AI model for every specialist and agent"], by="user:bob")
     changelog.record("legal_nda_desk", ["Changed its instructions"], by="user:carol")
     rows = changelog.entries("proc_po_chaser")
     assert [row["changes"][0] for row in rows] == [
-        "Changed the default AI model for every agent", "Changed its instructions"]
+        "Changed the default AI model for every specialist and agent", "Changed its instructions"]
     assert rows[1]["by"] == "user:alice"
     assert changelog.record("proc_po_chaser", [], by="user:alice") is None
 
@@ -69,6 +69,16 @@ def test_version_label_names_the_agent_and_the_last_change_before_the_answer():
     assert later["changed_since"][0]["changes"] == ["Changed its instructions"]
     general = changelog.version_label("", answered_at=row["ts"] + 60)
     assert general["agent"] == "Lightwork"
+    assert (label["kind"], general["kind"]) == ("specialist", "agent")
+
+
+def test_built_in_packs_are_specialists_and_everything_else_is_an_agent():
+    # Owner glossary: a built-in pack (even a customized copy) is a specialist;
+    # a customer-built agent, and the general assistant, is an agent.
+    assert changelog.agent_kind("proc_po_chaser") == "specialist"
+    assert changelog.agent_kind("acme_invoice_helper") == "agent"
+    assert changelog.agent_kind("") == "agent"
+    assert changelog.version_label("acme_invoice_helper", answered_at=None)["kind"] == "agent"
 
 
 def test_saving_and_resetting_an_agent_writes_the_changelog(tmp_path, monkeypatch):
@@ -87,11 +97,11 @@ def test_role_and_default_model_changes_are_recorded_for_every_agent(monkeypatch
                     json={"system_addendum": "Always answer in British English."})
     assert r.status_code == 200, r.text
     rows = changelog.entries(changelog.EVERY_AGENT)
-    assert rows[0]["changes"] == ["Changed the instructions the Planner follows for every agent"]
+    assert rows[0]["changes"] == ["Changed the instructions the Planner follows for every specialist and agent"]
     r = client.post("/settings/models", data={"model": "anthropic:claude-sonnet-4-6"}, follow_redirects=False)
     assert r.status_code == 303, r.text
     newest = changelog.entries(changelog.EVERY_AGENT)[0]["changes"][0]
-    assert newest.startswith("Changed the default AI model for every agent")
+    assert newest.startswith("Changed the default AI model for every specialist and agent")
 
 
 def test_the_agent_editor_shows_who_changed_it_when_and_what(monkeypatch):
@@ -100,6 +110,7 @@ def test_the_agent_editor_shows_who_changed_it_when_and_what(monkeypatch):
     history = body.split('id="agent-changelog"', 1)[1].split("</section>", 1)[0]
     assert "Change history" in history
     assert "alice@example.com" in history and "Changed its instructions" in history
+    assert "This specialist" in history and "This agent" not in history
 
 
 def test_people_who_are_not_administrators_see_that_an_administrator_changed_it(monkeypatch):

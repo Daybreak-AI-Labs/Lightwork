@@ -7091,11 +7091,13 @@ async def agents_page(request: Request) -> HTMLResponse:
     except Exception:  # never 500 the page if the factory layer is unavailable
         agents = []
     agent_changes: list = []
+    selected_kind = "agent"
     if selected:
         try:
             from . import agent_changelog
 
             agent_changes = agent_changelog.entries(selected["name"], limit=10)
+            selected_kind = agent_changelog.agent_kind(selected["name"])
         except Exception:  # pragma: no cover -- the history is best effort
             agent_changes = []
     return templates.TemplateResponse(
@@ -7103,7 +7105,7 @@ async def agents_page(request: Request) -> HTMLResponse:
         "agents.html",
         {"agents": agents, "rejected_agents": rejected_agents,
          "selected": selected, "editable": editable, "creating": creating,
-         "agent_changes": agent_changes,
+         "agent_changes": agent_changes, "selected_kind": selected_kind,
          # Names of the people who changed an agent are shown to administrators.
          "show_change_authors": has_global_permission(request, "admin")},
     )

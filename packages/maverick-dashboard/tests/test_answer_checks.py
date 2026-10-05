@@ -127,7 +127,7 @@ def test_a_pack_answer_names_its_specialist_and_the_last_change(world):
     world.set_goal_status(gid, "done", result="Three are overdue.")
     body = client.get(f"/chat/goal/{gid}").text
     agent = _text(body.split('id="answer-agent"', 1)[1].split("</p>", 1)[0])
-    assert re.search(r"Agent: PO Confirmation Chaser · updated \d{1,2} \w+ \d{4}", agent), agent
-    assert "What changed in this agent" in body and "Changed its instructions" in body
+    assert re.search(r"Specialist: PO Confirmation Chaser · updated \d{1,2} \w+ \d{4}", agent), agent
+    assert "What changed in this specialist" in body and "Changed its instructions" in body
     # Who made the change is for the agent editor, not every reader of the answer.
     assert "alice" not in body.split('id="answer-facts"', 1)[1].split("</div>", 1)[0]

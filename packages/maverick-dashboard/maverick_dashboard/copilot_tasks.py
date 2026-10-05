@@ -106,25 +106,26 @@ TASKS: dict[str, tuple[CopilotTask, ...]] = {
                     ("decisions on my requests", "my requests", "decision history", "was it approved")),
     ),
     "/learning": (
-        CopilotTask("See what people said about each agent",
-                    "What people said about each agent counts thumbs up and down per agent and the reasons "
-                    "people picked. Written comments stay with each person's task.",
-                    "/learning", "Open agent feedback", "agent-feedback",
+        CopilotTask("See what people said about each specialist and agent",
+                    "What people said about each specialist and agent counts thumbs up and down for each one "
+                    "and the reasons people picked. Written comments stay with each person's task.",
+                    "/learning", "Open answer feedback", "agent-feedback",
                     ("feedback", "what people said", "ratings", "thumbs"), "admin"),
     ),
     "/agents": (
-        CopilotTask("Change what an agent may do",
-                    "Pick the agent, change its allowed actions or instructions, then press Save specialist. "
+        CopilotTask("Change what a specialist may do",
+                    "Pick the specialist, change its allowed actions or instructions, then press Save specialist. "
                     "Its change history records who changed it and when.",
                     "/agents", "Open Agent Factory", "",
-                    ("allowed actions", "what an agent may do", "agent tools", "change an agent"), "admin"),
+                    ("allowed actions", "what a specialist may do", "what an agent may do", "agent tools",
+                     "change a specialist", "change an agent"), "admin"),
         CopilotTask("Create a custom agent",
                     "Give the agent a name and describe the job in plain words, choose what it may do, then "
                     "press Create custom agent.",
                     "/agents?new=1", "Start a custom agent", "agent-form",
                     ("custom agent", "new agent", "create an agent"), "admin"),
-        CopilotTask("See an agent's change history",
-                    "Open an agent; Change history lists who changed it, when, and what changed.",
+        CopilotTask("See what changed in a specialist or agent",
+                    "Open a specialist or agent; Change history lists who changed it, when, and what changed.",
                     "/agents", "Open Agent Factory", "",
                     ("change history", "who changed", "what changed"), "view"),
     ),

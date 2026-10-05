@@ -104,26 +104,40 @@ def describe_role_change(role: str, before: dict | None, after: dict | None) -> 
     title = _role_words(role)
     changes = []
     if before.get("system_addendum", "") != after.get("system_addendum", ""):
-        changes.append(f"Changed the instructions the {title} follows for every agent")
+        changes.append(f"Changed the instructions the {title} follows for every specialist and agent")
     if before.get("model") != after.get("model"):
-        changes.append(f"Changed the AI model the {title} uses for every agent: "
+        changes.append(f"Changed the AI model the {title} uses for every specialist and agent: "
                        f"{_model_words(before.get('model'))} to {_model_words(after.get('model'))}")
     if before.get("effort") != after.get("effort"):
-        changes.append(f"Changed how much effort the {title} puts into answers for every agent")
+        changes.append(f"Changed how much effort the {title} puts into answers for every specialist and agent")
     return changes
 
 
 def describe_default_model(before: object, after: object) -> list[str]:
     if before == after:
         return []
-    return [f"Changed the default AI model for every agent: {_model_words(before)} to {_model_words(after)}"]
+    return [f"Changed the default AI model for every specialist and agent: {_model_words(before)} to {_model_words(after)}"]
 
 
 def describe_role_models(before: dict, after: dict) -> list[str]:
     old, new = dict(before or {}), dict(after or {})
-    return [f"Changed the AI model the {_role_words(role)} uses for every agent: "
+    return [f"Changed the AI model the {_role_words(role)} uses for every specialist and agent: "
             f"{_model_words(old.get(role))} to {_model_words(new.get(role))}"
             for role in sorted(set(old) | set(new)) if old.get(role) != new.get(role)]
+
+
+def agent_kind(agent: str) -> str:
+    """``"specialist"`` for one of Lightwork's built-in packs (a customized copy
+    included), ``"agent"`` for everything else: customer-built agents and the
+    general assistant. Copy uses the word this returns."""
+    if not agent or agent == EVERY_AGENT:
+        return "agent"
+    try:
+        from maverick.domain import builtin_domains
+
+        return "specialist" if str(agent) in builtin_domains() else "agent"
+    except Exception:  # an unreadable catalog never promotes an agent to specialist
+        return "agent"
 
 
 def agent_title(agent: str) -> str:
@@ -148,11 +162,11 @@ def version_label(agent: str, *, answered_at: float | None) -> dict:
     else:
         before = [row for row in rows if row["ts"] <= answered_at]
         after = [row for row in rows if row["ts"] > answered_at]
-    return {"agent": agent_title(agent), "updated_at": before[0]["ts"] if before else None,
+    return {"agent": agent_title(agent), "kind": agent_kind(agent), "updated_at": before[0]["ts"] if before else None,
             "changes": before[:3], "changed_since": after[:3]}
 
 
 __all__ = [
-    "EVERY_AGENT", "agent_title", "describe_agent_change", "describe_default_model",
+    "EVERY_AGENT", "agent_kind", "agent_title", "describe_agent_change", "describe_default_model",
     "describe_role_change", "describe_role_models", "entries", "record", "version_label",
 ]

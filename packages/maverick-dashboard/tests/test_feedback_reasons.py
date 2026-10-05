@@ -44,9 +44,9 @@ def test_an_unknown_reason_is_refused(world):
 
 @pytest.mark.parametrize(("enabled", "expected"), [
     (True, "Thanks. Saved with this task and recorded as a learning signal. "
-           "Your workspace's learning policy decides how it is used to improve this agent."),
+           "Your workspace's learning policy decides how it is used to improve this specialist."),
     (False, "Thanks. Saved with this task. It was not recorded as a learning signal, "
-            "so it does not change this agent."),
+            "so it does not change this specialist."),
 ])
 def test_the_acknowledgement_says_plainly_where_feedback_goes(world, monkeypatch, enabled, expected):
     from maverick_dashboard import api
@@ -58,7 +58,11 @@ def test_the_acknowledgement_says_plainly_where_feedback_goes(world, monkeypatch
     with_reason = client.post(f"/api/v1/goals/{gid}/feedback",
                               json={"rating": "down", "reason": "wrong"}).json()["acknowledgement"]
     assert with_reason.endswith("The administrators' summary shows counts and the reasons picked "
-                                "for this agent, not what you wrote.")
+                                "for this specialist, not what you wrote.")
+    # A customer-built agent (or the general assistant) is an agent, not a specialist.
+    custom = _done(world, domain="acme_invoice_helper")
+    text = client.post(f"/api/v1/goals/{custom}/feedback", json={"rating": "up"}).json()["acknowledgement"]
+    assert text.endswith("this agent.") and "specialist" not in text
 
 
 def test_the_third_rejection_of_the_same_agent_asks_one_short_question(world):
@@ -104,6 +108,7 @@ def test_administrators_see_the_summary_on_the_learning_page(world):
     section = body.split('id="agent-feedback"', 1)[1].split("</section>", 1)[0]
     assert "PO Confirmation Chaser" in section and "Wrong or inaccurate" in section
     assert "Private comment" not in section
+    assert "What people said about each specialist and agent" in body
 
 
 def test_the_learning_page_stays_closed_to_people_who_are_not_administrators(world, monkeypatch):

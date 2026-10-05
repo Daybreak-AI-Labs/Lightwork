@@ -10321,18 +10321,21 @@ def post_feedback(request: Request, goal_id: int, payload: FeedbackIn) -> dict:
     follow_up = goal_feedback_store.should_follow_up(who, agent, previous=previous, rating=payload.rating)
     return {"feedback": row, "saved": True, "learning_observation": "recorded" if observed else "not_recorded",
             "training_completed": False,
-            "acknowledgement": _feedback_acknowledgement(observed, bool(payload.reason or payload.note)),
+            "acknowledgement": _feedback_acknowledgement(observed, bool(payload.reason or payload.note), agent),
             "follow_up": {"question": "What would make this better?"} if follow_up else None}
 
 
-def _feedback_acknowledgement(observed: bool, explained: bool) -> str:
+def _feedback_acknowledgement(observed: bool, explained: bool, agent: str = "") -> str:
     """Where feedback goes and how it is used, true to what just happened."""
+    from .agent_changelog import agent_kind
+
+    noun = agent_kind(agent)  # a built-in pack is a specialist; anything else is an agent
     text = ("Thanks. Saved with this task and recorded as a learning signal. Your workspace's "
-            "learning policy decides how it is used to improve this agent." if observed else
+            f"learning policy decides how it is used to improve this {noun}." if observed else
             "Thanks. Saved with this task. It was not recorded as a learning signal, "
-            "so it does not change this agent.")
+            f"so it does not change this {noun}.")
     if explained:
-        text += " The administrators' summary shows counts and the reasons picked for this agent, not what you wrote."
+        text += f" The administrators' summary shows counts and the reasons picked for this {noun}, not what you wrote."
     return text
 
 
