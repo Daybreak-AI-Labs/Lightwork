@@ -101,7 +101,7 @@
       if (canAdmin) {
         var del = el('button', { type: 'button', class: 'btn btn--danger', text: 'Delete' });
         del.addEventListener('click', function () {
-          var ask = window.mvConfirm ? window.mvConfirm('Delete the form for ' + p.name + '? Its page stops working immediately.', { okText: 'Delete' }) : Promise.resolve(window.confirm('Delete ' + p.name + '?'));
+          var ask = window.mvConfirm ? window.mvConfirm('Delete the form for ' + p.name + '? Its page stops working immediately.', { okText: 'Delete form' }) : Promise.resolve(window.confirm('Delete ' + p.name + '?'));
           ask.then(function (ok) { if (!ok) return; return call('DELETE', BASE + '/properties/' + encodeURIComponent(p.slug)).then(loadProperties); })
             .catch(function (f) { fail(status, f, 'delete the property'); });
         });

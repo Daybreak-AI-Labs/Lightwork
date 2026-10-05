@@ -93,8 +93,9 @@
     Object.entries(state.policy.effective_learning || {}).forEach(([name, enabled]) => text(el('pd-policy'), name.replaceAll('_', ' ') + ': ' + (enabled ? 'administrator policy permits; source restrictions still apply' : 'disabled by administrator policy')));
     text(el('pd-policy'), state.policy.model_skill_learning); text(el('pd-policy'), state.policy.companion);
   }
-  el('pd-refresh').addEventListener('click', () => {
-    if (dirty && !window.confirm('Refresh saved state and discard the unsaved note edits shown here?')) return;
+  el('pd-refresh').addEventListener('click', async () => {
+    const question = 'Refresh and discard your unsaved note edits? They can\'t be restored.';
+    if (dirty && !(await (window.mvConfirm ? window.mvConfirm(question, {okText: 'Discard note edits'}) : Promise.resolve(window.confirm(question))))) return;
     action(async () => ({}));
   });
   el('pd-link').addEventListener('submit', event => { event.preventDefault(); action(async () => {

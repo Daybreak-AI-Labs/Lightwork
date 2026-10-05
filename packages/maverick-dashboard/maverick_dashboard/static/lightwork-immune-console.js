@@ -241,7 +241,7 @@
   }
 
   async function forget(g) {
-    var ok = await window.mvConfirm("Delete the recording for “" + g.title + "”? It can no longer be re-run. Past re-run results are kept.", { okText: "Delete" });
+    var ok = await window.mvConfirm("Delete the recording for “" + g.title + "”? It can no longer be re-run. Past re-run results are kept.", { okText: "Delete recording" });
     if (!ok) { return; }
     var out = await call("DELETE", "/api/v1/immune/twin/" + encodeURIComponent(g.id), undefined, "delete the recording");
     if (out) { say("Recording deleted."); await loadAll(true); }

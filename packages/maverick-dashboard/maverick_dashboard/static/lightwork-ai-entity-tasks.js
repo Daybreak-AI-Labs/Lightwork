@@ -693,7 +693,7 @@
   document.getElementById("aet-purge-form").addEventListener("submit", async function (event) {
     event.preventDefault();
     var ok = typeof window.mvConfirm === "function"
-      ? await window.mvConfirm("Permanently delete finished or dismissed tasks whose keep-until date has passed? A record that they were deleted is kept. This can't be undone.", {okText: "Delete"})
+      ? await window.mvConfirm("Permanently delete finished or dismissed tasks whose keep-until date has passed? A record that they were deleted is kept. This can't be undone.", {okText: "Delete expired tasks"})
       : false;
     if (!ok) return;
     try {

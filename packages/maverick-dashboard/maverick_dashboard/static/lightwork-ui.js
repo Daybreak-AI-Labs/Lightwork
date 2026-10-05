@@ -80,8 +80,13 @@
     // Reusable feedback primitives, on every page that extends base.html.
     // Prefer these over the browser's native dialogs. Contract: docs/ui-primitives.md.
     //   window.mvToast(message, {error, quiet}) -> transient status/alert toast
-    //   window.mvConfirm(message, {okText}) -> Promise<bool> (native <dialog>;
-    //     focus-returning, not re-entrant; falls back to window.confirm)
+    //   window.mvConfirm(message, {okText, cancelText, danger, typed}) -> Promise<bool>
+    //     (native <dialog>; focus starts on the safe choice and returns to the
+    //     opener; not re-entrant; falls back to window.confirm). Say what will
+    //     happen and to what ("Delete the automation "Weekly report"? It stops
+    //     running."); okText names the action ("Delete automation"), never "OK".
+    //     danger: style the action as destructive. typed: a word the person
+    //     must type before the action unlocks, for workspace-wide deletes.
     //   window.mvCopy(text) -> copy to clipboard with a toast (+ fallback)
     (function () {
       var region = document.getElementById('mv-toasts');
@@ -107,6 +112,85 @@
           setTimeout(function () { t.remove(); }, 220);
         }, opts.error ? 5000 : 3200);
       };
+      // A way back from a delete (Gmail's Undo Send): the item goes from the
+      // page at once and a toast offers Undo, and Ctrl+Z or Cmd+Z, for
+      // opts.seconds (10 by default, never under 5; the time stops while the
+      // pointer or focus is on the toast). The delete is sent only when that
+      // time is up, when the person leaves the page (keepalive), or when
+      // another delete starts. Nothing is kept anywhere in the meantime, so
+      // a privacy erasure is never held back by it. If the delete then fails,
+      // undo() puts the item back and the failure is shown.
+      //   window.mvUndo(message, {run(keepalive) -> Promise<Response>, undo(), done(), action, seconds, latest})
+      var pendingUndo = null;
+      function typing(target) {
+        return target && target.closest && !!target.closest('input, textarea, select, [contenteditable="true"]');
+      }
+      window.mvUndo = function (message, opts) {
+        opts = opts || {};
+        if (pendingUndo) pendingUndo.commit(false);   // one at a time: the earlier delete goes through now
+        var wait = Math.max(5, Number(opts.seconds) || 10) * 1000;
+        var toast = document.createElement('div');
+        toast.className = 'mv-toast mv-toast--undo';
+        var words = document.createElement('span'); words.textContent = String(message);
+        var undoBtn = document.createElement('button'); undoBtn.type = 'button';
+        undoBtn.className = 'mv-toast__undo'; undoBtn.setAttribute('aria-keyshortcuts', 'Control+Z Meta+Z');
+        if (window.LightworkI18n) window.LightworkI18n.set(undoBtn, 'Undo'); else undoBtn.textContent = 'Undo';
+        toast.append(words, document.createTextNode(' '), undoBtn);
+        if (region) region.appendChild(toast);
+        var settled = false, timer = null, startedAt = 0, hard = null;
+        // opts.latest (epoch ms): the delete goes through by then even while
+        // the toast is paused, e.g. before a schedule's next run.
+        if (opts.latest) hard = setTimeout(function () { entry.commit(false); }, Math.max(0, Number(opts.latest) - Date.now()));
+        function start() { startedAt = Date.now(); timer = setTimeout(function () { entry.commit(false); }, wait); }
+        function pause() { if (timer) { clearTimeout(timer); timer = null; wait = Math.max(1000, wait - (Date.now() - startedAt)); } }
+        function finish() {
+          settled = true; pause(); if (hard) clearTimeout(hard);
+          toast.remove();
+          window.removeEventListener('pagehide', onHide);
+          document.removeEventListener('keydown', onKey);
+          if (pendingUndo === entry) pendingUndo = null;
+        }
+        function onHide() { entry.commit(true); }
+        function onKey(event) {
+          if ((event.ctrlKey || event.metaKey) && !event.shiftKey && !event.altKey &&
+              String(event.key).toLowerCase() === 'z' && !typing(event.target)) {
+            event.preventDefault(); entry.undo();
+          }
+        }
+        var entry = {
+          commit: async function (keepalive) {
+            if (settled) return 'settled';
+            finish();
+            try {
+              var response = await opts.run(!!keepalive);
+              if (response && response.ok === false) throw response;
+              if (opts.done) opts.done();
+              return 'done';
+            } catch (failure) {
+              if (opts.undo) opts.undo();
+              window.mvFail(failure, opts.action || 'delete it');
+              return 'failed';
+            }
+          },
+          undo: function () {
+            if (settled) return 'settled';
+            finish();
+            if (opts.undo) opts.undo();
+            mvToast(productText('Restored.'));
+            return 'undone';
+          }
+        };
+        undoBtn.addEventListener('click', function () { entry.undo(); });
+        toast.addEventListener('mouseenter', pause);
+        toast.addEventListener('focusin', pause);
+        toast.addEventListener('mouseleave', function () { if (!settled && !timer && !toast.contains(document.activeElement)) start(); });
+        toast.addEventListener('focusout', function () { if (!settled && !timer) start(); });
+        window.addEventListener('pagehide', onHide);
+        document.addEventListener('keydown', onKey);
+        pendingUndo = entry;
+        start();
+        return entry;
+      };
       var dlg = document.getElementById('mv-confirm');
       var msgEl = document.getElementById('mv-confirm-msg');
       var okBtn = document.getElementById('mv-confirm-ok');
@@ -120,10 +204,29 @@
         var opener = document.activeElement;           // restore focus on close
         if (opts.productCopy && window.LightworkI18n) window.LightworkI18n.set(msgEl, String(message), opts.values);
         else { msgEl.textContent = String(message); msgEl.lang = 'und'; msgEl.dir = 'auto'; }
-        if (window.LightworkI18n) { window.LightworkI18n.set(okBtn, opts.okText || 'Confirm'); window.LightworkI18n.set(cancelBtn, 'Cancel'); }
-        else okBtn.textContent = opts.okText || 'Confirm';
+        if (window.LightworkI18n) { window.LightworkI18n.set(okBtn, opts.okText || 'Confirm'); window.LightworkI18n.set(cancelBtn, opts.cancelText || 'Cancel'); }
+        else { okBtn.textContent = opts.okText || 'Confirm'; cancelBtn.textContent = opts.cancelText || 'Cancel'; }
+        okBtn.classList.toggle('btn--danger', !!opts.danger);
+        okBtn.classList.toggle('btn--primary', !opts.danger);
+        var typedWrap = document.getElementById('mv-confirm-typed');
+        if (typedWrap) typedWrap.remove();
+        typedWrap = null;
+        var typedInput = null;
+        if (opts.typed) {
+          typedWrap = document.createElement('p'); typedWrap.id = 'mv-confirm-typed'; typedWrap.className = 'mv-confirm__typed';
+          var typedLabel = document.createElement('label'); typedLabel.setAttribute('for', 'mv-confirm-typed-input');
+          typedLabel.textContent = window.LightworkI18n ? window.LightworkI18n.text('Type {word} to confirm', {word: String(opts.typed)}) : 'Type ' + String(opts.typed) + ' to confirm';
+          typedInput = document.createElement('input'); typedInput.id = 'mv-confirm-typed-input'; typedInput.className = 'input';
+          typedInput.autocomplete = 'off'; typedInput.spellcheck = false;
+          typedWrap.append(typedLabel, typedInput);
+          msgEl.insertAdjacentElement('afterend', typedWrap);
+          okBtn.disabled = true;
+          typedInput.addEventListener('input', function () { okBtn.disabled = typedInput.value.trim() !== String(opts.typed); });
+        } else okBtn.disabled = false;
         return new Promise(function (resolve) {
           function done(val) {
+            if (typedWrap) typedWrap.remove();
+            okBtn.disabled = false;
             okBtn.removeEventListener('click', onOk);
             cancelBtn.removeEventListener('click', onCancel);
             dlg.removeEventListener('cancel', onCancel);
@@ -133,7 +236,7 @@
             if (opener && opener.isConnected && typeof opener.focus === 'function') opener.focus();
             resolve(val);
           }
-          function onOk() { done(true); }
+          function onOk() { if (typedInput && typedInput.value.trim() !== String(opts.typed)) return; done(true); }
           function onCancel(e) { if (e) e.preventDefault(); done(false); }
           okBtn.addEventListener('click', onOk);
           cancelBtn.addEventListener('click', onCancel);

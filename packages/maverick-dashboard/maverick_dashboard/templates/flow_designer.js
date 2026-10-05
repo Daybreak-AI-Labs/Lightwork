@@ -2195,7 +2195,7 @@
           var rm = document.createElement('button'); rm.className = 'btn btn--ghost btn--danger'; rm.type = 'button'; rm.textContent = 'Remove';
           rm.setAttribute('aria-label', 'Remove the start “' + t.name + '”');
           rm.addEventListener('click', async function () {
-            if (!(await window.mvConfirm('Remove “' + t.name + '”? The other app will no longer be able to start this flow.', { okText: 'Remove' }))) return;
+            if (!(await window.mvConfirm('Remove “' + t.name + '”? The other app will no longer be able to start this flow.', { okText: 'Remove start' }))) return;
             apiFetch('/api/v1/triggers/' + encodeURIComponent(t.name), { method: 'DELETE' })
               .then(function (r) { if (!r.ok) say(failText(r, 'remove it'), true); showTriggers(); })
               .catch(function (e) { say(failText(e, 'remove it'), true); });

@@ -78,7 +78,7 @@
   document.querySelectorAll("[data-xa-remove]").forEach(function (b) {
     b.addEventListener("click", async function () {
       var id = b.getAttribute("data-xa-remove");
-      if (!(await window.mvConfirm("Remove " + label(b) + "? It will stop working here. Its past work stays in your records.", { okText: "Remove" }))) return;
+      if (!(await window.mvConfirm("Remove " + label(b) + "? It will stop working here. Its past work stays in your records.", { okText: "Remove agent" }))) return;
       var out = await call("/api/v1/external-agents/" + encodeURIComponent(id), { method: "DELETE" }, "Removed.", false, "remove the agent");
       if (out && b.hasAttribute("data-xa-go-roster")) setTimeout(function () { window.location.assign("/external-agents"); }, 350);
       else if (out) setTimeout(function () { window.location.reload(); }, 350);

@@ -118,8 +118,9 @@
   });
 
   var questions = {
-    suspend: ['Pause {name}? No new work can start in it until you resume it. Nothing is deleted.', 'Pause', 'pause the workspace', 'POST', '/suspend', '{name} is paused.'],
-    resume: ['Resume {name}? Work can start in it again.', 'Resume', 'resume the workspace', 'POST', '/resume', '{name} is active again.'],
+    suspend: ['Pause {name}? No new work can start in it until you resume it. Nothing is deleted.', 'Pause workspace', 'pause the workspace', 'POST', '/suspend', '{name} is paused.'],
+    // Resuming is routine and can be undone with Pause: no question.
+    resume: ['', 'Resume', 'resume the workspace', 'POST', '/resume', '{name} is active again.'],
     delete: ['Remove {name} from the list? Access and member roles will be revoked. Its stored records stay on this computer for deliberate recovery.', 'Remove workspace', 'remove the workspace', 'DELETE', '', '{name} was removed.']
   };
   document.querySelectorAll('[data-tenant-action]').forEach(function (button) {
@@ -127,7 +128,11 @@
       var row = button.closest('[data-tenant-row]');
       var id = row.dataset.tenantRow;
       var q = questions[button.dataset.tenantAction];
-      var ok = await window.mvConfirm(q[0].replace('{name}', row.dataset.tenantName), {okText: q[1]});
+      // Removing a workspace revokes everyone's access at once: the person
+      // types REMOVE first.
+      var removing = button.dataset.tenantAction === 'delete';
+      var ok = !q[0] || await window.mvConfirm(q[0].replace('{name}', row.dataset.tenantName),
+        {okText: q[1], danger: removing, typed: removing ? 'REMOVE' : undefined});
       if (!ok) return;
       button.disabled = true;
       rowMsg.textContent = 'Saving…';

@@ -2165,7 +2165,7 @@
           ? 'Prepare deletion for this request? Nothing is deleted yet: you confirm the deletion on the request\'s own page.'
           : 'Gather everything Lightwork holds about this person now?';
       if (!(await mvConfirm(text, { okText: btn.dataset.retry === 'true' ? 'Retry cleanup' :
-          btn.dataset.act === 'close' ? 'Close request' : 'Continue' }))) return;
+          btn.dataset.act === 'close' ? 'Close request' : btn.dataset.kind === 'erasure' ? 'Prepare deletion' : 'Gather their data' }))) return;
       btn.disabled = true;
       fetch('/api/v1/privacy/dsar/' + encodeURIComponent(btn.dataset.id) +
            '/' + btn.dataset.act, { method: 'POST' }).then(function (response) {

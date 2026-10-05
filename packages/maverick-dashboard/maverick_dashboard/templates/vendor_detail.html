@@ -233,10 +233,10 @@
   document.querySelectorAll('[data-vd-status]').forEach(function (b) {
     b.addEventListener('click', async function () {
       var to = b.getAttribute('data-vd-status');
-      var text = { under_review: 'Mark ' + name + ' as under review?',
-                   active: 'Mark ' + name + ' as active again?',
-                   offboarded: 'Stop using ' + name + '? It will be marked as no longer working with you.' }[to];
-      if (!(await window.mvConfirm(text, { okText: to === 'offboarded' ? 'Stop using' : 'Confirm' }))) return;
+      // Marking a vendor under review or active again is routine and can be
+      // changed back at once: only stopping work with them asks first.
+      if (to === 'offboarded' && !(await window.mvConfirm('Stop using ' + name + '? It will be marked as no longer working with you.',
+          { okText: 'Stop using ' + name }))) return;
       post('/status', { status: to, revision: revision }).then(done, fail('change the status'));
     });
   });

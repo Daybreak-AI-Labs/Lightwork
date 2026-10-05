@@ -319,7 +319,7 @@
         btn.type = 'button';
         btn.addEventListener('click', async function () {
           if (!(await window.mvConfirm('Delete ' + plural(d.waiting, 'waiting outline') + '? They are removed without being sent and cannot be recovered.',
-            { okText: 'Delete' }))) return;
+            { okText: 'Delete outlines' }))) return;
           btn.disabled = true;
           try {
             var r = await J.request(LO + '/donations/clear', { method: 'POST', json: { confirm: true } });

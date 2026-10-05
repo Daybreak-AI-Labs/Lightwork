@@ -105,7 +105,7 @@
       if (storageBusy || !storageSnapshot || !storageSnapshot.discarded || disposed) return;
       var selected = storageSnapshot; storageBusy = true; storageControls();
       try {
-        if (!(await confirmed('Free space from ' + selected.discarded + ' already discarded recovery copies? Open editors will check their saved version before saving again.'))) return;
+        if (!(await confirmed('Free space from ' + selected.discarded + ' already discarded recovery copies? Open editors will check their saved version before saving again.', 'Free space'))) return;
         showStorage(await storageCall({expected_version:selected.version}), 'Discarded recovery space freed. ');
       } catch (error) { storageSnapshot = null; storageStatus.textContent = error.message; }
       finally { storageBusy = false; storageControls(); }
@@ -221,13 +221,13 @@
       try { changed = JSON.stringify(read()) !== lastSaved; } catch (_error) { changed = true; }
       if (changed && initialized && !blocked) schedule();
     }
-    async function confirmed(message) { return typeof root.mvConfirm === 'function' ? root.mvConfirm(message) : root.confirm(message); }
-    async function review(message, action) {
+    async function confirmed(message, okText) { return typeof root.mvConfirm === 'function' ? root.mvConfirm(message, {okText: okText}) : root.confirm(message); }
+    async function review(message, action, okText) {
       if (running || !initialized) return;
       running = true; controls();
       try {
         var before = JSON.stringify(read()), candidate = remote, expected = revision;
-        if (!(await confirmed(message))) return;
+        if (!(await confirmed(message, okText))) return;
         var latest = await call('GET');
         if (latest.revision !== expected || !same(latest.payload, candidate)) {
           remote = latest.payload; revision = latest.revision; blocked = true;
@@ -244,16 +244,16 @@
         await options.restore(candidate);
         blocked = false; changed = false; failed = false; lastSaved = JSON.stringify(read());
         status.textContent = 'Recovery copy restored for review. Nothing was run, saved to the live resource, or published.';
-      });
+      }, 'Restore recovery copy');
     }
-    async function replaceReviewed(payload, message) {
+    async function replaceReviewed(payload, message, okText) {
       await review(message, async function () {
         running = false; pendingOperation = null;
         if (await persist(payload())) { blocked = false; changed = false; lastSaved = JSON.stringify(read()); }
-      });
+      }, okText);
     }
-    async function keepCurrent() { await replaceReviewed(read, 'Replace the recovery copy with the current editor draft? The live resource is unchanged.'); }
-    async function discardCopy() { await replaceReviewed(function () { return null; }, 'Discard the saved recovery copy? Your current editor contents will stay here.'); }
+    async function keepCurrent() { await replaceReviewed(read, 'Replace the recovery copy with the current editor draft? The live resource is unchanged.', 'Keep current draft'); }
+    async function discardCopy() { await replaceReviewed(function () { return null; }, 'Discard the saved recovery copy? It can\'t be restored. Your current editor contents will stay here.', 'Discard recovery copy'); }
     async function retryRecovery() {
       if (running) return;
       if (!initialized) { await initialize(); return; }

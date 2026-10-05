@@ -1150,9 +1150,8 @@
         archive.type = "button";
         archive.dataset.accessPath = "/requests/" + encodeURIComponent(record.id) + "/archive";
         archive.addEventListener("click", async function () {
-          if (pending || !window.confirm(
-            "Move this finished request to the retained archive? Source restrictions and evidence stay in place. This does not delete the original source."
-          )) return;
+          // Archiving keeps the request, its restrictions and evidence: no question.
+          if (pending) return;
           setBusy(true);
           try {
             var saved = await api(archive.dataset.accessPath, {

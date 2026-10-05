@@ -457,8 +457,6 @@
     var status = $('fa-lessons-status');
     var out = $('fa-lessons-out');
     $('fa-lessons-export').addEventListener('click', async function () {
-      var ok = await window.mvConfirm('Download your most recent lessons to share with another Lightwork installation? Only the lessons are included, never tasks or customer details. The other installation must trust yours before it can use them.', {okText: 'Download'});
-      if (!ok) return;
       say(status, 'Packaging lessons…');
       try {
         var response = await request('/api/v1/learning-exchange/export', {method: 'POST', raw: true,

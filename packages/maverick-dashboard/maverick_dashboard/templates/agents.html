@@ -1199,8 +1199,8 @@
         if (!beginMutation(saveBtn)) return;
         try {
           if (!(await mvConfirm(
-            (creating ? 'Create the specialist “' : 'Save the specialist “') + name + '”? Its allowed actions, steps and independence settings take effect for everyone who uses it.',
-            { okText: creating ? 'Create agent' : 'Deploy specialist' }
+            (creating ? 'Create the agent “' : 'Save your changes to the specialist “') + name + '”? Its allowed actions, steps and independence settings take effect for everyone who uses it.',
+            { okText: creating ? 'Create agent' : 'Save specialist' }
           ))) return;
           await call('POST', `/api/v1/agents/${name}/override`, payload());
           show(creating ? 'Custom agent created.' : 'Deployed.', true);
