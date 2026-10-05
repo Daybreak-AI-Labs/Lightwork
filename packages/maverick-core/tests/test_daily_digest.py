@@ -285,3 +285,71 @@ def test_expiring_access_keys_come_from_the_real_api_keys_module(tmp_path, monke
     world = _world(tmp_path)
     assert daily_digest.compose_digest(world, "user:a", can_decide=False, now=now)["expiring_keys"] == []
     assert calls == [([], daily_digest.KEY_EXPIRY_DAYS)]
+
+
+def _rendered_digest():
+    """A summary with one of each item, in a fixed time zone."""
+    return {
+        "date_label": "Sunday 04 October 2026", "time_zone": "Europe/London", "empty": False,
+        "approvals": [
+            {"id": 12, "action": "Run a shell command", "risk_label": "High risk",
+             "decide_by": 1791147900.0, "waiting_on": "you"},
+            {"id": 13, "action": "Delete old drafts", "risk_label": "Medium risk",
+             "decide_by": None, "waiting_on": "someone else"},
+        ],
+        "questions": [{"id": 7, "goal_id": 5, "goal_title": "Forecast", "question": "Which quarter?",
+                       "asked_at": 1791140000.0, "href": "/chat/goal/5"}],
+        "results": [{"id": 9, "title": "Board pack", "status": "done", "status_label": "Finished",
+                     "summary": "PRIVATE RESULT TEXT", "href": "/chat/goal/9"}],
+        "expiring_keys": [],
+        "spending": {"dollars": 1.5, "limit_dollars": 10, "over_limit": False},
+        "counts": {"approvals": 2, "questions": 1, "results": 1, "expiring_keys": 0},
+    }
+
+
+def test_summary_says_why_what_and_by_when_and_links_each_item():
+    """NOT-1 for email and Slack: a reason, the action and its due time, and an
+    exact link per item; never the result text."""
+    from maverick.daily_digest import render_html, render_text
+    from maverick.slack_interactive import digest_blocks
+
+    digest = _rendered_digest()
+    text = render_text(digest, dashboard_url="https://lw.test/")
+    assert "You get this because you turned on the daily summary in My work." in text
+    assert "Decide by Sun 04 Oct 2026, 22:05 (Europe/London)" in text
+    assert "https://lw.test/approvals#approval-12" in text
+    assert "Waiting on someone else's decision" in text and "No expiry is set" in text
+    assert "The task waits until you answer" in text
+    assert "https://lw.test/chat/goal/5#question-panel" in text
+    assert "https://lw.test/chat/goal/9" in text
+    assert "Change or stop this summary: https://lw.test/me#daily-summary" in text
+    html = render_html(digest, dashboard_url="https://lw.test/")
+    assert 'href="https://lw.test/approvals#approval-12"' in html
+    assert "Decide by Sun 04 Oct 2026, 22:05 (Europe/London)" in html
+    assert "You get this because you turned on the daily summary in My work." in html
+    blocks = digest_blocks(digest, dashboard_url="https://lw.test")
+    joined = " ".join(str(block) for block in blocks)
+    assert "<https://lw.test/approvals#approval-12|Open>" in joined
+    assert "Decide by Sun 04 Oct 2026, 22:05 (Europe/London)" in joined
+    assert "You get this because you turned on the daily summary in My work." in joined
+    for rendered in (text, html, joined):
+        assert "PRIVATE RESULT TEXT" not in rendered
+
+
+def test_results_already_seen_in_the_app_are_left_out_of_the_summary(tmp_path, monkeypatch):
+    from maverick import daily_digest
+    from maverick import personal_notifications as alerts
+
+    world = _world(tmp_path)
+    ids = _seed(world)
+    everything = daily_digest.compose_digest(world, "user:alice", can_decide=True)
+    assert [row["id"] for row in everything["results"]] == [ids["mine"]]
+    trimmed = daily_digest.compose_digest(world, "user:alice", can_decide=True,
+                                          seen_goal_ids={ids["mine"]})
+    assert trimmed["results"] == [] and trimmed["left_out_seen"] == 1
+    # The questions it still waits on stay: they need an answer, seen or not.
+    assert trimmed["questions"] == everything["questions"]
+    monkeypatch.setattr(alerts.PersonalInbox, "seen_goal_ids", lambda self: {ids["mine"]})
+    prepared = daily_digest.prepare_digest(world, "user:alice", can_decide=True,
+                                           prefs={"time_zone": "UTC"})
+    assert prepared["results"] == [] and prepared["left_out_seen"] == 1

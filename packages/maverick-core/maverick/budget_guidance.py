@@ -247,5 +247,6 @@ def warning_sources(principal):
     return [{"ref": row["id"], "version": row["id"], "category": "blocked", "goal_id": None,
              "project_id": None, "title": "Budget needs attention",
              "label": f"{row['dimension']} allowance crossed {row['threshold']:.0%}; review scheduled work",
-             "href": "/budget"}
+             "href": "/budget", "reason": "Your spending allowance crossed a warning level",
+             "action": "Review the work scheduled against your allowance"}
             for row in rows if row.get("principal") == principal and row.get("day") == today]

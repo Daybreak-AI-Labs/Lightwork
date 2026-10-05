@@ -873,7 +873,10 @@ async def post_approval_card(connector: TeamsConnector, approval_id: int, *, lin
     view = module.approval_view(approval_id)
     if view is None or view["approval"]["status"] != "pending":
         return []
-    card = approval_card(view["approval"], view["card"], source_label=view["source_label"])
+    from maverick.daily_digest import dashboard_url
+
+    card = approval_card(view["approval"], view["card"], source_label=view["source_label"],
+                         dashboard_url=dashboard_url())
     posted = []
     for link in links:
         conversation = link.get("conversation") if isinstance(link.get("conversation"), dict) else {}

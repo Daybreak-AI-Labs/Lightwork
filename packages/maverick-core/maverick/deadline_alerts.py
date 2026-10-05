@@ -99,6 +99,16 @@ _WEBHOOK_EVENTS: dict[str, tuple[str, str]] = {
     "vendor_contract": ("vendor.contract_renewal_due", "vendor.contract_renewal_due"),
     "approval": ("", "approval.expired"),
 }
+# What each alert asks its recipient to do (NOT-1: why, what and by when).
+RECORD_ACTIONS: dict[str, str] = {
+    "dsar": "Respond to the data request",
+    "dsar_acknowledgement": "Acknowledge the data request",
+    "incident": "Decide whether to notify the regulator and the people affected",
+    "assessment_renewal": "Renew the assessment or retire it",
+    "assessment_review": "Review the assessment",
+    "vendor_contract": "Renew the contract or end it",
+    "approval": "Approve or reject the request",
+}
 # Types whose alerts ignore quiet hours (a statutory clock keeps running).
 _ALWAYS_URGENT = frozenset({"incident"})
 
@@ -295,7 +305,7 @@ def _approval_deadlines(now: float, world: Any) -> list[Deadline]:
         if not card or not card.get("expires_at"):
             continue
         out.append(Deadline("approval", str(appr.id), str(getattr(appr, "action", "") or "approval"),
-                            float(card["expires_at"]), _link("/approvals"), "",
+                            float(card["expires_at"]), _link(f"/approvals#approval-{appr.id}"), "",
                             {"risk": getattr(appr, "risk", "")}))
     return out
 
@@ -483,7 +493,10 @@ def message_for(alert: Alert, now: float,
         title = f"Due today: {label.lower()} {d.title}"
     else:
         title = f"Due soon: {label.lower()} {d.title}"
-    body = f"{label}: {d.title} {when}. For: {alert.recipient}."
+    action = RECORD_ACTIONS.get(d.record_type, "Open the record and act on it")
+    why = ("this record is assigned to them" if alert.recipient_kind == "assignee"
+           else "no one is assigned to this record")
+    body = f"{label}: {d.title} {when}. Needed: {action}. For: {alert.recipient}, because {why}."
     if d.link:
         body += f" Open: {d.link}"
     return title[:200], body

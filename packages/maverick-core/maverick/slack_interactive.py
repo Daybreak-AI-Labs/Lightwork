@@ -237,7 +237,8 @@ def approval_blocks(content: dict[str, Any], *, dashboard_url: str = "",
     if lines:
         blocks.append({"type": "section", "text": _mrkdwn("\n\n".join(lines))})
     blocks.append({"type": "section", "fields": fields[:10]})
-    note = (f"Request #{content['id']} · This is Lightwork's suggestion — the decision is "
+    note = (f"Request #{content['id']} · Posted here because this channel receives Lightwork "
+            "approval requests. This is Lightwork's suggestion — the decision is "
             "yours, and it applies only to exactly what is described here.")
     if dashboard_url:
         note += f" <{dashboard_url.rstrip('/')}/approvals#approval-{content['id']}|Open on the dashboard>"
@@ -304,25 +305,36 @@ def text_blocks(title: str, body: str) -> list[dict[str, Any]]:
 
 
 def digest_blocks(digest: dict[str, Any], *, dashboard_url: str = "") -> list[dict[str, Any]]:
-    """The daily summary as Block Kit: the same content as the My work page."""
+    """The daily summary as Block Kit: the same content as the My work page,
+    with what each item needs, by when, and a link to it."""
+    from .daily_digest import WHY, approval_line, question_href
+
     blocks: list[dict[str, Any]] = [{"type": "header", "text": _plain(
         f"Your Lightwork summary · {digest.get('date_label', '')}".strip(" ·"))}]
     approvals = digest.get("approvals") or []
     questions = digest.get("questions") or []
     results = digest.get("results") or []
     spend = digest.get("spending") or {}
+    zone = str(digest.get("time_zone") or "UTC")
+
+    def opened(href: str) -> str:
+        return f" <{dashboard_url.rstrip('/')}{href}|Open>" if dashboard_url else ""
+
     if approvals:
         blocks.append({"type": "section", "text": _mrkdwn(
             f"*{len(approvals)} waiting for your decision*\n" + "\n".join(
-                f"• #{a['id']} {a['action']} — {a['risk_label']}" for a in approvals[:10]))})
+                f"• {approval_line(a, zone)}{opened('/approvals#approval-' + str(a['id']))}"
+                for a in approvals[:10]))})
     if questions:
         blocks.append({"type": "section", "text": _mrkdwn(
             f"*{len(questions)} question{'s' if len(questions) != 1 else ''} an agent is waiting on*\n"
-            + "\n".join(f"• {q['question']}" for q in questions[:10]))})
+            + "\n".join(f"• {q['question']} The task waits until you answer.{opened(question_href(q))}"
+                         for q in questions[:10]))})
     if results:
         blocks.append({"type": "section", "text": _mrkdwn(
             f"*{len(results)} recent result{'s' if len(results) != 1 else ''}*\n"
-            + "\n".join(f"• {r['title']} — {r['status_label']}" for r in results[:10]))})
+            + "\n".join(f"• {r['title']} — {r['status_label']}{opened(r.get('href') or '/goals')}"
+                         for r in results[:10]))})
     keys = digest.get("expiring_keys") or []
     if keys:
         blocks.append({"type": "section", "text": _mrkdwn(
@@ -336,7 +348,10 @@ def digest_blocks(digest: dict[str, Any], *, dashboard_url: str = "") -> list[di
     against = f" of your ${float(limit):.2f} monthly limit" if limit else ""
     blocks.append({"type": "context", "elements": [_mrkdwn(
         f"Spending this month: {spent}{against}."
-        + (f" <{dashboard_url.rstrip('/')}/me|Open My work>" if dashboard_url else ""))]})
+        + (f" <{dashboard_url.rstrip('/')}/me|Open My work>" if dashboard_url else "")
+        + f" {WHY}"
+        + (f" <{dashboard_url.rstrip('/')}/me#daily-summary|Change or stop this summary>"
+           if dashboard_url else ""))]})
     return blocks
 
 

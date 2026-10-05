@@ -211,3 +211,35 @@ def test_webhook_events_fire_for_due_and_overdue(world, monkeypatch):
     assert ("dsar.due_soon", "due_soon_2d") in events
     assert ("dsar.overdue", "overdue") in events
     assert ("approval.expired", "overdue") in events
+
+
+@pytest.mark.parametrize("record_type,action", [
+    ("dsar", "Respond to the data request"),
+    ("dsar_acknowledgement", "Acknowledge the data request"),
+    ("incident", "Decide whether to notify the regulator and the people affected"),
+    ("assessment_renewal", "Renew the assessment or retire it"),
+    ("assessment_review", "Review the assessment"),
+    ("vendor_contract", "Renew the contract or end it"),
+    ("approval", "Approve or reject the request"),
+])
+def test_every_deadline_alert_says_why_what_is_needed_and_by_when(record_type, action):
+    """NOT-1: the reason, the action and its due time travel in every alert."""
+    assigned = da.Alert(_deadline(record_type=record_type, assignee="Priya"), "due_soon_2d",
+                        "Priya", "assignee", False)
+    _title, body = da.message_for(assigned, NOW)
+    assert f"Needed: {action}." in body
+    assert "is due in 2 days" in body
+    assert "For: Priya, because this record is assigned to them." in body
+    owner = da.Alert(_deadline(record_type=record_type), "due_soon_2d", "Dana (privacy owner)", "owner", False)
+    assert ("For: Dana (privacy owner), because no one is assigned to this record."
+            in da.message_for(owner, NOW)[1])
+
+
+def test_approval_deadline_opens_that_approval_card(monkeypatch):
+    from maverick import approval_cards
+
+    monkeypatch.setattr(approval_cards, "decode_approval_detail", lambda detail: {"expires_at": NOW + HOUR})
+    world = type("World", (), {"pending_approvals": lambda self: [
+        type("Approval", (), {"id": 41, "detail": "card", "action": "deploy", "risk": "high"})()]})()
+    [deadline] = da._approval_deadlines(NOW, world)
+    assert deadline.link.endswith("/approvals#approval-41")
