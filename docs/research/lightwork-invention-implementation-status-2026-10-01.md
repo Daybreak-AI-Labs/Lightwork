@@ -44,9 +44,9 @@ self-improvement lifecycle, installed acceptance, or externally anchored audit.
 | Status | Meaning | Count |
 | --- | --- | ---: |
 | Partial product support | Working code for part of a broad product foundation; integrated customer acceptance still open | 6 |
-| Bounded pilot; mechanism unproven | An in-product pilot exists, but neither complete customer operation nor a distinct invention is qualified | 1 |
+| Bounded pilot; mechanism unproven | An in-product pilot exists, but neither complete customer operation nor a distinct invention is qualified | 2 |
 | Adjacent component | Code related to the direction, without its proposed general advance | 5 |
-| Research only | Mechanism remains a proposal or a research question | 12 |
+| Research only | Mechanism remains a proposal or a research question | 11 |
 | Rejected or parked | Retained to preserve an unfavorable or insufficient result | 4 |
 
 ## Product foundations

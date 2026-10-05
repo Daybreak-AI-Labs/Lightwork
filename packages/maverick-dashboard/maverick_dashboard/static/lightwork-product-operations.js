@@ -110,7 +110,8 @@
     if (!safeLocalHref(item.direct_ui)) return;
     var link = node('a', 'Open full controls', parent); link.className = 'btn btn--ghost'; link.href = item.direct_ui;
   }
-  async function refresh() {
+  async function refresh(options) {
+    var keepResult = options && options.keepResult === true;
     var started = generation, previous = catalog;
     status.textContent = 'Checking your current controls…';
     try {
@@ -131,7 +132,12 @@
       status.textContent = uncertainty || 'Current controls for this page. Changes require a separate review and confirmation.';
       return fresh;
     } catch (error) {
-      if (active(started)) { catalog = null; clear(buttons); clear(formHost); selected = null; host.hidden = false; if (noMatches) noMatches.hidden = true; status.textContent = error.message; }
+      if (active(started)) {
+        catalog = null; clear(buttons); selected = null; host.hidden = false;
+        if (!keepResult) clear(formHost);
+        if (noMatches) noMatches.hidden = true;
+        status.textContent = keepResult ? 'Your saved result is below. Current controls could not be refreshed. ' + error.message : error.message;
+      }
       return null;
     }
   }
@@ -265,6 +271,45 @@
     use.className = 'btn btn--primary'; use.focus();
     button('Cancel', formHost, function () { clear(formHost); selected = null; status.textContent = 'Teaching review cancelled.'; });
   }
+  async function openConsentJobForm(item, fresh, started) {
+    var selection = context(), native = window.LightworkConsentBulkJobs;
+    var review = await request('/prepare', Object.assign(payload(), {
+      operation: item.id, context: fresh.context, revision: item.revision, arguments: {}
+    }));
+    if (!active(started)) return;
+    var details = review.details || {};
+    if (review.read_only !== true || review.operation !== item.id || details.form !== 'consent_bulk_job' ||
+        typeof details.context !== 'string' || !/^[a-f0-9]{64}$/.test(details.context) ||
+        !native || typeof native.openCreate !== 'function')
+      throw new Error('The request form is unavailable. Open Consent requests to continue.');
+    clear(formHost); node('h3', item.label, formHost); node('p', review.summary, formHost);
+    var launch = button('Choose and review the request', formHost, async function () {
+      if (busy || !active(started)) return;
+      if (JSON.stringify(context()) !== JSON.stringify(selection)) {
+        status.textContent = 'Your selection changed. Refresh current controls before preparing a request.'; return;
+      }
+      lock(true);
+      try {
+        var result = await native.openCreate({host: formHost, context: details.context,
+          active: function () { return active(started) && JSON.stringify(context()) === JSON.stringify(selection); }});
+        if (!active(started)) return;
+        clear(formHost);
+        uncertainty = result && result.status === 'submitted' || result && result.status === 'cancelled' ? '' :
+          'This request still needs confirmation. Read the original request in Consent requests before another submission.';
+        node('p', result && result.status === 'submitted' ? 'The request was accepted. Its processing result is recorded separately.' :
+          result && result.status === 'cancelled' ? 'The form was closed. No new request was submitted.' : uncertainty, formHost);
+        if (result && result.status === 'submitted' && result.job) renderData(formHost, result.job);
+        nativeLink(item, formHost); status.textContent = uncertainty || 'The request form is finished.';
+        if (result && result.status === 'submitted') await refresh({keepResult: true});
+      } catch (_) {
+        if (active(started)) {
+          uncertainty = 'The request result could not be confirmed. Open Consent requests and read the original submission before another attempt.';
+          status.textContent = uncertainty; nativeLink(item, formHost);
+        }
+      } finally { lock(false); }
+    });
+    launch.className = 'btn btn--primary'; launch.focus(); nativeLink(item, formHost);
+  }
   async function openOperation(id) {
     if (busy) return false;
     var started = generation; lock(true);
@@ -275,6 +320,10 @@
       if (!item) return false;
       if (item.id === 'learning.workflow_run') {
         await openWorkflowRun(item, fresh, started);
+        return true;
+      }
+      if (item.id === 'consent.jobs.create') {
+        await openConsentJobForm(item, fresh, started);
         return true;
       }
       if (['learning.workflow_refine', 'learning.rule_teach', 'learning.rule_refine'].includes(item.id)) {
@@ -352,6 +401,10 @@
         }
         nativeLink(item, formHost); status.textContent = uncertainty || 'The server confirmed the result.';
         document.dispatchEvent(new CustomEvent('lightwork:product-operation-complete', {detail: {operation: result.operation, status: result.status}}));
+        if (result.status === 'confirmed' || result.status === 'replayed') {
+          button('Refresh current controls', formHost, function () { refresh({keepResult: true}); });
+          await refresh({keepResult: true});
+        }
       } catch (error) {
         if (active(started)) { clear(formHost); node('p', error.message, formHost); nativeLink(item, formHost); status.textContent = uncertainty; }
       } finally { lock(false); }

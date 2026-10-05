@@ -600,6 +600,12 @@ def _nav_context(request: Request) -> dict:
             return key_scopes is not None and ("admin" in key_scopes or scope in key_scopes)
         return True
     unavailable |= _account_pages_unavailable(request)
+    # These rollups refuse scoped callers until every metric has its own
+    # department projection. Discovery must follow the same native boundary.
+    try:
+        require_unscoped_board(request)
+    except HTTPException:
+        unavailable |= {"/overview", "/spend", "/workforce", "/savings", "/oversight"}
     for collection in (groups, finder):
         for group in collection:
             group["links"] = [link for link in group["links"]
@@ -1149,7 +1155,12 @@ async def _lifespan(app: FastAPI):
     finally:
         if runtime_receipt is not None:
             runtime_receipt.close()
-        await supervisor.stop()
+        from .local_runtime_service import shutdown as stop_local_ai
+
+        try:
+            await run_in_threadpool(stop_local_ai)
+        finally:
+            await supervisor.stop()
 
 
 def enforce_page_visibility(
@@ -1521,6 +1532,20 @@ from . import approval_challenges_api  # noqa: E402
 
 app.include_router(approval_challenges_api.router)
 app.include_router(approval_challenges_api.page_router)
+
+from . import installation_security_api  # noqa: E402
+
+app.include_router(installation_security_api.router)
+app.include_router(installation_security_api.page_router)
+
+from . import local_runtime_api  # noqa: E402
+
+app.include_router(local_runtime_api.router)
+
+from . import compliance_mapping_builder_api  # noqa: E402
+
+app.include_router(compliance_mapping_builder_api.router)
+app.include_router(compliance_mapping_builder_api.page_router)
 
 from . import webhook_settings_recovery_api  # noqa: E402
 

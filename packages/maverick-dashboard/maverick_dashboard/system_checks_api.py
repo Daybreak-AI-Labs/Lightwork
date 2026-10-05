@@ -21,9 +21,9 @@ recorded with the person who made them.
 from __future__ import annotations
 
 import threading
-from typing import Any
+from typing import Any, Literal
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.concurrency import run_in_threadpool
@@ -114,9 +114,9 @@ def _readiness() -> list[dict[str, Any]]:
     try:
         from maverick.crypto_at_rest import at_rest_enabled
         on = bool(at_rest_enabled())
-        rows.append(_row("encryption", "Stored data is encrypted", on,
-                         "Saved records are encrypted on disk." if on
-                         else "Saved records are not encrypted on disk. Whoever installed Lightwork can turn this on.",
+        rows.append(_row("encryption", "Protection for new saved records", on,
+                         "New supported records are encrypted on disk. Check Encryption to review older records and key custody." if on
+                         else "Protection for new supported records is off. Review Encryption in Maintenance before changing it.",
                          "See encryption", "#maintenance-encryption"))
     except Exception:  # noqa: BLE001
         rows.append(_row("encryption", "Stored data is encrypted", False,
@@ -388,39 +388,59 @@ def _encryption() -> dict[str, Any]:
 @router.get("/encryption")
 async def encryption_status(request: Request) -> dict:
     _admin(request)
-    return await run_in_threadpool(_encryption)
+    from .encryption_maintenance import current
+    state = await run_in_threadpool(current, request)
+    state.pop("key_revision", None)
+    return JSONResponse(state, headers={"Cache-Control": "private, no-store"})
 
 
-@router.post("/encryption/protect-older")
-async def encryption_protect_older(request: Request) -> dict:
+class EncryptionReview(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    action: Literal["protect", "rotate"]
+
+
+class EncryptionChange(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    context: str = Field(pattern=r"^[a-f0-9]{64}$")
+    review: str = Field(min_length=1, max_length=8192)
+    operation: str = Field(pattern=r"^[a-f0-9]{32}$")
+    confirm: bool
+
+
+@router.post("/encryption/review")
+async def encryption_review(body: EncryptionReview, request: Request):
     _mutation(request)
-    from maverick.crypto_at_rest import EncryptionUnavailable
-    from maverick.encryption_migrate import migrate_world_db
-
-    db = await run_in_threadpool(_world_db)
-    if db is None:
-        raise HTTPException(409, _SHARED_DATABASE_NOTE + " Nothing was changed here.")
-
-    def _do() -> int:
-        return sum(migrate_world_db(db, dry_run=False, backup=False).values()) if db.exists() else 0
-    try:
-        count = await run_in_threadpool(_do)
-    except EncryptionUnavailable as exc:
-        raise HTTPException(503, "Encryption is not set up on this installation, so nothing was changed.") from exc
-    await run_in_threadpool(_record, request, "encryption_protect_older", records=count)
-    return {"protected": count}
+    from .encryption_maintenance import prepare
+    return JSONResponse(await run_in_threadpool(prepare, request, body.action),
+                        headers={"Cache-Control": "private, no-store"})
 
 
-@router.post("/encryption/new-key")
-async def encryption_new_key(request: Request) -> dict:
+@router.get("/encryption/actions/{operation}")
+async def encryption_action_receipt(operation: str, request: Request):
+    _admin(request)
+    from .encryption_maintenance import receipt
+    return JSONResponse({"receipt": await run_in_threadpool(receipt, request, operation)},
+                        headers={"Cache-Control": "private, no-store"})
+
+
+async def _encryption_change(request, body, action):
     _mutation(request)
-    from maverick.crypto_at_rest import EncryptionUnavailable, rotate_at_rest_key
-    try:
-        await run_in_threadpool(rotate_at_rest_key)
-    except EncryptionUnavailable as exc:
-        raise HTTPException(503, "Encryption is not set up on this installation, so no new key was made.") from exc
-    await run_in_threadpool(_record, request, "encryption_new_key")
-    return {"rotated": True}
+    from .draft_api import context_for
+    from .encryption_maintenance import execute
+    if body.confirm is not True or body.context != context_for(request):
+        raise HTTPException(409, "Review the action in your current account and workspace before confirming it.")
+    return JSONResponse(await run_in_threadpool(execute, request, action, body.review, body.operation),
+                        headers={"Cache-Control": "private, no-store"})
+
+
+@router.post("/encryption/protect-older", dependencies=[Depends(_mutation)])
+async def encryption_protect_older(body: EncryptionChange, request: Request) -> dict:
+    return await _encryption_change(request, body, "protect")
+
+
+@router.post("/encryption/new-key", dependencies=[Depends(_mutation)])
+async def encryption_new_key(body: EncryptionChange, request: Request) -> dict:
+    return await _encryption_change(request, body, "rotate")
 
 
 # ---- live diagnostics (maverick diag circuits / ratelimits) ----------------

@@ -2730,7 +2730,7 @@ class WorldModel:
         return row is not None
 
     def purge_episodes_before(
-        self, cutoff_ts: float, *, dry_run: bool = False,
+        self, cutoff_ts: float, *, dry_run: bool = False, review_binding: dict | None = None,
     ) -> int:
         """Count or delete completed episodes older than an absolute cutoff.
 
@@ -2751,6 +2751,12 @@ class WorldModel:
         """
         predicate = "ended_at IS NOT NULL AND ended_at < ?"
         with self._writing() as conn:
+            if review_binding is not None:
+                from .retention_review_bindings import guard_sql
+
+                guard_sql(conn, "episodes", predicate, (float(cutoff_ts),), review_binding, dry_run=dry_run)
+                if dry_run:
+                    return int(review_binding["count"])
             if dry_run:
                 row = conn.execute(
                     f"SELECT COUNT(*) FROM episodes WHERE {predicate}",
@@ -2852,11 +2858,17 @@ class WorldModel:
             return cur.rowcount
 
     def purge_goal_events_before(
-        self, cutoff_ts: float, *, dry_run: bool = False,
+        self, cutoff_ts: float, *, dry_run: bool = False, review_binding: dict | None = None,
     ) -> int:
         """Count or delete goal events older than an absolute cutoff."""
         predicate = "ts IS NOT NULL AND ts < ?"
         with self._writing() as conn:
+            if review_binding is not None:
+                from .retention_review_bindings import guard_sql
+
+                guard_sql(conn, "goal_events", predicate, (float(cutoff_ts),), review_binding, dry_run=dry_run)
+                if dry_run:
+                    return int(review_binding["count"])
             if dry_run:
                 row = conn.execute(
                     f"SELECT COUNT(*) FROM goal_events WHERE {predicate}",
@@ -2870,7 +2882,7 @@ class WorldModel:
             return int(cur.rowcount or 0)
 
     def purge_messages_before(
-        self, cutoff_ts: float, *, dry_run: bool = False,
+        self, cutoff_ts: float, *, dry_run: bool = False, review_binding: dict | None = None,
     ) -> int:
         """Count or delete conversation messages older than an absolute cutoff.
 
@@ -2880,6 +2892,12 @@ class WorldModel:
         """
         predicate = "ts IS NOT NULL AND ts < ?"
         with self._writing() as conn:
+            if review_binding is not None:
+                from .retention_review_bindings import guard_sql
+
+                guard_sql(conn, "messages", predicate, (float(cutoff_ts),), review_binding, dry_run=dry_run)
+                if dry_run:
+                    return int(review_binding["count"])
             if dry_run:
                 row = conn.execute(
                     f"SELECT COUNT(*) FROM messages WHERE {predicate}",

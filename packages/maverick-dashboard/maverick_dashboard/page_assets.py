@@ -32,6 +32,7 @@ ASSETS = (
     "lightwork-tenants.js",
     "lightwork-typeahead.js",
     "lightwork-compliance.js",
+    "lightwork-retention-maintenance.js",
     "lightwork-compliance-scoping.js",
     "lightwork-compliance-scope-actions.js",
     "lightwork-dsar-detail.js",

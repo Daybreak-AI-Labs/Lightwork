@@ -187,6 +187,32 @@ def test_migrate_dry_run_writes_nothing(monkeypatch, tmp_path):
     assert raw == "still plaintext"
 
 
+@requires_crypto
+def test_migrate_preserves_a_concurrent_edit(monkeypatch, tmp_path):
+    from maverick import encryption_migrate as migration
+
+    db = tmp_path / "world.db"
+    with sqlite3.connect(db) as connection:
+        connection.execute("CREATE TABLE turns (content TEXT)")
+        connection.execute("INSERT INTO turns VALUES ('original customer text')")
+    monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "1")
+    original_seal = migration.seal_to_str
+
+    def seal_after_customer_edit(value):
+        with sqlite3.connect(db) as connection:
+            connection.execute("UPDATE turns SET content='new customer text'")
+        return original_seal(value)
+
+    monkeypatch.setattr(migration, "seal_to_str", seal_after_customer_edit)
+    assert migration.migrate_world_db(db)["turns.content"] == 0
+    with sqlite3.connect(db) as connection:
+        assert connection.execute("SELECT content FROM turns").fetchone()[0] == "new customer text"
+    monkeypatch.setattr(migration, "seal_to_str", original_seal)
+    assert migration.migrate_world_db(db)["turns.content"] == 1
+    with sqlite3.connect(db) as connection:
+        assert car.unseal_from_str(connection.execute("SELECT content FROM turns").fetchone()[0]) == "new customer text"
+
+
 def _all_db_bytes(db):
     """The DB main file + its WAL/SHM sidecars, concatenated."""
     blob = db.read_bytes() if db.exists() else b""

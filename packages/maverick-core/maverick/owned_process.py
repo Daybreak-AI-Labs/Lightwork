@@ -53,7 +53,8 @@ class PendingWrite:
 class OwnedProcess:
     """One process tree with bounded pipe queues and one serialized writer."""
 
-    def __init__(self, command: list[str], *, env: dict[str, str], cwd: str | None = None):
+    def __init__(self, command: list[str], *, env: dict[str, str], cwd: str | None = None,
+                 hidden: bool = False):
         self.stdout: queue.Queue[bytes | None] = queue.Queue(PIPE_QUEUE_CHUNKS)
         self.stderr: queue.Queue[bytes | None] = queue.Queue(PIPE_QUEUE_CHUNKS)
         self._writes: queue.Queue[PendingWrite] = queue.Queue(1)
@@ -66,7 +67,8 @@ class OwnedProcess:
             command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
             stderr=subprocess.PIPE, bufsize=0, env=env, cwd=cwd,
             start_new_session=os.name != "nt",
-            creationflags=(subprocess.CREATE_NEW_PROCESS_GROUP | _CREATE_SUSPENDED)
+            creationflags=(subprocess.CREATE_NEW_PROCESS_GROUP | _CREATE_SUSPENDED
+                           | (subprocess.CREATE_NO_WINDOW if hidden else 0))
             if os.name == "nt" else 0,
         )
         try:

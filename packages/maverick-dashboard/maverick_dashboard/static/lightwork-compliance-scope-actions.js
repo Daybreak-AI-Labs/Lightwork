@@ -25,7 +25,7 @@
   function say(text) { statusEl.textContent = text; }
   function fail(f, action) { say(R.errorText(f, action)); }
   function label(ref) {
-    return R.human(String(ref || '').replace(/^(ref|evidence):/, '').replace(/^(question|framework|control|overlap|evidence|catalog|mapping)[-_]/, ''));
+    return R.human(String(ref || '').replace(/^(ref|evidence):/, '').replace(/^(question|framework|control|overlap|evidence|catalog|mapping)[-_]/, '').replace(/-[a-f0-9]{12}$/, ''));
   }
   function badge(value) { var s = STATUS[value] || [R.human(value), 'info']; return R.badge(s[0], s[1]); }
   function find(list, key, value) { return list.filter(function (r) { return r[key] === value; })[0]; }

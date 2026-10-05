@@ -53,6 +53,10 @@ from . import rbac
 # not in the Settings visibility matrix. Flip it back to ready when the page
 # speaks to a non-technical user.
 PAGES: tuple[dict, ...] = (
+    {"path": "/settings/local-ai", "scope": "global", "label": "AI on this computer", "group": "Admin",
+     "icon": "settings", "floor": "admin", "default": "admin", "in_nav": False},
+    {"path": "/settings/security-installation", "scope": "global", "label": "Sign-in and work protection", "group": "Admin",
+     "icon": "settings", "floor": "admin", "default": "admin", "in_nav": False},
     {"path": "/learning/approval-challenges", "label": "Approval challenges", "group": "Observe",
      "icon": "learned", "floor": "operate", "default": "operate", "in_nav": False},
     {"path": "/learning/instructions", "label": "Instructions used in real work", "group": "Observe",
@@ -1026,6 +1030,16 @@ PAGES: tuple[dict, ...] = (
         "floor": "operate",
         "default": "operate",
         "module": "tech_risk_compliance.scope_actions",
+        "in_nav": False,
+    },
+    {
+        "path": "/compliance/scope-actions/mapping",
+        "label": "Build a task mapping",
+        "group": "Govern",
+        "icon": "compliance",
+        "floor": "operate",
+        "default": "operate",
+        "module": ("tech_risk_compliance.scoping", "tech_risk_compliance.scope_actions"),
         "in_nav": False,
     },
     {

@@ -240,6 +240,60 @@ class ComplianceScopeActionDependencies:
         self.store_for = store_for
 
 
+def authority(request: Request, dependencies: ComplianceScopeActionDependencies | None = None):
+    """Shared native tenant/principal and injected-store boundary."""
+    deps = dependencies or ComplianceScopeActionDependencies()
+    actions = _actions()
+    tenant = _tenant_id()
+    principal = _principal(request, tenant)
+    factory = getattr(
+        request.app.state,
+        "compliance_scope_actions_store_factory",
+        None,
+    )
+    apply_callback = getattr(
+        request.app.state,
+        "compliance_scope_actions_apply_callback",
+        None,
+    )
+    if apply_callback is not None and not callable(apply_callback):
+        raise HTTPException(
+            status_code=503,
+            detail="compliance scope-action runtime is unavailable",
+        )
+
+    def resolver() -> str:
+        return principal
+
+    try:
+        store = (
+            factory(
+                tenant_id=tenant,
+                principal_ref=principal,
+                principal_resolver=resolver,
+                apply_callback=apply_callback,
+                request=request,
+            )
+            if callable(factory)
+            else deps.store_for(
+                tenant,
+                principal,
+                apply_callback=apply_callback,
+            )
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="compliance scope-action store is unavailable",
+        ) from exc
+    if store is None:
+        raise HTTPException(
+            status_code=503,
+            detail="compliance scope-action store is unavailable",
+        )
+    return actions, tenant, store
+
+
 def create_compliance_scope_actions_router(  # noqa: C901, PLR0915
     dependencies: ComplianceScopeActionDependencies | None = None,
 ) -> APIRouter:
@@ -250,56 +304,8 @@ def create_compliance_scope_actions_router(  # noqa: C901, PLR0915
         route_class=_GenericValidationRoute,
     )
 
-    def authority(request: Request):
-        actions = _actions()
-        tenant = _tenant_id()
-        principal = _principal(request, tenant)
-        factory = getattr(
-            request.app.state,
-            "compliance_scope_actions_store_factory",
-            None,
-        )
-        apply_callback = getattr(
-            request.app.state,
-            "compliance_scope_actions_apply_callback",
-            None,
-        )
-        if apply_callback is not None and not callable(apply_callback):
-            raise HTTPException(
-                status_code=503,
-                detail="compliance scope-action runtime is unavailable",
-            )
-
-        def resolver() -> str:
-            return principal
-
-        try:
-            store = (
-                factory(
-                    tenant_id=tenant,
-                    principal_ref=principal,
-                    principal_resolver=resolver,
-                    apply_callback=apply_callback,
-                    request=request,
-                )
-                if callable(factory)
-                else deps.store_for(
-                    tenant,
-                    principal,
-                    apply_callback=apply_callback,
-                )
-            )
-        except Exception as exc:
-            raise HTTPException(
-                status_code=503,
-                detail="compliance scope-action store is unavailable",
-            ) from exc
-        if store is None:
-            raise HTTPException(
-                status_code=503,
-                detail="compliance scope-action store is unavailable",
-            )
-        return actions, tenant, store
+    def bound_authority(request: Request):
+        return authority(request, deps)
 
     async def call(actions, function, *args, **kwargs):
         try:
@@ -375,7 +381,7 @@ def create_compliance_scope_actions_router(  # noqa: C901, PLR0915
         """Catalogs, plans and reports in this workspace, newest first."""
 
         require_permission(request, "view")
-        actions, tenant, store = authority(request)
+        actions, tenant, store = bound_authority(request)
         listed = await call(actions, store.list_records, tenant)
         callback = getattr(request.app.state, "compliance_scope_actions_apply_callback", None)
         return {
@@ -419,7 +425,7 @@ def create_compliance_scope_actions_router(  # noqa: C901, PLR0915
         """Signed report for a plan with the deployment signing key."""
 
         require_permission(request, "operate")
-        actions, tenant, store = authority(request)
+        actions, tenant, store = bound_authority(request)
         plan = await call(actions, store.get_plan, tenant, plan_id)
         export_id = "report-" + hashlib.sha256(
             f"{plan_id}:{body.idempotency_key}".encode()
@@ -444,7 +450,7 @@ def create_compliance_scope_actions_router(  # noqa: C901, PLR0915
         body: CatalogVersionIn,
     ):
         require_permission(request, "operate")
-        actions, tenant, store = authority(request)
+        actions, tenant, store = bound_authority(request)
         payload = body.model_dump()
         payload["entries"] = [entry.model_dump() for entry in body.entries]
         return _jsonable(
@@ -464,7 +470,7 @@ def create_compliance_scope_actions_router(  # noqa: C901, PLR0915
         version: VersionPath,
     ):
         require_permission(request, "view")
-        actions, tenant, store = authority(request)
+        actions, tenant, store = bound_authority(request)
         return _jsonable(
             await call(
                 actions,
@@ -483,7 +489,7 @@ def create_compliance_scope_actions_router(  # noqa: C901, PLR0915
         body: RevisionIn,
     ):
         require_global_permission(request, "admin")
-        actions, tenant, store = authority(request)
+        actions, tenant, store = bound_authority(request)
         return _jsonable(
             await call(
                 actions,
@@ -503,7 +509,7 @@ def create_compliance_scope_actions_router(  # noqa: C901, PLR0915
         body: PlanCreateIn,
     ):
         require_permission(request, "operate")
-        actions, tenant, store = authority(request)
+        actions, tenant, store = bound_authority(request)
         return _jsonable(
             await call(
                 actions,
@@ -518,20 +524,20 @@ def create_compliance_scope_actions_router(  # noqa: C901, PLR0915
     @router.get("/plans/{plan_id}")
     async def get_plan(request: Request, plan_id: ObjectPath):
         require_permission(request, "view")
-        actions, tenant, store = authority(request)
+        actions, tenant, store = bound_authority(request)
         return _jsonable(await call(actions, store.get_plan, tenant, plan_id))
 
     @router.get("/plans/{plan_id}/history")
     async def get_plan_history(request: Request, plan_id: ObjectPath):
         require_permission(request, "view")
-        actions, tenant, store = authority(request)
+        actions, tenant, store = bound_authority(request)
         items = await call(actions, store.get_plan_history, tenant, plan_id)
         return {"items": _jsonable(items), "count": len(items)}
 
     @router.post("/plans/{plan_id}/approve")
     async def approve_plan(request: Request, plan_id: ObjectPath, body: RevisionIn):
         require_global_permission(request, "admin")
-        actions, tenant, store = authority(request)
+        actions, tenant, store = bound_authority(request)
         return _jsonable(
             await call(
                 actions,
@@ -549,7 +555,7 @@ def create_compliance_scope_actions_router(  # noqa: C901, PLR0915
         method_name: str,
     ):
         require_global_permission(request, "admin")
-        actions, tenant, store = authority(request)
+        actions, tenant, store = bound_authority(request)
         try:
             method = getattr(store, method_name)
         except Exception as exc:
@@ -592,7 +598,7 @@ def create_compliance_scope_actions_router(  # noqa: C901, PLR0915
         body: ExportPlanIn,
     ):
         require_permission(request, "operate")
-        actions, tenant, store = authority(request)
+        actions, tenant, store = bound_authority(request)
         return _jsonable(
             await call(
                 actions,
@@ -607,13 +613,13 @@ def create_compliance_scope_actions_router(  # noqa: C901, PLR0915
     @router.get("/exports/{export_id}")
     async def get_export(request: Request, export_id: ObjectPath):
         require_permission(request, "view")
-        actions, tenant, store = authority(request)
+        actions, tenant, store = bound_authority(request)
         return _jsonable(await call(actions, store.get_export, tenant, export_id))
 
     @router.get("/integrity")
     async def integrity(request: Request):
         require_global_permission(request, "audit")
-        actions, tenant, store = authority(request)
+        actions, tenant, store = bound_authority(request)
         result = _jsonable(await call(actions, store.verify_integrity, tenant))
         result["valid"] = True
         return result

@@ -224,15 +224,7 @@
       {% endif %}
     </div>
     <p id="cmp-retention-result" class="muted" role="status" aria-live="polite"></p>
-    {% if can_global_admin %}
-    <section id="cmp-retention-review" hidden aria-labelledby="cmp-retention-review-title">
-      <h3 id="cmp-retention-review-title">Review effective retention</h3>
-      <div id="cmp-retention-summary"></div>
-      <p>Recorded privacy-rights holds block deletion for the whole workspace because broad retention cannot identify every subject record. Check external holds separately with your records owner. Deleting task history also removes its provenance links from retained facts.</p>
-      <label><input type="checkbox" id="cmp-retention-holds"> I confirmed with the records owner that no preservation hold applies to these records.</label>
-      <p><button type="button" class="btn btn--danger" id="cmp-retention-confirm">Delete reviewed old records</button></p>
-    </section>
-    {% endif %}
+    {% include "_retention_maintenance.html" %}
   </div>
 
   <div class="section-head"><h2>Reports for auditors</h2></div>
@@ -281,4 +273,5 @@
   </div>
   {% endif %}
   <script src="/static/lightwork-compliance.js" defer></script>
+  <script src="/static/lightwork-retention-maintenance.js" defer></script>
 {% endblock %}

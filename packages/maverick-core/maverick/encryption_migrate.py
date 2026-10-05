@@ -165,11 +165,17 @@ def migrate_world_db(
         # Zero freed cells as rows are re-sealed in place, so the pre-encryption
         # plaintext can't be recovered from the DB file's free list.
         conn.execute("PRAGMA secure_delete=ON")
+        # The scan above intentionally holds no writer reservation (the backup
+        # uses another connection). Never overwrite work edited after that scan.
+        # Reports count only rows this execution actually changed; a subsequent
+        # scan can find newer plaintext without mistaking it for a completed seal.
+        report = dict.fromkeys(report, 0)
         for table, col, rid, val in work:
-            conn.execute(
-                f"UPDATE {table} SET {col} = ? WHERE rowid = ?",
-                (seal_to_str(val), rid),
+            changed = conn.execute(
+                f"UPDATE {table} SET {col} = ? WHERE rowid = ? AND {col} IS ?",
+                (seal_to_str(val), rid, val),
             )
+            report[f"{table}.{col}"] += changed.rowcount
         conn.commit()
         _shred_residue(conn, report)
     finally:
