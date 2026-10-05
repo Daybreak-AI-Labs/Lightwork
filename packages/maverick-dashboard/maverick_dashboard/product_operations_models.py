@@ -84,14 +84,25 @@ def prepare_test(request, selection, arguments):
 
 def execute_test(request, selection, arguments, review, operation_id):
     result, background = native.start(request, context_for(request), review["check_id"], True)
-    return Outcome("queued" if background else "replayed", "Use the model test history to read this exact request's result. No uncertain call is retried.", result, background=background)
+    return Outcome(_test_status(result["check"], replay=background is None), "Use the model test history to read this exact request's result. No uncertain call is retried.", result, background=background)
+
+
+def _test_status(value, *, replay):
+    if value.get("may_still_be_running"):
+        return "unconfirmed"
+    if value["state"] in {"queued", "executing"}:
+        return "queued"
+    if value["state"] in {"passed", "not_matched", "refused", "cancelled"}:
+        return "replayed" if replay else "confirmed"
+    return "unconfirmed"
 
 
 def recover_test(request, selection, arguments, review, operation_id):
     native.authority(request)
     row = model_tests.get(context_for(request), review["check_id"])
     if row is not None and row["state"] != "prepared":
-        return Outcome("replayed", "Recovered the original test receipt without another paid request.", {"check": model_tests.public(row)})
+        value = model_tests.public(row)
+        return Outcome(_test_status(value, replay=True), "The original test's saved status was read. No paid request was repeated.", {"check": value})
     return None
 
 

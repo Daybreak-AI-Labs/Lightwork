@@ -1,4 +1,4 @@
-"""Current administrator request batches with private, authority-bound positions."""
+"""Current request batches with private, authority-bound positions."""
 from __future__ import annotations
 
 import base64
@@ -20,7 +20,7 @@ MAX_TOKEN = 2048
 _STALE = "This request page expired or its account, workspace or view changed. Start this view again."
 
 
-def _purpose(tenant, actor, context, view, service):
+def _purpose(tenant, actor, context, view, service, can_review=True):
     with tenant_scope(tenant=tenant):
         source = [str(data_dir()), service.request_store.namespace,
                   service.request_store.backend_kind, service.archive_store.namespace,
@@ -30,7 +30,7 @@ def _purpose(tenant, actor, context, view, service):
         # cannot resume under otherwise equal account/workspace settings.
         for store in (service.request_store, service.archive_store):
             source.append(getattr(store._authority_token, "dsn_sha256", ""))
-    return "lightwork.knowledge-request-page.v1:" + digest([tenant, actor, context, view, source])
+    return "lightwork.knowledge-request-page.v1:" + digest([tenant, actor, context, view, source, can_review])
 
 
 def _position(token, purpose):
@@ -69,19 +69,27 @@ def _token(position, purpose):
 def browse(request, *, view="active", cursor="", limit=100):
     if view not in VIEWS or isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 250:
         raise HTTPException(422, "Choose a request view and a smaller batch.")
-    tenant, actor, context = native._binding(request, Response(), administrator=True)
+    can_review = native.has_global_permission(request, "admin")
+    if view == "ready" and not can_review:
+        raise HTTPException(403, "Administrator access is required for this view")
+    tenant, actor, context = native._binding(request, Response(), administrator=can_review)
     service = native.call_native(native._service, request)
-    purpose = native.call_native(_purpose, tenant, actor, context, view, service)
+    purpose = native.call_native(_purpose, tenant, actor, context, view, service, can_review)
     position = _position(cursor, purpose)
-    page = native.call_native(service.browse_requests, tenant, view=view, cursor=position, limit=limit)
-    capacity = native.call_native(service.request_capacity, tenant)
+    page = native.call_native(service.browse_requests, tenant, view=view, cursor=position, limit=limit,
+                             actor=None if can_review else actor)
+    capacity = native.call_native(service.request_capacity, tenant) if can_review else None
     # A slow source/hold projection must not escape an account or authority change.
-    current = native._binding(request, Response(), administrator=True)
-    if current != (tenant, actor, context) or native.call_native(_purpose, *current, view, service) != purpose:
+    current_review = native.has_global_permission(request, "admin")
+    current = native._binding(request, Response(), administrator=current_review)
+    if (current_review != can_review or current != (tenant, actor, context)
+            or native.call_native(_purpose, *current, view, service, current_review) != purpose):
         raise HTTPException(409, _STALE)
     return {"schema": "lightwork.knowledge-rights-requests.v1", "context": context,
-            "items": page["items"], "count": len(page["items"]), "can_review": True,
+            "items": page["items"], "count": len(page["items"]), "can_review": can_review,
             "archived": view == "archive", "ready_to_archive": view == "ready",
             "capacity": capacity, "next_cursor": _token(page["next_cursor"], purpose),
-            "complete": page["complete"], "scanned": page["scanned"], "view": view,
-            "notice": "Batches follow the retained record order. Start over to include new requests before this batch. Source restrictions and legal holds are checked again when each batch opens."}
+            "complete": page["complete"], "scanned": page["scanned"] if can_review else len(page["items"]), "view": view,
+            "notice": "Batches follow the retained record order. Start over to include new requests before this batch. " +
+                      ("Source restrictions and legal holds are checked again when each batch opens." if can_review else
+                       "Only your own submissions and status are shown. Other employees' requests and administrative evidence are withheld.")}

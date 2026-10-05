@@ -306,8 +306,8 @@ def entries():
     return (
         Adapter("templates.accounts", "Review a workflow account selection", "connections", "/templates", ("/templates", "/workflow-builder", "/connections"), TemplateAccountInput, account_snapshot, account_prepare),
         Adapter("connections.review", "Review connection diagnostics", "connections", "/connections", ("/connections", "/automations"), ConnectionInput, connection_snapshot, connection_prepare, connection_execute, aliases=("check my connection",)),
-        Adapter("schedules.change", "Change future schedule runs", "schedules", "/automations", ("/automations",), ScheduleInput, schedule_snapshot, schedule_prepare, schedule_execute, schedule_recover, aliases=("pause my schedule",)),
+        Adapter("schedules.change", "Change future schedule runs", "schedules", "/automations", ("/automations",), ScheduleInput, schedule_snapshot, schedule_prepare, schedule_execute, schedule_recover, aliases=("pause my schedule",), read_recovery=schedule_recover),
         Adapter("schedules.recovery", "Review parked schedule recovery", "schedules", "/automations", ("/automations",), RecoveryInput, recovery_snapshot, recovery_prepare),
-        Adapter("schedules.repair", "Repair reviewed future recurrence", "schedules", "/automations", ("/automations",), RepairInput, repair_snapshot, repair_prepare, repair_execute, repair_recover),
+        Adapter("schedules.repair", "Repair reviewed future recurrence", "schedules", "/automations", ("/automations",), RepairInput, repair_snapshot, repair_prepare, repair_execute, repair_recover, read_recovery=repair_recover),
         Adapter("schedules.repair_receipt", "Check this original schedule repair", "schedules", "/automations", ("/automations",), EmptyInput, receipt_snapshot, receipt_prepare),
     )

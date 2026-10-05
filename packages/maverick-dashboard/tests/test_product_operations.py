@@ -38,7 +38,8 @@ def registry(monkeypatch):
     def recover(request, selection, args, native, operation):
         return ops.Outcome("replayed", "already saved") if state["receipt"] == operation else None
     adapter = ops.Adapter("preferences.example", "Example", "preferences", "/preferences", ("/preferences",), Value,
-                          snapshot, lambda req, sel, args: ops.Preview("Review", [{"before": "old", "after": args["value"]}]), execute, recover)
+                          snapshot, lambda req, sel, args: ops.Preview("Review", [{"before": "old", "after": args["value"]}]), execute, recover,
+                          read_recovery=recover)
     state["adapter"] = adapter
     monkeypatch.setattr(ops, "adapters", lambda: {adapter.id: state["adapter"]})
     app = FastAPI()
@@ -65,6 +66,25 @@ def test_review_does_not_execute_and_native_receipt_recovers_exact_retry(registr
     completed = client.post(BASE + "/execute", json=payload).json()
     assert completed["status"] == "confirmed" and completed["message"] == "saved"
     assert client.post(BASE + "/execute", json=payload).json()["status"] == "replayed"
+    assert state["calls"] == 1
+
+
+def test_original_outcome_read_never_dispatches_even_without_receipt(registry):
+    client, state = registry
+    review = prepare(client, state).json()
+    assert review["recovery_available"] is True
+    reference = {"token": review["token"]}
+    assert client.post(BASE + "/recover", json=reference).json()["status"] == "unconfirmed"
+    assert state["calls"] == 0
+    state["adapter"] = replace(state["adapter"], read_recovery=None)
+    assert client.post(BASE + "/recover", json=reference).json()["status"] == "unconfirmed"
+    assert state["calls"] == 0
+    state["adapter"] = replace(state["adapter"], read_recovery=state["adapter"].recover)
+    client.post(BASE + "/execute", json={**reference, "confirmed": True})
+    assert client.post(BASE + "/recover", json=reference).json()["status"] == "replayed"
+    assert state["calls"] == 1
+    state["allowed"] = False
+    assert client.post(BASE + "/recover", json=reference).status_code == 403
     assert state["calls"] == 1
 
 

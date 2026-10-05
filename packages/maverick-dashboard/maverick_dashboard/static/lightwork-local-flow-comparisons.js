@@ -27,8 +27,17 @@
     } catch(failure) {if(failure.name==='AbortError'||failure instanceof TypeError||failure instanceof SyntaxError)throw new Error('The reply could not be confirmed. Check the original retained comparison before starting any new work.');throw failure;}
     finally {clearTimeout(deadline);requests.delete(controller);controller.abort();}
   }
-  function clear() {selected.length=0;cases.replaceChildren();form.elements.case_use.checked=false;result.hidden=true;result.replaceChildren();error.textContent='';}
+  function clear() {selected.length=0;cases.replaceChildren();form.elements.case_use.checked=false;document.getElementById('flow-comparison-included').replaceChildren();result.hidden=true;result.replaceChildren();error.textContent='';}
   function values(parent,data) {Object.entries(data||{}).forEach(([key,value])=>{if(value&&typeof value==='object'){node('strong',key.replace(/_/g,' '),parent);values(parent,value);}else node('p',key.replace(/_/g,' ')+': '+(value===true?'Yes':value===false?'No':value),parent);});}
+  function versions(parent, included) {
+    parent.replaceChildren();
+    ['published','proposed'].forEach(arm=>{
+      const workflows=included?.[arm]||[], block=node('div',undefined,parent);
+      node('strong',arm==='published'?'Included in the published rules':'Included in the proposed rules',block);
+      if(!workflows.length)node('p','No other workflows are included.',block);
+      else workflows.forEach(workflow=>node('p',workflow.name+' · saved version '+workflow.version,block));
+    });
+  }
   function render(record) {
     if(record.id===pending)unconfirmed=!['done','unavailable'].includes(record.state);
     result.hidden=false;result.replaceChildren();
@@ -38,6 +47,7 @@
     node('p',summary.baseline_matches+' of '+summary.cases+' published-rule answers and '+summary.candidate_matches+' of '+summary.cases+' proposed-rule answers match your frozen expectations.',result);
     node('p','Local replay time: published rules '+summary.baseline_elapsed_ms+' ms; proposed rules '+summary.candidate_elapsed_ms+' ms. '+summary.scope,result);
     node('p','Recorded '+date(summary.when)+'.',result);
+    versions(node('div',undefined,result),record.included_workflows);
     record.cases.forEach((item,index)=>{
       const card=node('details',undefined,result);card.className='panel';node('summary','Real case '+(index+1)+' · originally run '+date(item.when),card);
       node('p','Frozen expected answer: '+item.expected,card);values(card,item.inputs);
@@ -50,16 +60,18 @@
     if(busy)return;lock(true);const current=++generation, chosen=flow.value||new URLSearchParams(location.search).get('workflow')||'';clear();
     try {
       if(!chosen) {const listing=await request('');flow.replaceChildren(new Option('Choose a saved workflow',''));listing.flows.forEach(row=>flow.appendChild(new Option(row.name,row.id)));status.textContent='Choose a changed saved rule-only workflow with an exact published baseline.';state=null;return;}
-      const checked=await request('?flow_id='+encodeURIComponent(chosen));if(current!==generation)return;state=checked;
+      const retained=await request('/history?flow_id='+encodeURIComponent(chosen));if(current!==generation)return;
+      history.replaceChildren(new Option('Choose a retained comparison',''));retained.comparisons.forEach(row=>history.appendChild(new Option(date(row.when)+' · '+({done:'Completed',running:'Result not yet recorded',prepared:'Authorized',unavailable:'Complete result unavailable'}[row.state]||'Check original result'),row.id)));
+      if(pending&&!Array.from(history.options).some(item=>item.value===pending))history.appendChild(new Option('Original request · check saved result',pending));
+      const checked=await request('?flow_id='+encodeURIComponent(chosen));if(current!==generation)return;if(checked.context!==retained.context)throw new Error('Your account or workspace changed. Refresh before reviewing original work.');state=checked;
       if(!Array.from(flow.options).some(item=>item.value===chosen))flow.appendChild(new Option(checked.name,chosen));flow.value=chosen;
       document.getElementById('flow-comparison-version').textContent=checked.name+' · published version '+checked.baseline_version+' · proposed saved version '+checked.version;
+      versions(document.getElementById('flow-comparison-included'),checked.included_workflows);
       output.replaceChildren(new Option('Choose a final result',''));checked.outputs.forEach(row=>output.appendChild(new Option(row.label,row.value)));
-      history.replaceChildren(new Option('Choose a retained comparison',''));checked.comparisons.forEach(row=>history.appendChild(new Option(date(row.when)+' · '+({done:'Completed',running:'Result not yet recorded',prepared:'Authorized',unavailable:'Complete result unavailable'}[row.state]||'Check original result'),row.id)));
-      if(pending&&!Array.from(history.options).some(item=>item.value===pending))history.appendChild(new Option('Original request · check saved result',pending));
       status.textContent=checked.scope+' '+checked.cases.length+' real retained runs are available for selection.';
       if(!checked.can_compare)status.textContent+=' This draft is already published. Its retained comparisons remain available; save a changed draft before starting another comparison.';
       if(unconfirmed)status.textContent+=' Check the original comparison result before starting another.';
-    }catch(failure){state=null;error.textContent=failure.message;}finally{if(current===generation)lock(false);}
+    }catch(failure){state=null;error.textContent=failure.message;status.textContent='Current saved versions could not be verified. Retained comparisons can still be selected; results require their original sources to remain available.';}finally{if(current===generation)lock(false);}
   }
   function addCase() {
     if(busy||!state||!output.value||selected.length>=5){error.textContent='Choose a final result first, then select up to five real cases.';return;}
@@ -83,9 +95,9 @@
     if(!selected.length||selected.some(item=>!item.source)){error.textContent='Choose and review at least one original real case.';return;}
     const current=generation;lock(true);error.textContent='';
     try {
-      const confirmed=window.mvConfirm?await window.mvConfirm('Freeze these original values and expected answers, and authorize their reuse for this exact local comparison and independent release review? Both saved rule versions run locally. No AI or connected action starts.',{okText:'Compare saved rules'}):window.confirm('Freeze the cases and compare saved rules locally?');if(!confirmed)return;
+      const confirmed=window.mvConfirm?await window.mvConfirm('Freeze these original values and expected answers, and authorize their reuse for this exact local comparison and independent release review? Each version uses the included workflows shown here. No AI or connected action starts.',{okText:'Compare saved rules'}):window.confirm('Freeze the cases and compare saved rules locally?');if(!confirmed||current!==generation||!state)return;
       const operation=crypto.randomUUID().replace(/-/g,'');pending='FCP-'+operation;unconfirmed=true;
-      const body={context:state.context,confirm:true,authorize_case_use:form.elements.case_use.checked,operation,flow_id:state.flow_id,version:state.version,revision:state.revision,baseline_release:state.baseline_release,output:output.value,cases:selected.map(item=>({run_id:item.source.run_id,source_version:item.source.version,expected:item.kind==='boolean'?item.expected.value==='true':item.expected.value}))};
+      const body={context:state.context,confirm:true,authorize_case_use:form.elements.case_use.checked,operation,flow_id:state.flow_id,version:state.version,revision:state.revision,baseline_release:state.baseline_release,bundle:state.bundle,output:output.value,cases:selected.map(item=>({run_id:item.source.run_id,source_version:item.source.version,expected:item.kind==='boolean'?item.expected.value==='true':item.expected.value}))};
       const recorded=await request('',body);if(current!==generation)return;render(recorded);history.appendChild(new Option(date(recorded.summary.when)+' · original request',recorded.id));history.value=recorded.id;status.textContent='The original comparison result was read from native records. No publication changed.';
     }catch(failure){if(current===generation){error.textContent=failure.message;if(pending){history.appendChild(new Option('Original request · check saved result',pending));history.value=pending;}}}finally{if(current===generation)lock(false);}
   });

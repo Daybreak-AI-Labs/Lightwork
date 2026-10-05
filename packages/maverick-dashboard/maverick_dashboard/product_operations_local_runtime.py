@@ -63,5 +63,5 @@ def entries():
         result.append(Adapter("local_ai." + action, label, input_model=ConfigurationInput if action == "configure" else EmptyInput,
             snapshot=lambda request, selection, action=action: snapshot(request, selection, action=action),
             prepare=lambda request, selection, arguments, action=action: prepare(request, selection, arguments, action=action),
-            execute=execute, recover=recover, **shared))
+            execute=execute, recover=recover, read_recovery=recover, **shared))
     return result

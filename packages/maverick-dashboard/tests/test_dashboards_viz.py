@@ -100,7 +100,7 @@ def test_department_scoped_user_cannot_read_unfiltered_company_boards(monkeypatc
 
     monkeypatch.setattr(auth, "caller_suites", lambda request: frozenset({"finance"}))
     client = _client()
-    for board in ("overview", "spend"):
+    for board in ("overview", "spend", "workforce", "savings", "oversight"):
         api = client.get(f"/api/v1/dashboards/{board}")
         page = client.get(f"/{board}", headers={"Accept": "text/html"})
         assert api.status_code == 200, board
@@ -111,14 +111,6 @@ def test_department_scoped_user_cannot_read_unfiltered_company_boards(monkeypatc
         assert "not company totals" in page.text
     assert client.get("/api/v1/dashboards/overview").json()["totals"]["total"] == 0
     assert client.get("/api/v1/spend").json()["total"]["runs"] == 0
-    for board in ("workforce", "savings", "oversight"):
-        api = client.get(f"/api/v1/dashboards/{board}")
-        page = client.get(f"/{board}", headers={"Accept": "text/html"})
-        assert api.status_code == 403, board
-        assert page.status_code == 403, board
-        assert "Vendor DPA review" not in page.text
-        assert "departments you cannot access" in page.text
-
     # Department-specific boards retain their existing permission checks.
     assert client.get("/api/v1/dashboards/finance").status_code == 200
     monkeypatch.setattr(auth, "caller_suites", lambda request: None)

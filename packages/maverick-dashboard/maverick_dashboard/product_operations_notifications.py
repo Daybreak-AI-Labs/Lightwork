@@ -80,7 +80,9 @@ def _check(request, prepared):
 
 def _outcome(record, *, replay=False):
     state = record["state"]
-    status = "replayed" if replay else "confirmed" if state == "delivered" else "queued" if state in {"queued", "sending"} else "unconfirmed"
+    status = ("queued" if state in {"queued", "sending"} else
+              "replayed" if replay and state in {"delivered", "failed"} else
+              "confirmed" if state in {"delivered", "failed"} else "unconfirmed")
     return Outcome(status=status, message=record["message"], details={"receipt": record, "seen": "unknown"})
 
 

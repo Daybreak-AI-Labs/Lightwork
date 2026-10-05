@@ -112,6 +112,9 @@
                 if (opened && active(started)) {
                   var close = document.getElementById('mv-copilot-close');
                   if (close) close.click();
+                  document.dispatchEvent(new CustomEvent('lightwork:copilot-selection', {
+                    detail: {selection: {kind: 'knowledge_request_batch', view: page.view, cursor: page.cursor}}
+                  }));
                   var heading = document.getElementById('ka-requests-heading');
                   if (heading) heading.focus({preventScroll: true});
                 }
@@ -393,12 +396,35 @@
     } finally { lock(false); }
   }
   function renderConfirmation(item, review, started) {
+    function originalOutcomeButton() {
+      if (review.recovery_available !== true || Date.now() >= review.expires_at * 1000) return;
+      button('Check original outcome', formHost, async function () {
+        if (busy || !active(started)) return;
+        lock(true);
+        try {
+          var original = await request('/recover', {token: review.token});
+          if (!active(started)) return;
+          if (original.operation !== item.id || !['confirmed', 'replayed', 'queued', 'unconfirmed'].includes(original.status))
+            throw new Error('The original result could not be verified. Open the full controls.');
+          clear(formHost); node('h3', item.label, formHost); node('p', original.message, formHost);
+          if (original.details) renderData(formHost, original.details);
+          uncertainty = ['confirmed', 'replayed'].includes(original.status) ? '' :
+            'The original outcome is still unconfirmed. No action was repeated.';
+          status.textContent = uncertainty || 'The original saved outcome was checked. No action was repeated.';
+          nativeLink(item, formHost);
+          if (uncertainty) originalOutcomeButton();
+          else button('Refresh current controls', formHost, function () { refresh({keepResult: true}); });
+        } catch (error) { if (active(started)) status.textContent = error.message; }
+        finally { lock(false); }
+      });
+    }
     var line = node('label', undefined, formHost), consent = node('input', undefined, line); consent.type = 'checkbox';
     line.appendChild(document.createTextNode(' I reviewed these exact changes and want to apply them.'));
     var apply = button('Apply reviewed change', formHost, async function () {
       if (busy || !consent.checked) { status.textContent = 'Review the changes and select the confirmation box first.'; return; }
       if (Date.now() >= review.expires_at * 1000) { status.textContent = 'This review expired. Refresh controls and review again.'; return; }
       lock(true); uncertainty = 'A submitted action needs a status check before another attempt.';
+      var submitted = false;
       try {
         if (item.id === 'schedules.repair') {
           var recovery = window.LightworkScheduleRecovery;
@@ -410,6 +436,7 @@
           catch (error) { uncertainty = 'Nothing was submitted. The recovery reference could not be saved.'; throw error; }
           if (!active(started)) return;
         }
+        submitted = true;
         var result = await request('/execute', {token: review.token, confirmed: true});
         if (!active(started)) return;
         clear(formHost); node('h3', item.label, formHost); node('p', result.message, formHost);
@@ -440,13 +467,17 @@
           });
         }
         nativeLink(item, formHost); status.textContent = uncertainty || 'The server confirmed the result.';
+        if (uncertainty) originalOutcomeButton();
         document.dispatchEvent(new CustomEvent('lightwork:product-operation-complete', {detail: {operation: result.operation, status: result.status}}));
         if (result.status === 'confirmed' || result.status === 'replayed') {
           button('Refresh current controls', formHost, function () { refresh({keepResult: true}); });
           await refresh({keepResult: true});
         }
       } catch (error) {
-        if (active(started)) { clear(formHost); node('p', error.message, formHost); nativeLink(item, formHost); status.textContent = uncertainty; }
+        if (active(started)) {
+          clear(formHost); node('p', error.message, formHost); nativeLink(item, formHost); status.textContent = uncertainty;
+          if (submitted) originalOutcomeButton();
+        }
       } finally { lock(false); }
     });
     apply.className = 'btn btn--primary';

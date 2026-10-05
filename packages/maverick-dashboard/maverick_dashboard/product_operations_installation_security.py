@@ -104,7 +104,8 @@ def entries():
     for kind, model, label in (("choice", ChoiceInput, "Change an installation protection choice"), ("limit", LimitInput, "Change a protected work area limit"),
                                ("text", TextInput, "Change a sign-in or work area detail"), ("recover", RecoverInput, "Review an interrupted installation-policy attempt")):
         result.append(Adapter("installation.security." + kind, label, "connections", service.PAGE, pages, model,
-            partial(snapshot, kind=kind), partial(preview, kind=kind), partial(execute, kind=kind), partial(recover, kind=kind)))
+            partial(snapshot, kind=kind), partial(preview, kind=kind), partial(execute, kind=kind), partial(recover, kind=kind),
+            read_recovery=partial(recover, kind=kind) if kind != "recover" else None))
     for kind, label in (("work-area", "Check the work area connection"), ("company-signin", "Check the company sign-in connection"), ("single-signon", "Check the single sign-on connection")):
         result.append(Adapter("installation.security.check." + kind, label, "connections", service.PAGE, pages,
                               EmptyInput, snapshot, partial(check_preview, kind=kind)))

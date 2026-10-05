@@ -49,8 +49,15 @@ def records():
     return GovernedRecordStore("local-flow-comparisons", "FCP", "local_flow_comparison", required_backend="local")
 
 
-def _domain(flow):
-    release._pure(flow)
+def _domain(flow, *, retained_manifest=None, require_current_versions=True):
+    bundle = release.qualified_bundle(flow, retained_manifest=retained_manifest,
+                                      require_current_versions=require_current_versions)
+    for included in bundle["flows"]:
+        _definition_domain(included)
+    return bundle
+
+
+def _definition_domain(flow):
     visiting, visited = set(), set()
 
     def visit(identity):
@@ -67,7 +74,9 @@ def _domain(flow):
             raise CandidatePromotionDenied("This comparison supports short routes that compare ordinary values directly. Transform functions, time calculations and secret lookups are outside its bounded scope.")
         if len(node.assignments) > 16:
             raise CandidatePromotionDenied("Use at most sixteen ordinary value assignments per step for this bounded comparison.")
-        for value in node.assignments.values():
+        if len(node.subflow_inputs or {}) > 16:
+            raise CandidatePromotionDenied("Use at most sixteen directly named values for an included workflow.")
+        for value in [*node.assignments.values(), *(node.subflow_inputs or {}).values()]:
             if (type(value) not in (str, int, bool) or type(value) is int and abs(value) > 10**12
                     or type(value) is str and (len(value) > 1024 or "{{" in value
                     and not re.fullmatch(r"\{\{\s*[A-Za-z][A-Za-z0-9_]*\s*\}\}", value))):
@@ -97,7 +106,7 @@ def _current(request, flow_id, *, changed=True):
     if published is None or published[0].owner != owner or published[0].revision != candidate.revision:
         raise HTTPException(409, "Publish a compatible rule-only baseline first, then save the changed draft.")
     baseline, publication = published
-    _domain(baseline)
+    _domain(baseline, retained_manifest=publication.get("subflow_digests", {}), require_current_versions=False)
     _require_learned_flow_evidence(baseline)
     root, bundle, _size = release._bundle(candidate)
     if changed and bundle == publication["release_digest"]:
@@ -140,12 +149,14 @@ def _input(data):
     return copy.deepcopy(data)
 
 
-def _source(owner, flow, publication, run_id, output):
+def _source(owner, flow, publication, run_id, output, *, receipt_version=2):
     run = store.load_run(run_id, owner=owner)
     if (run is None or run.flow_id != flow.id or run.owner != owner or run.dry_run
             or run.status not in {runner.STATUS_COMPLETED, runner.STATUS_FAILED}
             or run.definition_revision != flow.revision or run.definition_digest != publication["definition_digest"]
-            or run.release_id != publication["release_id"] or run.subflow_digests):
+            or run.release_id != publication["release_id"]
+            or run.subflow_digests != publication.get("subflow_digests", {})
+            or run.release_digest != publication["release_digest"]):
         raise CandidatePromotionDenied("Choose a real finished run of this exact published baseline that still belongs to your account.")
     try:
         inputs = _input(run.input_data)
@@ -156,10 +167,38 @@ def _source(owner, flow, publication, run_id, output):
     value = run.data.get(output)
     if type(value) not in (str, int, bool) or type(value) is str and len(value) > 1024:
         value = None
-    commitment = release._sha([run.run_id, run.owner, run.created, run.updated, run.status, inputs,
-                               value, run.nodes, run.definition_digest, run.definition_revision, run.release_id])
+    material = [run.run_id, run.owner, run.created, run.updated, run.status, inputs,
+                value, run.nodes, run.definition_digest, run.definition_revision, run.release_id]
+    if receipt_version >= 2:
+        material.extend([run.subflow_digests, run.release_digest, run.definition_version,
+                         run.cost_dollars, run.origin, run.execution_channel, run.execution_user_id, run.allowed_suites])
+    commitment = release._sha(material)
     return {"run_id": run_id, "version": commitment, "inputs": inputs, "original_result": value,
-            "created": run.created, "original_status": run.status}
+            "created": run.created, "original_status": run.status, "receipt_version": receipt_version}
+
+
+def _included(bundle):
+    return [{"name": flow.name, "version": flow.version} for flow in bundle["flows"][1:]]
+
+
+def _reviewed_versions(candidate, baseline, publication, candidate_manifest=None):
+    left = _domain(baseline, retained_manifest=publication.get("subflow_digests", {}), require_current_versions=False)
+    right = _domain(candidate, retained_manifest=candidate_manifest,
+                    require_current_versions=candidate_manifest is None)
+    return {"published": _included(left), "proposed": _included(right)}
+
+
+def history(request, flow_id):
+    tenant, owner, context = _binding(request, Response())
+    if re.fullmatch(_ID, flow_id) is None:
+        raise ValueError("Choose a saved workflow to check its retained comparisons.")
+    # A removed draft/source can invalidate results without hiding the original
+    # request's existence. Full results still pass every current source guard.
+    rows = records().list(limit=1000)
+    retained = [{"id": row["id"], "when": row["created_at"], "state": row["state"]}
+                for row in rows if row.get("tenant") == tenant and row.get("owner") == owner
+                and row.get("flow_id") == flow_id]
+    return {"context": context, "comparisons": retained[-50:]}
 
 
 def options(request, flow_id):
@@ -177,9 +216,10 @@ def options(request, flow_id):
             "can_compare": bundle != publication["release_digest"],
             "revision": candidate.revision, "root": root, "bundle": bundle,
             "baseline_version": baseline.version, "baseline_release": publication["release_id"],
+            "included_workflows": _reviewed_versions(candidate, baseline, publication),
             "outputs": [{"value": name, "label": item["label"] + " · final result", "kind": item["kind"]} for name, item in outputs.items()],
             "cases": cases, "comparisons": comparisons[-50:],
-            "scope": "Up to five selected known cases from the latest 200 retained runs. Both complete saved rule versions run locally; agreement with your expected answers is not held-out accuracy or business lift."}
+            "scope": "Up to five selected known cases from the latest 200 retained runs. Each complete rule version uses its own saved included workflows. Agreement with your expected answers is not untouched test performance, general accuracy or business value."}
 
 
 class Case(BaseModel):
@@ -199,6 +239,7 @@ class Start(BaseModel):
     version: int = Field(ge=1)
     revision: str = Field(min_length=1, max_length=128)
     baseline_release: str = Field(pattern=r"^[a-f0-9]{64}$")
+    bundle: str = Field(pattern=r"^[a-f0-9]{64}$")
     output: str = Field(pattern=r"^[A-Za-z][A-Za-z0-9_]{0,63}$")
     cases: list[Case] = Field(min_length=1, max_length=5)
 
@@ -206,7 +247,8 @@ class Start(BaseModel):
 def _freeze(request, body):
     tenant, owner, context, candidate, baseline, publication, root, bundle = _current(request, body.flow_id)
     if (body.authorize_case_use is not True or body.version != candidate.version or body.revision != candidate.revision
-            or body.baseline_release != publication["release_id"] or body.output not in _outputs(candidate, baseline)):
+            or body.baseline_release != publication["release_id"] or body.bundle != bundle
+            or body.output not in _outputs(candidate, baseline)):
         raise CandidatePromotionConflict("The selected versions or case-use authorization changed. Refresh and review the original cases again.")
     output = _outputs(candidate, baseline)[body.output]
     cases = []
@@ -224,9 +266,13 @@ def _freeze(request, body):
         except ValueError as exc:
             raise CandidatePromotionConflict("The expected answer does not match this result's accepted answer type or size. Review the answer in the native form.") from exc
         cases.append({**source, "expected": expected})
+    qualified = _domain(candidate)
+    if qualified["root"] != root or qualified["bundle_sha"] != bundle:
+        raise CandidatePromotionConflict("An included workflow changed during case review. Refresh and review the saved versions again.")
     material = {"tenant": tenant, "owner": owner, "context": context, "flow_id": candidate.id,
                 "version": candidate.version, "flow_revision": candidate.revision, "root": root, "bundle_sha": bundle,
-                "baseline": publication, "output": body.output, "step": output,
+                "baseline": publication, "candidate_manifest": qualified["manifest"],
+                "output": body.output, "step": output,
                 "cases": cases, "protocol": PROTOCOL, "case_use": "owner_authorized_evaluation_and_exact_release_review"}
     return {"id": "FCP-" + body.operation, **material, "binding": release._sha(material), "state": "prepared", "results": []}
 
@@ -239,23 +285,53 @@ def _check(row):
     baseline = store.load_flow_snapshot(row["baseline"]["definition_digest"])
     if baseline is None or baseline.owner != row["owner"] or baseline.revision != row["flow_revision"]:
         raise CandidatePromotionDenied("The retained baseline is unavailable to its original owner.")
+    frozen_candidate = store.load_flow_snapshot(row["root"])
+    if frozen_candidate is None or frozen_candidate.owner != row["owner"] or frozen_candidate.revision != row["flow_revision"]:
+        raise CandidatePromotionDenied("The retained proposed rules are unavailable to their original owner.")
+    for flow, manifest, root, digest in (
+            (baseline, row["baseline"].get("subflow_digests", {}), row["baseline"]["definition_digest"], row["baseline"]["release_digest"]),
+            (frozen_candidate, row.get("candidate_manifest", {}), row["root"], row["bundle_sha"])):
+        bundle = _domain(flow, retained_manifest=manifest, require_current_versions=False)
+        if bundle["root"] != root or bundle["bundle_sha"] != digest:
+            raise CandidatePromotionConflict("An original saved rule version cannot be verified. This comparison cannot support release review.")
     for case in row["cases"]:
-        source = _source(row["owner"], baseline, row["baseline"], case["run_id"], row["output"])
+        source = _source(row["owner"], baseline, row["baseline"], case["run_id"], row["output"], receipt_version=case.get("receipt_version", 1))
         if source["version"] != case["version"]:
             raise CandidatePromotionConflict("An original case changed. This comparison cannot support a new release decision.")
     if row["state"] == "done":
         for pair in row["results"]:
             for arm in pair.values():
                 recorded = store.load_run(arm["run_id"], owner=row["owner"])
-                if recorded is None or _run_receipt(recorded) != arm["receipt"]:
+                if recorded is None or _run_receipt(recorded, version=arm.get("receipt_version", 1)) != arm["receipt"]:
                     raise CandidatePromotionConflict("A recorded comparison replay changed or is unavailable. It cannot support a new release decision.")
     return candidate, baseline
 
 
-def _run_receipt(run):
-    return release._sha([run.run_id, run.owner, run.flow_id, run.created, run.updated, run.status,
+def _run_receipt(run, *, version=2):
+    material = [run.run_id, run.owner, run.flow_id, run.created, run.updated, run.status,
                          run.dry_run, run.input_data, run.data, run.nodes, run.definition_digest,
-                         run.definition_version, run.definition_revision, run.release_digest, run.release_id])
+                         run.definition_version, run.definition_revision, run.release_digest, run.release_id]
+    if version >= 2:
+        material.extend([run.subflow_digests, run.cost_dollars, run.origin,
+                         run.execution_channel, run.execution_user_id, run.allowed_suites])
+    return release._sha(material)
+
+
+def _replay(row, flow, root, manifest, case, identifier, refuse, execution_guard):
+    # A new run without a pinned reservation captures today's child drafts.
+    # Reserve this arm's exact immutable graph before native dispatch instead.
+    digest = store.release_digest_for(root, manifest)
+    with store.run_lock(identifier):
+        if store.load_run(identifier) is not None:
+            raise CandidatePromotionConflict("An original replay already exists. Check its retained comparison instead of starting it again.")
+        store.save_run(store.FlowRun(run_id=identifier, flow_id=flow.id, status="queued", owner=row["owner"],
+            data=copy.deepcopy(case["inputs"]), input_data=copy.deepcopy(case["inputs"]), dry_run=True,
+            definition_digest=root, definition_version=flow.version, definition_revision=flow.revision,
+            subflow_digests=dict(manifest), release_digest=digest, release_id=digest,
+            origin="known-case-rule-comparison"))
+        return execution.execute(flow, owner=row["owner"], data=case["inputs"], run_id=identifier,
+            agent_runner=refuse, action_runner=refuse, record_outcomes=False, agent_budget_dollars=0,
+            origin="known-case-rule-comparison", execution_guard=execution_guard)
 
 
 def summary(row):
@@ -294,12 +370,9 @@ def run(request, body):
     budget = Budget(max_wall_seconds=10, max_dollars=0, max_tool_calls=0)
     def refuse(*_args):
         raise ValueError("This comparison never calls AI or a connected action.")
-    def execution_guard():
-        budget.check()
-        release._owner_authority(row["tenant"], row["owner"])
     try:
         admission = _current(request, row["flow_id"])
-        if admission[5] != row["baseline"] or admission[6] != row["root"]:
+        if admission[5] != row["baseline"] or admission[6] != row["root"] or admission[7] != row["bundle_sha"]:
             raise CandidatePromotionConflict("The saved or published version changed before the comparison started.")
         _check(row)
         candidate = store.load_flow_snapshot(row["root"])
@@ -312,23 +385,35 @@ def run(request, body):
                 budget.check()
                 started = time.perf_counter()
                 flow = baseline if arm == "baseline" else candidate
-                native = execution.execute(flow, owner=row["owner"], data=case["inputs"],
-                    run_id=row["id"] + "-" + arm[0] + str(index + 1), agent_runner=refuse, action_runner=refuse,
-                    record_outcomes=False, agent_budget_dollars=0,
-                    origin="known-case-rule-comparison", execution_guard=execution_guard)
+                manifest = row["baseline"].get("subflow_digests", {}) if arm == "baseline" else row.get("candidate_manifest", {})
+                root = row["baseline"]["definition_digest"] if arm == "baseline" else row["root"]
+                admissions = [0]
+
+                def execution_guard(flow=flow, manifest=manifest, admissions=admissions):
+                    budget.check()
+                    admissions[0] += 1
+                    if admissions[0] > 512:
+                        raise CandidatePromotionDenied("This comparison exceeded its local step allowance. Simplify repeated included-workflow calls before trying new work.")
+                    _domain(flow, retained_manifest=manifest, require_current_versions=False)
+                    budget.check()
+
+                native = _replay(row, flow, root, manifest, case,
+                    row["id"] + "-" + arm[0] + str(index + 1), refuse, execution_guard)
                 budget.check()
                 value = native.data.get(row["output"])
-                node = row["step"]["baseline_node"] if arm == "baseline" else row["step"]["node"]
-                produced = native.status == runner.STATUS_COMPLETED and native.nodes.get(node, {}).get("status") == "done"
+                # The native trace uses bare node names across child flows.
+                # Count a completed whole-workflow output, never infer an
+                # individual step's identity from a colliding trace key.
+                produced = native.status == runner.STATUS_COMPLETED and row["output"] in native.data
                 pair[arm] = {"run_id": native.run_id, "status": native.status,
                              "result": value if type(value) in (str, int, bool) else None,
                              "matches": produced and type(value) is type(case["expected"]) and value == case["expected"],
                              "elapsed_ms": (time.perf_counter() - started) * 1000,
-                             "definition": native.definition_digest, "receipt": _run_receipt(native)}
+                             "definition": native.definition_digest, "receipt": _run_receipt(native), "receipt_version": 2}
             results.append(pair)
         _check(row)
         current = store.load_flow(row["flow_id"])
-        if release._bundle(current)[0] != row["root"]:
+        if release._bundle(current)[1] != row["bundle_sha"]:
             raise CandidatePromotionConflict("The draft changed while its comparison ran. Saved answers cannot authorize a different version.")
         row = service.update(row["id"], lambda value: value.update(state="done", results=results, finished_at=time.time()),
                              expected_revision=row["revision"], action="flow.comparison.complete", actor=row["owner"])
@@ -357,10 +442,17 @@ def view(request, identifier):
                 arm["result"] = scalar(arm["result"])
                 arm.pop("definition", None)
                 arm.pop("receipt", None)
+                arm.pop("receipt_version", None)
         cases.append({"when": case["created"], "original_result": scalar(case["original_result"]),
                       "expected": scalar(case["expected"]), "inputs": case["inputs"], "results": pair})
+    try:
+        current = release._bundle(_candidate)[1] == row["bundle_sha"]
+    except CandidatePromotionDenied:
+        current = False
+    frozen_candidate = store.load_flow_snapshot(row["root"])
+    included = _reviewed_versions(frozen_candidate, _baseline, row["baseline"], row.get("candidate_manifest", {}))
     return {"id": row["id"], "state": row["state"], "name": _candidate.name, "flow_id": row["flow_id"],
-            "version": row["version"], "current": release._bundle(_candidate)[0] == row["root"],
+            "version": row["version"], "current": current, "included_workflows": included,
             "summary": summary(row), "cases": cases,
             "detail": "Completed local comparison." if row["state"] == "done" else "The original request is retained without complete results. No work was repeated."}
 
@@ -394,6 +486,11 @@ def case_detail(request: Request, flow_id: str, run_id: str, output: str):
         source["original_result"] = "Yes" if value is True else "No" if value is False else str(value) if value is not None else "No result recorded"
         return source
     return release._native_call(read)
+
+
+@router.get(API + "/history")
+def retained_history(request: Request, flow_id: str):
+    return release._native_call(lambda: history(request, flow_id))
 
 
 @router.post(API)

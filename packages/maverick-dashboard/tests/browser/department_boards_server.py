@@ -57,6 +57,29 @@ def main():
             running = world.create_goal("Follow up with our supplier", domain=allowed, owner=owner)
             world.start_episode(running)
             world.set_goal_status(running, "active")
+            from maverick.logging_config import reset_goal_context, set_goal_context
+            for identifier, label in ((allowed_goal, "Review the supplier commitment"),
+                                      (refused_goal, "Private finance payment approval"),
+                                      (foreign_goal, "Other employee confidential approval")):
+                tokens = set_goal_context(goal_id=identifier)
+                try:
+                    world.create_approval("send", detail=label, requested_by=world.get_goal(identifier).owner)
+                finally:
+                    reset_goal_context(tokens)
+
+        @app.post("/__browser_fixture/department-boards/stops", include_in_schema=False)
+        def seed_stops(request: Request):
+            auth.require_global_permission(request, "admin")
+            from maverick.goal_stop import stop
+            for title, domain, who in (("Stop my supplier follow-up", allowed, owner),
+                                       ("Private stopped finance work", refused, owner),
+                                       ("Other employee stopped confidential work", allowed, "user:browser-outcome-owner")):
+                identifier = world.create_goal(title, domain=domain, owner=who)
+                world.set_goal_status(identifier, "active")
+                goal = world.get_goal(identifier)
+                stop(world, identifier, actor=who, operation_id="browser_board_stop_" + str(identifier),
+                     expected_updated_at=goal.updated_at, expected_owner=who)
+            return {"created": True}
 
         # Deterministic interruption at the native projection/read boundary:
         # the real workspace fork changes inherited department, not a fake ACL.
@@ -87,6 +110,16 @@ def main():
         def change(request: Request):
             auth.require_global_permission(request, "admin")
             set_suites(owner, ["finance"], actor=auth.caller_principal(request))
+            return {"changed": True}
+
+        @app.post("/__browser_fixture/department-boards/role", include_in_schema=False)
+        def role(request: Request, body: dict):
+            auth.require_global_permission(request, "admin")
+            from maverick_dashboard import rbac
+            if body.get("role") not in {"operator", "viewer"}:
+                from fastapi import HTTPException
+                raise HTTPException(422, "Choose a fixture operator or viewer.")
+            rbac.set_tenant_role("browser-workspace", owner, body["role"], actor=auth.caller_principal(request))
             return {"changed": True}
 
         @app.get("/__browser_fixture/department-boards", include_in_schema=False)

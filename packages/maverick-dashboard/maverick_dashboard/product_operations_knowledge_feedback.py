@@ -206,14 +206,19 @@ def browse_snapshot(request, selection):
         choices.append({"value": "next", "label": "Next batch"})
     return Snapshot(digest([page["context"], view, cursor, page["items"], page["complete"]]),
                     "Current retained knowledge requests",
-                    "Read one batch with current source restrictions and legal holds. Only administrators can review shared requests; this read never applies a change.",
+                    ("Read one batch with current source restrictions and legal holds." if page["can_review"] else
+                     "Read your own submissions and status. Other employees' requests and administrative evidence are withheld.") +
+                    " This read never applies a change.",
                     fields=[{"name": "view", "label": "Request view", "kind": "select", "required": True,
-                             "value": view, "choices": [{"value": key, "label": label} for key, label in VIEWS.items()]},
+                             "value": view, "choices": [{"value": key, "label": label} for key, label in VIEWS.items()
+                                                         if page["can_review"] or key != "ready"]},
                             {"name": "page", "label": "Which batch", "kind": "select", "required": True,
                              "value": "current", "choices": choices}])
 
 
 def browse_prepare(request, selection, arguments):
+    from datetime import datetime, timezone
+
     from .knowledge_request_browse import VIEWS, browse
 
     selected_view, cursor = _batch_selection(selection)
@@ -230,9 +235,10 @@ def browse_prepare(request, selection, arguments):
              "status": row["status"].replace("_", " "),
              "source_use": row["source_use_status"].replace("_", " "),
              "retention_review": row["retention_review_status"].replace("_", " "),
-             "legal_hold": (row["retention_hold"]["effective_status"].replace("_", " ")
-                            if row["retention_hold"] else "No hold"),
-             "updated": row["updated_at"]} for row in page["items"]]
+             **({"legal_hold": (row["retention_hold"]["effective_status"].replace("_", " ")
+                                if row["retention_hold"] else "No hold")} if page["can_review"] else {}),
+             "updated": datetime.fromtimestamp(row["updated_at"], timezone.utc).strftime("%b %d, %Y at %H:%M UTC")}
+            for row in page["items"]]
     return Preview("Showing " + VIEWS[view].lower() + ". " +
                    ("This is the last batch currently found. " if page["complete"] else "More records can be checked with Next batch. ") + page["notice"],
                    native={"requests": rows, "knowledge_request_page": {"view": view, "cursor": cursor}})

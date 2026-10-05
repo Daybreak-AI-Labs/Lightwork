@@ -1,11 +1,12 @@
 <details class="research-advanced" id="local-flow-release">
   <summary><strong>Release a taught workflow safely</strong></summary>
   <p>Use learned rules without AI fallback. Start with a published rule-only baseline, change and save the next version, then practice it. A different release administrator must approve the exact version before putting it into use.</p>
-  <p>Practice checks that the version runs. It does not establish accuracy or improvement. This path supports taught rules and simple routing; connected actions and nested workflows need their own release connection.</p>
+  <p>Practice checks that the complete version runs. It does not establish accuracy or improvement. This path supports taught rules, simple routing and up to sixteen included workflows owned by you, with sixty-four total steps. Connected actions and waiting steps need a separate release connection.</p>
   <p id="local-flow-release-status" role="status" aria-live="polite"></p>
   <form id="local-flow-release-form" class="research-form">
     <label>Saved taught workflow<select class="input" name="flow_id" required><option value="">Choose a workflow</option></select></label>
     <p id="local-flow-release-current" class="muted"></p>
+    <ul id="local-flow-release-included" hidden aria-label="Included saved workflows"></ul>
     <a id="local-flow-release-open" class="btn btn--ghost" hidden>Open workflow to edit, publish or practice</a>
     <button type="button" class="btn" id="local-flow-release-rules">Use learned rules only</button>
     <label>Completed practice of this version<select class="input" name="practice_run" required><option value="">Choose a practice run</option></select></label>

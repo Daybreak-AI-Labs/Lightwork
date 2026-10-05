@@ -9492,7 +9492,12 @@ async def get_savings(request: Request, days: int = 90) -> dict:
     require_permission(request, "view")
     from maverick import savings as savings_mod
 
+    from . import department_boards
     from .value_views import value_scope
+
+    department_boards.check_context(request)
+    if department_boards.scoped(request):
+        return department_boards.build(request, "savings", days)
 
     days = max(1, min(int(days), 730))
     resolution = _value_assumptions_resolution()
@@ -15484,6 +15489,13 @@ def oversight_active(request: Request) -> dict:
     fleet work without a full-page reload. Fail-soft per goal: a goal whose
     event tail can't be read still lists with an empty activity.
     """
+    from . import department_boards
+    department_boards.check_context(request)
+    if department_boards.scoped(request):
+        projection = department_boards.build(request, "oversight")
+        return {"goals": projection["active_goals"][:50], "scope": projection["scope"],
+                "scope_notice": projection["scope_notice"], "context": projection["context"]}
+    require_permission(request, "operate")
     w = _world()
     goals = w.list_goals(
         status="active",

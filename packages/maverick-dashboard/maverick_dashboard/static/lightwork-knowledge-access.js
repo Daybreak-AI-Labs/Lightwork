@@ -64,14 +64,14 @@
   nextButton.type = "button";
   nextButton.hidden = true;
   searchNote.after(nextButton);
-  var recoveryMore = canReview ? node("button", "btn", "Next batch") : null;
+  var recoveryMore = node("button", "btn", "Next batch");
   if (recoveryMore) {
     recoveryMore.id = "ka-recovery-more";
     recoveryMore.type = "button";
     recoveryMore.hidden = true;
     requests.after(recoveryMore);
   }
-  if (canReview) refreshRequests.textContent = "Start over";
+  refreshRequests.textContent = "Start over";
 
   // A reply this page could not verify is shown as one plain sentence; the
   // precise reason stays on the error for the technical record. Messages
@@ -1185,19 +1185,16 @@
 
   async function loadRequests(advance, explicitCursor) {
     var token = access.capture();
-    var chosenCursor = canReview ? (explicitCursor === undefined ? (advance ? recoveryCursor || "" : "") : explicitCursor) : "";
-    var path = canReview ?
-      "/request-batches?limit=25&view=" + requestView() + "&cursor=" + encodeURIComponent(chosenCursor) :
-      "/requests?limit=100&archived=" + (archivedView ? "true" : "false") +
-      "&ready_to_archive=" + (readyView ? "true" : "false");
+    var chosenCursor = explicitCursor === undefined ? (advance ? recoveryCursor || "" : "") : explicitCursor;
+    var path = "/request-batches?limit=25&view=" + requestView() + "&cursor=" + encodeURIComponent(chosenCursor);
     var response = await fetch(apiBase + path, {
       method: "GET",
       credentials: "same-origin",
       headers: {Accept: "application/json"}
     });
-    var payload = await readJson(response, token, canReview ? "/request-batches" : "/requests", true);
+    var payload = await readJson(response, token, "/request-batches", true);
     var items = validateRequests(payload);
-    if (canReview) {
+    {
       if (payload.next_cursor !== null &&
           (typeof payload.next_cursor !== "string" || payload.next_cursor.length > 2048 ||
            !/^[A-Za-z0-9_-]+$/.test(payload.next_cursor))) {
@@ -1214,14 +1211,14 @@
       if (batchNote) batchNote.textContent = "Showing " + items.length + " matching request" +
         (items.length === 1 ? "" : "s") + " in this batch. " +
         (payload.complete ? "End of this view. " : "More records can be checked with Next batch. ") + payload.notice;
-    } else recoveryCursor = null;
-    renderRequests(items, false, canReview && (chosenCursor !== "" || !payload.complete));
+    }
+    renderRequests(items, false, chosenCursor !== "" || !payload.complete);
     if (recoveryMore) recoveryMore.hidden = !recoveryCursor;
     unconfirmedPaths.clear();
   }
 
   async function openRequestBatch(view, cursor) {
-    if (pending || access.blocked || !canReview || !["active", "archive", "ready"].includes(view) ||
+    if (pending || access.blocked || !["active", "archive", "ready"].includes(view) || (!canReview && view === "ready") ||
         typeof cursor !== "string" || cursor.length > 2048 || (cursor && !/^[A-Za-z0-9_-]+$/.test(cursor))) return false;
     var previousArchived = archivedView, previousReady = readyView;
     archivedView = view === "archive";
@@ -1573,7 +1570,7 @@
   });
 
   var initialPage = new URLSearchParams(window.location.search);
-  if (canReview && initialPage.has("requests_view")) {
+  if (initialPage.has("requests_view")) {
     openRequestBatch(initialPage.get("requests_view"), initialPage.get("requests_page") || "").then(function (opened) {
       if (!opened) requests.textContent = "This request page could not be opened. Choose a view or use Start over to check current requests.";
     });

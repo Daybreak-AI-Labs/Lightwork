@@ -11,6 +11,7 @@
   const rules = document.getElementById('local-flow-release-rules');
   const open = document.getElementById('local-flow-release-open');
   const current = document.getElementById('local-flow-release-current');
+  const included = document.getElementById('local-flow-release-included');
   function selected() { return state?.flows.find(row => row.id === flow.value); }
   function lock(value) { busy = value; form.querySelectorAll('button,input,select').forEach(control => { control.disabled = value; }); }
   async function request(path, body) {
@@ -36,9 +37,16 @@
     document.getElementById('local-flow-release-compare').href = '/learning/flow-checks' + (row ? '?workflow=' + encodeURIComponent(row.id) : '');
     run.replaceChildren(new Option('Choose a practice run', ''));
     (row?.practice_runs || []).forEach(item => run.appendChild(new Option(row.name + ' · version ' + row.version + ' · practice completed ' + new Date(item.created * 1000).toLocaleString(), item.id, false, item.id === chosenRun)));
-    current.textContent = row ? 'Saved version ' + row.version + ' · ' + (row.rules_only ? 'Uses learned rules only' : 'May fall back to AI') + ' · ' + (row.published ? 'Published baseline version ' + row.baseline_version : 'Publish a baseline first') : '';
+    current.textContent = row ? 'Saved version ' + row.version + ' · ' + (row.rules_only ? 'Complete workflow uses learned rules only' : row.root_rules_only ? 'Prepare rules-only behavior in the included workflows below' : 'May fall back to AI') + ' · ' + (row.published ? 'Published baseline version ' + row.baseline_version : 'Publish a baseline first') : '';
+    included.replaceChildren(); included.hidden = !(row?.included_workflows || []).length;
+    (row?.included_workflows || []).forEach(child => {
+      const item = document.createElement('li'), link = document.createElement('a');
+      link.href = child.href; link.textContent = child.name + ' · version ' + child.version;
+      item.append(link, document.createTextNode(child.rules_only ? ' · uses learned rules only' : ' · prepare a rules-only draft before release'));
+      included.appendChild(item);
+    });
     open.hidden = !row; if (row) open.href = '/flows/designer/' + encodeURIComponent(row.id);
-    rules.disabled = busy || !row || row.rules_only;
+    rules.disabled = busy || !row || row.root_rules_only;
     form.querySelector('[type="submit"]').disabled = busy || !row || !row.rules_only || !row.practice_runs.length || !state?.enabled;
   }
   async function refresh() {
@@ -70,6 +78,7 @@
       submitted = true;
       const result = await request(path, {context: state.context, confirm: true, flow_id: row.id,
         version: row.version, revision: row.revision, practice_run: path === '/prepare' ? practice : '',
+        bundle_sha: row.bundle_sha,
         comparison_id: path === '/prepare' ? compared : ''});
       outcome = result.detail;
     } catch (_) { outcome = 'The reply could not be confirmed. No action was repeated. Inspect the refreshed saved versions and release decisions before continuing.'; }
@@ -81,9 +90,9 @@
       else {
         const saved = selected();
         const prepared = state.prepared;
-        if (path === '/rules-only' && saved?.revision === row.revision && saved?.version === row.version + 1 && saved?.rules_only)
-          outcome = 'Rule-only draft is saved. The current saved version was verified. Publish a baseline, then change and practice the next version.';
-        if (path === '/prepare' && prepared?.flow_id === row.id && prepared?.version === row.version && prepared?.practice_run === practice && prepared?.comparison_id === compared)
+        if (path === '/rules-only' && saved?.revision === row.revision && saved?.version === row.version + 1 && saved?.root_rules_only)
+          outcome += ' The current draft uses learned rules only. Check included workflows before publishing or practicing the complete version.';
+        if (path === '/prepare' && prepared?.flow_id === row.id && prepared?.version === row.version && prepared?.bundle_sha === row.bundle_sha && prepared?.practice_run === practice && prepared?.comparison_id === compared)
           outcome = 'The exact release review is prepared and verified. Request independent approval below; no publication changed.';
       }
       status.textContent = outcome;

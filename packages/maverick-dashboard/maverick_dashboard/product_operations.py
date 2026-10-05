@@ -71,6 +71,7 @@ class Adapter:
     execute: Callable[[Request, dict, dict, dict, str], Outcome] | None = None
     recover: Callable[[Request, dict, dict, dict, str], Outcome | None] | None = None
     aliases: tuple[str, ...] = ()
+    read_recovery: Callable[[Request, dict, dict, dict, str], Outcome | None] | None = None
 
 
 class StrictInput(BaseModel):
@@ -93,8 +94,11 @@ class PrepareInput(ContextInput):
     arguments: dict[str, Any] = Field(default_factory=dict, max_length=30)
 
 
-class ExecuteInput(StrictInput):
+class RecoveryInput(StrictInput):
     token: str = Field(min_length=1, max_length=64000)
+
+
+class ExecuteInput(RecoveryInput):
     confirmed: bool
 
 
@@ -374,6 +378,7 @@ def prepare(request: Request, body: PrepareInput):
     if again.revision != state.revision or _context(request) != body.context or again.blocked:
         raise HTTPException(409, "The source changed while preparing this review. Refresh and review again.")
     return _response({"read_only": False, "operation": adapter.id, "token": token,
+                      "recovery_available": adapter.read_recovery is not None,
                       "expires_at": material["expires_at"], "summary": preview.summary,
                       "changes": preview.changes, "source": state.source,
                       "checked_at": time.time(), "direct_ui": adapter.direct_ui})
@@ -392,6 +397,30 @@ def _open(token):
         return material
     except Exception as exc:
         raise HTTPException(409, "This review expired or changed. Refresh and prepare it again.") from exc
+
+
+@router.post("/recover")
+def recover(request: Request, body: RecoveryInput):
+    """Read the original native outcome; absent evidence never dispatches work."""
+    _same_origin(request)
+    material = _open(body.token)
+    from maverick.authority_effects import authority_effect_fence
+    with authority_effect_fence():
+        adapter, _current = _adapter(request, material["page"], material["selection"], material["operation"])
+        if adapter.execute is None or material["context"] != _context(request):
+            raise HTTPException(409, "Your account, workspace or access changed. Open the native page to check the original result.")
+        arguments = _arguments(adapter, material["arguments"])
+        outcome = adapter.read_recovery(request, material["selection"], arguments, material["native"], material["operation_id"]) if adapter.read_recovery else None
+        _gate(request)
+        if material["context"] != _context(request):
+            raise HTTPException(409, "Access changed while reading this result. Reopen the native page.")
+    if outcome is None:
+        outcome = Outcome("unconfirmed", "The original result is not confirmed. No action was repeated. Check the native page before another attempt.")
+    if not isinstance(outcome, Outcome) or outcome.status not in {"confirmed", "replayed", "queued", "unconfirmed"}:
+        raise HTTPException(503, "The original result could not be confirmed. Check native status; no action was repeated.")
+    return _response({"operation": adapter.id, "status": outcome.status, "message": outcome.message,
+                      "details": outcome.details, "operation_id": material["operation_id"],
+                      "checked_at": time.time(), "direct_ui": adapter.direct_ui})
 
 
 @router.post("/execute")

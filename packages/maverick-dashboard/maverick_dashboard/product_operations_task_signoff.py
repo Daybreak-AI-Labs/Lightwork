@@ -81,7 +81,7 @@ def entries():
                     EmptyInput, snapshot, read_prepare, aliases=("read this result review", "check this result signoff")),
             Adapter("reviews.result_approve", "Approve this finished result", "reviews", "/chat", pages,
                     ReviewInput, partial(snapshot, decision="approved"), partial(prepare, decision="approved"),
-                    partial(execute, decision="approved"), recover, aliases=("approve this result",)),
+                    partial(execute, decision="approved"), recover, aliases=("approve this result",), read_recovery=recover),
             Adapter("reviews.result_reject", "Reject this finished result", "reviews", "/chat", pages,
                     ReviewInput, partial(snapshot, decision="rejected"), partial(prepare, decision="rejected"),
-                    partial(execute, decision="rejected"), recover, aliases=("reject this result",)))
+                    partial(execute, decision="rejected"), recover, aliases=("reject this result",), read_recovery=recover))

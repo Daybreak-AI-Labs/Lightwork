@@ -520,7 +520,7 @@ async def request_batches(
 ):
     from .knowledge_request_browse import browse
 
-    _binding(request, response, administrator=True)
+    _binding(request, response)
     return await run_in_threadpool(browse, request, view=view, cursor=cursor, limit=limit)
 
 

@@ -596,16 +596,10 @@ def _nav_context(request: Request) -> dict:
         if permission not in key_permissions:
             return False
         if permission == "operate":
-            scope = "approvals:decide" if page["path"] == "/approvals" else "tasks:write"
+            scope = "approvals:decide" if page["path"] in {"/approvals", "/oversight"} else "tasks:write"
             return key_scopes is not None and ("admin" in key_scopes or scope in key_scopes)
         return True
     unavailable |= _account_pages_unavailable(request)
-    # Boards without native department projections remain unavailable.
-    # Discovery follows the same boundary as their page and API readers.
-    try:
-        require_unscoped_board(request)
-    except HTTPException:
-        unavailable |= {"/workforce", "/savings", "/oversight"}
     for collection in (groups, finder):
         for group in collection:
             group["links"] = [link for link in group["links"]
@@ -3752,6 +3746,9 @@ def workforce_page(request: Request) -> HTMLResponse:
     firm-wide delivery rollup from the Operating Record, and the catalog counts.
     Per-department governed reviews load from /api/v1/departments/{key}/review.
     """
+    from . import department_boards
+    if department_boards.scoped(request):
+        return department_boards.page(request, "workforce")
     require_unscoped_board(request)
     from maverick.departments import department_entitled, list_departments
     from maverick.fleet import list_fleets
@@ -6394,6 +6391,9 @@ def savings_page(request: Request, days: int = 90) -> HTMLResponse:
     """The value dashboard: money saved vs the typical human cost, computed
     from real completed work and the client's OWN cost/value inputs (their
     hourly rate + human hours per task, editable right on the page)."""
+    from . import department_boards
+    if department_boards.scoped(request):
+        return department_boards.page(request, "savings")
     require_unscoped_board(request)
     from maverick import savings as savings_mod
 
@@ -7428,6 +7428,9 @@ def oversight_page(request: Request) -> HTMLResponse:
     /audit, /fleets) remain the deep dives; this is the at-a-glance roll-up.
     Fail-soft: an unreadable audit log yields empty panels, never a 500.
     """
+    from . import department_boards
+    if department_boards.scoped(request):
+        return department_boards.page(request, "oversight")
     require_unscoped_board(request)
     # This page contains the deployment-wide approval queue and mutating
     # decision controls. Authorize before reading either approval details or

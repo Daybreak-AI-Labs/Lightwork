@@ -97,7 +97,7 @@ def run_recover(request, selection, _arguments, prepared, _operation_id):
     job = _state(request, selection, write=True).job
     if job["revision"] == prepared["revision"]:
         return None
-    return Outcome("replayed", "Saved progress changed since this review. This status check did not start another part; review the current job before continuing.", _details(job))
+    return Outcome("unconfirmed", "Saved progress changed since this review. This does not establish whether the original part ran. No additional part was started; review the current job before continuing.", _details(job))
 
 
 def run_execute(request, selection, _arguments, prepared, _operation_id):
@@ -131,7 +131,7 @@ def cancel_recover(request, selection, _arguments, prepared, _operation_id):
     job = _state(request, selection, write=True).job
     if not job["cancel_requested"]:
         return None
-    return Outcome("replayed", "Cancellation is already recorded. Completed changes stay applied; no cancellation was repeated.", _details(job))
+    return Outcome("unconfirmed", "A cancellation request is saved. The original request remains unconfirmed. Completed changes stay applied; no cancellation was repeated.", _details(job))
 
 
 def cancel_execute(request, selection, _arguments, prepared, operation_id):

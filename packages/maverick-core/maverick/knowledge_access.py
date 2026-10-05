@@ -2077,7 +2077,8 @@ class KnowledgeAccessService:
         ) for row in rows[:limit]]
 
     def browse_requests(self, tenant: str, *, view: str = "active",
-                        cursor: str = "", limit: int = 100) -> dict:
+                        cursor: str = "", limit: int = 100,
+                        actor: str | None = None) -> dict:
         """Hydrate one bounded forward window, never the rotating prefix twice.
 
         Positions are private persistence metadata. Dashboard callers must bind
@@ -2090,6 +2091,10 @@ class KnowledgeAccessService:
                 or isinstance(limit, bool) or not isinstance(limit, int)
                 or not 1 <= limit <= 250):
             raise ValueError("knowledge request batch is malformed")
+        if actor is not None and (not isinstance(actor, str) or not actor.startswith("user:")):
+            raise PermissionError("A named user is required")
+        if actor is not None and view == "ready":
+            raise PermissionError("Administrator access is required for this view")
         with tenant_scope(tenant=canonical):
             store = self.archive_store if view == "archive" else self.request_store
             # One identity-only lookahead distinguishes an exact final window.
@@ -2111,11 +2116,13 @@ class KnowledgeAccessService:
                         continue
                     archived_at = float(row["created_at"])
                     row = self._archived_request(canonical, row)
+                if actor is not None and row.get("requested_by") != actor:
+                    continue
                 if view == "ready" and not self._archive_ready(canonical, row):
                     continue
-                items.append(self._fresh_request_projection(
-                    canonical, row, archived_at=archived_at,
-                ))
+                items.append(self._feedback_projection({**row, "archived_at": archived_at})
+                             if actor is not None else self._fresh_request_projection(
+                                 canonical, row, archived_at=archived_at))
             return {"items": items,
                     "next_cursor": window[-1][0] if more else None,
                     "scanned": len(window), "complete": not more}
