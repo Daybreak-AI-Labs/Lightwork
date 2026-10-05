@@ -77,7 +77,7 @@
   form.querySelectorAll('[data-inherit-list]').forEach(function (button) { button.addEventListener('click', function () { if (scope.value !== 'personal') return; changes[button.dataset.inheritList] = null; copy(status,'Product default selected for {preference}. Review and save to apply it.',{preference:fieldLabel(button.dataset.inheritList)}); }); });
   var previousScope = scope.value;
   scope.addEventListener('change', async function () {
-    if (Object.keys(changes).length && !(await window.mvConfirm('Discard these preference drafts before changing scope?',{productCopy:true}))) { scope.value = previousScope; return; }
+    if (Object.keys(changes).length && !(await window.mvConfirm('Discard these preference drafts before changing scope? Unsaved changes are lost.',{productCopy:true,okText:'Discard drafts'}))) { scope.value = previousScope; return; }
     previousScope = scope.value; render();
   });
   var add = document.getElementById('pin-add'); if (add) add.addEventListener('click', function () {
@@ -181,7 +181,7 @@
     var input = document.getElementById('personal-profile-file'), file = input.files[0];
     if (!file) { copy(profileStatus,'Choose a profile file first.'); return; }
     if (file.size > 262144) { copy(profileStatus,'Use a profile smaller than 256 KB.'); return; }
-    if (Object.keys(changes).length && !(await window.mvConfirm('Replace your current preference draft with this profile? Nothing saved will change until review.',{productCopy:true}))) return;
+    if (Object.keys(changes).length && !(await window.mvConfirm('Replace your current preference draft with this profile? Nothing saved will change until review.',{productCopy:true,okText:'Replace draft'}))) return;
     busy = true; profileBusy(true); form.inert = true;
     try {
       var response = await fetch('/api/v1/preferences/profile/import', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({profile:JSON.parse(await file.text())})});

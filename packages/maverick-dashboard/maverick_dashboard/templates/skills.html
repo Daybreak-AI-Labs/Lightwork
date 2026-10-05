@@ -264,22 +264,26 @@
     }
     window.lwAppendSkill = appendSkill;
 
-    // Remove a skill (administrators): confirm, then delete and drop the card.
-    installedEl.addEventListener('click', async function (event) {
+    // Remove a skill (administrators): the card goes at once and the toast
+    // offers Undo (window.mvUndo); the delete is sent when that time is up.
+    installedEl.addEventListener('click', function (event) {
       var btn = event.target.closest('[data-skill-remove]');
       if (!btn) return;
       var name = btn.getAttribute('data-skill-remove');
       var label = btn.getAttribute('data-skill-label') || human(name);
-      var ok = await window.mvConfirm('Remove the skill “' + label + '”? Agents stop using it from the next task.', {okText: 'Remove'});
-      if (!ok) return;
-      btn.disabled = true;
-      try {
-        var r = await fetch('/api/v1/skills/' + encodeURIComponent(name), {method: 'DELETE', credentials: 'same-origin'});
-        if (!r.ok && r.status !== 404) { window.mvFail(r, 'remove the skill'); btn.disabled = false; return; }
-        var card = btn.closest('.skill-card');
-        if (card) card.remove();
-        if (window.mvToast) window.mvToast('Removed ' + label + '.');
-      } catch (e) { window.mvFail(e, 'remove the skill'); btn.disabled = false; }
+      var card = btn.closest('.skill-card');
+      if (card) card.hidden = true;
+      var heading = document.getElementById('sk-list-title');
+      if (heading && heading.focus) { if (!heading.hasAttribute('tabindex')) heading.setAttribute('tabindex', '-1'); heading.focus(); }
+      window.mvUndo('Skill “' + label + '” removed. Agents stop using it from the next task.', {
+        action: 'remove the skill',
+        run: async function (keepalive) {
+          var r = await fetch('/api/v1/skills/' + encodeURIComponent(name), {method: 'DELETE', credentials: 'same-origin', keepalive: keepalive});
+          return r.ok || r.status === 404 ? {ok: true} : r;
+        },
+        undo: function () { if (card) { card.hidden = false; btn.focus(); } },
+        done: function () { if (card) card.remove(); }
+      });
     });
 
     // Tools picker: a filterable checklist of the tools agents can use.

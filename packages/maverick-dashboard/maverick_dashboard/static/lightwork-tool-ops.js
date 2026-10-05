@@ -340,7 +340,7 @@
         out.appendChild(table(USAGE_HEAD, usageRows(found), 'Skills that rarely help'));
         var remove = button('Remove ' + plural(found.length, 'skill'), 'btn--danger');
         remove.addEventListener('click', async function () {
-          var ok = await window.mvConfirm('Remove ' + plural(found.length, 'skill') + ' that rarely help? Agents stop using them from the next task. This cannot be undone.', {okText: 'Remove'});
+          var ok = await window.mvConfirm('Remove ' + plural(found.length, 'skill') + ' that rarely help? Agents stop using them from the next task. This cannot be undone.', {okText: 'Remove ' + plural(found.length, 'skill')});
           if (!ok) return;
           remove.disabled = true;
           try {

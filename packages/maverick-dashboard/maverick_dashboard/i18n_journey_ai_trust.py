@@ -1,6 +1,8 @@
 """Copy for how the AI explains itself: steps, checks, feedback, changes and examples."""
 
 ROWS = [
+    ('What each step recorded', 'Ce que chaque étape a enregistré', 'Was jeder Schritt aufgezeichnet hat',
+     '各ステップの記録内容', '每个步骤记录的内容'),
     ('The text recorded for each step, exactly as Lightwork saved it.',
      'Le texte enregistré pour chaque étape, tel que Lightwork l’a conservé.',
      'Der für jeden Schritt gespeicherte Text, genau so, wie Lightwork ihn aufgezeichnet hat.',

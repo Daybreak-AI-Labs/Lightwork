@@ -360,7 +360,7 @@
         .finally(function () { if (button.isConnected) button.disabled = false; });
     });
     document.getElementById('as-del').addEventListener('click', async function () {
-      if (!(await mvConfirm('Delete the assessment for ' + a.subject + '?', { okText: 'Delete' }))) return;
+      if (!(await mvConfirm('Delete the assessment for ' + a.subject + '?', { okText: 'Delete assessment' }))) return;
       var button = this; button.disabled = true;
       jfetch('/api/v1/assessments/' + a.kind + '/' + encodeURIComponent(a.subject)
         + '?expected_revision=' + encodeURIComponent(a.revision), { method: 'DELETE' })

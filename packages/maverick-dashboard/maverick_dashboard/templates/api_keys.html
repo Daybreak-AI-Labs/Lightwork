@@ -171,8 +171,8 @@
         if (['active', 'expiring', 'rotating'].indexOf(k.status) !== -1) {
           var revoke = el('button', 'btn btn--ghost', 'Revoke'); revoke.type = 'button';
           revoke.setAttribute('aria-label', 'Revoke key ' + k.label);
-          revoke.addEventListener('click', function () {
-            if (window.confirm('Revoke "' + k.label + '"? Anything using it will stop working now.')) act(k, 'revoke');
+          revoke.addEventListener('click', async function () {
+            if (await window.mvConfirm('Revoke the key "' + k.label + '"? Anything using it stops working now, and a revoked key can\'t be turned back on.', {okText: 'Revoke key'})) act(k, 'revoke');
           });
           actions.appendChild(revoke);
         }
@@ -245,7 +245,7 @@
           if (!a.disabled_at) {
             var b = el('button', 'btn btn--ghost', 'Disable ' + a.slug); b.type = 'button';
             b.addEventListener('click', async function () {
-              if (!window.confirm('Disable "' + a.slug + '"? All of its keys stop working now.')) return;
+              if (!(await window.mvConfirm('Disable the service account "' + a.slug + '"? All of its keys stop working now.', {okText: 'Disable service account'}))) return;
               try { await request('/api/v1/service-accounts/' + encodeURIComponent(a.slug) + '/disable', {method: 'POST', json: {}}); await load(); }
               catch (e) { $('ak-sa-msg').textContent = e.message; }
             });

@@ -80,7 +80,7 @@
   el('refresh').addEventListener('click',function(){if(current)perform(async function(){render(await call('/api/v1/employee-activation/'+encodeURIComponent(current.id)));});});
   ['launch','accept','workflow'].forEach(function(action){el(action).addEventListener('click',function(){if(!current)return;perform(async function(){
     var message=action==='launch'?'Start this exact reviewed task? It may incur provider cost.':action==='accept'?'Does the current result meet your acceptance criteria? This records your human review.':'Save reusable instructions with a new source input? Original source documents, result text and connection bindings are excluded.';
-    if(!(await window.mvConfirm(message,{productCopy:true})))return;
+    if(!(await window.mvConfirm(message,{productCopy:true,okText:action==='launch'?'Start task':action==='accept'?'Record that it meets them':'Save instructions'})))return;
     var body={context:data.context,expected_revision:current.revision,confirmed:true,result_fingerprint:current.result?current.result.fingerprint:''};
     render(await call('/api/v1/employee-activation/'+encodeURIComponent(current.id)+'/'+action,body));
   });});});

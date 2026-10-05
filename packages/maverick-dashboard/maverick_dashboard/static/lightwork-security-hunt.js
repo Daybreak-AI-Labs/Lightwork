@@ -392,7 +392,7 @@
       tr.appendChild(el("td", null, SEVERITY[c.level] || human(c.level)));
       var act = el("td");
       act.appendChild(button("Remove", "btn--ghost", async function () {
-        var ok = await window.mvConfirm("Remove the check “" + c.title + "”?", { okText: "Remove" });
+        var ok = await window.mvConfirm("Remove the check “" + c.title + "”?", { okText: "Remove check" });
         if (!ok) { return; }
         var next = customChecks.slice(); next.splice(i, 1); saveChecks(next); renderChecks();
       }));

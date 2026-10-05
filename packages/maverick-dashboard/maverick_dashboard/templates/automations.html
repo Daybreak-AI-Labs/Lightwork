@@ -71,7 +71,7 @@
                    action_label='Create a schedule', action_href='#auto-new-sched', id='auto-sched-empty', hidden=true) }}
     <details id="auto-new-sched" class="auto__new">
       <summary><span role="heading" aria-level="3">Create a schedule</span></summary>
-      <form id="auto-new-form" novalidate>
+      <form id="auto-new-form" novalidate data-mv-validate data-mv-keep="automation-schedule">
         <fieldset class="auto__what">
           <legend>What should run?</legend>
           <label><input type="radio" name="what" value="workflow" checked> A saved workflow</label>
@@ -427,7 +427,7 @@
     if (schedCount) schedCount.textContent=items.length+(items.length===1 ? ' schedule' : ' schedules');
     if (schedEmpty) schedEmpty.hidden=items.length>0;
     items.forEach(function (s) {
-      var li = el('li', 'mv-row'); li.dataset.schedule=JSON.stringify(s);
+      var li = el('li', 'mv-row'); li.dataset.schedule=JSON.stringify(s); li.dataset.scheduleId=String(s.id);
       var main = el('div', 'mv-row__main');
       main.appendChild(el('div', 'mv-row__title', s.title || 'Untitled task'));
       main.appendChild(el('div', 'mv-row__sub', cronText(s.cron) + (s.zone ? ' (' + String(s.zone).replace(/_/g, ' ') + ' time)' : '') + (fmtWhen(s.next_run) ? ' · next run ' + fmtWhen(s.next_run) : '')));
@@ -444,14 +444,40 @@
     var h = document.getElementById(id);
     if (h) h.focus();
   }
+  // A deleted row leaves the list at once and the toast offers Undo
+  // (window.mvUndo); the delete is sent when that time is up.
+  function rowWith(list, key, value) {
+    return list ? Array.prototype.find.call(list.children, function (li) { return li.dataset[key] === String(value); }) || null : null;
+  }
+  function deleteWithUndo(row, heading, message, url, action, reload, latest) {
+    if (row) row.hidden = true;
+    refocus(heading);
+    mvUndo(message, {
+      action: action, latest: latest,
+      run: function (keepalive) { return fetch(url, { method: 'DELETE', keepalive: keepalive }); },
+      undo: function () { if (row) { row.hidden = false; var b = row.querySelector('button'); if (b) b.focus(); } },
+      done: reload
+    });
+  }
   async function delSchedule(id) {
     if (!schedReady) return;
-    if (!(await mvConfirm('Delete this schedule? It will stop running.'))) return;
-    try {
-      var r = await fetch('/api/v1/schedules/' + encodeURIComponent(id), { method: 'DELETE' });
-      if (r.ok) { mvToast('Schedule deleted'); loadSchedules(); refocus('auto-sched-h'); }
-      else { mvFail(r, 'delete the schedule'); }
-    } catch (e) { mvFail(e, 'delete the schedule'); }
+    var row = rowWith(schedList, 'scheduleId', id), s = {};
+    try { s = JSON.parse(row ? row.dataset.schedule : '{}'); } catch (e) { s = {}; }
+    var name = s.title || 'Untitled task', url = '/api/v1/schedules/' + encodeURIComponent(id);
+    var next = Number(s.next_run) * 1000;
+    // Too close to its next run for a safe undo window: ask, then delete now.
+    if (next && next - Date.now() < 30000) {
+      if (!(await mvConfirm('Delete the schedule “' + name + '”? Its next run is due within a minute, so it is deleted now and can’t be brought back.',
+          { okText: 'Delete schedule', cancelText: 'Keep schedule', danger: true }))) return;
+      try {
+        var r = await fetch(url, { method: 'DELETE' });
+        if (r.ok) { mvToast('Schedule deleted'); loadSchedules(); refocus('auto-sched-h'); }
+        else { mvFail(r, 'delete the schedule'); }
+      } catch (e) { mvFail(e, 'delete the schedule'); }
+      return;
+    }
+    deleteWithUndo(row, 'auto-sched-h', 'Schedule “' + name + '” deleted.', url, 'delete the schedule', loadSchedules,
+      next ? next - 15000 : undefined);
   }
 
   var trigList = document.getElementById('auto-trig-list');
@@ -469,7 +495,7 @@
     if (trigEmpty) trigEmpty.hidden = items.length > 0;
     var base = window.location.origin + (data.webhook_url || '/webhook/run');
     items.forEach(function (t) {
-      var li = el('li', 'mv-row');
+      var li = el('li', 'mv-row'); li.dataset.trigger = t.name;
       var main = el('div', 'mv-row__main');
       main.appendChild(el('div', 'mv-row__title', t.name));
       var pcount = t.params ? Object.keys(t.params).length : 0;
@@ -492,13 +518,10 @@
       trigList.appendChild(li);
     });
   }
-  async function delTrigger(name) {
-    if (!(await mvConfirm('Delete “' + name + '”? Other apps will no longer be able to start this workflow.', { okText: 'Delete' }))) return;
-    try {
-      var r = await fetch('/api/v1/triggers/' + encodeURIComponent(name), { method: 'DELETE' });
-      if (r.ok) { mvToast('Deleted'); loadTriggers(); refocus('auto-trig-h'); }
-      else { mvFail(r, 'delete it'); }
-    } catch (e) { mvFail(e, 'delete it'); }
+  function delTrigger(name) {
+    deleteWithUndo(rowWith(trigList, 'trigger', name), 'auto-trig-h',
+      'Start “' + name + '” deleted. Other apps can no longer start this workflow.',
+      '/api/v1/triggers/' + encodeURIComponent(name), 'delete the start', loadTriggers);
   }
 
   // Run history (provenance): "N runs · ✓X · ✗Y · #ids" with drill-down links.
@@ -1080,6 +1103,7 @@
         }
         actions.appendChild(delBtn('Delete ' + t.name, function () { delEventTrigger(t.name); }));
         li.appendChild(actions);
+        li.dataset.eventTrigger = t.name;
         evList.appendChild(li);
       });
       return true;
@@ -1115,12 +1139,9 @@
       into.textContent = bits.join(' · ');
     }
     async function delEventTrigger(name) {
-      if (!(await mvConfirm('Delete “' + name + '”? Lightwork will stop checking for new items.', { okText: 'Delete' }))) return;
-      try {
-        var r = await fetch('/api/v1/event-triggers/' + encodeURIComponent(name), { method: 'DELETE' });
-        if (r.ok) { mvToast('Deleted'); loadEventTriggers(); }
-        else { mvFail(r, 'delete it'); }
-      } catch (e) { mvFail(e, 'delete it'); }
+      deleteWithUndo(rowWith(evList, 'eventTrigger', name), 'auto-event-h',
+        'Automation “' + name + '” deleted. Lightwork stops checking for new items.',
+        '/api/v1/event-triggers/' + encodeURIComponent(name), 'delete the automation', loadEventTriggers);
     }
     evForm.addEventListener('submit', async function (ev) {
       ev.preventDefault();

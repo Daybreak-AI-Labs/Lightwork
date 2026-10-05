@@ -570,7 +570,7 @@
         if (i > 0) tools.appendChild(btn('Move up', 'btn--ghost', 'Move “' + n.title + '” up', function () { if (engine().move(n.id, -1)) render(); }));
         if (i < steps.length - 1) tools.appendChild(btn('Move down', 'btn--ghost', 'Move “' + n.title + '” down', function () { if (engine().move(n.id, 1)) render(); }));
         tools.appendChild(btn('Remove', 'btn--ghost btn--danger', 'Remove “' + n.title + '”', async function () {
-          if (window.mvConfirm && !(await window.mvConfirm('Remove the step “' + n.title + '”? You can undo this with Undo on the Advanced canvas.', { okText: 'Remove' }))) return;
+          if (window.mvConfirm && !(await window.mvConfirm('Remove the step “' + n.title + '”? You can undo this with Undo on the Advanced canvas.', { okText: 'Remove step' }))) return;
           engine().remove(n.id); render();
         }));
         card.appendChild(ic); card.appendChild(main); card.appendChild(tools);

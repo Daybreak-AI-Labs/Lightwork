@@ -457,7 +457,7 @@
         {# Each step above is narrated in plain words; the text Lightwork
            recorded for it (prompts, tool output) stays here, folded away. #}
         <details class="raw-trace" id="raw-trace" hidden>
-          <summary>{{ ui('Technical details') }}</summary>
+          <summary>{{ ui('What each step recorded') }}</summary>
           <p class="muted raw-trace__note">{{ ui('The text recorded for each step, exactly as Lightwork saved it.') }}</p>
           <ol class="raw-trace__list" id="raw-trace-list"></ol>
         </details>
@@ -883,7 +883,7 @@
       }
 
       // The recorded text of each step (briefs, tool output, raw markdown) is
-      // kept under Technical details, never in the plain step list.
+      // kept under "What each step recorded", never in the plain step list.
       function recordRaw(e) {
         if (!rawTraceList) return;
         const item = document.createElement('li');

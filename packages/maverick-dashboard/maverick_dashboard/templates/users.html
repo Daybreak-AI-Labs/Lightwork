@@ -45,6 +45,7 @@
     {% endif %}
   {% endset %}
   {% from "_empty_state.html" import empty_state %}
+  {% from "_form_field.html" import form_field, error_summary %}
   {% set users_actions %}<a class="btn btn--primary" href="#invite-email">Invite someone</a>{% endset %}
   {% call hero('Administration', 'Users',
                subtitle='Who can use Lightwork',
@@ -64,13 +65,13 @@
   {% endcall %}
 
   {% if saved %}
-  <div class="panel users-saved" role="status" data-mv-toast="Saved. {{ saved }}"><strong>Saved.</strong> {{ saved }}</div>
+  <div class="panel users-saved" role="status" data-mv-toast="Saved. {{ saved }}" data-mv-keep-done="users-{{ request.query_params.get('saved', '') }}"><strong>Saved.</strong> {{ saved }}</div>
   {% endif %}
   {% if invite_link %}
   {# The one-time invite link is the result of the action just taken: shown
      first and given focus (script below), instead of beside the form far down
      the page while focus stayed at the top. #}
-  <section class="panel users-saved" id="invite-result" tabindex="-1" aria-labelledby="invite-result-title">
+  <section class="panel users-saved" id="invite-result" tabindex="-1" aria-labelledby="invite-result-title" data-mv-keep-done="users-invite">
     {% if invite_sent %}
     <strong id="invite-result-title">Invitation emailed to {{ invite_email }}.</strong>
     <p class="muted users-help">The same link is below if you also want to send it yourself. It works once and expires in 7 days.</p>
@@ -259,22 +260,20 @@
     {% set unassigned = people | rejectattr('role') | list %}
     <h3 class="users-subhead">Give someone a role</h3>
     {% if unassigned %}
-    <form method="post" action="/users/set" class="users-row-form">
+    <form method="post" action="/users/set" class="users-row-form" id="give-role-form" data-mv-validate data-mv-keep="users-set">
       {{ workspace_binding() }}
-      <label class="users-field">
-        <span>Person</span>
-        <select class="select" name="principal" required>
-          <option value="" disabled selected>Choose a person…</option>
-          {{ person_options(only_without_role=true) }}
-        </select>
-      </label>
-      <label class="users-field">
-        <span>Role</span>
-        <select class="select" name="role" required aria-describedby="give-role-help">
+      {{ error_summary('give-role-errors') }}
+      {% set person_choices = [('', 'Choose a person…')] %}{% for person in unassigned %}{% set _ = person_choices.append((person.principal, person.label)) %}{% endfor %}
+      {{ form_field('give-role-person', 'Person', name='principal', type='select', required=true, options=person_choices,
+                    error_required='Choose the person who needs a role.') }}
+      <div class="mv-field">
+        <label class="mv-field__label" for="give-role-role">Role</label>
+        <select class="select" id="give-role-role" name="role" required aria-describedby="give-role-help"
+                data-error-required="Choose the role to give them.">
           {{ role_options(placeholder='Choose a role') }}
         </select>
         {{ role_help('give-role-help') }}
-      </label>
+      </div>
       <button type="submit" class="btn">Give role</button>
     </form>
     <p class="muted users-help">The list shows everyone who has signed in or accepted an invite.</p>
@@ -347,8 +346,9 @@
   {% if invites_on %}
   <div class="section-head"><h2 id="invite-email">Invite someone by email</h2></div>
   <div class="panel">
-    <form method="post" action="/users/invite" class="users-row-form">
+    <form method="post" action="/users/invite" class="users-row-form" id="invite-form" data-mv-validate data-mv-keep="users-invite">
       {{ workspace_binding() }}
+      {{ error_summary('invite-errors') }}
       <label class="users-field users-grow">
         <span>Email address</span>
         <input class="input" id="invite-email-input" type="email" name="email" placeholder="colleague@company.com" autocomplete="off" required />
@@ -628,11 +628,13 @@
     <p class="muted users-help">A role that someone still has (including a waiting invitation) can't be
       deleted. Give those people another role first. Saving the same name again updates it.</p>
     {% endif %}
-    <form method="post" action="/users/roles/save" class="users-row-form">
+    <form method="post" action="/users/roles/save" class="users-row-form" id="custom-role-form" data-mv-validate data-mv-keep="users-role_saved">
       {{ workspace_binding() }}
+      {{ error_summary('custom-role-errors') }}
       <label class="users-field">
         <span>Role name</span>
-        <input class="input" name="name" required maxlength="32" placeholder="e.g. Privacy officer" autocomplete="off" />
+        <input class="input" name="name" required maxlength="32" minlength="2" placeholder="e.g. Privacy officer" autocomplete="off"
+               data-error-required="Enter a name for the role, for example: Privacy officer." data-error-length="Use a role name of 2 to 32 characters." />
       </label>
       <fieldset class="users-checks">
         <legend>Adds (viewing is always included)</legend>

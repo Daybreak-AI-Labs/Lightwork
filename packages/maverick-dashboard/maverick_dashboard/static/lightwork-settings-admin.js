@@ -426,7 +426,7 @@
         var go = el('button', 'btn btn--danger', 'Remove these records');
         go.type = 'button';
         go.addEventListener('click', async function () {
-          var ok = await window.mvConfirm('Remove these old records from this workspace? They cannot be brought back.', {okText: 'Remove'});
+          var ok = await window.mvConfirm('Remove these old records from this workspace? They cannot be brought back.', {okText: 'Remove old records'});
           if (!ok) return;
           go.disabled = true;
           say('cleanup', 'Removing…');

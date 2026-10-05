@@ -412,7 +412,7 @@
   document.querySelectorAll('[data-remove]').forEach(function (btn) {
     btn.addEventListener('click', async function () {
       var key = btn.getAttribute('data-remove');
-      var ok = await window.mvConfirm('Remove "' + btn.getAttribute('data-name') + '" from the book of work? Its targets are deleted. Finished work and approvals are not affected.', { okText: 'Remove' });
+      var ok = await window.mvConfirm('Remove "' + btn.getAttribute('data-name') + '" from the book of work? Its targets are deleted. Finished work and approvals are not affected.', { okText: 'Remove from book of work' });
       if (!ok) return;
       fetch(api + '/function/' + encodeURIComponent(key), { method: 'DELETE', headers: { Accept: 'application/json' } })
         .then(function (r) {

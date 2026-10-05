@@ -15,8 +15,28 @@
     return node;
   }
   function say(text) { $('preview').textContent = text; }
+  const fields = window.mvFieldErrors;
+  // Problems are written next to their field and listed in a summary at the
+  // top of the form (mvFieldErrors); nothing typed is cleared.
+  form.addEventListener('mv:validate', event => {
+    const kind = what(), error = event.detail.error;
+    if (kind === 'workflow') {
+      if (!$('workflow').value) error($('workflow'), 'Choose the workflow to run.');
+      for (const input of $('params').querySelectorAll('input[data-param]')) {
+        if (!input.value.trim()) error(input, 'Enter ' + human(input.dataset.param).toLowerCase() + ' for this workflow.');
+      }
+    } else if (kind === 'task') {
+      if (!$('text').value.trim()) error($('text'), 'Describe the task to run. For example: Send me a summary of new support tickets.');
+    } else if (!$('rerun').value) error($('rerun'), 'Choose the earlier task to run again.');
+  });
+  function failed(failure) {
+    if (fields) fields.fail(form, failure, 'create the schedule'); else say(failText(failure, 'create the schedule'));
+  }
   function failText(failure, what) {
     return typeof window.mvErrorText === 'function' ? window.mvErrorText(failure, what) : 'Could not ' + what + '. Please try again.';
+  }
+  async function errorOf(response) {
+    return typeof window.mvErrorResponse === 'function' ? window.mvErrorResponse(response) : response;
   }
   function human(value) { return typeof window.mvHuman === 'function' ? window.mvHuman(value) : String(value).replace(/[-_]+/g, ' '); }
   function when(epoch) {
@@ -90,6 +110,8 @@
     zone.replaceChildren();
     zones.forEach(z => { const o = make('option', null, z.replace(/_/g, ' ')); o.value = z; zone.append(o); });
     zone.value = zones.includes(local) ? local : 'UTC';
+    // Lists are filled now, so what was typed before a reload can go back in.
+    if (fields) { fields.restore(form); params(); fields.restore(form); }
     schedulePreview();
   }
   form.addEventListener('change', event => { if (event.target === $('workflow')) params(); schedulePreview(); });
@@ -101,19 +123,19 @@
     const body = { what: kind, timetable: timetable() };
     const title = $('title').value.trim();
     if (title) body.title = title.slice(0, 200);
+    // Without the shared checker (it runs first, on submit), check here.
+    if (!fields) {
+      const missing = [];
+      form.dispatchEvent(new CustomEvent('mv:validate', { detail: { error: (control, message) => missing.push([control, message]) } }));
+      if (missing.length) { say(missing[0][1]); missing[0][0].focus(); return; }
+    }
     if (kind === 'workflow') {
-      if (!$('workflow').value) { say('Choose a workflow first.'); $('workflow').focus(); return; }
       body.template = $('workflow').value;
       body.params = {};
-      for (const input of $('params').querySelectorAll('input[data-param]')) {
-        if (!input.value.trim()) { say('Fill in every answer the workflow needs.'); input.focus(); return; }
-        body.params[input.dataset.param] = input.value.trim();
-      }
+      for (const input of $('params').querySelectorAll('input[data-param]')) body.params[input.dataset.param] = input.value.trim();
     } else if (kind === 'task') {
-      if (!$('text').value.trim()) { say('Describe the task first.'); $('text').focus(); return; }
       body.text = $('text').value.trim();
     } else {
-      if (!$('rerun').value) { say('Choose the task to run again.'); $('rerun').focus(); return; }
       body.goal_id = Number($('rerun').value);
     }
     busy = true; $('save').disabled = true;
@@ -122,12 +144,13 @@
         method: 'POST', credentials: 'same-origin', cache: 'no-store', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body)
       });
-      if (!response.ok) { say(failText(response, 'create the schedule')); return; }
+      if (!response.ok) { failed(await errorOf(response)); return; }
       const data = await response.json();
+      if (fields) { fields.clear(form); fields.forget(form); }
       say('Schedule created. Next run ' + when(data.next_run) + '.');
       if (typeof window.mvToast === 'function') window.mvToast('Schedule created');
       document.dispatchEvent(new CustomEvent('lightwork:schedules-changed'));
-    } catch (error) { say(failText(error, 'create the schedule')); }
+    } catch (error) { failed(error); }
     finally { busy = false; $('save').disabled = false; }
   });
   sync();

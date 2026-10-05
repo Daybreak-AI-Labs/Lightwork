@@ -55,8 +55,7 @@
       const check=button('Review read-only check',async()=>{
         if(busy||lost||!resource.value.trim())return;busy=true;check.disabled=true;
         try{
-          if(!await mvConfirm('Read only the metadata for this exact resource? No business record is created or changed, and no blocked task is resumed.',{okText:'Check this read'}))return;
-          const result=await request(value.name,'/capability-check',{context:value.context,expected_revision:value.revision,capability:capability.id,resource:resource.value.trim(),confirm:true});
+                    const result=await request(value.name,'/capability-check',{context:value.context,expected_revision:value.revision,capability:capability.id,resource:resource.value.trim(),confirm:true});
           status.textContent=result.verified?'This exact resource read was verified at '+(window.mvTimeAbsolute ? window.mvTimeAbsolute(result.tested_at) : new Date(result.tested_at*1000).toLocaleTimeString())+'. Write access and future access remain unverified. No task was resumed.':'The exact resource read was not verified: '+result.outcome.replace(/_/g,' ')+'. Other connections remain available.';
         }catch(error){status.textContent=error.message;}
         finally{busy=false;check.disabled=false;}

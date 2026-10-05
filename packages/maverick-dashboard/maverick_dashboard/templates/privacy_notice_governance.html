@@ -471,7 +471,7 @@
     } catch (error) { say(failText(error, "save the target"), true); }
   }
   async function remove(target) {
-    if (!(await window.mvConfirm("Stop publishing approved notices to " + window.mvHuman(target.binding_id) + "?", {okText: "Remove"}))) return;
+    if (!(await window.mvConfirm("Stop publishing approved notices to " + window.mvHuman(target.binding_id) + "?", {okText: "Stop publishing"}))) return;
     try {
       var result = await call("DELETE", "/" + encodeURIComponent(target.binding_id));
       if (result.status === 409) { say(failText({status: 409, detail: result.detail}, "remove the target"), true); return; }

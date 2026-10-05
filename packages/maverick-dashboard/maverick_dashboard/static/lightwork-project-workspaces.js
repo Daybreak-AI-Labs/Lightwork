@@ -165,7 +165,7 @@
   id('details-form').onsubmit = function (event) { event.preventDefault(); review('details', detailsPayload(), 'details'); };
   id('milestone-form').onsubmit = function (event) { event.preventDefault(); review('milestone', milestonePayload(), 'milestone'); };
   id('milestone-select').onchange = async function () {
-    if (dirty.has('milestone') && !(await window.mvConfirm('Replace the current milestone draft with the selected saved milestone?'))) { id('milestone-select').value = selectedMilestone; return; }
+    if (dirty.has('milestone') && !(await window.mvConfirm('Replace your unsaved milestone draft with the saved milestone you chose? Your unsaved edits are lost.', {okText: 'Replace draft'}))) { id('milestone-select').value = selectedMilestone; return; }
     var saved = model.workspace.editor.milestones.find(function (row) { return row.id === id('milestone-select').value; }); restoreMilestone(saved || {id:uid()}); dirty.delete('milestone'); invalidate();
   };
   id('dependency-form').onsubmit = function (event) { event.preventDefault(); review('dependency', {id:id('dependent').value, prerequisite:id('prerequisite').value, required:id('required').value === 'true'}); };
@@ -175,7 +175,7 @@
   id('source-preview').onclick = function () { if (id('source').value) openSource('/' + project + '/sources/' + id('source').value, true); };
   id('add-source').onclick = function () { if (source) review('context', {kind:source.kind, source_id:source.source_id, version:source.version}); };
   id('confirm').onclick = apply; id('check').onclick = check; id('refresh').onclick = refresh;
-  id('retry-exact').onclick = async function () { if (!busy && uncertain && pending && await window.mvConfirm('Retry only this exact reviewed save? No new project change will be created.')) { uncertain = false; id('retry-exact').hidden = true; await apply(); } };
+  id('retry-exact').onclick = async function () { if (!busy && uncertain && pending) { uncertain = false; id('retry-exact').hidden = true; await apply(); } };
   id('back').onclick = function () { if (!busy && !uncertain) { pending = null; id('review-panel').hidden = true; } };
   id('cancel').onclick = function () { controllers.forEach(function (controller) { controller.abort(); }); };
   window.addEventListener('pagehide', function () { generation++; controllers.forEach(function (controller) { controller.abort(); }); Object.values(recovery).forEach(function (item) { if (item) item.dispose(); }); });

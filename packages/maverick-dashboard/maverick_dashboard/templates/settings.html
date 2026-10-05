@@ -3,6 +3,7 @@
 {% block content %}
   {% from "_hero.html" import hero, state %}
   {% from "_integration_readiness.html" import provider_status %}
+  {% from "_form_field.html" import error_summary %}
   {# The main action is the AI-service setup step the workspace still needs;
      each section's own Save stays a plain button. #}
   {% set settings_actions %}{% if workspace.next_action %}<a class="btn btn--primary" href="{{ workspace.next_action.href }}">{{ workspace.next_action.label }}</a>{% endif %}{% endset %}
@@ -19,7 +20,7 @@
   {% endcall %}
 
   {% if saved %}
-  <div class="panel settings-saved" role="status" data-mv-toast="Saved. {{ saved }}">
+  <div class="panel settings-saved" role="status" data-mv-toast="Saved. {{ saved }}" data-mv-keep-done="settings-{{ request.query_params.get('saved', '') }}">
     <strong>Saved.</strong> {{ saved }}
   </div>
   {% endif %}
@@ -423,7 +424,8 @@
       <a href="/spending-limits">Spending limits</a>.
     </p>
     {% set limit_mode = 'off' if not task_limits_enabled else ('amount' if budget is not none else 'default') %}
-    <form method="post" action="/settings/budget" class="settings-stack-form">
+    <form method="post" action="/settings/budget" class="settings-stack-form" id="settings-budget-form" data-mv-validate data-mv-keep="settings-budget">
+      {{ error_summary('settings-budget-errors') }}
       <fieldset class="settings-choice">
         <legend>Stop tasks that go over a limit</legend>
         <label><input type="radio" name="mode" value="disabled"{% if limit_mode == 'off' %} checked{% endif %} /> No limit for each task</label>
@@ -470,6 +472,14 @@
         error.textContent = '';
         field.removeAttribute('aria-invalid');
         field.setAttribute('aria-describedby', help);
+      });
+      // "Stop a task when it has spent" needs an amount; empty used to fall
+      // back to the standard limits without saying so.
+      if (field.form) field.form.addEventListener('mv:validate', function (event) {
+        var mode = field.form.querySelector('input[name="mode"]:checked');
+        if (mode && mode.value === 'configured' && !field.value.trim()) {
+          event.detail.error(field, 'Enter the amount per task in US dollars, or choose another option.');
+        }
       });
     })();
     </script>
@@ -724,7 +734,7 @@
       </p>
     </form>
     <form method="post" action="/settings/ui-visibility/reset" class="settings-inline-form"
-          data-confirm="Put every role's pages back to the standard set? Your changes on this table will be lost." data-confirm-ok="Reset">
+          data-confirm="Put every role's pages back to the standard set? Your changes on this table will be lost." data-confirm-ok="Reset page access">
       <button type="submit" class="btn">Reset to standard</button>
     </form>
     <p class="muted settings-foot">
