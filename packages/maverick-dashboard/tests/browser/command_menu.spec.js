@@ -77,6 +77,17 @@ test('commands open the page\'s own confirmations and never decide or stop anyth
   await page.locator('#navfinder-input').fill('> new task');
   await expect(page.locator('#navfinder-action-new-task')).toHaveAttribute('aria-selected', 'true');
   await page.keyboard.press('Enter');
+  // This person has no tasks yet, so Overview shows the first-task composer:
+  // New task focuses it in place instead of leaving the page.
+  const firstTask = page.locator('form[action="/chat/send"] textarea[name="title"]');
+  await expect(page).toHaveURL(/\/overview$/);
+  await expect(page.locator('#navfinder-dialog')).not.toBeVisible();
+  await expect(firstTask).toBeFocused();
+  // From a page without a composer, New task opens the chat composer.
+  await ready(page, '/goals');
+  await command(page, '> new task');
+  await expect(page.locator('#navfinder-action-new-task')).toHaveAttribute('aria-selected', 'true');
+  await page.keyboard.press('Enter');
   await expect(page).toHaveURL(/\/chat$/);
   // The composer is the page's first field (it takes focus when it can be
   // used; this fixture has no AI service, so it waits disabled).

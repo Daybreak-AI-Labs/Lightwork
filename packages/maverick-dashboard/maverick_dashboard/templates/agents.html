@@ -612,7 +612,12 @@
     var afToolList = null;
     function toolChoices() {
       if (!afToolList) {
-        afToolList = window.mvFetchJSON('/api/v1/tools').catch(function () { return { tools: [] }; })
+        // The editor mounts while the page is parsed, before the shell's
+        // helpers (lightwork-ui.js) load at the end of the page.
+        var shellReady = window.mvFetchJSON ? Promise.resolve()
+          : new Promise(function (done) { document.addEventListener('DOMContentLoaded', done); });
+        afToolList = shellReady.then(function () { return window.mvFetchJSON('/api/v1/tools'); })
+          .catch(function () { return { tools: [] }; })
           .then(function (j) {
             return (j.tools || []).map(function (t) { return { value: t.name, label: humanName(t.name) }; })
               .sort(function (a, b) { return a.label.localeCompare(b.label); });
