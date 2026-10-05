@@ -185,6 +185,77 @@ test("announcers already in the page (base.html) are reused, not duplicated", as
   w.close();
 });
 
+// ---- mvFetchJSON options for pages that guard access and waiting --------
+test("timeout aborts a request that takes too long, with mvErrorText's words", async () => {
+  const w = load();
+  let seen;
+  w.fetch = (url, options) => new Promise((resolve, reject) => {
+    seen = options.signal;
+    options.signal.addEventListener("abort", () => reject(new w.DOMException("The operation was aborted.", "AbortError")));
+  });
+  await assert.rejects(w.mvFetchJSON("/slow", { timeout: 20 }, "load the report"), (error) => {
+    assert.equal(error.name, "AbortError");
+    assert.equal(error.timedOut, true);
+    assert.equal(error.message, "Could not load the report. It took too long. Try again.");
+    return true;
+  });
+  assert.equal(seen.aborted, true);
+  w.close();
+});
+
+test("a page's own signal still cancels the request, and a finished request clears its timer", async () => {
+  const w = load();
+  const owner = new w.AbortController();
+  w.fetch = (url, options) => new Promise((resolve, reject) => {
+    options.signal.addEventListener("abort", () => reject(new w.DOMException("aborted", "AbortError")));
+  });
+  const pending = w.mvFetchJSON("/x", { signal: owner.signal, timeout: 60000 }, "load");
+  owner.abort();
+  await assert.rejects(pending, (error) => { assert.equal(error.name, "AbortError"); assert.equal(error.timedOut, undefined); return true; });
+  w.fetch = async (url, options) => { assert.equal(options.timeout, undefined, "options of ours are not sent to fetch"); return respond(200, { ok: 1 }); };
+  assert.deepEqual(JSON.parse(JSON.stringify(await w.mvFetchJSON("/y", { timeout: 50 }, "load"))), { ok: 1 });
+  w.close();
+});
+
+test("onAccess runs before the rejection when access is gone (401, 403, a redirect, or the page's own statuses)", async () => {
+  const w = load();
+  const lost = [];
+  const onAccess = (error) => lost.push(error.status);
+  w.fetch = async () => respond(403, { detail: "forbidden" });
+  await assert.rejects(w.mvFetchJSON("/a", { onAccess }, "open the list"), /You do not have permission/);
+  w.fetch = async () => respond(401, {});
+  await assert.rejects(w.mvFetchJSON("/a", { onAccess }, "open the list"), /Sign in again/);
+  w.fetch = async () => Object.assign(respond(200, {}), { redirected: true });
+  await assert.rejects(w.mvFetchJSON("/a", { onAccess }, "open the list"), (error) => { assert.equal(error.accessChanged, true); return true; });
+  w.fetch = async () => respond(404, {});
+  await assert.rejects(w.mvFetchJSON("/a", { onAccess }, "open the list"));
+  await assert.rejects(w.mvFetchJSON("/a", { onAccess, accessStatuses: [401, 403, 404] }, "open the list"));
+  w.fetch = async () => respond(500, {});
+  await assert.rejects(w.mvFetchJSON("/a", { onAccess }, "open the list"));
+  assert.deepEqual(lost, [403, 401, 200, 404]);
+  w.close();
+});
+
+test("plainDetail shows a server sentence written for people, and never its internals", async () => {
+  const w = load();
+  w.fetch = async () => respond(422, { detail: "Pick a date after today." });
+  await assert.rejects(w.mvFetchJSON("/a", { plainDetail: true }, "save"), { message: "Pick a date after today." });
+  await assert.rejects(w.mvFetchJSON("/a", {}, "save"), { message: "Could not save. Some of the details need fixing. Check what you entered and try again." });
+  w.fetch = async () => respond(422, { detail: "expected_revision mismatch in tenant_id" });
+  await assert.rejects(w.mvFetchJSON("/a", { plainDetail: true }, "save"), { message: "Could not save. Some of the details need fixing. Check what you entered and try again." });
+  w.close();
+});
+
+test("raw returns the response itself for a download, and still rejects plainly", async () => {
+  const w = load();
+  const file = respond(200, "csv,data");
+  w.fetch = async () => file;
+  assert.equal(await w.mvFetchJSON("/export", { raw: true }, "download"), file);
+  w.fetch = async () => respond(500, { detail: "boom" });
+  await assert.rejects(w.mvFetchJSON("/export", { raw: true }, "download the file"), { message: "Could not download the file. Something went wrong on our side. Try again in a minute." });
+  w.close();
+});
+
 test("an unreachable server gives the same words whether the error or its cause is passed on", async () => {
   const w = load();
   w.fetch = async () => { throw new TypeError("Failed to fetch"); };

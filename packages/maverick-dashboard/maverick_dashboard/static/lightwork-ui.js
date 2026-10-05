@@ -566,8 +566,26 @@
       // payload and headers, so mvFeatureOff(error) and
       // mvRenderError(el, error, action, error.payload) still work.
       //   const data = await mvFetchJSON('/api/v1/x', {method: 'POST', body: {...}}, 'save the policy');
+      // Options beyond fetch's own:
+      //   timeout: ms   give up (AbortError, error.timedOut) after this long;
+      //                 a page's own signal still cancels it too.
+      //   onAccess(error)  runs before the rejection when access is gone: a
+      //                 401 or 403 (or accessStatuses), or a redirect to the
+      //                 sign-in page; the page clears what it showed privately.
+      //   plainDetail   use the server's explanation when it is a plain
+      //                 sentence written for people (mvPlainDetail).
+      //   raw           resolve to the response itself (a download), unread.
+      var OWN_OPTIONS = ['timeout', 'onAccess', 'accessStatuses', 'plainDetail', 'raw'];
+      function fetchFailure(failure, action, opts) {
+        var plain = opts.plainDetail && typeof window.mvPlainDetail === 'function' ? window.mvPlainDetail(failure.detail) : '';
+        var error = new Error(plain || window.mvErrorText(failure, action));
+        error.status = failure.status; error.detail = failure.detail; error.headers = failure.headers; error.payload = failure.payload;
+        return error;
+      }
       window.mvFetchJSON = async function (url, opts, action) {
-        var options = Object.assign({ credentials: 'same-origin' }, opts || {});
+        var own = opts || {};
+        var options = Object.assign({ credentials: 'same-origin' }, own);
+        OWN_OPTIONS.forEach(function (name) { delete options[name]; });
         var headers = Object.assign({ Accept: 'application/json' }, options.headers || {});
         var body = options.body;
         var raw = body == null || typeof body === 'string' || (typeof FormData !== 'undefined' && body instanceof FormData) ||
@@ -578,22 +596,42 @@
           if (!headers['Content-Type']) headers['Content-Type'] = 'application/json';
         }
         options.headers = headers;
+        var timer = null, timedOut = false;
+        if (own.timeout > 0) {
+          var controller = new AbortController(), outer = own.signal;
+          if (outer) {
+            if (outer.aborted) controller.abort();
+            else outer.addEventListener('abort', function () { controller.abort(); });
+          }
+          timer = setTimeout(function () { timedOut = true; controller.abort(); }, own.timeout);
+          options.signal = controller.signal;
+        }
         var response;
         try { response = await fetch(url, options); }
         catch (cause) {
+          clearTimeout(timer);
           var offline = new Error(window.mvErrorText(cause, action));
           // Same name as the cause (TypeError, AbortError), so passing this
           // error to mvErrorText or mvFieldErrors.fail gives the same words.
           offline.status = 0; offline.cause = cause; offline.name = (cause && cause.name) || 'Error';
+          if (timedOut) offline.timedOut = true;
           throw offline;
         }
+        var access = own.accessStatuses || [401, 403];
+        var lost = typeof own.onAccess === 'function' && (access.indexOf(response.status) !== -1 || response.redirected === true);
+        if (own.raw && response.ok && !lost) { clearTimeout(timer); return response; }
         var payload = null;
         try { payload = await response.json(); } catch (_) { payload = null; }
+        finally { clearTimeout(timer); }
+        if (lost) {
+          // A redirect lands on the sign-in page: say so, as for a 401.
+          var gone = fetchFailure({ status: response.ok ? 401 : response.status, detail: payload && payload.detail, headers: response.headers, payload: payload }, action, own);
+          gone.status = response.status; gone.accessChanged = true;
+          own.onAccess(gone);
+          throw gone;
+        }
         if (response.ok) return payload;
-        var failure = { status: response.status, detail: payload && payload.detail, headers: response.headers };
-        var error = new Error(window.mvErrorText(failure, action));
-        error.status = failure.status; error.detail = failure.detail; error.headers = failure.headers; error.payload = payload;
-        throw error;
+        throw fetchFailure({ status: response.status, detail: payload && payload.detail, headers: response.headers, payload: payload }, action, own);
       };
       // Two page-wide live regions (polite, and assertive for errors) that
       // exist before any message: base.html renders them, and they are made
