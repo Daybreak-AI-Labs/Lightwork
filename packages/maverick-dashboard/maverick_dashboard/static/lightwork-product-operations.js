@@ -26,6 +26,10 @@
       try { return {kind: 'flow', id: decodeURIComponent(flow[1])}; } catch (_) { return {}; }
     }
     var query = new URLSearchParams(window.location.search);
+    // The workflow builder's Steps mode is the flow designer's editor for ?flow=<id>.
+    var builderFlow = query.get('flow');
+    if (window.location.pathname === '/workflow-builder' && query.get('mode') === 'steps' &&
+        builderFlow && /^[A-Za-z0-9_-]{1,120}$/.test(builderFlow)) return {kind: 'flow', id: builderFlow};
     var selectedGoal = query.get('goal_id');
     if (window.location.pathname === '/budget' && selectedGoal && /^[1-9]\d*$/.test(selectedGoal)) return {goal_id: Number(selectedGoal)};
     var thread = query.get('thread');

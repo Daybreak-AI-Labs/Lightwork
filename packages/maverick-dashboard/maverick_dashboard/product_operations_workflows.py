@@ -13,6 +13,9 @@ from .product_operations import Adapter, EmptyInput, Outcome, Preview, Snapshot,
 
 
 def _flow_id(selection):
+    if selection == {}:
+        # No saved flow open (the workflow builder's Describe-it mode): nothing to offer.
+        raise HTTPException(404, "Open a saved workflow before asking Copilot to run it.")
     if (not isinstance(selection, dict) or not {"kind", "id"} <= set(selection)
             or set(selection) - {"kind", "id", "node_id"}
             or selection["kind"] != "flow" or not isinstance(selection["id"], str)
@@ -458,18 +461,24 @@ def rule_refine_prepare(request, selection, _arguments):
     return _teaching_form_prepare(request, selection, "rule_refine")
 
 
+# The flow designer's editor at /flows/designer/<id>, and the same editor in the
+# workflow builder's Steps mode (/workflow-builder?mode=steps&flow=<id>; the
+# page names the flow in the selection, and every check reads the flow itself).
+FLOW_EDITOR_PAGES = ("/flows/designer/*", "/workflow-builder")
+
+
 def entries():
     return (Adapter("learning.workflow_run", "Run this published workflow", "learning", "/flows/designer",
-                    ("/flows/designer/*",), EmptyInput, snapshot, prepare,
+                    FLOW_EDITOR_PAGES, EmptyInput, snapshot, prepare,
                     aliases=("run this workflow", "start this workflow", "run published workflow")),
             Adapter("learning.workflow_harden", "Review fixed action for this step", "learning", "/workflows",
-                    ("/flows/designer/*",), HardeningBindings, harden_snapshot, harden_prepare, harden_execute,
+                    FLOW_EDITOR_PAGES, HardeningBindings, harden_snapshot, harden_prepare, harden_execute,
                     aliases=("harden this step", "make this step a fixed action", "apply flow improvement")),
             Adapter("learning.workflow_turn_off", "Turn off this flow", "learning", "/workflows",
-                    ("/flows/designer/*",), EmptyInput, off_snapshot, off_prepare, off_execute,
+                    FLOW_EDITOR_PAGES, EmptyInput, off_snapshot, off_prepare, off_execute,
                     aliases=("unpublish this flow", "stop this flow", "turn off this flow")),
             Adapter("learning.workflow_delete", "Delete this flow", "learning", "/workflows",
-                    ("/flows/designer/*",), EmptyInput, delete_snapshot, delete_prepare, delete_execute,
+                    FLOW_EDITOR_PAGES, EmptyInput, delete_snapshot, delete_prepare, delete_execute,
                     aliases=("delete this flow", "remove this flow")),
             Adapter("learning.examples_review", "Check recent learning examples", "learning", "/learning/examples",
                     ("/learning/examples",), EmptyInput, examples_snapshot, examples_prepare,
