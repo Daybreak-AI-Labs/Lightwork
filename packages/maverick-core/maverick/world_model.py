@@ -1805,7 +1805,7 @@ class WorldModel:
 
     def record_signoff(self, goal_id: int, decision: str, *,
                        decided_by: str = "", note: str | None = None,
-                       expected_updated_at: float | None = None) -> bool:
+                       expected_updated_at: float | None = None, _cursor=None) -> bool:
         """Record a human's certify/reject decision on a finished deliverable --
         the sign-off a pack's output gate calls for. One authoritative row per
         goal (a later decision replaces an earlier one); the note is encrypted
@@ -1822,7 +1822,7 @@ class WorldModel:
         """
         if decision not in {"approved", "rejected"}:
             raise ValueError("decision must be 'approved' or 'rejected'")
-        with self._writing() as conn:
+        with (self._writing() if _cursor is None else contextlib.nullcontext(_cursor)) as conn:
             sql = (
                 "INSERT INTO signoffs(goal_id, decision, decided_by, "
                 "note, created_at) SELECT id, ?, ?, ?, ? FROM goals "

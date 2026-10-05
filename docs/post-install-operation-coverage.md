@@ -74,6 +74,22 @@ was run for these additions. Whole-product Copilot parity remains open.
 
 ## High-impact action review (October 3, 2026)
 
+Finished-result sign-off now retains the actual accepted reviewer, result
+version and receipt atomically with the native decision. Chat and the selected
+result's Copilot can recover an interrupted response without resubmitting the
+decision or repeating learning or a configured handoff. A previous person's
+matching decision remains attributed to that person. Changed results are
+identified as historical receipts. Follow-through is reported as attempted or
+uncertain rather than proof of delivery or training. The native SQLite browser
+journey covers these controls; the PostgreSQL transaction path remains
+source-reviewed rather than live-deployment-qualified.
+
+Learned-skill prompt construction now rechecks the exact saved admitted bytes,
+current tenant and source permission after ranking. A withdrawn or replaced
+artifact stays unavailable even if a held object is relabeled as manual.
+Ordinary manual skills retain their existing behavior. This check protects the
+next prompt construction; it cannot remove instructions already sent to a model.
+
 Safety settings keep practice predictions in watch-only mode by default. An
 administrator who selects Hold mode now gets a fresh Approvals request when a
 prediction would stop a high-impact step. The review card commits the exact

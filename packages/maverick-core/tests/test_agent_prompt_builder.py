@@ -133,7 +133,10 @@ def test_skill_overlays_appends_and_returns_skills(monkeypatch):
     sk = [_FakeSkill("a"), _FakeSkill("b")]
     monkeypatch.setattr("maverick.skills.available_skills", lambda: ["all"])
     monkeypatch.setattr("maverick.skills.relevant_skills", lambda brief, avail, max_n=3: sk)
-    monkeypatch.setattr("maverick.skills.render_for_prompt", lambda skills: "RENDERED")
+    def render(skills, *, rendered_skills):
+        rendered_skills.extend(skills)
+        return "RENDERED"
+    monkeypatch.setattr("maverick.skills.render_for_prompt", render)
     base, skills = apply_skill_overlays("BASE", brief="do x", use_skills=True)
     assert base == "BASE\n\nRENDERED"
     assert skills == sk  # caller uses these to record stats + skills_used

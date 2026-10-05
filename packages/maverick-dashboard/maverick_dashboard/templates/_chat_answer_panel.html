@@ -33,10 +33,14 @@
               <button id="signoff-approve" class="btn btn--primary" type="button" data-decision="approved">{{ ui("Approve") }}</button>
               <button id="signoff-reject" class="btn btn--ghost" type="button" data-decision="rejected">{{ ui("Reject") }}</button>
             </div>
-            <p id="signoff-msg" role="status" aria-live="polite" class="muted" style="min-height: 1em; margin: var(--space-2) 0 0;"></p>
           {% else %}
             <p class="signoff__prompt muted">{% if goal.status == 'done' %}An authorized task owner must review this result before sharing.{% else %}{{ ui('Approval opens when the result is finished.' if deliverable.gate == 'approval' else 'Sign-off opens when the result is finished.') }}{% endif %}</p>
           {% endif %}
+          <div class="signoff__actions">
+            <button id="signoff-copilot" class="btn btn--ghost" type="button">{{ ui("Review result with Copilot") }}</button>
+            <button id="signoff-recover" class="btn btn--ghost" type="button" hidden>{{ ui("Check my original decision") }}</button>
+          </div>
+          <p id="signoff-msg" role="status" aria-live="polite" class="muted" style="min-height: 1em; margin: var(--space-2) 0 0;"></p>
         </div>
       {% endif %}
       {% if goal.status in ('done', 'blocked', 'failed') %}

@@ -212,8 +212,10 @@ def apply_skill_overlays(
         skills = relevant_skills(brief, available_skills(),
                                  max_n=3 if depth == 0 else 1)
         if skills:
-            base = base + "\n\n" + render_for_prompt(skills)
-            return base, list(skills)
+            delivered = []
+            overlay = render_for_prompt(skills, rendered_skills=delivered)
+            if overlay:
+                return base + "\n\n" + overlay, delivered
     except (ImportError, FileNotFoundError, ValueError):
         pass
     return base, []

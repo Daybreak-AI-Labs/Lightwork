@@ -2423,7 +2423,7 @@ class PostgresWorldModel:
 
     def record_signoff(
         self, goal_id: int, decision: str, *, decided_by: str = "",
-        note: str | None = None, expected_updated_at: float | None = None,
+        note: str | None = None, expected_updated_at: float | None = None, _cursor=None,
     ) -> bool:
         """Record a human's certify/reject decision on a deliverable. One row per
         goal (a later decision replaces an earlier one).
@@ -2437,7 +2437,7 @@ class PostgresWorldModel:
         if decision not in {"approved", "rejected"}:
             raise ValueError("decision must be 'approved' or 'rejected'")
         frag, fparams = _tenant_scope()
-        with self._tx() as cur:
+        with (self._tx() if _cursor is None else nullcontext(_cursor)) as cur:
             check_sql = (
                 "SELECT status, updated_at FROM goals WHERE id=%s"
             )

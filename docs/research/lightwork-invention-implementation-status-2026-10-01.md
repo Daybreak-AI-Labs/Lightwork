@@ -116,6 +116,17 @@ current ownership and learning permission, isolates the cache by tenant/path,
 and withholds unbound legacy answers. These are concrete runtime repairs, not
 proof that an entire research direction or installation has been qualified.
 
+The next F03 correction binds a human's finished-result decision and its exact
+actor/result receipt in the native sign-off transaction. Direct Chat controls
+and Copilot recover that original receipt without repeating learning or a
+configured handoff, and label prior reviewers and historical results honestly.
+Channel decisions now carry the original card into the same transaction-local
+approval guard, refusing a competing claim or changed card rather than voting
+on stale material. F05 also checks the exact admitted learned-skill file and
+tenant after selection and before prompt construction; withdrawal, replacement
+and relabeling cannot revive a retained learned object. These concrete repairs
+do not undo text already sent to a model or qualify an entire learning family.
+
 | ID | Status | Present code and exact remaining boundary |
 | --- | --- | --- |
 | P01 | Research only | A [feature-prefix transition model](https://github.com/Daybreak-AI-Labs/Lightwork/blob/1c27445dda93e21e2eb38ef2dde5193646832da8/packages/maverick-core/maverick/generative_world_model.py#L1-L25) generalizes within a fixed representation. It does not discover missing state distinctions and revise representation and procedure together. |

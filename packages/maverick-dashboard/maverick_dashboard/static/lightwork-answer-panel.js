@@ -6,6 +6,8 @@
   var message = document.getElementById('answer-refresh-status'), retry = document.getElementById('answer-refresh');
   var inFlight = null, generation = 0, lastStatus = panel.dataset.status, lastResult = null;
   var denied = false, forceAgain = false;
+  var pendingSignoff = null, signoffRecoveryLoaded = false;
+  var signoffCheckInFlight = false;
   function say(node, source, values) {
     if (window.LightworkI18n) window.LightworkI18n.set(node, source, values);
     else node.textContent = source.replace(/\{(\w+)\}/g, function (_, key) { return values && values[key] !== undefined ? values[key] : _; });
@@ -35,7 +37,8 @@
       });
       var approve = panel.querySelector("#" + 'signoff-approve');
       var reject = panel.querySelector("#" + 'signoff-reject');
-      if (!approve && !reject) return;
+      var recover = panel.querySelector('#signoff-recover'), copilot = panel.querySelector('#signoff-copilot');
+      if (!approve && !reject && !recover) return;
       var note = panel.querySelector("#" + 'signoff-note');
       var msg = panel.querySelector("#" + 'signoff-msg');
       var goalId = Number(panel.dataset.goal);
@@ -43,7 +46,66 @@
       // server rejects this version if a result or artifact changed meanwhile.
       var reviewedUpdatedAt = Number(panel.dataset.updatedAt);
       var btns = [approve, reject];
+      var key = 'lightwork-result-review:' + panel.dataset.context + ':' + goalId;
+      function liveReviewPanel() {
+        var live = document.getElementById('answer-panel');
+        return !denied && live && live.dataset.goal === String(goalId) && live.dataset.context === context ? live : null;
+      }
+      if (!signoffRecoveryLoaded) {
+        try { pendingSignoff = JSON.parse(sessionStorage.getItem(key) || 'null'); } catch (_) {}
+        if (pendingSignoff && (!/^[a-f0-9]{32}$/.test(pendingSignoff.id) || typeof pendingSignoff.version !== 'number')) pendingSignoff = null;
+        signoffRecoveryLoaded = true;
+      }
+      function uncertain() {
+        btns.forEach(function (b) { if (b) b.disabled = true; });
+        if (recover) recover.hidden = false;
+        say(msg, 'Your decision response was interrupted. Check the original receipt before making another decision. Nothing will be submitted again by this check.');
+      }
+      if (pendingSignoff) uncertain();
+      if (recover) recover.disabled = signoffCheckInFlight;
+      async function checkOriginal() {
+        if (!pendingSignoff || !recover || signoffCheckInFlight) return;
+        var attempt = pendingSignoff;
+        signoffCheckInFlight = true;
+        recover.disabled = true;
+        try {
+          var r = await fetch('/api/v1/goals/' + goalId + '/signoff?operation_id=' + attempt.id, {cache:'no-store'});
+          if ([401,403,404].includes(r.status)) { clearPrivate(); return; }
+          if (!r.ok) {
+            var failure = await r.json().catch(function () { return {}; }), errorPanel = liveReviewPanel();
+            if (errorPanel) window.mvRenderError(errorPanel.querySelector('#signoff-msg'), r, 'check the original decision', failure);
+            return;
+          }
+          var value = await r.json();
+          var live = liveReviewPanel();
+          if (!live || !pendingSignoff || pendingSignoff.id !== attempt.id) return;
+          say(live.querySelector('#signoff-msg'), value.message + (value.receipt && Number(live.dataset.updatedAt) !== attempt.version ? ' The result on this page has changed since that review.' : ''));
+          if (value.receipt) {
+            sessionStorage.removeItem(key); pendingSignoff = null; recover.hidden = true;
+            var currentRecover = live.querySelector('#signoff-recover'); if (currentRecover) currentRecover.hidden = true;
+            if (note && value.receipt.changed) note.value = '';
+            window.mvRefreshAnswerPanel();
+          }
+        } catch (e) {
+          var errorPanel = liveReviewPanel();
+          if (errorPanel) say(errorPanel.querySelector('#signoff-msg'), 'The original receipt could not be checked. Try this check again; your decision has not been submitted again.');
+        } finally {
+          signoffCheckInFlight = false;
+          var current = liveReviewPanel(), button = current && current.querySelector('#signoff-recover');
+          if (button) button.disabled = false;
+        }
+      }
+      if (recover) recover.addEventListener('click', checkOriginal);
+      if (copilot) copilot.addEventListener('click', function () {
+        document.dispatchEvent(new CustomEvent('lightwork:product-selection', {detail:{kind:'goal',id:goalId}}));
+        var fab = document.getElementById('mv-copilot-fab'); if (fab) fab.click();
+      });
       function submit(decision) {
+        if (pendingSignoff) { uncertain(); return; }
+        var identity = window.crypto.randomUUID().replace(/-/g, '');
+        pendingSignoff = {id:identity,version:reviewedUpdatedAt};
+        try { sessionStorage.setItem(key, JSON.stringify(pendingSignoff)); }
+        catch (_) { pendingSignoff = null; say(msg, 'Your browser could not retain a recovery reference. Allow this site to save session data before recording a decision.'); return; }
         btns.forEach(function (b) { if (b) b.disabled = true; });
         msg.style.color = 'var(--muted)';
         say(msg, 'Recording…');
@@ -53,18 +115,30 @@
             decision: decision,
             expected_updated_at: reviewedUpdatedAt,
             note: (note && note.value.trim()) || null,
+            operation_id: identity,
+            expected_context: panel.dataset.context,
           }),
         }).then(function (r) {
-          if (r.ok) { panel.querySelector('#signoff-note').value = ''; window.mvRefreshAnswerPanel(); return; }
+          if (r.ok) { return r.json().then(function (j) {
+            if (!j.receipt) { uncertain(); return; }
+            sessionStorage.removeItem(key); pendingSignoff = null;
+            if (note && j.receipt.changed) note.value = '';
+            say(msg, j.receipt.message); window.mvRefreshAnswerPanel();
+          }); }
           return r.json().catch(function () { return {}; }).then(function (j) {
             msg.style.color = 'var(--danger)';
             window.mvRenderError(msg, r, 'record the sign-off', j);
-            btns.forEach(function (b) { if (b) b.disabled = false; });
+            if ([401,403,404].includes(r.status)) { clearPrivate(); return; }
+            if (r.status < 500) {
+              sessionStorage.removeItem(key); pendingSignoff = null;
+              if (r.status === 409) window.mvRefreshAnswerPanel();
+              else btns.forEach(function (b) { if (b) b.disabled = false; });
+            }
+            else uncertain();
           });
         }).catch(function (e) {
           msg.style.color = 'var(--danger)';
-          say(msg, cgErr(e, 'record the sign-off'));
-          btns.forEach(function (b) { if (b) b.disabled = false; });
+          uncertain();
         });
       }
       if (approve) approve.addEventListener('click', function () { submit('approved'); });

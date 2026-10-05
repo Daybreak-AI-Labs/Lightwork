@@ -11747,7 +11747,7 @@ def chat_goal(request: Request, goal_id: int) -> HTMLResponse:
             "rendered": rendered,
             "signoff": signoff,
             "artifacts": artifacts,
-            "answer_version": version_for(g, contract, signoff, artifacts),
+            "answer_version": version_for(g, contract, signoff, artifacts, handed_off),
             "projects": projects,
             "share_links": share_links,
             "withheld_markers": _withheld_event_markers(),

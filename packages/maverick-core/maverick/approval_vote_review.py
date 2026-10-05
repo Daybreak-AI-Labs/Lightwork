@@ -13,6 +13,27 @@ def approval_review_identity(approval) -> str:
     return digest(material)
 
 
+def channel_vote_review(world, approval, *, status: str, actor: str, binding: str | None) -> dict:
+    """Bind a channel's original row to the existing transaction-local guard.
+
+    This captures no permissions, acknowledgement or quorum authority. Normal
+    quorum progression remains native; changed material, owner, claim and undo
+    round are checked by ``require_locked_vote_review`` under its reservation.
+    """
+    from .channel_approvals import ChannelApprovalRefused
+
+    content_owner = approval.requested_by or ""
+    if approval.goal_id:
+        goal = world.get_goal(approval.goal_id)
+        if goal is None:
+            raise ChannelApprovalRefused("stale_card", "The request's original task is unavailable. Review its current status before deciding.")
+        content_owner = goal.owner or ""
+    return {"actor": actor, "approval_id": approval.id, "status": status,
+            "identity": approval_review_identity(approval), "state": None,
+            "event_id": world.approval_audit_event_id(approval.id, status, actor),
+            "content_owner": content_owner, "binding": binding}
+
+
 def require_locked_vote_review(approval, review: dict, *, status: str, actor: str,
                                event_id: str, approvers: list[str], audit_pending: int,
                                content_owner: str | None) -> None:

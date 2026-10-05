@@ -10578,19 +10578,13 @@ def _goal_shape(domain: str) -> str:
 
 
 @router.get("/goals/{goal_id}/signoff")
-def get_signoff(request: Request, goal_id: int) -> dict:
+def get_signoff(request: Request, goal_id: int,
+                operation_id: str | None = Query(default=None, pattern=r"^[a-f0-9]{32}$")) -> dict:
     """The current sign-off on a goal's deliverable, plus the gate its pack
     declares (so the UI knows whether a sign-off is even called for)."""
-    w = _world()
-    g = w.get_goal(goal_id)
-    if g is None:
-        raise HTTPException(status_code=404, detail="no such goal")
-    assert_goal_access(request, g)
-    return {
-        "gate": _goal_gate(g.domain),
-        "deliverable_updated_at": g.updated_at,
-        "signoff": w.signoff_for(goal_id),
-    }
+    from .task_signoff_operations import read
+
+    return read(request, goal_id, operation_id)
 
 
 @router.post("/goals/{goal_id}/signoff")
@@ -10598,47 +10592,9 @@ def post_signoff(request: Request, goal_id: int, payload: SignoffIn) -> dict:
     """Record a human's certify/reject decision on a finished deliverable -- the
     governed hand-off step (agents draft; humans certify). 400 if the pack
     declares no gate (there is nothing to sign off)."""
-    require_permission(request, "operate")
-    w = _world()
-    g = w.get_goal(goal_id)
-    if g is None:
-        raise HTTPException(status_code=404, detail="no such goal")
-    assert_goal_access(request, g)
-    if _goal_gate(g.domain) is None:
-        raise HTTPException(status_code=400, detail="this deliverable has no sign-off gate")
-    if g.status != "done":
-        raise product_error(409, "task_unfinished", "This task must finish before its result can be signed off.",
-                            next_action=next_action("Review task progress", f"/chat/goal/{goal_id}"))
-    who = _supervisor(request)
-    try:
-        changed = w.record_signoff(
-            goal_id,
-            payload.decision,
-            decided_by=who,
-            note=payload.note,
-            expected_updated_at=payload.expected_updated_at,
-        )
-    except ValueError as exc:
-        # Optimistic version binding: a concurrent edit/rerun means the human
-        # reviewed stale bytes. Reload and require a fresh decision.
-        raise product_error(409, "stale_version", "The result changed after you reviewed it. Review the current result before deciding.",
-                            next_action=next_action("Review the current result", f"/chat/goal/{goal_id}")) from exc
-    # Feed the human's certify/reject verdict back into the learning loop as a
-    # GROUNDED outcome: a person judging the actual deliverable is the cleanest
-    # ground-truth signal in the system, and it lands as exactly the
-    # (goal_id, episode_id, value) tuple the Consequence Engine / data-engine
-    # already consume. Both verdicts are signal -- an approval is a 1.0 reward,
-    # a rejection a 0.0. Best-effort and gated: no-op unless [consequence] is on.
-    if changed:
-        _record_signoff_outcome(w, goal_id, payload.decision)
-        if payload.decision == "approved":
-            _handoff_approved_deliverable(g, who)
-    return {
-        "gate": _goal_gate(g.domain),
-        "deliverable_updated_at": g.updated_at,
-        "changed": changed,
-        "signoff": w.signoff_for(goal_id),
-    }
+    from .task_signoff_operations import decide
+
+    return decide(request, goal_id, payload)
 
 
 def _ground_outcome(w, goal_id: int, value: float, *, kind: str) -> bool:

@@ -591,6 +591,9 @@ def decide_from_channel(
         raise ChannelApprovalRefused(
             "not_pending", "This request was already decided or no longer exists.",
         )
+    from .approval_vote_review import channel_vote_review
+
+    review = channel_vote_review(world, approval, status=decision, actor=who, binding=binding)
     if authorize is not None:
         authorize(who, int(approval_id))
     if approval.provenance == SETTINGS_PROVENANCE:
@@ -604,7 +607,7 @@ def decide_from_channel(
     require_acknowledgement(approval, who=who, channel=channel, decision=decision,
                             confirmed=confirmed, acknowledged=acknowledged,
                             typed_confirmation=typed_confirmation)
-    event = record_vote(world, int(approval_id), decision, who)
+    event = record_vote(world, int(approval_id), decision, who, reviewed_card=review)
     delivered = audit_approval_decision(world, event)
     try:
         state = world.approval_state(int(approval_id)) or {}
