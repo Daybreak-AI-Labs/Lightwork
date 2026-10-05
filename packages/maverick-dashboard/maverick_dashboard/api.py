@@ -61,6 +61,7 @@ from ._shared import (
 )
 from ._shared import _world_cache as _world_cache  # re-export: tests clear api._world_cache
 from ._shared import dashboard_token as _dashboard_token
+from .answer_feedback_operations import FeedbackChangeIn as FeedbackIn
 from .api_schemas import (
     ActiveTenantIn,
     AgentGraduationIn,
@@ -106,7 +107,6 @@ from .api_schemas import (
     ExternalCredentialIn,
     FactIn,
     FeatureSwitchIn,
-    FeedbackIn,
     FileWorkEnableIn,
     FleetAgentAddIn,
     FleetCreateIn,
@@ -8693,7 +8693,7 @@ def get_flywheel_state(request: Request) -> dict:
 
         out["signal"] = {
             "grounded_outcomes": consequence.count(),
-            "human_feedback": goal_feedback_store.count(owner=goal_owner_filter(request)),
+            "human_feedback": goal_feedback_store.count(owner=goal_owner_filter(request), world=_world()),
         }
     except Exception:  # pragma: no cover
         pass
@@ -10636,43 +10636,18 @@ def _record_signoff_outcome(w, goal_id: int, decision: str) -> None:
 
 @router.get("/goals/{goal_id}/feedback")
 def get_feedback(request: Request, goal_id: int) -> dict:
-    """The current human thumbs-up/down on a goal's result (or ``null``)."""
-    w = _world()
-    g = w.get_goal(goal_id)
-    if g is None:
-        raise HTTPException(status_code=404, detail="no such goal")
-    assert_goal_access(request, g)
-    from maverick_dashboard import goal_feedback_store
+    """Read feedback with the current saved-answer authority and binding."""
+    from .answer_feedback_operations import read
 
-    return {"feedback": goal_feedback_store.latest_for_goal(goal_id, owner=g.owner or "")}
+    return JSONResponse({"feedback": read(request, goal_id)["feedback"]}, headers={"Cache-Control": "private, no-store"})
 
 
 @router.post("/goals/{goal_id}/feedback")
 def post_feedback(request: Request, goal_id: int, payload: FeedbackIn) -> dict:
-    """Record a human thumbs-up/down on a goal's result.
+    """Compatibility path uses the same reviewed result and original receipt."""
+    from .answer_feedback_operations import submit
 
-    The always-available verdict: unlike the sign-off gate (which only exists when
-    a pack declares one), any finished result can be rated here, and the rating is
-    fed back into the learning loop as a GROUNDED outcome -- an up is a 1.0 reward,
-    a down a 0.0 -- exactly the ``(goal_id, episode_id, value)`` tuple the
-    Consequence Engine / flywheel consume. Persisted for the UI + the "what your
-    workforce learned" count. Best-effort grounding, gated on ``[consequence]``."""
-    require_permission(request, "operate")
-    w = _world()
-    g = w.get_goal(goal_id)
-    if g is None:
-        raise HTTPException(status_code=404, detail="no such goal")
-    assert_goal_access(request, g)
-    value = 1.0 if payload.rating == "up" else 0.0
-    who = _supervisor(request)
-    from maverick_dashboard import goal_feedback_store
-
-    row = goal_feedback_store.record(
-        goal_id, g.owner or "", payload.rating, value=value, note=payload.note or "", by=who
-    )
-    observed = _ground_outcome(w, goal_id, value, kind="feedback")
-    return {"feedback": row, "saved": True, "learning_observation": "recorded" if observed else "not_recorded",
-            "training_completed": False}
+    return JSONResponse(submit(request, goal_id, payload), headers={"Cache-Control": "private, no-store"})
 
 
 @router.post("/goals/{goal_id}/deliverable/edit")
@@ -17051,115 +17026,9 @@ async def get_department_api(request: Request, key: str) -> dict:
 
 @router.post("/departments/{key}/deploy", status_code=201)
 async def deploy_department_api(request: Request, response: Response, key: str) -> dict:
-    """Deploy a department as a fleet of its specialists — a PAID ADD-ON.
-
-    Gated four ways: ``operate`` RBAC (a viewer is 403'd), the caller's
-    department grant (a finance-scoped user deploying Legal is 403'd),
-    owner-scoping (you cannot clobber another owner's fleet — that 404s), and
-    the ``departments`` entitlement (a tenant without the add-on is 402'd).
-    Mirrors ``maverick.departments.deploy_department`` so the CLI enforces the
-    same entitlement gate.
-    """
-    require_permission(request, "operate")
-    from maverick.departments import (
-        EntitlementError,
-        deploy_department,
-        fleet_name_for,
-        get_department,
-        merge_department_fleet,
-    )
-    from maverick.file_lock import cross_process_lock
-    from maverick.fleet import fleets_dir, load_fleet, save_fleet
-    from maverick.suite_grants import DepartmentAccessError
-
-    dept = get_department(key)
-    if dept is None:
-        raise HTTPException(status_code=404, detail="no such department")
-    require_suite(request, key)
-
-    principal = caller_principal(request)
-    owner = principal or ""
-    fleet_name = fleet_name_for(key, owner)
-    existing = load_fleet(fleet_name)
-    if (
-        existing is not None
-        and existing.owner != owner
-    ):
-        raise HTTPException(status_code=404, detail="no such fleet")
-
-    tenant = _department_request_tenant()
-    if tenant is None and _has_managed_tenant_roster():
-        raise HTTPException(
-            status_code=402,
-            detail="departments add-on requires an active tenant",
-        )
-    if not _department_entitled_for_request(key):
-        raise HTTPException(status_code=402, detail=str(EntitlementError(key)))
-
-    from maverick.domain_edit import list_agents
-
-    by_name = {agent["name"]: agent for agent in list_agents()}
-    action_status = _department_action_status(dept.members, by_name)
-    if action_status["ready_specialists"] == 0 and existing is None:
-        raise HTTPException(
-            status_code=409,
-            detail="This team has no specialists whose required actions passed setup checks. "
-                   "Open View team to see what needs setup before deploying.",
-        )
-
-    try:
-        fleet = deploy_department(key, owner, tenant=tenant, save=False)
-    except EntitlementError as e:
-        raise HTTPException(status_code=402, detail=str(e)) from e
-    except DepartmentAccessError as e:
-        # Kernel backstop (maverick.departments enforces the grant for every
-        # caller); the require_suite gate above normally 403s first.
-        raise HTTPException(
-            status_code=403, detail="insufficient department access for this action"
-        ) from e
-    if fleet is None:  # suite disabled between the check and the deploy
-        raise HTTPException(status_code=404, detail="no such department")
-    # A department may have one runnable specialist and many whose required
-    # actions are unavailable. Do not deploy those specialists as selectable
-    # fleet agents only to block their first task after the customer assigns it.
-    ready_names = {
-        name for name in dept.members
-        if by_name.get(name, {}).get("readiness", {}).get("state") == "action_ready"
-    }
-    from dataclasses import replace
-
-    fleet = replace(fleet, agents=tuple(a for a in fleet.agents if a.name in ready_names))
-    if not fleet.agents and existing is None:
-        raise HTTPException(
-            status_code=409,
-            detail="No ready specialist remains in this team. Open View team to check its setup.",
-        )
-    deployed_names = {a.name for a in fleet.agents}
-    skipped = [
-        {
-            "name": name,
-            "reason": by_name.get(name, {}).get("readiness", {}).get("label")
-                      or "Setup check unavailable",
-            "fix_url": by_name.get(name, {}).get("readiness", {}).get("fix_url")
-                       or "/workforce",
-        }
-        for name in dept.members if name not in deployed_names
-    ]
-    target_tenant = tenant or "__active__"
-    with cross_process_lock(fleets_dir(tenant=target_tenant) / f"{fleet_name}.json"):
-        current = load_fleet(fleet_name, tenant=target_tenant)
-        if current is not None and current.owner != owner:
-            raise HTTPException(status_code=404, detail="no such fleet")
-        if not fleet.agents and current is None:
-            raise HTTPException(status_code=409, detail="No ready specialist remains in this team.")
-        baseline_created = current is not None and not current.department_members_added
-        fleet, added_count = merge_department_fleet(fleet, current, known_members=dept.members)
-        save_fleet(fleet, tenant=target_tenant)
-    response.status_code = 201 if current is None else 200
-    return {"fleet": fleet.to_dict(), "deployed_count": len(fleet.agents),
-            "created": current is None, "added_count": added_count,
-            "baseline_created": baseline_created,
-            "skipped_count": len(skipped), "skipped_specialists": skipped}
+    from .department_team_updates import authorize
+    authorize(request, key)
+    raise HTTPException(409, "Review the saved team before changing it. Open Workforce or Agent Factory, choose the department, and select Update team or Set up team. No team was changed.")
 
 
 @router.get("/departments/{key}/review")

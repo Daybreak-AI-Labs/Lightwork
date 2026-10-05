@@ -1,23 +1,20 @@
-"""Append-only store of human feedback on a goal's result.
+"""Retained workspace feedback compatibility and owner-scoped signal counts.
 
-The sign-off gate (``/goals/{id}/signoff``) is the *governed* certify/reject, but
-it only exists when a pack declares an output gate. Most runs have no gate, so
-until now a person looking at a finished result had no way to say "this was
-right" / "this was wrong" -- a dead signal the learning loop never saw. This is
-that always-available thumbs-up/down: it grounds a real outcome into the
-Consequence Engine (via the shared self-outcome helper) AND persists the verdict
-here so the UI can show the current rating and the "what your workforce learned"
-view can count the human signal accumulated.
+New customer feedback is saved as an encrypted, exact-answer-bound native
+receipt by ``result_feedback_receipts``. This module reads the older workspace
+log without claiming its rows identify the currently displayed answer or an
+original reviewed operation. Its legacy writer is retained for compatibility;
+the reviewed dashboard route does not use it. Counts combine both stores.
 
-Append-only NDJSON (the ``consequence`` / ``trigger_events`` store shape): 0600,
-best-effort (never raises), bounded tail, latest row per goal wins. Owner-stamped
-for owner-scoped reads.
+A human rating is a feedback signal, not proof of real business performance,
+successful training, or the separate governed sign-off required by some work.
 """
 from __future__ import annotations
 
+import json
 import time
 
-from maverick.ndjson_log import append_row, clamp01, tail_rows
+from maverick.ndjson_log import append_row, clamp01
 from maverick.paths import data_dir
 
 _MAX_ROWS = 5000  # bound the tail we read back; the file itself grows unbounded
@@ -47,7 +44,26 @@ def record(goal_id: int, owner: str, rating: str, *, value: float,
 
 
 def _read_rows() -> list[dict]:
-    return tail_rows(_path(), _MAX_ROWS)
+    path = _path()
+    if not path.exists():
+        return []
+    # Bound both records and bytes when reading the retained workspace log.
+    with path.open("rb") as stream:
+        end = stream.seek(0, 2)
+        start = max(0, end - 4 * 1024 * 1024)
+        stream.seek(start)
+        raw = stream.read(4 * 1024 * 1024)
+    if start:
+        raw = raw.partition(b"\n")[2]
+    rows = []
+    for line in raw.splitlines()[-_MAX_ROWS:]:
+        try:
+            value = json.loads(line)
+        except (ValueError, UnicodeError):
+            continue
+        if isinstance(value, dict):
+            rows.append(value)
+    return rows
 
 
 def latest_for_goal(goal_id: int, *, owner: str) -> dict | None:
@@ -60,7 +76,7 @@ def latest_for_goal(goal_id: int, *, owner: str) -> dict | None:
     return hit
 
 
-def count(*, owner: str | None = None) -> int:
+def count(*, owner: str | None = None, world=None) -> int:
     """How many distinct goals have human feedback (accumulated human signal).
     ``owner=None`` counts all; a specific owner counts only its own."""
     seen: set[int] = set()
@@ -71,6 +87,9 @@ def count(*, owner: str | None = None) -> int:
             seen.add(int(r.get("goal_id")))
         except (TypeError, ValueError):
             continue
+    if world is not None:
+        from maverick.result_feedback_receipts import rated_goals
+        seen.update(rated_goals(world, owner=owner))
     return len(seen)
 
 

@@ -129,6 +129,7 @@
   </dialog>
 
   <script src="/static/board.js"></script>
+  <script src="/static/lightwork-department-team-updates.js"></script>
   <script>
   (function () {
     'use strict';
@@ -336,63 +337,12 @@
         var deptTitle = (card.querySelector("h3") || {}).textContent || key;
 
         if (act === "deploy") {
-          if (btn.dataset.inFlight === "true") return;
-          btn.dataset.inFlight = "true";
-          var updating = btn.dataset.deployed === 'true';
-          if (!(await mvConfirm(updating
-            ? "Check the " + deptTitle + " team for new ready specialists? Your specialists and changes will stay."
-            : "Set up the " + deptTitle + " team? If it already exists, your changes will stay while Lightwork checks for new ready specialists.",
-            { okText: updating ? "Update team" : "Set up team" }
-          ))) { delete btn.dataset.inFlight; return; }
-          var box = card.querySelector(".dept-detail");
-          box.hidden = false;
-          box.textContent = "Deploying…";
-          btn.disabled = true;
-          btn.setAttribute("aria-busy", "true");
-          try {
-            var response = await fetch("/api/v1/departments/" + encodeURIComponent(key) + "/deploy", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" }
-            });
-            var body = await response.json().catch(function () { return {}; });
-            var res = { ok: response.ok, status: response.status, body: body };
-            if (res.ok) {
-              var f = res.body.fleet || {};
-              var deployed = Number(res.body.deployed_count || (f.agents || []).length);
-              var added = Number(res.body.added_count || 0);
-              var skipped = Number(res.body.skipped_count || 0);
-              var result = res.body.created
-                ? "Team set up with " + deployed + " specialist" + (deployed === 1 ? '' : 's') + ". "
-                : res.body.baseline_created
-                  ? "Team kept as it is. Future new catalog specialists can be added on an update; your existing changes were kept. "
-                : added ? "Added " + added + " new specialist" + (added === 1 ? '' : 's') + ". Your existing team changes were kept. "
-                  : "Team unchanged. Your existing specialists and changes were kept; no new ready specialists were added. ";
-              box.innerHTML = "<p><strong>" + esc(human(f.name)) + "</strong> — " + esc(result) +
-                (skipped ? esc(skipped) + " catalog specialists still need setup. Use View team to see what they need. " : "") +
-                (deployed ? "Give the team tasks from " : "Add specialists in ") +
-                "<a href=\"/fleets#team-" + esc(encodeURIComponent(f.name || '')) + "\">Teams</a>" +
-                (deployed ? "." : " before giving it work.") + "</p>";
-              btn.dataset.deployed = 'true';
-              btn.textContent = 'Update team';
-              btn.setAttribute('aria-label', 'Update ' + deptTitle + ' team');
-            } else if (res.status === 402) {
-              box.innerHTML = "<p class=\"muted\">This department is a paid add-on. " +
-                "Ask your administrator to add it to your plan.</p>";
-            } else {
-              // textContent escapes on its own; passing esc()'d text here would
-              // double-encode (show literal &amp; / &lt;).
-              box.textContent = window.mvErrorText
-                ? window.mvErrorText(res, "deploy the " + deptTitle + " team")
-                : "Could not deploy the " + deptTitle + " team. Try again.";
-            }
-          } catch (error) {
-            box.textContent = "Could not deploy the " + deptTitle +
-              " team — check your connection and try again.";
-          } finally {
-            delete btn.dataset.inFlight;
-            btn.removeAttribute("aria-busy");
-            btn.disabled = false;
+          if (!window.LWDepartmentTeamUpdates) {
+            card.querySelector('.dept-detail').hidden = false;
+            card.querySelector('.dept-detail').textContent = 'The team review could not load. Reload this page before saving the team.';
+            return;
           }
+          await window.LWDepartmentTeamUpdates.open(key, btn);
           return;
         }
 

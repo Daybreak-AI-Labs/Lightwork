@@ -17,8 +17,8 @@
       host.appendChild(form);
       var note = document.createElement('p'); note.className = 'muted';
       note.textContent = 'Recovery copies keep unsent text. Attachments must be selected again after reload; files are not kept in a recovery copy.';
-      host.appendChild(note);
       form.mvRecovery = window.mvDraftRecovery.create({host: host,
+        compact: true, information: note,
         key: 'chat-composer:' + new URL(form.action).pathname, read: read,
         restore: function (draft) {
           fields.forEach(function (field) { if(field.name==="connection_references")field.value="[]"; if (typeof draft[field.name] === 'string') field.value = draft[field.name]; });

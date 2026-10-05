@@ -7,16 +7,29 @@ from maverick_dashboard import automation_queue as aq
 
 
 @pytest.fixture
-def calls(monkeypatch):
+def calls(monkeypatch, safe_learning_stores):
     seen: list[str] = []
     monkeypatch.setattr(aq, "_run_for_active_tenants", lambda _op, fn: fn() or True)
     monkeypatch.setattr(aq, "_world", lambda: object())
     monkeypatch.setattr(dreaming, "enabled", lambda: True)
-    monkeypatch.setattr(dreaming, "snapshot_learning_state",
-                        lambda keep_last: seen.append(f"snapshot:{keep_last}"))
+    original_snapshot = dreaming.snapshot_learning_state
+
+    def snapshot(*, keep_last, publish_empty, raise_on_error):
+        assert publish_empty is True and raise_on_error is True
+        seen.append(f"snapshot:{keep_last}")
+        return original_snapshot(keep_last=keep_last, publish_empty=publish_empty, raise_on_error=raise_on_error)
+
+    monkeypatch.setattr(dreaming, "snapshot_learning_state", snapshot)
     monkeypatch.setattr(dreaming, "dream_cycle", lambda _w: seen.append("cycle"))
     monkeypatch.setattr("maverick.self_improvement_runner.nightly_self_harness_enabled", lambda: False)
     return seen
+
+
+@pytest.fixture(autouse=True)
+def safe_learning_stores(monkeypatch, tmp_path):
+    # Unit worker seams must never copy import-time paths from a user's home.
+    monkeypatch.setattr(dreaming, "_live_stores", lambda: {"guardrails.json": tmp_path / "guardrails.json"})
+    monkeypatch.setattr(dreaming, "snapshots_dir", lambda: tmp_path / "snapshots")
 
 
 def test_snapshot_precedes_the_cycle(calls, monkeypatch):
@@ -25,16 +38,18 @@ def test_snapshot_precedes_the_cycle(calls, monkeypatch):
     assert calls == ["snapshot:3", "cycle"]
 
 
-def test_snapshots_off_is_honoured(calls, monkeypatch):
+def test_snapshots_off_blocks_unprotected_learning(calls, monkeypatch):
     monkeypatch.setattr(dreaming, "settings", lambda: {"snapshots": False})
-    aq._handle_dream()
-    assert calls == ["cycle"]
+    with pytest.raises(RuntimeError, match="safety copies"):
+        aq._handle_dream()
+    assert calls == []
 
 
 def test_failed_snapshot_blocks_the_cycle(calls, monkeypatch):
     monkeypatch.setattr(dreaming, "settings", dict)
 
-    def boom(keep_last):
+    def boom(**kwargs):
+        assert kwargs["publish_empty"] and kwargs["raise_on_error"]
         raise OSError("disk full")
 
     monkeypatch.setattr(dreaming, "snapshot_learning_state", boom)

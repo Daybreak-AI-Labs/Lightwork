@@ -12,6 +12,7 @@ from maverick.safety.secret_detector import redact
 from . import auth
 from .approval_authority import require_approval_authority
 from .content_access import require_approval_content
+from .identity_format import humanize_principal, role_label
 
 
 def selected_id(selection: dict) -> int:
@@ -107,6 +108,48 @@ def public(world, row, who: str) -> dict:
             "Approvals needed": int(state.get("approvals_required", 1)),
             "Next step": {"label": "Open this request's full review", "href": f"/approvals#approval-{row.id}"},
             "Meaning": "Authorization, execution and external verification are separate. This decision does not prove an action ran."}
+
+
+def private_review(request, approval_id: int, *, status: str | None = None) -> dict:
+    """The native private card, never the shared/channel or model projection.
+
+    Recheck the same queue/content/decision authority before opening exact
+    display text. Validated cards already redact secrets while preserving
+    command lines; do not shorten them or reuse the shared summary here.
+    """
+    world, row = owned(request, approval_id, status=status)
+    try:
+        exact = decode_approval_detail(row.detail)
+    except ApprovalCardError as exc:
+        if status == "approved":
+            raise HTTPException(409, "This request's complete details could not be verified. Open its full review in Approvals before deciding.") from exc
+        exact = None
+    if exact is None:
+        if status == "approved":
+            raise HTTPException(409, "This older request needs its full review in Approvals before deciding.")
+        try:
+            description, _matches = redact(row.detail or "")
+        except Exception as exc:
+            raise HTTPException(409, "This request's full description is unavailable. Open its protected review in Approvals before deciding.") from exc
+        return {**public(world, row, actor(request)), "Complete saved description": description,
+                "Review limit": "These older or unverified details cannot authorize an action. You may reject this request and ask for a fresh verified review."}
+    result = public(world, row, actor(request))
+    result.update({"Request": exact["action"], "Description": exact["summary"],
+                   "Applies to": exact["target"]["label"],
+                   "Requested by": humanize_principal(exact["authority"]["actor"]).name,
+                   "Requesting role": role_label(exact["authority"]["role"]),
+                   "Workspace": exact["authority"]["workspace"],
+                   "Decide by": datetime.fromtimestamp(exact["expires_at"], timezone.utc).strftime("%d %b %Y, %H:%M:%S UTC"),
+                   "What it will do": exact["parameters"]["summary"],
+                   "Before": exact["preview"]["before"], "After": exact["preview"]["after"],
+                   "Cannot be undone": exact["consequences"]["irreversible"],
+                   "Known effects": exact["consequences"]["known_effects"],
+                   "Open questions": exact["consequences"]["unresolved_assumptions"],
+                   "Recorded connection versions": exact["credentials"],
+                   "Recorded spending allowance": exact["budget"]})
+    if exact.get("display"):
+        result["Command it will run"] = exact["display"]["command"]
+    return result
 
 
 def receipt(world, event) -> dict:

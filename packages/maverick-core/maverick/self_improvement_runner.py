@@ -1903,6 +1903,16 @@ def nightly_self_harness_enabled() -> bool:
 
 
 def run_nightly_self_harness(world) -> dict:
+    """Protect standalone and combined nightly mutations with a complete point."""
+    if not nightly_self_harness_enabled():
+        return {}
+    from .dreaming import learning_mutation_scope
+
+    with learning_mutation_scope():
+        return _run_nightly_self_harness(world)
+
+
+def _run_nightly_self_harness(world) -> dict:
     """Run the configured nightly loop under the same gates as a manual pass.
 
     Only aggregate counts enter the activity record; customer examples, model

@@ -1,6 +1,7 @@
 {# Shared full-page/live result projection. All values remain autoescaped. #}
 <section id="answer-panel" data-goal="{{ goal.id }}" data-updated-at="{{ goal.updated_at }}"
          data-version="{{ answer_version|default('') }}" data-context="{{ conversation_context }}"
+         data-run-details-version="{{ answer_run_details_version|default('') }}"
          data-status="{{ goal.status }}" data-structured="{{ '1' if rendered and rendered.structured else '0' }}"
          data-operate="{{ '1' if can_operate else '0' }}">
     {% if handoff_closed %}<p id="handoff-closed-notice" role="status">{{ ui('Responsibility was accepted by {actor}. This original conversation is closed to further execution and its history remains private.', actor=handoff_closed.actor) }} <a href="/task-handoffs">{{ ui("View the handoff receipt") }}</a>.</p>{% endif %}
@@ -15,6 +16,7 @@
       {% else %}
         <span class="sr-only" id="answer-result-label">{{ ui("Goal result") }}</span><div id="result" tabindex="0" aria-labelledby="answer-result-label" class="prose" data-markdown lang="und" dir="auto" data-user-content>{{ goal.result or '' }}</div>
       {% endif %}
+      <div id="answer-run-details-slot">{% include "_chat_answer_run_details.html" %}</div>
       {% if deliverable and deliverable.gate %}
         <div class="signoff" id="signoff">
           {% if signoff %}
@@ -52,12 +54,26 @@
            into the learning loop. #}
         {% if can_operate %}<div id="feedback" class="feedback" role="group" aria-label="{{ ut('Rate this result') }}" lang="{{ ul('Rate this result') }}">
           <span class="feedback__q muted">{{ ui("Was this useful?") }}</span>
-          <button id="feedback-up" class="btn btn--ghost" type="button"
+          <button id="feedback-up" class="btn btn--ghost" type="button" style="min-height:44px;min-width:44px;"
                   data-rating="up" aria-label="{{ ut('Yes, useful') }}" lang="{{ ul('Yes, useful') }}">👍</button>
-          <button id="feedback-down" class="btn btn--ghost" type="button"
+          <button id="feedback-down" class="btn btn--ghost" type="button" style="min-height:44px;min-width:44px;"
                   data-rating="down" aria-label="{{ ut('No, not useful') }}" lang="{{ ul('No, not useful') }}">👎</button>
-          <span id="feedback-msg" role="status" aria-live="polite" class="muted"
-                style="min-height: 1em;"></span>
+          <button id="feedback-review" class="btn btn--ghost" type="button" style="min-height:44px;">{{ ui('Review saved feedback') }}</button>
+          <button id="feedback-copilot" class="btn btn--ghost" type="button" style="min-height:44px;">{{ ui('Give feedback with Copilot') }}</button>
+          <div id="feedback-saved" class="muted" style="flex-basis:100%;overflow-wrap:anywhere;"></div>
+          <form id="feedback-form" hidden style="flex-basis:100%;min-width:0;">
+            <p id="feedback-choice" class="muted"></p>
+            <label for="feedback-note">{{ ui('What should be better? (optional)') }}</label>
+            <textarea id="feedback-note" class="input" rows="3" maxlength="500" lang="und" dir="auto" data-user-content
+                      aria-describedby="feedback-note-help" style="width:100%;box-sizing:border-box;"></textarea>
+            <p id="feedback-note-help" class="muted">{{ ui("Up to 500 characters. Describe what would help. Feedback does not edit this answer or confirm that training completed.") }}</p>
+            <div style="display:flex;flex-wrap:wrap;gap:var(--space-2);">
+              <button id="feedback-save" class="btn btn--primary" type="submit" style="min-height:44px;">{{ ui('Save feedback') }}</button>
+              <button id="feedback-cancel" class="btn btn--ghost" type="button" style="min-height:44px;">{{ ui('Cancel') }}</button>
+            </div>
+          </form>
+          <button id="feedback-recover" class="btn btn--ghost" type="button" hidden style="min-height:44px;">{{ ui('Check my original feedback') }}</button>
+          <span id="feedback-msg" role="status" aria-live="polite" class="muted" style="flex-basis:100%;min-height:1em;"></span>
         </div>{% endif %}
         {% if goal.result %}<div class="answer-actions" role="group" aria-label="{{ ut('Answer actions') }}">
           <button id="copy-result" class="btn btn--ghost" type="button">{{ ui('Copy answer') }}</button>

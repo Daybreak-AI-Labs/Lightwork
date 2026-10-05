@@ -27,6 +27,7 @@ import stat
 from functools import lru_cache
 from pathlib import Path
 
+from .authority_effects import authority_effect_fence
 from .domain import (
     _MAX_DOMAIN_FILE_BYTES,
     _OVERLAYABLE,
@@ -303,7 +304,7 @@ def write_override(name: str, patch: dict, directory: str | Path | None = None, 
     # Lock a stable sidecar, then publish a complete private file. Atomic
     # replacement also replaces a planted final-component symlink rather than
     # following it to an attacker-selected target.
-    with cross_process_lock(path, strict=True):
+    with authority_effect_fence(), cross_process_lock(path, strict=True):
         if expected_generation == "new":
             if path.exists() or name in available_domains():
                 raise OverrideConflict("An agent with this name already exists. Open its latest version or choose a new name.")
@@ -337,7 +338,7 @@ def remove_override(name: str, directory: str | Path | None = None, *, expected_
     name = _validated_override_name(name)
     d = Path(directory) if directory else user_dir()
     path = d / f"{name}.toml"
-    with cross_process_lock(path, strict=True):
+    with authority_effect_fence(), cross_process_lock(path, strict=True):
         if expected_generation is not None and not hmac.compare_digest(expected_generation, _override_generation(name, path)):
             raise OverrideConflict("This agent changed after you opened it. Reload its latest version before resetting it.")
         if path.is_file():

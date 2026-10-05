@@ -63,8 +63,20 @@ def task_snapshot(request, selection):
                                  "href": f"/chat/goal/{goal.id}"})
 
 
-def task_preview(request, selection, args):
+def current_status_snapshot(request, selection):
+    from .answer_run_details import read as read_run_details
+
+    world, goal = _task(request, selection)
     state = task_snapshot(request, selection)
+    run_details = read_run_details(request, world, goal.id, expected_goal=goal)
+    details = dict(state.details)
+    details["recorded_run"] = ({key: run_details[key] for key in ("price_text", "elapsed_text", "scope")}
+                               if run_details else "No retained run figures match this saved answer.")
+    return replace(state, revision=digest({"answer": state.revision, "run": run_details}), details=details)
+
+
+def task_preview(request, selection, args):
+    state = current_status_snapshot(request, selection)
     return Preview("Read the current saved result and execution status. A saved result does not prove external delivery.",
                    [{"label": "Task", "after": state.details}])
 
@@ -266,7 +278,7 @@ def entries():
 
     return (
         Adapter("tasks.current_status", "Read this task's status and saved result", "tasks", "/chat", TASK_PAGES,
-                EmptyInput, task_snapshot, task_preview),
+                EmptyInput, current_status_snapshot, task_preview),
         Adapter("clarifications.answer", "Answer a task question", "clarifications", "/chat", TASK_PAGES,
                 AnswerInput, answer_snapshot, answer_preview, answer_execute, answer_recover, read_recovery=answer_recover),
         Adapter("artifacts.edit_saved_result", "Revise the saved result", "artifacts", "/chat", TASK_PAGES,

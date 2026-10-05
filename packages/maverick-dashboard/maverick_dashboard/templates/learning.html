@@ -428,8 +428,9 @@
       <div class="lrn__actions">
         <label for="lrn-snapshot">Saved point</label>
         <select id="lrn-snapshot" class="select"><option value="">Loading…</option></select>
-        <button type="button" class="btn btn--danger" id="lrn-rollback">Go back to this point</button>
+        <button type="button" class="btn btn--danger" id="lrn-rollback" disabled>Go back to this point</button>
       </div>
+      <div id="lrn-snapshot-coverage" role="status" aria-live="polite"></div>
 
       <h3 class="lrn__section-h">Check whether anything useful was lost</h3>
       <p class="lrn__section-sub">Compares past tasks against the saved point above: which ones Lightwork now has a lesson for, and which ones it lost.
@@ -492,6 +493,38 @@
         '• retire ' + plural(d.skills_retired, 'skill', 'skills') + ' that stopped working and tidy ' + plural(d.notes_tidied, 'old note', 'old notes')]
         .concat(d.paused ? ['Learning is paused while its checks recover, so nothing new was kept.'] : []);
     }
+    var savedPointCoverage = null, savedPointGeneration = 0;
+    async function loadCoverage() {
+      var generation = ++savedPointGeneration, name = $('lrn-snapshot').value;
+      savedPointCoverage = null;
+      $('lrn-rollback').disabled = true;
+      if (!name) { show('lrn-snapshot-coverage', ['There is no saved point to review yet.']); return; }
+      show('lrn-snapshot-coverage', ['Checking the saved learning information…']);
+      var d = await call('GET', '/api/v1/learning/snapshots/' + encodeURIComponent(name) + '/coverage', null, 'read this saved point', 'lrn-snapshot-coverage');
+      if (generation !== savedPointGeneration || $('lrn-snapshot').value !== name) return;
+      if (!d) return;
+      if (!Array.isArray(d.labels) || !/^[a-f0-9]{64}$/.test(d.revision || '')) {
+        show('lrn-snapshot-coverage', ['This saved point could not be verified. Nothing was restored.']); return;
+      }
+      savedPointCoverage = { name: name, revision: d.revision, labels: d.labels };
+      show('lrn-snapshot-coverage', ['This saved point covers: ' + d.labels.join(', ') + '.', d.notice, d.source_notice, d.preserved].filter(Boolean));
+      $('lrn-rollback').disabled = false;
+    }
+    $('lrn-snapshot').addEventListener('change', loadCoverage);
+    window.LightworkLearningSavedPoints = {
+      open: async function (name, revision) {
+        var sel = $('lrn-snapshot');
+        if (!Array.from(sel.options).some(function (option) { return option.value === name; })) await loadSnapshots();
+        if (!Array.from(sel.options).some(function (option) { return option.value === name; })) return false;
+        sel.value = name;
+        await loadCoverage();
+        if (!savedPointCoverage || savedPointCoverage.name !== name || savedPointCoverage.revision !== revision) return false;
+        $('learning-tab-review').click();
+        sel.scrollIntoView({ block: 'center' });
+        sel.focus({ preventScroll: true });
+        return true;
+      }
+    };
     async function loadSnapshots() {
       var sel = $('lrn-snapshot');
       var d = await call('GET', '/api/v1/learning/snapshots', null, 'load the saved points');
@@ -501,6 +534,7 @@
         var o = document.createElement('option'); o.value = ''; o.textContent = 'No saved points yet'; sel.appendChild(o);
       }
       list.forEach(function (s) { var o = document.createElement('option'); o.value = s.value; o.textContent = s.label; sel.appendChild(o); });
+      await loadCoverage();
     }
     $('lrn-dream-preview').addEventListener('click', async function (ev) {
       ev.target.disabled = true;
@@ -518,14 +552,24 @@
       if (d) { show('lrn-dream-result', dreamLines(d)); loadSnapshots(); }
     });
     $('lrn-rollback').addEventListener('click', async function (ev) {
-      var sel = $('lrn-snapshot');
-      if (!sel.value) { window.mvToast('There is no saved point to go back to yet.', { error: true }); return; }
+      var sel = $('lrn-snapshot'), reviewed = savedPointCoverage;
+      if (!reviewed || reviewed.name !== sel.value) { window.mvToast('Read the saved point before restoring it.', { error: true }); return; }
       var label = sel.options[sel.selectedIndex].textContent;
-      if (!(await mvConfirm('Restore the learned information covered by the saved point from ' + label + '? Newer information in those learning stores will be replaced. Completed work and connected-service changes remain.', { okText: 'Go back' }))) return;
+      if (!(await mvConfirm('Restore ' + reviewed.labels.join(', ') + ' from ' + label + '? Newer information in these learning families will be replaced. Completed work, approvals and activity remain current.', { okText: 'Go back' }))) return;
+      if (savedPointCoverage !== reviewed || sel.value !== reviewed.name) { window.mvToast('The selected saved point changed. Review it again.', { error: true }); return; }
       ev.target.disabled = true;
-      var d = await call('POST', '/api/v1/learning/rollback', { snapshot: sel.value }, 'go back to the saved point');
-      ev.target.disabled = false;
-      if (d) window.mvToast('Restored what Lightwork knew at ' + label + '.');
+      var d = await call('POST', '/api/v1/learning/rollback', { snapshot: reviewed.name, revision: reviewed.revision }, 'go back to the saved point', 'lrn-snapshot-coverage');
+      if (d) {
+        window.mvToast('Restored the reviewed learning information from ' + label + '.');
+        await loadCoverage();
+      } else {
+        savedPointCoverage = null;
+        var warning = document.createElement('p'); warning.textContent = 'Check current lessons and learning records before another attempt.';
+        $('lrn-snapshot-coverage').appendChild(warning);
+        var check = document.createElement('button'); check.type = 'button'; check.className = 'btn btn--ghost';
+        check.textContent = 'Read this saved point again'; check.addEventListener('click', loadCoverage);
+        $('lrn-snapshot-coverage').appendChild(check);
+      }
     });
     $('lrn-hindsight').addEventListener('click', async function (ev) {
       ev.target.disabled = true;

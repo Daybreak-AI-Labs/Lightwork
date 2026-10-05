@@ -28,8 +28,11 @@ loaders); writes propagate so a failed promotion is never silently dropped.
 from __future__ import annotations
 
 import contextlib
+import contextvars
+import hashlib
 import json
 import logging
+import math
 import os
 import sqlite3
 import time
@@ -244,6 +247,152 @@ def _where(predicate: str) -> str:
 
 def _and(predicate: str) -> str:
     return f" AND {predicate}" if predicate else ""
+
+
+def guidance_source() -> dict:
+    """Private exact backend binding; never includes a connection string."""
+    from .paths import current_tenant_id_strict
+    from .self_harness import _store_path, settings
+
+    cfg = settings()
+    if not cfg.get("_config_valid", True):
+        raise RuntimeError("Current learning storage settings are unavailable")
+    mode = str(cfg.get("store") or "files").strip().lower()
+    if mode not in {"files", "world"}:
+        raise RuntimeError("Current learning storage is unsupported")
+    tenant = current_tenant_id_strict()
+    backend = "files" if mode == "files" else "postgres" if _postgres() else "sqlite"
+    location = (_pg_dsn() if backend == "postgres" else str(
+        (_sqlite_path() if mode == "world" else _store_path()).resolve()))
+    binding = hashlib.sha256(json.dumps(
+        [backend, tenant, location], separators=(",", ":"),
+    ).encode()).hexdigest()
+    return {"mode": mode, "backend": backend, "tenant": tenant, "binding": binding}
+
+
+_guidance_scope: contextvars.ContextVar[dict | None] = contextvars.ContextVar(
+    "learning_guidance_snapshot_scope", default=None,
+)
+
+
+@contextlib.contextmanager
+def derived_guidance_fence():
+    """Common cross-process fence for file-derived guidance and safety copies."""
+    from .file_lock import cross_process_lock
+    from .paths import data_dir
+
+    with cross_process_lock(data_dir("learning-state-writes"), strict=True):
+        yield
+
+
+@contextlib.contextmanager
+def guidance_fence():
+    """Use the production addenda/provenance writer fence, once per capture.
+
+    This is held only while copying/restoring state, never while a model runs.
+    The shared Postgres advisory lock fences the whole two-table transaction.
+    """
+    from .file_lock import cross_process_lock
+    from .self_harness import _lock, _store_path, _store_rmw_lock
+
+    expected = guidance_source()
+    with (derived_guidance_fence(), _lock,
+          cross_process_lock(_store_path(), strict=True), _store_rmw_lock(_store_path())):
+        if guidance_source() != expected:
+            raise RuntimeError("Learning storage changed; prepare a new safety copy")
+        token = _guidance_scope.set(expected)
+        try:
+            yield expected
+        finally:
+            _guidance_scope.reset(token)
+
+
+def _require_guidance_fence(source: dict) -> None:
+    if _guidance_scope.get() != source or guidance_source() != source:
+        raise RuntimeError("Learning guidance must use its current mutation fence")
+
+
+def validate_guidance_snapshot(state: dict, source: dict) -> None:
+    """Refuse malformed or differently scoped derived guidance before writes."""
+    if (not isinstance(state, dict) or set(state) != {"version", "source", "addenda", "line_meta"}
+            or type(state["version"]) is not int or state["version"] != 1
+            or state["source"] != source or source["mode"] != "world"):
+        raise RuntimeError("The safety copy belongs to different learning storage")
+    for family in ("addenda", "line_meta"):
+        rows = state[family]
+        if not isinstance(rows, list) or len(rows) > 10000:
+            raise RuntimeError("The saved learning guidance exceeds its supported bounds")
+        seen = set()
+        for row in rows:
+            if (not isinstance(row, list) or len(row) != 3
+                    or not isinstance(row[0], str) or not row[0] or len(row[0]) > 10000
+                    or row[0] in seen or not isinstance(row[1], str)
+                    or len(row[1].encode()) > 2 * 1024 * 1024
+                    or type(row[2]) not in (int, float) or not math.isfinite(row[2])):
+                raise RuntimeError("The saved learning guidance is invalid")
+            seen.add(row[0])
+            if family == "line_meta":
+                parsed = json.loads(row[1])
+                if not isinstance(parsed, dict):
+                    raise RuntimeError("The saved learning provenance is invalid")
+                json.dumps(parsed, allow_nan=False)
+    if len(json.dumps(state, allow_nan=False).encode()) > 32 * 1024 * 1024:
+        raise RuntimeError("The saved learning guidance exceeds its supported bounds")
+
+
+def export_guidance_snapshot() -> dict:
+    """Strict selective read under guidance_fence; customer/history rows stay live."""
+    source = _guidance_scope.get()
+    if source is None or source["mode"] != "world":
+        raise RuntimeError("The current learning guidance fence is required")
+    _require_guidance_fence(source)
+    pred, params = _tenant_predicate()
+    with _conn() as c:
+        # SQLite's ordinary SELECT does not begin a read transaction itself.
+        if isinstance(c, sqlite3.Connection):
+            c.execute("BEGIN")
+        state = {"version": 1, "source": source}
+        total = 0
+        for key, table, columns in (
+            ("addenda", "harness_addenda", "key, block, updated_at"),
+            ("line_meta", "harness_line_meta", "line_id, record, updated_at"),
+        ):
+            identity, content, _ = columns.split(", ")
+            size = (lambda col: f"octet_length({col})") if _postgres() else (
+                lambda col: f"length(CAST({col} AS BLOB))")
+            count, amount, maximum = _rows(c,
+                f"SELECT COUNT(*), COALESCE(SUM({size(identity)} + {size(content)}), 0), "
+                f"COALESCE(MAX({size(content)}), 0) FROM {table}{_where(pred)}", params)[0]
+            total += amount
+            if count > 10000 or maximum > 2 * 1024 * 1024 or total > 32 * 1024 * 1024:
+                raise RuntimeError("Current learned guidance exceeds the safety-copy bounds")
+            state[key] = [list(row) for row in _rows(
+                c, f"SELECT {columns} FROM {table}{_where(pred)} LIMIT 10001", params,
+            )]
+        _require_guidance_fence(source)
+    validate_guidance_snapshot(state, source)
+    return state
+
+
+def restore_guidance_snapshot(state: dict) -> None:
+    """Atomically replace only this tenant's accepted guidance and provenance."""
+    source = _guidance_scope.get()
+    if source is None:
+        raise RuntimeError("The current learning guidance fence is required")
+    _require_guidance_fence(source)
+    validate_guidance_snapshot(state, source)
+    pred, params = _tenant_predicate()
+    tcol, tph, tparam = _tenant_column()
+    with _conn() as c:
+        for key, table, columns in (
+            ("addenda", "harness_addenda", "key, block, updated_at"),
+            ("line_meta", "harness_line_meta", "line_id, record, updated_at"),
+        ):
+            _exec(c, f"DELETE FROM {table}{_where(pred)}", params)
+            for row in state[key]:
+                _exec(c, f"INSERT INTO {table} ({columns}{tcol}) "
+                      f"VALUES ({_ph(3)}{tph})", (*row, *tparam))
+        _require_guidance_fence(source)
 
 
 def load_addenda_db() -> dict[str, str]:

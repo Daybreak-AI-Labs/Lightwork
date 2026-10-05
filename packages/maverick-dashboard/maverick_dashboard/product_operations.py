@@ -140,6 +140,7 @@ def _adapter_modules():
     # every advertised native capability statically reachable and mandatory.
     from . import (
         product_operations_activation,
+        product_operations_answer_feedback,
         product_operations_approval_challenges,
         product_operations_approvals,
         product_operations_audit_checkpoints,
@@ -153,6 +154,7 @@ def _adapter_modules():
         product_operations_consent_jobs,
         product_operations_conversation,
         product_operations_department_boards,
+        product_operations_department_teams,
         product_operations_devices,
         product_operations_diagnostics,
         product_operations_dsar_handoff,
@@ -167,6 +169,7 @@ def _adapter_modules():
         product_operations_installation_security,
         product_operations_instruction_capture,
         product_operations_knowledge,
+        product_operations_learning_cycles,
         product_operations_learning_history,
         product_operations_learning_lessons,
         product_operations_learning_program,
@@ -196,6 +199,7 @@ def _adapter_modules():
     return (
         product_operations_approvals,
         product_operations_approval_challenges,
+        product_operations_answer_feedback,
         product_operations_preferences,
         product_operations_audit_checkpoints,
         product_operations_companion,
@@ -211,6 +215,7 @@ def _adapter_modules():
         product_operations_consent_jobs,
         product_operations_notifications,
         product_operations_department_boards,
+        product_operations_department_teams,
         product_operations_outcome_pilots,
         product_operations_budget,
         product_operations_models,
@@ -224,6 +229,7 @@ def _adapter_modules():
         product_operations_flow_releases,
         product_operations_form_recovery,
         product_operations_knowledge,
+        product_operations_learning_cycles,
         product_operations_learning_history,
         product_operations_instruction_capture,
         product_operations_installation_security,

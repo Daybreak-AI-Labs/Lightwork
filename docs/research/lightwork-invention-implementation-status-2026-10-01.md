@@ -108,6 +108,15 @@ and candidate run their exact retained child maps. The current bounds are
 establishes a usable bounded implementation, without claiming held-out accuracy,
 causal customer lift, universal workflow coverage or research novelty.
 
+The learning safety-copy path now covers safeguards, habits and accepted model
+instructions/provenance in addition to its earlier six families. Exact saved
+bytes and tenant/storage bindings are checked before restoration; legacy copies
+cannot erase newer learning families they never covered. The next native recall
+uses the restored guidance. Required safety copies precede manual and scheduled
+cycles, and current coverage is reviewed in the ordinary UI and Copilot. This
+narrows F03/F05's recovery gap; it does not roll back customer observations,
+external actions, provider training or every proposed learning mechanism.
+
 October 5 runtime corrections add two specific foundations. F03 outside-agent
 requests now retain distinct unknown-effect and asynchronous-acceptance states,
 with read-only recent receipts in the ordinary page and authorized Copilot;

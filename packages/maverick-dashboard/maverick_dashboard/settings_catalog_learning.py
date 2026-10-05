@@ -226,9 +226,9 @@ def _overnight(S) -> tuple:
           group, "30 */6 * * *", "maverick_dashboard.automation_queue", subgroup=_NIGHT,
           choices=_EVERY_HALF),
         S("dreaming", "snapshots", "Save a restore point before learning",
-          "Save what Lightwork knows before each learning run, so you can go back.",
+          "Keep a checked copy of the covered learned information before each improvement cycle. Customer work and activity stay current.",
           "toggle", group, True, "maverick.config", subgroup=_NIGHT, weaker=False,
-          warning="You will not be able to go back to before a learning run."),
+          warning="Scheduled and manual learning cycles will stop until restore points are turned on again."),
         S("dreaming", "benchmark_gate", "Hold back new skills while test results slip",
           "Keep newly learned skills on hold while the tracked test results are getting "
           "worse.", "toggle", group, True, "maverick.config", subgroup=_NIGHT, weaker=False,

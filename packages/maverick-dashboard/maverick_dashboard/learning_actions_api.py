@@ -43,6 +43,7 @@ class DreamIn(BaseModel):
 
 class RollbackIn(BaseModel):
     snapshot: str = Field(min_length=1, max_length=80)
+    revision: str = Field(pattern=r"^[a-f0-9]{64}$")
 
 
 class HindsightIn(BaseModel):
@@ -135,6 +136,25 @@ async def snapshots(request: Request) -> dict:
     return {"snapshots": [{"value": n, "label": snapshot_label(n)} for n in reversed(names)]}
 
 
+
+def current_snapshot_coverage(request: Request, name: str) -> dict:
+    require_global_permission(request, "admin")
+    from maverick import dreaming
+    if name == "latest" or not _SNAPSHOT.fullmatch(name):
+        raise HTTPException(422, "Choose one named saved point from the list.")
+    try:
+        return dreaming.snapshot_coverage(name)
+    except ValueError as exc:
+        raise HTTPException(404, "That saved point no longer exists.") from exc
+    except (OSError, RuntimeError) as exc:
+        raise HTTPException(409, "This saved point cannot be safely read. Choose another point or check your learning safety copies. Nothing was restored.") from exc
+
+
+@router.get("/learning/snapshots/{name}/coverage")
+async def saved_point_coverage(request: Request, name: str) -> dict:
+    return await run_in_threadpool(current_snapshot_coverage, request, name)
+
+
 def _dream(preview: bool) -> dict:
     from maverick import dreaming
     from maverick.learning_guard import check_learning_halt
@@ -143,10 +163,8 @@ def _dream(preview: bool) -> dict:
         report = dreaming.dream_cycle_dry(world)
     else:
         check_learning_halt("dreaming", "dashboard_start")
-        cfg = dreaming.settings()
-        if cfg.get("snapshots", True):
-            dreaming.snapshot_learning_state(keep_last=int(cfg.get("snapshot_keep_last", 5)))
-        report = dreaming.dream_cycle(world)
+        with dreaming.learning_mutation_scope():
+            report = dreaming.dream_cycle(world)
     return {"preview": preview, "tasks_reviewed": report.goals_replayed,
             "failures_reviewed": report.failures_replayed,
             "lessons_written": report.insights_written,
@@ -165,10 +183,14 @@ async def run_dream(request: Request, body: DreamIn) -> dict:
     if not body.preview and not dreaming.enabled():
         raise HTTPException(status_code=409, detail=(
             "Turn on Dreaming under Learning systems first."))
+    if not body.preview and not dreaming.settings().get("snapshots", True):
+        raise HTTPException(409, "Turn on Save a restore point before learning in All settings, Memory & learning before starting. No learning was run.")
     try:
         result = await run_in_threadpool(_dream, body.preview)
     except Halted as exc:
         raise _halted(exc) from exc
+    except (OSError, RuntimeError) as exc:
+        raise HTTPException(503, "The learning cycle could not finish. Check learning safety copies and the current learning record before trying again.") from exc
     if not body.preview:
         await run_in_threadpool(
             lambda: _record(request, "dream_run", **{k: v for k, v in result.items()
@@ -176,28 +198,39 @@ async def run_dream(request: Request, body: DreamIn) -> dict:
     return result
 
 
-@router.post("/learning/rollback")
-async def rollback(request: Request, body: RollbackIn) -> dict:
+def restore_current_snapshot(request: Request, body: RollbackIn) -> dict:
+    from maverick.authority_effects import authority_effect_fence
+
+    with authority_effect_fence():
+        require_global_permission(request, "admin")
+        return _restore_reviewed_snapshot(request, body)
+
+
+def _restore_reviewed_snapshot(request: Request, body: RollbackIn) -> dict:
     require_global_permission(request, "admin")
     from maverick import dreaming
-    if body.snapshot != "latest" and not _SNAPSHOT.fullmatch(body.snapshot):
-        raise HTTPException(status_code=422, detail="Choose a saved point from the list.")
-    names = await run_in_threadpool(dreaming.list_snapshots)
-    if body.snapshot != "latest" and body.snapshot not in names:
-        raise HTTPException(status_code=404, detail="That saved point no longer exists.")
+    coverage = current_snapshot_coverage(request, body.snapshot)
+    if body.revision != coverage["revision"]:
+        raise HTTPException(409, "This saved point changed after review. Read its coverage again before restoring. Nothing was restored.")
     try:
-        restored = await run_in_threadpool(dreaming.rollback_learning_state, body.snapshot)
+        restored = dreaming.rollback_learning_state(
+            body.snapshot, expected_revision=body.revision,
+        )
     except ValueError as exc:
-        raise HTTPException(status_code=404, detail="That saved point no longer exists.") from exc
-    except Exception as exc:  # noqa: BLE001 -- earlier stores may already have been restored
-        raise HTTPException(status_code=503, detail=(
-            "Lightwork could not fully restore that saved point. Some learned information "
-            "may have changed. Review the Learned and Learning pages before trying again.")) from exc
+        raise HTTPException(404, "That saved point no longer exists.") from exc
+    except dreaming.LearningRollbackError as exc:
+        raise HTTPException(503, "Lightwork could not fully restore that saved point. Some learned information may have changed. Review the Learned and Learning pages before trying again.") from exc
+    except (OSError, RuntimeError) as exc:
+        raise HTTPException(409, "The saved point or learning storage changed or could not be safely checked. Nothing was restored. Read the saved point again before continuing.") from exc
     if not restored:
-        raise HTTPException(status_code=404, detail="There is no saved point to go back to yet.")
-    await run_in_threadpool(lambda: _record(request, "rollback", snapshot=body.snapshot,
-                                            restored=[str(n) for n in restored]))
-    return {"restored": len(restored)}
+        raise HTTPException(404, "There is no saved point to go back to yet.")
+    _record(request, "rollback", snapshot=body.snapshot, restored=[str(n) for n in restored])
+    return {"restored": len(restored), "coverage": coverage}
+
+
+@router.post("/learning/rollback")
+async def rollback(request: Request, body: RollbackIn) -> dict:
+    return await run_in_threadpool(restore_current_snapshot, request, body)
 
 
 @router.post("/learning/hindsight")

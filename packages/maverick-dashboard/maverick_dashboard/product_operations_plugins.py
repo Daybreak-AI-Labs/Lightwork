@@ -75,14 +75,20 @@ def migration_pins(request):
             identity = {"kind": kind, "record": row["goal_id"] if kind == "task" else row["run_id"],
                         "distribution": row["distribution"], "name": row["name"], "previous": row["fingerprint"]}
             result.append({**identity, "id": digest(identity), "state": row["state"],
-                           "label": kind.capitalize() + " " + str(identity["record"]) + " / " + row["name"] + " / " + row["state"]})
+                           "label": ("Task: " if kind == "task" else "Workflow: ") + row["title"] + " / " + row["name"] + " / " + row["state"],
+                           "title": row["title"], "version_recorded_at": row.get("updated_at")})
     return result
 
 
 def prepare(request, selection, arguments):
     value = state(request)
+    changes = []
     if "fingerprint" in arguments:
-        workbench.selected(arguments["fingerprint"])
+        selected = workbench.selected(arguments["fingerprint"])
+        changes.extend([{"label": "Selected plugin", "after": selected["name"]},
+                        {"label": "Installed version", "after": selected["version"]},
+                        {"label": "Publisher package", "after": selected["distribution"]},
+                        {"label": "Qualification scope", "after": selected["scope"]}])
     if "sample_json" in arguments:
         try:
             sample, expected = json.loads(arguments["sample_json"]), json.loads(arguments["expected_json"])
@@ -91,16 +97,36 @@ def prepare(request, selection, arguments):
             json.dumps([sample, expected], allow_nan=False)
         except (ValueError, TypeError) as exc:
             raise HTTPException(422, "Use valid finite JSON and an object input. No check started.") from exc
+        changes.extend([{"label": "Check", "after": {"sample": "Run the practice input and compare its answer",
+                        "timeout": "Observe whether the bounded check stops on time",
+                        "cancellation": "Observe whether the bounded check stops when cancelled"}[arguments["mode"]]},
+                        {"label": "Complete practice input", "after": json.dumps(sample, ensure_ascii=False, indent=2, allow_nan=False)},
+                        {"label": "Exact expected answer", "after": json.dumps(expected, ensure_ascii=False, indent=2, allow_nan=False)}])
+    if "rollback" in arguments:
+        changes.extend([{"label": "Action", "after": "Publish readiness for the reviewed restricted checks only"},
+                        {"label": "Affected work and restoration plan", "after": arguments["rollback"]}])
+    if "check_id" in arguments:
+        check_row = next((row for row in value["checks"] if row["id"] == arguments["check_id"]), None)
+        if check_row is None:
+            raise HTTPException(404, "Choose a saved check from your current qualification history.")
+        changes.extend([{"label": "Selected check", "after": check_row["plugin"] + " / " + check_row["version"]},
+                        {"label": "Check type", "after": check_row["mode"].capitalize()},
+                        {"label": "Current result", "after": check_row["state"].replace("_", " ")},
+                        {"label": "Action", "after": "Request cancellation; verify the original check's cleanup and outcome"}])
     prepared = {"context": value["context"]}
     if "pin" in arguments:
         pin = next((item for item in migration_pins(request) if item["id"] == arguments["pin"]), None)
-        selected = workbench.selected(arguments["fingerprint"])
         if pin is None or pin["distribution"] != selected["distribution"] or pin["name"] != selected.get("pin_name", selected["name"]):
             raise HTTPException(409, "Select an owned pin for this exact plugin before reviewing migration.")
         prepared["pin"] = pin
         prepared["new_content"] = selected["content_sha256"]
+        changes.extend([{"label": "Selected stopped work", "after": pin["label"]},
+                        {"label": "Current work status", "after": pin["state"].replace("_", " ")},
+                        {"label": "Version change", "before": "The exact version already recorded for this work",
+                         "after": selected["name"] + " / " + selected["version"]},
+                        {"label": "What happens next", "after": "Only this selected work's plugin version changes. No task resumes and no previous action repeats."}])
     return Preview("Review this exact plugin operation. Network, credentials and host writes remain unavailable; nothing installs, resumes or replays work.",
-                   native=prepared)
+                   changes=changes, native=prepared)
 
 
 def recover_check(request, selection, arguments, prepared, operation):

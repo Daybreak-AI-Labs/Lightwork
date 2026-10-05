@@ -78,6 +78,24 @@
     storageRefresh.type = storageRetire.type = 'button'; storageRefresh.className = storageRetire.className = 'btn btn--ghost';
     storageRefresh.textContent = 'Refresh storage summary'; storageRetire.textContent = 'Free discarded recovery space'; storageRetire.disabled = true;
     storage.append(storageTitle, storageStatus, storageRefresh, storageRetire); panel.append(storage);
+    // Chat's dock needs one quiet readiness row. The same native controls stay
+    // available in its disclosure; unresolved recovery always opens in full.
+    var compact = options.compact === true, disclosure = null, disclosureTitle = null, automaticallyOpened = false;
+    if (compact) {
+      disclosure = doc.createElement('details'); disclosureTitle = doc.createElement('summary');
+      disclosure.className = 'draft-recovery__compact'; disclosureTitle.textContent = 'Checking draft recovery…';
+      disclosureTitle.style.cssText = 'cursor:pointer;color:var(--muted);font-size:var(--text-xs);line-height:1.5';
+      var disclosureBody = doc.createElement('div');
+      disclosureBody.style.cssText = 'margin-top:var(--space-2);max-height:min(44vh,24rem);overflow:auto;overflow-wrap:anywhere';
+      while (panel.firstChild) disclosureBody.appendChild(panel.firstChild);
+      if (options.information) disclosureBody.appendChild(options.information);
+      disclosure.append(disclosureTitle, disclosureBody); panel.append(disclosure);
+      panel.style.cssText = 'padding:var(--space-2);margin-block:var(--space-2);min-width:0';
+      disclosureTitle.addEventListener('click', function (event) {
+        if (blocked || failed || pendingOperation) { event.preventDefault(); disclosure.open = true; }
+        else automaticallyOpened = false;
+      });
+    }
     function storageControls() { storageRefresh.disabled = storageBusy; storageRetire.disabled = storageBusy || !storageSnapshot || !storageSnapshot.discarded; }
     async function storageCall(body) {
       var response = await send('/api/v1/drafts/storage' + (body ? '/retire' : ''), {method:body ? 'POST' : 'GET', cache:'no-store',
@@ -123,6 +141,16 @@
         try { compare(remote, read()); }
         catch (_error) { contents.textContent = 'Current draft comparison is unavailable until credentials are removed. The recovery copy has been kept.'; }
       }
+      compactControls();
+    }
+    function compactControls() {
+      if (!compact) return;
+      var attention = blocked || failed || pendingOperation;
+      disclosureTitle.textContent = failed ? 'Draft recovery needs attention' : blocked ? 'Recovery copy needs review' :
+        pendingOperation ? 'Recovery save needs confirmation' : !initialized ? 'Checking draft recovery…' :
+        running || changed ? 'Keeping unsent text…' : remote ? 'Unsent text protected' : 'Draft recovery ready';
+      if (attention && !disclosure.open) { automaticallyOpened = true; disclosure.open = true; }
+      else if (!attention && automaticallyOpened) { automaticallyOpened = false; disclosure.open = false; }
     }
     // The label a person sees for a stored field: the editor's own label for
     // that control when there is one, else the field name in words.
@@ -219,6 +247,7 @@
     function markChanged(event) {
       if (event && panel.contains(event.target)) return;
       try { changed = JSON.stringify(read()) !== lastSaved; } catch (_error) { changed = true; }
+      compactControls();
       if (changed && initialized && !blocked) schedule();
     }
     async function confirmed(message) { return typeof root.mvConfirm === 'function' ? root.mvConfirm(message) : root.confirm(message); }
@@ -259,7 +288,7 @@
       if (!initialized) { await initialize(); return; }
       if (blocked) { status.textContent = 'Review the recovery copy, then choose Restore, Keep current draft, or Discard.'; return; }
       if (pendingOperation) {
-        if (await persist(pendingOperation.payload)) { changed = JSON.stringify(read()) !== lastSaved; if (changed) schedule(); }
+        if (await persist(pendingOperation.payload)) { changed = JSON.stringify(read()) !== lastSaved; compactControls(); if (changed) schedule(); }
       } else { changed = true; await saveChanged(); }
     }
     options.host.addEventListener('input', markChanged); options.host.addEventListener('change', markChanged);
@@ -273,7 +302,7 @@
         if (running || blocked) return false;
         root.clearTimeout(timer);
         if (!(await persist(null))) return false;
-        changed = false; lastSaved = JSON.stringify(read()); return true;
+        changed = false; lastSaved = JSON.stringify(read()); compactControls(); return true;
       },
       dispose:function () { disposed = true; root.clearTimeout(timer); root.removeEventListener('beforeunload', unload); options.host.removeEventListener('input', markChanged); options.host.removeEventListener('change', markChanged); }};
   }

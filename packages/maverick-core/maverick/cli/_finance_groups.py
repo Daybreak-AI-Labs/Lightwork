@@ -189,57 +189,51 @@ def dream(ctx, max_goals: int, rehearse: bool, rehearse_budget: float,
         )
         click.echo("(dry run -- nothing written) " + report.summary())
         return
-    # Learning rollback, half 1: snapshot every learned store before this
-    # cycle mutates anything, so `--rollback latest` can undo it wholesale.
     cfg = dreaming.settings()
-    if cfg.get("snapshots", True):
-        snap = dreaming.snapshot_learning_state(
-            keep_last=int(cfg.get("snapshot_keep_last", 5)),
+    with dreaming.learning_mutation_scope() as snap:
+        click.echo(f"[snapshot: {snap.name}]")
+        # LLM-in-the-loop consolidation (two-key opt-in: the dreaming algorithm
+        # knob plus the independent learning provider-egress authority):
+        # wire the SAME configured LLM the platform runs on (cheap summarizer role)
+        # into insight consolidation, metered by its own small budget and scanned by
+        # the shield. Fail-open: with the knob off this stays the deterministic path.
+        dream_llm = dream_budget = dream_shield = None
+        if dreaming._llm_consolidation_authorized(cfg):
+            from ..budget import Budget
+            from ..llm import LLM, model_for_role
+            dream_llm = LLM(model=model_for_role("summarizer"))
+            dream_budget = Budget(
+                max_dollars=float(cfg.get("llm_consolidation_budget", 1.0)),
+            )
+            try:
+                from maverick_shield import Shield
+                dream_shield = Shield.from_config()
+            except Exception:  # pragma: no cover -- kernel runs without the shield
+                dream_shield = None
+        report = _run_dreaming_guarded(
+            lambda: dreaming.dream_cycle(
+                world, max_goals=max_goals, donations_dir=donations_dir,
+                llm=dream_llm, budget=dream_budget, shield=dream_shield,
+            ),
         )
-        if snap is not None:
-            click.echo(f"[snapshot: {snap.name}]")
-    # LLM-in-the-loop consolidation (two-key opt-in: the dreaming algorithm
-    # knob plus the independent learning provider-egress authority):
-    # wire the SAME configured LLM the platform runs on (cheap summarizer role)
-    # into insight consolidation, metered by its own small budget and scanned by
-    # the shield. Fail-open: with the knob off this stays the deterministic path.
-    dream_llm = dream_budget = dream_shield = None
-    if dreaming._llm_consolidation_authorized(cfg):
-        from ..budget import Budget
-        from ..llm import LLM, model_for_role
-        dream_llm = LLM(model=model_for_role("summarizer"))
-        dream_budget = Budget(
-            max_dollars=float(cfg.get("llm_consolidation_budget", 1.0)),
-        )
+        click.echo(report.summary())
+        # Cognitive Data Engine: turn the flywheel as part of the nightly cycle --
+        # triage failures by causal impact, mine self-correcting guardrails,
+        # consolidate beneficial habits, propose improvements, all grounded in real
+        # outcomes. No-op unless [data_engine] is enabled; never breaks dreaming.
         try:
-            from maverick_shield import Shield
-            dream_shield = Shield.from_config()
-        except Exception:  # pragma: no cover -- kernel runs without the shield
-            dream_shield = None
-    report = _run_dreaming_guarded(
-        lambda: dreaming.dream_cycle(
-            world, max_goals=max_goals, donations_dir=donations_dir,
-            llm=dream_llm, budget=dream_budget, shield=dream_shield,
-        ),
-    )
-    click.echo(report.summary())
-    # Cognitive Data Engine: turn the flywheel as part of the nightly cycle --
-    # triage failures by causal impact, mine self-correcting guardrails,
-    # consolidate beneficial habits, propose improvements, all grounded in real
-    # outcomes. No-op unless [data_engine] is enabled; never breaks dreaming.
-    try:
-        from .. import data_engine
-        if data_engine.enabled():
-            from ..flywheel import maybe_run
-            fw = maybe_run()
-            if fw.acted:
-                click.echo(
-                    f"[flywheel] {len(fw.guardrails)} guardrails, {len(fw.memories)} "
-                    f"habits, {len(fw.hypotheses)} improvements "
-                    f"(recoverable lift ~{fw.predicted_lift:.2f})")
-    except Exception:  # pragma: no cover -- the flywheel must never break dreaming
-        pass
-    _run_self_harness_nightly(world)
+            from .. import data_engine
+            if data_engine.enabled():
+                from ..flywheel import maybe_run
+                fw = maybe_run()
+                if fw.acted:
+                    click.echo(
+                        f"[flywheel] {len(fw.guardrails)} guardrails, {len(fw.memories)} "
+                        f"habits, {len(fw.hypotheses)} improvements "
+                        f"(recoverable lift ~{fw.predicted_lift:.2f})")
+        except Exception:  # pragma: no cover -- the flywheel must never break dreaming
+            pass
+        _run_self_harness_nightly(world)
     if not rehearse:
         return
     cases = dreaming.load_rehearsals()

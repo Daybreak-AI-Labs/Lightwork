@@ -79,22 +79,51 @@
         : 'This check could not be completed. Reopen the control to read current status.');
     } finally { clearTimeout(timeout); pendingRequests.delete(controller); }
   }
-  function renderData(parent, value) {
-    var remaining = 160;
+  function renderData(parent, value, options) {
+    var complete = true, fullReview = !!(options && options.complete), remaining = fullReview ? 8192 : 160;
+    var maximumEntries = fullReview ? 2048 : 35, maximumDepth = fullReview ? 12 : 6;
+    function omitted(target) { complete = false; node('p', 'The complete details are available in the full controls.', target); }
     function append(target, item, depth) {
-      if (--remaining < 0 || depth > 6) { node('p', 'More details are available on the native page.', target); return; }
+      if (--remaining < 0 || depth > maximumDepth) { omitted(target); return; }
       if (item === null || item === undefined) { node('span', 'Not specified', target); return; }
-      if (typeof item !== 'object') { node('span', typeof item === 'boolean' ? (item ? 'Yes' : 'No') : item, target); return; }
+      if (typeof item !== 'object') {
+        var text = node('span', typeof item === 'boolean' ? (item ? 'Yes' : 'No') : item, target);
+        text.style.whiteSpace = 'pre-wrap'; text.style.overflowWrap = 'anywhere'; return;
+      }
       if (typeof item.href === 'string' && typeof item.label === 'string' && safeLocalHref(item.href)) {
         var local = node('a', item.label, target); local.href = item.href; local.className = 'btn btn--ghost'; return;
       }
       if (Array.isArray(item)) {
         var ordered = node('ol', undefined, target);
-        item.slice(0, 35).forEach(function (entry) { append(node('li', undefined, ordered), entry, depth + 1); });
+        item.slice(0, maximumEntries).forEach(function (entry) { append(node('li', undefined, ordered), entry, depth + 1); });
+        if (item.length > maximumEntries) omitted(target);
         return;
       }
       var list = node('dl', undefined, target);
-      Object.entries(item).slice(0, 35).forEach(function (entry) {
+      var entries = Object.entries(item);
+      if (entries.length > maximumEntries) omitted(target);
+      entries.slice(0, maximumEntries).forEach(function (entry) {
+        if (entry[0] === 'learning_saved_point') {
+          var saved = entry[1], savedStarted = generation;
+          if (!saved || Array.isArray(saved) || Object.keys(saved).sort().join(',') !== 'name,revision' ||
+              !/^[A-Za-z0-9._-]{1,80}$/.test(saved.name || '') || !/^[a-f0-9]{64}$/.test(saved.revision || '')) return;
+          var savedDestination = node('dd', undefined, list);
+          if (window.LightworkLearningSavedPoints) button('Open this saved point', savedDestination, async function (event) {
+            if (!active(savedStarted) || busy) return;
+            event.currentTarget.disabled = true;
+            try {
+              var opened = await window.LightworkLearningSavedPoints.open(saved.name, saved.revision);
+              if (!active(savedStarted)) return;
+              if (opened) {
+                var close = document.getElementById('mv-copilot-close'); if (close) close.click();
+                var pointSelect = document.getElementById('lrn-snapshot'); if (pointSelect) pointSelect.focus({preventScroll: true});
+              } else status.textContent = 'This saved point changed or could not be opened. Review current saved points in Learning.';
+            } catch (_) { if (active(savedStarted)) status.textContent = 'This saved point could not be opened. Check current saved points in Learning.'; }
+            finally { if (active(savedStarted)) event.currentTarget.disabled = false; }
+          });
+          else { var savedLink = node('a', 'Open saved learning points', savedDestination); savedLink.href = '/learning#learning-review'; }
+          return;
+        }
         if (entry[0] === 'knowledge_request_page') {
           var page = entry[1], started = generation;
           if (!page || Array.isArray(page) || Object.keys(page).sort().join(',') !== 'cursor,view' ||
@@ -134,6 +163,7 @@
       });
     }
     append(parent, value, 0);
+    return complete;
   }
   function safeLocalHref(href) {
     if (typeof href !== 'string' || !href.startsWith('/') || href.startsWith('//') || /[\\\u0000-\u0020]/.test(href)) return false;
@@ -380,9 +410,19 @@
           if (!active(started)) return;
           clear(formHost); node('h3', item.label, formHost); node('p', review.summary, formHost);
           node('p', 'Source: ' + review.source + '. Checked ' + (window.mvTimeAbsolute ? window.mvTimeAbsolute(review.checked_at) : new Date(review.checked_at * 1000).toLocaleString()) + '.', formHost);
-          if (review.changes && review.changes.length) renderData(formHost, review.changes);
+          var completeReview = true;
+          if (review.changes && review.changes.length) {
+            completeReview = item.id === 'teams.department.update'
+              ? !!(window.LWDepartmentTeamUpdates && window.LWDepartmentTeamUpdates.renderReview &&
+                   window.LWDepartmentTeamUpdates.renderReview(formHost, review.changes) === true)
+              : renderData(formHost, review.changes, {complete: review.read_only !== true});
+          }
           if (review.read_only) { renderData(formHost, review.details); status.textContent = 'Current information checked. Nothing was changed.'; }
-          else renderConfirmation(item, review, started);
+          else if (completeReview) renderConfirmation(item, review, started);
+          else {
+            node('p', 'This complete review could not be displayed here. Open the full controls to review and confirm it; nothing was submitted.', formHost);
+            status.textContent = 'Open the full controls for the complete review. Nothing was submitted.';
+          }
           nativeLink(item, formHost);
           button('Refresh current controls', formHost, function () { clear(formHost); selected = null; refresh(); });
         } catch (error) { if (active(started)) status.textContent = error.message; }

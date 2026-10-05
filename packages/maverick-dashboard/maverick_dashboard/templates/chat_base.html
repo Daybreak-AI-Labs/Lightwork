@@ -182,10 +182,11 @@
       body.chat-shell { grid-template-columns: 1fr; }
       body.chat-shell main { grid-column: 1; }
       .cs-topbar {
-        display: flex; align-items: center; gap: var(--space-2); flex: none;
+        display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); flex: none;
         padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--hairline);
       }
-      .cs-topbar__title { flex: 1; min-width: 0; font-weight: var(--font-semibold); }
+      .cs-topbar > .btn, .cs-topbar > .iconbtn { flex: none; min-width: 44px; min-height: 44px; }
+      .cs-topbar__title { flex: 1; min-width: 0; font-weight: var(--font-semibold); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .cs-side {
         position: fixed; inset-block: 0; inset-inline-start: 0; z-index: 60;
         width: min(300px, 86vw); visibility: hidden; transform: translateX(-102%);
@@ -195,13 +196,16 @@
       [dir="rtl"] .cs-side { transform: translateX(102%); }
       body.cs-drawer-open .cs-side { visibility: visible; transform: none; transition: transform 0.18s ease; }
       body.cs-drawer-open .cs-backdrop { display: block; position: fixed; inset: 0; z-index: 55; background: var(--scrim, rgba(0,0,0,.45)); }
-      .cs-side__close { display: flex; }
+      .cs-side__close { display: flex; min-width: 44px; min-height: 44px; }
       .chat-shell > .mv-copilot {
         top: 3.6rem; bottom: .65rem; right: .65rem; left: .65rem; width: auto;
       }
       [dir="rtl"] .chat-shell > .mv-copilot { right: .65rem; left: .65rem; }
     }
-    @media (max-width: 480px) { .cs-topbar__copilot span { display: none; } }
+    @media (max-width: 480px) {
+      .cs-topbar__title, .cs-topbar__copilot span { display: none; }
+      .cs-topbar__copilot { margin-inline-start: auto; }
+    }
     @media (prefers-reduced-motion: reduce) { .cs-side { transition: none !important; } }
     @media (prefers-reduced-motion: no-preference) {
       .cs-anim { opacity: 0; transform: translateY(8px); animation: csUp 0.4s ease forwards; }

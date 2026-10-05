@@ -1734,6 +1734,11 @@ from .research_api import router as research_router  # noqa: E402
 app.include_router(research_router)
 app.include_router(research_page_router)
 app.include_router(knowledge_access_router)
+from .answer_feedback_operations import router as answer_feedback_router  # noqa: E402
+from .department_team_updates_api import router as department_team_updates_router  # noqa: E402
+
+app.include_router(department_team_updates_router)
+app.include_router(answer_feedback_router)
 app.include_router(knowledge_access_page_router)
 app.include_router(create_vendor_onboarding_page_router(templates))
 from .agent_control_plane_api import router as agent_control_plane_router  # noqa: E402
@@ -11720,10 +11725,12 @@ def chat_goal(request: Request, goal_id: int) -> HTMLResponse:
     assert_goal_access(request, root)
     from maverick.attachment_submissions import SubmissionStore
     from maverick.chat_threads import ChatThreads
+    from maverick.governed_operations import digest
     from maverick.runner import configured_goal_ceiling_dollars
 
     from ._event_stream import TERMINAL_RUN_STATUSES
     from .answer_projection import version_for
+    from .answer_run_details import read as read_run_details
 
     try:
         spend_ceiling = configured_goal_ceiling_dollars()
@@ -11754,6 +11761,7 @@ def chat_goal(request: Request, goal_id: int) -> HTMLResponse:
     handoff_budget = SimpleNamespace(max_dollars=spend_ceiling)
     apply_ceiling(w, goal_id, handoff_budget)
     spend_ceiling = handoff_budget.max_dollars
+    answer_run_details = read_run_details(request, w, goal_id, expected_goal=g)
 
     return templates.TemplateResponse(
         request,
@@ -11789,6 +11797,8 @@ def chat_goal(request: Request, goal_id: int) -> HTMLResponse:
             "signoff": signoff,
             "artifacts": artifacts,
             "answer_version": version_for(g, contract, signoff, artifacts, handed_off),
+            "answer_run_details": answer_run_details,
+            "answer_run_details_version": digest(answer_run_details),
             "projects": projects,
             "share_links": share_links,
             "withheld_markers": _withheld_event_markers(),

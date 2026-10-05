@@ -246,29 +246,45 @@ def decision_prepare(request, _selection, arguments, *, action):
              "rollback": report["rollback"], "reconcile": "Read the authoritative release and resolve the uncertain action without repeating it."}
     changes = [{"label": "Workflow release", "after": report["name"] + " · version " + str(report["version"])},
                {"label": "Evidence limit", "after": report["evidence"]}]
+    if action == "review":
+        changes.extend([{"label": "Your decision", "after": "Approve this exact release" if arguments["approve"] else "Do not approve this release"},
+                        {"label": "Your review and limits", "after": arguments["note"]}])
+    comparison = report.get("known_case_comparison")
+    if comparison:
+        changes.append({"label": "Known-case comparison limits", "after": comparison["scope"]})
+        if comparison.get("reviewed_cases"):
+            changes.append({"label": "Every selected real case", "after": [
+                {"Inputs": "; ".join(name + ": " + str(value) for name, value in case["inputs"].items()),
+                 "Expected final answer": case["expected"], "Published-rule answer": case["baseline"],
+                 "Published rules match the expected answer": case["baseline_matched"],
+                 "Proposed-rule answer": case["candidate"], "Proposed rules match the expected answer": case["candidate_matched"]}
+                for case in comparison["reviewed_cases"]]})
     for step in report["steps"]:
-        title = step["label"]
+        complete_step = {}
         for key, label in (("instructions", "Work instructions"), ("fallback", "When rules cannot answer"),
                            ("condition", "Condition"), ("output", "Result name"), ("next", "Next step"),
                            ("if_true", "When true"), ("if_false", "When false")):
             if step.get(key):
-                changes.append({"label": title + " · " + label, "after": step[key]})
+                complete_step[label] = step[key]
+        questions = {}
         for name, limits in step.get("questions", {}).items():
             kind = {"integer": "Whole number", "string": "Text", "boolean": "Yes or no"}.get(limits["type"], "Value")
             if "min" in limits:
                 kind += " from " + str(limits["min"]) + " to " + str(limits["max"])
             elif "max_length" in limits:
                 kind += " up to " + str(limits["max_length"]) + " characters"
-            changes.append({"label": title + " · input " + name, "after": kind})
-        for index, example in enumerate(step.get("examples", [])):
-            changes.append({"label": title + " · teaching example " + str(index + 1),
-                            "after": "; ".join(name + ": " + str(value) for name, value in example["inputs"].items())
-                            + " → " + str(example["output"])})
-        for name, value in step.get("assignments", {}).items():
-            changes.append({"label": title + " · set " + name, "after": str(value)})
-        for index, route in enumerate(step.get("cases", [])):
-            changes.append({"label": title + " · route " + str(index + 1),
-                            "after": route["condition"] + " → " + route["next"]})
+            questions[name] = kind
+        if questions:
+            complete_step["Every input and its limits"] = questions
+        if step.get("examples"):
+            complete_step["Every teaching example"] = [
+                "; ".join(name + ": " + str(value) for name, value in example["inputs"].items()) + " → " + str(example["output"])
+                for example in step["examples"]]
+        if step.get("assignments"):
+            complete_step["Every assigned value"] = {name: str(value) for name, value in step["assignments"].items()}
+        if step.get("cases"):
+            complete_step["Every route"] = [route["condition"] + " → " + route["next"] for route in step["cases"]]
+        changes.append({"label": step["label"], "after": complete_step})
     return Preview(notes[action], changes=changes,
         native={"candidate": row["candidate_id"], "revision": row["revision"], "manifest": row["manifest_sha256"],
                 "event_count": len(row["events"]), "action": action})

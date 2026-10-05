@@ -102,7 +102,9 @@ class MemoryStore:
             self._load()
 
     def update(self, memories) -> None:
-        with self._lock:
+        from .learning_store import derived_guidance_fence
+
+        with derived_guidance_fence(), self._lock:
             self._mem = {m.action: m for m in memories}
             self._save()
 
@@ -110,12 +112,20 @@ class MemoryStore:
         """The strongest consolidated habits -- a learned prior the planner can
         prefer. Empty store -> []."""
         with self._lock:
+            self._refresh()
             return sorted(self._mem.values(), key=lambda m: m.strength, reverse=True)[:top_k]
 
     def strength_of(self, action: str) -> float:
         with self._lock:
+            self._refresh()
             m = self._mem.get(action)
             return m.strength if m else 0.0
+
+    def _refresh(self) -> None:
+        if self.path is not None:
+            self._mem.clear()
+            if Path(self.path).exists():
+                self._load()
 
     def _load(self) -> None:
         try:
@@ -169,6 +179,17 @@ def shared() -> MemoryStore:
 def reset_shared() -> None:
     with _shared_lock:
         _shared.clear()
+
+
+def refresh_shared() -> None:
+    """Refresh the active tenant's existing objects after native restoration."""
+    from .paths import data_dir
+
+    with _shared_lock:
+        store = _shared.get(data_dir("procedural_memory.json"))
+        if store is not None:
+            with store._lock:
+                store._refresh()
 
 
 def recall_prompt(*, store: MemoryStore | None = None, top_k: int = 5) -> str:

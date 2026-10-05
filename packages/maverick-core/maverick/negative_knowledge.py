@@ -85,7 +85,9 @@ class GuardrailRegistry:
     def update(self, guardrails) -> None:
         """Replace the learned set with a freshly-mined one (re-triage drops the
         rules whose harm is gone -- guardrails don't accumulate forever)."""
-        with self._lock:
+        from .learning_store import derived_guidance_fence
+
+        with derived_guidance_fence(), self._lock:
             self._rails = {g.action: g for g in guardrails}
             self._save()
 
@@ -93,11 +95,21 @@ class GuardrailRegistry:
         """The guardrail flagging ``action``, or None. The read side for an agent
         / the rehearsal gate; None on an empty registry (no behaviour change)."""
         with self._lock:
+            self._refresh()
             return self._rails.get(action)
 
     def all(self) -> list[Guardrail]:
         with self._lock:
+            self._refresh()
             return sorted(self._rails.values(), key=lambda g: g.severity, reverse=True)
+
+    def _refresh(self) -> None:
+        # A rollback can come from another process. Existing objects must read
+        # current retained guidance, including a restored empty boundary.
+        if self.path is not None:
+            self._rails.clear()
+            if Path(self.path).exists():
+                self._load()
 
     def _load(self) -> None:
         try:
@@ -152,6 +164,17 @@ def shared() -> GuardrailRegistry:
 def reset_shared() -> None:
     with _shared_lock:
         _shared.clear()
+
+
+def refresh_shared() -> None:
+    """Refresh the active tenant's existing objects after native restoration."""
+    from .paths import data_dir
+
+    with _shared_lock:
+        reg = _shared.get(data_dir("guardrails.json"))
+        if reg is not None:
+            with reg._lock:
+                reg._refresh()
 
 
 __all__ = ["Guardrail", "mine", "GuardrailRegistry", "shared", "reset_shared"]

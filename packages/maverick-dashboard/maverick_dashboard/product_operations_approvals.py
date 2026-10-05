@@ -62,7 +62,7 @@ def snapshot(request, selection, *, status=None):
 
 def read_prepare(request, selection, _arguments):
     current = snapshot(request, selection)
-    return Preview(current.summary, native=current.details)
+    return Preview(current.summary, native=native.private_review(request, native.selected_id(selection)))
 
 
 def prepare(request, selection, arguments, *, status):
@@ -74,8 +74,9 @@ def prepare(request, selection, arguments, *, status):
         world, row = native.owned(request, approval_id, status=status)
         if card_content(row)["needs_typed_confirmation"] and arguments["confirmation"].strip().lower() != "approve":
             raise HTTPException(422, "Type APPROVE to confirm this critical action.")
-    current = snapshot(request, selection, status=status)
-    changes = [{"field": key, "after": value} for key, value in current.details.items() if key not in {"Your original decisions", "Next step"}]
+    snapshot(request, selection, status=status)
+    details = native.private_review(request, approval_id, status=status)
+    changes = [{"field": key, "after": value} for key, value in details.items() if key not in {"Your original decisions", "Next step"}]
     if status == "denied" and arguments["reason"]:
         changes.append({"field": "Rejection reason", "after": native.safe(arguments["reason"])})
     return Preview("Record your approval vote for this exact request. Quorum and audit delivery are required; execution remains separate."

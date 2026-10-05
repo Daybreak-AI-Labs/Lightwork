@@ -11,6 +11,7 @@ from . import auth
 from . import personal_data_api as native
 from . import personal_data_exports as exports
 from . import personal_data_requests as deletion
+from .identity_format import humanize_principal
 from .product_operations import Adapter, EmptyInput, Outcome, Preview, Snapshot, StrictInput
 from .product_operations_identity import _choices, _field
 
@@ -176,6 +177,66 @@ def _memory_prepare(state, args, action):
                    [{"note": row["note"], "operation": args["operation"], "replacement": args["replacement"] if args["operation"] == "edit" else ""}], data)
 
 
+def _deletion_scope(record):
+    """Complete human scope; exact source identifiers stay in native receipts."""
+    labels = {"preference_notes": "Remembered preferences", "conversation_history": "Conversation history and associated work",
+              "recovery_drafts": "Private editor recovery copies", "companion_history": "Employee companion history",
+              "experience_preferences": "Personal account and conversation preferences", "model_memory": "Personal model memory",
+              "notification_receipts": "Notification delivery history", "diagnostic_reports": "Personal diagnostic reports",
+              "activation_drafts": "Private activation drafts", "project_defaults": "Personal project defaults",
+              "model_test_history": "Personal model-check history", "generated_tools": "Currently authorized learned tools",
+              "conversation_inbox": "Queued conversation messages and files", "saved_views_and_pins": "Saved views and task pins"}
+    targets = []
+    for target in record["targets"]:
+        kind = target["store"]
+        item = {"Information": labels[kind], "Scope": "This exact account's selected " + record["channel"] + " scope"}
+        if "count" in target:
+            item["Selected items"] = target["count"]
+        if "records" in target:
+            item["Selected records"] = len(target["records"])
+        if "scope" in target:
+            item.update({"Conversations": len(target["scope"]["conversation_ids"]),
+                         "Associated tasks": len(target["scope"]["goal_ids"]),
+                         "Task activity records": len(target["scope"]["episode_ids"])})
+        inventory = target.get("inventory", {})
+        for key, label in (("saved", "Saved recovery copies"), ("discarded", "Retired recovery copies"),
+                           ("files", "History files"), ("consumed_items", "Recorded notification items"),
+                           ("pin_count", "Pinned tasks"), ("view_count", "Saved views"), ("blocked", "Items awaiting reconciliation")):
+            if key in inventory:
+                item[label] = inventory[key]
+        if "receipts" in inventory:
+            item["Delivery receipts"] = len(inventory["receipts"])
+        if kind == "companion_history":
+            from maverick.employee_companion import EmployeeCompanionStore
+            history = EmployeeCompanionStore().history(record["owner"])
+            if deletion._digest(history) != target["history_revision"]:
+                raise HTTPException(409, "The selected companion history changed. Review a fresh deletion scope.")
+            item["Conversation entries"] = len(history)
+        elif kind == "experience_preferences":
+            from maverick import experience_preferences
+            directory = experience_preferences.data_dir("experience-preferences")
+            prefix = experience_preferences._principal_key(record["owner"])
+            paths = [directory / (prefix + ".enc"), *directory.glob(prefix + "-thread-*.enc")]
+            versions = [[p.name, p.stat().st_size, p.stat().st_mtime_ns] for p in paths if p.is_file()]
+            if deletion._digest(versions) != target["revision"]:
+                raise HTTPException(409, "The selected preferences changed. Review a fresh deletion scope.")
+            item["Personal preference records"] = len(versions)
+        for key in ("use", "retained", "note"):
+            if target.get(key) or inventory.get(key):
+                item[{"use": "Included work", "retained": "Kept separately", "note": "Coverage"}[key]] = target.get(key) or inventory[key]
+        targets.append(item)
+    holds = record["holds"]
+    return {"Selected account": humanize_principal(record["owner"]).name, "Selected channel": record["channel"],
+            "Complete selected stores": targets,
+            "Preservation obligations": {"Deletion blocked": holds["blocked"], "Recorded legal holds": holds["legal_holds"],
+                "Other recorded deletion restrictions": holds["retention_blocks"], "Coverage": holds["coverage"]},
+            "Every retained exception": [{"Information": row["store"].replace("_", " "),
+                "Result": row["state"].replace("-", " "), "Why": row["reason"],
+                **({"Full controls": {"label": "Review this retained information", "href": row["href"]}} if row.get("href") else {})}
+                for row in record["exceptions"]],
+            "Scope limit": record["notice"]}
+
+
 def prepare(request, _selection, args, *, action):
     actor = _authority(request, write=action not in READ_ACTIONS)
     state = native._state(request)
@@ -208,11 +269,14 @@ def prepare(request, _selection, args, *, action):
         scope = _scope(state, args["scope_id"])
         reviewed = deletion.preview(actor, scope["channel"], scope["user_id"], args["stores"], native._app()._world())
         return Preview("Request independent deletion review for these exact stores. Nothing is deleted now; current holds and retained exceptions remain explicit.",
-                       [reviewed], {"channel": scope["channel"], "user_id": scope["user_id"], "snapshot": reviewed["snapshot"], "actor": actor})
+                       [_deletion_scope(reviewed)], {"channel": scope["channel"], "user_id": scope["user_id"], "snapshot": reviewed["snapshot"], "actor": actor})
     if action == "deletion_review":
         row = _review(request, args["request_id"])
+        current = deletion.preview(row["owner"], row["channel"], row["user_id"], [target["store"] for target in row["targets"]], native._app()._world())
+        if current["targets"] != row["targets"]:
+            raise HTTPException(409, "The selected information changed. Its owner must review a fresh deletion scope.")
         return Preview("Dispatch the separately requested exact deletion scope only if all current holds and source checks pass. Interrupted outcomes are never automatically retried.",
-                       [{"request": row}], {"revision": row["revision"]})
+                       [_deletion_scope(current)], {"revision": row["revision"]})
     if action == "export_scope":
         scope = _scope(state, args["scope_id"])
         return Preview("Download the current verified scope. The authenticated link expires in ten minutes and rechecks current ownership at download.", native=exports.link(request, channel=scope["channel"], user_id=scope["user_id"]))

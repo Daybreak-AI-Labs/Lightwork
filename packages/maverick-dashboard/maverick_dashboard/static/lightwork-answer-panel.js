@@ -8,6 +8,7 @@
   var denied = false, forceAgain = false;
   var pendingSignoff = null, signoffRecoveryLoaded = false;
   var signoffCheckInFlight = false;
+  var pendingFeedback = null, feedbackBusy = false;
   function say(node, source, values) {
     if (window.LightworkI18n) window.LightworkI18n.set(node, source, values);
     else node.textContent = source.replace(/\{(\w+)\}/g, function (_, key) { return values && values[key] !== undefined ? values[key] : _; });
@@ -15,8 +16,9 @@
   function sourceText(node, value) { node.textContent = value; node.lang = 'und'; node.dir = 'auto'; node.dataset.userContent = '1'; }
   function cgErr(failure, action) { return window.mvErrorText(failure, action); }
   function dirty() {
-    var editor = panel.querySelector('#edit-text'), note = panel.querySelector('#signoff-note');
-    return !!((editor && (editor.readOnly || editor.value !== editor.dataset.savedText)) || (note && note.value.trim()));
+    var editor = panel.querySelector('#edit-text'), note = panel.querySelector('#signoff-note'), feedback = panel.querySelector('#feedback-note');
+    return !!((editor && (editor.readOnly || editor.value !== editor.dataset.savedText)) || (note && note.value.trim()) ||
+      pendingFeedback || (feedback && feedback.value !== (feedback.dataset.savedText || '')));
   }
   function clearPrivate() {
     denied = true; generation++;
@@ -145,47 +147,108 @@
       if (reject) reject.addEventListener('click', function () { submit('rejected'); });
     })();
 
-    // Thumbs up/down feedback: grounds a real outcome into the learning loop for
-    // any finished result. Reflects the current rating on load; textContent only.
+    // Notes belong to the exact saved answer. Lost replies read the original
+    // actor-bound receipt; they never submit another rating or learning signal.
     (function () {
-      var box = panel.querySelector("#" + 'feedback');
+      var box = panel.querySelector('#feedback');
       if (!box) return;
-      var up = panel.querySelector("#" + 'feedback-up');
-      var down = panel.querySelector("#" + 'feedback-down');
-      var msg = panel.querySelector("#" + 'feedback-msg');
-      var goalId = Number(panel.dataset.goal);
+      var up = panel.querySelector('#feedback-up'), down = panel.querySelector('#feedback-down');
+      var msg = panel.querySelector('#feedback-msg'), form = panel.querySelector('#feedback-form');
+      var note = panel.querySelector('#feedback-note'), save = panel.querySelector('#feedback-save');
+      var cancel = panel.querySelector('#feedback-cancel'), recover = panel.querySelector('#feedback-recover');
+      var current = panel.querySelector('#feedback-saved'), review = panel.querySelector('#feedback-review');
+      var key = 'lightwork-answer-feedback:' + context + ':' + goalId, binding = null, chosen = null;
+      try { pendingFeedback = JSON.parse(sessionStorage.getItem(key) || 'null'); } catch (_) {}
+      if (pendingFeedback && (!/^[a-f0-9]{32}$/.test(pendingFeedback.id) || !/^[a-f0-9]{64}$/.test(pendingFeedback.revision))) pendingFeedback = null;
+      function live() { return !denied && document.getElementById('answer-panel') === panel && panel.dataset.context === context; }
+      function lock() {
+        [up,down,save,cancel].forEach(function (button) { button.disabled = feedbackBusy || !!pendingFeedback || !binding; });
+        note.readOnly = feedbackBusy || !!pendingFeedback;
+        review.disabled = feedbackBusy; recover.disabled = feedbackBusy; recover.hidden = !pendingFeedback;
+      }
       function show(rating) {
-        [up, down].forEach(function (b) { if (b) b.classList.remove('is-active'); });
-        if (rating === 'up' && up) up.classList.add('is-active');
-        if (rating === 'down' && down) down.classList.add('is-active');
+        [up,down].forEach(function (button) { var selected = button.dataset.rating === rating;
+          button.classList.toggle('is-active', selected); button.setAttribute('aria-pressed', String(selected)); });
       }
-      fetch('/api/v1/goals/' + goalId + '/feedback').then(function (r) {
-        return r.ok ? r.json() : {};
-      }).then(function (j) {
-        if (j && j.feedback && j.feedback.rating) show(j.feedback.rating);
-      }).catch(function () {});
-      function submit(rating) {
-        [up, down].forEach(function (b) { if (b) b.disabled = true; });
-        msg.style.color = 'var(--muted)';
-        say(msg, 'Recording…');
-        fetch('/api/v1/goals/' + goalId + '/feedback', {
-          method: 'POST', headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({rating: rating}),
-        }).then(function (r) {
-          [up, down].forEach(function (b) { if (b) b.disabled = false; });
-          if (r.ok) { show(rating); say(msg, "Feedback saved. Learning use follows your organization's policy."); return; }
-          return r.json().catch(function () { return {}; }).then(function (j) {
-            msg.style.color = 'var(--danger)';
-            window.mvRenderError(msg, r, 'save your feedback', j);
-          });
-        }).catch(function (e) {
-          [up, down].forEach(function (b) { if (b) b.disabled = false; });
-          msg.style.color = 'var(--danger)';
-          say(msg, cgErr(e, 'save your feedback'));
-        });
+      function display(value) {
+        current.replaceChildren();
+        if (!value) { say(current, 'No saved feedback is available in the current records.'); return; }
+        var label = document.createElement('p');
+        say(label, (value.rating === 'up' ? 'Useful' : 'Needs improvement') +
+          (value.legacy ? ' · earlier feedback: the answer version was not recorded' : value.current_result ? ' · current answer' : ' · earlier answer') + ' · ' + window.mvWhen(value.recorded_at));
+        current.appendChild(label);
+        if (value.note) { var text = document.createElement('p'); sourceText(text, value.note); text.style.whiteSpace='pre-wrap'; current.appendChild(text); }
+        if (!chosen) show(value.current_result ? value.rating : '');
       }
-      if (up) up.addEventListener('click', function () { submit('up'); });
-      if (down) down.addEventListener('click', function () { submit('down'); });
+      async function request(operation, body) {
+        var controller = new AbortController(), timer = setTimeout(function () { controller.abort(); }, 12000);
+        try {
+          var response = await fetch('/api/v1/goals/' + goalId + '/answer-feedback' + (operation ? '?operation_id=' + operation : ''),
+            {method:body ? 'POST' : 'GET', headers:body ? {'Content-Type':'application/json'} : {},
+             body:body ? JSON.stringify(body) : undefined, cache:'no-store', signal:controller.signal});
+          if (!live()) throw new Error('The answer changed. Reopen it before continuing.');
+          if (response.redirected || [401,403,404].includes(response.status)) { clearPrivate(); throw new Error('Access changed. Reopen the authorized task.'); }
+          var value = await response.json();
+          if (!response.ok) { var error = new Error(window.mvErrorText({status:response.status,detail:value.detail}, 'save your feedback')); error.refused=response.status<500; throw error; }
+          if (value.context !== context) { clearPrivate(); throw new Error('Your account or workspace changed. Reopen the authorized task.'); }
+          return value;
+        } catch (error) {
+          if (error.name === 'AbortError') throw new Error('The feedback response took too long to arrive.');
+          if (error.name === 'TypeError') throw new Error('Lightwork could not be reached.');
+          throw error;
+        } finally { clearTimeout(timer); }
+      }
+      function forget() { sessionStorage.removeItem(key); pendingFeedback = null; }
+      function accepted(value, original) {
+        if (!value || !pendingFeedback || value.operation_id !== pendingFeedback.id) throw new Error('The original feedback could not be confirmed.');
+        display(value); forget();
+        if (value.current_result) { note.dataset.savedText = note.value; form.hidden=true; chosen=null; }
+        say(msg, (original ? 'Your original feedback is saved.' : 'Feedback saved.') +
+          (value.current_result ? '' : ' It applies to the earlier answer you reviewed.') +
+          ' Feedback does not confirm that training completed.');
+      }
+      async function check(original) {
+        if (feedbackBusy) return;
+        feedbackBusy=true; lock();
+        try {
+          var attempt = pendingFeedback, value = await request(original && attempt ? attempt.id : null);
+          if (!live()) return;
+          if (original && attempt) {
+            if (value.feedback) accepted(value.feedback, true);
+            else say(msg, 'No saved receipt for your original feedback was found. Its outcome is still unconfirmed. Nothing was submitted again; your note is kept.');
+          } else { display(value.feedback); say(msg, 'Current saved feedback is shown. This does not establish the outcome of another request.'); }
+          binding = value.eligible && value.updated_at === Number(panel.dataset.updatedAt) ? value.revision : null;
+          if (!binding) say(msg, 'The saved answer changed. Your note is kept. Review the current answer before giving feedback.');
+        } catch (error) { if (live()) say(msg, error.message + ' Your note is kept. Nothing was submitted again.'); }
+        finally { feedbackBusy=false; if (live()) lock(); }
+      }
+      function choose(rating) {
+        if (!binding || pendingFeedback || feedbackBusy) return;
+        chosen=rating; show(rating); form.hidden=false;
+        say(panel.querySelector('#feedback-choice'), rating === 'up' ? 'You selected Useful.' : 'You selected Needs improvement.');
+        note.focus();
+      }
+      form.addEventListener('submit', async function (event) {
+        event.preventDefault(); if (!binding || !chosen || pendingFeedback || feedbackBusy || !form.reportValidity()) return;
+        pendingFeedback={id:window.crypto.randomUUID().replace(/-/g,''),revision:binding};
+        try { sessionStorage.setItem(key, JSON.stringify(pendingFeedback)); }
+        catch (_) { pendingFeedback=null; say(msg, 'Your browser could not keep the original feedback reference. Allow session storage before saving; your note is kept.'); return; }
+        feedbackBusy=true; lock(); say(msg, 'Saving your feedback…');
+        try { var value = await request(null, {rating:chosen,note:note.value,revision:binding,expected_context:context,operation_id:pendingFeedback.id});
+          accepted(value.feedback, false);
+        } catch (error) { if (live()) { if (error.refused) { forget(); binding=null; }
+          say(msg, error.message + ' Your note is kept. ' + (pendingFeedback ? 'Check your original feedback before another save; nothing will be submitted again by that check.' : 'Review the current answer before trying again.')); } }
+        finally { feedbackBusy=false; if (live()) lock(); }
+      });
+      up.addEventListener('click', function () { choose('up'); }); down.addEventListener('click', function () { choose('down'); });
+      review.addEventListener('click', function () { check(false); }); recover.addEventListener('click', function () { check(true); });
+      cancel.addEventListener('click', function () { form.hidden=true; chosen=null; note.value=''; note.dataset.savedText=''; show(''); });
+      panel.querySelector('#feedback-copilot').addEventListener('click', function () {
+        document.dispatchEvent(new CustomEvent('lightwork:product-selection', {detail:{kind:'goal',id:Number(goalId)}}));
+        var fab=document.getElementById('mv-copilot-fab'); if (fab) fab.click();
+      });
+      lock(); check(false);
+      if (pendingFeedback) say(msg, 'A feedback response was interrupted. Check your original feedback before saving again.');
     })();
 
     // One source and one handler for current-answer actions, including a live refresh.
@@ -361,13 +424,18 @@
       if (!next || next.dataset.goal !== goalId || next.dataset.context !== context ||
           parsed.querySelectorAll('#answer-panel').length !== 1 || next.querySelector('script')) throw new Error('projection unavailable');
       if (next.dataset.version === panel.dataset.version && next.dataset.operate === panel.dataset.operate) {
+        if (next.dataset.runDetailsVersion !== panel.dataset.runDetailsVersion) {
+          var runSlot = panel.querySelector('#answer-run-details-slot'), nextRunSlot = next.querySelector('#answer-run-details-slot');
+          if (runSlot && nextRunSlot) runSlot.replaceChildren.apply(runSlot, Array.from(nextRunSlot.childNodes));
+          panel.dataset.runDetailsVersion = next.dataset.runDetailsVersion;
+        }
         retry.hidden = true; message.textContent = ''; return;
       }
       if (!force && dirty()) {
         retry.hidden = false;
         say(message, 'The saved result changed. Your unsaved edit or review note is kept. Refresh when you are ready to review the current version.');
         // A superseded result cannot be signed off through stale controls.
-        panel.querySelectorAll('#signoff-approve,#signoff-reject').forEach(function (node) { node.disabled = true; });
+        panel.querySelectorAll('#signoff-approve,#signoff-reject,#feedback-up,#feedback-down,#feedback-save').forEach(function (node) { node.disabled = true; });
         if (next.dataset.operate !== '1') panel.querySelectorAll('button,input,textarea').forEach(function (node) { node.disabled = true; });
         return;
       }

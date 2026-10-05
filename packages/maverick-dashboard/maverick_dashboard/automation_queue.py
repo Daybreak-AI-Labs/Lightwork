@@ -787,18 +787,15 @@ def _handle_dream(_job=None) -> None:
             from maverick.learning_guard import check_learning_halt
 
             check_learning_halt("dreaming", "scheduled")
-            # Same rollback point `maverick dream` takes: a scheduled cycle must
-            # never mutate learned state that `dream --rollback` cannot undo.
-            # A snapshot failure raises before dream_cycle runs (fail closed).
-            cfg = dreaming.settings()
-            if cfg.get("snapshots", True):
-                dreaming.snapshot_learning_state(keep_last=int(cfg.get("snapshot_keep_last", 5)))
+            # One required safety copy covers the complete combined cycle.
+            # The copy is durable before either learning family may change.
             world = _world()
-            try:
-                if dreaming.enabled():
-                    dreaming.dream_cycle(world)
-            finally:
-                run_nightly_self_harness(world)
+            with dreaming.learning_mutation_scope():
+                try:
+                    if dreaming.enabled():
+                        dreaming.dream_cycle(world)
+                finally:
+                    run_nightly_self_harness(world)
 
     _run_for_active_tenants("scheduled dream cycle", _cycle)
 

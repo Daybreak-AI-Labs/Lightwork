@@ -523,6 +523,7 @@
   <template id="wf-row-tpl">{{ wf_row(none) }}</template>
   {% endif %}
 
+  <script src="/static/lightwork-department-team-updates.js"></script>
   <script>
     // ---- shared page helpers: plain errors, readable names, action pickers ----
     function plainError(failure, what) {
@@ -934,19 +935,6 @@
         else if (prefix) s = s.slice(prefix.length);
         return s.replace(/_/g, ' ');
       }
-      function showDeployed(msg, result) {
-        if (!msg) return;
-        var name = result && result.fleet && typeof result.fleet.name === 'string'
-          ? result.fleet.name : '';
-        var ready = !result || !Number.isInteger(result.deployed_count) || result.deployed_count > 0;
-        var link = document.createElement('a');
-        link.href = name ? '/fleets#team-' + encodeURIComponent(name) : '/fleets';
-        link.textContent = name ? (ready ? 'Give this team a task' : 'Review team setup') : 'Open Teams';
-        link.className = 'btn btn--primary btn--sm';
-        msg.style.color = 'var(--accent)';
-        msg.replaceChildren(document.createTextNode(ready
-          ? 'Team set up. ' : 'Team saved. No specialist is ready to start. '), link);
-      }
       function blockedTeam(d) {
         return Number.isInteger(d.ready_specialists) && Number.isInteger(d.unknown_specialists)
           && d.ready_specialists === 0 && d.unknown_specialists === 0;
@@ -1039,71 +1027,15 @@
       document.getElementById('dept-dlg-close').addEventListener('click', function () { dlg.close(); });
       dlgDeploy.addEventListener('click', async function () {
         if (!dlgKey) return;
-        if (dlgDeploy.dataset.inFlight === 'true') return;
-        dlgDeploy.dataset.inFlight = 'true';
-        var title = (byKey[dlgKey] && byKey[dlgKey].title) || dlgKey;
-        if (!(await mvConfirm(
-          'Set up the ' + title + ' team? This adds its specialists so you can give the team work.',
-          { okText: 'Deploy team' }
-        ))) { delete dlgDeploy.dataset.inFlight; return; }
-        var msg = document.getElementById('dept-dlg-msg');
-        dlgDeploy.disabled = true;
-        dlgDeploy.setAttribute('aria-busy', 'true');
-        msg.style.color = 'var(--muted)'; msg.textContent = 'Deploying…';
-        fetch('/api/v1/departments/' + encodeURIComponent(dlgKey) + '/deploy',
-              { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
-          .then(function (r) { return r.json().catch(function () { throw new Error('The result could not be confirmed. Refresh the page to check whether the team was set up.'); }).then(function (j) { return { ok: r.ok || r.status === 201, status: r.status, j: j }; }); })
-          .then(function (res) {
-            if (res.ok) showDeployed(msg, res.j);
-            else { msg.style.color = 'var(--danger)'; msg.textContent = plainError(res, 'set up the team'); }
-          })
-          .catch(function (error) {
-            msg.style.color = 'var(--danger)';
-            msg.textContent = error && error.name !== 'TypeError' && error.message
-              ? error.message
-              : plainError(error, 'set up the team');
-          })
-          .finally(function () {
-            delete dlgDeploy.dataset.inFlight;
-            dlgDeploy.removeAttribute('aria-busy');
-            dlgDeploy.disabled = false;
-          });
+        if (!window.LWDepartmentTeamUpdates) { document.getElementById('dept-dlg-msg').textContent = 'The team review could not load. Reload this page before saving the team.'; return; }
+        var source = host.querySelector('.dep-details[data-key="' + dlgKey + '"]') || dlgDeploy;
+        dlg.close(); await window.LWDepartmentTeamUpdates.open(dlgKey, source);
       });
-
       host.addEventListener('click', async function (e) {
         var btn = e.target.closest('.dep-deploy');
         if (!btn) return;
-        if (btn.dataset.inFlight === 'true') return;
-        btn.dataset.inFlight = 'true';
-        var card = btn.closest('.dept');
-        var msg = card && card.querySelector('.dep-msg');
-        var title = (byKey[btn.dataset.key] && byKey[btn.dataset.key].title) || btn.dataset.key;
-        if (!(await mvConfirm(
-          'Set up the ' + title + ' team? This adds its specialists so you can give the team work.',
-          { okText: 'Deploy team' }
-        ))) { delete btn.dataset.inFlight; return; }
-        btn.disabled = true; btn.setAttribute('aria-busy', 'true');
-        if (msg) { msg.style.color = 'var(--muted)'; msg.textContent = 'Deploying…'; }
-        fetch('/api/v1/departments/' + encodeURIComponent(btn.dataset.key) + '/deploy',
-              { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
-          .then(function (r) { return r.json().catch(function () { throw new Error('The result could not be confirmed. Refresh the page to check whether the team was set up.'); }).then(function (j) { return { ok: r.ok || r.status === 201, status: r.status, j: j }; }); })
-          .then(function (res) {
-            if (res.ok) showDeployed(msg, res.j);
-            else if (msg) { msg.style.color = 'var(--danger)'; msg.textContent = plainError(res, 'set up the team'); }
-          })
-          .catch(function (error) {
-            if (msg) {
-              msg.style.color = 'var(--danger)';
-              msg.textContent = error && error.name !== 'TypeError' && error.message
-                ? error.message
-                : plainError(error, 'set up the team');
-            }
-          })
-          .finally(function () {
-            delete btn.dataset.inFlight;
-            btn.removeAttribute('aria-busy');
-            btn.disabled = false;
-          });
+        if (!window.LWDepartmentTeamUpdates) { var unavailable=btn.closest('.dept').querySelector('.dep-msg'); if(unavailable)unavailable.textContent='The team review could not load. Reload this page before saving the team.'; return; }
+        await window.LWDepartmentTeamUpdates.open(btn.dataset.key, btn);
       });
     })();
     mountToolPicks();
