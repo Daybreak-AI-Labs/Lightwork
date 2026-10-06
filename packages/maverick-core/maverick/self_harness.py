@@ -352,6 +352,44 @@ def shared_addenda(path: Path | None = None) -> dict[str, str]:
     return out
 
 
+def conflict_review(model_id: str | None = None, path: Path | None = None) -> dict:
+    """One strict, source-authorized read for a complete guided conflict check.
+
+    Raw and withheld guidance is bound by the revision, never returned. Readers
+    recheck this revision before each physical provider dispatch and before
+    presenting a retained result. This is not a lock held across model work.
+    """
+    from .file_lock import cross_process_lock
+    from .governed_operations import digest
+    p = path if path is not None else _store_path()
+    with _lock, cross_process_lock(p, strict=True), _store_rmw_lock(p):
+        raw = _load_addenda_strict(p)
+        meta = load_line_meta(p)
+        selected = {key: block for key, block in raw.items()
+                    if model_id is None or _split_key(key)[0] == model_id}
+        blocks, withheld = {}, 0
+        for key, block in sorted(selected.items()):
+            eligible = []
+            for line in _bullets(block):
+                if _shared_line_current(key, line, meta) and screen_stored_line(line) == line:
+                    eligible.append(line)
+                else:
+                    withheld += 1
+            if eligible:
+                blocks[key] = _ADDENDUM_HEADER + "\n" + "\n".join("- " + line for line in eligible)
+        # Recall counters do not change guidance or source custody. Bind the
+        # actual provenance, not incidental reads by another running agent.
+        relevant_meta = {lid: {name: value for name, value in row.items()
+                              if name not in {"recall_notes", "last_recalled_at"}}
+                         for lid, row in meta.items() if row.get("model_id") in selected}
+        source = str(p.absolute())
+        if _world_routed(p):
+            from . import learning_store
+            source = digest(learning_store._pg_dsn()) if learning_store._postgres() else str(learning_store._sqlite_path().absolute())
+        return {"revision": digest([source, _world_routed(p), selected, relevant_meta, blocks]),
+                "blocks": blocks, "withheld": withheld}
+
+
 def recall_addendum(model_id: str | None, path: Path | None = None, *,
                     domain: str | None = None,
                     tools: list[str] | tuple[str, ...] | None = None,
@@ -582,7 +620,9 @@ def _is_negative(line: str) -> bool:
 
 def find_conflicts(new_line: str, existing_lines: list[str], *,
                    min_overlap: float = 0.5,
-                   classifier_fn: Callable[[str, str], bool] | None = None) -> list[str]:
+                   classifier_fn: Callable[[str, str], bool] | None = None,
+                   before_pair: Callable[[str, str], None] | None = None,
+                   observe_pair: Callable[[str, str, bool | None, bool], None] | None = None) -> list[str]:
     """Existing lines that appear to CONTRADICT ``new_line``: high content-token
     overlap (same topic) but OPPOSITE polarity (one prohibits what the other
     prefers). Advisory and deliberately conservative (high overlap threshold) --
@@ -600,28 +640,40 @@ def find_conflicts(new_line: str, existing_lines: list[str], *,
     for ex in existing_lines or []:
         if _norm_line(ex) == _norm_line(new_line):
             continue
+        if before_pair is not None:
+            before_pair(new_line, ex)  # Authority failures never become a fallback verdict.
         if classifier_fn is not None:
             try:
-                if bool(classifier_fn(new_line, ex)):
-                    out.append(ex)
-                continue  # classifier is authoritative for this pair
+                verdict = bool(classifier_fn(new_line, ex))
             except Exception:  # a bad judge can't drop a real conflict -> heuristic
                 pass
-        if _jaccard(nt, _content_tokens(ex)) >= min_overlap and _is_negative(ex) != neg:
+            else:
+                if verdict:
+                    out.append(ex)
+                if observe_pair is not None:
+                    observe_pair(new_line, ex, verdict, False)
+                continue
+        fallback = _jaccard(nt, _content_tokens(ex)) >= min_overlap and _is_negative(ex) != neg
+        if fallback:
             out.append(ex)
+        if observe_pair is not None:
+            observe_pair(new_line, ex, None, fallback)
     return out
 
 
 def detect_store_conflicts(model_id: str | None = None,
                            path: Path | None = None, *,
                            classifier_fn: Callable[[str, str], bool] | None = None,
+                           reviewed_blocks: dict[str, str] | None = None,
+                           before_pair: Callable[[str, str, str], None] | None = None,
+                           observe_pair: Callable[[str, str, str, bool | None, bool], None] | None = None,
                            ) -> list[tuple[str, str, str]]:
     """Suspected contradictory pairs in the CURRENT store as ``(model, a, b)``,
     de-duplicated (each unordered pair once). Powers ``self-harness conflicts``.
     An optional ``classifier_fn`` (see :func:`find_conflicts`) refines the lexical
     heuristic with a semantic judge."""
     out: list[tuple[str, str, str]] = []
-    for store_key, block in shared_addenda(path).items():
+    for store_key, block in (shared_addenda(path) if reviewed_blocks is None else reviewed_blocks).items():
         mid, ctx = _split_key(store_key)
         if model_id is not None and mid != model_id:
             continue
@@ -631,7 +683,10 @@ def detect_store_conflicts(model_id: str | None = None,
         lines = _bullets(block)
         seen: set[frozenset] = set()
         for i, ln in enumerate(lines):
-            for other in find_conflicts(ln, lines[i + 1:], classifier_fn=classifier_fn):
+            for other in find_conflicts(ln, lines[i + 1:], classifier_fn=classifier_fn,
+                    before_pair=(lambda a, b, key=store_key: before_pair(key, a, b)) if before_pair else None,
+                    observe_pair=(lambda a, b, verdict, fallback, key=store_key:
+                                  observe_pair(key, a, b, verdict, fallback)) if observe_pair else None):
                 key = frozenset((_norm_line(ln), _norm_line(other)))
                 if key not in seen:
                     seen.add(key)
@@ -1370,7 +1425,8 @@ def llm_proposer(llm, *, budget=None, model: str | None = None,
 
 
 def llm_conflict_classifier(llm, *, budget=None, model: str | None = None,
-                            max_tokens: int = 8) -> Callable[[str, str], bool]:
+                            max_tokens: int = 8, dispatch_guard=None,
+                            max_physical_attempts: int | None = None) -> Callable[[str, str], bool]:
     """An LLM-backed ``classifier_fn`` for :func:`find_conflicts` /
     :func:`detect_store_conflicts`: judge by MEANING whether two guidance lines
     contradict each other -- catching reworded conflicts the lexical heuristic
@@ -1381,12 +1437,14 @@ def llm_conflict_classifier(llm, *, budget=None, model: str | None = None,
     ``find_conflicts`` treats a raising classifier as "fall back to the lexical
     heuristic for this pair", so a flaky judge never drops a real flag."""
     def _classify(a: str, b: str) -> bool:
+        guarded = ({"dispatch_guard": dispatch_guard, "max_physical_attempts": max_physical_attempts,
+                    "_no_failover": True} if dispatch_guard is not None else {})
         resp = llm.complete(
             "Two lines of operating guidance for the same agent follow. Answer "
             "ONLY 'yes' or 'no': do they CONTRADICT each other (following both "
             "at once would be impossible or incoherent)?",
             [{"role": "user", "content": f"A: {a}\nB: {b}\n\nyes/no:"}],
-            budget=budget, max_tokens=max_tokens, model=model)
+            budget=budget, max_tokens=max_tokens, model=model, **guarded)
         text = (getattr(resp, "text", "") or "").strip().lower()
         if text.startswith("yes"):
             return True

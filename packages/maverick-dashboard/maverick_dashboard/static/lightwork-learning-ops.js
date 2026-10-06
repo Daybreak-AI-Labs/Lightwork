@@ -214,7 +214,7 @@
   function loadRewardModels() {
     J.request(TO + '/reward-models').then(function (d) {
       var nodes = [el('p', 'muted', plural(d.waiting_outlines, 'task outline') + ' waiting on this server to learn from.')];
-      if (!d.models.length) nodes.push(el('p', 'muted', admin ? 'No reward model yet. Train one below.' : 'No reward model yet.'));
+      if (!d.models.length) nodes.push(el('p', 'muted', admin ? 'No scoring guide yet. Learn from eligible task approaches below.' : 'No scoring guide yet.'));
       else nodes.push(J.table(['Trained', 'Comparisons', 'Agreed with the checker', ''], d.models.map(function (m) {
         var link = el('a', 'btn btn--ghost', 'Download');
         link.href = TO + '/reward-models/' + encodeURIComponent(m.name) + '/download';
@@ -222,9 +222,10 @@
         return [J.when(m.created_at), String(m.pairs), Math.round(m.accuracy * 100) + '%', admin ? link : ''];
       })));
       fill('lo-rm-list', nodes);
-      options($('lo-rm-model'), d.models.map(function (m) { return { value: m.name, label: 'Trained ' + J.when(m.created_at) }; }));
+      var selected = $('lo-rm-model') && $('lo-rm-model').value;
+      options($('lo-rm-model'), d.models.map(function (m, i) { return { value: m.name, label: 'Training ' + (d.models.length - i) + ' · ' + J.when(m.created_at) }; }), selected);
     }).catch(async function (failure) {
-      fill('lo-rm-list', el('p', null, await J.problem(failure, 'load the reward models')));
+      fill('lo-rm-list', el('p', null, await J.problem(failure, 'load saved scoring guides')));
     });
   }
   async function rewardSource() {
@@ -233,20 +234,22 @@
     var body = await fileBody($('lo-rm-file'), 'Choose the task outline file first.');
     return body ? { source: 'file', init: { method: 'POST', body: body, type: 'application/octet-stream' } } : null;
   }
-  J.wire($('lo-rm-train'), async function () {
+  J.wire($('lo-rm-file-train') || $('lo-rm-train'), async function () {
     var src = await rewardSource();
     if (!src) return null;
+    if ($('lo-rm-file-train') && src.source !== 'file') { window.mvToast('Choose the task-outline file option first.', { error: true }); return null; }
     var q = '?source=' + src.source + '&min_margin=' + $('lo-rm-margin').value + '&max_pairs=' + $('lo-rm-pairs').value +
       '&epochs=' + $('lo-rm-epochs').value + '&lr=' + $('lo-rm-lr').value;
     return { url: TO + '/reward-models/train' + q, init: src.init };
-  }, ui('lo-rm', 'train the reward model', function (d) {
+  }, ui('lo-rm', 'learn a scoring guide', function (d) {
     if (!d.trained) return el('p', null, d.why);
     return el('p', null, 'Trained on ' + plural(d.pairs, 'comparison') + ' from ' + plural(d.outlines, 'task outline') + '. It agrees with the answer checker ' +
       Math.round(d.accuracy * 100) + '% of the time.');
   }, loadRewardModels));
+  document.addEventListener('lightwork:reward-model-saved', loadRewardModels);
   J.wire($('lo-rm-score'), async function () {
     var model = $('lo-rm-model').value;
-    if (!model) { window.mvToast('Train a reward model first.', { error: true }); return null; }
+    if (!model) { window.mvToast('Learn a scoring guide from eligible task approaches first.', { error: true }); return null; }
     var src = await rewardSource();
     if (!src) return null;
     return { url: TO + '/reward-models/' + encodeURIComponent(model) + '/score?source=' + src.source, init: src.init };

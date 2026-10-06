@@ -721,8 +721,8 @@ async def conflicts(request: Request, model_id: str | None = Query(default=None,
     require_permission(request, "view")
     from maverick import self_harness
     model = await run_in_threadpool(_model_choice, model_id)
-    # The lexical check only: the meaning-based check calls an AI model and
-    # stays a deliberate terminal choice.
+    # This wording check is read-only. The separately reviewed native meaning
+    # check on the Learned page uses the governed learning-job admission.
     pairs = await run_in_threadpool(self_harness.detect_store_conflicts, model)
     return {"pairs": [{"model": m, "first": _clip(a), "second": _clip(b)}
                       for m, a, b in pairs[:_MAX_ROWS]], "truncated": len(pairs) > _MAX_ROWS}

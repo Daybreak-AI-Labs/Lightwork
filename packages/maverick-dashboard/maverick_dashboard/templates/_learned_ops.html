@@ -9,15 +9,23 @@
     <p class="muted" id="lpo-plan" role="status" aria-live="polite">Loading…</p>
 
     <h3 id="lpo-clash-h">Check lessons for clashes by meaning</h3>
-    <p class="muted">The list above catches clashes by wording. This asks the answer checker to compare each pair of
-      lessons by meaning, which catches reworded clashes. It uses a little of the spending limit; you can stop it.</p>
+    <p class="muted">The wording check above uses no AI calls. Here, review the currently shareable lessons and spending
+      settings before asking the answer checker to look for possible conflicts by meaning. Its judgments may be wrong
+      or unavailable. This changes no instructions.</p>
     <div class="lpo-row">
       <label for="lpo-clash-model">Model</label>
       <select id="lpo-clash-model" class="select"><option value="">Every model</option></select>
-      <button type="button" class="btn btn--ghost" id="lpo-clash-run">Check by meaning</button>
+      <button type="button" class="btn btn--ghost" id="lpo-clash-run">Review meaning check</button>
+    </div>
+    <div id="lpo-clash-review" style="overflow-wrap:anywhere"></div>
+    <div class="lpo-row">
+      <label for="lpo-clash-original">Original check</label>
+      <select id="lpo-clash-original" class="select"><option value="">Choose your original check</option></select>
+      <button type="button" class="btn btn--ghost" id="lpo-clash-recover" disabled>Read original result</button>
+      <button type="button" class="btn btn--ghost" id="lpo-clash-refresh">Refresh original checks</button>
     </div>
     <p class="muted" id="lpo-clash-status" role="status" aria-live="polite"></p>
-    <div id="lpo-clash-out"></div>
+    <div id="lpo-clash-out" style="overflow-wrap:anywhere"></div>
 
     <h3 id="lpo-transfer-h">Try proven lessons on other models</h3>
     <p class="muted">Lessons that proved themselves for one model are tested on another. Any that pass start on trial,

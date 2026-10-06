@@ -438,7 +438,7 @@
     if (!model()) return Promise.resolve();
     return get('/conflicts?model_id=' + encodeURIComponent(model())).then(function (data) {
       list.textContent = '';
-      if (!data.pairs.length) { list.appendChild(el('li', 'muted', 'No lessons seem to contradict each other.')); return; }
+      if (!data.pairs.length) { list.appendChild(el('li', 'muted', 'The wording check flagged no possible conflicts in currently shareable lessons. This does not establish that the guidance is correct.')); return; }
       data.pairs.forEach(function (p) {
         list.appendChild(el('li', null, '“' + p.first + '” may contradict “' + p.second + '”. Remove whichever is wrong from the lessons above.'));
       });

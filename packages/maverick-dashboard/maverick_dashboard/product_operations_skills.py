@@ -1,13 +1,14 @@
 """Copilot reviews and controls the same learned-skill admission as Skills."""
 from __future__ import annotations
 
-import re
+import time
 
 from fastapi import HTTPException
 from maverick.governed_operations import digest
 from pydantic import Field
 
 from . import auth
+from . import learned_skill_changes as changes
 from . import tools_ops_api as native
 from .product_operations import Adapter, EmptyInput, Outcome, Preview, Snapshot, StrictInput
 
@@ -23,7 +24,10 @@ class WithdrawInput(StrictInput):
 
 def _state(request):
     auth.require_permission(request, "admin")
-    return native._learned_candidates()
+    context = changes.authority(request)
+    value = native._learned_candidates()
+    changes.authority(request, context)
+    return {**value, "context": context}
 
 
 def snapshot(request, selection, kind="review"):
@@ -66,34 +70,24 @@ def admit_prepare(request, selection, arguments):
                 if item["name"] == arguments["candidate"] and item["ok"]), None)
     if row is None or not value["can_add"]:
         raise HTTPException(409, "This suggestion is unavailable. Refresh the current review.")
-    name = arguments["name"] or row["name"]
-    if len(name) > 96 or not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", name):
-        raise HTTPException(422, "Choose a short name using letters, numbers and dashes.")
+    review = changes.prepare(request, row["name"], "admit", row["fingerprint"], arguments["name"])
     return Preview(
-        "Add this exact suggestion to the agents' skills only after reviewing all instructions and linked tasks.",
-        changes=[{"label": "Skill name", "before": "Not added", "after": name.replace("-", " ")},
-                 {"label": "Full instructions", "before": "Not used", "after": row["instructions"]},
-                 {"label": "Used when", "before": "Not used", "after": ", ".join(row["triggers"])},
-                 {"label": "Source tasks", "before": "Not used", "after": ", ".join(str(n) for n in row["source_tasks"])}],
-        native={"candidate": row["name"], "fingerprint": row["fingerprint"], "name": name},
+        review["message"], changes=review["changes"], native={"review": review, "expires": time.time() + changes.TTL},
     )
 
 
 def admit_recover(request, selection, arguments, prepared, operation):
-    value = _state(request)
-    found = next((row for row in value["added"]
-                  if row["name"] == prepared["name"] and
-                  row.get("candidate_fingerprint") == prepared["fingerprint"]), None)
-    return Outcome("replayed", "This exact suggestion is already added; it was not added again.", found) if found else None
+    result = changes.original_for_review(request, prepared["review"], operation)
+    return _outcome(result) if result else None
+
+
+def _outcome(result):
+    return Outcome("confirmed" if result["confirmed"] else "unconfirmed", result["message"], result)
 
 
 def admit_execute(request, selection, arguments, prepared, operation):
-    result = native.admit_checked_learned_skill(
-        request, prepared["candidate"],
-        native.LearnedAdmissionIn(fingerprint=prepared["fingerprint"],
-                                  publish_name=prepared["name"], confirm=True),
-    )
-    return Outcome("confirmed", "The reviewed skill was added. Agents can use it on a matching new task.", result)
+    result = changes.apply(request, prepared["review"], operation, expires=prepared["expires"])
+    return _outcome(result)
 
 
 def withdraw_prepare(request, selection, arguments):
@@ -101,22 +95,32 @@ def withdraw_prepare(request, selection, arguments):
     row = next((item for item in value["added"] if item["name"] == arguments["name"]), None)
     if row is None:
         raise HTTPException(409, "This saved skill is unavailable. Refresh the current review.")
-    explanation = ("Its source task access is unavailable, so agents cannot use it now. "
-                   "Removing it also prevents reuse if access returns. "
-                   if row.get("source_shared") is False else "")
+    review = changes.prepare(request, row["name"], "withdraw", row["fingerprint"])
     return Preview(
-        explanation + "Remove this reviewed skill from new tasks. Past task records remain.",
-        changes=[{"label": "Agents' skill", "before": row["name"].replace("-", " "), "after": "Removed"}],
-        native={"name": row["name"], "fingerprint": row["fingerprint"]},
+        review["message"], changes=review["changes"], native={"review": review, "expires": time.time() + changes.TTL},
     )
 
 
 def withdraw_execute(request, selection, arguments, prepared, operation):
-    result = native.withdraw_checked_learned_skill(
-        request, prepared["name"],
-        native.LearnedWithdrawalIn(fingerprint=prepared["fingerprint"], confirm=True),
-    )
-    return Outcome("confirmed", "The skill was removed. New tasks will not use it.", result)
+    return admit_execute(request, selection, arguments, prepared, operation)
+
+
+def original_snapshot(request, selection):
+    context = changes.authority(request)
+    if selection.get("kind") != "learned_skill_change" or not selection.get("operation"):
+        return Snapshot(digest([context, "no-selected-original"]), "Original learned-skill changes",
+                        "Read the exact original result without adding or removing anything.",
+                        blocked="Choose Read original change in the Skills page first.")
+    row = changes.original(request, selection["operation"])
+    return Snapshot(digest(row), "Original reviewed learned-skill change", row["message"])
+
+
+def original_prepare(request, selection, arguments):
+    row = changes.original(request, selection["operation"])
+    return Preview(row["message"], native={"Original change": row["message"],
+        "Current skills": row.get("current", "Current skills do not establish the original result."),
+        "Open original result": {"href": "/skills?learned_request=" + row["operation"] + "#to-learned-skills",
+                                 "label": "Read original skill change"}})
 
 
 def entries():
@@ -126,8 +130,10 @@ def entries():
                 snapshot=snapshot, prepare=review_prepare, **shared),
         Adapter("skills.admit_suggestion", "Add a reviewed skill", input_model=AdmitInput,
                 snapshot=lambda r, s: snapshot(r, s, "admit"), prepare=admit_prepare,
-                execute=admit_execute, recover=admit_recover, **shared),
+                execute=admit_execute, recover=admit_recover, read_recovery=admit_recover, **shared),
         Adapter("skills.withdraw_suggestion", "Remove an added suggested skill", input_model=WithdrawInput,
                 snapshot=lambda r, s: snapshot(r, s, "withdraw"), prepare=withdraw_prepare,
-                execute=withdraw_execute, **shared),
+                execute=withdraw_execute, recover=admit_recover, read_recovery=admit_recover, **shared),
+        Adapter("skills.read_original_change", "Read the selected original skill change", input_model=EmptyInput,
+                snapshot=original_snapshot, prepare=original_prepare, **shared),
     )

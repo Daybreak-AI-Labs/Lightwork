@@ -198,6 +198,16 @@ Published synthetic cases and a user-reported model label do not establish model
 quality, unseen-case generalization, autonomous evaluator improvement or a novel
 algorithm. The register's research status counts are unchanged.
 
+The same foundations now have reviewed native meaning-check admission, retained
+local ranking-model publication, and exact original suggested-skill changes.
+Ordinary Learning and Skills controls share their source and authority guards
+with Copilot, and lost replies recover recorded work without repeating it.
+Native provider transport was checked with synthetic responses, the existing
+local trainer ran on eligible synthetic task outlines, and native skill files
+were added and removed through reviewed controls. These improve operability and
+custody; they do not qualify semantic accuracy, a new learning algorithm,
+independent audit custody, causal business value or invention novelty.
+
 An engine, API route, test fixture, or research archive is not a complete
 customer feature. The [learning journey contract](https://github.com/Daybreak-AI-Labs/Lightwork/blob/1c27445dda93e21e2eb38ef2dde5193646832da8/docs/learned-capabilities-product-contract.md#L1-L16)
 requires nontechnical setup, capture, review, teaching, use, result, withdrawal,

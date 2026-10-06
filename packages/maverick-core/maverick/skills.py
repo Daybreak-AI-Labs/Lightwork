@@ -1029,6 +1029,7 @@ def admit_learned_skill(
     name: str, fingerprint: str, *, publish_name: str = "",
     store: Path | None = None, skills_dir: Path | None = None,
     before_save: Callable[[LearnedSkillCandidate], None] | None = None,
+    effect_guard: Callable[[], None] | None = None,
 ) -> Skill:
     """Promote one reviewed proposal through ordinary signing/shield checks.
 
@@ -1082,6 +1083,8 @@ def admit_learned_skill(
             last = _learned_candidate(name, store=root)
             if last.fingerprint != fingerprint:
                 raise ValueError("This suggestion changed. Check it again before adding it.")
+            if effect_guard is not None:
+                effect_guard()
 
         return _validate_and_write(text, _resolved_skills_dir(skills_dir),
                                    before_save=_authorize, replace_existing=False,
@@ -1153,6 +1156,7 @@ def admitted_learned_skills(*, skills_dir: Path | None = None) -> list[AdmittedL
 def withdraw_admitted_learned_skill(
     name: str, fingerprint: str, *, skills_dir: Path | None = None,
     before_delete: Callable[[AdmittedLearnedSkill], None] | None = None,
+    effect_guard: Callable[[], None] | None = None,
 ) -> AdmittedLearnedSkill:
     """Withdraw one exact reviewed skill; stale reviews never delete updates."""
     from .file_lock import cross_process_lock
@@ -1168,6 +1172,8 @@ def withdraw_admitted_learned_skill(
             raise ValueError("This saved skill changed. Refresh it before removing it.")
         if before_delete is not None:
             before_delete(item)
+        if effect_guard is not None:
+            effect_guard()
         target.unlink()
     return item
 

@@ -798,3 +798,35 @@ including delayed refusals, detached controls and obsolete selections, with no
 JavaScript errors. Only metadata and deferred destination controllers were
 substituted in that presentation check; it does not newly qualify the six native
 services or claim a customer effect.
+
+## October 5 reviewed lessons, local ranking and suggested skills
+
+The meaning check now reviews the current shared lessons, configured models and
+spending controls before starting the native retained worker. It records the
+original request and worker admission before contacting an AI service. Missing
+answers, provider failures and lexical fallback remain distinct from an AI
+finding. Reading the original check does not start another check, and withdrawn
+or inaccessible source text is withheld from history. Native SDK requests through
+a local HTTP transport covered nine synthetic calls, delayed identity writes,
+interrupted admissions, lost replies and fresh-process recovery. This checks the
+operating contract; it does not establish a model's conflict-detection accuracy.
+
+Learning now offers an ordinary reviewed form for training the existing local
+ranking model from eligible shared task outlines. Its choices, exact sources and
+original publication belong to one retained request. Training, scoring and
+download recheck current source permission. Withdrawal removes source details
+from an old result and prevents later use, while preserving truthful publication
+history. Actual local training exercised three runs and two published models,
+including lost replies and an interrupted publication. No paid AI service was
+used and no improvement in customer outcomes is claimed.
+
+Adding and removing suggested skills now require a full current review through
+Skills or Copilot. The final native file writer checks the source, authority and
+review deadline. Original confirmation is retained separately from today's file
+state. A write whose confirmation was interrupted remains unconfirmed; matching
+file contents or a later removal cannot establish that original outcome.
+The ordinary page retains original changes and recovers a lost reply without
+repeating the effect. Actual 320px journeys completed three additions and two
+removals, refused stale sources and expired queued reviews, and kept current
+skills separate from five original records without document overflow or
+JavaScript errors.

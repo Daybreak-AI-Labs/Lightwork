@@ -259,8 +259,65 @@ async def reward_models(request: Request) -> dict:
 
     def _read() -> dict:
         from maverick.donation import list_pending
-        return {"models": list(reversed(_index()))[:50], "waiting_outlines": len(list_pending())}
+
+        from .reward_model_training import models
+        combined = list(reversed(_index())) + models()
+        return {"models": sorted(combined, key=lambda row: row["created_at"], reverse=True)[:50], "waiting_outlines": len(list_pending())}
     return await run_in_threadpool(_read)
+
+
+@router.get("/reward-models/current-outlines")
+async def current_reward_outlines(request: Request) -> Response:
+    from . import reward_model_training as reward
+    state, _rows = await run_in_threadpool(reward.current, request)
+    public = {key: value for key, value in state.items() if key not in {"source", "storage", "sources"}}
+    return Response(json.dumps(public), media_type="application/json", headers={"Cache-Control": "private, no-store"})
+
+
+@router.post("/reward-models/review")
+async def review_reward_training(request: Request) -> Response:
+    import secrets
+
+    from maverick import crypto_at_rest
+
+    from . import reward_model_training as reward
+    try:
+        prepared = await run_in_threadpool(reward.prepare, request, json.loads(await _upload(request, 8192)))
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(422, "Choose the displayed training options before reviewing.") from exc
+    value = {"purpose": "lightwork.reward-training.v1", "operation": secrets.token_hex(16),
+             "expires": time.time() + 600, "prepared": prepared}
+    token = crypto_at_rest.seal_to_str(json.dumps(value, ensure_ascii=False, separators=(",", ":")))
+    if not crypto_at_rest.is_sealed_str(token) or len(token) > 262144:
+        raise HTTPException(409, "The training review could not be protected. Nothing was started.")
+    return Response(json.dumps({"token": token, "operation": value["operation"], "context": prepared["body"]["context"],
+                               "review": reward.review_rows(prepared), "notice": reward.NOTICE}),
+                    media_type="application/json", headers={"Cache-Control": "private, no-store"})
+
+
+@router.post("/reward-models/train-reviewed")
+async def train_reviewed_reward_model(request: Request, body: OrdinaryScoreIn) -> Response:
+    from maverick import crypto_at_rest
+
+    from . import reward_model_training as reward
+    try:
+        if not crypto_at_rest.is_sealed_str(body.token):
+            raise ValueError
+        value = json.loads(crypto_at_rest.unseal_from_str(body.token))
+        if (set(value) != {"purpose", "operation", "expires", "prepared"}
+                or value["purpose"] != "lightwork.reward-training.v1" or value["expires"] <= time.time()):
+            raise ValueError
+    except (ValueError, TypeError, KeyError) as exc:
+        raise HTTPException(409, "This training review expired or could not be checked. Read any original request before preparing another.") from exc
+    result = await run_in_threadpool(reward.start, request, value["prepared"], value["operation"], expires=value["expires"])
+    return Response(json.dumps(result), media_type="application/json", headers={"Cache-Control": "private, no-store"})
+
+
+@router.get("/reward-models/requests/{operation}")
+async def original_reward_training(request: Request, operation: str) -> Response:
+    from . import reward_model_training as reward
+    result = await run_in_threadpool(reward.original, request, operation)
+    return Response(json.dumps(result), media_type="application/json", headers={"Cache-Control": "private, no-store"})
 
 
 @router.post("/reward-models/train")
@@ -309,11 +366,16 @@ async def score_with_reward_model(request: Request, name: str,
                                   source: Literal["outbox", "file"] = "outbox") -> dict:
     require_global_permission(request, "admin")
     from maverick.training.reward_model import PreferenceRewardModel
-    path = await run_in_threadpool(_model_path, name)
+
+    from .reward_model_training import model_bytes
+    guided = await run_in_threadpool(model_bytes, request, name)
+    path = await run_in_threadpool(_model_path, name) if guided is None else None
     raw = await _rows(request, source)
 
     def _run(job) -> dict:
-        model = PreferenceRewardModel.load(path)
+        require_global_permission(request, "admin")
+        latest = model_bytes(request, name) if guided is not None else None
+        model = PreferenceRewardModel(json.loads(latest)["weights"]) if latest is not None else PreferenceRewardModel.load(path)
         rows = _file_rows(raw) if source == "file" else _outbox_rows()
         scored = sorted(({"outcome": str(r.get("outcome") or "").replace("_", " "),
                           "steps": len(r.get("messages") or []), "score": round(model.score(r), 4),
@@ -326,8 +388,12 @@ async def score_with_reward_model(request: Request, name: str,
 @router.get("/reward-models/{name}/download")
 async def download_reward_model(request: Request, name: str) -> Response:
     require_global_permission(request, "admin")
-    path = await run_in_threadpool(_model_path, name)
-    data = await run_in_threadpool(path.read_bytes)
+    from .reward_model_training import model_bytes
+    data = await run_in_threadpool(model_bytes, request, name)
+    if data is None:
+        path = await run_in_threadpool(_model_path, name)
+        data = await run_in_threadpool(path.read_bytes)
+    require_global_permission(request, "admin")
     await run_in_threadpool(lambda: _record(request, "reward_model_download", model=name))
     return Response(data, media_type="application/json", headers={
         "Content-Disposition": f'attachment; filename="Lightwork-reward-model-{name[3:]}.json"',

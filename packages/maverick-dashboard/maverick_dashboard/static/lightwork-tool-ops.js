@@ -184,117 +184,198 @@
 
   // ---- Skills suggested by completed work ---------------------------------
   function learnedSkills() {
-    var panel = $('to-learned-skills');
-    if (!panel) return;
-    var status = $('to-learned-status');
-    var suggestions = $('to-learned-list');
-    var added = $('to-learned-added');
-    async function refresh() {
-      suggestions.textContent = '';
-      added.textContent = '';
+    var panel = $('to-learned-skills'); if (!panel) return;
+    var status = $('to-learned-status'), suggestions = $('to-learned-list'), added = $('to-learned-added');
+    var preview = $('to-learned-review'), result = $('to-learned-result'), history = $('to-learned-history');
+    var original = $('to-learned-original'), reload = $('to-learned-refresh');
+    var context = null, pending = null, busy = false, generation = 0, reviewGeneration = 0;
+    function lock(value) {
+      busy = value;
+      panel.querySelectorAll('button,input').forEach(function (item) { item.disabled = value; });
+      original.disabled = value || !pending;
+      var confirm = preview.querySelector('[data-confirm]');
+      var checked = preview.querySelector('input[type="checkbox"]');
+      if (confirm) confirm.disabled = value || !checked || !checked.checked;
+    }
+    function invalidate() { reviewGeneration++; preview.replaceChildren(); }
+    function changed() {
+      generation++; invalidate(); context = null; pending = null;
+      suggestions.replaceChildren(); added.replaceChildren(); result.replaceChildren(); history.replaceChildren();
+      lock(false); say(status, 'Your account, workspace or access changed. Refresh suggestions before continuing.');
+    }
+    async function call(url, options) {
+      options = options || {};
       try {
-        var data = await request('/api/v1/skills/learned-candidates');
+        return await window.mvFetchJSON(url, {method: options.method || 'GET', cache: 'no-store',
+          body: options.json, timeout: 30000, onAccess: changed});
+      } catch (failure) {
+        if (failure.status === 409 && String(failure.detail || '').indexOf('Your account or workspace changed.') === 0) changed();
+        throw failure;
+      }
+    }
+    function preserve(operation) {
+      pending = operation;
+      original.disabled = busy || !pending;
+      if (context && pending) {
+        try { sessionStorage.setItem('learned-skill-change:' + context, pending); } catch (_) {}
+        document.dispatchEvent(new CustomEvent('lightwork:copilot-selection', {
+          detail: {selection: {kind: 'learned_skill_change', operation: pending}}}));
+      }
+    }
+    function show(row) {
+      result.replaceChildren();
+      result.appendChild(el('h3', null, 'Your original skill change'));
+      result.appendChild(el('p', null, row.message));
+      if (row.current) result.appendChild(el('p', 'muted sk-small', 'Current skills: ' + row.current));
+      if (row.recorded_at) result.appendChild(el('p', 'muted sk-small', 'Recorded ' + when(row.recorded_at)));
+    }
+    async function readOriginal(operation) {
+      if (busy || !context || !/^[a-f0-9]{32}$/.test(operation)) return;
+      var started = generation; invalidate(); lock(true);
+      try {
+        var row = await call('/api/v1/skills/learned-requests/' + encodeURIComponent(operation));
+        if (started !== generation) return;
+        if (row.context !== context) { changed(); return; }
+        preserve(operation); show(row); say(status, 'Read the original result. No skill was added or removed.');
+      } catch (failure) {
+        if (started === generation) say(status, await failText(failure, 'read the original change') + ' Nothing was repeated.');
+      } finally { if (started === generation) lock(false); }
+    }
+    async function reviewAction(row, action, chosen, nameInput) {
+      if (busy || !context) return;
+      var started = generation, draft = ++reviewGeneration; preview.replaceChildren(); lock(true);
+      try {
+        var review = await call('/api/v1/skills/learned-candidates/' + encodeURIComponent(row.name) + '/review',
+          {method: 'POST', json: {action: action, fingerprint: row.fingerprint, publish_name: chosen || '', context: context}});
+        if (started !== generation || draft !== reviewGeneration) return;
+        if (review.context !== context) { changed(); return; }
+        preview.appendChild(el('h3', null, action === 'admit' ? 'Review this skill before adding it' : 'Review this skill removal'));
+        preview.appendChild(el('p', null, review.message));
+        review.changes.forEach(function (change) {
+          preview.appendChild(el('h4', null, change.label));
+          var text = el('p', null, change.after); text.style.whiteSpace = 'pre-wrap'; text.style.overflowWrap = 'anywhere';
+          preview.appendChild(text);
+        });
+        var label = el('label', 'sk-field'), checked = el('input');
+        checked.type = 'checkbox'; label.appendChild(checked);
+        label.appendChild(el('span', null, 'I reviewed this exact change and all displayed instructions.'));
+        preview.appendChild(label);
+        var apply = button(action === 'admit' ? 'Add reviewed skill' : 'Remove reviewed skill', 'btn--primary');
+        apply.setAttribute('data-confirm', 'true'); apply.disabled = true; preview.appendChild(apply);
+        checked.addEventListener('change', function () { apply.disabled = busy || !checked.checked; });
+        apply.addEventListener('click', async function () {
+          if (busy || !checked.checked || draft !== reviewGeneration || started !== generation) return;
+          if (nameInput && slug(nameInput.value) !== chosen) { invalidate(); say(status, 'The name changed. Review the skill again.'); return; }
+          lock(true); preserve(review.operation);
+          try {
+            var outcome = await call('/api/v1/skills/learned-candidates/' + encodeURIComponent(row.name) + '/' + action,
+              {method: 'POST', json: {fingerprint: row.fingerprint, confirm: true, review_token: review.token,
+                ...(action === 'admit' ? {publish_name: chosen} : {})}});
+            if (started !== generation) return;
+            if (outcome.context !== context) { changed(); return; }
+            show(outcome); say(status, outcome.message);
+            invalidate(); lock(false);
+            await refresh();
+          } catch (failure) {
+            if (started === generation) {
+              invalidate();
+              say(status, await failText(failure, 'change this skill') +
+                ' The change may have completed. Check the original result before another decision.');
+            }
+          } finally { if (started === generation) lock(false); }
+        });
+      } catch (failure) {
+        if (started === generation) say(status, await failText(failure, 'review this skill'));
+      } finally { if (started === generation) lock(false); }
+    }
+    function slug(value) {
+      return String(value || '').toLowerCase().normalize('NFKD')
+        .replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+    }
+    async function refresh() {
+      if (busy) return null;
+      var started = ++generation; invalidate(); lock(true);
+      try {
+        var data = await call('/api/v1/skills/learned-candidates');
+        if (started !== generation) return null;
+        if (context && data.context !== context) { changed(); return null; }
+        context = data.context; suggestions.replaceChildren(); added.replaceChildren(); history.replaceChildren();
         var rows = data.suggestions || [];
         say(status, data.blocked || (rows.length ? plural(rows.length, 'suggestion') + ' ready for your review.' :
-          'No new suggestions yet. Lightwork will place repeated successes here for review.'));
+          'No new suggestions yet. Repeated shared successes can produce suggestions for review.'));
         rows.forEach(function (row) {
-          var card = el('article', 'panel to-card');
-          card.appendChild(el('h3', null, human(row.name)));
-          card.appendChild(el('p', 'muted sk-small', 'Suggested from completed shared tasks. Review those tasks and every step below before adding this skill.'));
+          var card = el('article', 'panel to-card'); card.appendChild(el('h3', null, human(row.name)));
+          card.appendChild(el('p', 'muted sk-small', 'Suggested from completed shared tasks. Review its sources and every instruction before adding it.'));
           var sources = el('p', 'muted sk-small');
           (row.source_tasks || []).forEach(function (id, index) {
             if (index) sources.appendChild(document.createTextNode(' · '));
-            var link = el('a', null, 'Task ' + id);
-            link.href = '/chat/goal/' + encodeURIComponent(id);
-            sources.appendChild(link);
+            var link = el('a', null, 'Task ' + id); link.href = '/chat/goal/' + encodeURIComponent(id); sources.appendChild(link);
           });
           card.appendChild(sources);
           card.appendChild(el('p', null, 'Used when a task mentions: ' + (row.triggers || []).join(', ')));
-          card.appendChild(el('p', null, row.tools.length ? 'Tools it asks for: ' + row.tools.map(human).join(', ') : 'It asks for no tools.'));
+          card.appendChild(el('p', null, row.tools.length ? 'Tools requested: ' + row.tools.map(human).join(', ') : 'It requests no tools.'));
           card.appendChild(el('p', 'muted sk-small', 'Full instructions:'));
           card.appendChild(el('pre', 'to-text', row.instructions || 'No instructions.'));
-          if (row.problems.length) {
-            card.appendChild(el('p', null, 'This suggestion cannot be added yet:'));
-            card.appendChild(list(row.problems));
-          }
+          if (row.problems.length) card.appendChild(list(row.problems));
           if (row.ok && data.can_add) {
-            var label = el('label', 'sk-field');
-            label.appendChild(el('span', null, 'Save this skill as'));
-            var name = el('input', 'input');
-            name.type = 'text'; name.maxLength = 96; name.value = human(row.name);
-            name.setAttribute('aria-label', 'Name for ' + human(row.name));
-            label.appendChild(name); card.appendChild(label);
-            var add = button('Add this skill', 'btn--primary');
-            add.addEventListener('click', async function () {
-              var chosen = String(name.value || '').toLowerCase().normalize('NFKD')
-                .replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+            var label = el('label', 'sk-field'); label.appendChild(el('span', null, 'Save this skill as'));
+            var name = el('input', 'input'); name.type = 'text'; name.maxLength = 96; name.value = human(row.name);
+            name.setAttribute('aria-label', 'Name for ' + human(row.name)); label.appendChild(name); card.appendChild(label);
+            name.addEventListener('input', invalidate);
+            var add = button('Review adding this skill', 'btn--primary');
+            add.addEventListener('click', function () {
+              var chosen = slug(name.value);
               if (!chosen || chosen.length > 96) { say(status, 'Choose a short name with letters or numbers.'); name.focus(); return; }
-              var confirmed = await window.mvConfirm('Add “' + human(chosen) + '” to the agents’ skills? They may follow these reviewed instructions on the next matching task.', {okText: 'Add skill'});
-              if (!confirmed) return;
-              add.disabled = true;
-              try {
-                var saved = await request('/api/v1/skills/learned-candidates/' + encodeURIComponent(row.name) + '/admit',
-                  {method: 'POST', json: {fingerprint: row.fingerprint, publish_name: chosen, confirm: true}});
-                var current = await refresh();
-                var confirmed = current && (current.added || []).find(function (item) { return item.name === saved.name; });
-                if (confirmed) {
-                  if (window.lwAppendSkill) window.lwAppendSkill(saved);
-                  say(status, 'Added ' + human(saved.name) + '. ' + (confirmed.status || 'Check its current use status below.'));
-                } else {
-                  say(status, 'The add request returned, but the current skill list could not confirm it. Refresh before trying again.');
-                }
-              } catch (failure) {
-                say(status, await failText(failure, 'add this suggestion'));
-                add.disabled = false;
-              }
-            });
-            card.appendChild(add);
+              reviewAction(row, 'admit', chosen, name);
+            }); card.appendChild(add);
           }
           suggestions.appendChild(card);
         });
-        if (data.added && data.added.length) {
-          added.appendChild(el('h3', null, 'Added suggestions'));
-          added.appendChild(el('p', 'muted sk-small', 'Remove one to stop agents using it on new tasks. Past task records remain.'));
+        if ((data.added || []).length) {
+          added.appendChild(el('h3', null, 'Current added suggestions'));
+          added.appendChild(el('p', 'muted sk-small', 'This is the current list. Original change receipts are separate below.'));
           data.added.forEach(function (row) {
-            var card = el('div', 'sk-actions');
-            card.appendChild(el('span', null, human(row.name)));
+            var card = el('div', 'sk-actions'); card.appendChild(el('span', null, human(row.name)));
             if (row.status) card.appendChild(el('span', 'muted sk-small', row.status));
             if (row.recall_ready === true) card.appendChild(el('span', 'muted sk-small',
               row.use_tracking === false ? 'Use history is turned off.' :
-                (row.uses > 0 ? 'Used on ' + plural(row.uses, 'later task') + '.' :
-                  'No later task has used this skill yet.')));
-            var remove = button('Remove', 'btn--danger');
-            remove.setAttribute('aria-label', 'Remove ' + human(row.name));
-            remove.addEventListener('click', async function () {
-              var confirmed = await window.mvConfirm('Remove “' + human(row.name) + '” from the agents’ skills? New tasks will stop using it.', {okText: 'Remove skill'});
-              if (!confirmed) return;
-              remove.disabled = true;
-              try {
-                await request('/api/v1/skills/learned-candidates/' + encodeURIComponent(row.name) + '/withdraw',
-                  {method: 'POST', json: {fingerprint: row.fingerprint, confirm: true}});
-                var current = await refresh();
-                if (current && !(current.added || []).some(function (item) { return item.name === row.name; })) {
-                  document.querySelectorAll('[data-skill]').forEach(function (item) {
-                    if (item.getAttribute('data-skill') === row.name) item.remove();
-                  });
-                  say(status, 'Removed ' + human(row.name) + '. New tasks will not use it.');
-                } else {
-                  say(status, 'The remove request returned, but the current skill list could not confirm it. Refresh before trying again.');
-                }
-              } catch (failure) {
-                say(status, await failText(failure, 'remove this skill'));
-                remove.disabled = false;
-              }
-            });
+                row.uses > 0 ? 'Used on ' + plural(row.uses, 'later task') + '.' : 'No later task has used this skill yet.'));
+            var remove = button('Review removal', 'btn--danger'); remove.setAttribute('aria-label', 'Review removal of ' + human(row.name));
+            remove.addEventListener('click', function () { reviewAction(row, 'withdraw', ''); });
             card.appendChild(remove); added.appendChild(card);
           });
         }
+        var saved = await call('/api/v1/skills/learned-requests');
+        if (started !== generation) return null;
+        if (saved.context !== context) { changed(); return null; }
+        if (saved.requests.length) {
+          history.appendChild(el('h3', null, 'Recent original changes'));
+          saved.requests.forEach(function (row) {
+            var read = button((row.action === 'admit' ? 'Add ' : 'Remove ') + human(row.name) +
+              (row.confirmed ? ' · Read original change' : ' · Result unconfirmed'));
+            read.addEventListener('click', function () { readOriginal(row.operation); });
+            history.appendChild(read);
+          });
+        }
+        if (!pending) {
+          var query = new URL(location.href).searchParams.get('learned_request');
+          try { pending = query || sessionStorage.getItem('learned-skill-change:' + context); } catch (_) { pending = query; }
+          if (!/^[a-f0-9]{32}$/.test(pending || '')) pending = null;
+        }
+        return data;
       } catch (failure) {
-        say(status, await failText(failure, 'load suggested skills'));
+        if (started === generation) say(status, await failText(failure, 'load suggested skills') + ' Your displayed work is kept.');
         return null;
-      }
-      return data;
+      } finally { if (started === generation) lock(false); }
     }
+    original.addEventListener('click', function () { if (pending) readOriginal(pending); });
+    reload.addEventListener('click', refresh);
+    document.addEventListener('lightwork:workspace-changed', changed);
+    document.addEventListener('lightwork:account-context-changed', changed);
+    window.addEventListener('lightwork:context-changed', changed);
+    document.addEventListener('lightwork:copilot-context-changed', function (event) {
+      if (!event.detail || event.detail.reason !== 'selection') changed();
+    });
     refresh();
   }
 

@@ -55,6 +55,7 @@ ASSETS = (
     "lightwork-learning-test-cases.js",
     "lightwork-learning-holdout-setup.js",
     "lightwork-model-answer-scoring.js",
+    "lightwork-reward-model-training.js",
     "lightwork-learning-pending-cases.js",
     "lightwork-value-proof.js",
     "lightwork-assurance-forms.js",

@@ -106,7 +106,11 @@ _MODIFY_REFUSALS = (
 
 
 class ClashIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
     model_id: str | None = Field(default=None, max_length=200)
+    context: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
+    token: str | None = Field(default=None, min_length=1, max_length=24000)
+    confirmed: bool = False
 
 
 class TransferIn(BaseModel):
@@ -289,7 +293,9 @@ _JOB_STATES = {"running": "Working", "stopping": "Stopping at the next safe poin
 _RESULT_COUNTS = {"patterns_found": "Patterns found", "ideas_tried": "Ideas tried",
                   "passed_testing": "Passed practice checks", "adopted": "Lessons adopted",
                   "retired": "Lessons retired", "removed": "Cases removed", "tested": "Ideas checked",
-                  "tasks": "Completed tasks reviewed", "tried": "Lessons tried"}
+                  "tasks": "Completed tasks reviewed", "tried": "Lessons tried",
+                  "checked": "AI judgments received", "unknown": "AI judgments unavailable",
+                  "flagged": "Possible conflicts flagged by AI", "wording_flags": "Wording flags without an AI judgment"}
 
 
 def _history_job(request, job_id):
@@ -543,25 +549,53 @@ def _offered(model_id: str | None) -> str | None:
     return model_id or None
 
 
-@router.post("/self-harness/clash-check")
-async def clash_check(request: Request, body: ClashIn) -> dict:
-    """``self-harness conflicts --semantic``: the checker model judges each
-    possible pair by meaning. Stopping lowers its spending limit so the
-    remaining pairs fall back to the wording check."""
-    require_global_permission(request, "admin")
-    from maverick import self_harness
-    model = await run_in_threadpool(_offered, body.model_id)
-    budget = _budget("self_harness")
-    await run_in_threadpool(lambda: _record(request, "self_harness_semantic_conflicts", model=model or ""))
+@router.get("/self-harness/clash-check")
+def clash_catalog(request: Request):
+    from . import learning_conflicts as checks
+    return JSONResponse(checks.catalog(request), headers={"Cache-Control": "no-store"})
 
-    def _run(job: jobs.Job) -> dict:
-        from maverick.llm import LLM, model_for_role
-        classifier = self_harness.llm_conflict_classifier(LLM(model_for_role("verifier")), budget=budget)
-        pairs = self_harness.detect_store_conflicts(model_id=model, classifier_fn=classifier)
-        return {"pairs": [{"model": m, "first": _clip(a), "second": _clip(b)} for m, a, b in pairs[:100]],
-                "spent": round(float(budget.dollars), 4)}
-    return start_job(request, "self_harness_clash", "Checking lessons for clashes by meaning", _run,
-                     cancellable=True, on_cancel=jobs.stop_budget(budget))
+
+@router.get("/self-harness/clash-check/requests/{operation}")
+def clash_original(request: Request, operation: str):
+    from . import learning_conflicts as checks
+    return JSONResponse(checks.original(request, operation), headers={"Cache-Control": "no-store"})
+
+
+@router.post("/self-harness/clash-check/review")
+def clash_review(request: Request, body: ClashIn):
+    import secrets
+
+    from maverick import crypto_at_rest
+
+    from . import learning_conflicts as checks
+    if body.context is None or body.token is not None or body.confirmed:
+        raise HTTPException(422, "Open the current guidance and review this meaning check first.")
+    prepared = checks.prepare(request, body.model_id, context=body.context)
+    material = {"purpose": "lightwork.learning-conflict.v1", "prepared": prepared, "operation": secrets.token_hex(16)}
+    token = crypto_at_rest.seal_to_str(json.dumps(material, ensure_ascii=False, allow_nan=False, separators=(",", ":")))
+    if not crypto_at_rest.is_sealed_str(token) or len(token) > 24000:
+        raise HTTPException(503, "This review could not be kept securely. No AI call was made.")
+    return JSONResponse({"context": prepared["context"], "operation": material["operation"], "token": token,
+                         "changes": checks.changes(request, prepared)}, headers={"Cache-Control": "no-store"})
+
+
+@router.post("/self-harness/clash-check")
+def clash_check(request: Request, body: ClashIn) -> dict:
+    from maverick import crypto_at_rest
+
+    from . import learning_conflicts as checks
+    if not body.confirmed or not body.token or not body.context:
+        raise HTTPException(422, "Review the exact guidance and spending settings, then confirm in the Learned page. No AI call was made.")
+    try:
+        if not crypto_at_rest.is_sealed_str(body.token):
+            raise ValueError
+        material = json.loads(crypto_at_rest.unseal_from_str(body.token))
+        if (set(material) != {"purpose", "prepared", "operation"} or material["purpose"] != "lightwork.learning-conflict.v1"
+                or material["prepared"]["context"] != body.context):
+            raise ValueError
+    except Exception as exc:
+        raise HTTPException(409, "This review could not be verified. Review the current guidance again.") from exc
+    return checks.start(request, material["prepared"], material["operation"])
 
 
 @router.post("/self-harness/transfer")

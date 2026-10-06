@@ -103,12 +103,12 @@
   </div>
 
   <div class="panel" id="lo-reward">
-    <h3 class="lrn__section-h" id="lo-rm-h">Reward model</h3>
+    <h3 class="lrn__section-h" id="lo-rm-h">Learn how to rank work</h3>
     <p class="lrn__section-sub">A small model trained on this server that learns which attempts at a task the answer
       checker preferred, so new attempts can be ranked cheaply. It learns from task outlines, never from task text.</p>
     <div id="lo-rm-list" role="status" aria-live="polite">Loading…</div>
     {% if learning_can_manage %}
-    <h4>Train a new reward model</h4>
+    <h4>Train a local ranking model</h4>
     <fieldset class="lo-fieldset">
       <legend>Learn from</legend>
       <label><input type="radio" name="lo-rm-source" value="outbox" checked> Task outlines waiting on this server</label>
@@ -125,12 +125,14 @@
       <select id="lo-rm-epochs" class="select"><option value="100">100</option><option value="200" selected>200</option><option value="500">500</option></select>
       <label for="lo-rm-lr">Learning speed</label>
       <select id="lo-rm-lr" class="select"><option value="0.05">Slow</option><option value="0.1" selected>Normal</option><option value="0.2">Fast</option></select>
-      <button type="button" class="btn btn--primary" id="lo-rm-train">Train the reward model</button>
+      <button type="button" class="btn btn--primary" id="lo-rm-train">Review local training</button>
+      <button type="button" class="btn btn--ghost" id="lo-rm-file-train" hidden>Train from uploaded outlines</button>
     </div>
+    {% include '_reward_model_training.html' %}
     <h4>Score task outlines</h4>
     <div class="lrn__actions">
-      <label for="lo-rm-model">Reward model</label><select id="lo-rm-model" class="select"></select>
-      <button type="button" class="btn btn--ghost" id="lo-rm-score">Score with the reward model</button>
+      <label for="lo-rm-model">Saved scoring guide</label><select id="lo-rm-model" class="select"></select>
+      <button type="button" class="btn btn--ghost" id="lo-rm-score">Score task approaches</button>
     </div>
     <p class="muted" id="lo-rm-status" role="status" aria-live="polite"></p>
     <div id="lo-rm-out"></div>

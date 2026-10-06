@@ -201,12 +201,22 @@ class LearnedAdmissionIn(BaseModel):
     fingerprint: str = Field(pattern=r"^[a-f0-9]{64}$")
     publish_name: str = Field(default="", max_length=96)
     confirm: bool = False
+    review_token: str = Field(default="", max_length=100000)
 
 
 class LearnedWithdrawalIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
     fingerprint: str = Field(pattern=r"^[a-f0-9]{64}$")
     confirm: bool = False
+    review_token: str = Field(default="", max_length=100000)
+
+
+class LearnedReviewIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    action: Literal["admit", "withdraw"]
+    fingerprint: str = Field(pattern=r"^[a-f0-9]{64}$")
+    publish_name: str = Field(default="", max_length=96)
+    context: str = Field(pattern=r"^[a-f0-9]{64}$")
 
 
 def _learned_admission_allowed() -> tuple[bool, str]:
@@ -275,7 +285,32 @@ def _learned_candidates() -> dict:
 @router.get("/skills/learned-candidates")
 async def skill_learned_candidates(request: Request) -> dict:
     require_permission(request, "admin")
-    return await run_in_threadpool(_learned_candidates)
+    def current():
+        from .learned_skill_changes import authority
+        context = authority(request)
+        value = _learned_candidates()
+        authority(request, context)
+        return {**value, "context": context}
+    return await run_in_threadpool(current)
+
+
+@router.post("/skills/learned-candidates/{name}/review")
+async def skill_learned_review(request: Request, name: str, body: LearnedReviewIn):
+    from . import learned_skill_changes as changes
+    changes.authority(request, body.context, write=True)
+    return await run_in_threadpool(changes.sealed_review, request, name, body.action, body.fingerprint, body.publish_name)
+
+
+@router.get("/skills/learned-requests")
+async def skill_learned_requests(request: Request):
+    from .learned_skill_changes import recent
+    return await run_in_threadpool(recent, request)
+
+
+@router.get("/skills/learned-requests/{operation}")
+async def skill_learned_original(request: Request, operation: str):
+    from .learned_skill_changes import original
+    return await run_in_threadpool(original, request, operation)
 
 
 def _record_learned_change(request: Request, verb: str, *, name: str,
@@ -303,45 +338,18 @@ def _record_learned_change(request: Request, verb: str, *, name: str,
 
 def admit_checked_learned_skill(request: Request, name: str, body: LearnedAdmissionIn) -> dict:
     """One authority path for the Skills page and Copilot."""
-    same_origin(request)
-    require_permission(request, "admin")
-    allowed, reason = _learned_admission_allowed()
-    if not allowed:
-        raise HTTPException(403, reason)
+    from . import learned_skill_changes as changes
+    changes.authority(request, write=True)
     if not body.confirm:
         raise HTTPException(422, "Read the suggestion and confirm before adding it.")
-    from maverick.learning_guard import Halted
-    from maverick.skills import admit_learned_skill
-
-    def authorize(item):
-        require_permission(request, "admin")
-        _record_learned_change(
-            request, "learned_skill_admit", name=body.publish_name or item.name,
-            fingerprint=item.fingerprint, source_tasks=item.source_goal_ids,
-            phase="prepared",
-        )
-
-    try:
-        skill = admit_learned_skill(
-            name, body.fingerprint, publish_name=body.publish_name,
-            before_save=authorize,
-        )
-    except Halted as exc:
-        raise HTTPException(409, "Learning is paused. This suggestion was not added.") from exc
-    except ValueError as exc:
-        message = str(exc)
-        status = 409 if any(word in message for word in ("changed", "already", "current", "name")) else 422
-        if "shared task sources" in message or "no longer available" in message:
-            raise HTTPException(404, "This suggestion is no longer available.") from exc
-        raise HTTPException(status, message) from exc
-    except OSError as exc:
-        raise HTTPException(503, "The skill change could not be confirmed. Refresh the current skill list before trying again.") from exc
-    _record_learned_change(
-        request, "learned_skill_admit", name=skill.name,
-        fingerprint=body.fingerprint, source_tasks=skill.source_goal_ids,
-        phase="completed",
-    )
-    return {"name": skill.name, "triggers": skill.triggers, "tools_needed": skill.tools_needed}
+    if not body.review_token:
+        raise HTTPException(409, "Review the full current suggestion before adding it. No skill was changed.")
+    review = changes.open_review(request, body.review_token)
+    prepared = review["prepared"]
+    if (prepared["action"] != "admit" or prepared["name"] != name
+            or prepared["fingerprint"] != body.fingerprint or prepared["publish_name"] != (body.publish_name or name)):
+        raise HTTPException(409, "This request differs from the reviewed skill. Prepare a fresh review.")
+    return changes.apply(request, prepared, review["operation"], expires=review["expires"])
 
 
 @router.post("/skills/learned-candidates/{name}/admit", status_code=201)
@@ -350,38 +358,17 @@ async def skill_learned_admit(request: Request, name: str, body: LearnedAdmissio
 
 
 def withdraw_checked_learned_skill(request: Request, name: str, body: LearnedWithdrawalIn) -> dict:
-    same_origin(request)
-    require_permission(request, "admin")
+    from . import learned_skill_changes as changes
+    changes.authority(request, write=True)
     if not body.confirm:
         raise HTTPException(422, "Confirm before removing this saved skill.")
-    from maverick.skills import withdraw_admitted_learned_skill
-
-    def authorize(item):
-        require_permission(request, "admin")
-        _record_learned_change(
-            request, "learned_skill_withdraw", name=item.name,
-            fingerprint=item.fingerprint, source_tasks=item.source_goal_ids,
-            phase="prepared",
-        )
-
-    try:
-        item = withdraw_admitted_learned_skill(
-            name, body.fingerprint,
-            before_delete=authorize,
-        )
-    except ValueError as exc:
-        message = str(exc)
-        if "no longer available" in message or "not a reviewed" in message:
-            raise HTTPException(404, "This saved skill is no longer available.") from exc
-        raise HTTPException(409, message) from exc
-    except OSError as exc:
-        raise HTTPException(503, "The skill change could not be confirmed. Refresh the current skill list before trying again.") from exc
-    _record_learned_change(
-        request, "learned_skill_withdraw", name=item.name,
-        fingerprint=item.fingerprint, source_tasks=item.source_goal_ids,
-        phase="completed",
-    )
-    return {"name": item.name, "removed": True}
+    if not body.review_token:
+        raise HTTPException(409, "Review the current saved skill before removing it. No skill was changed.")
+    review = changes.open_review(request, body.review_token)
+    prepared = review["prepared"]
+    if prepared["action"] != "withdraw" or prepared["name"] != name or prepared["fingerprint"] != body.fingerprint:
+        raise HTTPException(409, "This request differs from the reviewed removal. Prepare a fresh review.")
+    return changes.apply(request, prepared, review["operation"], expires=review["expires"])
 
 
 @router.post("/skills/learned-candidates/{name}/withdraw")
