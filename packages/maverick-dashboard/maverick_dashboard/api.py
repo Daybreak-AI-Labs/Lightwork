@@ -6615,12 +6615,20 @@ async def export_assessments_endpoint(request: Request, format: str = "json") ->
 
 @router.post("/assessments/sweep")
 async def sweep_assessments_endpoint(request: Request) -> dict:
-    """Re-assess every subject now (catch drift) and return what needs attention.
-    The same sweep the automation scheduler runs daily, on demand."""
-    require_permission(request, "admin")
+    """Re-check current subjects without hiding incomplete checks."""
     from maverick import assessments
+    from maverick.authority_effects import authority_effect_fence
 
-    return assessments.sweep_due()
+    _actor, guard = _assessment_effect_guard(request)
+    try:
+        with authority_effect_fence():
+            guard()
+            return assessments.sweep_due(effect_guard=guard)
+    except HTTPException as exc:
+        raise HTTPException(exc.status_code, "These checks were interrupted because your current account, workspace or access changed. Checks completed before the interruption may be saved. Reload the current assessments before trying again.",
+                            headers=exc.headers) from exc
+    except (OSError, assessments.AssessmentRegisterError) as exc:
+        raise HTTPException(503, "These checks could not be confirmed. Checks completed before the interruption may be saved. Reload the current assessments before trying again.") from exc
 
 
 @router.get("/assessments/{kind}/{name}")
@@ -6639,43 +6647,52 @@ async def refresh_assessment_endpoint(
     request: Request, kind: str, name: str, payload: AssessmentRefreshIn
 ) -> dict:
     """Auto-draft (or re-draft, detecting drift) the assessment for a subject."""
-    require_permission(request, "admin")
     from maverick import assessments
+    from maverick.authority_effects import authority_effect_fence
+
+    _actor, guard = _assessment_effect_guard(request)
 
     try:
-        a = assessments.refresh(
-            _assess_kind(kind),
-            name,
-            template=payload.template,
-            expected_revision=payload.expected_revision,
-        )
+        with authority_effect_fence():
+            guard()
+            a = assessments.refresh(
+                _assess_kind(kind),
+                name,
+                template=payload.template,
+                expected_revision=payload.expected_revision, effect_guard=guard,
+            )
     except assessments.AssessmentVersionConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except (OSError, assessments.AssessmentRegisterError) as exc:
+        raise HTTPException(503, "This change could not be confirmed. It may already be saved. Reload the current assessments before trying again.") from exc
     if a is None:
         raise HTTPException(status_code=404, detail=f"unknown {kind}: {name!r}")
     return a
 
 
-@router.post("/assessments/{kind}/{name}/review")
-async def review_assessment_endpoint(
-    request: Request, kind: str, name: str, payload: AssessmentReviewIn
-) -> dict:
-    """Record a reviewer's accept / needs-work decision on one lens."""
+def _assessment_effect_guard(request: Request, *, review: bool = False):
+    """Bind a native assessment mutation to current account and access."""
     from maverick import assessments
-    from maverick.authority_effects import authority_effect_fence
     from maverick.paths import current_tenant_id_strict
 
     from . import auth, session_revocation, workspace_tenants
 
-    require_permission(request, "admin")
+    with auth.fresh_configuration():
+        require_permission(request, "admin")
+        if review:
+            auth.require_api_key_scope(request, "approvals:decide")
     actor, tenant = caller_principal(request), current_tenant_id_strict()
+    register_path = assessments._path()
     selection = (workspace_tenants.get_selection_binding(actor)
                  if getattr(request.state, "workspace_tenant_source", None) == "principal_selection" else None)
 
     def guard():
         with auth.fresh_configuration():
             require_permission(request, "admin")
-            if caller_principal(request) != actor or current_tenant_id_strict() != tenant:
+            if review:
+                auth.require_api_key_scope(request, "approvals:decide")
+            if (caller_principal(request) != actor or current_tenant_id_strict() != tenant
+                    or assessments._path() != register_path):
                 raise HTTPException(409, "Your account or workspace changed. Reopen this assessment before reviewing it.")
             if selection is not None and selection != workspace_tenants.get_selection_binding(actor):
                 raise HTTPException(409, "Your workspace changed. Reopen this assessment before reviewing it.")
@@ -6698,6 +6715,19 @@ async def review_assessment_endpoint(
                 if via != "api_key":
                     auth._enforce_scim_active(fresh)
                 auth._enforce_workspace_policies(request, fresh)
+
+    return actor, guard
+
+
+@router.post("/assessments/{kind}/{name}/review")
+async def review_assessment_endpoint(
+    request: Request, kind: str, name: str, payload: AssessmentReviewIn
+) -> dict:
+    """Record a reviewer's accept / needs-work decision on one lens."""
+    from maverick import assessments
+    from maverick.authority_effects import authority_effect_fence
+
+    actor, guard = _assessment_effect_guard(request, review=True)
 
     try:
         with authority_effect_fence():
@@ -6723,20 +6753,26 @@ async def review_assessment_endpoint(
 async def add_assessment_evidence_endpoint(
     request: Request, kind: str, name: str, payload: AssessmentEvidenceIn
 ) -> dict:
-    require_permission(request, "admin")
     from maverick import assessments
+    from maverick.authority_effects import authority_effect_fence
+
+    _actor, guard = _assessment_effect_guard(request)
 
     try:
-        a = assessments.add_evidence(
-            _assess_kind(kind),
-            name,
-            payload.lens,
-            payload.control,
-            payload.evidence,
-            expected_revision=payload.expected_revision,
-        )
+        with authority_effect_fence():
+            guard()
+            a = assessments.add_evidence(
+                _assess_kind(kind),
+                name,
+                payload.lens,
+                payload.control,
+                payload.evidence,
+                expected_revision=payload.expected_revision, effect_guard=guard,
+            )
     except assessments.AssessmentVersionConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except (OSError, assessments.AssessmentRegisterError) as exc:
+        raise HTTPException(503, "This change could not be confirmed. It may already be saved. Reload the current assessments before trying again.") from exc
     if a is None:
         raise HTTPException(status_code=404, detail="no such finding")
     return a
@@ -6749,15 +6785,21 @@ async def delete_assessment_endpoint(
     name: str,
     expected_revision: int = Query(..., ge=1),
 ) -> Response:
-    require_permission(request, "admin")
     from maverick import assessments
+    from maverick.authority_effects import authority_effect_fence
+
+    _actor, guard = _assessment_effect_guard(request)
 
     try:
-        assessments.delete_assessment(
-            _assess_kind(kind), name, expected_revision=expected_revision,
-        )
+        with authority_effect_fence():
+            guard()
+            assessments.delete_assessment(
+                _assess_kind(kind), name, expected_revision=expected_revision, effect_guard=guard,
+            )
     except assessments.AssessmentVersionConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except (OSError, assessments.AssessmentRegisterError) as exc:
+        raise HTTPException(503, "This change could not be confirmed. It may already be saved. Reload the current assessments before trying again.") from exc
     return Response(status_code=204)
 
 

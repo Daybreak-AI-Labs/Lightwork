@@ -337,3 +337,12 @@ and version checks. These repairs improve product correctness and recoverability
 synthetic reported outcome windows are not causal quality-lift evidence, and
 local audit confirmation is not independently held custody. Research status
 counts remain unchanged.
+
+Assessment mutation follow-through extends physical current-authority checks to
+refresh, evidence and removal, and makes guarded bulk refresh distinguish
+confirmed work from unavailable or uncertain work. Explicit access-key decision
+scope closes a Settings-permission interpretation trap. Read-only current-state
+checks preserve recovery honesty without claiming an original receipt. These
+are correctness and usability repairs to the existing assessment product; they
+do not complete the wider learning research mechanisms or establish independent
+audit custody. The 28-item research status counts remain unchanged.

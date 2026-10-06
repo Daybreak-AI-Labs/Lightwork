@@ -940,12 +940,25 @@ def get_assessment(kind: str, name: str) -> dict | None:
     return _summarize(a) if a else None
 
 
+def _confirm_mutation_access(effect_guard):
+    if effect_guard is not None:
+        try:
+            effect_guard()
+        except Exception as exc:
+            raise AssessmentRegisterError(
+                "assessment change was saved but completion is unconfirmed"
+            ) from exc
+
+
 def delete_assessment(
     kind: str, name: str, *, expected_revision: int | None = None,
+    effect_guard: Callable[[], None] | None = None,
 ) -> bool:
     path = _path()
     ensure_private_directory(path.parent)
     with cross_process_lock(path, strict=True):
+        if effect_guard is not None:
+            effect_guard()
         data, register_revision = _read_register_unlocked()
         key = _key(kind, name)
         existing = data.get(key)
@@ -958,7 +971,9 @@ def delete_assessment(
         del data[key]
         _write_register_unlocked(
             data, expected_register_revision=register_revision,
+            **({"effect_guard": effect_guard} if effect_guard is not None else {}),
         )
+        _confirm_mutation_access(effect_guard)
         return True
 
 
@@ -1037,12 +1052,15 @@ def refresh(
     now: float | None = None,
     *,
     expected_revision: int | None = None,
+    effect_guard: Callable[[], None] | None = None,
 ) -> dict | None:
     """Create or re-draft under a strict transaction with revision CAS."""
     now = time.time() if now is None else now
     path = _path()
     ensure_private_directory(path.parent)
     with cross_process_lock(path, strict=True):
+        if effect_guard is not None:
+            effect_guard()
         data, register_revision = _read_register_unlocked()
         refreshed, changed = _refresh_unlocked(
             data,
@@ -1056,7 +1074,10 @@ def refresh(
         if changed:
             _write_register_unlocked(
                 data, expected_register_revision=register_revision,
+                **({"effect_guard": effect_guard} if effect_guard is not None else {}),
             )
+        if changed:
+            _confirm_mutation_access(effect_guard)
         return _summarize(refreshed) if refreshed else None
 
 
@@ -1324,6 +1345,7 @@ def refresh_on_change(
     now: float | None = None,
     *,
     expected_revision: int | None = None,
+    effect_guard: Callable[[], None] | None = None,
 ) -> dict | None:
     """Re-draft an assessment ONLY if one already exists (detecting drift), for
     callers that just changed a subject (e.g. an agent-override save). Returns the
@@ -1333,6 +1355,8 @@ def refresh_on_change(
     path = _path()
     ensure_private_directory(path.parent)
     with cross_process_lock(path, strict=True):
+        if effect_guard is not None:
+            effect_guard()
         data, register_revision = _read_register_unlocked()
         refreshed, changed = _refresh_unlocked(
             data,
@@ -1346,18 +1370,24 @@ def refresh_on_change(
         if changed:
             _write_register_unlocked(
                 data, expected_register_revision=register_revision,
+                **({"effect_guard": effect_guard} if effect_guard is not None else {}),
             )
+        if changed:
+            _confirm_mutation_access(effect_guard)
         return _summarize(refreshed) if refreshed else None
 
 
 def add_evidence(kind: str, name: str, lens: str, control: str, evidence: str,
                  now: float | None = None, *,
-                 expected_revision: int | None = None) -> dict | None:
+                 expected_revision: int | None = None,
+                 effect_guard: Callable[[], None] | None = None) -> dict | None:
     """Attach an evidence note/link to a specific finding."""
     now = time.time() if now is None else now
     path = _path()
     ensure_private_directory(path.parent)
     with cross_process_lock(path, strict=True):
+        if effect_guard is not None:
+            effect_guard()
         data, register_revision = _read_register_unlocked()
         a = data.get(_key(kind, name))
         if a is None:
@@ -1371,38 +1401,87 @@ def add_evidence(kind: str, name: str, lens: str, control: str, evidence: str,
                 a["revision"] = revision + 1
                 _write_register_unlocked(
                     data, expected_register_revision=register_revision,
+                    **({"effect_guard": effect_guard} if effect_guard is not None else {}),
                 )
+                _confirm_mutation_access(effect_guard)
                 return _summarize(a)
         return None
 
 
-def due_assessments(now: float | None = None) -> list[dict]:
-    """Assessments needing attention: past their re-review ``due_at``, or flipped
-    to ``needs_review`` by drift, or never reviewed past a draft."""
-    now = time.time() if now is None else now
+def _due_records(records: dict, now: float) -> list[dict]:
     out = []
-    for a in _load_all().values():
+    for a in records.values():
         overdue = bool(a.get("due_at")) and a["due_at"] <= now
         if overdue or a.get("status") in ("needs_review", "draft"):
             out.append(_summarize(a))
     out.sort(key=lambda a: (a.get("due_at") or 0))
     return out
 
+def due_assessments(now: float | None = None) -> list[dict]:
+    """Assessments needing attention or a scheduled re-review."""
+    now = time.time() if now is None else now
+    return _due_records(_load_all(), now)
 
-def sweep_due(now: float | None = None) -> dict:
-    """Re-draft every stored assessment (so drift is caught) and return the ones
-    still needing human attention. This is the primitive the scheduler fires on a
-    cadence and the dashboard's "Re-check due now" button calls on demand."""
+
+def _read_current_register(effect_guard):
+    """Pure guarded manual read; legacy publication recovery is separate."""
+    path = _path()
+    ensure_private_directory(path.parent)
+    with cross_process_lock(path, strict=True):
+        effect_guard()
+        records, _revision = _read_register_unlocked()
+        effect_guard()
+        return records
+
+
+
+def sweep_due(now: float | None = None, *,
+              effect_guard: Callable[[], None] | None = None) -> dict:
+    """Re-draft stored assessments, preserving incomplete manual check results."""
     now = time.time() if now is None else now
     refreshed = 0
-    for key in list(_load_all().keys()):
+    if effect_guard is None:
+        # Preserve the scheduler/legacy best-effort contract.
+        for key in list(_load_all().keys()):
+            kind, _, name = key.partition(":")
+            try:
+                if refresh_on_change(kind, name, now=now) is not None:
+                    refreshed += 1
+            except Exception:  # pragma: no cover -- one bad subject never stops the sweep
+                pass
+        return {"refreshed": refreshed, "due": due_assessments(now=now)}
+
+    authority_refused = False
+
+    def guard():
+        nonlocal authority_refused
+        try:
+            effect_guard()
+        except Exception:
+            authority_refused = True
+            raise
+
+    guard()
+    keys = list(_read_current_register(guard))
+    guard()
+    unavailable = 0
+    for key in keys:
         kind, _, name = key.partition(":")
         try:
-            if refresh_on_change(kind, name, now=now) is not None:
+            if refresh_on_change(kind, name, now=now, effect_guard=guard) is None:
+                unavailable += 1
+            else:
                 refreshed += 1
-        except Exception:  # pragma: no cover -- one bad subject never stops the sweep
-            pass
-    return {"refreshed": refreshed, "due": due_assessments(now=now)}
+        except Exception:
+            if authority_refused:
+                raise
+            unavailable += 1
+    guard()
+    due = _due_records(_read_current_register(guard), now)
+    guard()
+    return {"refreshed": refreshed, "due": due, "requested": len(keys),
+            "checked": refreshed, "changed": refreshed, "unavailable": unavailable,
+            "complete": unavailable == 0}
 
 
 def export_rows() -> list[dict]:

@@ -6315,3 +6315,18 @@ without enabled administrator actions. A changed account clears private
 assessment content and its owned evidence dialog. Current review permission is
 checked after writer waits and again at physical replacement. A decision already
 published before a later refusal remains explicitly unconfirmed until read back.
+
+### Assessment actions and interrupted bulk refresh
+
+Refresh, evidence changes and removal recheck the current actor and workspace
+at native replacement, after waiting for another writer. A refused write leaves
+the original unchanged; a refusal after a saved effect asks the person to check
+the current record before retrying. Assessment reviews also require the named
+decision scope when called with an access key.
+
+Bulk refresh reports confirmed checks and unavailable or unconfirmed checks.
+A changed account stops the operation and clears private screen content.
+Interrupted responses offer a read-only current-state check. That check is not
+the original operation's receipt and does not repeat a refresh, decision or
+removal. Unsaved frequency and evidence drafts survive ordinary same-account
+errors; losing access clears private findings and disables write controls.

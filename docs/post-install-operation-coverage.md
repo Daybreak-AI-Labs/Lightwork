@@ -2001,3 +2001,25 @@ wait, before signed review phases and at native replacement retries. Its durable
 prepare/authorize/publish protocol and record-version check are preserved. A late
 refusal after publication reports an unconfirmed saved decision; current native
 recovery reads that decision without recording another review.
+
+## October 6 complete assessment mutation guards
+
+Refresh, evidence addition and removal carry the current authority callback
+through the native register lock and physical replacement retries. A guarded
+manual sweep reads the register without flushing legacy audit recovery writes,
+stops on changed authority or context, and exposes requested, confirmed, changed
+and unavailable-or-unconfirmed counts. Prior changes are retained and disclosed.
+Default scheduler best-effort behavior and the existing review publication
+protocol remain separate.
+
+Review requests made with an access key require both the existing administrator
+floor and the explicit decision scope; broad Settings write permission alone
+does not grant that decision. The same checks run again before physical effects.
+
+The page offers read-only current-state checks after uncertain mutations and
+bulk refresh. Reading current state is not recovery of an original operation
+receipt. It does not repeat the action or prove which interrupted operation
+caused the current state. Same-account transient errors preserve unsaved
+frequency and evidence drafts; access loss clears private content and disables
+writes. These repairs do not supply an all-action audit archive or independent
+custody.
