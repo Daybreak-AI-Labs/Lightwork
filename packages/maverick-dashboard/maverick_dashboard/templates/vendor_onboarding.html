@@ -78,7 +78,7 @@
       <label for="vs-ticket">Jira connection</label><select id="vs-ticket" class="select" required disabled></select>
       <label for="vs-document">Google Drive connection (optional for uploaded evidence)</label><select id="vs-document" class="select" disabled></select>
       <label class="vo-upload-confirm-label"><input type="checkbox" id="vs-confirm" disabled> <span>I reviewed the owner, connection choices and this setup change.</span></label>
-      <div class="vo-actions"><button id="vs-save" class="btn btn--primary" type="submit" disabled>Save workspace setup</button><button id="vs-enable" class="btn" type="button" disabled>Turn on vendor onboarding</button><button id="vs-refresh" class="btn btn--ghost" type="button">Refresh setup</button></div>
+      <div class="vo-actions"><button id="vs-save" class="btn" type="submit" disabled>Save workspace setup</button><button id="vs-enable" class="btn" type="button" disabled>Turn on vendor onboarding</button><button id="vs-refresh" class="btn btn--ghost" type="button">Refresh setup</button></div>
     </form>
     <p class="muted">Turning on vendor onboarding also turns on the vendor, risk and evidence features it uses. It doesn't give anyone new access.</p>
     <details id="vs-off" hidden>
@@ -129,7 +129,7 @@
           <label for="vo-due">Needed by</label><input id="vo-due" class="input" type="date" required>
           <div hidden><label for="vo-renewal">Earlier request being renewed</label><input id="vo-renewal" maxlength="128"></div>
           <p id="vo-renewal-note" class="muted" hidden></p>
-          <button class="btn btn--primary" type="submit">Create request</button>
+          <button class="btn" type="submit">Create request</button>
         </form>
         <p class="muted">Choose up to eight documents. You can also create the request first and upload files below.</p>
       </section>
@@ -151,7 +151,7 @@
           <button id="vo-save-draft" class="btn" type="button" disabled>Save request details</button>
         </details>
         <div class="vo-actions">
-          <button id="vo-collect" class="btn btn--primary" type="button" disabled>Obtain current evidence</button>
+          <button id="vo-collect" class="btn" type="button" disabled>Obtain current evidence</button>
           <button id="vo-assess" class="btn" type="button" disabled>Build assessment</button>
           <button id="vo-renew" class="btn" type="button" disabled>Start renewal or reevaluation</button>
         </div>
@@ -178,7 +178,7 @@
               <button id="vo-upload-transcribe" class="btn" type="button">Preview what I typed</button>
             </div>
             <label class="vo-upload-confirm-label"><input id="vo-upload-confirm" type="checkbox"> <span>I compared this text with the original, reviewed the stated limits and any omissions, and want to add it as evidence.</span></label>
-            <button id="vo-upload-accept" class="btn btn--primary" type="button" disabled>Add reviewed evidence</button>
+            <button id="vo-upload-accept" class="btn" type="button" disabled>Add reviewed evidence</button>
           </section>
           <p class="muted">Lightwork keeps only short quotes from each file, not the file itself. Replacing evidence clears the assessment and any ticket approval.</p>
         </div>
@@ -201,7 +201,7 @@
         <div id="vo-corrections"></div>
         <label for="vo-rationale">Why you're approving or rejecting</label><textarea id="vo-rationale" class="input" required maxlength="4000"></textarea>
         <div class="vo-actions">
-          <button id="vo-review-approve" class="btn btn--primary" type="button" disabled>Approve assessment with corrections</button>
+          <button id="vo-review-approve" class="btn" type="button" disabled>Approve assessment with corrections</button>
           <button id="vo-review-reject" class="btn btn--danger" type="button" disabled>Reject assessment</button>
           <button id="vo-prepare" class="btn" type="button" disabled>Prepare Jira task for approval</button>
         </div>
@@ -212,8 +212,8 @@
         <div id="vo-operation">No ticket prepared.</div>
         <details hidden><summary>Technical details</summary><pre id="vo-operation-record"></pre></details>
         <div class="vo-actions">
-          <button id="vo-approve" class="btn btn--primary" type="button" disabled>Approve this exact Jira task</button>
-          <button id="vo-execute" class="btn btn--primary" type="button" disabled>Create and verify ticket</button>
+          <button id="vo-approve" class="btn" type="button" disabled>Approve this exact Jira task</button>
+          <button id="vo-execute" class="btn" type="button" disabled>Create and verify ticket</button>
           <button id="vo-reconcile" class="btn" type="button" disabled>Check uncertain ticket result</button>
         </div>
       </section>
@@ -221,7 +221,7 @@
         <h2 id="vo-outcome-title">Customer acceptance and renewal</h2>
         <label for="vo-acceptance-reason">Why you're accepting or rejecting</label><textarea id="vo-acceptance-reason" class="input" required maxlength="4000"></textarea>
         <div class="vo-actions">
-          <button id="vo-accept" class="btn btn--primary" type="button" disabled>Accept deliverable</button>
+          <button id="vo-accept" class="btn" type="button" disabled>Accept deliverable</button>
           <button id="vo-reject" class="btn btn--danger" type="button" disabled>Reject deliverable</button>
         </div>
         <div id="vo-outcome"></div>

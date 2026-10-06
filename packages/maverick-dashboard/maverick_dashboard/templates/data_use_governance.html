@@ -33,7 +33,7 @@
   <section class="panel" aria-labelledby="dug-assets-heading">
     <div class="section-head">
       <h2 id="dug-assets-heading">Data sets</h2>
-      <button class="btn btn--primary" type="button" id="dug-new-asset"{% if not du_on or not du_admin %} disabled{% endif %}>Add a data set</button>
+      <button class="btn" type="button" id="dug-new-asset"{% if not du_on or not du_admin %} disabled{% endif %}>Add a data set</button>
     </div>
     <p class="muted">A data set is a table, file or feed of data. List its fields so rules can refer to them.</p>
     <div id="dug-assets"><p class="muted">Loading data sets…</p></div>
@@ -70,7 +70,7 @@
         </label>
         <label class="cw-wide">Or attach its description<input class="input" type="file" name="evidence_file"></label>
         <div class="cw-actions">
-          <button class="btn btn--primary" type="submit">Save</button>
+          <button class="btn" type="submit">Save</button>
           <button class="btn btn--ghost" type="button" data-dug-close="dug-catalog">Cancel</button>
         </div>
       </fieldset>
@@ -85,7 +85,7 @@
   <section class="panel" aria-labelledby="dug-context-heading">
     <div class="section-head">
       <h2 id="dug-context-heading">Why each data set may be used</h2>
-      <button class="btn btn--primary" type="button" id="dug-new-context"{% if not du_on or not du_admin %} disabled{% endif %}>Record a reason</button>
+      <button class="btn" type="button" id="dug-new-context"{% if not du_on or not du_admin %} disabled{% endif %}>Record a reason</button>
     </div>
     <p class="muted">Before any request is allowed, a data set needs four up-to-date reasons, each from a different source: its business purpose, the laws that apply, the consent people gave, and how sensitive it is.</p>
     <div id="dug-contexts"><p class="muted">Loading…</p></div>
@@ -113,7 +113,7 @@
           <label>Version of the source record<input class="input" type="number" name="source_revision" min="1" value="1"></label>
         </details>
         <div class="cw-actions">
-          <button class="btn btn--primary" type="submit">Save reason</button>
+          <button class="btn" type="submit">Save reason</button>
           <button class="btn btn--ghost" type="button" data-dug-close="dug-context">Cancel</button>
         </div>
       </fieldset>
@@ -123,7 +123,7 @@
   <section class="panel" aria-labelledby="dug-labels-heading">
     <div class="section-head">
       <h2 id="dug-labels-heading">Labels</h2>
-      <button class="btn btn--primary" type="button" id="dug-new-label"{% if not du_on or not du_admin %} disabled{% endif %}>Create a label</button>
+      <button class="btn" type="button" id="dug-new-label"{% if not du_on or not du_admin %} disabled{% endif %}>Create a label</button>
     </div>
     <p class="muted">Labels mark fields that need extra care, such as personal or financial data. Rules can apply only to labelled fields.</p>
     <div id="dug-labels"><p class="muted">Loading…</p></div>
@@ -152,7 +152,7 @@
         </label>
         <label class="cw-wide">What it means<textarea class="textarea" name="evidence_note" rows="2" maxlength="2000" placeholder="Email addresses of customers and prospects"></textarea></label>
         <div class="cw-actions">
-          <button class="btn btn--primary" type="submit">Save label</button>
+          <button class="btn" type="submit">Save label</button>
           <button class="btn btn--ghost" type="button" data-dug-close="dug-label">Cancel</button>
         </div>
       </fieldset>
@@ -168,7 +168,7 @@
         <label>Field<select class="select" name="field_id" required></select></label>
         <label class="cw-wide">Why this field gets the label<textarea class="textarea" name="evidence_note" rows="2" maxlength="2000"></textarea></label>
         <div class="cw-actions">
-          <button class="btn btn--primary" type="submit">Label field</button>
+          <button class="btn" type="submit">Label field</button>
           <button class="btn btn--ghost" type="button" data-dug-close="dug-assign">Cancel</button>
         </div>
       </fieldset>
@@ -178,7 +178,7 @@
   <section class="panel" aria-labelledby="dug-policies-heading">
     <div class="section-head">
       <h2 id="dug-policies-heading">Rules</h2>
-      <button class="btn btn--primary" type="button" id="dug-new-policy"{% if not du_on or not du_admin %} disabled{% endif %}>Create a rule</button>
+      <button class="btn" type="button" id="dug-new-policy"{% if not du_on or not du_admin %} disabled{% endif %}>Create a rule</button>
     </div>
     <p class="muted">A rule says what happens when a project asks to use data: allow it, block it, hide part of each value, show only some rows, or send it to a person. A rule only takes effect after a second person switches it on.</p>
     <div id="dug-policies"><p class="muted">Loading rules…</p></div>
@@ -218,7 +218,7 @@
           <button class="btn btn--ghost" type="button" id="dug-add-control">Add another step</button>
         </fieldset>
         <div class="cw-actions">
-          <button class="btn btn--primary" type="submit">Save as draft</button>
+          <button class="btn" type="submit">Save as draft</button>
           <button class="btn btn--ghost" type="button" id="dug-policy-preview">Preview what it covers</button>
           <button class="btn btn--ghost" type="button" data-dug-close="dug-policy">Cancel</button>
         </div>
@@ -230,7 +230,7 @@
   <section class="panel" aria-labelledby="dug-exceptions-heading">
     <div class="section-head">
       <h2 id="dug-exceptions-heading">Time-limited exceptions</h2>
-      <button class="btn btn--primary" type="button" id="dug-new-exception"{% if not du_on %} disabled{% endif %}>Ask for an exception</button>
+      <button class="btn" type="button" id="dug-new-exception"{% if not du_on %} disabled{% endif %}>Ask for an exception</button>
     </div>
     <p class="muted">An exception replaces one step of a rule for a limited time. An administrator must approve it, and it ends on its end date.</p>
     <div id="dug-exceptions"><p class="muted">Loading…</p></div>
@@ -257,7 +257,7 @@
         <label>Ends on<input class="input" type="date" name="expires_at" required></label>
         <label class="cw-wide">Why it is needed<textarea class="textarea" name="evidence_note" rows="2" maxlength="2000" required></textarea></label>
         <div class="cw-actions">
-          <button class="btn btn--primary" type="submit">Send for approval</button>
+          <button class="btn" type="submit">Send for approval</button>
           <button class="btn btn--ghost" type="button" data-dug-close="dug-exception">Cancel</button>
         </div>
       </fieldset>
@@ -267,7 +267,7 @@
   <section class="panel" aria-labelledby="dug-requests-heading">
     <div class="section-head">
       <h2 id="dug-requests-heading">Requests to use data</h2>
-      <button class="btn btn--primary" type="button" id="dug-new-request"{% if not du_on %} disabled{% endif %}>Ask to use data</button>
+      <button class="btn" type="button" id="dug-new-request"{% if not du_on %} disabled{% endif %}>Ask to use data</button>
     </div>
     <div id="dug-requests"><p class="muted">Loading requests…</p></div>
     <form id="dug-request" class="cw-editor" hidden novalidate>
@@ -293,7 +293,7 @@
         <fieldset class="cw-wide"><legend>Purpose</legend><div class="cw-checks" id="dug-request-purposes"></div></fieldset>
         <label class="cw-wide">Why the project needs it<textarea class="textarea" name="evidence_note" rows="2" maxlength="2000" required></textarea></label>
         <div class="cw-actions">
-          <button class="btn btn--primary" type="submit">Send request</button>
+          <button class="btn" type="submit">Send request</button>
           <button class="btn btn--ghost" type="button" data-dug-close="dug-request">Cancel</button>
           {% if not data_use_projects %}<a class="btn btn--ghost" href="/projects">Create a project</a>{% endif %}
         </div>
@@ -304,7 +304,7 @@
       <div id="dug-decision-body"></div>
       <fieldset id="dug-compile" class="cw-actions"{% if not data_use_compiler_enabled %} disabled aria-disabled="true"{% endif %}>
         <legend class="sr-only">Prepare database rules</legend>
-        <button class="btn btn--primary" type="button" id="dug-compile-button">Prepare database rules</button>
+        <button class="btn" type="button" id="dug-compile-button">Prepare database rules</button>
         <a class="btn btn--ghost" href="/data-use/providers">Apply them in Snowflake or Databricks</a>
       </fieldset>
       <div id="dug-compile-result" class="cw-result" role="status" aria-live="polite"></div>
