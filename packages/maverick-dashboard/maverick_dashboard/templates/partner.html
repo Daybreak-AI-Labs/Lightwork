@@ -57,7 +57,7 @@
   function fmt(n) { return (n || 0).toLocaleString(); }
   function problem(r, action) {
     return window.mvErrorText ? window.mvErrorText({ status: r && r.status }, action)
-                              : 'Could not ' + action + '. Please try again.';
+                              : 'Could not ' + action + '. Try again.';
   }
   function offline(action) { return 'Could not ' + action + ' — check your connection and try again.'; }
 

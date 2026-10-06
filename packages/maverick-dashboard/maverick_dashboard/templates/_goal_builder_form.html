@@ -254,7 +254,7 @@
       }
       showError(r.status === 422 || r.status === 400
         ? "Check the spending limit (0 to 100 dollars) and the steps, then try again."
-        : (window.mvErrorText ? window.mvErrorText(r, "create the task") : "Could not create the task. Please try again."));
+        : (window.mvErrorText ? window.mvErrorText(r, "create the task") : "Could not create the task. Try again."));
     } catch (e) {
       showError("Lightwork can't be reached. Check your connection and try again.");
     } finally { btn.disabled = false; }

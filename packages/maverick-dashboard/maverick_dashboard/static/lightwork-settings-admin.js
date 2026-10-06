@@ -9,7 +9,7 @@
     return node;
   }
   function errorText(failure, action) {
-    return window.mvErrorText ? window.mvErrorText(failure, action) : 'Could not ' + action + '. Please try again.';
+    return window.mvErrorText ? window.mvErrorText(failure, action) : 'Could not ' + action + '. Try again.';
   }
   function badge(ok, yes, no) {
     return el('span', 'badge ' + (ok ? 'active' : 'blocked'), ok ? yes : no);

@@ -72,7 +72,7 @@
             {% else %}<span class="badge failure">{{ _LIFECYCLE.get(a.lifecycle, a.lifecycle | humanize) }}</span>{% endif %}
           </td>
           <td class="mv-row__actions">
-            <a class="btn btn--primary" href="/external-agents/{{ a.id }}">View</a>
+            <a class="btn btn--primary" href="/external-agents/{{ a.id }}">View agent</a>
             {% if a.contained %}
             <button type="button" class="btn btn--ghost" data-xa-release="{{ a.id }}" data-xa-label="{{ _name }}"{% if not external_agents_can_manage %} disabled aria-disabled="true"{% endif %}>Let it work again</button>
             {% endif %}
@@ -81,7 +81,7 @@
             <button type="button" class="btn btn--ghost" data-xa-reset-budget="{{ a.id }}" data-xa-label="{{ _name }}"{% if not external_agents_can_manage %} disabled aria-disabled="true"{% endif %}>Reset spending</button>
             {% endif %}
             <button type="button" class="btn btn--ghost btn--danger" data-xa-revoke="{{ a.id }}" data-xa-label="{{ _name }}"{% if not external_agents_can_manage %} disabled aria-disabled="true"{% endif %}>Block all access</button>
-            <button type="button" class="btn btn--ghost btn--danger" data-xa-remove="{{ a.id }}" data-xa-label="{{ _name }}"{% if not external_agents_can_manage %} disabled aria-disabled="true"{% endif %}>Remove</button>
+            <button type="button" class="btn btn--ghost btn--danger" data-xa-remove="{{ a.id }}" data-xa-label="{{ _name }}"{% if not external_agents_can_manage %} disabled aria-disabled="true"{% endif %}>Remove agent</button>
           </td>
         </tr>
         {% endfor %}

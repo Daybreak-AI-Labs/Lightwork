@@ -43,7 +43,7 @@
     return s.charAt(0).toUpperCase() + s.slice(1);
   }
   function errorText(failure, action) {
-    return window.mvErrorText ? window.mvErrorText(failure, action) : "Could not " + action + ". Please try again.";
+    return window.mvErrorText ? window.mvErrorText(failure, action) : "Could not " + action + ". Try again.";
   }
   function problem(message) { var e = new Error(message); e.plain = true; return e; }
   function say(id, text) { window.mvStatus(document.getElementById(id), text); }
@@ -82,7 +82,7 @@
   function readFile(input, what) {
     var file = input.files && input.files[0];
     if (!file) { return Promise.reject(problem("Choose the " + what + " first.")); }
-    if (file.size > maxBytes) { return Promise.reject(problem("That file is too large to be a Lightwork " + what + ".")); }
+    if (file.size > maxBytes) { return Promise.reject(problem("That file is too large to be a Lightwork " + what + ". Choose the " + what + " file you were sent.")); }
     return file.text();
   }
 
@@ -239,8 +239,8 @@
   async function checkReceipt() {
     var raw = String(await readFile(document.getElementById("rcp-file"), "receipt file")).trim();
     var parsed;
-    try { parsed = JSON.parse(raw); } catch (_e) { throw problem("That file isn't a Lightwork receipt."); }
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) { throw problem("That file isn't a Lightwork receipt."); }
+    try { parsed = JSON.parse(raw); } catch (_e) { throw problem("That file isn't a Lightwork receipt. Choose the receipt file you were sent."); }
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) { throw problem("That file isn't a Lightwork receipt. Choose the receipt file you were sent."); }
     // Sent verbatim: re-encoding would change number formatting and break the signature.
     var body = { receipt: raw, keys: [], use_local_keys: document.getElementById("rcp-local-keys").checked };
     var key = keyFrom("rcp-extra-key");
@@ -264,7 +264,7 @@
 
   async function checkProof() {
     var raw = String(await readFile(document.getElementById("rcp-proof-file"), "proof file")).trim();
-    try { JSON.parse(raw); } catch (_e) { throw problem("That file isn't a Lightwork proof file."); }
+    try { JSON.parse(raw); } catch (_e) { throw problem("That file isn't a Lightwork proof file. Choose the proof file you were sent."); }
     var key = keyFrom("rcp-proof-key");
     var body = { bundle: raw, use_own_key: !key };
     if (key) { body.key = key; }

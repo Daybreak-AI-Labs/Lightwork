@@ -41,7 +41,7 @@
         </details>
         <p class="muted cw-wide">After connecting, ask for the kinds of access the person needs. Each one then needs two approvals.</p>
         <div class="cw-actions">
-          <button class="btn btn--primary" type="submit">Connect</button>
+          <button class="btn btn--primary" type="submit">Connect account</button>
           <button class="btn btn--ghost" type="button" data-tca-close="tca-connect">Cancel</button>
         </div>
       </fieldset>
@@ -200,7 +200,7 @@
     if (body !== undefined && method !== "GET") { opts.body = JSON.stringify(body); opts.headers["Content-Type"] = "application/json"; }
     var response = await fetch((base || API) + path, opts);
     var text = await response.text(), parsed;
-    try { parsed = JSON.parse(text); } catch (_error) { var bad = new Error("Request failed: the server returned an invalid JSON response."); bad.status = response.ok ? 0 : response.status; throw bad; }
+    try { parsed = JSON.parse(text); } catch (_error) { var bad = new Error("The reply from the server could not be read. Try again."); bad.status = response.ok ? 0 : response.status; throw bad; }
     if (!response.ok) { var failure = new Error(parsed && typeof parsed.detail === "string" ? parsed.detail : "That didn't work. Refresh the page and try again."); failure.status = response.status; throw failure; }
     return parsed;
   }

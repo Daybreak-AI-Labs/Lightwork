@@ -16,7 +16,7 @@
   function plural(n, one, many) { return n + ' ' + (n === 1 ? one : (many || one + 's')); }
   function say(node, text) { window.mvStatus(node, text || ''); }
   function errorText(failure, action) {
-    return window.mvErrorText ? window.mvErrorText(failure, action) : 'Could not ' + action + '. Please try again.';
+    return window.mvErrorText ? window.mvErrorText(failure, action) : 'Could not ' + action + '. Try again.';
   }
   async function failText(failure, action) {
     try {

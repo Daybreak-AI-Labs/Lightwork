@@ -108,7 +108,7 @@
           body: JSON.stringify({ confirm: true }),
         });
         if (!response.ok) throw new Error(typeof mvErrorText === 'function'
-          ? mvErrorText(response, 'allow file work') : 'Could not allow file work. Please try again.');
+          ? mvErrorText(response, 'allow file work') : 'Could not allow file work. Try again.');
         var result = await response.json();
         if (!result || !result.file_work || !Array.isArray(result.file_work.blocked_tools) ||
             result.file_work.blocked_tools.length ||
@@ -117,7 +117,7 @@
         }
         location.reload();
       } catch (error) {
-        fileResult.textContent = error.message || 'Could not reach Lightwork. Please try again.';
+        fileResult.textContent = error.message || 'Could not reach Lightwork. Try again.';
         fileButton.disabled = false;
       }
     });
@@ -148,7 +148,7 @@
         }
         if (!r.ok) {
           return r.json().catch(function () { return {}; }).then(function (b) {
-            throw new Error(typeof mvErrorText === 'function' ? mvErrorText(r, 'change where work runs') : 'Could not change where work runs. Please try again.');
+            throw new Error(typeof mvErrorText === 'function' ? mvErrorText(r, 'change where work runs') : 'Could not change where work runs. Try again.');
           });
         }
         return r.json().catch(function () {

@@ -197,7 +197,7 @@
     (function() {
       function problem(r, j, action) {
         if (window.mvErrorText) return window.mvErrorText({ status: r && r.status, body: j }, action);
-        return 'Could not ' + action + '. Please try again.';
+        return 'Could not ' + action + '. Try again.';
       }
       function offline(action) {
         return 'Could not ' + action + ' — check your connection and try again.';

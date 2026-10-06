@@ -69,18 +69,18 @@
     var declared = response.headers.get("Content-Length");
     if (declared !== null && Number(declared) > maximum) {
       if (response.body && typeof response.body.cancel === "function") { await response.body.cancel(); }
-      throw failure("Lightwork sent more than this page can show. Please try again.");
+      throw failure("Lightwork sent more than this page can show. Try again.");
     }
     if (!response.body || typeof response.body.getReader !== "function") {
       var buffer = new Uint8Array(await response.arrayBuffer());
-      if (buffer.byteLength > maximum) { throw failure("Lightwork sent more than this page can show. Please try again."); }
+      if (buffer.byteLength > maximum) { throw failure("Lightwork sent more than this page can show. Try again."); }
       return buffer;
     }
     var reader = response.body.getReader(); var chunks = []; var total = 0;
     while (true) {
       var part = await reader.read(); if (part.done) { break; }
       total += part.value.byteLength;
-      if (total > maximum) { await reader.cancel(); throw failure("Lightwork sent more than this page can show. Please try again."); }
+      if (total > maximum) { await reader.cancel(); throw failure("Lightwork sent more than this page can show. Try again."); }
       chunks.push(part.value);
     }
     var bytes = new Uint8Array(total); var offset = 0;
@@ -93,7 +93,7 @@
     var bytes = await readBounded(response, MAX_JSON_BYTES);
     if (!bytes.byteLength) { return {}; }
     try { return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)); }
-    catch (_error) { throw failure("Lightwork sent an answer this page could not read. Please try again."); }
+    catch (_error) { throw failure("Lightwork sent an answer this page could not read. Try again."); }
   }
   function show(label, payload) {
     window.mvStatus(statusNode, label);
@@ -202,7 +202,7 @@
       grant.token = null;
       if (!response.ok) { throw response; }
       var bytes = await readBounded(response, MAX_PDF_BYTES);
-      if (response.headers.get("Content-Type") !== "application/pdf") { throw failure("The PDF couldn't be downloaded. Please try again."); }
+      if (response.headers.get("Content-Type") !== "application/pdf") { throw failure("The PDF couldn't be downloaded. Try again."); }
       var url = URL.createObjectURL(new Blob([bytes], { type: "application/pdf" }));
       var link = document.createElement("a"); link.href = url; link.download = (R.slug(titleOf(report), "report")) + ".pdf";
       document.body.appendChild(link); link.click(); link.remove(); URL.revokeObjectURL(url);

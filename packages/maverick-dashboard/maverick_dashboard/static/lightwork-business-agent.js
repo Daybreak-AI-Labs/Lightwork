@@ -33,7 +33,7 @@
     }
   } catch (_) { /* Private browsing may disable session storage; the agent still opens. */ }
   function failText(failure, what) {
-    return typeof window.mvErrorText === 'function' ? window.mvErrorText(failure, what) : 'Could not ' + what + '. Please try again.';
+    return typeof window.mvErrorText === 'function' ? window.mvErrorText(failure, what) : 'Could not ' + what + '. Try again.';
   }
   function human(value) { return typeof window.mvHuman === 'function' ? window.mvHuman(value) : String(value).replace(/_/g, ' '); }
   function lock(state) { busy = state; $('draft').disabled = state; $('approve').disabled = state; $('discard').disabled = state; }

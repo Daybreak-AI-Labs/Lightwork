@@ -531,7 +531,7 @@
     if (busy) return;
     setBusy(true);
     try { await work(); }
-    catch (error) { message(error.message || 'Something went wrong. Please try again.', true); }
+    catch (error) { message(error.message || 'Something went wrong. Try again.', true); }
     finally { setBusy(false); }
   }
 

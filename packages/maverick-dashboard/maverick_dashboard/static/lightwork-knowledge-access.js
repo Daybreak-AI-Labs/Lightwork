@@ -368,7 +368,7 @@
       return "This changed since you loaded it, or current access couldn't be confirmed. Refresh and try again.";
     }
     if (typeof window.mvErrorText === "function") return window.mvErrorText({status: response.status, headers: response.headers}, "finish this");
-    return "Something went wrong. Please try again.";
+    return "Something went wrong. Try again.";
   }
 
   async function readJson(response, token, path, readScope) {
@@ -734,7 +734,7 @@
       announce("Source detail is current and ready for review.", false);
     } catch (error) {
       clearEligibleResults();
-      announce(error.message || "Could not open this source. Please try again.", true, error);
+      announce(error.message || "Could not open this source. Try again.", true, error);
     } finally {
       setBusy(false);
     }
@@ -901,7 +901,7 @@
           if (!["capability", "transient"].includes(error.accessKind)) {
             try { await loadRequests(); } catch (_refreshError) { /* retain the decision error */ }
           }
-          announce(error.message || "Could not save your decision. Please try again.", true, error);
+          announce(error.message || "Could not save your decision. Try again.", true, error);
         } finally {
           setBusy(false);
         }
@@ -987,7 +987,7 @@
           if (!["capability", "transient"].includes(error.accessKind)) {
             try { await loadRequests(); } catch (_refreshError) { /* retain original error */ }
           }
-          announce(error.message || "Could not place the hold. Please try again.", true, error);
+          announce(error.message || "Could not place the hold. Try again.", true, error);
         } finally {
           setBusy(false);
         }
@@ -1041,7 +1041,7 @@
         if (!["capability", "transient"].includes(error.accessKind)) {
           try { await loadRequests(); } catch (_refreshError) { /* retain original error */ }
         }
-        announce(error.message || "Could not release the hold. Please try again.", true, error);
+        announce(error.message || "Could not release the hold. Try again.", true, error);
       } finally {
         setBusy(false);
       }
@@ -1292,7 +1292,7 @@
       exportButton.disabled = true;
       nextCursor = null;
       nextButton.hidden = true;
-      announce(error.message || "Could not search. Please try again.", true, error);
+      announce(error.message || "Could not search. Try again.", true, error);
     } finally {
       if (generation === searchGeneration || activeSearch === null) { setBusy(false); }
     }
@@ -1410,7 +1410,7 @@
       announce("Exported " + clean.length + " currently eligible source" + (clean.length === 1 ? "." : "s."), false);
     } catch (error) {
       if (!["capability", "transient"].includes(error.accessKind)) clearEligibleResults();
-      announce(error.message || "Could not download the results. Please try again.", true, error);
+      announce(error.message || "Could not download the results. Try again.", true, error);
     } finally {
       setBusy(false);
     }
@@ -1471,7 +1471,7 @@
       await loadRequests();
       announce("Requests are up to date.", false);
     } catch (error) {
-      announce(error.message || "Could not load requests. Please try again.", true, error);
+      announce(error.message || "Could not load requests. Try again.", true, error);
     } finally {
       setBusy(false);
     }
@@ -1506,7 +1506,7 @@
       if (showReady) showReady.setAttribute("aria-pressed", readyView ? "true" : "false");
       showArchived.setAttribute("aria-pressed", archivedView ? "true" : "false");
       showArchived.textContent = archivedView ? "View active requests" : "View finished archive";
-      announce(error.message || "Could not load this request view. Please try again.", true, error);
+      announce(error.message || "Could not load this request view. Try again.", true, error);
     } finally { setBusy(false); }
   });
 
@@ -1532,7 +1532,7 @@
         showArchived.textContent = archivedView ? "View active requests" : "View finished archive";
       }
       showReady.setAttribute("aria-pressed", readyView ? "true" : "false");
-      announce(error.message || "Could not load this request view. Please try again.", true, error);
+      announce(error.message || "Could not load this request view. Try again.", true, error);
     } finally { setBusy(false); }
   });
 

@@ -71,7 +71,7 @@
   }
 
   function errorText(failure, action) {
-    return window.mvErrorText ? window.mvErrorText(failure, action) : 'Could not ' + action + '. Please try again.';
+    return window.mvErrorText ? window.mvErrorText(failure, action) : 'Could not ' + action + '. Try again.';
   }
   function rows(scope) {
     return Array.prototype.slice.call((scope || root).querySelectorAll('.settings-all-row[data-setting-id]'));

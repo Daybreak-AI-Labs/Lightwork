@@ -317,7 +317,7 @@
     var head = '<div class="as-detail-head">'
       + '<div class="as-card__title">' + esc(a.subject) + '</div>' + statusPill(a)
       + '<button type="button" class="btn btn--ghost" id="as-rerun" style="margin-inline-start:auto; font-size:var(--text-sm);">Re-assess</button>'
-      + '<button type="button" class="btn btn--danger" id="as-del" style="font-size:var(--text-sm);">Delete</button></div>'
+      + '<button type="button" class="btn btn--danger" id="as-del" style="font-size:var(--text-sm);">Delete assessment</button></div>'
       + '<p class="muted" style="margin:0 0 var(--space-2); font-size:var(--text-sm);">' + esc(KIND_LABEL[a.kind] || a.kind) + (a.description ? ' · ' + esc(a.description) : '') + '</p>'
       + '<p class="muted" id="as-detail-msg" role="status" aria-live="polite" style="margin:0 0 var(--space-3); font-size:var(--text-sm);"></p>';
     var lenses = Object.keys(a.lenses || {}).map(function (lens) {

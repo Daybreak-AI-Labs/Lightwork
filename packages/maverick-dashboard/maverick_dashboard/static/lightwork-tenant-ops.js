@@ -12,7 +12,7 @@
   async function failText(failure, action) {
     var plain = window.mvPlainDetail ? window.mvPlainDetail(failure && failure.detail) : '';
     if (plain) return plain;
-    return window.mvErrorText ? window.mvErrorText(failure, action) : 'Could not ' + action + '. Please try again.';
+    return window.mvErrorText ? window.mvErrorText(failure, action) : 'Could not ' + action + '. Try again.';
   }
   async function call(path, method, body) {
     return window.mvFetchJSON(path, {method: method || 'GET', cache: 'no-store', body: body});
@@ -105,8 +105,13 @@
         }
         if (job.state === 'done') {
           render(job.result);
-          keysMsg.textContent = job.result && job.result.failed ? 'Some workspaces still need attention. Keep the current key.' : 'Done.';
-        } else keysMsg.textContent = job.error || 'Still working. Check back in a few minutes.';
+          keysMsg.textContent = job.result && job.result.failed ? 'Some workspaces still need attention. Keep the current key and check the list below.' : 'Every workspace now uses the new key.';
+        } else if (job.state === 'running') {
+          keysMsg.textContent = 'Still working. Check back in a few minutes.';
+        } else {
+          keysMsg.textContent = (window.mvPlainDetail && window.mvPlainDetail(job.error)) ||
+            'Re-protecting stopped before every workspace was done. Keep the current key and try again.';
+        }
         if (job.record_warning) keysMsg.textContent += ' The result could not be added to the activity record. Keep the current key and ask your administrator to reconcile it before continuing.';
       } catch (failure) { keysMsg.textContent = await failText(failure, 're-protect the workspaces'); }
       keys.reset();

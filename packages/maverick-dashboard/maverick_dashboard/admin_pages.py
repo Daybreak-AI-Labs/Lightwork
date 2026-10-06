@@ -1643,7 +1643,7 @@ _LIMIT_ERRORS = {
     "period": "Choose how often the limit resets.",
     "person": "Choose a person.",
     "full": "There are too many personal limits to add another.",
-    "unreadable": "The saved spending limits could not be read. Please try again.",
+    "unreadable": "The saved spending limits could not be read. Try again.",
 }
 
 

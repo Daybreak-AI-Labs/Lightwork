@@ -1130,7 +1130,7 @@
             render('unknown');
             mvToast(typeof mvErrorText === 'function'
               ? mvErrorText(response, 'change the emergency stop')
-              : productText('Emergency stop change failed. Please try again.'), { error: true });
+              : productText('Emergency stop change failed. Try again.'), { error: true });
           } else {
             // A 204 only acknowledges the mutation request.  It is not a
             // status document and cannot prove either local or cluster state.

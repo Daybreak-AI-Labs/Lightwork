@@ -3138,7 +3138,7 @@ async def vendor_questionnaire_responses(request: Request, response: Response,
     except vm.QuestionnaireResponsesUnavailable as exc:
         raise HTTPException(
             status_code=503,
-            detail="We couldn't check questionnaire replies. Please try again shortly.",
+            detail="We couldn't check questionnaire replies. Try again shortly.",
         ) from exc
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="no such vendor") from exc
@@ -3164,7 +3164,7 @@ async def replace_vendor_questionnaire_link(
     except vm.QuestionnaireLinkUnavailable as exc:
         raise HTTPException(
             status_code=503,
-            detail="The old link could not be safely closed. Please try again.",
+            detail="The old link could not be safely closed. Try again.",
         ) from exc
     except RecordConflict as exc:
         raise HTTPException(status_code=409, detail="This vendor changed. Refresh and try again.") from exc

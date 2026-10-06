@@ -52,7 +52,7 @@
 
   <div class="section-head"><h2>Questionnaires</h2>{% if questionnaire_types %}<button type="button" class="btn" data-vd-add="questionnaire">Send a questionnaire</button>{% endif %}</div>
   <div class="panel{% if not vendor.questionnaires %} empty{% endif %}">
-    {% if questionnaire_unavailable %}<p role="alert">We can't check questionnaire replies right now. Please try again before following up with this vendor.</p>{% endif %}
+    {% if questionnaire_unavailable %}<p role="alert">We can't check questionnaire replies right now. Try again before following up with this vendor.</p>{% endif %}
     {% if vendor.questionnaires %}
       <table>
         <thead><tr><th scope="col">Questionnaire</th><th scope="col">Status</th>

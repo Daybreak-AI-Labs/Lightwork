@@ -144,7 +144,7 @@
     }
     if (status === 403) { return "You do not have permission to do this. Ask an administrator."; }
     if (status === 400 || status === 422) { return "Some of the details need fixing. Check them and try again."; }
-    return "Something went wrong. Please try again.";
+    return "Something went wrong. Try again.";
   }
 
   function boundedError(error) {

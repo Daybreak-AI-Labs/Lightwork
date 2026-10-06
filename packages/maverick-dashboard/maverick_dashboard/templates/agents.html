@@ -21,7 +21,7 @@
       <div style="display: flex; gap: 0.25rem;">
         <button type="button" class="btn btn--ghost wf-up">Move up</button>
         <button type="button" class="btn btn--ghost wf-down">Move down</button>
-        <button type="button" class="btn btn--ghost btn--danger wf-del">Remove</button>
+        <button type="button" class="btn btn--ghost btn--danger wf-del">Remove step</button>
       </div>
     </div>
     <label style="display: block; margin-top: 0.4rem;">What to do in this step
@@ -169,7 +169,7 @@
   {% from "_hero.html" import hero, state %}
   {# The main action: a new custom agent. While a specialist is open, saving
      it is the main action, so the header link steps back to a plain button. #}
-  {% set agents_actions %}<a class="btn{% if not selected %} btn--primary{% endif %}" href="/agents?new=1#agent-form">New custom agent</a>{% endset %}
+  {% set agents_actions %}<a class="btn{% if not selected %} btn--primary{% endif %}" href="/agents?new=1#agent-form">Build a custom agent</a>{% endset %}
   {% call hero('Build your workforce', 'Agent Factory',
                subtitle='Build agents and tailor specialists',
                lede='Describe an agent in plain English — its job, the
@@ -584,7 +584,7 @@
   <script>
     // ---- shared page helpers: plain errors, readable names, action pickers ----
     function plainError(failure, what) {
-      return window.mvErrorText ? window.mvErrorText(failure, what) : 'Could not ' + what + '. Please try again.';
+      return window.mvErrorText ? window.mvErrorText(failure, what) : 'Could not ' + what + '. Try again.';
     }
     function humanName(v) {
       if (window.mvHuman) return window.mvHuman(v);

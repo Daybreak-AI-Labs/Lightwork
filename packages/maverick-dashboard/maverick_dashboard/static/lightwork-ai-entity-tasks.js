@@ -90,7 +90,7 @@
     }
     if (status === 403) return "You do not have permission to do this. Ask an administrator.";
     if (status === 409) return "This changed since you opened it. Refresh the page and try again.";
-    return "Something went wrong. Please try again.";
+    return "Something went wrong. Try again.";
   }
 
   function positiveInteger(raw, label, maximum) {
@@ -160,7 +160,7 @@
       throw new Error("Choose a type of task.");
     }
     if (["low", "medium", "high", "critical"].indexOf(payload.priority) === -1) {
-      throw new Error("Priority is invalid. Choose a priority from the list.");
+      throw new Error("That priority is not one of the choices. Choose a priority from the list.");
     }
     var assignee = String(fields.assignee_ref || "").trim();
     if (assignee) payload.assignee_ref = identifier(assignee, "The person assigned");
@@ -178,7 +178,7 @@
     var status = String(fields.status || "");
     if (status) {
       if (["open", "in_progress", "blocked", "resolved", "dismissed"].indexOf(status) === -1) {
-        throw new Error("Status is invalid. Choose a status from the list.");
+        throw new Error("That status is not one of the choices. Choose a status from the list.");
       }
       payload.status = status;
       changes += 1;
@@ -186,7 +186,7 @@
     var priority = String(fields.priority || "");
     if (priority) {
       if (["low", "medium", "high", "critical"].indexOf(priority) === -1) {
-        throw new Error("Priority is invalid. Choose a priority from the list.");
+        throw new Error("That priority is not one of the choices. Choose a priority from the list.");
       }
       payload.priority = priority;
       changes += 1;
@@ -199,7 +199,7 @@
       payload.assignee_ref = null;
       changes += 1;
     } else if (assigneeAction !== "keep") {
-      throw new Error("Assignee update action is invalid. Refresh the page and try again.");
+      throw new Error("The assignee change was not recognized. Refresh the page and try again.");
     }
     var collaboratorAction = String(fields.collaborator_action || "keep");
     if (collaboratorAction === "replace") {
@@ -209,7 +209,7 @@
       payload.collaborator_refs = [];
       changes += 1;
     } else if (collaboratorAction !== "keep") {
-      throw new Error("Collaborator update action is invalid. Refresh the page and try again.");
+      throw new Error("The collaborator change was not recognized. Refresh the page and try again.");
     }
     var dueAction = String(fields.due_action || "keep");
     if (dueAction === "set") {
@@ -219,7 +219,7 @@
       payload.due_at = null;
       changes += 1;
     } else if (dueAction !== "keep") {
-      throw new Error("Due date update action is invalid. Refresh the page and try again.");
+      throw new Error("The due date change was not recognized. Refresh the page and try again.");
     }
     if (changes === 0) throw new Error("Select at least one change to save. Nothing was changed.");
     return payload;
@@ -301,7 +301,7 @@
     technical(details);
   }
   function fail(error) {
-    say(error && error.message ? error.message : "Something went wrong. Please try again.", true,
+    say(error && error.message ? error.message : "Something went wrong. Try again.", true,
       error && error.technical ? error.technical : undefined);
   }
   function reference(prefix) {

@@ -127,7 +127,7 @@
       <div class="sh-actions">
         {% if can_manage %}
         <button type="button" class="btn btn--ghost" data-edit="{{ f.key }}">Edit</button>
-        <button type="button" class="btn btn--danger" data-remove="{{ f.key }}" data-name="{{ f.name }}">Remove</button>
+        <button type="button" class="btn btn--danger" data-remove="{{ f.key }}" data-name="{{ f.name }}">Remove team</button>
         {% endif %}
         {% if f.exception_count %}<a class="btn btn--ghost" href="#sh-desk-{{ loop.index }}">See {{ f.exception_count }} waiting</a>{% endif %}
       </div>
@@ -189,7 +189,7 @@
     <p><button type="button" class="btn btn--ghost" id="sh-add-sla">Add a target</button></p>
 
     <div class="sh-actions">
-      <button type="submit" class="btn btn--primary" id="sh-save">Save</button>
+      <button type="submit" class="btn btn--primary" id="sh-save">Save team</button>
       <button type="button" class="btn btn--ghost" id="sh-cancel" hidden>Cancel editing</button>
     </div>
     <p class="sh-note" id="sh-status-msg" role="status" aria-live="polite"></p>

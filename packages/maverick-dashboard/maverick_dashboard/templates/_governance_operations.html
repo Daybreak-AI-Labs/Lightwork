@@ -1241,7 +1241,7 @@
     if (response.status === 409) return "This was changed since you opened it. Choose it again in the table and retry.";
     if (response.status === 400 || response.status === 422) return "Some of the details need fixing. Check them and try again.";
     if (response.status === 503) return "This feature is not available right now. It may need to be turned on or set up first.";
-    return `Could not ${fallback}. Please try again.`;
+    return `Could not ${fallback}. Try again.`;
   };
   // One JSON request through the shell's mvFetchJSON: one plain sentence per
   // failure, never a status code or server wording.
@@ -1558,7 +1558,7 @@
       await fillFingerprints(form);
       return await action();
     }
-    catch (error) { setStatus(statusId, plainMessage(error, "That did not work. Please try again.")); return null; }
+    catch (error) { setStatus(statusId, plainMessage(error, "That did not work. Try again.")); return null; }
     finally {
       delete form.dataset.inFlight;
       if (button) { button.disabled = false; button.removeAttribute("aria-busy"); }
@@ -3385,7 +3385,7 @@
     if (!button) return;
     button.disabled = true; button.setAttribute("aria-busy", "true"); setStatus(statusId, message);
     try { return await action(); }
-    catch (error) { setStatus(statusId, plainMessage(error, "That did not work. Please try again.")); return null; }
+    catch (error) { setStatus(statusId, plainMessage(error, "That did not work. Try again.")); return null; }
     finally { button.disabled = false; button.removeAttribute("aria-busy"); }
   };
   const identityFederationInput = form => {

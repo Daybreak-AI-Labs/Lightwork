@@ -7376,7 +7376,7 @@ async def simulate_research_page(
         research_error = (
             "Sign in with your own named account to run a practice study."
             if exc.status_code in (401, 403)
-            else "The practice study could not start. Please try again."
+            else "The practice study could not start. Try again."
         )
     except ValueError:
         status_code = 400

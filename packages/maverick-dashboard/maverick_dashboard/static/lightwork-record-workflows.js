@@ -27,7 +27,7 @@
 
   function errorText(failure, action) {
     if (global.mvErrorText) return global.mvErrorText(failure, action);
-    return 'Could not ' + action + '. Please try again.';
+    return 'Could not ' + action + '. Try again.';
   }
 
   // One JSON request (mvFetchJSON). A refusal rejects with the shared plain

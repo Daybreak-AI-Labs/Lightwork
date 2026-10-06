@@ -307,7 +307,7 @@
       (maximumArtifacts === 0 && (kinds.length !== 0 || maximumTotalBytes !== 0)) ||
       (maximumArtifacts > 0 && (kinds.length === 0 || maximumTotalBytes === 0))
     ) {
-      fail("artifact policy bounds are inconsistent");
+      fail("The file limits for this request are inconsistent.");
     }
     return {
       allowed_kinds: kinds,
@@ -570,7 +570,7 @@
     if (status === 400 || status === 411 || status === 415) return `${what}The file could not be read. Choose it again and try once more.`;
     if (status === 422) return `${what}Some answers or files need fixing. Check what you entered and try again.`;
     if (status === 429) return `${what}Too many tries in a short time. Wait a minute and try again.`;
-    return `${what}This is temporarily unavailable, so nothing was sent. Please try again in a few minutes.`;
+    return `${what}This is temporarily unavailable, so nothing was sent. Try again in a few minutes.`;
   }
 
   // ---- page state --------------------------------------------------------------
@@ -1233,7 +1233,7 @@
       state.answerMemory.set(questionId, result.value);
       answers[questionId] = { value: result.value, artifact_ids: [] };
     }
-    if (Object.keys(answers).length > MAX_QUESTIONS) fail("answer count exceeds its bound");
+    if (Object.keys(answers).length > MAX_QUESTIONS) fail("This request has more answers than it has questions.");
     syncFilesFromPage();
     const policy = state.contract.artifact_policy;
     if (state.files.length > policy.maximum_artifacts) {

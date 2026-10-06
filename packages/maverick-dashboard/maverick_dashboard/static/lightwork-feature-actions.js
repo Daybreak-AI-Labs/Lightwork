@@ -13,7 +13,7 @@
     return node;
   }
   function errorText(failure, action) {
-    return window.mvErrorText ? window.mvErrorText(failure, action) : 'Could not ' + action + '. Please try again.';
+    return window.mvErrorText ? window.mvErrorText(failure, action) : 'Could not ' + action + '. Try again.';
   }
   // A plain server sentence is shown as is; anything else gets the shared
   // plain message.
@@ -109,7 +109,7 @@
     if (!root) return;
     var status = $('fa-account-status');
     var me = await account();
-    if (!me) { say(status, 'Could not load your account. Please try again.'); return; }
+    if (!me) { say(status, 'Could not load your account. Try again.'); return; }
     say(status, '');
     var facts = el('dl', 'fa-facts');
     function fact(label, value) { facts.appendChild(el('dt', null, label)); facts.appendChild(el('dd', null, value)); }

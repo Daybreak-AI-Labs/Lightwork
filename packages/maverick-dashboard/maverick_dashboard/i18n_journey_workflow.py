@@ -265,7 +265,7 @@ ROWS = [('Workflow builder', 'Créateur de workflows', 'Workfloweditor', 'ワー
  ('Copy address', 'Copier l’adresse', 'Adresse kopieren', 'アドレスをコピー', '复制地址'),
  ('Copy start name', 'Copier le nom du déclenchement', 'Startnamen kopieren', '開始方法の名前をコピー', '复制启动名称'),
  ('Browse connectors', 'Parcourir les connecteurs', 'Verbindungen durchsuchen', 'コネクターを参照', '浏览连接器'),
- ('Done', 'Terminé', 'Fertig', '完了', '完成'),
+ ('Close the list', 'Fermer la liste', 'Liste schließen', 'リストを閉じる', '关闭列表'),
  ('Draft versions and publication',
   'Versions du brouillon et publication',
   'Entwurfsversionen und Veröffentlichung',
@@ -650,7 +650,7 @@ ROWS = [('Workflow builder', 'Créateur de workflows', 'Workfloweditor', 'ワー
   'erneut vor.',
   '保存済みの下書きを読み取れませんでした。「チャット」に戻り、作成し直してください。',
   '无法读取已保存的草稿。请返回聊天并重新准备。'),
- ('This saved draft is invalid or expired. Return to Chat and prepare a brief of 8,000 characters or fewer.',
+ ('This saved draft cannot be used or has expired. Return to Chat and prepare a brief of 8,000 characters or fewer.',
   'Ce brouillon est invalide ou expiré. Revenez à Chat et préparez une description de 8 000 caractères au '
   'maximum.',
   'Dieser Entwurf ist ungültig oder abgelaufen. Kehren Sie zum Chat zurück und erstellen Sie eine '

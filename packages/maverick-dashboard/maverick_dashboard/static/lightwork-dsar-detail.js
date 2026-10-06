@@ -16,7 +16,7 @@
   function $(id) { return doc.getElementById(id); }
   function say(text) { window.mvStatus(statusEl, text); }
   function fail(failure, action) {
-    say(window.mvErrorText ? window.mvErrorText(failure, action) : 'Could not ' + action + '. Please try again.');
+    say(window.mvErrorText ? window.mvErrorText(failure, action) : 'Could not ' + action + '. Try again.');
   }
   // A refused change carries a plain sentence saying what is missing; show it.
   function failPlain(failure, action) {

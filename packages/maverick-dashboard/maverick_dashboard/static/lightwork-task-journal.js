@@ -20,7 +20,7 @@
   function say(text) { window.mvStatus($('status'), text); }
   function failText(failure, what) {
     return typeof window.mvErrorText === 'function' ? window.mvErrorText(failure, what)
-      : 'Could not ' + what + '. Please try again.';
+      : 'Could not ' + what + '. Try again.';
   }
   function count(n, one, many) { return n + ' ' + (n === 1 ? one : many); }
   function lock(state) {

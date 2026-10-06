@@ -25,7 +25,7 @@
     return isNaN(d.getTime()) ? '' : window.mvTimeAbsolute ? window.mvTimeAbsolute(stamp) : d.toLocaleString();
   }
   function errorText(failure, action) {
-    return window.mvErrorText ? window.mvErrorText(failure, action) : 'Could not ' + action + '. Please try again.';
+    return window.mvErrorText ? window.mvErrorText(failure, action) : 'Could not ' + action + '. Try again.';
   }
   async function failText(failure, action) {
     // A server sentence written for people is shown as is.

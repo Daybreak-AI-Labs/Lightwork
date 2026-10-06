@@ -316,7 +316,7 @@
               {{ workspace_binding() }}
               <input type="hidden" name="channel" value="{{ l.channel }}" />
               <input type="hidden" name="external_id" value="{{ l.external_id }}" />
-              <button type="submit" class="btn btn--danger" aria-label="Unlink {{ l.channel }} account {{ l.external_id }}">Unlink</button>
+              <button type="submit" class="btn btn--danger" aria-label="Unlink account {{ l.external_id }} on {{ l.channel }}">Unlink account</button>
             </form>
           </td>
         </tr>
@@ -653,7 +653,7 @@
               {{ workspace_binding() }}
               <input type="hidden" name="name" value="{{ name }}" />
               <button type="submit" class="btn btn--danger"
-                      aria-label="Delete the {{ name | role_label }} role">Delete</button>
+                      aria-label="Delete role {{ name | role_label }}">Delete role</button>
             </form>
           </td>
         </tr>

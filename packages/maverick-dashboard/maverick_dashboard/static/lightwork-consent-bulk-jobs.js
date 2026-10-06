@@ -56,7 +56,7 @@
     try {
       return JSON.parse(responseText);
     } catch (_error) {
-      throw failure("Server returned invalid JSON.", "response_invalid_json", response.status);
+      throw failure("The reply from the server could not be read. Try again.", "response_invalid_json", response.status);
     }
   }
 
@@ -160,9 +160,9 @@
     var region = String(selected.region_code || "");
     var source = String(selected.asserted_source || "operator");
     if (!/^[A-Z]{2}$/.test(country) || !/^(?:[A-Z0-9]{1,8}(?:-[A-Z0-9]{1,8}){0,2})?$/.test(region)) {
-      throw failure("Context country or region code is invalid. Use a two-letter code such as US or FR.", "invalid_input");
+      throw failure("That country or region code is not recognized. Use a two-letter code such as US or FR.", "invalid_input");
     }
-    if (!SOURCES.has(source)) { throw failure("Context source is invalid. Choose a source from the list.", "invalid_input"); }
+    if (!SOURCES.has(source)) { throw failure("That source is not one of the choices. Choose a source from the list.", "invalid_input"); }
     return {
       jurisdiction: identifier(selected.jurisdiction, "Jurisdiction"),
       country_code: country,
@@ -183,7 +183,7 @@
         ["channel", "vendor_id", "expires_at"],
         "Choice " + (index + 1)
       );
-      if (!ACTIONS.has(item.action)) { throw failure("Choice action is invalid. Refresh the page and try again.", "invalid_input"); }
+      if (!ACTIONS.has(item.action)) { throw failure("That choice was not recognized. Refresh the page and try again.", "invalid_input"); }
       return {
         purpose_id: identifier(item.purpose_id, "Purpose ID"),
         action: item.action,
@@ -269,7 +269,7 @@
       } else if (operation === "change_identifier_type") {
         item = exactShape(rawItem, ["item_id", "profile_id", "expected_revision", "identity_kind", "subject_sha256"], [], label);
         if (item.identity_kind !== "known" && item.identity_kind !== "anonymous") {
-          throw failure("Identity kind is invalid. Choose an identity type from the list.", "invalid_input");
+          throw failure("That identity type is not one of the choices. Choose an identity type from the list.", "invalid_input");
         }
         if (!DIGEST_PATTERN.test(String(item.subject_sha256 || ""))) {
           throw failure("Subject digest must be lowercase SHA-256.", "invalid_input");

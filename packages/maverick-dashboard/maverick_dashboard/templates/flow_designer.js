@@ -1620,7 +1620,7 @@
     if (window.mvErrorText) return window.mvErrorText(response, what);
     var status = response && response.status;
     if (status === 409) return 'Could not ' + what + '. This flow was changed since you opened it. Reload it and try again.';
-    return 'Could not ' + what + '. Please try again.';
+    return 'Could not ' + what + '. Try again.';
   }
   // Problems in words, naming the step ("The step “Send to Slack” needs an action chosen.").
   function problemText(f) {
@@ -2043,7 +2043,7 @@
       if (retry) retry.hidden = !draftNotes.length;
     } catch (e) {
       if (generation === draftGeneration) {
-        say(e.message || 'Could not draft the flow. Please try again.', true);
+        say(e.message || 'Could not draft the flow. Try again.', true);
         if (retry) retry.hidden = false;
       }
     } finally {

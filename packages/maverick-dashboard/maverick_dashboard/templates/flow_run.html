@@ -164,7 +164,7 @@
   var flowName = '';
   var assignedReviewOnly = false;
   function human(v) { return window.mvHuman ? window.mvHuman(v) : String(v || '').replace(/_/g, ' '); }
-  function plain(failure, what) { return window.mvErrorText ? window.mvErrorText(failure, what) : 'Could not ' + what + '. Please try again.'; }
+  function plain(failure, what) { return window.mvErrorText ? window.mvErrorText(failure, what) : 'Could not ' + what + '. Try again.'; }
   function stepLabel(id) {
     var n = (flowNodes || []).filter(function (x) { return x.id === id; })[0];
     return n ? (n.title || KIND_LABEL[n.kind] || 'that step') : 'the step that stopped';

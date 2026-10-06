@@ -46,7 +46,7 @@
     }
     choice.value=Object.hasOwn(members,selected)?selected:"";
   }
-  function problem(response,action){return window.mvErrorText?window.mvErrorText(response,action):"Could not "+action+". Please try again.";}
+  function problem(response,action){return window.mvErrorText?window.mvErrorText(response,action):"Could not "+action+". Try again.";}
   async function api(path,options={},action="load the workspace members"){
     const token=access.capture();
     const headers={"Content-Type":"application/json","X-Lightwork-Workspace-People-Context":root.dataset.context},exp=expected();if(exp)headers["X-Lightwork-Expected-Tenant"]=exp;
