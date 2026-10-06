@@ -60,3 +60,9 @@ def test_skills_tool_list_only_for_people_who_can_add_skills() -> None:
     block = page[start:page.index("</fieldset>", start)]
     assert "{% if can_author %}" in block and "{% else %}" in block
     assert "Loading tools…</p>" not in block
+
+
+def test_saved_task_views_use_the_shared_loader() -> None:
+    # The status line said "Loading your saved views…" for 64 ms on Tasks.
+    assert "Loading your saved views…</p>" not in _read("templates/_task_saved_views.html")
+    assert "window.mvLoading(list," in _read("static/lightwork-task-views.js")

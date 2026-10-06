@@ -328,8 +328,16 @@
     // can be undone. High risk needs the box ticked; critical also needs
     // the word APPROVE typed. Never the browser's confirm().
     const dlg = document.getElementById('approval-confirm');
+    // Opening a modal dialog restyles the whole page (about 100 ms on a
+    // phone). The click's own frame paints first and the confirmation opens
+    // in the next one, so the click answers within 200 ms (INP).
+    let opening = false;
+    function afterPaint(run) {
+      if (typeof requestAnimationFrame === 'function') requestAnimationFrame(function () { setTimeout(run, 0); });
+      else setTimeout(run, 0);
+    }
     function confirmApproval(item) {
-      if (!dlg || typeof dlg.showModal !== 'function' || dlg.open) return Promise.resolve(null);
+      if (!dlg || typeof dlg.showModal !== 'function' || dlg.open || opening) return Promise.resolve(null);
       const risk = (item.dataset.risk || '').toLowerCase();
       const critical = risk === 'critical';
       const opener = document.activeElement;
@@ -422,8 +430,12 @@
         dlg.addEventListener('cancel', onCancel);
         ack.addEventListener('change', onFix);
         typed.addEventListener('input', onFix);
-        dlg.showModal();
-        ack.focus();
+        opening = true;
+        afterPaint(function () {
+          opening = false;
+          dlg.showModal();
+          ack.focus();
+        });
       });
     }
 

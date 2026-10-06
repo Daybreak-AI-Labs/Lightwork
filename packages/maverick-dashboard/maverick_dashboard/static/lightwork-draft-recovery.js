@@ -83,7 +83,7 @@
     storage.append(storageTitle, storageStatus, storageRefresh, storageRetire); panel.append(storage);
     // Chat's dock needs one quiet readiness row. The same native controls stay
     // available in its disclosure; unresolved recovery always opens in full.
-    var compact = options.compact === true, disclosure = null, disclosureTitle = null, automaticallyOpened = false, slowCheck = false;
+    var compact = options.compact === true, disclosure = null, disclosureTitle = null, automaticallyOpened = false, slowCheck = false, checkingSince = 0;
     if (compact) {
       disclosure = doc.createElement('details'); disclosureTitle = doc.createElement('summary');
       disclosure.className = 'draft-recovery__compact'; disclosureTitle.textContent = 'Draft recovery';
@@ -102,7 +102,7 @@
       panel.style.cssText = 'padding:var(--space-2);margin-block:var(--space-2);min-width:0';
       // The loading words appear only when the check takes longer than
       // 300 ms (the mvLoading rule), so a quick check never flashes them.
-      root.setTimeout(function () { slowCheck = true; if (!initialized) compactControls(); }, 300);
+      root.setTimeout(function () { slowCheck = true; if (!initialized) { checkingSince = Date.now(); compactControls(); } }, 300);
       disclosureTitle.addEventListener('click', function (event) {
         if (blocked || failed || pendingOperation) { event.preventDefault(); disclosure.open = true; }
         else automaticallyOpened = false;
@@ -158,6 +158,10 @@
     function compactControls() {
       if (!compact) return;
       var attention = blocked || failed || pendingOperation;
+      // Once shown, the checking words stay 500 ms so they can be read.
+      var shownFor = checkingSince ? Date.now() - checkingSince : 500;
+      if (initialized && !attention && shownFor < 500) { root.setTimeout(compactControls, 500 - shownFor); return; }
+      if (initialized) checkingSince = 0;
       disclosureTitle.textContent = failed ? 'Draft recovery needs attention' : blocked ? 'Recovery copy needs review' :
         pendingOperation ? 'Recovery save needs confirmation' : !initialized ? (slowCheck ? 'Checking draft recovery…' : 'Draft recovery') :
         running || changed ? 'Keeping unsent text…' : remote ? 'Unsent text protected' : 'Draft recovery ready';

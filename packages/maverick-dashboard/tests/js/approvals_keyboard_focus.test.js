@@ -156,3 +156,19 @@ test("the acknowledgement error is tied to the box it is about", async () => {
     assert.equal(f.doc.activeElement, f.item(3).querySelector(".approval-undo"));
   } finally { f.dom.window.close(); }
 });
+
+// Opening the modal restyles the whole page; the click's frame paints first
+// and the confirmation opens in the next one (phone INP was 208-232 ms).
+test("the high-risk confirmation opens just after the click's frame, once", async () => {
+  const f = fixture();
+  try {
+    const approve = f.item(3).querySelector('[data-action="approve"]');
+    f.press(approve);
+    const dialog = f.doc.getElementById("approval-confirm");
+    assert.equal(dialog.open, false, "not inside the click's own task");
+    f.press(approve);   // a second click while it opens does not open it twice
+    await new Promise(resolve => setTimeout(resolve, 30)); await flush();
+    assert.equal(dialog.open, true);
+    assert.equal(f.doc.activeElement, f.doc.getElementById("approval-confirm-ack"));
+  } finally { f.dom.window.close(); }
+});

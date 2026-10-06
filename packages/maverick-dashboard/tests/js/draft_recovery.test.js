@@ -188,9 +188,12 @@ test('a quick recovery check never shows the loading words in the compact row',a
   assert.ok(!ui.labels.includes('Checking draft recovery…'),JSON.stringify(ui.labels));
   assert.equal(ui.summary.textContent,'Draft recovery ready');ui.dom.window.close();
 });
-test('a slow recovery check says it is checking',async()=>{
+test('a slow recovery check says it is checking, long enough to read',async()=>{
   const ui=await compactRow(450);
   assert.ok(ui.labels.includes('Checking draft recovery…'),JSON.stringify(ui.labels));
+  // Shown at 300 ms and answered at 450 ms: the words stay 500 ms, not 150.
+  assert.equal(ui.summary.textContent,'Checking draft recovery…');
+  await new Promise(resolve=>setTimeout(resolve,500));
   assert.equal(ui.summary.textContent,'Draft recovery ready');ui.dom.window.close();
 });
 
