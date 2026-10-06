@@ -68,8 +68,12 @@ def agents(request, terms, can_open_page) -> list[dict]:
     for agent in list_agents():
         if allowed is not None and not set(agent["suites"]) <= allowed:
             continue
-        kind = agent_kind(agent["name"])
         description = str(agent.get("description") or "")
+        # Two thousand packs: words the pack cannot hold skip the naming work.
+        if not all(term in f"{agent['name']} {humanize(agent['name'])} {description} agent specialist".casefold()
+                   for term in terms):
+            continue
+        kind = agent_kind(agent["name"])
         # "Trade Finance: Prepare letter-of-credit..." is known as "Trade Finance".
         known, _, _rest = description.partition(":")
         title = known.strip() if _rest and 0 < len(known.strip()) <= 60 else humanize(agent["name"])
@@ -139,3 +143,14 @@ def find(request, query: str, can_open_page) -> list[dict]:
         except Exception:  # a closed or unreadable source adds nothing  # noqa: BLE001
             continue
     return results
+
+
+def warm_up(request, can_open_page) -> None:
+    """Read every source this person may use, with the same checks, and keep
+    nothing: a word no name holds matches no row, so only the catalogs'
+    first-read cost is paid before the person types."""
+    for source in SOURCES:
+        try:
+            source(request, ["\x00"], can_open_page)
+        except Exception:  # a closed or unreadable source adds nothing  # noqa: BLE001
+            continue

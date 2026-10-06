@@ -230,3 +230,11 @@ def test_page_results_show_where_each_page_lives_and_its_go_to_keys(client):
     # The keys shown are the ones the shortcuts dialog lists and binds.
     shown = dict(re.findall(r'data-shortcut="g (\w)" data-shortcut-href="([^"]+)"', client.get("/overview").text))
     assert shown == {key: href for key, href, _ in navigation_api.GO_TO_KEYS if href != "/settings"}
+
+
+@pytest.mark.parametrize("words", ["stop all agents", "stop every agent", "stop everything", "kill switch"])
+def test_ways_of_asking_to_stop_everything_find_the_emergency_stop(client, words):
+    _as("operator")
+    shell, _ = _shell(client)
+    synonyms = shell.commands["halt"]["data-synonyms"].split("|")
+    assert words in synonyms

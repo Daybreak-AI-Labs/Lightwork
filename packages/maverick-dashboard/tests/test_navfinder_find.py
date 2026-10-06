@@ -140,3 +140,26 @@ def test_agents_are_found_by_name_not_by_a_word_in_their_description(client):
     _as("admin")
     rows = [row for row in _find(client, "invite") if row["kind"] in {"agent", "specialist"}]
     assert all("invite" in " ".join(row["labels"]).casefold() for row in rows)
+
+
+def test_warming_returns_nothing_and_still_checks_permission(client, monkeypatch):
+    """Ctrl+K warms the sources when it opens so the first search answers in
+    time; the warm request runs the same per-person checks and returns no rows."""
+    from maverick_dashboard import auth
+
+    _as("admin")
+    calls = []
+    import maverick.domain_edit as domain_edit
+    real = domain_edit.list_agents
+    monkeypatch.setattr(domain_edit, "list_agents", lambda: calls.append(1) or real())
+    response = client.get("/nav/finder/find", params={"warm": "1"})
+    assert response.status_code == 200
+    assert response.json() == {"results": []}
+    assert response.headers["cache-control"] == "private, no-store"
+    assert calls, "the agents source was read for this person"
+
+    def denied(_request, _permission):
+        from fastapi import HTTPException
+        raise HTTPException(status_code=403)
+    monkeypatch.setattr(auth, "require_permission", denied)
+    assert client.get("/nav/finder/find", params={"warm": "1"}).status_code == 403

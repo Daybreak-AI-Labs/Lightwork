@@ -447,6 +447,7 @@
       refreshPinLabel();
       readPersonal();
       if (loaded) filterResults(); else ensureLoaded();
+      warmFound();
       if (typeof dialog.showModal === "function") {
         dialog.showModal();
       } else {
@@ -670,6 +671,14 @@
       filterResults();
     }
 
+    // Opening asks the server to read its sources for this person (same
+    // checks, no rows back), so the first search's rows arrive while the
+    // person is still typing rather than after a cold catalog read.
+    function warmFound() {
+      if (!findSource) return;
+      global.mvFetchJSON(findSource + "?warm=1", {cache: "no-store"}).catch(function () {});
+    }
+
     function searchFound(text) {
       var generation = ++findGeneration;
       if (findTimer) global.clearTimeout(findTimer);
@@ -684,7 +693,7 @@
             setFound(data && Array.isArray(data.results) ? data.results : [], text);
           })
           .catch(function () { if (generation === findGeneration) setFound([]); });
-      }, 200);
+      }, 60);
     }
 
     // "Approve or reject…": the requests this person may decide, from the
