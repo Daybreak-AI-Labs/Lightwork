@@ -19,8 +19,9 @@
   {% for a in approvals %}
     {% set assessment_id = assessment_ids.get(a.id) if assessment_ids else None %}
     {% set _raw_action = (approval_actions.get(a.id, '') if approval_actions else '') | trim %}
-    {% set action_label = 'Review paused action' if a.provenance == 'rehearsal' else ((_raw_action if ' ' in _raw_action else (_raw_action | replace('.', ' ') | humanize)) or 'Reviewed action') %}
     {% set card = cards.get(a.id) if cards else None %}
+    {#- The card's plain summary, else the task page's step words, else the action name (approval_labels.py). -#}
+    {% set action_label = 'Review paused action' if a.provenance == 'rehearsal' else (approval_action_label(_raw_action, card) if approval_action_label is defined else ((_raw_action if ' ' in _raw_action else (_raw_action | replace('.', ' ') | humanize)) or 'Reviewed action')) %}
     {% set card_status = card_statuses.get(a.id, 'legacy') if card_statuses else 'legacy' %}
     {% set scope_text = approval_scopes.get(a.id, '') if approval_scopes and approval_scopes.get(a.id) else 'The item described' %}
     {# What is enforced: the person who asked may approve their own request
@@ -278,36 +279,10 @@
     function itemFor(id) {
       return document.querySelector('article.approval-item[data-id="' + id + '"]');
     }
-    // The page header's "N requests waiting" follows the queue: a decision,
-    // an undo or a send-back changes it at once, as the list does.
-    const countBox = document.getElementById('approvals-current-state');
     // Product copy in the person's language (lightwork-i18n.js), English otherwise.
     function tr(source, values) {
       if (window.LightworkI18n) return window.LightworkI18n.text(source, values);
       return source.replace(/\{([a-z]+)\}/g, function (whole, name) { return values && name in values ? String(values[name]) : whole; });
-    }
-    function refreshCount() {
-      if (!countBox) return;
-      const open = queue.querySelectorAll(':scope > article.approval-item').length +
-        (parseInt(countBox.dataset.flowCount, 10) || 0);
-      const hidden = parseInt(countBox.dataset.privateCount, 10) || 0;
-      const checked = countBox.dataset.coverage === 'current';
-      const name = countBox.querySelector('.hero-statebox__row strong');
-      if (name) {
-        name.textContent = open ? (open === 1 ? tr('1 request waiting') : tr('{count} requests waiting', {count: open}))
-          : hidden ? (hidden === 1 ? tr("1 request is waiting that you can't open here")
-            : tr("{count} requests are waiting that you can't open here", {count: hidden}))
-          : tr('0 requests waiting');
-      }
-      const badge = countBox.querySelector('.hero-statebox__row .badge');
-      if (badge) {
-        badge.textContent = tr(open || countBox.dataset.inChat === '1' ? 'Action needed'
-          : hidden ? 'Waiting' : checked ? 'All clear' : 'Check needed');
-        badge.className = 'badge ' + (open || hidden || !checked ? 'warn' : 'ok');
-      }
-    }
-    if (countBox && queue && typeof MutationObserver === 'function') {
-      new MutationObserver(refreshCount).observe(queue, {childList: true});
     }
     function showEmptyIfNeeded() {
       if (queue.querySelector('article.approval-item')) return;

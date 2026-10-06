@@ -7,6 +7,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs"), path = require("node:path");
 const {JSDOM} = require("jsdom");
 const queue = fs.readFileSync(path.resolve(__dirname, "../../maverick_dashboard/templates/_approvals_queue.html"), "utf8").replace(/\r\n/g, "\n");
+const counter = fs.readFileSync(path.resolve(__dirname, "../../maverick_dashboard/static/lightwork-approvals-count.js"), "utf8");
 const flush = async () => { for (let i = 0; i < 12; i++) await new Promise(setImmediate); };
 
 function card(id, risk, label) {
@@ -45,6 +46,7 @@ function fixture({flow = 0, privateCount = 0} = {}) {
   };
   const start = queue.indexOf("  (function() {\n    const msg = document.getElementById('approval-msg')");
   w.eval(queue.slice(start, queue.indexOf("</script>", start)));
+  w.eval(counter);
   const count = () => doc.querySelector("#approvals-current-state strong").textContent;
   const badge = () => doc.querySelector("#approvals-current-state .badge");
   const press = (button) => button.dispatchEvent(new w.MouseEvent("click", {bubbles: true, detail: 0}));

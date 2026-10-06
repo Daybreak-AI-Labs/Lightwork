@@ -287,8 +287,9 @@ def test_decision_buttons_name_the_action_they_decide(tmp_path):
     w = _world(tmp_path)
     _queue(w, action="send_email", risk="medium")
     text = _client().get("/approvals").text
-    assert re.search(r'data-action="approve"[^>]*>Approve &#34;Send email&#34;</button>', text)
-    assert re.search(r'data-action="deny">Reject &#34;Send email&#34;</button>', text)
+    # The card's plain summary names the action on both buttons.
+    assert re.search(r'data-action="approve"[^>]*>Approve &#34;Update 12 Salesforce account records&#34;</button>', text)
+    assert re.search(r'data-action="deny">Reject &#34;Update 12 Salesforce account records&#34;</button>', text)
     source = TEMPLATE.read_text(encoding="utf-8")
     # No bare yes or generic OK on any approval button or confirmation.
     assert "Yes, approve" not in source
@@ -304,5 +305,35 @@ def test_the_waiting_count_in_the_header_follows_the_queue(tmp_path):
     box = re.search(r'<div id="approvals-current-state"[^>]*>', text)
     assert box and 'data-flow-count="0"' in box.group(0) and 'data-private-count="0"' in box.group(0)
     assert "2 requests waiting" in text
-    source = TEMPLATE.read_text(encoding="utf-8")
-    assert "approvals-current-state" in source and "MutationObserver" in source
+    counter = (TEMPLATE.parent.parent / "static" / "lightwork-approvals-count.js").read_text(encoding="utf-8")
+    assert "approvals-current-state" in counter and "MutationObserver" in counter
+    assert "lightwork-approvals-count.js" in text
+    # The page itself never carries "All clear" while requests wait.
+    assert "All clear" not in text
+
+
+def test_decision_labels_use_the_cards_plain_summary_then_the_step_words():
+    from maverick_dashboard.approval_labels import action_label
+
+    # The card's own plain summary names the action.
+    assert action_label("shell", {"summary": "Run a command in the sandbox."}) == "Run a command in the sandbox"
+    assert action_label("salesforce.update_records", {"summary": "Update 12 Salesforce account records"}) == \
+        "Update 12 Salesforce account records"
+    # A generic or overlong summary falls back to the plain step words.
+    assert action_label("shell", {"summary": "Review this exact operation."}) == "Run a command"
+    assert action_label("write_file", {"summary": "x" * 200}) == "Save a file"
+    assert action_label("shell", None) == "Run a command"
+    # Neither: the humanised action, as before.
+    assert action_label("send_email", None) == "Send email"
+    assert action_label("", None) == "Reviewed action"
+    # A summary that is itself the request ("Approve the payment?") is not a name.
+    assert action_label("send_email", {"summary": "Approve the reviewed customer change"}) == "Send email"
+    assert action_label("flow.resume", {"summary": "Pay the March invoices?"}) == "Flow resume"
+
+
+def test_the_queue_names_the_card_summary_on_its_buttons(tmp_path):
+    w = _world(tmp_path)
+    _queue(w, risk="medium")
+    text = _client().get("/approvals").text
+    assert 'Approve &#34;Update 12 Salesforce account records&#34;</button>' in text
+    assert 'data-label="Update 12 Salesforce account records"' in text

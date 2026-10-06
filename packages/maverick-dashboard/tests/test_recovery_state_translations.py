@@ -13,6 +13,7 @@ DASHBOARD = Path(__file__).resolve().parents[1] / "maverick_dashboard"
 LOOKUPS = {
     "static/lightwork-session.js": r"\bt\('((?:[^'\\]|\\.)*)'",
     "templates/_approvals_queue.html": r"""\btr\((?:'((?:[^'\\]|\\.)*)'|"((?:[^"\\]|\\.)*)")""",
+    "static/lightwork-approvals-count.js": r"""\btr\((?:'((?:[^'\\]|\\.)*)'|"((?:[^"\\]|\\.)*)")""",
     "static/lightwork-immune-console.js": r"LightworkI18n\.text\(\"([^\"]*)\"\)",
     "static/lightwork-third-party-collaboration.js": r"LightworkI18n\.text\(\"([^\"]*)\"\)",
     "static/lightwork-ai-entity-tasks.js": r"LightworkI18n\.text\(\"([^\"]*)\"\)",

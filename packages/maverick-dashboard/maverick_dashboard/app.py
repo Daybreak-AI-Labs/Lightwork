@@ -278,6 +278,9 @@ templates.env.filters["identity"] = _idfmt.humanize_principal
 templates.env.filters["role_label"] = _idfmt.role_label
 templates.env.filters["permission_label"] = _idfmt.permission_label
 templates.env.filters["humanize"] = _idfmt.humanize
+from .approval_labels import action_label as _approval_action_label  # noqa: E402
+
+templates.env.globals["approval_action_label"] = _approval_action_label
 # One run-status vocabulary for the chat badge, composer and recents.
 from maverick.channel_approvals import spending_text as _approval_spending  # noqa: E402
 
