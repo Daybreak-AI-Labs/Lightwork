@@ -10,7 +10,7 @@
     if(coverage.review){const details=node('details');details.append(node('summary','Recorded coverage review'));details.append(node('p',coverage.review.note));box.append(details);}
     const form=node('form');form.id='op-cost-coverage-form';form.dataset.draftRecovery='off';
     const label=node('label','How all attempts, failures and rejected cases were accounted for'),note=node('textarea');note.className='input';note.required=true;note.rows=3;note.maxLength=4000;label.append(note);form.append(label);
-    const confirmed=node('label'),checkbox=node('input');checkbox.type='checkbox';checkbox.required=true;confirmed.append(checkbox,node('span',' I reviewed every planned case and confirm that all provider costs for those cases, including failed attempts and rejected results, are represented in the current allocations.'));form.append(confirmed);
+    const confirmed=node('label'),checkbox=node('input');checkbox.type='checkbox';checkbox.required=true;confirmed.append(checkbox,node('span',' I reviewed every planned case. All provider costs for those cases, including failed attempts and rejected results, are in the current allocations.'));form.append(confirmed);
     const button=node('button','Confirm complete provider cost coverage');button.type='submit';button.className='btn';button.disabled=!coverage.can_confirm;form.append(button);box.append(form);panel.append(box);
     form.addEventListener('input',event=>{if(event.target!==checkbox){checkbox.checked=false;delete form.dataset.operation;}});
     form.addEventListener('submit',event=>{event.preventDefault();if(!coverage.can_confirm||!checkbox.checked||!form.reportValidity())return;

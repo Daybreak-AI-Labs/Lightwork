@@ -123,7 +123,7 @@
     </div>
     <div class="panel">
       <h3 style="margin-top:0;">Cross-border transfer map</h3>
-      <p class="muted" style="font-size: var(--text-sm);">Where personal data flows out, from your processing record and transfer assessments, and whether a legal transfer safeguard (such as standard contractual clauses) is on file.</p>
+      <p class="muted" style="font-size: var(--text-sm);">Where personal data flows out, from your processing record and transfer assessments. Each one shows whether a legal transfer safeguard, such as standard contractual clauses, is on file.</p>
       <div id="pv-transfer" aria-live="polite"></div>
     </div>
   </div>
@@ -308,8 +308,7 @@
 
     <div {{ tab_panel('lineage', 'dpa', tab_prefix='pw-tabbtn-', panel_prefix='pw-tab-') }}>
       <p class="muted" style="font-size:var(--text-sm);margin-bottom:var(--space-3);">
-        Answer the questions a regulator asks about a vendor: its full history,
-        why it was approved, and what else depends on a clause or document
+        Answer the questions a regulator asks about a vendor: its full history and why it was approved. See what else depends on a clause or document
         that turned out to be a problem. Every answer links to the record it
         came from.
       </p>
@@ -364,8 +363,7 @@
     <div {{ tab_panel('paper', 'dpa', tab_prefix='pw-tabbtn-', panel_prefix='pw-tab-') }}>
       <p class="muted" style="font-size:var(--text-sm);margin-bottom:var(--space-3);">
         When the vendor insists on <strong>their</strong> paper. Upload it and
-        Lightwork works out whether it is a DPA or a privacy addendum, compares
-        every clause against your playbook, and returns their document marked up
+        Lightwork works out whether it is a DPA or a privacy addendum. It compares every clause against your playbook and returns their document marked up
         with real Word tracked changes. Which clauses fall short is decided
         deterministically — a model only re-words <em>your</em> clause to match
         their drafting, and never weakens it.
@@ -543,8 +541,7 @@
           <button class="btn" id="pw-ai-register" type="button" {% if not aira_sessions %}disabled{% endif %}>Register from assessment</button>
           <span class="pw-form-err" id="pw-ai-err" role="alert"></span>
         </div>
-        <p class="muted" style="margin:0; font-size:var(--text-xs);">Answers in the assessment can only raise
-          the risk level: if it confirms a banned or high-risk use, that counts even when the description sounds harmless.</p>
+        <p class="muted" style="margin:0; font-size:var(--text-xs);">Answers in the assessment can only raise the risk level. If it confirms a banned or high-risk use, that counts even when the description sounds harmless.</p>
       </div>
       {% if records.ai %}
       <div class="pw-scroll">
@@ -1146,8 +1143,8 @@
         by their names. This is a starting point for your team, not a scan of the data itself.
         {% if estate.data_map_posture %}
         <strong>{{ estate.data_map_posture.flagged_assets }}</strong> of
-        {{ estate.data_map_posture.assets }} places hold likely personal data,
-        {{ estate.data_map_posture.special_category_assets }} of them sensitive (such as health data), and
+        {{ estate.data_map_posture.assets }} places hold likely personal data.
+        {{ estate.data_map_posture.special_category_assets }} of them are sensitive, such as health data, and
         {{ estate.data_map_posture.unlinked_flagged_assets }} are not yet linked to a processing record entry.
         {% if estate.data_map_posture.by_category %}By kind of data:
         {% for category, count in estate.data_map_posture.by_category.items() %}{{ category | humanize }} {{ count }}{% if not loop.last %}, {% endif %}{% endfor %}.{% endif %}

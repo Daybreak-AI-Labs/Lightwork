@@ -4,7 +4,7 @@
   {% from "_module_gate.html" import module_gate %}
   {% set _LIFECYCLE = {'active': 'Active', 'suspended': 'Paused', 'revoked': 'Access blocked', 'contained': 'Blocked for rule breaks', 'expired': 'Access expired'} %}
   <h1 class="page-title">Outside agents</h1>
-  <p class="page-subtitle">Agents built on other platforms — Salesforce Agentforce, AWS Bedrock, Copilot Studio or your own — keep running where they are, but follow your rules here: access keys, spending limits, checks before risky actions, and a record of every run.</p>
+  <p class="page-subtitle">Agents built on other platforms — Salesforce Agentforce, AWS Bedrock, Copilot Studio or your own — keep running where they are. They follow your rules here: access keys, spending limits, checks before risky actions, and a record of every run.</p>
   {% if outside_agent_tabs %}{% from "_tabs.html" import tab_bar, panel_attrs %}{{ tab_bar('Outside agents views', outside_agent_tabs, '') }}<div {{ panel_attrs('') }}>{% endif %}
   {% if not enabled %}
   {{ module_gate('external_agents', 'Outside agents',
@@ -90,7 +90,7 @@
     {% else %}
     <div class="mv-empty">
       <p class="mv-empty__title">No outside agents yet</p>
-      <p class="mv-empty__body">Bring an agent from Salesforce, AWS or another platform under your rules: add it below, create its access key, and its work starts showing up here.</p>
+      <p class="mv-empty__body">Bring an agent from Salesforce, AWS or another platform under your rules. Add it below and create its access key, and its work starts showing up here.</p>
       <a class="btn btn--primary" href="#xa-add">Add an outside agent</a>
     </div>
     {% endif %}

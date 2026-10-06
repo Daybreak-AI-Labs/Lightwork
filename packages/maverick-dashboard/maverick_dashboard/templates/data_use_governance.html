@@ -87,7 +87,7 @@
       <h2 id="dug-context-heading">Why each data set may be used</h2>
       <button class="btn" type="button" id="dug-new-context"{% if not du_on or not du_admin %} disabled{% endif %}>Record a reason</button>
     </div>
-    <p class="muted">Before any request is allowed, a data set needs four up-to-date reasons, each from a different source: its business purpose, the laws that apply, the consent people gave, and how sensitive it is.</p>
+    <p class="muted">Before any request is allowed, a data set needs four up-to-date reasons, each from a different source. They are its business purpose, the laws that apply, the consent people gave, and how sensitive it is.</p>
     <div id="dug-contexts"><p class="muted">Loading…</p></div>
     <form id="dug-context" class="cw-editor" hidden novalidate>
       <fieldset id="dug-context-controls" class="cw-form" data-feature-enabled="{{ 'true' if du_on else 'false' }}"{% if not du_on %} disabled aria-disabled="true"{% endif %}>
@@ -180,7 +180,7 @@
       <h2 id="dug-policies-heading">Rules</h2>
       <button class="btn" type="button" id="dug-new-policy"{% if not du_on or not du_admin %} disabled{% endif %}>Create a rule</button>
     </div>
-    <p class="muted">A rule says what happens when a project asks to use data: allow it, block it, hide part of each value, show only some rows, or send it to a person. A rule only takes effect after a second person switches it on.</p>
+    <p class="muted">A rule says what happens when a project asks to use data. It can allow it, block it, hide part of each value, show only some rows, or send it to a person. A rule only takes effect after a second person switches it on.</p>
     <div id="dug-policies"><p class="muted">Loading rules…</p></div>
     <form id="dug-policy" class="cw-editor" hidden novalidate>
       <fieldset id="dug-policy-controls" class="cw-form" data-feature-enabled="{{ 'true' if du_on else 'false' }}"{% if not du_on %} disabled aria-disabled="true"{% endif %}>
