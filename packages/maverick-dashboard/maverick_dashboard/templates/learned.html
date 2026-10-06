@@ -134,27 +134,8 @@
     {% endif %}
   </div>
 
-  <div class="section-head"><h2>Tools Lightwork wrote for itself</h2></div>
-  <div class="panel" id="generated-tools">
-    <p class="muted">Remove a tool that misbehaves. It is deleted and will not be used again.</p>
-    {% if generated_tools %}
-      <table>
-        <thead><tr><th scope="col">Tool</th><th scope="col">Actions</th></tr></thead>
-        <tbody>
-        {% for f in generated_tools %}
-          {% set tool_name = (f[:-3] if f.endswith('.py') else f) %}
-          {% set tool_name = (tool_name[4:] if tool_name.startswith('gen_') else tool_name) | humanize %}
-          <tr data-name="{{ f }}">
-            <td>{{ tool_name }}</td>
-            <td>{% if can_remove_tools %}<button type="button" class="btn btn--danger gt-remove" data-name="{{ f }}" data-label="{{ tool_name }}" aria-label="Remove {{ tool_name }}">Remove</button>{% else %}<span class="muted">Administrators can remove tools.</span>{% endif %}</td>
-          </tr>
-        {% endfor %}
-        </tbody>
-      </table>
-    {% else %}
-      <p class="muted" id="no-generated">No tools written yet.</p>
-    {% endif %}
-  </div>
+  {% if can_remove_tools %}{% include "_generated_tool_removal.html" %}
+  {% else %}<section class="panel" id="generated-tools"><h2>Tools Lightwork wrote</h2><p>Administrators can review their owned tools for stopping, removal and original-result recovery.</p></section>{% endif %}
 
   {% include "_learning_loop.html" %}
   {% include "_learning_jobs.html" %}
@@ -228,28 +209,6 @@
           if (out.retired) setTimeout(function () { location.reload(); }, 800); }
       });
 
-      document.querySelectorAll('button.gt-remove').forEach(function (btn) {
-        btn.addEventListener('click', async function () {
-          var label = btn.dataset.label || 'this tool';
-          if (!(await mvConfirm('Remove the tool “' + label + '”? It is deleted and will not be used again.', { okText: 'Remove tool' }))) return;
-          btn.disabled = true;
-          say('Removing ' + label + '…');
-          try {
-            var r = await fetch('/api/v1/generated-tools/' + encodeURIComponent(btn.dataset.name), { method: 'DELETE' });
-            if (r.ok || r.status === 204) {
-              say(label + ' removed.');
-              var row = btn.closest('tr');
-              if (row) row.remove();
-            } else {
-              btn.disabled = false;
-              say(window.mvErrorText(r, 'remove the tool'));
-            }
-          } catch (e) {
-            btn.disabled = false;
-            say(window.mvErrorText(e, 'remove the tool'));
-          }
-        });
-      });
     })();
   </script>
 {% endblock %}

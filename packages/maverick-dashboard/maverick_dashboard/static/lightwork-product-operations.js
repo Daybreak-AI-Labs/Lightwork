@@ -1048,6 +1048,9 @@
               : item.id.startsWith('learning.rule_evolution.')
                 ? !!(window.LWGovernedRuleEvolution && window.LWGovernedRuleEvolution.renderReview &&
                      window.LWGovernedRuleEvolution.renderReview(formHost, review.changes) === true)
+              : ['learning.generated_tool_remove', 'learning.generated_tool_cleanup'].includes(item.id)
+                ? !!(window.LWGeneratedToolRemoval && window.LWGeneratedToolRemoval.renderReview &&
+                     window.LWGeneratedToolRemoval.renderReview(formHost, review.changes) === true)
               : item.id.startsWith('learning.acquisition.')
                 ? !!(window.LWOperatorAcquisition && window.LWOperatorAcquisition.renderReview &&
                      window.LWOperatorAcquisition.renderReview(formHost, review.changes) === true)

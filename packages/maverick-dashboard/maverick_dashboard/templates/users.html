@@ -14,6 +14,14 @@
   {# Native forms must be bound before the shared script finishes loading.
      This is the request-rendered workspace, never the current browser cookie. #}
   {% macro workspace_binding() %}{% if workspace_tenant_selection %}<input type="hidden" name="_expected_tenant" value="{{ workspace_tenant_selection }}">{% endif %}{% endmacro %}
+  {% macro invite_expiry(id) %}
+    <label class="users-field" for="{{ id }}">Link expires after
+      <select id="{{ id }}" name="expiry" class="select" required>
+        <option value="1_hour">1 hour</option><option value="1_day">1 day</option>
+        <option value="7_days" selected>7 days</option><option value="30_days">30 days</option>
+      </select>
+    </label>
+  {% endmacro %}
   {% macro person_options(selected='', only_without_role=false) %}
     {% for person in people if not only_without_role or not person.role %}
     <option value="{{ person.principal }}"{% if person.principal == selected %} selected{% endif %}>{{ person.label }}</option>
@@ -76,14 +84,14 @@
   <section class="panel users-saved" id="invite-result" tabindex="-1" aria-labelledby="invite-result-title" data-mv-keep-done="users-invite">
     {% if invite_sent %}
     <strong id="invite-result-title">Invitation emailed to {{ invite_email }}.</strong>
-    <p class="muted users-help">The same link is below if you also want to send it yourself. It works once and expires in 7 days.</p>
+    <p class="muted users-help">The same link is below if you also want to send it yourself. It works once and expires {{ invite_expires_at | datetime('absolute') }}.</p>
     {% elif invite_send_note and 'disabled' not in invite_send_note and 'no sending account' not in invite_send_note %}
     <strong id="invite-result-title">Invitation for {{ invite_email }} created.</strong>
-    <p class="muted users-help">We couldn't email the invite. Copy the link below and send it yourself. It works once and expires in 7 days.</p>
+    <p class="muted users-help">We couldn't email the invite. Copy the link below and send it yourself. It works once and expires {{ invite_expires_at | datetime('absolute') }}.</p>
     {% else %}
     <strong id="invite-result-title">Invitation for {{ invite_email }} created.</strong>
     <p class="muted users-help">Copy this link and send it to them. It is shown only once, works once and
-      expires in 7 days. {% if invite_sso_on %}They must sign in with the email address you invited.{% else %}Anyone who opens it can accept, so send it only to the person you invited.{% endif %}</p>
+      expires {{ invite_expires_at | datetime('absolute') }}. {% if invite_sso_on %}They must sign in with the email address you invited.{% else %}Anyone who opens it can accept, so send it only to the person you invited.{% endif %}</p>
     {% endif %}
     <div class="users-row-form">
       <label class="users-field users-grow"><span>Invite link</span>
@@ -352,6 +360,7 @@
   <div class="panel">
     <form method="post" data-mv-save="background" data-mv-save-what="create the invite link" data-mv-save-show="invite-result-slot" action="/users/invite" class="users-row-form" id="invite-form" data-mv-validate data-mv-keep="users-invite">
       {{ workspace_binding() }}
+      <input type="hidden" name="expected_context" value="{{ workspace_people_context }}">
       {{ error_summary('invite-errors') }}
       <label class="users-field users-grow">
         <span>Email address</span>
@@ -364,6 +373,7 @@
         </select>
         {{ role_help('invite-role-chosen', 'viewer') }}
       </label>
+      {{ invite_expiry('invite-expiry') }}
       <button type="submit" class="btn">Create invite link</button>
       <p class="mv-form__err users-field-error" id="invite-email-error" role="alert" hidden></p>
     </form>
@@ -372,6 +382,7 @@
       {% if invite_sso_on %}The link asks them to sign in with a company account whose email matches the invitation before giving them the role.
       {% else %}Opening the link signs them in with their email address.{% endif %}
       If email sending is set up, the link is also emailed to them.</p>
+    <p class="muted users-help">If creation is interrupted, reload Users and check the waiting invitations before creating another. A lost one-time link cannot be recovered; cancel that invitation, then create a replacement.</p>
     {% if invite_confirm is defined %}
     {% set ic = invite_confirm %}
     <section class="panel" id="invite-result" tabindex="-1" role="region" aria-labelledby="invite-confirm-title">
@@ -402,7 +413,7 @@
       {% for inv in pending_invites %}
       <li>
         <input type="checkbox" name="invite_ids" value="{{ inv.id }}" form="invites-bulk" id="inv-pick-{{ loop.index }}" /><label class="sr-only" for="inv-pick-{{ loop.index }}">Select the invitation for {{ inv.email }}</label>
-        <span class="users-grow">{{ inv.email }}</span>
+        <span class="users-grow">{{ inv.email }}<br><span class="muted users-help">Expires {{ inv.expires_at | datetime('absolute') }}</span></span>
         <span class="badge">{{ inv.role | role_label }}</span>
         <form method="post" action="/users/invite/revoke" class="users-inline"
               data-users-confirm="Cancel the invitation for {{ inv.email }}? The link will stop working." data-users-ok="Cancel invitation">
@@ -445,11 +456,13 @@
   {% if workspace_options and invites_on %}
   <section id="wi-root" class="panel" aria-labelledby="wi-title">
     <h3 id="wi-title" class="users-subhead">Invite someone to a workspace</h3>
-    <p class="muted">Their role applies only in the workspace you choose. Send the one-time link to the person you invite; it expires in 7 days.</p>
+    <p class="muted">Their role applies only in the workspace you choose. Choose how long the one-time link remains available, then send it to the person you invite.</p>
+    <div id="workspace-invite-result-slot">
     {% if workspace_invite_link %}
-    <div class="panel users-saved" role="status" data-mv-toast="Workspace invitation for {{ workspace_invite_email }} created. Copy the link below.">
+    <div class="panel users-saved" role="status" tabindex="-1" data-mv-toast="Workspace invitation for {{ workspace_invite_email }} created. Copy the link below.">
       <strong>Invitation for {{ workspace_invite_email }} to {{ workspace_names.get(workspace_invite_tenant, workspace_invite_tenant) }} created.</strong>
       <p class="muted users-help">{% if workspace_invite_sent %}The invitation was emailed.{% elif workspace_invite_send_note and 'disabled' not in workspace_invite_send_note and 'no sending account' not in workspace_invite_send_note %}We couldn't email it. Send the link below yourself.{% else %}Copy the link below and send it yourself.{% endif %} The link is shown only once. {% if invite_sso_on %}They must sign in with the email address you invited.{% else %}Anyone with it can accept, so send it only to them.{% endif %}</p>
+      <p class="muted users-help">Expires {{ workspace_invite_expires_at | datetime('absolute') }}.</p>
       <div class="users-row-form">
         <label class="users-field users-grow" for="workspace-invite-link">Invite link
           <input class="input" id="workspace-invite-link" type="text" readonly value="{{ workspace_invite_link }}" />
@@ -458,9 +471,11 @@
       </div>
     </div>
     {% endif %}
-    <form method="post" action="/users/workspace-invite" class="users-row-form">
+    </div>
+    <form method="post" action="/users/workspace-invite" class="users-row-form" data-mv-save="background" data-mv-save-what="create the workspace invite" data-mv-save-show="workspace-invite-result-slot" data-mv-validate>
       {{ workspace_binding() }}
       <input type="hidden" name="expected_context" value="{{ workspace_people_context }}">
+      {{ error_summary('workspace-invite-errors') }}
       <label class="users-field" for="wi-tenant">Workspace
         <select id="wi-tenant" name="tenant" class="select" required>{% for w in workspace_options %}<option value="{{ w.id }}"{% if w.id == wm_tenant %} selected{% endif %}>{{ w.name }}</option>{% endfor %}</select>
       </label>
@@ -470,14 +485,16 @@
       <label class="users-field" for="wi-role">Role in this workspace
         <select id="wi-role" name="role" class="select" required>{% for r in workspace_roles %}<option value="{{ r }}"{% if r == 'viewer' %} selected{% endif %}>{{ r | role_label }}</option>{% endfor %}</select>
       </label>
+      {{ invite_expiry('wi-expiry') }}
       <button type="submit" class="btn btn--primary">Create workspace invite</button>
     </form>
+    <p class="muted users-help">If creation is interrupted, reload Users and check the waiting invitations before creating another. A lost one-time link cannot be recovered; cancel that invitation, then create a replacement.</p>
     {% if workspace_pending_invites %}
     <h3 class="users-subhead">Waiting to join a workspace</h3>
     <ul class="users-list">
       {% for inv in workspace_pending_invites %}
       <li>
-        <span class="users-grow">{{ inv.email }} · {{ workspace_names.get(inv.tenant, inv.tenant) }}</span>
+        <span class="users-grow">{{ inv.email }} · {{ workspace_names.get(inv.tenant, inv.tenant) }}<br><span class="muted users-help">Expires {{ inv.expires_at | datetime('absolute') }}</span></span>
         <span class="badge">{{ inv.role | role_label }}</span>
         <form method="post" action="/users/workspace-invite/revoke" class="users-inline"
               data-users-confirm="Cancel the workspace invitation for {{ inv.email }}? The link will stop working." data-users-ok="Cancel invitation">

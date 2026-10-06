@@ -40,7 +40,7 @@ _FLOW_FIELDS = frozenset({
 _NODE_FIELDS = frozenset({
     "kind", "next", "tool", "params", "brief", "condition", "if_true", "if_false",
     "cases", "items", "var", "body", "limit", "concurrent", "branches", "prompt",
-    "choices", "seconds", "flow_ref", "retries", "on_error", "timeout", "output",
+    "choices", "seconds", "flow_ref", "retries", "retry_backoff", "on_error", "timeout", "output",
     "label", "x", "y",
     # rich human-task fields (approval) -- documented in FLOW_SCHEMA_BLOCK, so
     # the copilot must be able to set them, else "make it expire / escalate /

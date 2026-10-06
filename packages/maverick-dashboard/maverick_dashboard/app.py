@@ -1841,6 +1841,7 @@ from . import (  # noqa: E402
     competence_transport_api,
     consent_publication_withdrawal_api,
     flow_requalification_api,
+    generated_tool_removal_api,
     governed_rule_evolution_api,
     grc_draft_changes_api,
     learning_distinctions_api,
@@ -1874,6 +1875,7 @@ app.include_router(applicability_regions_api.router)
 app.include_router(agent_override_changes_api.router, prefix="/api/v1")
 app.include_router(automation_imports_api.router)
 app.include_router(report_downloads_api.router)
+app.include_router(generated_tool_removal_api.router)
 app.include_router(access_key_requests_api.router, prefix="/api/v1")
 app.include_router(consent_publication_withdrawal_api.router, prefix="/api/v1")
 app.include_router(workflow_step_checks.router)

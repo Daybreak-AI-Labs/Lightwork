@@ -1621,3 +1621,41 @@ The shared Copilot confirmation remains visibly disabled until its exact-review
 checkbox is selected, including after the shared form unlock. Cancellation keeps
 an entered native draft. These features use the same ordinary and typed native
 services, rather than a separate Copilot authority or mutation path.
+
+## October 6 owned tool stopping, invitation lifetimes and retry waits
+
+Learned lists exact owned generated tools, stopped files awaiting cleanup and
+original stopping decisions. Removal first retains the reviewed owner-bound
+intent, stops native permission and then removes its files with current checks.
+Source withdrawal permits only metadata stopping or cleanup for the retained
+owner. It exposes neither private source nor permission to use it. Any unknown
+original stays unknown; separate cleanup needs explicit acknowledgment and a
+new complete review. Earlier history remains available with generation disabled.
+The legacy unreviewed delete route refuses effects and opens those controls.
+
+Exact owned generated-source stopping includes every existing user or service
+principal binding for the same tenant, tool and source digest. Signed revocation
+rows preserve the verified prior ledger; a different source or tenant is not
+revoked. Unreadable permission stays unknown. Owner-bound original reads may
+repair only their pending canonical audit receipt, never repeat source effects.
+
+Users provides closed ordinary expiration choices for installation and workspace
+invitations, with the stored expiry shown in both the one-time result and current
+waiting list. The physical writer rechecks current people authority, context and
+feature availability; workspace invitations repeat their existing recent-MFA
+requirement after waits. Creation audit metadata includes chosen expiry, hours
+and actual expiration. Native seven-day default callers remain unchanged. An
+interrupted successful creation is not automatically repeated or relabeled as
+link delivery: reload the pending invitation, cancel it, then deliberately create
+a replacement if needed. Copilot uses the same protected native people form.
+
+Designer exposes only supported retry waits and preserves earlier unsupported
+requests until an explicit edit. Its ordinary explanation states the effective
+first wait, doubling and thirty-second cap, including a legacy negative request
+that produces no wait. Changing the field participates in Undo and native draft
+recovery. The existing workflow Copilot can change that same native field;
+explicit Save remains separate. Native safe-action execution exercised actual
+lookup retries at ten, twenty and thirty seconds using a declared local clock
+seam, without waiting or calling a provider. Unsafe or uncertain results retain
+the native no-repeat behavior. This does not guarantee every connected action
+can be retried or expand the existing native retry limit.

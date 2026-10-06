@@ -36,6 +36,16 @@
     if (sec % 60 === 0) return (sec / 60) + (sec === 60 ? ' minute' : ' minutes');
     return sec + (sec === 1 ? ' second' : ' seconds');
   }
+  function retryWaitOptions(value) {
+    var options = [{ v: '0', t: 'No wait' }, { v: '10', t: '10 seconds' }, { v: '30', t: '30 seconds' }];
+    var saved = Number(value) || 0;
+    if (!options.some(function (option) { return Number(option.v) === saved; })) {
+      options.push({ v: String(saved), t: saved > 30
+        ? 'Saved request: ' + durationText(saved) + ' (first wait: 30 seconds)'
+        : 'Saved request: ' + durationText(saved) });
+    }
+    return options;
+  }
 
   var flow = { id: '', name: '', start: '', nodes: [] };
   var rootFlow = flow;  // the top-level flow (save/run/history operate on this)
@@ -1196,9 +1206,17 @@
       if (n.kind !== 'subflow') {
         fails.appendChild(field('Try again', numberSelect(n.retries || 0, [{ v: '0', t: 'Don’t try again' }, { v: '1', t: 'Once' }, { v: '2', t: 'Twice' }, { v: '3', t: '3 times' }],
           function (v) { n.retries = parseInt(v, 10) || 0; })));
-        fails.appendChild(field('Wait between tries', select(String(Math.round(n.retry_backoff || 0)), [{ v: '0', t: 'No wait' }, { v: '10', t: '10 seconds' }].concat(DURATIONS.slice(0, 3)).concat(
-          (n.retry_backoff && [0, 10, 60, 300, 900].indexOf(Math.round(n.retry_backoff)) < 0) ? [{ v: String(Math.round(n.retry_backoff)), t: durationText(n.retry_backoff) }] : []),
-          function (v) { n.retry_backoff = parseFloat(v) || 0; })));
+        var retryHelp = document.createElement('p'); retryHelp.className = 'muted'; retryHelp.id = 'fd-retry-wait-help';
+        function describeRetryWait() {
+          var requested = Number(n.retry_backoff) || 0, effective = Math.min(30, Math.max(0, requested));
+          retryHelp.textContent = (requested > 30 ? 'The saved request is ' + durationText(requested) + ', but each wait is limited to 30 seconds. Choose a supported wait to change it. ' : requested < 0 ? 'The saved request is ' + durationText(requested) + '; no wait is used. Choose a supported wait to change it. ' : '') +
+            (effective ? 'When another try is allowed, the first wait is ' + durationText(effective) + '; later waits double, up to 30 seconds. ' : 'When another try is allowed, no wait is requested. ') +
+            'The run’s time limit can stop work sooner. AI tasks and actions that are unsafe to repeat or have an uncertain result are not repeated automatically.';
+        }
+        var retryChoice = select(String(Number(n.retry_backoff) || 0), retryWaitOptions(n.retry_backoff),
+          function (v) { pushHistory(); n.retry_backoff = parseFloat(v) || 0; describeRetryWait(); });
+        retryChoice.setAttribute('aria-describedby', retryHelp.id);
+        fails.appendChild(field('First wait between tries', retryChoice)); describeRetryWait(); fails.appendChild(retryHelp);
         fails.appendChild(field('Give up after', select(String(Math.round(n.timeout || 0)), durationOptions(n.timeout, 'No time limit'),
           function (v) { n.timeout = parseFloat(v) || 0; })));
       }

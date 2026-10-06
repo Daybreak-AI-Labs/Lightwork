@@ -37,6 +37,7 @@ import json
 import logging
 import math
 import os
+import re
 import secrets
 import sys
 import threading
@@ -493,11 +494,15 @@ def _active_grants(records: list[dict]) -> dict[tuple[str, str], None]:
 
 def _append_record_unlocked(
     path: Path, key: bytes, records: list[dict], *, op: str,
-    action: str, scope: str,
+    action: str, scope: str, effect_guard: Callable[[], None] | None = None,
+    authority_binding: tuple[str, str, str] | None = None,
 ) -> None:
     if len(records) >= _MAX_LEDGER_RECORDS:
         raise ConsentLedgerError("consent ledger contains too many records")
-    tenant, principal, policy = _authority_binding()
+    current_binding = _authority_binding()
+    tenant, principal, policy = current_binding if authority_binding is None else authority_binding
+    if authority_binding is not None and (tenant != current_binding[0] or not re.fullmatch(r"[a-f0-9]{64}", principal) or not re.fullmatch(r"[a-f0-9]{64}", policy)):
+        raise ConsentLedgerError("consent revocation binding is invalid")
     unsigned = {
         "action": action,
         "op": op,
@@ -519,6 +524,8 @@ def _append_record_unlocked(
     try:
         with os.fdopen(fd, "ab") as stream:
             fd = -1
+            if effect_guard is not None:
+                effect_guard()
             stream.write(encoded)
             stream.flush()
             os.fsync(stream.fileno())
@@ -565,6 +572,8 @@ def revoke(
     path: Path | None = None,
     strict: bool = False,
     write_tombstone: bool = False,
+    effect_guard: Callable[[], None] | None = None,
+    all_matching_bindings: bool = False,
 ) -> bool:
     """Remove all matching grants. Returns True if anything was removed.
 
@@ -580,8 +589,14 @@ def revoke(
     action, normalized_scope = _validated_key(action, scope)
     try:
         with _locked_ledger(path) as resolved:
+            if effect_guard is not None:
+                effect_guard()
             key = _ledger_key(resolved, create=write_tombstone)
             records = _load_records_unlocked(resolved, key)
+            if all_matching_bindings and key is not None and _revoke_generated_bindings(
+                resolved, key, records, action, normalized_scope, effect_guard,
+            ):
+                return True
             was_active = (action, normalized_scope) in _active_grants(records)
             if key is None or (not was_active and not write_tombstone):
                 return False
@@ -603,7 +618,7 @@ def revoke(
                     return False
             _append_record_unlocked(
                 resolved, key, records, op="revoke",
-                action=action, scope=normalized_scope,
+                action=action, scope=normalized_scope, effect_guard=effect_guard,
             )
             return was_active
     except (ConsentLedgerError, OSError, PermissionError) as exc:
@@ -611,6 +626,32 @@ def revoke(
             raise
         log.warning("consent: cannot revoke standing grant: %s", exc)
         return False
+
+
+def _generated_bindings(records, action, scope):
+    tenant = _authority_binding()[0]
+    if action != "register-generated-tool" or not re.fullmatch(re.escape(tenant) + r":[a-z][a-z0-9_]{1,40}:[a-f0-9]{64}", scope):
+        raise ValueError("cross-binding revocation is limited to this tenant's exact generated source")
+    latest = {}
+    for record in records:
+        if (record["tenant"], record["action"], record["scope"]) == (tenant, action, scope):
+            latest[(record["principal"], record["policy"])] = record["op"]
+    return [(tenant, principal, policy) for (principal, policy), op in latest.items() if op == "grant"]
+
+
+def _revoke_generated_bindings(path, key, records, action, scope, effect_guard):
+    bindings = _generated_bindings(records, action, scope)
+    if not bindings:
+        return False
+    if len(bindings) > 128:
+        raise ConsentLedgerError("the complete generated-source authority exceeds 128 active bindings")
+    for binding in bindings:
+        _append_record_unlocked(path, key, records, op="revoke", action=action, scope=scope,
+                                effect_guard=effect_guard, authority_binding=binding)
+        # Every append changes seq/prev. Re-verify the complete native signed
+        # ledger before constructing the next row, retaining all prior bytes.
+        records = _load_records_unlocked(path, key)
+    return True
 
 
 def list_grants(*, path: Path | None = None) -> list[tuple[str, str]]:

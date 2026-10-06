@@ -75,6 +75,7 @@ ASSETS = (
     "lightwork-access-key-requests.js",
     "lightwork-automation-imports.js",
     "lightwork-report-downloads.js",
+    "lightwork-generated-tool-removal.js",
     "lightwork-workflow-step-checks.js",
     "lightwork-commitment-economic-alternatives.js",
     "lightwork-flow-requalification.js",

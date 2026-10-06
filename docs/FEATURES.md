@@ -2571,6 +2571,33 @@ limits are recorded in the [operation coverage register](post-install-operation-
   report bytes or delivering private content through its answer. Offering a
   file does not establish that the customer saved it.
 
+- **Owned generated-tool stopping** shows current owned tools, disabled files
+  awaiting cleanup and retained original decisions on Learned. Each removal
+  reviews exact stopping and file consequences before consent and guarded
+  native deletion. A withdrawn source allows only its owner's metadata-only
+  stopping or cleanup; it does not reveal the old source or restore permission.
+  An interrupted removal remains unknown. Any later cleanup requires its own
+  explicit acknowledgment and current review, rather than replaying the old
+  decision. Native library callers retain their existing defaults, while the
+  older unreviewed dashboard delete opens the complete review.
+
+- **Invitation expiry choices** let administrators choose one hour, one day,
+  seven days or thirty days for installation and workspace invitations. The
+  result and waiting list show the actual native expiration date. Creation
+  rechecks the current administrator, people context, invitation switch and
+  existing workspace MFA requirement at the physical write, and records the
+  chosen lifetime and exact expiration in the creation audit. A lost one-time
+  link cannot be recovered: review and cancel the waiting invitation before
+  deliberately creating its replacement. Copilot opens the same protected
+  people form while keeping entered email and expiration choices.
+
+- **Truthful workflow retry waits** show supported no-wait, ten-second and
+  thirty-second choices. Earlier saved requests remain intact until deliberately
+  changed; the designer states their actual first wait and thirty-second cap.
+  Later eligible waits double within that cap, and uncertain or unsafe actions
+  retain the native refusal to repeat. Ordinary editing, Undo, draft recovery
+  and the existing workflow Copilot share the native saved field.
+
 - **Rich human tasks** — an `approval` node carries `choices` (verdicts beyond
   approve/reject, recorded to `output` for a downstream switch), an `assignee`,
   an `expires_after` expiry (its own field, not the execution `timeout`) that

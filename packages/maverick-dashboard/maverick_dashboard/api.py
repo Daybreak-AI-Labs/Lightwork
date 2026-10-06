@@ -9417,53 +9417,12 @@ async def learned_api(request: Request) -> dict:
 
 @router.delete("/generated-tools/{name}", status_code=204)
 async def remove_generated_tool(request: Request, name: str) -> None:
-    """Delete a persisted generated tool so a bad one can be pulled.
-
-    The valuable mutation of #427: removes ~/.maverick/generated_tools/<name>
-    without filesystem access. The path is resolved strictly under the
-    generated-tools dir (see ``_resolve_generated_tool``) so traversal /
-    absolute / out-of-dir names are refused. Auth/same-origin is enforced
-    centrally by the dashboard's bearer_auth middleware (DELETE is a
-    mutating method, so the same-origin check applies), and RBAC requires
-    ``admin`` -- deleting agent-loaded code is not a view-only action.
-    """
+    """Require the complete current removal review for older HTTP callers."""
     require_permission(request, "admin")
-    target = _resolve_generated_tool(name)
-    from maverick import self_learning
-    from maverick.audit import AuditRefused
-    from maverick.safety.consent import ConsentLedgerError
-
-    try:
-        await run_in_threadpool(
-            self_learning.delete_generated_tool,
-            target.stem,
-            actor=caller_principal(request) or "local",
-            owner=goal_owner_filter(request),
-        )
-    except ValueError:
-        raise HTTPException(
-            status_code=400,
-            detail="invalid generated-tool name",
-        ) from None
-    except (FileNotFoundError, PermissionError):
-        raise HTTPException(
-            status_code=404,
-            detail="no such generated tool",
-        ) from None
-    except (
-        AuditRefused,
-        ConsentLedgerError,
-        self_learning.GeneratedToolRemovalError,
-    ):
-        # The source stays present when its durable authority/audit tombstone
-        # cannot be committed. Do not turn an evidence failure into an
-        # unaudited deletion.
-        raise HTTPException(
-            status_code=503,
-            detail="could not durably revoke generated-tool authority",
-        ) from None
-    except OSError as e:
-        raise HTTPException(status_code=500, detail=f"could not remove: {e}") from e
+    raise HTTPException(409, {
+        "message": "Review the current owned tool and stopping consequences on Learned. Nothing was removed by this older control.",
+        "open_review": "/learned#generated-tools",
+    })
 
 
 @router.post("/harness-corpus/review")

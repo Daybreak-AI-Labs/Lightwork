@@ -1382,6 +1382,9 @@ def users_delete_custom_role(
 def _invite_refusal(reason: str) -> HTTPException:
     """An invite the store refused, in words for the person who typed it."""
     from .product_errors import product_error
+    if "expiry" in reason:
+        message = "Choose when the invitation link should expire."
+        return product_error(422, "invite_expiry", message, field_errors={"expiry": message})
     if "email" in reason:
         message = "Enter a full email address. For example: name@company.com."
         return product_error(422, "invite_email", message, field_errors={"email": message})
@@ -1396,7 +1399,8 @@ def _invite_refusal(reason: str) -> HTTPException:
 
 @router.post("/users/invite", response_class=HTMLResponse)
 def users_invite(request: Request, email: str = Form(...),
-                 role: str = Form(...)) -> HTMLResponse:
+                 role: str = Form(...), expiry: str = Form("7_days"),
+                 expected_context: str | None = Form(default=None)) -> HTMLResponse:
     """Mint a single-use invite link (admin only) and show it ONCE.
 
     The token is never stored (only its hash), so this response is the only
@@ -1405,25 +1409,38 @@ def users_invite(request: Request, email: str = Form(...),
     redirect would drop the one-time link."""
     auth.require_global_permission(request, "admin")
     _app()._require_same_origin(request)
+    from maverick.authority_effects import authority_effect_fence
+
     from . import invites
+    from .invite_routes import require_people_context
     if not invites.invites_enabled():
         raise HTTPException(status_code=404, detail="invites are not enabled")
     invited_by = auth.caller_principal(request) or "local-admin"
+    def guard() -> None:
+        auth.require_global_permission(request, "admin")
+        require_people_context(request, expected_context)
+        if not invites.invites_enabled():
+            raise HTTPException(404, "Invitations are not enabled.")
     try:
-        inv, token = invites.create_invite(email, role, created_by=invited_by)
+        ttl = invites.expiry_hours(expiry)
+        with authority_effect_fence():
+            guard()
+            inv, token = invites.create_invite(email, role, created_by=invited_by,
+                                              ttl_hours=ttl, before_effect=guard)
     except ValueError as exc:
         from .product_errors import background_save
         if background_save(request):
             raise _invite_refusal(str(exc)) from exc
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     link = str(request.base_url).rstrip("/") + f"/auth/invite/{token}"
-    _admin_audit(request, "invite_created", email=inv.email, role=getattr(inv, "role", role))
+    _admin_audit(request, "invite_created", email=inv.email, role=getattr(inv, "role", role),
+                 expires_at=inv.expires_at, expiry=expiry, ttl_hours=ttl)
     # Best-effort email (fail-soft): the copyable link below is always the
     # fallback, so a broken SMTP account can never strand an invite.
     sent, send_note = invites.send_invite_email(inv, link, invited_by=invited_by)
     return _app().templates.TemplateResponse(request, "users.html", {
         **_users_context(request), "invite_link": link, "invite_email": inv.email,
-        "invite_sent": sent, "invite_send_note": send_note,
+        "invite_sent": sent, "invite_send_note": send_note, "invite_expires_at": inv.expires_at,
     })
 
 
@@ -1463,7 +1480,7 @@ def _workspace_invite_authority(request: Request, tenant: str, role: str | None 
 @router.post("/users/workspace-invite", response_class=HTMLResponse)
 def users_workspace_invite(
     request: Request, tenant: str = Form(...), email: str = Form(...), role: str = Form(...),
-    expected_context: str | None = Form(default=None),
+    expected_context: str | None = Form(default=None), expiry: str = Form("7_days"),
 ) -> HTMLResponse:
     """Create a single-use invitation for one existing workspace only."""
     _app()._require_same_origin(request)
@@ -1477,25 +1494,39 @@ def users_workspace_invite(
     _workspace_invite_authority(request, tenant, role)
     step_up.require_recent_mfa(request, "change_role")
     invited_by = auth.caller_principal(request) or "local-admin"
-    with authority_effect_fence():
-        from .invite_routes import require_people_context
+    from .invite_routes import require_people_context
+
+    def guard() -> None:
         require_people_context(request, expected_context)
+        _workspace_invite_authority(request, tenant, role)
+        step_up.require_recent_mfa(request, "change_role")
+        if not invites.invites_enabled():
+            raise HTTPException(404, "Invitations are not enabled.")
+    with authority_effect_fence():
+        guard()
         installation_admin = _workspace_invite_authority(request, tenant, role)
         try:
+            ttl = invites.expiry_hours(expiry)
             inv, token = invites.create_invite(
                 email, role, created_by=invited_by, tenant=tenant,
                 workspace_admin_invite=not installation_admin,
+                ttl_hours=ttl, before_effect=guard,
             )
         except ValueError as exc:
+            from .product_errors import background_save
+            if background_save(request):
+                raise _invite_refusal(str(exc)) from exc
             raise HTTPException(400, str(exc)) from exc
     link = str(request.base_url).rstrip("/") + f"/auth/invite/{token}"
     _admin_audit(request, "workspace_invite_created", workspace=tenant,
-                 email=inv.email, role=inv.role)
+                 email=inv.email, role=inv.role, expires_at=inv.expires_at,
+                 expiry=expiry, ttl_hours=ttl)
     sent, send_note = invites.send_invite_email(inv, link, invited_by=invited_by)
     return _app().templates.TemplateResponse(request, "users.html", {
         **_users_context(request), "workspace_invite_link": link,
         "workspace_invite_email": inv.email, "workspace_invite_tenant": tenant,
         "workspace_invite_sent": sent, "workspace_invite_send_note": send_note,
+        "workspace_invite_expires_at": inv.expires_at,
     })
 
 

@@ -1497,7 +1497,11 @@ def generated_tool_names(*, owner: str | None = None) -> set[str]:
 
 
 def delete_generated_tool(name: str, *, actor: str = "system", owner: str | None = None,
-                          expected_digest: str | None = None) -> dict[str, Any]:
+                          expected_digest: str | None = None, metadata_stop: bool = False,
+                          allow_absent: bool = False, before_delete: Callable[[], None] | None = None,
+                          effect_guard: Callable[[], None] | None = None,
+                          owned_absence_guard: Callable[[], None] | None = None,
+                          after_revoke: Callable[[], None] | None = None) -> dict[str, Any]:
     """Revoke and remove one persisted generated tool, fail-closed.
 
     Deletion is an authority lifecycle transition, not merely ``Path.unlink``:
@@ -1524,27 +1528,42 @@ def delete_generated_tool(name: str, *, actor: str = "system", owner: str | None
     target = generated_tools_dir() / f"{name}.py"
     with cross_process_lock(target, strict=True):
         if not target.is_file():
-            raise FileNotFoundError(target)
-        source = _read_generated_source(target)
-        digest = hashlib.sha256(source.encode("utf-8")).hexdigest()
+            if not allow_absent or not metadata_stop or expected_digest is None:
+                raise FileNotFoundError(target)
+            digest = expected_digest
+        else:
+            source = _read_generated_source(target)
+            digest = hashlib.sha256(source.encode("utf-8")).hexdigest()
         if expected_digest is not None and digest != expected_digest:
             raise GeneratedToolRemovalError("The reviewed generated source changed; review it again")
         from .learning_content import source_allowed_now
-        if not source_allowed_now(target, digest, owner=owner):
+        if metadata_stop:
+            from .generated_tool_removal import require_owned
+            try:
+                require_owned(target, digest, owner)
+            except FileNotFoundError:
+                if not allow_absent or target.exists() or owned_absence_guard is None:
+                    raise
+                owned_absence_guard()
+        elif not source_allowed_now(target, digest, owner=owner):
             raise PermissionError("Generated source content is unavailable")
         scope = _generated_consent_scope(tenant, name, digest)
+
+        if before_delete is not None:
+            before_delete()
+        if effect_guard is not None:
+            effect_guard()
 
         consent_revoked = revoke(
             "register-generated-tool",
             scope=scope,
             strict=True,
             write_tombstone=True,
+            effect_guard=effect_guard,
+            all_matching_bindings=True,
         )
-        if _generated_consent_granted(
-            tenant=tenant,
-            name=name,
-            digest=digest,
-        ):
+        from .generated_tool_removal import runtime_permission
+        if runtime_permission(tenant, name, digest):
             raise GeneratedToolRemovalError(
                 "generated-tool authority remained active after revocation"
             )
@@ -1563,12 +1582,18 @@ def delete_generated_tool(name: str, *, actor: str = "system", owner: str | None
             raise GeneratedToolRemovalError(
                 "generated-tool revocation could not be recorded in the audit log"
             )
+        if after_revoke is not None:
+            after_revoke()
 
         # Revocation and its audit evidence are durable before this point. If
         # unlink now fails, the source remains present but cannot execute; the
         # caller can safely retry removal without resurrecting authority.
-        target.unlink()
+        if effect_guard is not None:
+            effect_guard()
+        target.unlink(missing_ok=allow_absent)
         from .learning_content import metadata_path
+        if effect_guard is not None:
+            effect_guard()
         metadata_path(target).unlink(missing_ok=True)
 
     return {

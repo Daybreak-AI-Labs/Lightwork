@@ -34,10 +34,12 @@ import secrets
 import string
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
 INVITE_TTL_HOURS = 7 * 24          # default link lifetime
+INVITE_EXPIRIES = {"1_hour": 1, "1_day": 24, "7_days": 168, "30_days": 720}
 LOCAL_SESSION_DAYS = 30            # no-IdP session lifetime (then sign in with the passphrase)
 _MAX_PENDING = 500                 # cap the store; an admin never needs more
 
@@ -228,9 +230,17 @@ def _validate_record(invite_id: str, rec: object) -> dict:
     return clean
 
 
-def _write(data: dict[str, dict]) -> None:
+def _write(data: dict[str, dict], *, before_effect: Callable[[], None] | None = None) -> None:
     from maverick.file_lock import atomic_write_text
-    atomic_write_text(store_path(), json.dumps(data, indent=2, sort_keys=True))
+    options = {"effect_guard": before_effect} if before_effect is not None else {}
+    atomic_write_text(store_path(), json.dumps(data, indent=2, sort_keys=True), **options)
+
+
+def expiry_hours(choice: str) -> int:
+    """The ordinary invitation form's bounded choices; legacy lifetimes remain unchanged."""
+    if choice not in INVITE_EXPIRIES:
+        raise ValueError("Choose an invitation expiry from the list.")
+    return INVITE_EXPIRIES[choice]
 
 
 def _to_invite(rec: dict) -> Invite:
@@ -246,7 +256,8 @@ def _to_invite(rec: dict) -> Invite:
 
 def create_invite(email: str, role: str, *, created_by: str,
                   ttl_hours: float = INVITE_TTL_HOURS, tenant: str = "",
-                  workspace_admin_invite: bool = False) -> tuple[Invite, str]:
+                  workspace_admin_invite: bool = False,
+                  before_effect: Callable[[], None] | None = None) -> tuple[Invite, str]:
     """Mint an invite; returns ``(invite, token)``. The token is shown ONCE —
     only its sha256 is stored, so a copied store file yields no working links.
     With ``tenant`` the role is granted inside that workspace only (a
@@ -283,7 +294,14 @@ def create_invite(email: str, role: str, *, created_by: str,
         if pending >= _MAX_PENDING:
             raise ValueError("too many pending invites — revoke some first")
         data[inv_id] = rec
-        _write(data)
+        if before_effect is None:
+            _write(data)
+        else:
+            def guard() -> None:
+                before_effect()
+                if not rbac.is_known_role(role):
+                    raise ValueError("The invitation role changed. Choose its current role again.")
+            _write(data, before_effect=guard)
     return _to_invite(rec), token
 
 
