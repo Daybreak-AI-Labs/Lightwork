@@ -134,10 +134,16 @@ def test_high_impact_learning_workforce_and_agent_actions_confirm():
     assert "This changes the deployment-wide learning posture" in learning
     assert "Enable automatic application of proven workflow improvements?" in learning
     assert "Scheduled and triggered workflows may start running" in learning
-    assert "This creates an operational fleet and its specialists" in workforce
-    assert "This adds its specialists so you can give the team work" in agents
-    assert "Its allowed actions and steps take effect for everyone who uses it" in agents
-    assert "Your changes to its allowed actions and steps will be removed" in agents
+    teams = (TEMPLATES.parent / "static" / "lightwork-department-team-updates.js").read_text(encoding="utf-8")
+    overrides = (TEMPLATES.parent / "static" / "lightwork-agent-override-changes.js").read_text(encoding="utf-8")
+    # Setting up or updating a team opens a before-and-after review first.
+    assert "await window.LWDepartmentTeamUpdates.open(key, btn);" in workforce
+    assert agents.count("await window.LWDepartmentTeamUpdates.open(") == 2
+    assert "Review the complete before and after. Saving does not start any tasks." in teams
+    assert "Its allowed actions, steps and independence settings take effect for everyone who uses it" in agents
+    # Reset and removal show a reviewed consequence and need a ticked consent.
+    assert "'Review reset to the built-in definition'" in overrides
+    assert "apply.disabled = busy || !consent.checked" in overrides
 
 
 def test_privacy_decision_network_failure_restores_the_draft_control():
@@ -151,7 +157,7 @@ def test_privacy_decision_network_failure_restores_the_draft_control():
 def test_repeated_department_actions_name_their_target():
     workforce = (TEMPLATES / "workforce.html").read_text(encoding="utf-8")
     agents = (TEMPLATES / "agents.html").read_text(encoding="utf-8")
-    assert 'aria-label="Deploy {{ d.title }} team"' in workforce
+    assert 'aria-label="Set up {{ d.title }} team"' in workforce
     assert 'aria-label="View {{ d.title }} team"' in workforce
     assert "aria-label=\"Deploy ' + esc(d.title) + ' team\"" in agents
     assert "aria-label=\"View ' + esc(d.title) + ' details\"" in agents

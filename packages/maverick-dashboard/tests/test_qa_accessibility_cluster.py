@@ -101,7 +101,7 @@ def test_extending_pages_leave_the_main_landmark_to_base(template_name: str) -> 
             (
                 'aria-label="View {{ d.title }} team"',
                 'aria-label="Review {{ d.title }} performance"',
-                'aria-label="Deploy {{ d.title }} team"',
+                'aria-label="Set up {{ d.title }} team"',
             ),
         ),
         (
