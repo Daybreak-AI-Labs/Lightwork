@@ -40,3 +40,15 @@ def test_a_refused_open_still_shows_the_saved_role(monkeypatch):
     invite_routes._open_workspace(_request(), "t")
     assert shown["state"] == "accepted" and shown["current_role"] == "admin" and shown["token"] == "t"
     assert "could not be opened" in shown["message"]
+
+
+def test_the_open_workspace_form_carries_the_workspace_it_was_rendered_under():
+    """The invitation page has no shared page script, so its own form must send
+    the workspace the page was rendered under, or the stale-tab check refuses
+    every Open <workspace> with 'the active workspace changed'."""
+    from pathlib import Path
+
+    page = (Path(__file__).resolve().parents[1] / "maverick_dashboard/templates/invite_accept.html").read_text()
+    form = page[page.index('action="/auth/invite/{{ invite.token }}/workspace"'):]
+    form = form[:form.index("</form>")]
+    assert 'name="_expected_tenant"' in form and "workspace_expected_tenant" in form

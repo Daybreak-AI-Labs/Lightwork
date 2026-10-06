@@ -35,6 +35,9 @@ module.exports=async function start(browser,info,{fixed=false}={}){
     const passphrase='Synthetic workspace administrator passphrase'; // pragma: allowlist secret - disposable synthetic account fixture
     await page.locator('input[name="password"]').fill(passphrase);await page.locator('input[name="password2"]').fill(passphrase);
     await page.getByRole('button',{name:'Accept invitation',exact:true}).click();
+    // The saved grant is confirmed first; opening the workspace is a separate step.
+    await expect(page.getByRole('heading',{name:'Invitation accepted'})).toBeVisible();
+    await page.getByRole('button',{name:/^Open /}).click();
     await expect(page).not.toHaveURL(/\/auth\/invite\//);
     expect((await context.cookies()).some(cookie=>cookie.name==='mvk_session')).toBe(true);
     const state=async()=>{const response=await context.request.get('/__workspace_acceptance');expect(response.status(),await response.text()).toBe(200);return response.json();};
