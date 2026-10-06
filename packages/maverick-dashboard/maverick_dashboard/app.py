@@ -357,6 +357,19 @@ def _comments_enabled() -> bool:
 templates.env.globals["comments_enabled"] = _comments_enabled
 
 
+def _suggestions_enabled() -> bool:
+    """Whether suggested edits show on AI use rules."""
+    try:
+        from maverick.policy_suggestions import enabled
+
+        return enabled()
+    except Exception:  # noqa: BLE001 -- an unreadable setting shows no suggestions
+        return False
+
+
+templates.env.globals["suggestions_enabled"] = _suggestions_enabled
+
+
 class StaticCacheMiddleware:
     """Long-cache a ``/static/`` response only when its ``?v=`` matches the
     asset's current content hash; every other static request keeps the route's
@@ -1557,6 +1570,7 @@ from .flow_action_fields import router as flow_action_fields_router  # noqa: E40
 from .mcp_presets import router as mcp_presets_router  # noqa: E402
 from .page_assets import router as page_assets_router  # noqa: E402
 from .policy_preview_api import router as policy_preview_router  # noqa: E402
+from .policy_suggestions_api import router as policy_suggestions_router  # noqa: E402
 from .provider_spending_api import router as provider_spending_router  # noqa: E402
 from .recovery_api import router as recovery_router  # noqa: E402
 from .recovery_mode import RecoveryOnlyMiddleware  # noqa: E402
@@ -1574,6 +1588,7 @@ app.include_router(recovery_router)
 app.include_router(provider_spending_router)
 app.include_router(support_router)
 app.include_router(comments_router)
+app.include_router(policy_suggestions_router)
 app.include_router(policy_preview_router)
 app.include_router(system_checks_router)
 app.include_router(feature_actions_router)

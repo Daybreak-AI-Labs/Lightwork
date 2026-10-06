@@ -957,6 +957,14 @@
     .mv-comments__title { margin: 0 0 var(--space-1); font-size: var(--text-lg); }
     .mv-comments--collapsed { margin-top: var(--space-2); }
     .mv-comments--collapsed > summary { cursor: pointer; color: var(--brand); font-size: var(--text-sm); }
+    /* Suggested edits to AI use rules (NOT-4): removed words struck, added words underlined. */
+    .mv-suggestions { margin-top: var(--space-3); }
+    .mv-suggestions__item { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: var(--space-2) var(--space-3); margin: var(--space-2) 0; }
+    .mv-suggestions__item h5 { margin: 0 0 var(--space-1); font-size: var(--text-md); }
+    .mv-suggestions__diff { overflow-wrap: anywhere; }
+    .mv-suggestions__diff del { color: var(--danger); text-decoration: line-through; }
+    .mv-suggestions__diff ins { color: var(--success); text-decoration: underline; }
+    .mv-suggestions__reason { display: inline-flex; gap: var(--space-1); align-items: center; }
     .mv-comments__lede { margin: 0 0 var(--space-3); font-size: var(--text-sm); }
     .mv-comments__list { list-style: none; margin: 0 0 var(--space-3); padding: 0; display: grid; gap: var(--space-2); }
     .mv-comments__item { padding: var(--space-2) var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface-1); }

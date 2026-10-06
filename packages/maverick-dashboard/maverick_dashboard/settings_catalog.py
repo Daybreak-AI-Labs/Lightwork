@@ -954,6 +954,18 @@ SETTINGS: tuple[Setting, ...] = (
       "its comments or be mentioned. On by default.",
       "toggle", "People & access", True, "maverick.comments",
       aliases="comment comments mention mentions discuss discussion thread collaborate"),
+    S("collaboration", "suggestions", "Suggested edits to rules",
+      "Let agents and colleagues suggest new wording for AI use rules. A suggestion shows exactly what "
+      "it changes, who or what proposed it and why, and changes nothing until a person accepts it. "
+      "On by default.",
+      "toggle", "People & access", True, "maverick.policy_suggestions",
+      aliases="suggest suggestion suggestions edit review accept reject tracked changes rules policy"),
+    S("collaboration", "ai_suggestions", "AI-drafted suggestions",
+      "Let the AI assistant draft a suggested edit to AI use rules when a person asks. Each draft "
+      "uses the AI service within the spending cap for one task and is only a suggestion until a "
+      "person accepts it. On by default.",
+      "toggle", "People & access", True, "maverick.policy_suggestions",
+      aliases="ai suggest draft assistant rules policy wording"),
     S("support", "status_page_url", "Service status page",
       "A public page that shows whether your Lightwork service is up and its incident history. When set, the Help menu on every page links to it, and so does the notice shown while an AI service is paused. Leave empty to show no link.",
       "text", "Integrations", "", "maverick.config", pattern=r"(" + _HTTPS + r")?",

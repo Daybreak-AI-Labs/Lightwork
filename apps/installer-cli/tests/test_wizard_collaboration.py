@@ -51,3 +51,45 @@ def test_declining_writes_the_knob_and_the_kernel_reads_it(tmp_path, monkeypatch
         assert comments.enabled() is False
     finally:
         config.reset_config_cache()
+
+
+def test_suggested_edits_questions_default_to_yes_and_write_nothing(monkeypatch):
+    from maverick_installer import wizard
+    asked = []
+
+    def fake_confirm(message, default=True):
+        asked.append((message, default))
+        return default
+
+    monkeypatch.setattr(wizard, "_q_confirm", fake_confirm)
+    assert wizard.pick_suggestions() == {}
+    assert [default for _message, default in asked] == [True, True]
+    assert "suggest" in asked[0][0] and "AI assistant" in asked[1][0]
+
+
+def test_declining_ai_drafting_keeps_suggestions_and_the_kernel_reads_it(tmp_path, monkeypatch):
+    from maverick_installer import wizard
+    answers = iter([True, False])
+    monkeypatch.setattr(wizard, "_q_confirm", lambda *a, **kw: next(answers))
+    answer = wizard.pick_suggestions()
+    assert answer == {"ai_suggestions": False}
+    monkeypatch.setenv("HOME", str(tmp_path))
+    cfg_dir = tmp_path / ".maverick"
+    cfg_dir.mkdir(parents=True, exist_ok=True)
+    cfg = _write(cfg_dir, monkeypatch, answer)
+    assert "ai_suggestions = false" in cfg
+    monkeypatch.setenv("MAVERICK_CONFIG", str(cfg_dir / "config.toml"))
+    from maverick import config, policy_suggestions
+    config.reset_config_cache()
+    try:
+        assert policy_suggestions.enabled() is True and policy_suggestions.ai_enabled() is False
+    finally:
+        config.reset_config_cache()
+
+
+def test_declining_suggestions_skips_the_ai_question(monkeypatch):
+    from maverick_installer import wizard
+    asked = []
+    monkeypatch.setattr(wizard, "_q_confirm", lambda message, default=True: asked.append(message) or False)
+    assert wizard.pick_suggestions() == {"suggestions": False}
+    assert len(asked) == 1

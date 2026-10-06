@@ -7117,6 +7117,28 @@ def pick_collaboration() -> dict[str, Any]:
     return {"comments": False}
 
 
+def pick_suggestions() -> dict[str, Any]:
+    """Suggested edits to AI use rules. ON by default, AI drafting included.
+
+    Agents and colleagues suggest new wording; each suggestion changes nothing
+    until a person accepts it. Written as ``[collaboration] suggestions`` and
+    ``ai_suggestions`` (``maverick.policy_suggestions``); declining writes false.
+    """
+    if not _q_confirm(
+        "Let agents and colleagues suggest edits to your AI use rules? Each suggestion shows what it "
+        "changes and why, and changes nothing until a person accepts it.",
+        default=True,
+    ):
+        return {"suggestions": False}
+    if _q_confirm(
+        "Let the AI assistant draft a suggested edit when someone asks? Each draft uses the AI service "
+        "within the spending cap for one task.",
+        default=True,
+    ):
+        return {}
+    return {"ai_suggestions": False}
+
+
 def pick_deliverable_handoff() -> tuple[dict[str, Any], list[str]]:
     """System-of-record hand-off for APPROVED deliverables. Returns
     (config, env_vars_needed).
@@ -11553,7 +11575,7 @@ def run(fast: bool = False, resume: bool = False) -> int:
     support_cfg = state.get("_support") if isinstance(state.get("_support"), dict) else pick_support()
     state["_support"] = support_cfg
     collaboration_cfg = (state.get("_collaboration") if isinstance(state.get("_collaboration"), dict)
-                         else pick_collaboration())
+                         else {**pick_collaboration(), **pick_suggestions()})
     state["_collaboration"] = collaboration_cfg
     _save_partial(state)
 

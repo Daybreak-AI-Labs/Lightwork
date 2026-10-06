@@ -21,7 +21,7 @@ from .draft_store import DraftStore
 
 STORE = GovernedRecordStore("personal_data_requests", "PDR", "personal_data_request")
 KINDS = {"preference_notes", "conversation_history", "recovery_drafts",
-         "companion_history", "experience_preferences", "model_memory", "notification_receipts", "diagnostic_reports", "activation_drafts", "project_defaults", "model_test_history", "generated_tools", "conversation_inbox", "saved_views_and_pins", "comments"}
+         "companion_history", "experience_preferences", "model_memory", "notification_receipts", "diagnostic_reports", "activation_drafts", "project_defaults", "model_test_history", "generated_tools", "conversation_inbox", "saved_views_and_pins", "comments", "policy_suggestions"}
 DIAGNOSTICS = GovernedRecordStore("owned_task_diagnostics", "OTD", "owned_task_diagnostics")
 EXCEPTIONS = [
     {"store": "workspace_gallery_curation", "state": "retained", "reason": "Gallery curation is a separate workspace record. Erasing an account's saved views and task pins does not delete featured task content or curator history."},
@@ -169,6 +169,9 @@ def preview(actor, channel, user_id, selected, world):
         elif kind == "comments":
             from maverick import comments
             target["count"] = comments.count_by(actor)
+        elif kind == "policy_suggestions":
+            from maverick import policy_suggestions
+            target["count"] = policy_suggestions.count_by(actor)
         targets.append(target)
     holds = preservation_snapshot()
     result = {"owner": actor, "channel": channel, "user_id": user_id, "targets": targets,
@@ -248,6 +251,17 @@ def _erase_owned_account(row, target):
                 "removed": result["removed"], "retained": target["inventory"]["retained"]}
     raise ValueError("Unsupported owned account store")
 
+def _erase_collaboration(kind, actor):
+    """A person's comments, or the edits they suggested to AI use rules."""
+    if kind == "policy_suggestions":
+        from maverick import policy_suggestions
+        return {"state": "purged", "removed": policy_suggestions.erase_person(actor),
+                "retained": "Decisions stay on the rules' history without your name. The activity record keeps its own entries."}
+    from maverick import comments
+    return {"state": "purged", "removed": comments.erase_person(actor),
+            "retained": "Other people's comments, including ones that mention you, are theirs and remain."}
+
+
 def _erase_target(world, row, target):
     kind, actor = target["store"], row["owner"]
     channel, user_id = row["channel"], row["user_id"]
@@ -274,10 +288,8 @@ def _erase_target(world, row, target):
     if kind == "experience_preferences":
         from maverick.experience_preferences import erase_personal
         return {"state": "purged", "removed": erase_personal(actor)}
-    if kind == "comments":
-        from maverick import comments
-        return {"state": "purged", "removed": comments.erase_person(actor),
-                "retained": "Other people's comments, including ones that mention you, are theirs and remain."}
+    if kind in ("comments", "policy_suggestions"):
+        return _erase_collaboration(kind, actor)
     if kind == "notification_receipts":
         from maverick.personal_notification_delivery import remove_personal_history
         return {"state": "purged", "result": remove_personal_history(actor), "retained": "Notification preferences, provider records and recipient enrollment are separate."}
