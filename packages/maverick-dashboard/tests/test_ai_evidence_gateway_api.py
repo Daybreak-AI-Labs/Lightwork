@@ -586,7 +586,7 @@ def test_assurance_cockpit_disabled_state_is_product_copy(monkeypatch):
 
     assert response.status_code == 200, response.text
     assert "Evidence recording is off" in response.text
-    assert "Ask an administrator to turn on" in response.text
+    assert "Ask an administrator to turn this on." in response.text
     # The cockpit is a product surface: no CLI invocations on the page.
     assert "maverick preflight" not in response.text
 
