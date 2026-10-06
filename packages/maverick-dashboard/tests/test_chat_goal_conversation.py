@@ -191,6 +191,10 @@ def test_markdown_export_fails_closed_when_domain_policy_missing(page_env):
     page = client.get(f"/chat/goal/{gid}")
     assert f'href="/chat/goal/{gid}/download.md"' not in page.text
     assert "review requirements can be checked" in page.text
+    # The live answer panel reads the same way; the export stays withheld.
+    panel = client.get(f"/chat/goal/{gid}/answer-panel")
+    assert panel.status_code == 200, panel.text
+    assert f'href="/chat/goal/{gid}/download.md"' not in panel.text
 
 
 def test_markdown_export_fails_closed_when_policy_read_fails(page_env, monkeypatch):

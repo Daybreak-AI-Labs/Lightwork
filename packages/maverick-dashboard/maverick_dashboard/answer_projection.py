@@ -40,10 +40,25 @@ def version_for(goal, contract, signoff, artifacts, handoff_closed=None):
     return hashlib.sha256((version + json.dumps(handoff_closed, sort_keys=True)).encode()).hexdigest()
 
 
+def _policy_removed(goal) -> bool:
+    """The task's specialist (and so its result policy) no longer exists.
+
+    The task still opens, read as an ungated result exactly as the page reads
+    it, while every export stays withheld (``_chat_answer_download_state``
+    fails closed on the missing policy). A catalogue that cannot be read is
+    not "removed": it raises and the page is withheld (503) as before.
+    """
+    if not goal.domain:
+        return False
+    from maverick.domain import available_domains
+
+    return available_domains().get(goal.domain) is None
+
+
 def _snapshot(world, goal):
     from .app import _goal_artifacts, _goal_deliverable
 
-    contract, rendered = ((None, None) if goal.status in ("blocked", "failed")
+    contract, rendered = ((None, None) if goal.status in ("blocked", "failed") or _policy_removed(goal)
                           else _goal_deliverable(goal, strict=True))
     signoff = world.signoff_for(goal.id) if contract and contract.get("gate") else None
     artifacts = _goal_artifacts(world, goal.id, strict=True)
