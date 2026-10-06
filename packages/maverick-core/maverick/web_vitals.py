@@ -1,7 +1,7 @@
 """Optional field Core Web Vitals: how fast pages load and respond for real visitors.
 
 Off unless ``[analytics] web_vitals = true``. When on, the dashboard measures a
-sample of page loads in the visitor's browser (:data:`SAMPLE_RATE`) with the
+sample of page loads in the visitor's browser (:func:`sample_rate`) with the
 web-vitals method -- Largest Contentful Paint (LCP), Interaction to Next Paint
 (INP) and Cumulative Layout Shift (CLS) -- and sends the three numbers for the
 page's route ("/chat/goal/{goal_id}", never the address itself) and a device
@@ -30,7 +30,7 @@ from pathlib import Path
 from typing import Any
 
 _LOCK = threading.RLock()
-SAMPLE_RATE = 0.5          # share of page loads measured in the browser
+SAMPLE_RATE = 0.5          # default share of page loads measured ([analytics] web_vitals_sample_rate)
 WINDOW_DAYS = 28           # web.dev's field window (CrUX reports 28 days)
 MIN_SAMPLES = 20           # below this, a route reports only its count
 MAX_ROUTES_PER_DAY = 500   # bounds the file; further routes that day are refused
@@ -57,6 +57,23 @@ def enabled() -> bool:
     except Exception:  # noqa: BLE001 -- an unreadable config keeps measurement off
         return False
     return isinstance(section, dict) and section.get("web_vitals") is True
+
+
+def sample_rate() -> float:
+    """``[analytics] web_vitals_sample_rate``, the share of page loads measured.
+
+    A number from 0 to 1; anything else keeps :data:`SAMPLE_RATE`.
+    """
+    try:
+        from .config import load_config
+
+        section = (load_config() or {}).get("analytics")
+    except Exception:  # noqa: BLE001 -- an unreadable config keeps the default
+        return SAMPLE_RATE
+    value = section.get("web_vitals_sample_rate") if isinstance(section, dict) else None
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not 0 <= value <= 1:
+        return SAMPLE_RATE
+    return float(value)
 
 
 def store_path() -> Path:
@@ -195,7 +212,7 @@ def report(now: float | None = None) -> dict[str, Any]:
         rows.append(row)
     order = {False: 0, None: 1, True: 2}
     rows.sort(key=lambda r: (order[r["passes"]], r["route"], r["device"]))
-    return {"window_days": WINDOW_DAYS, "minimum": MIN_SAMPLES, "sample_rate": SAMPLE_RATE,
+    return {"window_days": WINDOW_DAYS, "minimum": MIN_SAMPLES, "sample_rate": sample_rate(),
             "thresholds": {name: spec[2] for name, spec in METRICS.items()}, "rows": rows}
 
 
@@ -208,6 +225,7 @@ __all__ = [
     "VitalsError",
     "enabled",
     "record",
+    "sample_rate",
     "report",
     "store_path",
 ]

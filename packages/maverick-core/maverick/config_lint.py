@@ -237,7 +237,8 @@ KNOWN_SCHEMA: dict[str, set[str] | None] = {
         "group_suites",
         "active_tenant",
     },
-    "analytics": {"mcp_client_language", "task_questions", "usability_survey", "web_vitals"},
+    "analytics": {"mcp_client_language", "task_questions", "usability_survey", "web_vitals",
+                  "web_vitals_sample_rate"},
     "first_outcome": {"department", "sample_workspace_created"},
     # Work discovery is a high-trust client-controlled sensor.  Keep this
     # section fixed-key so misspelled retention/privacy knobs do not silently
@@ -618,6 +619,7 @@ _NUMERIC_KEYS: dict[str, set[str]] = {
     "sandbox": {"timeout", "pids_limit", "memory_mb", "cpus", "run_as_user"},
     "commerce": {"max_session_spend", "max_line_quantity", "max_cart_lines"},
     "durable": {"keep_last"},
+    "analytics": {"web_vitals_sample_rate"},
     "ekko": {
         "retention_days",
         "enrollment_days",

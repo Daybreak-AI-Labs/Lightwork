@@ -109,3 +109,27 @@ def test_rejects_what_it_will_not_store(home, route, device, metrics):
 
 def test_sampling_rate_is_a_fraction():
     assert 0 < vitals.SAMPLE_RATE <= 1
+
+
+@pytest.mark.parametrize("text,expected", [
+    ("", vitals.SAMPLE_RATE),
+    ("web_vitals_sample_rate = 0.1\n", 0.1),
+    ("web_vitals_sample_rate = 1\n", 1.0),
+    ("web_vitals_sample_rate = 0\n", 0.0),
+    ("web_vitals_sample_rate = 1.5\n", vitals.SAMPLE_RATE),     # out of range keeps the default
+    ("web_vitals_sample_rate = -0.2\n", vitals.SAMPLE_RATE),
+    ('web_vitals_sample_rate = "half"\n', vitals.SAMPLE_RATE),
+    ("web_vitals_sample_rate = true\n", vitals.SAMPLE_RATE),
+])
+def test_the_share_of_visits_measured_is_a_setting(home, text, expected):
+    home("[analytics]\nweb_vitals = true\n" + text)
+    assert vitals.sample_rate() == expected
+    assert vitals.report()["sample_rate"] == expected
+
+
+def test_config_lint_knows_the_sample_rate_key():
+    from maverick import config_lint
+
+    assert "web_vitals_sample_rate" in config_lint.KNOWN_SCHEMA["analytics"]
+    assert "web_vitals_sample_rate" in config_lint._NUMERIC_KEYS["analytics"]
+    assert "web_vitals_sample_rate" not in config_lint._BOOL_KEYS["analytics"]

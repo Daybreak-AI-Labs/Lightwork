@@ -6831,7 +6831,8 @@ def pick_web_vitals() -> dict[str, Any]:
     (LCP, INP and CLS) and keeps only counts per page and device class, so
     Settings > Page speed shows the 75th percentile over the last 28 days.
     No names, addresses or browsing history are kept, and nothing is sent
-    anywhere. Written under ``[analytics]`` as ``web_vitals``.
+    anywhere. Written under ``[analytics]`` as ``web_vitals`` and
+    ``web_vitals_sample_rate`` (the share of visits measured, 0 to 1).
     """
     console.print()
     console.print(
@@ -6842,7 +6843,13 @@ def pick_web_vitals() -> dict[str, Any]:
     )
     if not _q_confirm("Measure page speed for real visitors?", default=False):
         return {}
-    return {"web_vitals": True}
+    # ``[analytics] web_vitals_sample_rate``: the share of visits measured.
+    while True:
+        raw = _q_text("Share of visits to measure, from 0 to 1 (0.5 measures every other visit):", default="0.5").strip()
+        rate = _safe_float(raw, default=float("nan"))
+        if math.isfinite(rate) and 0 <= rate <= 1:
+            return {"web_vitals": True, "web_vitals_sample_rate": rate}
+        console.print("[yellow]Enter a number from 0 to 1, for example 0.5.[/yellow]")
 
 
 def pick_persona() -> dict[str, str]:

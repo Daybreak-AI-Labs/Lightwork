@@ -147,3 +147,18 @@ def test_settings_catalog_row_is_the_dashboard_control():
 def test_settings_links_to_the_page_speed_view_for_administrators(isolated, monkeypatch):
     _as(monkeypatch, "user:ada", role="admin")
     assert 'href="/settings/page-speed"' in _client().get("/settings").text
+
+
+def test_the_sample_rate_setting_reaches_the_page_and_has_its_control(isolated, monkeypatch):
+    from maverick import config
+    from maverick_dashboard import settings_catalog
+
+    (isolated / "config.toml").write_text("[analytics]\nweb_vitals = true\nweb_vitals_sample_rate = 0.2\n")
+    config.reset_config_cache()
+    _as(monkeypatch, "user:kim")
+    assert 'data-sample-rate="0.2"' in _client().get("/goals").text
+    rows = [row for row in settings_catalog.SETTINGS if (row.section, row.key) == ("analytics", "web_vitals_sample_rate")]
+    assert len(rows) == 1
+    row = rows[0]
+    assert row.control == "number" and row.default == 0.5 and row.minimum == 0 and row.maximum == 1
+    assert row.reader == "maverick.web_vitals"

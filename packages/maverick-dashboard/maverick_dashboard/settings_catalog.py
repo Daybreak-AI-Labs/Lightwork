@@ -833,6 +833,10 @@ SETTINGS: tuple[Setting, ...] = (
       "Only counts per page are kept: no names, addresses or browsing history. Nothing is sent anywhere. "
       "Results are on Settings > Page speed.",
       "toggle", "Privacy", False, "maverick.web_vitals"),
+    S("analytics", "web_vitals_sample_rate", "Share of visits measured for page speed",
+      "How many visits are measured when page speed measurement is on, from 0 (none) to 1 (every visit). "
+      "0.5 measures about every other visit. More visits give results sooner; each one measured sends three numbers.",
+      "number", "Privacy", 0.5, "maverick.web_vitals", minimum=0, maximum=1, step=0.05, unit="share"),
     S("immune", "twin_record", "Record tool results for replay",
       "Keep sealed copies of every task's tool results so the task can be replayed to test changes.",
       "toggle", "Privacy", False, "maverick.config", weaker=True,

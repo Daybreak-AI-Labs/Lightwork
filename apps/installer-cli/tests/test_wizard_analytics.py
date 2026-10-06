@@ -121,8 +121,9 @@ def test_web_vitals_yes_writes_the_knob_and_the_kernel_reads_it(tmp_path, monkey
     """Rule-6 loop for [analytics] web_vitals."""
     from maverick_installer import wizard
     monkeypatch.setattr(wizard, "_q_confirm", lambda *a, **kw: True)
+    monkeypatch.setattr(wizard, "_q_text", lambda message, default="": default)
     answer = wizard.pick_web_vitals()
-    assert answer == {"web_vitals": True}
+    assert answer == {"web_vitals": True, "web_vitals_sample_rate": 0.5}
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.delenv("MAVERICK_CONFIG", raising=False)
     cfg_dir = tmp_path / ".maverick"
@@ -143,3 +144,18 @@ def test_the_analytics_step_asks_about_page_speed():
 
     from maverick_installer import wizard
     assert "pick_web_vitals()" in inspect.getsource(wizard)
+
+
+def test_web_vitals_asks_how_many_visits_to_measure(monkeypatch):
+    from maverick_installer import wizard
+    answers = iter(["2", "abc", "0.25"])   # out of range and not a number are asked again
+    monkeypatch.setattr(wizard, "_q_confirm", lambda *a, **kw: True)
+    monkeypatch.setattr(wizard, "_q_text", lambda *a, **kw: next(answers))
+    assert wizard.pick_web_vitals() == {"web_vitals": True, "web_vitals_sample_rate": 0.25}
+
+
+def test_web_vitals_sample_rate_default_is_written_when_kept(monkeypatch):
+    from maverick_installer import wizard
+    monkeypatch.setattr(wizard, "_q_confirm", lambda *a, **kw: True)
+    monkeypatch.setattr(wizard, "_q_text", lambda message, default="": default)
+    assert wizard.pick_web_vitals() == {"web_vitals": True, "web_vitals_sample_rate": 0.5}

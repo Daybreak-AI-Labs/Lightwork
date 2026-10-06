@@ -89,7 +89,7 @@ def vitals_context(request: Request) -> dict[str, Any]:
         from maverick import web_vitals
 
         on = web_vitals.enabled() and bool(auth.caller_principal(request))
-        rate = web_vitals.SAMPLE_RATE
+        rate = web_vitals.sample_rate()
     except Exception:  # noqa: BLE001 -- the shell never fails over optional measurement
         on, rate = False, 0
     return {"web_vitals_on": on, "web_vitals_sample_rate": rate}
