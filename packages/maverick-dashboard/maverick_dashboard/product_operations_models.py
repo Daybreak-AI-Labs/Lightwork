@@ -54,10 +54,11 @@ def snapshot(request, selection):
     for provider, row in evidence.items():
         for name in (row.get("models") or [])[:500]:
             spec = spec_for(provider, name)
-            models.append({"model": spec, **describe(spec, provider=provider, capability=(row.get("capabilities") or {}).get(name),
+            models.append({"model": spec, "availability": "Previously reported; refresh needed" if row.get("stale", True) else "Reported by the last successful check",
+                            **describe(spec, provider=provider, capability=(row.get("capabilities") or {}).get(name),
                             fetched_at=row.get("fetched_at"), stale=row.get("stale", True))})
     details = {"models": models, "approved_models": sorted(_allowed_model_specs()),
-               "scope": "Provider-reported evidence only. Tools remain untested; successful text generation does not establish tool support."}
+               "scope": "Provider-reported evidence for the current workspace and connection only. Previous choices can remain visible after a failed check, but cannot supply current zero-price spending permission. Tools remain untested; successful text generation does not establish tool support."}
     return Snapshot(digest(details), "Current approved-model policy and cached provider metadata", "Compare reported model capabilities and dated prices.", details=details)
 
 

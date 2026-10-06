@@ -132,12 +132,13 @@
   <div class="section-head" data-settings-group="models" id="settings-models"><h2>Models</h2></div>
   <div class="panel" data-settings-group="models">
     <p class="muted settings-lead">
-      Lightwork offers every model your set-up AI services can reach, plus its
-      built-in list. Nothing changes until you save a choice below.
+      Choose from provider model lists and Lightwork's built-in choices.
+      Previous lists stay visible when a check fails or becomes out of date.
+      Nothing changes until you save a choice below.
     </p>
     <div class="models-overview" role="group" aria-label="Model availability">
       <div class="stat"><span class="num">{{ configured_count }}</span><span class="muted">provider{{ '' if configured_count == 1 else 's' }} set up</span></div>
-      <div class="stat"><span class="num">{{ offered_specs|length }}</span><span class="muted">model{{ '' if offered_specs|length == 1 else 's' }} available</span></div>
+      <div class="stat"><span class="num">{{ offered_specs|length }}</span><span class="muted">model choice{{ '' if offered_specs|length == 1 else 's' }} listed</span></div>
       <div class="stat"><span class="num">{{ live_count }}</span><span class="muted">up-to-date list{{ '' if live_count == 1 else 's' }}{% if last_refresh_ago %} · refreshed {{ last_refresh_ago }}{% endif %}</span></div>
       <form method="post" action="/settings/models/discover" class="models-overview-action">
         <button type="submit" class="btn"{% if not discovery_enabled or not configured_count %} disabled aria-disabled="true"{% endif %}>Refresh model lists</button>
@@ -158,23 +159,28 @@
     {% elif not configured_count %}
     <p class="muted">No AI service is set up yet. Add one under <a href="#settings-integrations" data-settings-jump="integrations">Provider keys</a> and its models will appear here.</p>
     {% endif %}
-    {% set status_words = {'live': 'Up to date', 'unavailable': 'Could not check', 'unconfigured': 'Not set up', 'pending': 'Not checked yet', 'disabled': 'Built-in list', 'unsupported': 'Built-in list', 'configured': 'Saved model', 'catalog': 'Added by your installation'} %}
+    {% set status_words = {'live': 'Up to date', 'unavailable': 'Could not confirm', 'unconfigured': 'Not set up', 'pending': 'Not checked yet', 'disabled': 'Built-in list', 'unsupported': 'Built-in list', 'configured': 'Saved model', 'catalog': 'Added by your installation'} %}
     <ul class="models-status" aria-label="Model list status by provider">
       {% for g in model_groups if g.name != 'custom' %}
+      {% set current_list = g.status == 'live' and not g.stale %}
       <li data-settings-search-item>
         <span class="models-status-label">{{ g.label }}</span>
-        <span class="badge {{ 'active' if g.status == 'live' else ('blocked' if g.status == 'unavailable' else '') }}">{{ status_words.get(g.status, 'Built-in list') }}</span>
+        <span class="badge {{ 'active' if current_list else ('blocked' if g.status == 'unavailable' else '') }}">{{ 'Previous list' if g.status == 'live' and g.stale else status_words.get(g.status, 'Built-in list') }}</span>
         <span class="muted">
-          {%- if g.status == 'live' %}{{ g.live_count }} model{{ '' if g.live_count == 1 else 's' }} available with your key
-          {%- elif g.status == 'unavailable' %}The provider did not answer. Try refreshing later.
+          {%- if current_list %}{{ g.live_count }} model{{ '' if g.live_count == 1 else 's' }} listed in the current check.
+          {%- elif g.status == 'live' and g.stale %}The earlier model list needs a fresh check.
+          {%- elif g.status == 'unavailable' %}The current model list could not be confirmed. Try refreshing later.
           {%- elif g.status == 'unconfigured' %}Set up this service under Provider keys to use it.
           {%- elif g.status == 'pending' %}Refresh to see the models this key can reach.
           {%- elif g.status == 'configured' %}Using the model saved in your connection.
           {%- else %}Showing Lightwork's built-in list for this provider.{% endif %}
-          {%- if g.fetched_ago %} · refreshed {{ g.fetched_ago }}{% endif %}{% if g.stale %} · out of date, refresh to update{% endif %}</span>
+          {%- if g.previous_count|default(0) %} {{ g.previous_count }} previous choice{{ '' if g.previous_count == 1 else 's' }} kept; availability needs a fresh check.{% endif %}
+          {%- if g.fetched_ago %} · last successful list {{ g.fetched_ago }}{% endif %}
+          {%- if g.last_attempt_ago and not current_list %} · last attempt {{ g.last_attempt_ago }}{% endif %}</span>
       </li>
       {% endfor %}
     </ul>
+    <p class="muted">Current availability and any reported free rate need a fresh successful check. Review a spending ceiling when a usable price is missing; your saved model choices stay as you left them.</p>
     {% if discovery_enabled and not discovery_locked %}
     <form method="post" action="/settings/models/discovery" class="settings-inline-form">
       <input type="hidden" name="enabled" value="off" />
@@ -211,7 +217,7 @@
       <label class="settings-field">Model
         <select class="select" name="rate_model" data-model-picker="rate-model-custom" required>
           <option value="">Choose a model</option>
-          {% for pg in picker_groups %}<optgroup label="{{ pg.label }}">{% for m in pg.options %}<option value="{{ m.spec }}">{{ m.spec|model_label }}</option>{% endfor %}</optgroup>{% endfor %}
+          {% for pg in picker_groups %}<optgroup label="{{ pg.label }}">{% for m in pg.options %}<option value="{{ m.spec }}">{{ m.spec|model_label }}{% if m.last_known %} · previous list{% endif %}</option>{% endfor %}</optgroup>{% endfor %}
           <option value="{{ custom_marker }}">Other model (advanced)…</option>
         </select>
       </label>
@@ -258,7 +264,7 @@
     <p><a href="/settings/all">Enable or disable bounded model tests in All settings</a></p>
     <form id="model-test-form">
       <label>Model <select class="select" id="model-test-model" data-model-picker="model-test-custom">
-        {% for pg in picker_groups %}<optgroup label="{{ pg.label }}">{% for m in pg.options %}<option value="{{ m.spec }}">{{ m.spec|model_label }}</option>{% endfor %}</optgroup>{% endfor %}
+        {% for pg in picker_groups %}<optgroup label="{{ pg.label }}">{% for m in pg.options %}<option value="{{ m.spec }}">{{ m.spec|model_label }}{% if m.last_known %} · previous list{% endif %}</option>{% endfor %}</optgroup>{% endfor %}
         <option value="__custom__">Other model (advanced)</option>
       </select></label>
       <label id="model-test-custom" hidden>Exact model name from your provider <input class="input" id="model-test-custom-value" maxlength="200"></label>
@@ -295,7 +301,7 @@
           {% for pg in picker_groups %}
           <optgroup label="{{ pg.label }}">
             {% for m in pg.options %}
-            <option value="{{ m.spec }}"{% if pinned_model == m.spec %} selected{% endif %}>{{ m.spec|model_label }}{% if m.live %} · up to date{% endif %}</option>
+            <option value="{{ m.spec }}"{% if pinned_model == m.spec %} selected{% endif %}>{{ m.spec|model_label }}{% if m.live %} · up to date{% elif m.last_known %} · previous list{% endif %}</option>
             {% endfor %}
           </optgroup>
           {% endfor %}
@@ -337,7 +343,7 @@
                   {% for pg in picker_groups %}
                   <optgroup label="{{ pg.label }}">
                     {% for m in pg.options %}
-                    <option value="{{ m.spec }}"{% if override == m.spec %} selected{% endif %}>{{ m.spec|model_label }}{% if m.live %} · up to date{% endif %}</option>
+                    <option value="{{ m.spec }}"{% if override == m.spec %} selected{% endif %}>{{ m.spec|model_label }}{% if m.live %} · up to date{% elif m.last_known %} · previous list{% endif %}</option>
                     {% endfor %}
                   </optgroup>
                   {% endfor %}
@@ -378,8 +384,8 @@
         </div>
         {% endif %}
         {% for m in g.models %}
-        <label class="model-row" data-settings-search-item data-model-source="{{ 'live' if m.live else 'catalog' }}">
-          <span>{{ m.spec|model_label }}{% if m.live %} <span class="badge active">Up to date</span>{% endif %}</span>
+        <label class="model-row" data-settings-search-item data-model-source="{{ 'live' if m.live else ('previous' if m.last_known else 'catalog') }}">
+          <span>{{ m.spec|model_label }}{% if m.live %} <span class="badge active">Up to date</span>{% elif m.last_known %} <span class="badge">Previous list · refresh to confirm</span>{% endif %}</span>
           <input type="checkbox" name="models" value="{{ m.spec }}"{% if m.spec in allowed_models %} checked{% endif %} />
         </label>
         {% endfor %}
@@ -1135,6 +1141,60 @@
       return badge ? badge.textContent.trim() : '';
     }
 
+    // Refresh evidence, never another section's entered model choices.
+    function refreshModelLists(documentCopy, status) {
+      var current = document.querySelector('.models-status'), next = documentCopy.querySelector('.models-status');
+      if (!current || !next) throw new Error('Could not read the refreshed model status. Your choices are kept.');
+      current.replaceWith(document.importNode(next, true));
+      var freshStats = documentCopy.querySelectorAll('.models-overview .stat');
+      document.querySelectorAll('.models-overview .stat').forEach(function (stat, position) {
+        if (freshStats[position]) stat.replaceWith(document.importNode(freshStats[position], true));
+      });
+      var changed = false, freshPickers = Array.from(documentCopy.querySelectorAll('[data-model-picker]'));
+      document.querySelectorAll('[data-model-picker]').forEach(function (select) {
+        var fresh = freshPickers.find(function (item) { return item.dataset.modelPicker === select.dataset.modelPicker; });
+        if (!fresh) return;
+        var freshOptions = new Map(Array.from(fresh.options).map(function (option) { return [option.value, option]; }));
+        if (select.options.length !== fresh.options.length) changed = true;
+        Array.from(select.options).forEach(function (option) {
+          var replacement = freshOptions.get(option.value);
+          if (replacement) option.textContent = replacement.textContent;
+          else { changed = true; option.textContent = option.textContent.replace(/ · (up to date|previous list|not in refreshed choices)$/, '') + ' · not in refreshed choices'; }
+        });
+      });
+      var freshRows = new Map(Array.from(documentCopy.querySelectorAll('.model-row')).map(function (row) {
+        return [row.querySelector('input[name="models"]').value, row];
+      }));
+      var rows = document.querySelectorAll('.model-row');
+      if (rows.length !== freshRows.size) changed = true;
+      rows.forEach(function (row) {
+        var replacement = freshRows.get(row.querySelector('input[name="models"]').value);
+        if (replacement) {
+          row.dataset.modelSource = replacement.dataset.modelSource;
+          row.firstElementChild.replaceWith(document.importNode(replacement.firstElementChild, true));
+        } else {
+          changed = true; row.dataset.modelSource = 'previous';
+          var label = row.firstElementChild, badge = label.querySelector('.badge');
+          if (!badge) { badge = document.createElement('span'); label.append(' ', badge); }
+          badge.className = 'badge'; badge.textContent = 'Not in refreshed choices';
+        }
+      });
+      status.textContent = 'Model-list check finished. Current status is shown above; your entered choices are kept.';
+      if (changed) {
+        status.append(' The available choices changed. Save other drafts before reloading, or keep working here. ');
+        var reload = document.createElement('button'); reload.type = 'button'; reload.className = 'btn btn--ghost'; reload.textContent = 'Reload updated choices';
+        reload.addEventListener('click', async function () {
+          if (dirty.size) {
+            var warning = 'Reloading replaces your unsaved choices on this page. Save them first, or cancel to keep working.';
+            var agreed = window.mvConfirm ? await window.mvConfirm(warning, {okText:'Reload choices'}) : window.confirm(warning);
+            if (!agreed) return;
+          }
+          dirty.clear(); window.location.assign('/settings#settings-models');
+        });
+        status.append(reload);
+      }
+    }
+
     function bindForm(form) {
       form.addEventListener('input', markDirty);
       form.addEventListener('change', markDirty);
@@ -1194,6 +1254,7 @@
               status.textContent = (form.getAttribute('action') === '/settings/providers/test'
                 ? 'Connection test finished.' : receipt.textContent.trim()) + ' Status now: ' + providerState;
             }
+            if (form.getAttribute('action') === '/settings/models/discover') refreshModelLists(documentCopy, status);
             if (form.matches('form[action="/settings/models"], form[action="/settings/models/roles"]')) {
               var currentRates = document.querySelector('[data-model-rate-status]');
               var updatedRates = documentCopy.querySelector('[data-model-rate-status]');

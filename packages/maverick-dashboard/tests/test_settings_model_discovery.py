@@ -70,7 +70,7 @@ def test_pickers_group_reachable_models_by_configured_provider(monkeypatch, tmp_
     assert 'data-model-source="live"' in text and 'data-model-source="catalog"' in text
     # Discovery status is visible and refreshable.
     assert 'action="/settings/models/discover"' in text
-    assert "2 models available with your key" in text
+    assert "2 models listed in the current check" in text
     # A failed list reads as a plain sentence, never a status code.
     assert "HTTP 401" not in text
     assert "The provider did not answer" in text

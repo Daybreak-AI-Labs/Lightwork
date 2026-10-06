@@ -2023,3 +2023,31 @@ caused the current state. Same-account transient errors preserve unsaved
 frequency and evidence drafts; access loss clears private content and disables
 writes. These repairs do not supply an all-action audit archive or independent
 custody.
+
+## October 6 current model evidence and add-on compatibility
+
+Discovery uses the native tenant cache and an opaque binding to the effective
+connection. Refresh reserves an unrepeatable token under the existing cache
+lock, performs bounded I/O outside that lock and publishes only its still-current
+reservation. Failure retains previous choices without current zero-price
+authority. Settings and the model-capability read distinguish previous evidence,
+last successful checks and failed attempts; ordinary refresh preserves unsaved
+form state and offers a deliberate reload for a changed list.
+
+Missing or expired OpenRouter pricing evidence can trigger a bounded check
+before initial admission, with per-provider single flight and a finite failure
+cooldown. Official-list origin and every advertised price are checked. Native
+attempt custody retains the admitted price for matching Budget, model and tenant
+accounting. New retry, hedge and compatibility SDK sends take distinct current
+admissions; a refusal after a reservation releases an unsent hold at zero.
+Async initial discovery runs off the event loop. Response accounting performs
+no discovery request. These checks use fictional transports; they do not qualify
+live provider access, invoices or model quality.
+
+Python add-on compatibility reads native distribution metadata without loading
+entry points. Present malformed contracts and unsupported API majors are refused
+before import. Native page reasons and the read-only Copilot status use that same
+compatibility result. Copilot first gives complete aggregate counts, then offers
+an exact current add-on selection with complete reasons; it does not silently
+truncate a full inventory into the generic result renderer. Existing permissions,
+practice operations and supported or absent-manifest behavior are preserved.

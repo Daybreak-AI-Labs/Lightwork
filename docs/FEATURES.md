@@ -6330,3 +6330,31 @@ Interrupted responses offer a read-only current-state check. That check is not
 the original operation's receipt and does not repeat a refresh, decision or
 removal. Unsaved frequency and evidence drafts survive ordinary same-account
 errors; losing access clears private findings and disables write controls.
+
+### Model checks, spending and add-on readiness
+
+Model checks belong to the current workspace and configured connection. Changing
+the key or endpoint invalidates the old evidence. A failed refresh preserves
+previous model choices and their last successful check, while showing that they
+are unconfirmed. Settings updates that status without discarding unsaved choices;
+changed lists offer an explicit reload. Overlapping checks cannot let an older
+response replace a newer check, even after a connection changes away and back.
+
+An expired OpenRouter zero-price listing is checked before a new request when
+discovery is enabled. Waiters share one bounded check, and a recent failure has a
+short retry pause. Only fresh evidence from the official listing with all
+advertised prices at zero grants a zero-price quote. OpenRouter advertises
+[request and other price fields](https://openrouter.ai/docs/api/api-reference/models/list-all-models-and-their-properties)
+as well as input and output prices; an additional charge excludes that row.
+
+Each actual SDK attempt retains its admitted price for response accounting.
+Expiry or a changed connection after dispatch does not discard an already
+returned answer. Retries, hedges and compatibility resends recheck the current
+connection and price before their own sends. Async initial metadata checks run
+off the event loop; accounting does not make model-list requests.
+
+Python add-ons with a declared unsupported or unreadable contract are refused
+before their entry point loads. Older supported contracts and add-ons without a
+manifest retain their existing behavior. The add-on page shows the reason, and
+Copilot offers a complete count summary plus a selected add-on's current
+compatibility and practice-readiness details, including refused add-ons.

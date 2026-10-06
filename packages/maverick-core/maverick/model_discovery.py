@@ -10,11 +10,15 @@ with ``[models] discovery = false`` or ``MAVERICK_MODEL_DISCOVERY=0``.
 """
 from __future__ import annotations
 
+import hashlib
 import json
+import math
 import os
 import re
 import time
+import uuid
 from collections.abc import Callable, Iterable
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote, urlsplit, urlunsplit
@@ -25,7 +29,8 @@ MAX_MODELS_PER_PROVIDER = 500
 MAX_PAGES = 8
 MAX_DETAIL_CHARS = 200
 DEFAULT_TTL_MINUTES = 60
-CACHE_SCHEMA = "lightwork.model-discovery.v1"
+PRICE_REFRESH_RETRY_SECONDS = 60
+CACHE_SCHEMA = "lightwork.model-discovery.v2"
 ANTHROPIC_VERSION = "2023-06-01"
 
 # provider -> (default endpoint, response style). Vendors with an OpenAI-shaped
@@ -206,22 +211,25 @@ def _zero_price(value: object) -> bool:
     """True when a provider-advertised price field is exactly zero."""
     if isinstance(value, bool):
         return False
+    if isinstance(value, Decimal):
+        return value.is_finite() and value == 0
     if isinstance(value, (int, float)):
         return value == 0
     if isinstance(value, str):
         try:
-            return float(value.strip()) == 0.0
-        except ValueError:
+            return Decimal(value.strip()) == 0
+        except InvalidOperation:
             return False
     return False
 
 
 def parse_free_models(style: str, payload: object) -> list[str]:
-    """Model ids an OpenAI-shaped listing prices at $0 for prompt AND completion.
+    """Model ids whose prompt, completion and other advertised fees are all zero.
 
     OpenRouter's ``GET /api/v1/models`` carries a ``pricing`` object per row; a
-    model it lists at zero incurs no metered token charge. Rows without a
-    pricing object, or with any non-zero price, are never free.
+    rows without both token prices, or with any non-zero or unreadable additional
+    price, cannot supply a zero-price quote. Discovery accepts this evidence only
+    from the official endpoint; other request options may have separate charges.
     """
     if style != "openai" or not isinstance(payload, dict):
         return []
@@ -235,7 +243,8 @@ def parse_free_models(style: str, payload: object) -> list[str]:
         pricing = row.get("pricing")
         if not isinstance(pricing, dict):
             continue
-        if _zero_price(pricing.get("prompt")) and _zero_price(pricing.get("completion")):
+        if (_zero_price(pricing.get("prompt")) and _zero_price(pricing.get("completion"))
+                and all(_zero_price(value) for field, value in pricing.items() if field not in {"prompt", "completion"})):
             free.append(row.get("id"))
     return _ids(free)
 
@@ -328,7 +337,14 @@ def _entry(
     }
 
 
-def discover(provider: str, *, fetch: Fetch | None = None) -> dict[str, Any]:
+def _official_openrouter_listing(url: str) -> bool:
+    parsed = urlsplit(url)
+    return (parsed.scheme == "https" and parsed.hostname == "openrouter.ai"
+            and parsed.port in (None, 443) and parsed.path == "/api/v1/models"
+            and not parsed.query and not parsed.fragment and parsed.username is None)
+
+
+def discover(provider: str, *, fetch: Fetch | None = None, material: dict[str, Any] | None = None) -> dict[str, Any]:
     """Ask one provider which models its configured key can reach (no cache)."""
     name = _canonical(provider)
     fetch = fetch or _fetch
@@ -338,7 +354,7 @@ def discover(provider: str, *, fetch: Fetch | None = None) -> dict[str, Any]:
         return _entry(name, "unsupported", [], "this provider has no model-list endpoint; pick from the catalog or type a model id", None)
     if not discovery_enabled():
         return _entry(name, "disabled", [], "model discovery is switched off ([models] discovery or MAVERICK_MODEL_DISCOVERY)", None)
-    material = _provider_material(name)
+    material = material if material is not None else _provider_material(name)
     if not material["configured"]:
         return _entry(name, "unconfigured", [], "no key or endpoint is configured for this provider", None)
     now = time.time()
@@ -361,11 +377,11 @@ def discover(provider: str, *, fetch: Fetch | None = None) -> dict[str, Any]:
             status, body = fetch(_page_url(url, style, token), headers, allow_loopback=allow_loopback)
             if not 200 <= int(status) < 300:
                 return _entry(name, "unavailable", [], f"provider returned HTTP {int(status)} for the model list", now)
-            payload = json.loads(body.decode("utf-8"))
+            payload = json.loads(body.decode("utf-8"), parse_float=Decimal)
             ids, token = parse_models(style, payload)
             from .model_guidance import parse_capabilities
             capabilities.update(parse_capabilities(style, payload))
-            if name == "openrouter":
+            if name == "openrouter" and _official_openrouter_listing(url):
                 free.extend(parse_free_models(style, payload))
             if name == "gemini":
                 ids = [i.removeprefix("models/") for i in ids]
@@ -397,12 +413,21 @@ def discover(provider: str, *, fetch: Fetch | None = None) -> dict[str, Any]:
 
 
 def cache_path() -> Path:
-    from .paths import maverick_home
-    return maverick_home() / "cache" / "model-discovery.json"
+    from .paths import data_dir
+    return data_dir("cache", "model-discovery.json")
 
 
-def _load_cache() -> dict[str, dict[str, Any]]:
-    path = cache_path()
+def _material_binding(provider: str, material: dict[str, Any] | None = None) -> str:
+    """Opaque binding to this provider's effective connection, never its key."""
+    material = material if material is not None else _provider_material(provider)
+    return hashlib.sha256(json.dumps(
+        [provider, material["configured"], material["api_key"], material["base_url"]],
+        separators=(",", ":"), ensure_ascii=True,
+    ).encode("utf-8")).hexdigest()
+
+
+def _load_cache(path: Path | None = None) -> dict[str, dict[str, Any]]:
+    path = path or cache_path()
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
@@ -414,11 +439,14 @@ def _load_cache() -> dict[str, dict[str, Any]]:
     for name, row in providers.items():
         if not (isinstance(name, str) and _VALID_PROVIDER.fullmatch(name) and isinstance(row, dict)):
             continue
+        binding = _material_binding(name)
+        if row.get("material_binding") != binding:
+            continue
         status = row.get("status")
         if status not in _STATUSES:
             continue
         fetched_at = row.get("fetched_at")
-        fetched = float(fetched_at) if isinstance(fetched_at, (int, float)) and not isinstance(fetched_at, bool) else None
+        fetched = float(fetched_at) if isinstance(fetched_at, (int, float)) and not isinstance(fetched_at, bool) and math.isfinite(fetched_at) else None
         models = row.get("models") if isinstance(row.get("models"), list) else []
         free = row.get("free_models") if isinstance(row.get("free_models"), list) else []
         detail = row.get("detail") if isinstance(row.get("detail"), str) else ""
@@ -426,16 +454,20 @@ def _load_cache() -> dict[str, dict[str, Any]]:
         raw_caps = row.get("capabilities")
         capabilities = {m: clean_capabilities(raw_caps.get(m)) for m in _ids(models)} if isinstance(raw_caps, dict) else {}
         out[name] = _entry(name, status, _ids(models), detail, fetched,
-                           free_models=_ids(free), capabilities=capabilities)
+                           free_models=[m for m in _ids(free) if m in _ids(models)], capabilities=capabilities)
+        out[name]["material_binding"] = binding
+        out[name]["refresh_token"] = row.get("refresh_token") if isinstance(row.get("refresh_token"), str) and re.fullmatch(r"[a-f0-9]{32}", row["refresh_token"]) else ""
+        attempted = row.get("last_attempt_at")
+        out[name]["last_attempt_at"] = attempted if isinstance(attempted, (int, float)) and not isinstance(attempted, bool) and math.isfinite(attempted) else None
     return out
 
 
-def _write_cache(entries: dict[str, dict[str, Any]]) -> None:
+def _write_cache(entries: dict[str, dict[str, Any]], *, path: Path | None = None, effect_guard=None) -> None:
     from . import file_lock
-    path = cache_path()
+    path = path or cache_path()
     file_lock.ensure_private_directory(path.parent)
     payload = {"schema": CACHE_SCHEMA, "providers": entries}
-    file_lock.atomic_write_text(path, json.dumps(payload, indent=2, sort_keys=True))
+    file_lock.atomic_write_text(path, json.dumps(payload, indent=2, sort_keys=True), effect_guard=effect_guard)
 
 
 def refresh(providers: Iterable[str] | None = None) -> dict[str, dict[str, Any]]:
@@ -444,11 +476,82 @@ def refresh(providers: Iterable[str] | None = None) -> dict[str, dict[str, Any]]
         names = [p for p in DISCOVERABLE if _provider_material(p)["configured"]]
     else:
         names = list(dict.fromkeys(_canonical(p) for p in providers))
-    entries = _load_cache()
-    fresh = {name: discover(name) for name in names}
-    entries.update(fresh)
-    _write_cache(entries)
+    if not names:
+        return {}
+    from .file_lock import cross_process_lock
+
+    path = cache_path()
+    materials = {name: _provider_material(name) for name in names}
+    bindings = {name: _material_binding(name, material) for name, material in materials.items()}
+
+    def current_connection() -> None:
+        if cache_path() != path or any(_material_binding(name) != binding for name, binding in bindings.items()):
+            raise ValueError("The AI connection changed during the check. Refresh its model list again.")
+
+    # Reserve the latest request durably, without relying on clock resolution or
+    # holding the cache lock over provider I/O. Existing evidence stays intact.
+    reservations = {name: uuid.uuid4().hex for name in names}
+    with cross_process_lock(path, strict=True):
+        current_connection()
+        entries = _load_cache(path)
+        for name in names:
+            previous = entries.get(name) or _entry(name, "unavailable", [], "A model-list check is in progress.", None)
+            previous.update(refresh_token=reservations[name], material_binding=bindings[name])
+            entries[name] = previous
+        _write_cache(entries, path=path, effect_guard=current_connection)
+
+    fresh = {name: discover(name, material=materials[name]) for name in names}
+    current_connection()
+    with cross_process_lock(path, strict=True):
+        current_connection()
+        entries = _load_cache(path)
+        for name, row in fresh.items():
+            previous = entries.get(name, {})
+            attempted = row["fetched_at"]
+            if previous.get("refresh_token") != reservations[name]:
+                fresh[name] = previous or _entry(name, "unavailable", [], "A newer check replaced this request.", None)
+                continue
+            if row["status"] == "unavailable" and previous.get("models"):
+                row.update(models=previous["models"], capabilities=previous["capabilities"],
+                           fetched_at=previous["fetched_at"], free_models=[])
+            row.update(material_binding=bindings[name], last_attempt_at=attempted,
+                       refresh_token=reservations[name])
+        entries.update(fresh)
+        _write_cache(entries, path=path, effect_guard=current_connection)
     return fresh
+
+
+def refresh_for_price(*, provider: str = "openrouter", model: str) -> None:
+    """Check expired/missing pricing evidence before a new physical AI request.
+
+    Only the configured discovery option permits this bounded metadata request.
+    Never call this from token accounting. Failed recent attempts have a finite
+    cooldown, and same-provider callers share one check without locking other
+    providers' cache reads or updates. This does not grant spending permission.
+    """
+    from .file_lock import cross_process_lock
+
+    name = _canonical(provider)
+    if name != "openrouter" or not _VALID_MODEL.fullmatch(model) or not discovery_enabled():
+        return
+    material = _provider_material(name)
+    if not material["configured"]:
+        return
+    path, binding = cache_path(), _material_binding(name, material)
+
+    def needs_check() -> bool:
+        if cache_path() != path or _material_binding(name) != binding:
+            raise ValueError("The AI connection changed during the check. Refresh its model list again.")
+        row = snapshot().get(name, {})
+        if row.get("status") == "live" and not row.get("stale", True):
+            return False
+        attempted = row.get("last_attempt_at")
+        return attempted is None or not 0 <= time.time() - attempted < PRICE_REFRESH_RETRY_SECONDS
+
+    if needs_check():
+        with cross_process_lock(path.with_name("model-discovery-openrouter-price"), strict=True):
+            if needs_check():
+                refresh([name])
 
 
 def snapshot() -> dict[str, dict[str, Any]]:
@@ -458,7 +561,7 @@ def snapshot() -> dict[str, dict[str, Any]]:
     out = {}
     for name, entry in _load_cache().items():
         fetched = entry.get("fetched_at")
-        entry["stale"] = fetched is None or (now - fetched) > limit
+        entry["stale"] = entry["status"] != "live" or fetched is None or not 0 <= now - fetched <= limit
         out[name] = entry
     return out
 
@@ -466,18 +569,17 @@ def snapshot() -> dict[str, dict[str, Any]]:
 def reachable(provider: str) -> list[str]:
     """Model ids the cached discovery says this provider's key can reach."""
     entry = snapshot().get(_canonical(provider))
-    return list(entry["models"]) if entry and entry["status"] == "live" else []
+    return list(entry["models"]) if entry and entry["status"] == "live" and not entry["stale"] else []
 
 
 def free_models(provider: str) -> list[str]:
     """Model ids the cached discovery says ``provider`` advertises at $0.
 
-    Only OpenRouter publishes per-model prices in its listing today, so this is
-    empty for every other provider. Staleness does not clear it: the rate is the
-    provider's own published one, fetched with the operator's key, and the pin
-    was chosen from that same list.
+    A current, connection-bound, fresh successful listing is required. Previous
+    model choices can remain visible after failure, but cannot supply $0 pricing
+    authority. This read never refreshes the provider or sends a paid request.
     """
     entry = snapshot().get(_canonical(provider))
-    if not entry or entry["status"] != "live":
+    if not entry or entry["status"] != "live" or entry["stale"]:
         return []
     return [m for m in entry.get("free_models") or [] if isinstance(m, str)]

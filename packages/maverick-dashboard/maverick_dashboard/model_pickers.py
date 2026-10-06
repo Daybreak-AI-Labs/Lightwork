@@ -79,7 +79,8 @@ def _group(name: str, label: str, row: dict | None, entry: dict, enabled: bool, 
         status = "disabled"
     elif not status:
         status = "unsupported" if not supported else ("pending" if configured else "unconfigured")
-    live = list(entry.get("models") or []) if status == "live" else []
+    reported = list(entry.get("models") or []) if enabled and configured and status in {"live", "unavailable"} else []
+    live = reported if status == "live" and not entry.get("stale", True) else []
     live_set = set(live)
     catalog = list(MODEL_CATALOG.get(name, []))
     customer_model = _configured_cloud_model(name)
@@ -88,7 +89,7 @@ def _group(name: str, label: str, row: dict | None, entry: dict, enabled: bool, 
     if customer_model and configured and status in {"unsupported", "disabled"}:
         status = "configured"
     catalog_set = set(catalog)
-    ids = list(dict.fromkeys(live + [m for m in catalog if m not in live_set]))
+    ids = list(dict.fromkeys(reported + catalog))
     fetched_at = entry.get("fetched_at")
     if status == "live":
         detail = entry.get("detail") or f"{len(live)} models reachable with the configured key"
@@ -106,8 +107,11 @@ def _group(name: str, label: str, row: dict | None, entry: dict, enabled: bool, 
         "fetched_ago": age(now - fetched_at) if isinstance(fetched_at, (int, float)) else None,
         "stale": bool(entry.get("stale")),
         "live_count": len(live),
+        "previous_count": len(reported) if not live else 0,
+        "last_attempt_ago": age(now - entry["last_attempt_at"]) if isinstance(entry.get("last_attempt_at"), (int, float)) else None,
         "models": [
-            {"spec": spec_for(name, m), "id": m, "live": m in live_set, "catalog": m in catalog_set}
+            {"spec": spec_for(name, m), "id": m, "live": m in live_set, "catalog": m in catalog_set,
+             "last_known": m in reported and m not in live_set}
             for m in ids
         ],
     }
@@ -179,7 +183,7 @@ def build(providers: list[dict], allow: set[str]) -> dict:
         "offered_specs": sorted(offered),
         "discovery_enabled": enabled,
         "configured_count": sum(1 for g in groups if g["configured"] and g["name"] != "custom"),
-        "live_count": sum(1 for g in groups if g["status"] == "live"),
+        "live_count": sum(1 for g in groups if g["status"] == "live" and not g["stale"]),
         "last_refresh_ago": age(now - max(fetched)) if fetched else None,
         "custom_marker": CUSTOM,
     }

@@ -346,3 +346,13 @@ checks preserve recovery honesty without claiming an original receipt. These
 are correctness and usability repairs to the existing assessment product; they
 do not complete the wider learning research mechanisms or establish independent
 audit custody. The 28-item research status counts remain unchanged.
+
+Model and add-on follow-through binds provider evidence to its actual workspace
+and connection, prevents stale refresh publication and preserves admitted prices
+for individual physical request accounting. Settings makes failed checks and
+previous choices explicit without losing drafts. Declared incompatible Python
+add-ons refuse entry-point loading and expose complete ordinary/Copilot reasons.
+These repairs improve reliability and usable control of the existing platform.
+Fictional provider and add-on fixtures do not establish live pricing, learning
+lift, independent audit custody or invention novelty. The register remains
+6 partial product foundations, 18 bounded pilots and 4 parked/rejected results.
