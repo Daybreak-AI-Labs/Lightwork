@@ -42,7 +42,7 @@
 <link rel="preload" as="script" href="{{ asset('lightwork-ui.js') }}">
 {% include "_journey_i18n.html" %}
 </head>
-<body class="theme-{{ theme or 'dark' }} font-{{ font or 'default' }} density-{{ density or 'comfortable' }} glass-{{ glass or 'off' }}" data-global-admin="{{ '1' if viewer_global_admin else '0' }}">
+<body class="{% if practice_mode %}is-practice {% endif %}theme-{{ theme or 'dark' }} font-{{ font or 'default' }} density-{{ density or 'comfortable' }} glass-{{ glass or 'off' }}" data-global-admin="{{ '1' if viewer_global_admin else '0' }}">
   {# The skip link is the first keyboard stop on every page. #}
   <a class="skip-link" href="#content"{% if lang and page_lang and lang != page_lang %} lang="{{ lang }}"{% endif %}>{{ t('chrome.skip_to_content') }}</a>
   {% if lang and lang != 'en' %}<aside class="locale-coverage" aria-label="{{ ut('Translation coverage') }}" lang="{{ ul('Translation coverage') }}">{{ ui('Some controls are translated. Other sections remain in English. These draft translations need language and consequence-copy review.') }} {{ ui('User-written content is kept in its original language.') }}</aside>{% endif %}
@@ -128,6 +128,7 @@
   {% include "_shortcuts.html" %}
   <main id="content" tabindex="-1">
     {% include "_halt_banner.html" %}
+    {% include "_practice_banner.html" %}
     {% include "_service_status_banner.html" %}{% if nav_mode == 'areas' %}{% include "_area_nav.html" %}{% else %}{% include "_where_crumbs.html" %}{% endif %}
     {# The page's own tools: its documentation, and pinning it to the
        sidebar (only on a page the person may open, when they can pin). #}
@@ -194,6 +195,8 @@
   {% if show_personal_notifications %}<script src="{{ asset('lightwork-notification-badge.js') }}" defer></script>{% endif %}
   {% if record_search_context %}<link rel="stylesheet" href="{{ asset('lightwork-record-search.css') }}"><script src="{{ asset('lightwork-record-search.js') }}" defer></script>{% endif %}
   <script src="{{ asset('lightwork-voice.js') }}" defer></script>
+  <script src="{{ asset('lightwork-practice.js') }}" defer></script>
+  {% if usage_measures_on %}<script src="{{ asset('lightwork-usage-measures.js') }}"></script>{% endif %}
   {% if usability_survey_on %}<script src="{{ asset('lightwork-usability-survey.js') }}" defer></script>{% endif %}
   {% block scripts_extra %}{% endblock %}
 </body>

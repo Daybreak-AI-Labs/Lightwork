@@ -2,7 +2,7 @@
     every specialist's setup, and the specialist test suite. Filled by
     lightwork-workforce-ops.js; download and setup check appear for
     administrators only (the routes check again). -#}
-<div id="wo-root" class="wo">
+<div id="wo-root" class="wo" data-can-open-agents="{{ 'true' if can_open_page is defined and can_open_page('/agents') else 'false' }}">
   <div class="section-head"><h2 id="wo-inv-h">What each agent and specialist can do, and what stops it</h2></div>
   <section class="panel" aria-labelledby="wo-inv-h">
     <p class="muted">For each agent and specialist: whether it can reach tools that change things, whether a person must sign
@@ -62,7 +62,7 @@
     <div class="wo-test-admin wo-test-run-row" hidden>
       <button type="button" class="btn" id="wo-test-run">Check answers</button>
       <button type="button" class="btn btn--ghost" id="wo-test-new-run" hidden>Start a separate check</button>
-      <span class="muted">Up to 5 saved checks per run. Each run can make paid AI requests and stops at its spending limit.</span>
+      <span class="muted">The whole saved set, up to 20 checks, runs at once. Each run can make paid AI requests and stops at its spending limit of $0.05 a question.</span>
     </div>
     <p id="wo-test-run-status" role="status" aria-live="polite"></p>
     <div id="wo-test-run-out"></div>
@@ -78,7 +78,7 @@
       <section id="wo-compare-review" class="panel" hidden tabindex="-1" aria-labelledby="wo-compare-review-title">
         <h3 id="wo-compare-review-title">Review instruction comparison</h3>
         <div id="wo-compare-reviewed"></div>
-        <p class="muted">At most $0.25 total, up to 5 questions and 2 answers per question. Each answer is limited in length. Literal checks do not prove correctness or business improvement. No instructions will be published.</p>
+        <p class="muted">At most $0.05 a question, up to 20 questions and 2 answers per question. Each answer is limited in length. Literal checks do not prove correctness or business improvement. No instructions will be published here: when every proposed answer passes on every saved check, Agent Factory can publish these exact instructions.</p>
         <div class="wo-row"><button type="button" class="btn" id="wo-compare-start">Start comparison</button>
           <button type="button" class="btn btn--ghost" id="wo-compare-edit">Change proposal</button></div>
       </section>

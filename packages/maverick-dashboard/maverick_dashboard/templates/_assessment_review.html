@@ -286,7 +286,31 @@
       let selected = choices.find(function (choice) { return choice.key === selectedQuestion; }) || choices.find(function (choice) { return !choice.saved.answer; }) || choices[0];
       const memoryContext = document.querySelector?.('meta[name="lightwork-search-context"]')?.content || '';
       const memoryHeaders = memoryContext ? {'X-Lightwork-Search-Context': memoryContext} : {};
-      const memory = el('div'), memoryButton = el('button', 'btn', 'Find precedent answers');
+      const memory = el('div'), memoryButton = el('button', 'btn', 'Find precedent answers'), restore = el('div');
+      // AI-7: an answer the AI suggested and a person later changed can go
+      // back to the AI's original value, in the draft only, until saved.
+      function aiOriginal(choice) {
+        if (!choice || choice.followup || (choice.saved && choice.saved.ai_metadata)) return null;
+        const items = (rec.answer_history || []).filter(function (item) {
+          return item.question_id === choice.id && item.previous_answer && item.previous_answer.ai_metadata;
+        });
+        return items.length ? items[items.length - 1].previous_answer : null;
+      }
+      function renderRestore() {
+        restore.textContent = '';
+        const original = aiOriginal(selected);
+        if (!original) return;
+        restore.appendChild(el('p', 'muted', 'Suggested by AI before a person changed it: ' +
+          (ANSWER_LABEL[original.answer] || original.answer) + (original.note ? ' (' + original.note + ')' : '') + '.'));
+        const back = el('button', 'btn btn--ghost', 'Restore the AI suggestion'); back.type = 'button';
+        back.addEventListener('click', async function () {
+          if (answerBusy) return;
+          if (answerDirty && !(await mvConfirm('Replace this unsaved answer with the AI suggestion?', {okText: 'Restore the AI suggestion'}))) return;
+          answer.value = original.answer; note.value = original.note || ''; answerDirty = true;
+          statusEl.textContent = 'The AI suggestion is back in this answer only. Review it and save when you can confirm it.';
+        });
+        restore.appendChild(back);
+      }
       memoryButton.type = 'button';
       let memorySuggestions = {}, rejectedSuggestions = new Set(), appliedSuggestion = '';
       function sourceUrl(source, exact) {
@@ -372,7 +396,7 @@
         answer.value = choice.saved.answer || ''; note.value = choice.saved.note || '';
         answer.hidden = answerLabel.hidden = !!choice.followup; answer.disabled = !!choice.followup; answer.required = !choice.followup;
         note.required = !!choice.followup; noteLabel.textContent = choice.followup ? 'Your reply' : 'Notes and supporting information (optional)'; answerDirty = false;
-        renderSuggestion();
+        renderSuggestion(); renderRestore();
       }
       picker.addEventListener('change', async function () {
         const next = choices.find(function (choice) { return choice.key === picker.value; });
@@ -385,7 +409,7 @@
       });
       answer.addEventListener('input', function () { answerDirty = true; }); note.addEventListener('input', function () { answerDirty = true; });
       discard.addEventListener('click', function () { if (!answerBusy) hydrate(selected); });
-      form.append(questionLabel, picker, prompt, guidance, memoryButton, memory, answerLabel, answer, noteLabel, note, save, discard);
+      form.append(questionLabel, picker, prompt, guidance, memoryButton, memory, restore, answerLabel, answer, noteLabel, note, save, discard);
       section.appendChild(form); body.appendChild(section); hydrate(selected);
       form.addEventListener('submit', async function (event) {
         event.preventDefault();

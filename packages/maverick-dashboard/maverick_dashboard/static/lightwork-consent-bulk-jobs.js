@@ -1106,7 +1106,7 @@
       if (pendingAllowance) { CW.open($('cbj-allowance-recovery'),'#cbj-check-allowance');return; }
       await refreshCredit();
       if (!state.credit) return;
-      var answers = await global.mvForm("Add to the allowance", [{ key: "amount", label: "How many more records", type: "select", required: true, default: "10", options: [{ value: "10", label: "10" }, { value: "50", label: "50" }, { value: "100", label: "100" }, { value: "500", label: "500" }] }], { okText: "Continue" });
+      var answers = await global.mvForm("Add to the allowance", [{ key: "amount", label: "How many more records", type: "select", required: true, default: "10", options: [{ value: "10", label: "10" }, { value: "50", label: "50" }, { value: "100", label: "100" }, { value: "500", label: "500" }] }], { okText: "Review the larger allowance" });
       if (!answers) return;
       if (!(await CW.confirm("Allow " + answers.amount + " more consent records to be processed in this workspace? No job runs and no payment is made.", "Add"))) return;
       disableControls();

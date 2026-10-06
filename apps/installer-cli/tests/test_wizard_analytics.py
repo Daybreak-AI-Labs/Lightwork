@@ -102,3 +102,32 @@ def test_usability_survey_yes_writes_the_knob_and_the_kernel_reads_it(tmp_path, 
         assert usability_survey.enabled() is True
     finally:
         config.reset_config_cache()
+
+
+def test_usage_measures_question_defaults_to_no_and_yes_writes_the_knob(tmp_path, monkeypatch):
+    """Rule-6 loop for [analytics] usage_measures (ONB-1 / AI-13 research measures)."""
+    from maverick_installer import wizard
+    captured = {}
+
+    def fake_confirm(message, default=True):
+        captured["default"] = default
+        return default
+
+    monkeypatch.setattr(wizard, "_q_confirm", fake_confirm)
+    assert wizard.pick_usage_measures() == {} and captured["default"] is False
+    monkeypatch.setattr(wizard, "_q_confirm", lambda *a, **kw: True)
+    answer = wizard.pick_usage_measures()
+    assert answer == {"usage_measures": True}
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.delenv("MAVERICK_CONFIG", raising=False)
+    cfg_dir = tmp_path / ".maverick"
+    cfg_dir.mkdir(parents=True, exist_ok=True)
+    cfg = _write(cfg_dir, monkeypatch, answer)
+    assert "usage_measures = true" in cfg
+    monkeypatch.setenv("MAVERICK_CONFIG", str(cfg_dir / "config.toml"))
+    from maverick import config, usage_measures
+    config.reset_config_cache()
+    try:
+        assert usage_measures.enabled() is True
+    finally:
+        config.reset_config_cache()

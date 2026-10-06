@@ -806,6 +806,7 @@ templates.env.globals.setdefault("help_topic", None)
 templates.env.globals.setdefault("support_status_page_url", "")
 templates.env.globals.setdefault("help_menu_text", False)
 templates.env.globals.setdefault("service_status", None)
+templates.env.globals.setdefault("service_notices", [])
 # Requestless renders cannot prove authority; the request processor supplies
 # permitted destinations, including full navigation in verified local mode.
 templates.env.globals.setdefault("nav_groups", [])
@@ -1616,12 +1617,24 @@ from .usability_survey_api import survey_context as _usability_survey_context  #
 app.include_router(approval_waits_router)
 app.include_router(usability_survey_router)
 templates.context_processors.append(_usability_survey_context)
+from . import usage_measures_api as _usage_measures_api  # noqa: E402
+
+# ONB-1 / AI-13 research measures: off unless [analytics] usage_measures.
+app.include_router(_usage_measures_api.router)
+templates.context_processors.append(_usage_measures_api.context)
 app.include_router(conversation_organization_router)
 from .first_outcome_api import router as first_outcome_router  # noqa: E402
 from .in_app_routes import router as in_app_router  # noqa: E402
 
 app.include_router(in_app_router)
 app.include_router(first_outcome_router)
+from . import practice_mode  # noqa: E402
+
+# ONB-4: a person's practice session runs in the separate practice workspace,
+# with a marker on every screen and live changes refused until Back to live.
+app.include_router(practice_mode.router)
+app.middleware("http")(practice_mode.middleware)
+templates.context_processors.append(practice_mode.context)
 from .billing_invoice_api import router as billing_invoice_router  # noqa: E402
 from .channel_check_api import router as channel_check_router  # noqa: E402
 from .dsar_export_handoff_api import router as dsar_export_handoff_router  # noqa: E402
@@ -3442,12 +3455,19 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
               reference, occurred_at, request.method, route,
               exc_info=(type(exc), exc, exc.__traceback__))
     headers = {"Cache-Control": "private, no-store", "X-Lightwork-Failure-Reference": reference}
+    from maverick.service_status import READ_ONLY_REFUSAL, is_read_only_error
+
+    # CTL-5: a write refused by a read-only database says what broke, that
+    # saved work is safe and what to do, never the database error itself.
+    read_only = is_read_only_error(exc)
+    status = 503 if read_only else 500
     if _wants_html(request):
         try:
             return templates.TemplateResponse(
                 request, "500.html", {"failure_reference": reference, "failure_time": occurred_at,
-                                      "uncertain_mutation": request.method not in {"GET", "HEAD"}},
-                status_code=500, headers=headers,
+                                      "uncertain_mutation": request.method not in {"GET", "HEAD"},
+                                      "read_only_error": read_only},
+                status_code=status, headers=headers,
             )
         except Exception:
             # Deliberately independent of the normal layout and its data reads.
@@ -3458,8 +3478,10 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
                 f'<a href="/help?failure={reference}">Open Help</a></html>',
                 status_code=500, headers=headers,
             )
-    return JSONResponse({"detail": "The request could not be completed. Check its current state before retrying a change.",
-                         "failure_reference": reference, "occurred_at": occurred_at}, status_code=500, headers=headers)
+    detail = READ_ONLY_REFUSAL if read_only else (
+        "The request could not be completed. Check its current state before retrying a change.")
+    return JSONResponse({"detail": detail, "failure_reference": reference, "occurred_at": occurred_at},
+                        status_code=status, headers=headers)
 
 
 @app.middleware("http")
@@ -4754,8 +4776,17 @@ def spend_page(request: Request) -> HTMLResponse:
         "spend.html",
         {"episodes": episodes, "total": w.total_spend(owner=value_view["owner"]),
          "goal_titles": goal_titles, "csv_months": months, "episode_provenance": episode_provenance,
-         "value_view": value_view, "spend_recorded_at": _newest_cost_at(w, value_view["owner"])},
+         "value_view": value_view, "spend_recorded_at": _newest_cost_at(w, value_view["owner"]),
+         "practice_cost": _practice_cost_text(value_view["owner"], when="across all time")},
     )
+
+
+def _practice_cost_text(owner, *, when: str, since: float | None = None) -> str:
+    """The labelled practice line for a cost view (maverick.practice_costs), or ""."""
+    from maverick import practice_costs
+
+    line = practice_costs.summary(owner, since=since)
+    return practice_costs.label(line, when) if line else ""
 
 
 # One assessment engine, one workspace chassis per department: each
@@ -6769,6 +6800,8 @@ def savings_page(request: Request, days: int = 90) -> HTMLResponse:
             "can_manage_assumptions": has_global_permission(request, "operate"),
             "value_view": value_view,
             "assumptions_confirmed": assumptions_confirmed(),
+            "practice_cost": _practice_cost_text(value_view["owner"], when=f"in the last {days} days, not part of these savings",
+                                                 since=time.time() - days * 86400),
         },
     )
 
@@ -6864,6 +6897,16 @@ def billing_page(request: Request, format: str = "", period: str = "", receipt_o
                                  episode.input_tokens, episode.output_tokens, episode.tool_calls,
                                  *export_fields(episode)])
                 yield buf.getvalue()
+            # Practice runs cost real provider money: one labelled row, apart from the real runs.
+            from maverick import practice_costs
+
+            extra = practice_costs.export_row(practice_costs.summary(owner, since=start.timestamp(),
+                                                                     until=end.timestamp()), 9 + len(EXPORT_HEADERS))
+            if extra:
+                buf.seek(0)
+                buf.truncate(0)
+                writer.writerow(extra)
+                yield buf.getvalue()
         safe_tenant = "".join(c for c in tenant if c.isalnum() or c in "-_")[:64] or "workspace"
         return StreamingResponse(rows(), media_type="text/csv",
             headers={"Content-Disposition": f'attachment; filename="statement-{safe_tenant}-{sel}.csv"',
@@ -6879,8 +6922,11 @@ def billing_page(request: Request, format: str = "", period: str = "", receipt_o
     if previous and previous["cost"] > 0 and not previous["unknown_cost_runs"] and not current["unknown_cost_runs"]:
         delta_pct = round((current["cost"] - previous["cost"]) / previous["cost"] * 100, 1)
     series = [months[k] for k in sorted(months, reverse=True)][:12]
+    from maverick import practice_costs
     from maverick.quotas import UsageLedger, UsageLedgerError
 
+    _practice = practice_costs.summary(owner, since=practice_costs.month_bounds()[0])
+    practice_cost = practice_costs.label(_practice, "this month") if _practice else ""
     receipt_error = None
     receipts = {"items": [], "total": 0, "offset": max(0, receipt_offset), "limit": 50, "has_more": False}
     try:
@@ -6900,6 +6946,7 @@ def billing_page(request: Request, format: str = "", period: str = "", receipt_o
             "series": series,
             "usage_receipts": receipts,
             "usage_receipt_error": receipt_error,
+            "practice_cost": practice_cost,
             "spend_recorded_at": newest_cost_at,
             "invoice_admin": has_global_permission(request, "admin"),
             "invoice_workspaces": _invoice_workspaces(tenant, tenant_label),
@@ -9319,6 +9366,10 @@ def _approval_source(provenance: str | None) -> str | None:
         return "Agent wants to change its own instructions"
     if provenance == "assessment":
         return "Assessment review"
+    if provenance == "plan":
+        # [autonomy] confirm_plan: the task's first outside action waits for
+        # a person to check the whole plan (maverick.plan_review).
+        return "Plan to check before the task acts"
     if provenance == "goal_risk":
         # A task held before it starts because its wording looks risky.
         return "Task waiting to start"
@@ -10845,6 +10896,7 @@ def chat_page(request: Request, compose: str = "") -> HTMLResponse:
             # one limit that is true in code.
             "chat_examples": _chat_examples(request),
             "chat_limits": _CHAT_LIMITS,
+            "chat_capability": _CHAT_CAPABILITY,
             "compose_form": compose_form,
             "compose_form_available": page_visible(request, "/goal-builder"),
             "channels": _goal_builder_channels() if compose_form else [],
@@ -10867,6 +10919,7 @@ def _chat_examples(request: Request) -> dict:
         return {"department": None, "examples": [], "sample": None}
 
 
+from .chat_examples import CAPABILITY as _CHAT_CAPABILITY  # noqa: E402
 from .chat_examples import LIMITS as _CHAT_LIMITS  # noqa: E402
 
 
@@ -13306,6 +13359,14 @@ def cost_csv(request: Request, month: str | None = None) -> StreamingResponse:
             yield buf.getvalue()
             buf.seek(0)
             buf.truncate(0)
+        # Practice runs cost real provider money: one labelled row, apart from the real runs.
+        from maverick import practice_costs
+
+        extra = practice_costs.export_row(practice_costs.summary(owner, since=start_ts, until=end_ts),
+                                          9 + len(EXPORT_HEADERS))
+        if extra:
+            writer.writerow(extra)
+            yield buf.getvalue()
 
     fname = f"maverick-cost-{month}.csv" if month else "maverick-cost-all.csv"
     return StreamingResponse(

@@ -144,7 +144,7 @@
   function badge(text, kind) { return el('span', 'badge ' + (kind || 'info'), text); }
 
   function confirm(message, okText) {
-    return global.mvConfirm ? global.mvConfirm(message, { okText: okText || 'Continue' }) : Promise.resolve(false);
+    return global.mvConfirm ? global.mvConfirm(message, { okText: okText || 'Save this change' }) : Promise.resolve(false);
   }
 
   function form(title, fields, okText) {

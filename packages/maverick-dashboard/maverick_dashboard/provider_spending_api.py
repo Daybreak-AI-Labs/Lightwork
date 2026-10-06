@@ -6,7 +6,7 @@ import json
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import FileResponse, Response
-from maverick import backup, provider_cost_cap, workspace_recovery
+from maverick import backup, practice_costs, provider_cost_cap, workspace_recovery
 from maverick import provider_spending_recovery as spending
 from maverick.governed_operations import digest
 from maverick.privacy_ops import RecordConflict
@@ -101,6 +101,8 @@ async def page(request: Request):
         # A shared database ledger has no readable time: say nothing rather than guess.
         "spend_freshness_known": not shared,
         "spend_recorded_at": recorded_at,
+        "practice_cost": ((await run_in_threadpool(practice_costs.provider_share, provider_cost_cap.period_key()))
+                          or {}).get("text", ""),
     })
     response.headers["Cache-Control"] = "private, no-store"
     return response
@@ -119,7 +121,11 @@ async def status(request: Request, period: str | None = Query(default=None, patt
                  provider: str | None = Query(default=None, max_length=128),
                  offset: int = Query(default=0, ge=0, le=100000), limit: int = Query(default=100, ge=1, le=100)):
     _, context = _admit(request)
-    return _json({**await _call(spending.status, period, provider=provider, offset=offset, limit=limit), "context": context,
+    report = await _call(spending.status, period, provider=provider, offset=offset, limit=limit)
+    # Practice calls are real provider charges already in these totals; say how much.
+    report["practice"] = await run_in_threadpool(practice_costs.provider_share, report.get("period") or period
+                                                 or provider_cost_cap.period_key())
+    return _json({**report, "context": context,
                   "isolated": isolated(request.app),
                   "expected_tenant": getattr(request.state, "workspace_expected_tenant", "")})
 

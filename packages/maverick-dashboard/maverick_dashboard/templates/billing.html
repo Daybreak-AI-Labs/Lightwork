@@ -26,6 +26,7 @@
   <div class="section-head"><h2>This month — {{ month(current.period) }}</h2></div>
   <a class="btn btn--primary" href="/billing?format=csv&period={{ current.period }}" download>Download this month (spreadsheet)</a>
 </div>
+{% include "_practice_cost.html" %}
 <div class="grid">
   <div class="stat">
     <div class="num" title="${{ '%.6f'|format(current.cost) }}">{{ current.cost | money }}</div>

@@ -21,6 +21,7 @@ def test_one_paused_service_with_a_healthy_backup_reads_reduced_not_down():
     assert "still working with OpenAI" in status["title"]
     assert "backup model" in status["tasks"] and "Failed" in status["tasks"]
     assert status["checks"] == [{"provider": "Anthropic", "at": 1030.0}]
+    assert status["alternative"] == "Meanwhile, start new work as usual: it uses OpenAI."
 
 
 def test_every_service_in_use_paused_reads_down_and_says_what_happens_to_tasks():
@@ -31,6 +32,8 @@ def test_every_service_in_use_paused_reads_down_and_says_what_happens_to_tasks()
     assert status["tasks"] == service_status.TASKS_DOWN
     assert "kept" in status["tasks"] and "run them again" in status["tasks"]
     assert [check["at"] for check in status["checks"]] == [1030.0, 1060.0]
+    # CTL-5: and another way to carry on meanwhile.
+    assert status["alternative"] == service_status.ALTERNATIVE_DOWN and "Settings > AI models" in status["alternative"]
 
 
 def test_a_service_being_tested_again_says_so_instead_of_a_time():

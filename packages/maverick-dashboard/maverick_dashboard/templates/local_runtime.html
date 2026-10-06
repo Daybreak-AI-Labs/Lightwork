@@ -1,10 +1,10 @@
 {% extends "base.html" %}
 {% from "_hero.html" import hero %}
-{% block title %}Local AI · Lightwork{% endblock %}
+{% block title %}AI on this computer · Lightwork{% endblock %}
 {% block head_extra %}<link rel="stylesheet" href="{{ asset('lightwork-local-runtime.css') }}">{% endblock %}
 {% block content %}
 <div class="la-shell" id="la-root" data-draft-recovery="off">
-  {% call hero('Settings', 'Local AI', lede='Prepare and control an installed model server on this computer. Your model stays here; your choice of AI service for tasks is managed separately.') %}
+  {% call hero('Settings', 'AI on this computer', lede='Prepare and control an installed model server on this computer. Your model stays here; your choice of AI service for tasks is managed separately.') %}
     <div class="hero-statebox">
       <div class="hero-statebox__label">Managed server</div>
       <div class="hero-statebox__row"><strong id="la-state">Checking current status</strong></div>

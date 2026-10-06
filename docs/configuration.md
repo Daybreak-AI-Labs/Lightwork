@@ -917,9 +917,22 @@ client_token = ""             # MAVERICK_PROXY_CLIENT_TOKEN (sealed when set on 
 # dollars = 2.0                # review checkpoint
 # tool_calls = 25
 
+[agent_factory]
+jd_hiring = true              # Agent Factory: draft or match agents from a job description
+require_passing_tests = true  # changed instructions publish only after every saved test passes (or with a recorded reason)
+
+[autonomy]
+confirm_plan = false          # show the plan in Approvals and wait before a task's first action that reaches outside Lightwork
+
+[practice]
+enable = true                 # offer practice mode: a separate practice workspace where nothing is sent, paid or changed
+daily_spend_cap = 1.0         # dollars per person per day for AI in practice: real provider cost, counted apart
+                              # from real spending limits and never above one that applies
+
 [analytics]
 task_questions = true         # Insights page questions (need the dashboard's "duckdb" extra)
 usability_survey = false      # optional ease-of-use survey (SUS + one question after top tasks); answers stay local
+usage_measures = false        # optional name-free counts: first result in the first session, AI suggestions used or dismissed
 
 [env_hunt.enrichment_sources.intel_feed]  # a lookup service your server registered
 enable = true

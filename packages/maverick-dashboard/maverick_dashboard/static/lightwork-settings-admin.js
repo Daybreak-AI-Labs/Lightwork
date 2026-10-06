@@ -27,7 +27,7 @@
         return;
       }
       event.preventDefault();
-      window.mvConfirm(form.dataset.confirm, {okText: form.dataset.confirmOk || 'Confirm'}).then(function (ok) {
+      window.mvConfirm(form.dataset.confirm, {okText: form.dataset.confirmOk || 'Save this change'}).then(function (ok) {
         if (!ok) return;
         form.dataset.confirmed = 'true';
         if (form.requestSubmit) form.requestSubmit(); else form.submit();

@@ -82,6 +82,9 @@
   .af-card input:focus, .af-card textarea:focus, .af-card select:focus{
     outline: none; border-color: var(--brand-border); box-shadow: 0 0 0 3px var(--brand-subtle); }
   #f-persona{ min-height: 7rem; line-height: 1.5; resize: vertical; }
+  .agent-tests { margin: var(--space-3) 0; padding: var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-md); }
+  .agent-tests h3 { margin-top: 0; }
+  .agent-tests__actions { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
 
   /* tool chips */
   .chips{ display: flex; flex-wrap: wrap; gap: var(--space-2); }
@@ -382,7 +385,9 @@
       {% endif %}
       {% if selected or creating %}
       <div id="agent-msg" role="status" aria-live="polite" class="muted" style="min-height: 1.2rem;"></div>
-      <form id="agent-form" data-name="{{ selected.name if selected else '' }}" data-generation="{{ selected.generation if selected else 'new' }}" data-creating="{{ '1' if creating else '' }}" data-has-base="{{ '1' if selected and selected.base_allow_tools is not none else '0' }}" data-base-allow="{{ selected.base_allow_tools | join(' ') if selected and selected.base_allow_tools is not none else '' }}" data-base-risk="{{ selected.base_max_risk or '' if selected else '' }}" data-kind="{{ kind_word }}">
+      <form id="agent-form" data-name="{{ selected.name if selected else '' }}" data-generation="{{ selected.generation if selected else 'new' }}" data-creating="{{ '1' if creating else '' }}" data-has-base="{{ '1' if selected and selected.base_allow_tools is not none else '0' }}" data-base-allow="{{ selected.base_allow_tools | join(' ') if selected and selected.base_allow_tools is not none else '' }}" data-base-risk="{{ selected.base_max_risk or '' if selected else '' }}" data-kind="{{ kind_word }}" data-mv-validate>
+        {# CTL-3: the shared form-field pattern -- each problem next to its field and in a summary that takes focus. #}
+        {% from "_form_field.html" import error_summary %}{{ error_summary('agent-form-errors') }}
         {% if creating %}
         <div class="fld">
           <label for="f-new-id">Short name <span class="sub">— filled in from the name below; change it if you like</span></label>
@@ -391,11 +396,13 @@
         {% endif %}
         <div class="fld">
           <label for="f-description">Name <span class="sub">— a short summary of the role</span></label>
-          <input id="f-description" name="description" type="text" value="{{ selected.description if selected else '' }}">
+          <input id="f-description" name="description" type="text" value="{{ selected.description if selected else '' }}" required
+                 data-error-required="Give the {{ kind_word }} a name, for example Onboarding assistant.">
         </div>
         <div class="fld">
           <label for="f-persona">What should it do? <span class="sub">— plain English</span></label>
-          <textarea id="f-persona" name="persona" rows="6" placeholder="Describe the job in plain English — what it handles, how it should behave, what 'done' looks like.">{{ selected.persona if selected else '' }}</textarea>
+          <textarea id="f-persona" name="persona" rows="6" required data-error-required="Describe what the {{ kind_word }} should do, in a sentence or two."
+                    placeholder="Describe the job in plain English — what it handles, how it should behave, what 'done' looks like.">{{ selected.persona if selected else '' }}</textarea>
           <p class="sub" style="margin: var(--space-1) 0 0; font-size: var(--text-sm);">The clearer the brief, the better the {{ kind_word }} — say what it handles, and what a finished result looks like.</p>
         </div>
 
@@ -499,6 +506,22 @@
         </details>
 
         {% if editable %}
+        {% if selected and not creating %}
+        {# AI-14: the saved test set and its latest result, before publishing.
+           Changed instructions need a passing run of every saved test on
+           exactly these words, or a reason that goes to the activity record. #}
+        <section class="agent-tests" id="agent-tests" aria-labelledby="agent-tests-title">
+          <h3 id="agent-tests-title">Tests before publishing</h3>
+          <p id="agent-tests-status" role="status" aria-live="polite">Reading the saved test results…</p>
+          {% if can_open_page is defined and can_open_page('/workforce') %}
+          <p class="agent-tests__actions">
+            <a class="btn btn--ghost" id="agent-tests-run" href="/workforce?specialist={{ selected.name | urlencode }}&amp;compare=1#wo-compare">Test these instructions</a>
+            <a id="agent-tests-open" href="/workforce?specialist={{ selected.name | urlencode }}#wo-my-tests">Open the saved tests</a>
+          </p>
+          {% endif %}
+          <p id="agent-tests-restore" hidden><button type="button" class="btn btn--ghost" id="agent-tests-restore-btn">Restore the instructions you were testing</button></p>
+        </section>
+        {% endif %}
         <div class="af-actions">
           <button type="button" class="btn btn--primary" id="btn-save">{{ 'Create custom agent' if creating else ('Save specialist' if selected_kind == 'specialist' else 'Save agent') }}</button>
           <button type="button" class="btn" id="btn-validate">Check settings</button>
@@ -1238,7 +1261,10 @@
         }
         return { status: 200, data };
       }
+      // The shared pattern finds missing answers first (CTL-3); nothing typed is cleared.
+      function formReady() { return !window.mvFieldErrors || window.mvFieldErrors.validate(form); }
       document.getElementById('btn-validate').addEventListener('click', async () => {
+        if (!formReady()) return;
         try {
           fieldMessage('', '');
           const name = targetName();
@@ -1256,18 +1282,86 @@
           fieldMessage(error && error.field, error && error.message);
         }
       });
+      // ---- AI-14: tests before publishing ----
+      const testsStatus = document.getElementById('agent-tests-status');
+      const proposedKey = (n) => 'lightwork-proposed-instructions:' + n;
+      function testsLine(v) {
+        let text = v.message;
+        if (v.latest && v.latest.started_at) {
+          const when = window.mvTimeRelative ? window.mvTimeRelative(v.latest.started_at) : '';
+          text += ' Last run on these instructions: ' + v.latest.passed + ' of ' + v.latest.total + ' passed' + (when ? ', ' + when : '') + '.';
+        }
+        if (v.blocked) text += ' Publishing these changes needs a passing run, or a reason that is written to the activity record.';
+        else if (!v.gate_on && v.instructions_changed) text += ' This workspace does not require passing tests before publishing.';
+        return text;
+      }
+      async function publishCheck() {
+        return window.mvFetchJSON(`/api/v1/agents/${targetName()}/publish-check`, { method: 'POST', body: payload() }, 'read the saved test results');
+      }
+      let testsTimer = null;
+      async function refreshTests() {
+        if (!testsStatus) return;
+        try { testsStatus.textContent = testsLine(await publishCheck()); }
+        catch (failure) { testsStatus.textContent = window.mvErrorText ? window.mvErrorText(failure, 'read the saved test results') : 'The saved test results could not be read.'; }
+      }
+      if (testsStatus && !creating) {
+        // The shared fetch helper loads after this page script.
+        if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', refreshTests);
+        else refreshTests();
+        document.getElementById('f-persona').addEventListener('input', () => {
+          clearTimeout(testsTimer); testsTimer = setTimeout(refreshTests, 600);
+        });
+        const runLink = document.getElementById('agent-tests-run');
+        if (runLink) runLink.addEventListener('click', () => {
+          // Hand the unsaved instructions to the comparison in Workforce.
+          try { window.sessionStorage.setItem(proposedKey(targetName()), document.getElementById('f-persona').value); } catch (_) { /* no storage: the comparison starts empty */ }
+        });
+        let pending = null;
+        try { pending = window.sessionStorage.getItem(proposedKey(targetName())); } catch (_) { pending = null; }
+        const restore = document.getElementById('agent-tests-restore');
+        if (pending && restore && pending.trim() !== document.getElementById('f-persona').value.trim()) {
+          restore.hidden = false;
+          document.getElementById('agent-tests-restore-btn').addEventListener('click', () => {
+            document.getElementById('f-persona').value = pending;
+            restore.hidden = true;
+            refreshTests();
+            document.getElementById('f-persona').focus();
+          });
+        }
+      }
+      // Changed instructions without a passing run: test them, or publish with a reason.
+      async function publishDecision() {
+        if (creating) return { ok: true, extra: {} };
+        const verdict = await publishCheck();
+        if (!verdict.blocked) return { ok: true, extra: {}, line: verdict.tests ? ' ' + testsLine(verdict) : '' };
+        const answers = window.mvForm ? await window.mvForm('Publish without a passing test run?', [
+          { key: 'reason', label: 'Why publish these instructions before every saved test passes?', type: 'text', required: true,
+            help: testsLine(verdict) + ' To test them first, cancel and choose Test these instructions.' },
+        ], { okText: 'Publish without passing tests' }) : null;
+        if (!answers || !String(answers.reason || '').trim()) {
+          show('Nothing was published. Test these instructions first, or give a reason to publish without passing tests.', false);
+          const link = document.getElementById('agent-tests-run');
+          if (link) link.focus();
+          return { ok: false };
+        }
+        return { ok: true, extra: { publish_without_passing_tests: true, override_reason: String(answers.reason).trim() }, skipConfirm: true };
+      }
       const saveBtn = document.getElementById('btn-save');
       saveBtn.addEventListener('click', async () => {
+        if (!formReady()) return;
         const name = targetName();
         if (!name) { show('Give your ' + kindWord() + ' a name first.', false); return; }
         if (!beginMutation(saveBtn)) return;
         try {
           fieldMessage('', '');
-          if (!(await mvConfirm(
-            (creating ? 'Create the agent “' : 'Save your changes to the ' + kindWord() + ' “') + name + '”? Its allowed actions, steps and independence settings take effect for everyone who uses it.',
+          const decision = await publishDecision();
+          if (!decision.ok) return;
+          if (!decision.skipConfirm && !(await mvConfirm(
+            (creating ? 'Create the agent “' : 'Save your changes to the ' + kindWord() + ' “') + name + '”? Its allowed actions, steps and independence settings take effect for everyone who uses it.' + (decision.line || ''),
             { okText: creating ? 'Create agent' : (kindWord() === 'specialist' ? 'Save specialist' : 'Save agent') }
           ))) return;
-          await call('POST', `/api/v1/agents/${name}/override`, payload());
+          await call('POST', `/api/v1/agents/${name}/override`, { ...payload(), ...decision.extra });
+          try { window.sessionStorage.removeItem(proposedKey(name)); } catch (_) { /* nothing kept */ }
           show(creating ? 'Custom agent created.' : 'Deployed.', true);
           window.location.search = '?name=' + encodeURIComponent(name);
         } catch (error) {

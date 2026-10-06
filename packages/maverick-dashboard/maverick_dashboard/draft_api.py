@@ -37,6 +37,10 @@ def context_for(request: Request) -> str:
 
         mode = "dashboard-token" if dashboard_token() else "local"
     identity = [current_tenant_id_strict(), mode, principal]
+    from maverick import practice
+
+    if practice.active():  # practice drafts, inbox items and labels stay in practice
+        identity.append("practice")
     return hashlib.sha256(json.dumps(identity, separators=(",", ":")).encode()).hexdigest()
 
 

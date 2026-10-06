@@ -64,7 +64,7 @@
             return {key: field.name, label: field.label, type: 'select', required: field.required,
               options: options, help: field.description || 'Choose where this action gets its value.'};
           });
-          var bindings = await window.mvForm('Choose the action inputs', choices, {okText: 'Continue'});
+          var bindings = await window.mvForm('Choose the action inputs', choices, {okText: 'Use these inputs'});
           if (bindings === null) return null;
           var fixedFields = [];
           fields.forEach(function (field) {

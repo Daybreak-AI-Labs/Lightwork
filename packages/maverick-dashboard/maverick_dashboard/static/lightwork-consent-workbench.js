@@ -215,7 +215,7 @@
   }
 
   function confirm(message, okText) {
-    if (typeof root.mvConfirm === 'function') return root.mvConfirm(message, { okText: okText || 'Confirm' });
+    if (typeof root.mvConfirm === 'function') return root.mvConfirm(message, { okText: okText || 'Save this change' });
     return Promise.resolve(false);
   }
 

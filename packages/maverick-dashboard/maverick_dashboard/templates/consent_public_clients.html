@@ -206,7 +206,7 @@
       } catch (error) { $("pcc-profiles").replaceChildren(); CW.fail(status, error, "load people"); }
     }
     async function revokeProfile(x, button) {
-      var answer = await window.mvForm("Revoke access for " + x.profile_id, [{key: "reason", label: "Why", type: "select", options: REASONS, required: true}], {okText: "Continue"});
+      var answer = await window.mvForm("Revoke access for " + x.profile_id, [{key: "reason", label: "Why", type: "select", options: REASONS, required: true}], {okText: "Review revocation"});
       if (!answer) return;
       CW.busy(button, async function () {
         if (!(await CW.confirm("Revoke " + x.profile_id + "’s access? Their saved choices are kept, but they will need to make them again on that website or app.", "Revoke access"))) return;

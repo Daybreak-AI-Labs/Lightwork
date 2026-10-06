@@ -72,7 +72,7 @@
       <span class="bd-live"><span class="dot" aria-hidden="true"></span>Live
         <span class="bd-stamp" id="bd-stamp" role="status" aria-live="off">loading…</span></span>
       {% from "_tabs.html" import panel_tabs %}
-      {{ panel_tabs('Time range', [('30', '30d'), ('90', '90d'), ('180', '180d'), ('365', '1y')], '90', id='bd-range', data='days', controls=false, activation='manual') }}
+      {{ panel_tabs('Time range', [('30', '30d'), ('90', '90d'), ('180', '180d'), ('365', '1y')], '90', id='bd-range', data='days', controls=false, activation='manual', hash='range-') }}
     </div>
 
     {% from "_board_kpis.html" import kpi_row %}

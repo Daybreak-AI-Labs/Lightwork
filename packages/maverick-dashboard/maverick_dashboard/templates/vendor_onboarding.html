@@ -72,10 +72,15 @@
     <p>Connect Jira (and optionally Google Drive) in <a href="/connections">Connections</a>, then choose them here.</p>
     <details><summary>Backups</summary><p>Lightwork's <a href="/workspace/recovery">workspace recovery</a> restores these requests, but not changes already made in Drive or Jira.</p></details>
     <p id="vs-owner"></p>
-    <form id="vs-form">
-      <label for="vs-resource-owner">Vendor review owner</label><select id="vs-resource-owner" class="select" required disabled aria-describedby="vs-owner-help"></select>
+    {% from "_form_field.html" import error_summary %}
+    <form id="vs-form" data-mv-validate>
+      {# CTL-3: the shared form-field pattern -- each problem next to its field and in a summary that takes focus. #}
+      {{ error_summary('vs-form-errors') }}
+      <label for="vs-resource-owner">Vendor review owner</label><select id="vs-resource-owner" class="select" required disabled aria-describedby="vs-owner-help"
+        data-error-required="Choose who owns vendor reviews in this workspace."></select>
       <p id="vs-owner-help" class="muted">The person responsible for vendor reviews in this workspace. Add people in <a href="/users">Users</a>.</p>
-      <label for="vs-ticket">Jira connection</label><select id="vs-ticket" class="select" required disabled></select>
+      <label for="vs-ticket">Jira connection</label><select id="vs-ticket" class="select" required disabled
+        data-error-required="Choose the Jira connection that vendor tickets are created in."></select>
       <label for="vs-document">Google Drive connection (optional for uploaded evidence)</label><select id="vs-document" class="select" disabled></select>
       <label class="vo-upload-confirm-label"><input type="checkbox" id="vs-confirm" disabled> <span>I reviewed the owner, connection choices and this setup change.</span></label>
       <div class="vo-actions"><button id="vs-save" class="btn btn--primary" type="submit" disabled>Save workspace setup</button><button id="vs-enable" class="btn" type="button" disabled>Turn on vendor onboarding</button><button id="vs-refresh" class="btn btn--ghost" type="button">Refresh setup</button></div>
@@ -115,18 +120,23 @@
       </section>
       <section class="vo-card" aria-labelledby="vo-intake-title">
         <h2 id="vo-intake-title">New request</h2>
-        <form id="vo-intake">
-          <label for="vo-vendor">Vendor name</label><input id="vo-vendor" class="input" required maxlength="200">
+        <form id="vo-intake" data-mv-validate>
+          {{ error_summary('vo-intake-errors') }}
+          <label for="vo-vendor">Vendor name</label><input id="vo-vendor" class="input" required maxlength="200"
+            data-error-required="Enter the vendor's name, for example Acme Analytics.">
           <label for="vo-document-search">Find a Drive document by name</label><input id="vo-document-search" class="input" maxlength="200">
           <label for="vo-document-target">Add search results to</label><select id="vo-document-target" class="select"><option value="new">New request</option><option value="selected">Selected request</option></select>
           <button id="vo-search-documents" class="btn" type="button">Search Drive</button>
           <div id="vo-document-results" aria-live="polite"></div>
           <div id="vo-new-documents" aria-live="polite">No Drive documents selected for the new request. Choose documents above to attach them.</div>
           <div hidden><label for="vo-document">Chosen Drive documents</label><textarea id="vo-document" maxlength="2056" rows="3"></textarea></div>
-          <label for="vo-project">Jira project (short name shown in ticket numbers, like VEND)</label><input id="vo-project" class="input" required maxlength="32">
-          <label for="vo-purpose">What you plan to use this vendor for</label><textarea id="vo-purpose" class="input" required maxlength="2000"></textarea>
+          <label for="vo-project">Jira project (short name shown in ticket numbers, like VEND)</label><input id="vo-project" class="input" required maxlength="32"
+            data-error-required="Enter the Jira project's short name, for example VEND.">
+          <label for="vo-purpose">What you plan to use this vendor for</label><textarea id="vo-purpose" class="input" required maxlength="2000"
+            data-error-required="Say what you plan to use this vendor for, in a sentence or two."></textarea>
           <label for="vo-freshness">How long evidence stays valid</label><select id="vo-freshness" class="select" required><option value="182">6 months</option><option value="365" selected>1 year</option><option value="730">2 years</option></select>
-          <label for="vo-due">Needed by</label><input id="vo-due" class="input" type="date" required>
+          <label for="vo-due">Needed by</label><input id="vo-due" class="input" type="date" required
+            data-error-required="Choose the date you need the review by.">
           <div hidden><label for="vo-renewal">Earlier request being renewed</label><input id="vo-renewal" maxlength="128"></div>
           <p id="vo-renewal-note" class="muted" hidden></p>
           <button class="btn btn--primary" type="submit">Create request</button>

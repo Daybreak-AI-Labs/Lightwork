@@ -249,7 +249,7 @@
     async function revoke(b) {
       var answers = await window.mvForm("Remove " + CW.human(b.binding_id), [{key: "reason", label: "Why remove it?", type: "select", required: true, default: "table-retired", options: [
         {value: "table-retired", label: "The table is no longer used"}, {value: "wrong-table", label: "Connected to the wrong table"},
-        {value: "access-concern", label: "Access or security concern"}, {value: "moving-service", label: "Moving to another service"}, {value: "other", label: "Other"}]}], {okText: "Continue"});
+        {value: "access-concern", label: "Access or security concern"}, {value: "moving-service", label: "Moving to another service"}, {value: "other", label: "Other"}]}], {okText: "Review removal"});
       if (!answers) return;
       if (!(await CW.confirm("Remove the connection " + CW.human(b.binding_id) + " permanently? This cannot be undone. Lightwork will stop applying decisions to this table; to connect it again you create a new connection.", "Remove permanently"))) return;
       try {

@@ -468,9 +468,21 @@
       queryChanged("input");
     });
 
+    // NAV-4: a search has an address (?find=…) that reproduces it, without
+    // adding a Back step; closing the finder removes it again.
+    function rememberQuery(reason) {
+      var history = global.history, loc = global.location;
+      if (!history || !history.replaceState || !loc || typeof global.URL !== "function") return;
+      var url = new global.URL(loc.href);
+      if (reason === "closed" || !input.value) url.searchParams.delete("find");
+      else url.searchParams.set("find", input.value);
+      if (url.href !== loc.href) history.replaceState(history.state, "", url.pathname + url.search + url.hash);
+    }
+
     // Other searches (settings, records) listen for this. Each only searches
     // within the scope that includes it, with the prefix removed.
     function queryChanged(reason) {
+      if (reason !== "opened") rememberQuery(reason);
       if (typeof global.CustomEvent === "function") {
         var query = parsed();
         dialog.dispatchEvent(new global.CustomEvent("lightwork:finder-query", {detail: {
@@ -840,6 +852,16 @@
       },
     };
     dialog.lightworkFinder = controller;
+    // An address with ?find=… opens the finder on that search.
+    try {
+      var shared = global.location && typeof global.URL === "function"
+        ? new global.URL(global.location.href).searchParams.get("find") : null;
+      if (shared) {
+        openFinder(trigger);
+        input.value = shared.slice(0, 200);
+        input.dispatchEvent(new global.Event("input"));
+      }
+    } catch (_) { /* an unreadable address opens nothing */ }
     return controller;
   }
 

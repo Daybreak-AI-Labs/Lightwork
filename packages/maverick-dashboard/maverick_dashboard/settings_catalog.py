@@ -352,6 +352,17 @@ SETTINGS: tuple[Setting, ...] = (
       "Screen agent answers for leaked secrets or harmful content.",
       "toggle", "Safety", True, "maverick.config", weaker=False,
       warning="Answers will be shown without being checked for leaked secrets or harmful content."),
+    S("practice", "enable", "Offer practice mode",
+      "Let people switch to a separate practice workspace to try tasks, specialists and approvals. In "
+      "practice nothing is sent, paid or changed outside practice, and nothing counts as real work. AI "
+      "answers still cost real money, counted apart from spending limits.", "toggle", "Safety", True,
+      "maverick.practice", aliases="practice sandbox try test drive safe mode training demo"),
+    S("practice", "daily_spend_cap", "Practice spending cap per person",
+      "AI answers in practice come from the real AI service and cost real money. That spending is counted "
+      "apart from real spending limits and stops at this amount per person each day (never more than a "
+      "real limit that applies). Each task's own budget still applies.", "number", "Safety", 1.0,
+      "maverick.practice", minimum=0, maximum=1000, unit="dollars per day", weaker="higher",
+      aliases="practice budget practice spending sandbox cost"),
     S("safety", "compartments", "Share blocked threats across a team of agents",
       "When one agent's check blocks a threat, the other agents on the same task are protected from it too.",
       "toggle", "Safety", False, "maverick.config"),
@@ -423,6 +434,12 @@ SETTINGS: tuple[Setting, ...] = (
     S("autonomy", "enable", "Extra checks on uncertain work",
       "When agents disagree or are unsure, double-check the answer and tighten what risky tools may do.",
       "toggle", "Safety", False, "maverick.autonomy", env=("MAVERICK_AUTONOMY_GATE",)),
+    S("autonomy", "confirm_plan", "Show the plan before acting",
+      "Before a task's first action that could reach outside Lightwork (a message, a payment, a change in a "
+      "connected system or a command), show its plan, first action and spending cap in Approvals and wait. "
+      "Approve to carry on, reject to stop before anything runs, or send it back with what to change.",
+      "toggle", "Safety", False, "maverick.autonomy",
+      aliases="plan before acting confirm plan review plan approve plan"),
     S("autonomy", "headless_assume", "Carry on when nobody can answer",
       "When no person is available to answer a question, let the agent make a reasonable assumption instead of waiting.",
       "toggle", "Safety", False, "maverick.autonomy", env=("MAVERICK_AUTONOMOUS",), weaker=True,
@@ -827,6 +844,11 @@ SETTINGS: tuple[Setting, ...] = (
       "server, are reported by the role people choose, never by name, and are never sent anywhere. "
       "Results are on People > Ease-of-use results.",
       "toggle", "Privacy", False, "maverick.usability_survey"),
+    S("analytics", "usage_measures", "Count first results and AI suggestions, without names",
+      "Count whether new people see a finished result of their own task in their first session, and how often "
+      "AI suggestions are shown, used or dismissed. People and suggestions are kept only as one-way codes, and "
+      "nothing is sent anywhere. Results are on People > Ease-of-use results.",
+      "toggle", "Privacy", False, "maverick.usage_measures"),
     S("immune", "twin_record", "Record tool results for replay",
       "Keep sealed copies of every task's tool results so the task can be replayed to test changes.",
       "toggle", "Privacy", False, "maverick.config", weaker=True,

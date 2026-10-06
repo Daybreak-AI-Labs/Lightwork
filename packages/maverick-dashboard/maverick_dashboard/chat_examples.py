@@ -13,8 +13,13 @@ from __future__ import annotations
 # demands a fresh human decision for every command (allow_auto_approve=False,
 # consult_ledger=False), whatever the workspace's approval mode; the test
 # suite pins that. Nothing here claims more than that.
+# AI-1: what it is and can do, how reliable it is, and two limits that are
+# true in code (shell consent; the tool registry and its access list).
+CAPABILITY = ("Lightwork is an AI assistant. It plans and carries out multi-step work with "
+              "Lightwork's specialists, then hands you the result to review.")
 LIMITS = ("Lightwork can make mistakes, so check important facts before you rely on them. "
-          "It never runs a command without a person's approval.")
+          "It never runs a command without a person's approval, and it only reaches the tools "
+          "and connected systems your administrator allows.")
 
 EXAMPLES: dict[str, tuple[str, ...]] = {
     "finance": (
@@ -123,4 +128,4 @@ def examples_for(request) -> dict:
             "examples": picked[:6], "sample": _sample(request, first) if first else None}
 
 
-__all__ = ["EXAMPLES", "GENERAL", "LIMITS", "examples_for"]
+__all__ = ["CAPABILITY", "EXAMPLES", "GENERAL", "LIMITS", "examples_for"]

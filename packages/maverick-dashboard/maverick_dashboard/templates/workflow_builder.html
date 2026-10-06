@@ -160,7 +160,11 @@
       </button>
     </div>
 
-    <div class="panel">
+    {% from "_form_field.html" import error_summary %}
+    {# CTL-3: each editor uses the shared form-field pattern -- the problem next to its
+       field and in a summary that takes focus, with nothing typed cleared. #}
+    <form class="panel" id="wf-draft-form" data-mv-validate>
+      {{ error_summary('wf-draft-errors') }}
       <div class="wf__field" style="margin-bottom: var(--space-3);">
         <label for="wf-brief"><span id="wf-noun">{{ ui("Describe the workflow") }}</span></label>
         <textarea lang="und" dir="auto" data-user-content id="wf-brief" class="input wf__brief"
@@ -183,7 +187,7 @@
           <button class="btn btn--ghost" type="button" id="wf-source-clear">{{ ui("Remove document") }}</button>
         </div>
       </div>
-    </div>
+    </form>
 
     <p id="wf-status" role="status" aria-live="polite" class="muted" style="min-height: 1.2em; margin: 0 0 var(--space-4);"></p>
 
@@ -193,6 +197,8 @@
         <span class="badge info">{{ ui("Template") }}</span>
         <h2>{{ ui("Review & edit") }}</h2>
       </div>
+      <form id="wf-template-form" data-mv-validate>
+      {{ error_summary('wf-template-errors') }}
       <div class="wf-grid">
         <div class="wf__field" style="flex: 1 1 16rem;">
           <label for="wf-name">{{ ui("Short name (filled in from the title)") }}</label>
@@ -200,7 +206,8 @@
         </div>
         <div class="wf__field" style="flex: 2 1 18rem;">
           <label for="wf-title">{{ ui("Title") }}</label>
-          <input type="text" id="wf-title" class="input" aria-label="{{ ut('Workflow title') }}" lang="{{ ul('Workflow title') }}">
+          <input type="text" id="wf-title" class="input" aria-label="{{ ut('Workflow title') }}" lang="{{ ul('Workflow title') }}"
+                 required data-error-required="{{ ut('Give the workflow a title, for example Weekly competitor summary.') }}">
         </div>
       </div>
       <div class="wf__field">
@@ -218,6 +225,8 @@
         <div class="wf__field wf__field--sm">
           <label for="wf-budget">{{ ui("Optional spending limit ($)") }}</label>
           <input type="number" id="wf-budget" class="input" min="0" step="0.01"
+                 data-error-range="{{ ut('Enter a spending limit of $0 or more with at most two decimal places, or leave it empty for no limit.') }}"
+                 data-error-format="{{ ut('Enter a spending limit of $0 or more with at most two decimal places, or leave it empty for no limit.') }}"
                  aria-label="{{ ut('Optional per-run budget in dollars') }}" placeholder="{{ ut('No task limit') }}" lang="{{ ul('No task limit') }}">
         </div>
       </div>
@@ -236,6 +245,7 @@
         <button type="button" id="wf-save-btn" class="btn btn--primary">{{ ui("Save workflow") }}</button>
         <span class="wf__hint">{{ ui("Saved workflows appear in Templates and can be run from Chat.") }} <a href="/templates">{{ ui("Templates") }}</a>.</span>
       </div>
+      </form>
     </div>
 
     <!-- playbook editor -->
@@ -244,10 +254,13 @@
         <span class="badge info">{{ ui("Agent playbook") }}</span>
         <h2>{{ ui("Review & edit the playbook") }}</h2>
       </div>
+      <form id="pb-form" data-mv-validate>
+      {{ error_summary('pb-form-errors') }}
       <div class="wf-grid">
         <div class="wf__field" style="flex: 1 1 16rem;">
           <label for="pb-name">{{ ui("Short name (filled in from the description)") }}</label>
-          <input type="text" id="pb-name" class="input" aria-label="{{ ut('Agent short name') }}" lang="{{ ul('Agent short name') }}">
+          <input type="text" id="pb-name" class="input" aria-label="{{ ut('Agent short name') }}" lang="{{ ul('Agent short name') }}"
+                 required data-error-required="{{ ut('Give the agent a short name, for example competitor_watch.') }}">
         </div>
         <div class="wf__field wf__field--sm">
           <label for="pb-risk">{{ ui("Riskiest action allowed") }}</label>
@@ -321,6 +334,7 @@
         <button type="button" id="pb-save-btn" class="btn btn--primary"{% if not pack_editing_allowed %} disabled title="{{ ut('An administrator must check and save this draft') }}"{% endif %} lang="{{ ul('An administrator must check and save this draft') }}">{{ ui("Save playbook") }}</button>
         <span class="wf__hint">{% if pack_editing_allowed %}{{ ui("Saved playbooks become agents on Agents.") }} <a href="/agents">{{ ui("Agents") }}</a>.{% else %}This draft stays unsaved until an administrator checks and saves it. <button type="button" class="btn btn--ghost" id="pb-copy-draft">{{ ui("Copy the draft to send to an administrator") }}</button>{% endif %}</span>
       </div>
+      </form>
     </div>
 
     <!-- saved -->
@@ -894,7 +908,18 @@
       catch (error) { if (!error.status) throw error; return { resp: { ok: false, status: error.status }, data: error.payload || {} }; }
     }
 
+    // CTL-3: the shared form-field pattern finds missing or wrong answers first.
+    function formReady(form) { return !form || !window.mvFieldErrors || window.mvFieldErrors.validate(form); }
+    function fieldProblem(form, field, message) {
+      if (window.mvFieldErrors && form) { setStatus(''); window.mvFieldErrors.show(form, [{field: field, message: translated(message)}]); }
+      else setStatus(message, true);
+    }
+    ['wf-draft-form', 'wf-template-form', 'pb-form'].forEach(function (id) {
+      var editor = document.getElementById(id);
+      if (editor) editor.addEventListener('submit', function (event) { event.preventDefault(); });
+    });
     saveBtn.addEventListener('click', async function () {
+      if (!formReady(document.getElementById('wf-template-form'))) return;
       var payload = collectTemplate();
       if (!payload.name && payload.title) { payload.name = slugName(payload.title); elName.value = payload.name; }
       if (!payload.name) { setStatus('Give the workflow a title.', true); elTitle.focus(); return; }
@@ -1451,6 +1476,7 @@
         setStatus('A dashboard admin must validate and save this draft.', true);
         return;
       }
+      if (!formReady(document.getElementById('pb-form'))) return;
       var name = pbName.value.trim();
       if (!name) { setStatus('Give the agent a short name.', true); return; }
       pbSaveBtn.disabled = true;
@@ -1598,7 +1624,13 @@
       try {
         var resp;
         if (fileInput.files.length && !sourceReady) { setStatus('Review a readable document before drafting, or remove it and use the brief.',true); return; }
-        if (!brief.value.trim() && !sourceText.value.trim()) { setStatus('Describe it, or upload a document.',true); return; }
+        if (!brief.value.trim() && !sourceText.value.trim()) {
+          fieldProblem(document.getElementById('wf-draft-form'), brief, draftMode === 'playbook'
+            ? 'Describe the agent you want, or upload a document to draft from.'
+            : 'Describe the workflow you want, or upload a document to draft from.');
+          return;
+        }
+        if (window.mvFieldErrors) window.mvFieldErrors.clear(document.getElementById('wf-draft-form'));
         resp = await fetch('/api/v1/workflows/draft', {
           method:'POST', headers:{'Content-Type':'application/json'},
           body:JSON.stringify({description:brief.value.trim(), source_text:sourceText.value, form:draftMode})
