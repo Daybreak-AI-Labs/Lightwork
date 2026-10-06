@@ -60,6 +60,12 @@ def test_results_are_marked_and_only_the_owner_can_rate_them(client):
     assert "Written by an agent." in viewed and "data-rating" not in viewed
 
 
+def test_the_feedback_script_is_served(client):
+    test_client, _world = client
+    response = test_client.get("/static/lightwork-result-feedback.js")
+    assert response.status_code == 200 and "javascript" in response.headers["content-type"]
+
+
 def test_one_tap_saves_through_the_tasks_own_feedback(client):
     test_client, world = client
     goal = _finished(world, "My report", "user:customer")
