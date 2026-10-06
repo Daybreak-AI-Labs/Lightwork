@@ -972,6 +972,23 @@
     {% endif %}
   </section>
 
+  {% if flow_feedback %}
+  <div class="section-head"><h2 id="flow-feedback-title">{{ ui('What people said about each flow') }}</h2></div>
+  <section class="panel" id="flow-feedback" aria-labelledby="flow-feedback-title">
+    <div class="fa-scroll">
+      <table>
+        <thead><tr><th scope="col">{{ ui('Flow') }}</th><th scope="col">{{ ui('Useful') }}</th><th scope="col">{{ ui('Not useful') }}</th></tr></thead>
+        <tbody>
+        {% for row in flow_feedback %}
+          <tr><th scope="row"><a href="/flows/designer/{{ row.flow_id | urlencode }}">{{ row.title }}</a></th><td>{{ row.up }}</td><td>{{ row.down }}</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <p class="muted">{{ ui("Counts use each person's latest rating of a finished run. Only the rating is kept, for up to a year.") }}</p>
+  </section>
+  {% endif %}
+
   <div class="section-head"><h2 id="fa-flywheel-title">What Lightwork learned from results</h2></div>
   <section class="panel" aria-labelledby="fa-flywheel-title">
     <p class="muted" id="fa-flywheel-status">Loading…</p>

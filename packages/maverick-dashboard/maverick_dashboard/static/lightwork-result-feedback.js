@@ -1,4 +1,5 @@
-/* One-tap feedback on a finished result outside the task page (AI-10). It
+/* One-tap feedback on a finished result outside the task page (AI-10), and on
+   flow run results (/api/v1/flows/runs/{id}/feedback, see bindRun). It
    saves through the task page's own saved-answer feedback
    (/api/v1/goals/{id}/answer-feedback), so the same owner check, receipt and
    learning policy apply. A lost reply is retried only with the same
@@ -48,6 +49,36 @@
     }
     buttons.forEach(function (button) { button.addEventListener('click', function () { rate(button.dataset.rating); }); });
   }
-  function init() { document.querySelectorAll('[data-result-feedback]').forEach(bind); }
+  // A flow run's result (flow_run.html): the run's own small store keeps only
+  // the rating, one per run, so a repeated tap simply sets it again.
+  function bindRun(box) {
+    var run = String(box.dataset.run || '');
+    if (!/^[A-Za-z0-9_.-]{1,128}$/.test(run) || box.dataset.feedbackReady) return;
+    box.dataset.feedbackReady = 'true';
+    var msg = box.querySelector('[data-feedback-msg]');
+    var buttons = Array.prototype.slice.call(box.querySelectorAll('[data-rating]'));
+    var url = '/api/v1/flows/runs/' + encodeURIComponent(run) + '/feedback';
+    function show(value) {
+      box.hidden = !(value && value.eligible);
+      buttons.forEach(function (button) { button.setAttribute('aria-pressed', String(!!value && button.dataset.rating === value.rating)); });
+    }
+    function load() { window.mvFetchJSON(url, {cache: 'no-store'}, 'read this run').then(show).catch(function () { /* stays hidden */ }); }
+    buttons.forEach(function (button) {
+      button.addEventListener('click', function () {
+        buttons.forEach(function (item) { item.disabled = true; });
+        say(msg, 'Saving your feedback…');
+        window.mvFetchJSON(url, {method: 'PUT', cache: 'no-store', body: {rating: button.dataset.rating}}, 'save your feedback')
+          .then(function (value) { show(value); say(msg, 'Thanks. Saved with this run.'); })
+          .catch(function (error) { say(msg, window.mvErrorText ? window.mvErrorText(error, 'save your feedback') : 'Could not save your feedback. Try again.', true); })
+          .then(function () { buttons.forEach(function (item) { item.disabled = false; }); });
+      });
+    });
+    document.addEventListener('lightwork:flow-run-finished', load);
+    load();
+  }
+  function init() {
+    document.querySelectorAll('[data-result-feedback]').forEach(bind);
+    document.querySelectorAll('[data-flow-run-feedback]').forEach(bindRun);
+  }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
 }());

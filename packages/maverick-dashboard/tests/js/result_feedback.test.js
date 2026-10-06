@@ -71,3 +71,46 @@ test("a result that cannot be rated says where to go instead", async () => {
   assert.equal(p.msg(), "This result cannot be rated here. Open it to give feedback.");
   p.dom.window.close();
 });
+
+function runPage(reply) {
+  const dom = new JSDOM(`<div data-flow-run-feedback data-run="run-9" hidden><button data-rating="up" aria-pressed="false">up</button>
+    <button data-rating="down" aria-pressed="false">down</button><span data-feedback-msg></span></div>`,
+    { url: "https://lightwork.test/flows/f/runs/run-9", runScripts: "outside-only" });
+  const calls = [];
+  dom.window.fetch = async (url, init = {}) => {
+    calls.push({ url: String(url), method: init.method || "GET", body: init.body ? JSON.parse(init.body) : null });
+    return reply(calls.at(-1));
+  };
+  shell(dom.window);
+  dom.window.eval(SCRIPT);
+  const doc = dom.window.document;
+  return { dom, doc, calls, box: doc.querySelector("[data-flow-run-feedback]"), msg() { return doc.querySelector("[data-feedback-msg]").textContent; } };
+}
+
+test("a finished flow run shows its saved rating and one tap replaces it", async () => {
+  const p = runPage((call) => call.method === "GET" ? json({ eligible: true, rating: "up" }) : json({ eligible: true, rating: call.body.rating }));
+  await settle();
+  assert.equal(p.calls[0].url, "/api/v1/flows/runs/run-9/feedback");
+  assert.equal(p.box.hidden, false);
+  assert.equal(p.doc.querySelector('[data-rating="up"]').getAttribute("aria-pressed"), "true");
+  p.doc.querySelector('[data-rating="down"]').click();
+  await settle();
+  const put = p.calls.find((call) => call.method === "PUT");
+  assert.deepEqual(put.body, { rating: "down" }, "only the rating is sent: no written text");
+  assert.equal(p.doc.querySelector('[data-rating="down"]').getAttribute("aria-pressed"), "true");
+  assert.equal(p.doc.querySelector('[data-rating="up"]').getAttribute("aria-pressed"), "false");
+  assert.equal(p.msg(), "Thanks. Saved with this run.");
+  p.dom.window.close();
+});
+
+test("a flow run still working stays without the rating until it finishes", async () => {
+  let finished = false;
+  const p = runPage(() => json({ eligible: finished, rating: null }));
+  await settle();
+  assert.equal(p.box.hidden, true);
+  finished = true;
+  p.doc.dispatchEvent(new p.dom.window.CustomEvent("lightwork:flow-run-finished"));
+  await settle();
+  assert.equal(p.box.hidden, false);
+  p.dom.window.close();
+});

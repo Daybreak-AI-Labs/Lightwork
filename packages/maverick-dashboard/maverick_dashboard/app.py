@@ -1832,6 +1832,9 @@ from .department_team_updates_api import router as department_team_updates_route
 
 app.include_router(department_team_updates_router)
 app.include_router(answer_feedback_router)
+from .flow_run_feedback import router as flow_run_feedback_router  # noqa: E402
+
+app.include_router(flow_run_feedback_router)
 from .compliance_questionnaire_builder_api import (  # noqa: E402
     router as compliance_questionnaire_builder_router,
 )
@@ -3989,6 +3992,7 @@ async def learning_page(request: Request) -> HTMLResponse:
             "snap": _learning_snapshot(request),
             "learning_can_manage": has_global_permission(request, "admin"),
             "agent_feedback": _agent_feedback_summary(),
+            "flow_feedback": _flow_feedback_summary(),
             "learning_can_operate": has_permission(request, "operate"),
         },
     )
@@ -4003,6 +4007,25 @@ def _agent_feedback_summary() -> list[dict]:
         rows = goal_feedback_store.summary_by_agent(world=_world())
         for row in rows:
             row["title"] = agent_title(row["agent"])
+        return rows
+    except Exception:  # pragma: no cover -- the page renders without the summary
+        return []
+
+
+def _flow_feedback_summary() -> list[dict]:
+    """Useful / not useful per flow for the Learning page (flow_run_feedback.py)."""
+    try:
+        from maverick.flow import store as flow_store
+
+        from . import flow_run_feedback
+
+        rows = flow_run_feedback.summary_by_flow()
+        for row in rows:
+            try:
+                flow = flow_store.load_flow(row["flow_id"])
+            except Exception:  # noqa: BLE001 -- a removed or unreadable flow keeps its id
+                flow = None
+            row["title"] = (getattr(flow, "name", "") or row["flow_id"]) if flow else row["flow_id"]
         return rows
     except Exception:  # pragma: no cover -- the page renders without the summary
         return []
