@@ -2135,9 +2135,11 @@
   // Many requests at once (ADM-7): filter, select all matching, then assign
   // them to one person (undo puts each back with its earlier assignee) or
   // record that receipt was confirmed to each requester.
-  (function () {
+  (function wireBulk() {
     var list = document.getElementById('pw-dsar-rows');
-    if (!list || !window.mvBulk) return;
+    if (!list) return;
+    // The shared helpers load at the end of the page; wire the bar after them.
+    if (!window.mvBulk) { document.addEventListener('DOMContentLoaded', wireBulk, {once: true}); return; }
     var people = [];
     try { people = JSON.parse(document.getElementById('pw-dsar-assignees').textContent || '[]'); } catch (_) { people = []; }
     function assigneeCell(row, principal) {

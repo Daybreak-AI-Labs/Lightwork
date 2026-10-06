@@ -114,3 +114,18 @@ def test_approvals_never_offer_bulk_approve():
     bulk = bulk[:bulk.index("</script>")]
     assert "label: 'Reject'" in bulk and "label: 'Send back'" in bulk
     assert "'approve'" not in bulk and "label: 'Approve'" not in bulk
+
+
+@pytest.mark.parametrize("template", ["templates/permissions.html", "templates/privacy.html",
+                                      "templates/_approvals_queue.html"])
+def test_inline_bulk_bars_wait_for_the_shared_helpers(template):
+    # These pages' own scripts run before lightwork-ui.js (loaded at the end of
+    # base.html), so wiring the bar at once found no mvBulk and drew nothing.
+    source = (PACKAGE / template).read_text(encoding="utf-8")
+    bulk = source[source.index("wireBulk"):]
+    assert "document.addEventListener('DOMContentLoaded', wireBulk, {once: true})" in bulk
+
+
+def test_a_page_script_runs_before_the_shared_helpers():
+    base = (PACKAGE / "templates/base.html").read_text(encoding="utf-8")
+    assert base.index("{% block content %}") < base.index("<script src=\"{{ asset('lightwork-ui.js') }}\"></script>")

@@ -510,6 +510,9 @@
       // Block or allow many tools at once (ADM-7): the filter above picks the
       // matching tools, the bar selects them all, one confirmation states the
       // count, and the report can undo every change.
+      // This page's script runs before the shared helpers (lightwork-ui.js at
+      // the end of the page), so the bar is wired once they have loaded.
+      function wireBulk() {
       const list = document.getElementById('perm-tool-rows');
       if (!list || !window.mvBulk || !list.querySelector('tr[data-bulk-id]')) return;
       function change(action) {
@@ -530,6 +533,8 @@
           {label: 'Allow', verb: 'Allow', run: change('enable')}
         ]
       });
+      }
+      if (window.mvBulk) wireBulk(); else document.addEventListener('DOMContentLoaded', wireBulk, {once: true});
     })();
   </script>
   {% if comments_enabled() and permissions_can_manage_tools %}{% from "_comments.html" import comments %}{{ comments('policy', 'tools', 'Comments on the tool permissions') }}

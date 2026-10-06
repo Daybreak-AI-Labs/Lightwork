@@ -710,9 +710,11 @@
 <script>
   // Reject or send back many requests at once (ADM-7). Approving stays one
   // request at a time: each approval needs its own reading of what it does.
-  (function () {
+  (function wireBulk() {
     const queue = document.getElementById('approval-queue');
     const api = window.mvApprovalQueue;
+    // The shared helpers load at the end of the page; wire the bar after them.
+    if (queue && api && !window.mvBulk) { document.addEventListener('DOMContentLoaded', wireBulk, {once: true}); return; }
     if (!queue || !api || !window.mvBulk || !queue.querySelector('article.approval-item[data-bulk-id]')) return;
     async function post(id, verb, body) {
       const r = await fetch('/api/v1/approvals/' + encodeURIComponent(id) + '/' + verb, {
