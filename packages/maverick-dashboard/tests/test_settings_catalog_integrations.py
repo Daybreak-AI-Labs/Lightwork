@@ -13,6 +13,7 @@ from maverick_dashboard import settings_catalog as catalog
 from maverick_dashboard import settings_catalog_integrations as integrations
 from maverick_dashboard.app import app
 
+from test_support.channel_review import channel_review_token
 from test_support.settings_pages import every_group, save_catalog
 
 client = TestClient(app, headers={"Origin": "http://testserver"})
@@ -86,6 +87,7 @@ VALUES: dict[str, tuple[object, object]] = {
                        "https://tax.example.com/constants.json"),
     "tax.trusted_constants_pubkeys": ([_KEY.upper()], [_KEY]),
     "channels.rich_render": (True, True),
+    "channels.max_intake_records": (50000, 50000),
     "vendor_onboarding.safe_read_attempts": (5, 5),
     "vendor_onboarding.safe_read_backoff_seconds": (1.5, 1.5),
     "voice.stt_backend": ("local", "local"),
@@ -171,6 +173,7 @@ INVALID: dict[str, object] = {
     "tax.update_url": "http://tax.example.com",
     "tax.trusted_constants_pubkeys": ["not a key"],
     "channels.rich_render": None,
+    "channels.max_intake_records": 500,
     "vendor_onboarding.safe_read_attempts": 6,
     "vendor_onboarding.safe_read_backoff_seconds": 6,
     "voice.stt_backend": "cloud",
@@ -244,6 +247,7 @@ LOOSENING: dict[str, tuple[object, object]] = {
     "voice.whisper_cpp_bin": (None, "whisper-cli"),
     "voice.whisper_cpp_model": (None, "ggml-custom.bin"),
     "channels.routing.rules": (None, [_RULE]),
+    "channels.max_intake_records": (20000, 40000),
     # finance operating profile
     "finance.framework": (None, "ifrs"),
     "finance.materiality": (50000, 100000),
@@ -783,10 +787,12 @@ def test_mattermost_is_set_up_on_the_channels_page_with_a_sealed_token(monkeypat
     page = client.get("/channels")
     assert page.status_code == 200 and "Mattermost" in page.text
     refused = client.post("/channels/save", follow_redirects=False, data={
+        "review_token": channel_review_token(client),
         "channel": "mattermost", "enabled": "on", "url": "http://chat.example.com",
         "bot_token": token})
     assert refused.status_code == 400
     saved = client.post("/channels/save", follow_redirects=False, data={
+        "review_token": channel_review_token(client),
         "channel": "mattermost", "enabled": "on", "url": "https://chat.example.com/",
         "bot_token": token})
     assert saved.status_code == 303
