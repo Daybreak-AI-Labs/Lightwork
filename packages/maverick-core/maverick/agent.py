@@ -1105,6 +1105,29 @@ def _audit_summary(value: Any, limit: int = 200) -> str:
     return s[:limit] + ("…" if len(s) > limit else "")
 
 
+# Argument names that say what a tool reads or changes: a file, an address,
+# a table. Their values go in the activity record as the resources an AI
+# action accessed (ADM-5), bounded like every other summary.
+_RESOURCE_ARGS = ("path", "file", "file_path", "filename", "url", "uri", "table", "database",
+                  "bucket", "repo", "repository", "channel", "to", "recipient", "dataset")
+
+
+def _resources_accessed(args: Any, limit: int = 5) -> list[str]:
+    """The files, addresses and tables a tool call names, for the audit record."""
+    if not isinstance(args, dict):
+        return []
+    found: list[str] = []
+    for key in _RESOURCE_ARGS:
+        value = args.get(key)
+        values = value if isinstance(value, (list, tuple)) else [value]
+        for item in values:
+            if isinstance(item, str) and item.strip():
+                found.append(_audit_summary(item))
+            if len(found) >= limit:
+                return found
+    return found
+
+
 def _tool_status(output: str) -> str:
     """'error' | 'ok' for a tool result -- the TOOL_RESULT audit status."""
     return "error" if _tool_call_failed(output) else "ok"
@@ -3772,6 +3795,10 @@ class Agent:
             origin="agent",
             principal=principal,
             input_summary=_audit_summary(args),
+            # Which model acted and what it reached, so an AI action's record
+            # says both (ADM-5).
+            model=str(getattr(self, "model", "") or ""),
+            resources=_resources_accessed(args),
             **_checked_tags(name, keys=_compliance_profiles),
         ):
             return _NotExecutedToolResult(

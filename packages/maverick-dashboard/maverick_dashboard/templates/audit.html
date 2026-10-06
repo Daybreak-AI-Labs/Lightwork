@@ -95,6 +95,12 @@
           {% for p in people %}<option value="{{ p.value }}"{% if p.value == person %} selected{% endif %}>{{ p.label }}</option>{% endfor %}
         </select>
       </label>
+      <label for="aud-agent">Agent or specialist
+        <select id="aud-agent" name="agent" class="select">
+          <option value="">Any</option>
+          {% for a in agents %}<option value="{{ a.value }}"{% if a.value == agent %} selected{% endif %}>{{ a.label }}</option>{% endfor %}
+        </select>
+      </label>
       <label for="aud-q">Contains words
         <input type="search" id="aud-q" name="q" value="{{ q }}" class="input" placeholder="For example: invoice">
       </label>
@@ -216,7 +222,7 @@
       <label for="aud-format" class="sr-only">Download format</label>
       <select id="aud-format" class="select">
         <option value="csv">Spreadsheet</option>
-        <option value="json">For security tools (standard)</option>
+        <option value="json" title="A JSON Lines file (.jsonl): one event per line">Data file, one event per line (for security tools)</option>
         <option value="cef">For security tools (ArcSight)</option>
       </select>
       <button type="button" class="btn btn--ghost" id="aud-download">Download</button>

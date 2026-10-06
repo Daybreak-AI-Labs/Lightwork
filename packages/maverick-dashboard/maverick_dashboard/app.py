@@ -6927,6 +6927,31 @@ def _global_audit_tail(request: Request, audit_log, n: int, day: str | None) -> 
     return [{**e, "scope": "deployment"} for e in rows if isinstance(e, dict)]
 
 
+def _audit_matcher(*, kind: str, person: str, agent: str, q: str):
+    """The activity log's filter: kind of event, person, agent or specialist,
+    and words. Words also find an AI action by a file, address or table it
+    reached, which the row shows only as a fingerprint (ADM-5)."""
+    from . import audit_actions_api as _audit_plain
+    from .content_access import resource_fingerprint
+
+    needle = q.lower()
+    resource_hit = resource_fingerprint(q) if q else ""
+
+    def matches(e: dict) -> bool:
+        if kind and e.get("kind") != kind:
+            return False
+        if person and _audit_plain.event_person(e) != person:
+            return False
+        if agent and e.get("agent") != agent:
+            return False
+        if q and resource_hit in (e.get("resource_fingerprints") or []):
+            return True
+        return not needle or (needle in json.dumps(e, default=str).lower()
+                              or needle in _audit_plain.kind_label(e.get("kind")).lower())
+
+    return matches
+
+
 @app.get("/audit", response_class=HTMLResponse)
 async def audit_page(request: Request) -> HTMLResponse:
     """The activity log: recent events for a day or a date range, filtered by
@@ -6968,16 +6993,9 @@ async def audit_page(request: Request) -> HTMLResponse:
     read_report = ReadReport()
     kind = (request.query_params.get("kind") or "").strip()
     person = (request.query_params.get("person") or "").strip()
+    agent = (request.query_params.get("agent") or "").strip()[:128]
     q = (request.query_params.get("q") or "").strip()[:200]
-    needle = q.lower()
-
-    def _matches(e: dict) -> bool:
-        if kind and e.get("kind") != kind:
-            return False
-        if person and _audit_plain.event_person(e) != person:
-            return False
-        return not needle or (needle in json.dumps(e, default=str).lower()
-                              or needle in _audit_plain.kind_label(e.get("kind")).lower())
+    _matches = _audit_matcher(kind=kind, person=person, agent=agent, q=q)
 
     from datetime import datetime, timezone
     from urllib.parse import urlencode
@@ -6987,7 +7005,7 @@ async def audit_page(request: Request) -> HTMLResponse:
     from .audit_search import search_events
 
     window_note, next_href = "", None
-    events, kind_set, people_set = [], set(), set()
+    events, kind_set, people_set, agent_set = [], set(), set(), set()
     deployment_filter_view = False
     displayed_audit_log = audit_log
     if not filter_error:
@@ -7016,6 +7034,7 @@ async def audit_page(request: Request) -> HTMLResponse:
             before=before_event, scan_limit=_AUDIT_RANGE_SCAN_LIMIT,
         )
         events, kind_set, people_set = result["events"], result["kinds"], result["people"]
+        agent_set = result.get("agents", set())
         if deployment_filter_view:
             events = [{**event, "scope": "deployment"} for event in events]
         if not result["cursor_found"]:
@@ -7035,7 +7054,7 @@ async def audit_page(request: Request) -> HTMLResponse:
     # Deployment-wide records have a separate chain and are shown as a
     # clearly bounded recent view, never silently mixed into this cursor.
     deployment_events = []
-    if not (filter_error or since or until or before_event or kind or person or q):
+    if not (filter_error or since or until or before_event or kind or person or agent or q):
         deployment_events = await run_in_threadpool(
             _global_audit_tail, request, audit_log, min(n, 200), day)
     order = "oldest" if request.query_params.get("order") == "oldest" else "newest"
@@ -7058,6 +7077,8 @@ async def audit_page(request: Request) -> HTMLResponse:
             "kinds": kinds,
             "person": person,
             "people": [{"value": p, "label": _idfmt.humanize_principal(p).name} for p in people],
+            "agent": agent,
+            "agents": [{"value": a, "label": _idfmt.humanize(a)} for a in sorted(agent_set)],
             "q": q,
             "order": order,
             "can_admin": has_permission(request, "admin"),
