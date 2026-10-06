@@ -2291,11 +2291,15 @@
           copy.addEventListener('click', function () { if (window.mvCopy) window.mvCopy(address); });
           var rm = document.createElement('button'); rm.className = 'btn btn--ghost btn--danger'; rm.type = 'button'; rm.textContent = 'Remove';
           rm.setAttribute('aria-label', 'Remove the start “' + t.name + '”');
-          rm.addEventListener('click', async function () {
-            if (!(await window.mvConfirm('Remove “' + t.name + '”? The other app will no longer be able to start this flow.', { okText: 'Remove start' }))) return;
-            apiFetch('/api/v1/triggers/' + encodeURIComponent(t.name), { method: 'DELETE' })
-              .then(function (r) { if (!r.ok) say(failText(r, 'remove it'), true); showTriggers(); })
-              .catch(function (e) { say(failText(e, 'remove it'), true); });
+          rm.addEventListener('click', function () {
+            // One action with a way back (CTL-1): removed when Undo ends.
+            row.hidden = true;
+            window.mvUndo('“' + t.name + '” removed. The other app can no longer start this flow.', {
+              action: 'remove it',
+              run: function (keepalive) { return apiFetch('/api/v1/triggers/' + encodeURIComponent(t.name), { method: 'DELETE', keepalive: keepalive }); },
+              undo: function () { row.hidden = false; rm.focus(); },
+              done: function () { showTriggers(); }
+            });
           });
           row.appendChild(nm); row.appendChild(copy); row.appendChild(rm); wl.appendChild(row);
         });

@@ -5,9 +5,10 @@
    operation reference, so one tap is never counted twice. */
 (function () {
   'use strict';
-  function say(node, text) {
+  function say(node, text, failed) {
     if (!node) return;
-    if (window.LightworkI18n) window.LightworkI18n.set(node, text); else node.textContent = text;
+    var words = window.LightworkI18n ? window.LightworkI18n.text(text) : text;
+    if (window.mvStatus) window.mvStatus(node, words, {error: !!failed}); else node.textContent = words;
   }
   function bind(box) {
     var goal = Number(box.dataset.goal);
@@ -33,14 +34,14 @@
           revision: current.revision, expected_context: current.context, operation_id: attempt.id}}, 'save your feedback');
         keep(null);
         buttons.forEach(function (button) { button.setAttribute('aria-pressed', String(button.dataset.rating === rating)); });
-        if (msg) msg.textContent = (value && value.acknowledgement) || 'Thanks. Saved with this task.';
+        say(msg, (value && value.acknowledgement) || 'Thanks. Saved with this task.');
         if (rating === 'down' && msg) {
           var more = document.createElement('a'); more.href = '/chat/goal/' + goal + '#feedback';
-          say(more, 'Say what was wrong');
+          more.textContent = window.LightworkI18n ? window.LightworkI18n.text('Say what was wrong') : 'Say what was wrong';
           msg.append(' ', more);
         }
       } catch (error) {
-        say(msg, window.mvErrorText ? window.mvErrorText(error, 'save your feedback') : 'Could not save your feedback. Try again.');
+        say(msg, window.mvErrorText ? window.mvErrorText(error, 'save your feedback') : 'Could not save your feedback. Try again.', true);
       } finally {
         buttons.forEach(function (button) { button.disabled = false; });
       }

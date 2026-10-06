@@ -154,11 +154,17 @@
       document.getElementById('fact-cancel').hidden = false; document.getElementById('fact-editor-title').textContent = 'Edit fact'; conflict.hidden = true; detail.focus(); return;
     }
     if (button.hasAttribute('data-remove-fact')) {
-      if (!(await window.mvConfirm('Remove "' + key + '" from new recall? Recorded versions and audit evidence may remain under workspace retention policy. This is not permanent erasure.', {okText:'Stop using this fact'}))) return;
-      setBusy(true);
-      try { await request('/api/v1/facts/' + encodeURIComponent(key) + '?' + new URLSearchParams({expected_revision:row.dataset.revision,context:context}), {method:'DELETE'}); snapshot = ''; offset = 0; await load(); status.textContent = 'Fact removed from new recall. Retained history follows workspace policy.'; }
-      catch (error) { status.textContent = error.status === 409 ? 'This fact changed. Refresh and review its current value before removing; nothing was removed.' : error.message; }
-      finally { setBusy(false); } return;
+      // One action with a way back (CTL-1): the fact leaves new recall when
+      // the Undo time is up. This is not erasure; history follows retention.
+      var url = '/api/v1/facts/' + encodeURIComponent(key) + '?' + new URLSearchParams({expected_revision:row.dataset.revision,context:context});
+      row.hidden = true;
+      window.mvUndo('"' + key + '" removed from new recall. Recorded versions follow workspace retention; this is not erasure.', {
+        action: 'remove the fact',
+        run: async function (keepalive) { await request(url, {method:'DELETE', keepalive:keepalive}); return {ok:true}; },
+        undo: function () { row.hidden = false; button.focus(); },
+        done: async function () { snapshot = ''; offset = 0; await load(); status.textContent = 'Fact removed from new recall. Retained history follows workspace policy.'; }
+      });
+      return;
     }
     setBusy(true); body.replaceChildren();
     try { showRecord(await current(key)); document.getElementById('fact-inspector-title').focus(); }

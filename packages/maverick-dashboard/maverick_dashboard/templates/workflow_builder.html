@@ -1109,17 +1109,30 @@
         rm.className = 'btn btn--ghost btn--danger';
         rm.setAttribute('aria-label', translated('Delete the schedule for {name}',{name:s.title||translated('Untitled task')}));
         productText(rm,'Delete schedule');
-        rm.addEventListener('click', function () { cancelSchedule(s.id, li); });
+        rm.addEventListener('click', function () { cancelSchedule(s.id, li, s); });
         li.appendChild(span); li.appendChild(rm);
         schedList.appendChild(li);
       });
     }
-    async function cancelSchedule(id, li) {
-      if (!(await mvConfirm('Delete this schedule? It will stop running.', { okText: 'Delete schedule', productCopy:true }))) return;
-      try {
-        var resp = await fetch('/api/v1/schedules/' + encodeURIComponent(id), { method: 'DELETE' });
-        if (resp.ok) { if (li) li.remove(); mvToast(translated('Schedule deleted')); } else { mvFail(resp, 'delete the schedule'); }
-      } catch (e) { mvFail(e, 'delete the schedule'); }
+    async function cancelSchedule(id, li, s) {
+      var url = '/api/v1/schedules/' + encodeURIComponent(id), next = Number(s && s.next_run) * 1000;
+      // Too close to its next run for a safe undo window: ask, then delete now.
+      if (next && next - Date.now() < 30000) {
+        if (!(await mvConfirm('Delete this schedule? Its next run is due within a minute, so it is deleted now and can’t be brought back.', { okText: 'Delete schedule', productCopy:true }))) return;
+        try {
+          var resp = await fetch(url, { method: 'DELETE' });
+          if (resp.ok) { if (li) li.remove(); mvToast(translated('Schedule deleted')); } else { mvFail(resp, 'delete the schedule'); }
+        } catch (e) { mvFail(e, 'delete the schedule'); }
+        return;
+      }
+      // One action with a way back (CTL-1): sent when the Undo time is up.
+      if (li) li.hidden = true;
+      mvUndo(translated('Schedule deleted'), {
+        action: 'delete the schedule', latest: next ? next - 15000 : undefined,
+        run: function (keepalive) { return fetch(url, { method: 'DELETE', keepalive: keepalive }); },
+        undo: function () { if (li) { li.hidden = false; var b = li.querySelector('button'); if (b) b.focus(); } },
+        done: function () { if (li) li.remove(); }
+      });
     }
     if (schedWrap) {
       schedCadence.addEventListener('change', updateSchedBtn);
@@ -1221,23 +1234,16 @@
         trigList.appendChild(li);
       });
     }
-    async function deleteTrigger(name, li) {
-      if (!(await mvConfirm('Delete {name}? Other apps will no longer be able to start this workflow.', { okText: 'Delete start', productCopy:true,values:{name:name} }))) return;
-      try {
-        var resp = await fetch('/api/v1/triggers/' + encodeURIComponent(name), { method: 'DELETE' });
-        if (resp.ok) {
-          if (li) li.remove();
-          mvToast(translated('Deleted'));
-          return;
-        }
-        var detail = plainErr(resp, 'delete it');
-        if (trigMsg) productText(trigMsg,detail);
-        mvToast(detail, { error: true });
-      } catch (e) {
-        var message = plainErr(e, 'delete it');
-        if (trigMsg) productText(trigMsg,message);
-        mvToast(message, { error: true });
-      }
+    function deleteTrigger(name, li) {
+      // One action with a way back (CTL-1): other apps can start this
+      // workflow until the Undo time is up, then the start is deleted.
+      if (li) li.hidden = true;
+      mvUndo(translated('{name} deleted. Other apps can no longer start this workflow.', {name: name}), {
+        action: 'delete it',
+        run: function (keepalive) { return fetch('/api/v1/triggers/' + encodeURIComponent(name), { method: 'DELETE', keepalive: keepalive }); },
+        undo: function () { if (li) { li.hidden = false; var b = li.querySelector('button'); if (b) b.focus(); } },
+        done: function () { if (li) li.remove(); }
+      });
     }
     if (trigWrap) {
       trigName.addEventListener('input', updateTrigBtn);

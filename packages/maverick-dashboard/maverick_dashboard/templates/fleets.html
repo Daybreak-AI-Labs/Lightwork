@@ -312,14 +312,16 @@
       document.querySelectorAll('button.fleet-remove-btn').forEach(function(btn) {
         btn.addEventListener('click', async function() {
           const label = btn.dataset.label || btn.dataset.fleet;
-          if (!(await mvConfirm('Remove the team "' + label + '"? Its agents and task history list are deleted. Past tasks stay in your task list.', { okText: 'Remove team' }))) return;
-          btn.disabled = true;
-          try {
-            const r = await fetch('/api/v1/fleets/' + encodeURIComponent(btn.dataset.fleet), { method: 'DELETE' });
-            if (r.ok || r.status === 204) { window.location.reload(); return; }
-            const j = await r.json().catch(function() { return {}; });
-            btn.disabled = false; mvToast(problem(r, j, 'remove the team'), { error: true });
-          } catch (err) { btn.disabled = false; mvToast(offline('remove the team'), { error: true }); }
+          // One action with a way back (CTL-1): the team leaves the list at
+          // once and is deleted when the Undo time is up.
+          const row = btn.closest('tr, li, article, .card');
+          if (row) row.hidden = true;
+          mvUndo('Team "' + label + '" removed. Past tasks stay in your task list.', {
+            action: 'remove the team',
+            run: function (keepalive) { return fetch('/api/v1/fleets/' + encodeURIComponent(btn.dataset.fleet), { method: 'DELETE', keepalive: keepalive }); },
+            undo: function () { if (row) row.hidden = false; btn.focus(); },
+            done: function () { window.location.reload(); }
+          });
         });
       });
     })();
