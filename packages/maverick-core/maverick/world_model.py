@@ -3605,6 +3605,11 @@ class WorldModel:
         )
         return row is not None
 
+    @staticmethod
+    def _check_effect_guard(effect_guard):
+        if effect_guard is not None:
+            effect_guard()
+
     def decide_approval_audited(
         self,
         approval_id: int,
@@ -3612,6 +3617,7 @@ class WorldModel:
         *,
         decided_by: str,
         reviewed_card: dict | None = None,
+        effect_guard=None,
     ) -> ApprovalAuditEvent | None:
         """Atomically accept a vote and queue its signed-audit delivery.
 
@@ -3639,6 +3645,7 @@ class WorldModel:
                 "WHERE id = ? AND status = 'pending'",
                 (int(approval_id),),
             ).rowcount > 0
+            self._check_effect_guard(effect_guard)
             undo_round = self._approval_undo_round(approval_id, conn)
             event_id = _approval_audit_event_id(
                 current_tenant_id(), approval_id, status, approver, undo_round,
@@ -3654,8 +3661,11 @@ class WorldModel:
                 audit_pending = int(conn.execute("SELECT COUNT(*) FROM approval_audit_outbox WHERE approval_id = ? AND delivered_at IS NULL", (int(approval_id),)).fetchone()[0])
                 content_owner = (approval.requested_by or "") if approval is not None else None
                 if approval is not None and approval.goal_id:
-                    source = conn.execute("SELECT owner FROM goals WHERE id = ?", (approval.goal_id,)).fetchone()
+                    source = conn.execute("SELECT owner,domain FROM goals WHERE id = ?", (approval.goal_id,)).fetchone()
                     content_owner = (source["owner"] or "") if source is not None else None
+                    source_guard = getattr(effect_guard, "approval_source", None)
+                    if source_guard is not None:
+                        source_guard(approval.goal_id, content_owner, source["domain"] if source is not None else None)
                 require_locked_vote_review(approval, reviewed_card, status=status, actor=approver,
                                            event_id=event_id, approvers=approvers, audit_pending=audit_pending,
                                            content_owner=content_owner)
@@ -3802,7 +3812,7 @@ class WorldModel:
                     now,
                 ),
             )
-            return ApprovalAuditEvent(
+            result = ApprovalAuditEvent(
                 event_id=event_id,
                 approval_id=int(approval_id),
                 status=status,
@@ -3811,12 +3821,15 @@ class WorldModel:
                 created_at=now,
                 delivered_at=None,
             )
+            self._check_effect_guard(effect_guard)
+            return result
 
     def mark_approval_audit_delivered(
         self,
         event_id: str,
         *,
         delivered_at: float | None = None,
+        effect_guard=None,
     ) -> bool:
         """Acknowledge signed delivery and apply any now-safe final outcome.
 
@@ -3827,6 +3840,9 @@ class WorldModel:
         """
         finalized: tuple[str, str] | None = None
         with self._writing() as conn:
+            if effect_guard is not None:
+                conn.execute("UPDATE approval_audit_outbox SET delivered_at=delivered_at WHERE event_id=?", (str(event_id),))
+                effect_guard()
             event = conn.execute(
                 "SELECT event_id, approval_id, status, decided_by, final_status, "
                 "created_at, delivered_at FROM approval_audit_outbox "
@@ -3835,6 +3851,12 @@ class WorldModel:
             ).fetchone()
             if event is None:
                 return False
+            source_guard = getattr(effect_guard, "approval_source", None)
+            if source_guard is not None:
+                source = conn.execute("SELECT g.id,g.owner,g.domain FROM approvals a JOIN goals g ON g.id=a.goal_id WHERE a.id=?", (event["approval_id"],)).fetchone()
+                if source is None:
+                    raise PermissionError("The original approval task is unavailable")
+                source_guard(source[0], source[1] or "", source[2])
             if event["delivered_at"] is None:
                 conn.execute(
                     "UPDATE approval_audit_outbox SET delivered_at = ? "
@@ -3877,6 +3899,7 @@ class WorldModel:
             if finalized is not None:
                 self._emit_approval_event("approval.decided", approval_id,
                                           {"status": finalized[0], "decided_by": finalized[1] or ""})
+            self._check_effect_guard(effect_guard)
             return True
 
     def decide_approval(self, approval_id: int, status: str,

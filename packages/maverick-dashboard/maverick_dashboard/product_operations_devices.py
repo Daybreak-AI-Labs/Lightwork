@@ -36,7 +36,8 @@ def snapshot(request, _selection, *, remove=False):
 
 def _read(request, selection, _arguments):
     snapshot(request, selection)
-    return Preview("These are your current paired devices. No credential or setting was changed.")
+    return Preview("These are your current paired devices. Compare the code and review each permission in the complete pairing form.",
+        native={"open": {"label": "Open device pairing and permissions", "href": "/devices#device-review-form"}})
 
 
 def prepare(request, _selection, arguments):
@@ -69,7 +70,8 @@ def recover(request, _selection, _arguments, prepared, _operation_id):
 def entries():
     shared = {"family": "connections", "direct_ui": "/devices", "pages": ("/devices", "/account", "/preferences")}
     return (
-        Adapter(id="devices.status", label="Show my paired devices", input_model=EmptyInput, snapshot=snapshot, prepare=_read, **shared),
+        Adapter(id="devices.status", label="View or pair my devices", input_model=EmptyInput, snapshot=snapshot, prepare=_read,
+                aliases=("pair my phone", "connect my device", "review device permissions"), **shared),
         Adapter(id="devices.remove", label="Remove a paired device", input_model=RemoveInput,
                 snapshot=lambda request, selection: snapshot(request, selection, remove=True), prepare=prepare, execute=execute, recover=recover, **shared),
     )

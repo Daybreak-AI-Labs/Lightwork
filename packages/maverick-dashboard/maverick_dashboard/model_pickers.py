@@ -1,10 +1,10 @@
 """Grouped model choices for Settings > Models.
 
 Builds, from the shipped catalog plus the cached live discovery, one group per
-provider: what the saved key can reach (live), what the catalog knows
+provider: what the saved connection can reach (live), what the catalog knows
 (catalog), and the discovery status the admin sees. The pickers offer the
 configured providers plus whatever the admin allow-listed; every provider is
-listed in the allow-list so an admin can approve models before adding a key.
+listed in the allow-list so an admin can approve models before setting it up.
 """
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ import time
 CUSTOM = "__custom__"
 _VALID_SPEC = re.compile(r"[A-Za-z0-9_.:/-]{1,128}")
 _STATUS_TEXT = {
-    "pending": "Not checked yet. Refresh to list the models this key can reach.",
+    "pending": "Not checked yet. Refresh to list the models this connection can reach.",
     "unconfigured": "Set up this service under Provider keys to use it.",
     "disabled": "Live discovery is switched off; showing the shipped catalog.",
     "unsupported": "No model-list endpoint; pick from the catalog or type a model id.",
@@ -92,11 +92,13 @@ def _group(name: str, label: str, row: dict | None, entry: dict, enabled: bool, 
     ids = list(dict.fromkeys(reported + catalog))
     fetched_at = entry.get("fetched_at")
     if status == "live":
-        detail = entry.get("detail") or f"{len(live)} models reachable with the configured key"
+        detail = entry.get("detail") or f"{len(live)} models reachable with the configured connection"
     elif status == "unavailable":
         detail = entry.get("detail") or "the model list could not be read"
     else:
         detail = UNSUPPORTED.get(name) or _STATUS_TEXT.get(status, "")
+    if status == "unconfigured" and name == "ollama":
+        detail = "Add your model server's address under Provider keys. Ollama does not require an API key."
     return {
         "name": name,
         "label": label,
@@ -132,7 +134,7 @@ def build(providers: list[dict], allow: set[str]) -> dict:
     rows = {p["name"]: p for p in providers}
     order = list(rows) + [n for n in MODEL_CATALOG if n not in rows]
     groups = [
-        _group(name, PROVIDER_LABELS.get(name) or rows.get(name, {}).get("label") or name,
+        _group(name, rows.get(name, {}).get("label") or PROVIDER_LABELS.get(name) or name,
                rows.get(name), discovered.get(name) or {}, enabled, now)
         for name in order
     ]
@@ -165,8 +167,8 @@ def build(providers: list[dict], allow: set[str]) -> dict:
             picker_groups.append({"label": g["label"], "options": options})
         elif allow:
             # The admin approved these explicitly: the pickers mirror the
-            # allow-list even before that provider's key is saved.
-            picker_groups.append({"label": g["label"] + " (no key yet)", "options": options})
+            # allow-list even before that provider is set up.
+            picker_groups.append({"label": g["label"] + " (not set up)", "options": options})
     offered = {m["spec"] for pg in picker_groups for m in pg["options"]}
     leftovers = sorted(allow - known - set(custom)) if allow else []
     if leftovers:

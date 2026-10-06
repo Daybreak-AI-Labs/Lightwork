@@ -16,7 +16,10 @@
     <h2 id="device-review-title">Confirm this device</h2>
     <p id="device-review-description"></p>
     <p>Compare the full code with the device you are holding. Approve only a request you started. Pairing expires after five minutes; the device must finish connecting within one minute of approval.</p>
-    <label id="device-actions-option" hidden><input type="checkbox" id="device-actions"> Also allow reviewed answers and Stop on my own tasks when organization policy permits</label>
+    <p id="device-actions-option" hidden><label><input type="checkbox" id="device-actions"> Also allow reviewed answers and Stop on my own tasks when organization policy permits</label></p>
+    <p id="device-new-tasks-option" hidden><label><input type="checkbox" id="device-new-tasks"> Also allow starting my new tasks after reviewing their instructions and spending limits</label></p>
+    <p id="device-approvals-option" hidden><label><input type="checkbox" id="device-approvals"> Also allow reviewed approval or rejection of requests belonging to my own tasks</label></p>
+    <p>Each choice is separate. Current workspace rules, role, source access and spending limits still apply. New tasks may use authorized tools; approval authorizes an action but does not prove it ran. Earlier device approvals never gain these additional choices automatically.</p>
     <button class="btn btn--primary" id="device-confirm" type="button">Approve this device</button>
     <button class="btn btn--ghost" id="device-cancel" type="button">Cancel review</button>
   </section>

@@ -170,8 +170,8 @@
           {%- if current_list %}{{ g.live_count }} model{{ '' if g.live_count == 1 else 's' }} listed in the current check.
           {%- elif g.status == 'live' and g.stale %}The earlier model list needs a fresh check.
           {%- elif g.status == 'unavailable' %}The current model list could not be confirmed. Try refreshing later.
-          {%- elif g.status == 'unconfigured' %}Set up this service under Provider keys to use it.
-          {%- elif g.status == 'pending' %}Refresh to see the models this key can reach.
+          {%- elif g.status == 'unconfigured' %}{{ g.detail }}
+          {%- elif g.status == 'pending' %}Refresh to see the models this connection can reach.
           {%- elif g.status == 'configured' %}Using the model saved in your connection.
           {%- else %}Showing Lightwork's built-in list for this provider.{% endif %}
           {%- if g.previous_count|default(0) %} {{ g.previous_count }} previous choice{{ '' if g.previous_count == 1 else 's' }} kept; availability needs a fresh check.{% endif %}
@@ -368,14 +368,14 @@
       the pickers above then offer only those, and <strong>no task can use a
       model outside this list</strong>. Leave every box unticked to allow all
       models. Models marked <span class="badge active">Up to date</span> were
-      confirmed by the provider for your key.
+      confirmed by the provider for your connection.
     </p>
     <form method="post" action="/settings/models/allowed">
       {% for g in model_groups %}
       <details data-model-group="{{ g.name }}"{% if g.configured %} open{% endif %} class="model-group">
         <summary>
           <span class="model-group-title">{{ 'Added by your installation' if g.name == 'custom' else g.label }}</span>
-          <span class="muted">{{ g.models|length }} model{{ '' if g.models|length == 1 else 's' }}{% if g.live_count %} · {{ g.live_count }} up to date{% endif %}{% if not g.configured and g.name != 'custom' %} · no key{% endif %}</span>
+          <span class="muted">{{ g.models|length }} model{{ '' if g.models|length == 1 else 's' }}{% if g.live_count %} · {{ g.live_count }} up to date{% endif %}{% if not g.configured and g.name != 'custom' %} · not set up{% endif %}</span>
         </summary>
         {% if g.models %}
         <div class="model-group-actions">
@@ -389,7 +389,7 @@
           <input type="checkbox" name="models" value="{{ m.spec }}"{% if m.spec in allowed_models %} checked{% endif %} />
         </label>
         {% endfor %}
-        {% if not g.models %}<p class="muted">No models known for this provider yet. Save its key and press Test connection to load them.</p>{% endif %}
+        {% if not g.models %}<p class="muted">No models known for this provider yet. Set up its connection and press Test connection to load them.</p>{% endif %}
       </details>
       {% endfor %}
       <p class="settings-foot">

@@ -493,69 +493,6 @@
     <button type="button" id="answer-refresh" class="btn btn--ghost" hidden>{{ ui('Refresh saved result and controls') }}</button>
     {% include "_chat_answer_panel.html" %}
     <script src="/static/lightwork-answer-panel.js" defer></script>
-    {% if can_operate %}<details class="panel planning-steps" id="planning-steps" data-goal="{{ goal.id }}">
-      <summary>{{ ui('Show planning steps') }}</summary>
-      <p class="muted">{{ ui('See how Lightwork would plan this request: it lists the steps, works through each one, then reviews the result and revises the plan if needed. This only shows the plan; the task itself is not changed or restarted. It uses AI, counts toward your spending limits and costs at most $2.00.') }}</p>
-      <label for="ps-passes">{{ ui('How many review rounds') }}</label>
-      <select id="ps-passes" class="select"{% if not can_operate %} disabled data-permission-disabled="1"{% endif %}>
-        <option value="1" lang="{{ ul('One round') }}">{{ ut('One round') }}</option>
-        <option value="2" selected lang="{{ ul('Up to two rounds') }}">{{ ut('Up to two rounds') }}</option>
-        <option value="3" lang="{{ ul('Up to three rounds') }}">{{ ut('Up to three rounds') }}</option>
-      </select>
-      <button type="button" class="btn btn--primary" id="ps-run"{% if not can_operate %} disabled data-permission-disabled="1"{% endif %}>{{ ui('Show planning steps') }}</button>
-      <p id="ps-status" role="status" aria-live="polite" tabindex="-1"></p>
-      <div id="ps-result" hidden></div>
-    </details>{% endif %}
-    <details class="more" id="share-panel">
-      <summary>{{ ui('More') }}</summary>
-    {% if projects %}
-    <form method="post" action="/chat/goal/{{ goal.id }}/project" class="goal-project">
-      <label class="muted" for="goal-project-sel">{{ ui('Project') }}</label>
-      <select id="goal-project-sel" name="project_id" class="input" onchange="this.form.requestSubmit()"{% if not can_operate %} disabled data-permission-disabled="1"{% endif %}>
-        <option value="" lang="{{ ul('— none —') }}">{{ ut('— none —') }}</option>
-        {% for p in projects %}
-          <option value="{{ p.id }}"{% if p.id == goal.project_id %} selected{% endif %}>{{ p.name or 'Untitled' }}</option>
-        {% endfor %}
-      </select>
-      <noscript><button type="submit" id="goal-project-save" class="btn btn--ghost"{% if not can_operate %} disabled data-permission-disabled="1"{% endif %}>{{ ui('Set') }}</button></noscript>
-    </form>
-    {% endif %}
-    <div class="goal-share" data-goal="{{ goal.id }}" data-can-operate="{{ '1' if can_operate else '0' }}">
-      {% if can_recover_task_files %}<a class="btn btn--ghost" href="/chat/goal/{{ goal.id }}/files">{{ ui('Review task files') }}</a>{% endif %}
-      <a class="btn btn--ghost" href="/goals/{{ goal.id }}/trajectory#goal-export">{{ ui('Download or share full history') }}</a>
-      {% if can_operate %}
-      <label for="share-scope">{{ ui('What to share') }}</label>
-      <select id="share-scope" class="input" aria-describedby="share-msg">
-        <option value="result" selected>{{ ui('Saved answer and files') }}</option>
-        <option value="conversation">{{ ui('Full conversation through this message') }}</option>
-      </select>
-      <button type="button" id="share-create" class="btn btn--ghost"{% if goal.status != 'done' or not goal.result %} hidden disabled{% endif %}>{{ ui('Review share link') }}</button>
-      <input type="text" id="share-url" class="input" readonly aria-label="{{ ut('Share link') }}"
-             style="display: none; max-width: 28rem;" onclick="this.select()">
-      <button type="button" id="share-copy" class="btn btn--ghost" hidden>{{ ui('Copy link') }}</button>
-      <span id="share-msg" class="muted" role="status" aria-live="polite"></span>
-      <ul id="share-list" class="share-list">
-        {% for s in share_links %}
-          <li data-id="{{ s.id }}">Read-only link{% if s.created_at %} made {{ s.created_at | datetime }}{% endif %}
-            <button type="button" class="btn btn--ghost share-revoke" data-id="{{ s.id }}">{{ ui('Revoke') }}</button></li>
-        {% endfor %}
-      </ul>
-      {% endif %}
-    </div>
-    <div class="task-ops">
-      <h3 class="task-ops__title">{{ ui('Task Health') }}</h3>
-      <p class="muted task-ops__note">{{ ui('A score out of 100 from how the task went: whether it finished, tool errors, and how much AI it used.') }}</p>
-      <button type="button" class="btn btn--ghost" id="task-health-check" data-goal="{{ goal.id }}">{{ ui("Check this task's health") }}</button>
-      <p id="task-health-status" class="muted" role="status" aria-live="polite"></p>
-      <div id="task-health-out"></div>
-    </div>
-    </details>
-    {% if can_operate %}<details class="more" id="code-sandbox" data-goal="{{ goal.id }}">
-      <summary>{{ ui('Run code for this task') }}</summary>
-      <p class="muted task-ops__note">{{ ui("Run small pieces of Python for this task in Lightwork's sandbox, step by step. Values carry over between steps. Every step is checked, recorded and counted against the task's limits.") }}</p>
-      <p id="code-sandbox-status" class="muted" role="status" aria-live="polite"></p>
-      <div id="code-sandbox-body"></div>
-    </details>{% endif %}
     <div id="halt-card" class="halt-card" style="display: none;" data-stop-kind="{{ stop.kind if stop else '' }}" data-resume-mode="{{ stop_progress.mode if stop_progress else 'retry' }}">
       {% set pilot_prepared = stop and stop.kind == 'pilot_prepared' %}
       {% set specialist_setup = stop and stop.kind in ('specialist_setup', 'specialist_needs_web_search', 'specialist_needs_connection') %}
@@ -622,6 +559,69 @@
         <span id="halt-resume-msg" role="status" aria-live="polite" class="muted" style="font-size: var(--text-sm);"></span>
       </form>{% endif %}
     </div>
+    {% if can_operate %}<details class="panel planning-steps" id="planning-steps" data-goal="{{ goal.id }}">
+      <summary>{{ ui('Show planning steps') }}</summary>
+      <p class="muted">{{ ui('See how Lightwork would plan this request: it lists the steps, works through each one, then reviews the result and revises the plan if needed. This only shows the plan; the task itself is not changed or restarted. It uses AI, counts toward your spending limits and costs at most $2.00.') }}</p>
+      <label for="ps-passes">{{ ui('How many review rounds') }}</label>
+      <select id="ps-passes" class="select"{% if not can_operate %} disabled data-permission-disabled="1"{% endif %}>
+        <option value="1" lang="{{ ul('One round') }}">{{ ut('One round') }}</option>
+        <option value="2" selected lang="{{ ul('Up to two rounds') }}">{{ ut('Up to two rounds') }}</option>
+        <option value="3" lang="{{ ul('Up to three rounds') }}">{{ ut('Up to three rounds') }}</option>
+      </select>
+      <button type="button" class="btn btn--primary" id="ps-run"{% if not can_operate %} disabled data-permission-disabled="1"{% endif %}>{{ ui('Show planning steps') }}</button>
+      <p id="ps-status" role="status" aria-live="polite" tabindex="-1"></p>
+      <div id="ps-result" hidden></div>
+    </details>{% endif %}
+    <details class="more" id="share-panel">
+      <summary>{{ ui('More') }}</summary>
+    {% if projects %}
+    <form method="post" action="/chat/goal/{{ goal.id }}/project" class="goal-project">
+      <label class="muted" for="goal-project-sel">{{ ui('Project') }}</label>
+      <select id="goal-project-sel" name="project_id" class="input" onchange="this.form.requestSubmit()"{% if not can_operate %} disabled data-permission-disabled="1"{% endif %}>
+        <option value="" lang="{{ ul('— none —') }}">{{ ut('— none —') }}</option>
+        {% for p in projects %}
+          <option value="{{ p.id }}"{% if p.id == goal.project_id %} selected{% endif %}>{{ p.name or 'Untitled' }}</option>
+        {% endfor %}
+      </select>
+      <noscript><button type="submit" id="goal-project-save" class="btn btn--ghost"{% if not can_operate %} disabled data-permission-disabled="1"{% endif %}>{{ ui('Set') }}</button></noscript>
+    </form>
+    {% endif %}
+    <div class="goal-share" data-goal="{{ goal.id }}" data-can-operate="{{ '1' if can_operate else '0' }}">
+      {% if can_recover_task_files %}<a class="btn btn--ghost" href="/chat/goal/{{ goal.id }}/files">{{ ui('Review task files') }}</a>{% endif %}
+      <a class="btn btn--ghost" href="/goals/{{ goal.id }}/trajectory#goal-export">{{ ui('Download or share full history') }}</a>
+      {% if can_operate %}
+      <label for="share-scope">{{ ui('What to share') }}</label>
+      <select id="share-scope" class="input" aria-describedby="share-msg">
+        <option value="result" selected>{{ ui('Saved answer and files') }}</option>
+        <option value="conversation">{{ ui('Full conversation through this message') }}</option>
+      </select>
+      <button type="button" id="share-create" class="btn btn--ghost"{% if goal.status != 'done' or not goal.result %} hidden disabled{% endif %}>{{ ui('Review share link') }}</button>
+      <input type="text" id="share-url" class="input" readonly aria-label="{{ ut('Share link') }}"
+             style="display: none; max-width: 28rem;" onclick="this.select()">
+      <button type="button" id="share-copy" class="btn btn--ghost" hidden>{{ ui('Copy link') }}</button>
+      <span id="share-msg" class="muted" role="status" aria-live="polite"></span>
+      <ul id="share-list" class="share-list">
+        {% for s in share_links %}
+          <li data-id="{{ s.id }}">Read-only link{% if s.created_at %} made {{ s.created_at | datetime }}{% endif %}
+            <button type="button" class="btn btn--ghost share-revoke" data-id="{{ s.id }}">{{ ui('Revoke') }}</button></li>
+        {% endfor %}
+      </ul>
+      {% endif %}
+    </div>
+    <div class="task-ops">
+      <h3 class="task-ops__title">{{ ui('Task Health') }}</h3>
+      <p class="muted task-ops__note">{{ ui('A score out of 100 from how the task went: whether it finished, tool errors, and how much AI it used.') }}</p>
+      <button type="button" class="btn btn--ghost" id="task-health-check" data-goal="{{ goal.id }}">{{ ui("Check this task's health") }}</button>
+      <p id="task-health-status" class="muted" role="status" aria-live="polite"></p>
+      <div id="task-health-out"></div>
+    </div>
+    </details>
+    {% if can_operate %}<details class="more" id="code-sandbox" data-goal="{{ goal.id }}">
+      <summary>{{ ui('Run code for this task') }}</summary>
+      <p class="muted task-ops__note">{{ ui("Run small pieces of Python for this task in Lightwork's sandbox, step by step. Values carry over between steps. Every step is checked, recorded and counted against the task's limits.") }}</p>
+      <p id="code-sandbox-status" class="muted" role="status" aria-live="polite"></p>
+      <div id="code-sandbox-body"></div>
+    </details>{% endif %}
   </div>
   {% include "_conversation_inbox_panel.html" %}
   {% if comments_enabled() %}{% from "_comments.html" import comments %}{{ comments('task', goal.id, 'Comments on this task') }}
@@ -839,6 +839,14 @@
         }
       }
 
+      function showHaltCard(stopped) {
+        if (haltCard) haltCard.style.display = stopped ? 'block' : 'none';
+        ['planning-steps', 'code-sandbox'].forEach(function (id) {
+          const panel = document.getElementById(id);
+          if (panel) panel.hidden = stopped;
+        });
+      }
+
       function renderHalted() {
         // A 'blocked' goal with no open question has actually stopped
         // (budget/time cap, killswitch, or error). Make that legible instead
@@ -848,7 +856,7 @@
         cancelBtn.disabled = true;
         if (resultSection) resultSection.style.display = 'none';
         renderStop(lastStop);
-        haltCard.style.display = 'block';
+        showHaltCard(true);
         loadStopProgress();
       }
 
@@ -1046,7 +1054,7 @@
         // the live stream back up so the page keeps following it in place.
         done = false;
         setStatus('pending');
-        if (haltCard) haltCard.style.display = 'none';
+        showHaltCard(false);
         cancelBtn.disabled = false;
         syncComposer();
         openStream();
@@ -1080,6 +1088,8 @@
           }
           questionsFresh = true; if(j.last_answer)cgCopy(status,j.last_answer.file_count===1?'Earlier answer accepted with {count} prepared file on {time}. Any recovered composer draft is kept for you to review.':'Earlier answer accepted with {count} prepared files on {time}. Any recovered composer draft is kept for you to review.',{count:cgNumber(j.last_answer.file_count),time:cgDate(j.last_answer.created_at)});else cgCopy(status,''); retry.hidden = true;
           if (qs.length) {
+            showHaltCard(false);
+            progressLoaded = false;
             const changed = currentQuestionId !== qs[0].id;
             currentQuestionId = qs[0].id;
             currentQuestionVersion = qs[0].version;
@@ -1453,7 +1463,7 @@
         if (Object.prototype.hasOwnProperty.call(d, 'stop')) lastStop = d.stop && typeof d.stop === 'object' ? d.stop : null;
         if (d.status) {
           setStatus(d.status);
-          if (!['blocked', 'failed', 'cancelled'].includes(d.status) && haltCard) { haltCard.style.display = 'none'; progressLoaded = false; }
+          if (!['blocked', 'failed', 'cancelled'].includes(d.status)) { showHaltCard(false); progressLoaded = false; }
         }
         if (d.result && d.result !== preparationMessage) {
           const changed = d.result !== lastResult;

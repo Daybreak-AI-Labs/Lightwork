@@ -1486,6 +1486,26 @@ _CONTEXTS = tuple(
             ),
         ),
         _registered(
+            path="/channels",
+            summary="Connect chat apps, choose who may use them and review their current readiness.",
+            capabilities=(
+                "Check each saved chat connection and its permitted people.",
+                "Open the complete protected message test for Telegram, Discord, WhatsApp or Mattermost.",
+                "Review a currently permitted private conversation and the fixed test sentence before sending; read its original outcome afterward.",
+            ),
+            boundaries=(
+                "A connection check does not prove a person received a message; a service accepting the test is a separate result.",
+                "An uncertain message outcome must be read from its original before a separate new decision; it is never automatically resent.",
+                "WhatsApp tests need a recent saved private conversation; the service can still refuse a reply outside its allowed window.",
+            ),
+            next_steps=(
+                "Choose the chat app and check its current connection.",
+                "Open the protected form, choose a permitted conversation and review the recipient and message.",
+                "Confirm the send separately, then read its saved outcome.",
+            ),
+            suggested_questions=("How can I check this chat connection?", "Can I review a test message?", "Was my earlier test accepted?"),
+        ),
+        _registered(
             path="/privacy/data-discovery",
             summary=(
                 "Enroll exact data sources, run bounded provider scans, review minimized findings, "

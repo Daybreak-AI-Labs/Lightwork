@@ -51,6 +51,7 @@ export function RunsListScreen(props: {
   settings: Settings;
   onOpenRun: (id: number, title?: string) => void;
   onOpenSettings?: () => void;
+  onNewTask?: () => void;
 }): React.JSX.Element {
   useLanguage();
   const theme = useTheme(), styles = stylesFor(theme);
@@ -122,7 +123,7 @@ export function RunsListScreen(props: {
     empty = (
       <EmptyState
         title={search || status ? "No matching tasks" : "No tasks yet"}
-        body={search || status ? "Try another search or status. Matching tasks may be outside the saved offline copy." : "Tasks started from the Lightwork dashboard will appear here. This list refreshes on its own."}
+        body={search || status ? "Try another search or status. Matching tasks may be outside the saved offline copy." : "Start a task here with its separately approved device permission, or on your dashboard. This list refreshes on its own."}
         actionLabel={msg("Refresh now")}
         onAction={refresh}
       />
@@ -130,6 +131,7 @@ export function RunsListScreen(props: {
   }
 
   const header = <>
+      {props.onNewTask ? <Button label="Start a new task" onPress={props.onNewTask} /> : null}
       <Text style={styles.heading} accessibilityRole="header" accessibilityLanguage={messageLanguage("Tasks")}>{msg("Tasks")}</Text>
       <TextInput style={styles.search} accessibilityLabel={msg("Search tasks")} placeholder="Search all task titles and results" value={query} onChangeText={setQuery} onSubmitEditing={() => setSearch(query.trim())} />
       <View style={styles.filters}>

@@ -19,7 +19,7 @@
 import { connectionValidationError } from "./connectionValidation";
 import { nativePlatform, nativeTransportReady, nativeRequest } from './nativeTransport';
 
-export type DeviceInfo = {id: string; generation: number; expires_at: number; enrollment_expires_at: number; principal: string; tenant: string | null; actions: boolean};
+export type DeviceInfo = {id: string; generation: number; expires_at: number; enrollment_expires_at: number; principal: string; tenant: string | null; actions: boolean; new_tasks?: boolean; approvals?: boolean};
 export type Settings = { baseUrl: string; token: string; cacheScope?: string; needsSetup?: boolean; offlineEnabled?: boolean; pairedDevice?: DeviceInfo };
 
 export type Goal = {
@@ -162,6 +162,7 @@ async function apiRequest<T>(cfg: Settings, path: string, signal?: AbortSignal, 
   const base = cfg.baseUrl.trim().replace(/\/+$/, "");
   const headers: Record<string, string> = { Accept: "application/json" };
   if (body) { headers["Content-Type"] = "application/json"; headers.Origin = new URL(base).origin; }
+  if (body && cfg.pairedDevice?.tenant) headers["X-Lightwork-Expected-Tenant"] = cfg.pairedDevice.tenant;
   if (path === "/api/v1/offline/bundle") headers["X-Lightwork-Offline-Policy"] = "1";
   if (cfg.token) {
     headers.Authorization = `Bearer ${cfg.token.trim()}`;
@@ -184,6 +185,7 @@ async function apiRequest<T>(cfg: Settings, path: string, signal?: AbortSignal, 
         const pairing = path.startsWith('/api/v1/devices/');
         const message = pairing && res.status === 401 ? 'This device connection or pairing request expired or was removed. Start device pairing again.'
           : pairing && res.status === 403 ? 'Device pairing is turned off or this account no longer has access. Check with your administrator.'
+          : path.startsWith('/api/v1/devices/work/') && res.status === 409 ? 'Work, limits or access changed. Keep your draft, refresh and review again. An earlier submission must be read back before another intentional request.'
           : path.startsWith('/api/v1/devices/actions/') && res.status === 409 ? 'The task or access changed. Keep your draft, refresh the task and review again.'
           : pairing && res.status === 409 ? 'This device connection changed. Review pairing again.' : statusMessage(res.status);
         throw new ApiError(message, res.status, res.status === 401 || res.status === 403 ? "access" : "transient");
@@ -274,4 +276,29 @@ export function getSpend(cfg: Settings, signal?: AbortSignal): Promise<{ total: 
 
 export function getOfflineBundle(cfg: Settings, signal?: AbortSignal): Promise<OfflineBundle> {
   return apiGet<OfflineBundle>(cfg, "/api/v1/offline/bundle", signal);
+}
+export type WorkAction = 'start' | 'approve' | 'reject';
+export type WorkField = {name: string; label: string; kind: string; required?: boolean; max_length?: number; value?: unknown; choices?: {value: unknown; label: string}[]};
+export type WorkContext = {context: string; revision: string; blocked: string; summary: string; fields: WorkField[]; current_details?: {label: string; value: string}[]; checked_at: number};
+export type WorkReview = {token: string; operation_id: string; action: WorkAction; expires_at: number; summary: string; changes: {label?: string; field?: string; before?: unknown; after?: unknown}[]};
+export type WorkOutcome = {status: 'confirmed' | 'replayed' | 'queued' | 'unconfirmed'; message: string; operation_id: string; details: Record<string, unknown>};
+export type WorkHistory = {items: {operation: string; action: WorkAction; label: string; at: number}[]; complete: boolean; notice: string};
+export type OwnedApprovals = {items: {id: number; task_title: string; action: string}[]; before_id: number; complete: boolean; notice: string};
+export function workContext(cfg: Settings, action: WorkAction, approvalId = 0, signal?: AbortSignal): Promise<WorkContext> {
+  return apiGet(cfg, `/api/v1/devices/work/context?action=${action}&approval_id=${approvalId}`, signal);
+}
+export function prepareWork(cfg: Settings, action: WorkAction, current: WorkContext, args: object, approvalId = 0, signal?: AbortSignal): Promise<WorkReview> {
+  return apiRequest(cfg, '/api/v1/devices/work/prepare', signal, {action, approval_id: approvalId, context: current.context, revision: current.revision, arguments: args});
+}
+export function executeWork(cfg: Settings, review: WorkReview, signal?: AbortSignal): Promise<WorkOutcome> {
+  return apiRequest(cfg, '/api/v1/devices/work/execute', signal, {token: review.token, confirmed: true});
+}
+export function readWorkOriginal(cfg: Settings, operation: string, signal?: AbortSignal): Promise<WorkOutcome> {
+  return apiGet(cfg, '/api/v1/devices/work/original?operation=' + encodeURIComponent(operation), signal);
+}
+export function workHistory(cfg: Settings, signal?: AbortSignal): Promise<WorkHistory> {
+  return apiGet(cfg, '/api/v1/devices/work/history', signal);
+}
+export function ownedApprovals(cfg: Settings, beforeId = 0, signal?: AbortSignal): Promise<OwnedApprovals> {
+  return apiGet(cfg, '/api/v1/devices/work/approvals?before_id=' + beforeId, signal);
 }

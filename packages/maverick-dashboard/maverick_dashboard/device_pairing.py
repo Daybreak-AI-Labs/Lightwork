@@ -77,11 +77,14 @@ def _load():
         raise HTTPException(503, "The device registry could not be verified.") from exc
 
 
-def _save(value):
+def _save(value, *, effect_guard=None):
     now = time.time()
     value["pending"] = {key: row for key, row in value["pending"].items() if row["expires_at"] > now}
-    value["devices"] = {key: row for key, row in value["devices"].items() if row["enrollment_expires_at"] > now and not row.get("revoked")}
-    atomic_write_bytes(_path(), seal(json.dumps(value, separators=(",", ":")).encode()), mode=0o600)
+    value["devices"] = {key: row for key, row in value["devices"].items() if row.get("work_attempts") or (row["enrollment_expires_at"] > now and not row.get("revoked"))}
+    protected = seal(json.dumps(value, separators=(",", ":")).encode())
+    if len(protected) > 8 * 1024 * 1024:
+        raise HTTPException(409, "The retained device history is full. Nothing was discarded or repeated; use the full dashboard for new work.")
+    atomic_write_bytes(_path(), protected, mode=0o600, effect_guard=effect_guard)
 
 
 def _hash(value):
@@ -155,13 +158,15 @@ def review(principal, code):
             "scope": "Read only your own tasks, activity and costs", "credential_seconds": policy["ttl"]}
 
 
-def confirm(principal, code, *, actions=False):
+def confirm(principal, code, *, actions=False, new_tasks=False, approvals=False):
+    if type(new_tasks) is not bool or type(approvals) is not bool:
+        raise HTTPException(422, "Choose each additional device permission separately.")
     with _locked():
         policy = _policy()
         _current(principal)
         state, now = _load(), time.time()
         pending = _pending(state, code)
-        if actions and not policy["actions"]:
+        if (actions or new_tasks or approvals) and not policy["actions"]:
             raise HTTPException(403, "Your organization does not allow companion actions.")
         active = [row for row in state["devices"].values() if not row.get("revoked") and row["enrollment_expires_at"] > now]
         if len(state["devices"]) >= 2000 or sum(row["principal"] == principal for row in active) >= 20:
@@ -170,7 +175,8 @@ def confirm(principal, code, *, actions=False):
         token = PREFIX + ident + "." + secret
         device = {"id": ident, "label": pending["label"], "principal": principal, "tenant": current_tenant_id_strict(),
                   "issued_at": now, "expires_at": now + policy["ttl"], "enrollment_expires_at": now + ENROLLMENT_TTL,
-                  "secret_hash": _hash(secret), "generation": 1, "actions": actions, "revoked": False}
+                  "secret_hash": _hash(secret), "generation": 1, "actions": actions,
+                  "new_tasks": new_tasks, "approvals": approvals, "revoked": False}
         _audit(principal, "paired", ident)
         state["devices"][ident] = device
         pending.update(status="approved", token=token, device_id=ident, expires_at=min(pending["expires_at"], now + 60))
@@ -201,7 +207,8 @@ def poll(token):
 
 
 def _public(row):
-    return {key: row[key] for key in ("id", "label", "principal", "tenant", "issued_at", "expires_at", "enrollment_expires_at", "generation", "actions", "revoked")}
+    return {key: row[key] for key in ("id", "label", "principal", "tenant", "issued_at", "expires_at", "enrollment_expires_at", "generation", "actions", "revoked")} | {
+        "new_tasks": row.get("new_tasks") is True, "approvals": row.get("approvals") is True}
 
 
 def _scope(method, path, row, policy):
@@ -213,6 +220,13 @@ def _scope(method, path, row, policy):
         return
     if (method == "POST" and path in {"/api/v1/devices/actions/prepare", "/api/v1/devices/actions/execute"}
             and row["actions"] and policy["actions"]):
+        return
+    if ((method == "GET" and path in {"/api/v1/devices/work/history", "/api/v1/devices/work/original"})
+            or (method == "POST" and path == "/api/v1/devices/work/original")):
+        return
+    if (policy["actions"] and (row.get("new_tasks") is True or row.get("approvals") is True)
+            and ((method == "GET" and path in {"/api/v1/devices/work/context", "/api/v1/devices/work/approvals", "/api/v1/devices/work/history", "/api/v1/devices/work/original"})
+                 or (method == "POST" and path in {"/api/v1/devices/work/prepare", "/api/v1/devices/work/execute", "/api/v1/devices/work/original"}))):
         return
     raise HTTPException(403, "This paired device cannot perform that operation. Open the signed-in dashboard.")
 
@@ -244,7 +258,40 @@ def authenticate(token, method, path):
         finally:
             reset_tenant(pin)
         return VerifiedPrincipal(sub=row["principal"][5:], issuer="lightwork:paired-device", audience="lightwork:companion",
-                                 claims={"device_id": ident, "tenant": row["tenant"], "iat": row["issued_at"]})
+                                 claims={"device_id": ident, "tenant": row["tenant"], "iat": row["issued_at"],
+                                         "new_tasks": row.get("new_tasks") is True, "approvals": row.get("approvals") is True})
+
+
+def claim_work(ident, principal, operation, binding, action, *, receipt, effect_guard):
+    """Reserve an intentional work attempt on its existing enrollment, never replay it."""
+    if not re.fullmatch(r"[a-f0-9]{32}", operation) or not re.fullmatch(r"[a-f0-9]{64}", binding):
+        raise HTTPException(409, "This reviewed request could not be verified.")
+    with _locked():
+        state = _load()
+        row = state["devices"].get(ident)
+        if not row or row["principal"] != principal or row["tenant"] != current_tenant_id_strict():
+            raise HTTPException(403, "This device no longer belongs to this account and workspace.")
+        attempts = row.setdefault("work_attempts", {})
+        expected = {"binding": binding, "action": action, "receipt": receipt}
+        prior = attempts.get(operation)
+        if prior is not None:
+            if {key: prior.get(key) for key in expected} != expected:
+                raise HTTPException(409, "This original request belongs to different reviewed work.")
+            return False
+        if len(attempts) >= 1000:
+            raise HTTPException(409, "This device's retained work history is full. Nothing was discarded or repeated; use the full dashboard for new work.")
+        effect_guard()
+        attempts[operation] = {**expected, "at": time.time()}
+        _save(state, effect_guard=effect_guard)
+        return True
+
+
+def work_history(ident, principal):
+    with _locked():
+        row = _load()["devices"].get(ident)
+        if not row or row["principal"] != principal or row["tenant"] != current_tenant_id_strict():
+            raise HTTPException(403, "This device no longer belongs to this account and workspace.")
+        return dict(row.get("work_attempts", {}))
 
 
 def bind(request, principal):

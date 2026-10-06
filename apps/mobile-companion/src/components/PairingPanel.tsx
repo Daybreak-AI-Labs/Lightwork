@@ -48,7 +48,7 @@ export function PairingPanel(props: {address: string; label: string; disabled: b
   });}
   return <View>
     <Text accessibilityRole="header" style={{color: theme.text, fontSize: 18, marginTop: 16}} accessibilityLanguage="en">Pair with your account</Text>
-    <Text style={{color: theme.muted}} accessibilityLanguage="en">Approve a short-lived code in your signed-in dashboard. No access-token copying is needed. The connection is limited to your own work in the chosen workspace.</Text>
+    <Text style={{color: theme.muted}} accessibilityLanguage="en">Approve a short-lived code in your signed-in dashboard. No access-token copying is needed. The connection is limited to your own work in the chosen workspace. On the dashboard, separately choose whether this device may answer or stop tasks, start new tasks, or decide requests belonging to your tasks. Existing devices gain none of these new permissions automatically.</Text>
     {!pending ? <Button label={msg("Start device pairing")} language={messageLanguage("Start device pairing")} disabled={props.disabled || busy} onPress={start} /> : <>
       <Text selectable accessibilityLabel={'Pairing code ' + pending.code.split('').join(' ')} style={{color: theme.text, fontSize: 24}}>{pending.code}</Text>
       <Button label="Open pairing page" disabled={busy} onPress={() => {void Linking.openURL(props.address.replace(/\/+$/, '') + '/devices?code=' + encodeURIComponent(pending.code)).catch(() => setError('Open your dashboard on a computer, choose Your account, then Your paired devices, and enter this code.'));}} />

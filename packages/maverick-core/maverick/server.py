@@ -207,6 +207,7 @@ class Server:
     ):
         created_sandbox = sandbox is None
         self.world = world
+        self._db_path: Path | None = None
         self.llm = llm
         self.sandbox = build_sandbox() if sandbox is None else sandbox
         self.max_depth = max_depth
@@ -246,6 +247,8 @@ class Server:
         if tenant is None:
             world = self.world
         else:
+            if self._db_path is not None:
+                raise RuntimeError("An explicit database cannot be combined with per-user workspace selection.")
             # Postgres is one shared transactional backend whose row-level
             # tenant boundary comes from tenant_scope/current_tenant_strict.
             # Creating a tenant SQLite world here silently splits channel
@@ -514,6 +517,7 @@ class Server:
                     channel=msg.channel or "unknown",
                     user_id=execution_user_id,
                     conversation_id=conversation.id,
+                    **({"db_path": self._db_path} if self._db_path is not None else {}),
                 )
             except Exception:
                 log.exception("goal #%s dispatch failed", goal_id)
@@ -1152,8 +1156,23 @@ def _advise_channel_tenancy(server) -> None:
         pass
 
 
-def build_from_config() -> Server:
+def build_from_config(db: Path | None = None) -> Server:
     cfg = load_config()
+    if db is not None:
+        from .grpc_dispatcher import configured_target
+        from .paths import tenant_by_user_enabled
+        from .world_model_backends import is_postgres_configured
+
+        queue = cfg.get("queue") or {}
+        if (not isinstance(queue, dict) or queue.get("backend")
+                or configured_target() or tenant_by_user_enabled()
+                or is_postgres_configured()):
+            raise RuntimeError(
+                "--db selects one local database and cannot be combined with "
+                "a network worker, Postgres, or per-user workspaces. Use local "
+                "execution for that database, or omit --db to use the configured shared workspace."
+            )
+        db = Path(db).expanduser().resolve()
     # Validate the routes this server can actually instantiate. A credential
     # for an unrelated provider must not unblock startup, while valid keyless
     # localhost and Codex CLI routes must not be rejected.
@@ -1174,7 +1193,7 @@ def build_from_config() -> Server:
             f"({detail}). Run 'maverick init' or `maverick preflight`."
         )
 
-    world = open_world()
+    world = open_world(db) if db is not None else open_world()
     sandbox = None
     server = None
     try:
@@ -1199,6 +1218,7 @@ def build_from_config() -> Server:
             owns_sandbox=True,
         )
         server._runtime_configuration_native = True
+        server._db_path = db
 
         channels_cfg = cfg.get("channels", {})
         for name, wire in _WIRES.items():

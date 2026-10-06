@@ -174,12 +174,12 @@ def start_recover(request, selection, arguments, prepared, operation_id):
     return _receipt_outcome(goal, replayed=True)
 
 
-def start_execute(request, selection, arguments, prepared, operation_id):
+def start_execute(request, selection, arguments, prepared, operation_id, *, effect_guard=None):
     if _policy() != prepared["policy"]:
         raise HTTPException(409, "Task limits changed. Review the current limits before starting.")
     background, response = BackgroundTasks(), Response()
     goal = api._create_goal(request, GoalIn(**{**arguments, "title": arguments["title"].strip()}),
-                            background, response, idempotency_key=operation_id)
+                            background, response, idempotency_key=operation_id, **({"effect_guard": effect_guard} if effect_guard is not None else {}))
     return _receipt_outcome(goal, replayed=response.headers.get("Idempotency-Replayed") == "true",
                             background=background)
 

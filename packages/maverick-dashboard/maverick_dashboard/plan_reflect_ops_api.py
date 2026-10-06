@@ -72,7 +72,9 @@ def _trace(goal_text: str, passes: int, principal: str, actor: str, goal_id: int
             result = run_plan_execute_reflect(goal_text, planner_complete=llm.complete,
                                               executor_complete=llm.complete, reflector_complete=llm.complete,
                                               max_iterations=passes, budget=budget)
-        outcome = "finished"
+        review_unavailable = any(r.notes == "reflector JSON parse failed" for r in result.reflections)
+        no_plan = not result.plan and not result.results
+        outcome = "incomplete" if no_plan or review_unavailable else str(result.status)
     except SpendingLimitReached as exc:
         outcome = "stopped"
         return {"ran": False, "message": str(exc)}
@@ -90,8 +92,12 @@ def _trace(goal_text: str, passes: int, principal: str, actor: str, goal_id: int
         "ran": True,
         "plan": [str(step)[:500] for step in result.plan][:20],
         "steps": [{"step": str(r.step)[:500], "output": str(r.output or "")[:MAX_TEXT]} for r in result.results][:60],
-        "reviews": [{"verdict": str(r.status), "notes": str(r.notes or "")[:1000]} for r in result.reflections][:10],
-        "status": str(result.status),
+        "reviews": [{
+            "verdict": "unavailable" if no_plan or r.notes == "reflector JSON parse failed" else str(r.status),
+            "notes": ("The AI review could not be read, so it did not confirm this attempt."
+                      if r.notes == "reflector JSON parse failed" else str(r.notes or "")[:1000]),
+        } for r in result.reflections][:10],
+        "status": "no_plan" if no_plan else "review_unavailable" if review_unavailable else str(result.status),
         "passes": int(result.iterations),
         "cost": round(float(result.total_dollars), 4),
     }

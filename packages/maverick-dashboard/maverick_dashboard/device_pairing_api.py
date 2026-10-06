@@ -9,12 +9,14 @@ from pydantic import BaseModel, ConfigDict, Field
 from . import auth
 from . import device_pairing as service
 from .device_actions import router as device_actions_router
+from .device_work_actions import router as device_work_router
 from .draft_api import context_for
 from .reviewed_stop import router as reviewed_stop_router
 
 router = APIRouter()
 
 router.include_router(device_actions_router)
+router.include_router(device_work_router)
 router.include_router(reviewed_stop_router)
 
 
@@ -30,6 +32,8 @@ class Confirm(Input):
     code: str = Field(pattern=r"^[A-Z2-9]{12}$")
     context: str = Field(min_length=1, max_length=128)
     allow_actions: bool = False
+    allow_new_tasks: bool = False
+    allow_approvals: bool = False
 
 
 class Remove(Input):
@@ -100,7 +104,8 @@ def review(request: Request, response: Response, code: str):
 def confirm(request: Request, response: Response, body: Confirm):
     _private(response)
     _binding(request, body.context)
-    return service.confirm(_principal(request), body.code, actions=body.allow_actions)
+    return service.confirm(_principal(request), body.code, actions=body.allow_actions,
+                           new_tasks=body.allow_new_tasks, approvals=body.allow_approvals)
 
 
 @router.post("/api/v1/devices/remove")

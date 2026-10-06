@@ -1674,6 +1674,11 @@ def _rest_goal_limits(payload: GoalIn) -> dict[str, float | int]:
     }
 
 
+def _check_effect_guard(effect_guard):
+    if effect_guard is not None:
+        effect_guard()
+
+
 def _create_goal(
     request: Request,
     payload: GoalIn,
@@ -1681,9 +1686,11 @@ def _create_goal(
     response: Response,
     *,
     idempotency_key: str,
+    effect_guard=None,
 ) -> GoalOut:
     """Native launch authority shared with reviewed Copilot task starts."""
     require_permission(request, "operate")
+    _check_effect_guard(effect_guard)
     require_provider_or_400()
     # Shared sliding-window cap across /chat/send + this route, so a
     # runaway loop can't spawn unbounded (paid) goals.
@@ -1749,7 +1756,8 @@ def _create_goal(
         receipt = reserve_api(w, key=idem_key, owner=caller_principal(request) or "",
             payload=payload, title=title, description=description, domain=domain,
             connection_references=connection_refs,
-            caps={"max_dollars": max_dollars, "max_wall_seconds": max_wall_seconds, "max_depth": max_depth})
+            caps={"max_dollars": max_dollars, "max_wall_seconds": max_wall_seconds, "max_depth": max_depth},
+            **({"effect_guard": effect_guard} if effect_guard is not None else {}))
         goal_id = receipt["goal_id"]
         if not receipt["created"]:
             g0 = w.get_goal(goal_id)
@@ -1786,7 +1794,7 @@ def _create_goal(
         intent = {"max_dollars": max_dollars, "max_wall_seconds": max_wall_seconds,
                   "max_depth": max_depth, "channel": "api", "user_id": user_id,
                   "allowed_suites": sorted(allowed_suites) if allowed_suites is not None else None}
-        if not try_claim_api_dispatch(w, receipt, intent):
+        if not try_claim_api_dispatch(w, receipt, intent, **({"effect_guard": effect_guard} if effect_guard is not None else {})):
             # A concurrent same-key request claimed the draft first (a replay
             # can win the claim before the request that created it): the work
             # was dispatched exactly once, so this request gets the same goal.
@@ -1797,6 +1805,7 @@ def _create_goal(
                 return _to_goal_out(g1, limits=limits)
             raise HTTPException(status_code=409, detail=(
                 "Request retained; execution admission is unconfirmed. Reconcile before retrying."))
+    _check_effect_guard(effect_guard)
     if user_id:
         bg.add_task(
             run_goal_in_background_async,
@@ -15169,7 +15178,7 @@ def _approval_decision_response(world, event, audit_delivered: bool) -> Response
 
 
 def _decide_approval(request: Request, approval_id: int, payload: dict, status: str, *,
-                     binding: str | None = None, reviewed: dict | None = None) -> Response:
+                     binding: str | None = None, reviewed: dict | None = None, effect_guard=None) -> Response:
     """The synchronous native queue decision, shared with typed Copilot controls.
 
     The HTTP routes retain their exact statuses, headers and denial-note
@@ -15206,9 +15215,10 @@ def _decide_approval(request: Request, approval_id: int, payload: dict, status: 
     before = world.get_approval(approval_id) if reason else None
     if reviewed is not None:
         require_review(request, world, approval_id, status, reviewed)
-    event = (_record_vote_or_raise(world, approval_id, status, who) if vote_guard is None
-             else _record_vote_or_raise(world, approval_id, status, who, reviewed_card=vote_guard))
-    delivered = _audit_approval_decision(world, event)
+    effect_options = {"effect_guard": effect_guard} if effect_guard is not None else {}
+    event = (_record_vote_or_raise(world, approval_id, status, who, **effect_options) if vote_guard is None
+             else _record_vote_or_raise(world, approval_id, status, who, reviewed_card=vote_guard, **effect_options))
+    delivered = _audit_approval_decision(world, event, **effect_options)
     if reason and delivered and before is not None:
         from maverick import audit
         from maverick.safety.secret_detector import redact

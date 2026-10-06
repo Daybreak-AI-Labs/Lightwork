@@ -377,6 +377,16 @@
               ? function (isCurrent) { return samlControl.open(samlForm.context, samlForm.original, isCurrent); } : null);
           return;
         }
+        if (entry[0] === 'channel_message_test') {
+          var channelTest = entry[1], channelTestControl = window.LightworkChannelMessageTests;
+          if (!channelTest || Array.isArray(channelTest) || Object.keys(channelTest).sort().join(',') !== 'channel,context' ||
+              typeof channelTest.context !== 'string' || !/^[a-f0-9]{64}$/.test(channelTest.context) ||
+              !['telegram', 'discord', 'whatsapp_cloud', 'mattermost'].includes(channelTest.channel)) return;
+          protectedControls(node('dd', undefined, list), 'Open the complete channel message test',
+            '/channels#channel-message-tests', channelTestControl && typeof channelTestControl.open === 'function'
+              ? function (isCurrent) { return channelTestControl.open(channelTest.context, channelTest.channel, isCurrent); } : null);
+          return;
+        }
         if (entry[0] === 'company_signin_migration') {
           var signinForm = entry[1], signinControl = window.LightworkCompanySigninMigration;
           if (!signinForm || Array.isArray(signinForm) || Object.keys(signinForm).sort().join(',') !== 'context,original' ||

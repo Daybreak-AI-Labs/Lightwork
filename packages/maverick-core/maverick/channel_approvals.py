@@ -309,13 +309,15 @@ def _self_approval(world, event) -> dict[str, bool]:
     return {}
 
 
-def deliver_approval_audit_event(world, event) -> bool:
+def deliver_approval_audit_event(world, event, *, effect_guard=None) -> bool:
     """Deliver exactly one queued vote and persist its delivery marker."""
     if event.delivered_at is not None:
         return True
 
     from .audit import AuditRefused, EventKind, audit_event
 
+    if effect_guard is not None:
+        effect_guard()
     try:
         written = audit_event(
             EventKind.APPROVAL_DECISION,
@@ -342,7 +344,8 @@ def deliver_approval_audit_event(world, event) -> bool:
         )
         return False
     try:
-        return bool(world.mark_approval_audit_delivered(event.event_id))
+        return bool(world.mark_approval_audit_delivered(event.event_id,
+            **({"effect_guard": effect_guard} if effect_guard is not None else {})))
     # The signed append may have succeeded while the delivery-marker commit
     # acknowledgement failed. Reconcile instead of inviting a differently-keyed retry.
     # failure-policy: fail_soft_with_audit
@@ -358,7 +361,7 @@ def deliver_approval_audit_event(world, event) -> bool:
         return bool(reconciled and reconciled.delivered_at is not None)
 
 
-def audit_approval_decision(world, event) -> bool:
+def audit_approval_decision(world, event, *, effect_guard=None) -> bool:
     """Deliver an approval's queued votes in durable occurrence order.
 
     The world-model outbox is the authority seam: an audit refusal leaves every
@@ -375,7 +378,8 @@ def audit_approval_decision(world, event) -> bool:
         log.exception("approval audit outbox could not be read (event_id=%s)", event.event_id)
         return False
     for queued in pending:
-        if not deliver_approval_audit_event(world, queued):
+        if not deliver_approval_audit_event(world, queued,
+                **({"effect_guard": effect_guard} if effect_guard is not None else {})):
             return False
     try:
         current = world.get_approval_audit_event(event.event_id)
@@ -452,7 +456,7 @@ def require_separate_approver(world: Any, approval_id: int, who: str) -> None:
 # ----------------------------------------------------------------------------
 
 def record_vote(world: Any, approval_id: int, status: str, who: str, *,
-                reviewed_card: dict | None = None) -> Any:
+                reviewed_card: dict | None = None, effect_guard=None) -> Any:
     """Apply one approver's vote and return its outbox event.
 
     The person who asked may be told to leave a High or Critical approval to
@@ -472,9 +476,10 @@ def record_vote(world: Any, approval_id: int, status: str, who: str, *,
         require_separate_approver(world, approval_id, who)
     event_id = world.approval_audit_event_id(approval_id, status, who)
     try:
-        event = (world.decide_approval_audited(approval_id, status, decided_by=who)
-                 if reviewed_card is None else world.decide_approval_audited(
-                     approval_id, status, decided_by=who, reviewed_card=reviewed_card))
+        options = {"reviewed_card": reviewed_card} if reviewed_card is not None else {}
+        if effect_guard is not None:
+            options["effect_guard"] = effect_guard
+        event = world.decide_approval_audited(approval_id, status, decided_by=who, **options)
     except ChannelApprovalRefused:
         # A known atomic review refusal is not a lost commit acknowledgement.
         # Never replace it with an unrelated pre-existing vote's readback.
