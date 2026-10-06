@@ -10,7 +10,7 @@
   const translated=text=>window.LightworkI18n?window.LightworkI18n.text(text):text;
   const money=value=>window.mvMoney?window.mvMoney(value):'$'+value;
   const providerKinds=new Set(['provider_authentication','provider_rate_limit','provider_model_not_found','provider_unavailable','provider_connection','provider_configuration','provider_not_ready']);
-  const reviewLabel=()=>{const kind=document.getElementById('halt-card')?.dataset.stopKind;return kind==='pilot_prepared'?'Review task start':providerKinds.has(kind)?'Review retry after checking AI':'Review restart';};
+  const reviewLabel=()=>{const card=document.getElementById('halt-card'),kind=card?.dataset.stopKind;return kind==='pilot_prepared'?'Review task start':providerKinds.has(kind)?'Review retry after checking AI':card?.dataset.resumeMode==='resume'?'Resume':'Try again';};
   document.addEventListener('lightwork:task-stop-changed',()=>{if(!prepared&&!busy&&!uncertain&&!received)copy(button,reviewLabel());});
   if(window.LightworkI18n&&budget.max&&Number.isFinite(Number(budget.max))){const amount=money(Number(budget.max));budget.placeholder=window.LightworkI18n.text('Up to {amount}',{amount});const inherited=document.getElementById('halt-inherited-limit');if(inherited)copy(inherited,'Leave it empty to use your workspace’s spending limit of {amount}.',{amount});}
   const check=document.createElement('button');check.type='button';check.className='btn btn--ghost';copy(check,'Check restart receipt');check.hidden=true;form.appendChild(check);

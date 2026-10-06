@@ -12530,6 +12530,14 @@ def chat_answer_panel(request: Request, goal_id: int) -> HTMLResponse:
                                                "X-Lightwork-Context": context["conversation_context"]})
 
 
+def _stop_progress(world, goal):
+    from .stop_progress import summarize
+    try:
+        return summarize(world, goal)
+    except Exception:  # pragma: no cover -- never 500 the goal page
+        return None
+
+
 @app.get("/chat/goal/{goal_id}", response_class=HTMLResponse)
 def chat_goal(request: Request, goal_id: int) -> HTMLResponse:
     require_permission(request, "view")
@@ -12611,6 +12619,7 @@ def chat_goal(request: Request, goal_id: int) -> HTMLResponse:
             "can_operate": not handed_off and has_permission(request, "operate") and (caller_principal(request) or "") == (g.owner or ""),
             "handoff_closed": handed_off,
             "stop": stop,
+            "stop_progress": _stop_progress(w, g),
             "show_technical_details": show_technical,
             "submission_key": secrets.token_urlsafe(24),
             "submission": SubmissionStore(w).for_goal(goal_id),

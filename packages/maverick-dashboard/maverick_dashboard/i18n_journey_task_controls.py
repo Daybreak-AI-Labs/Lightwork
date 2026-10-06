@@ -73,4 +73,20 @@ ROWS = [
     ("The answer couldn’t be checked. Please try again.", "La réponse n'a pas pu être vérifiée. Réessayez.", "Die Antwort konnte nicht geprüft werden. Bitte erneut versuchen.", "回答を確認できませんでした。再試行してください。", "无法验证答案。请重试。"),
     ("This couldn’t be started. Please try again.", "Le démarrage a échoué. Réessayez.", "Der Vorgang konnte nicht gestartet werden. Bitte erneut versuchen.", "開始できませんでした。再試行してください。", "无法启动。请重试。"),
     ("Two viewpoints are ready below.", "Deux points de vue sont disponibles ci-dessous.", "Zwei Sichtweisen stehen unten bereit.", "2つの視点が以下に表示されています。", "两种观点已在下方准备就绪。"),
+    # A stopped task's progress (stop_progress.py) and its one-action Stop.
+    ("Not done yet", "Pas encore fait", "Noch nicht erledigt", "未完了", "尚未完成"),
+    ("No step was finished.", "Aucune étape n’a été terminée.", "Kein Schritt wurde abgeschlossen.", "完了した手順はありません。", "没有完成任何步骤。"),
+    ("Resume", "Reprendre", "Fortsetzen", "再開", "继续"),
+    ("Try again", "Réessayer", "Erneut versuchen", "もう一度試す", "重试"),
+    ("Stopped at step {step} of {total}.", "Arrêtée à l’étape {step} sur {total}.", "Bei Schritt {step} von {total} gestoppt.", "{total}手順中{step}番目で停止しました。", "已在第{step}步（共{total}步）停止。"),
+    ("All {total} planned steps were done before it stopped.", "Les {total} étapes prévues étaient terminées avant l’arrêt.", "Alle {total} geplanten Schritte waren vor dem Stopp erledigt.", "停止前に予定の{total}手順はすべて完了していました。", "停止前已完成全部{total}个计划步骤。"),
+    ("Stopped after {count} recorded steps.", "Arrêtée après {count} étapes enregistrées.", "Nach {count} aufgezeichneten Schritten gestoppt.", "記録された{count}手順の後に停止しました。", "在记录的{count}个步骤后停止。"),
+    ("Stopped after {count} recorded step.", "Arrêtée après {count} étape enregistrée.", "Nach {count} aufgezeichnetem Schritt gestoppt.", "記録された{count}手順の後に停止しました。", "在记录的{count}个步骤后停止。"),
+    ("Stopped before any step was finished.", "Arrêtée avant la fin de la première étape.", "Gestoppt, bevor ein Schritt abgeschlossen war.", "手順が完了する前に停止しました。", "在任何步骤完成前已停止。"),
+    ("Lightwork had not planned the remaining steps yet.", "Lightwork n’avait pas encore prévu les étapes restantes.", "Lightwork hatte die restlichen Schritte noch nicht geplant.", "Lightworkは残りの手順をまだ計画していませんでした。", "Lightwork 尚未规划剩余步骤。"),
+    ("Resume continues from saved step {step}; finished steps are not repeated.", "Reprendre continue depuis l’étape enregistrée {step} ; les étapes terminées ne sont pas répétées.", "Fortsetzen macht ab dem gespeicherten Schritt {step} weiter; erledigte Schritte werden nicht wiederholt.", "再開すると保存済みの手順{step}から続行し、完了した手順は繰り返しません。", "继续将从已保存的第{step}步开始，已完成的步骤不会重复。"),
+    ("Try again starts the task over. This workspace does not save progress, so finished steps run again.", "Réessayer recommence la tâche. Cet espace de travail n’enregistre pas la progression : les étapes terminées sont refaites.", "Erneut versuchen beginnt die Aufgabe von vorn. Dieser Arbeitsbereich speichert keinen Fortschritt, daher laufen erledigte Schritte erneut.", "もう一度試すとタスクを最初からやり直します。このワークスペースは進捗を保存しないため、完了した手順も再実行されます。", "重试会从头开始任务。此工作区不保存进度，因此已完成的步骤会再次运行。"),
+    ("Stopping. Lightwork stops after the step it is on.", "Arrêt en cours. Lightwork s’arrête après l’étape en cours.", "Wird gestoppt. Lightwork stoppt nach dem aktuellen Schritt.", "停止しています。Lightworkは現在の手順の後に停止します。", "正在停止。Lightwork 会在当前步骤完成后停止。"),
+    ("Stop requested. The current step may still be cleaning up. Already completed external changes are not undone. You can resume or try again below once it stops.", "Arrêt demandé. L’étape en cours peut encore se terminer. Les modifications externes déjà effectuées ne sont pas annulées. Vous pourrez reprendre ou réessayer ci-dessous une fois l’arrêt effectif.", "Stopp angefordert. Der aktuelle Schritt wird eventuell noch abgeschlossen. Bereits erfolgte externe Änderungen werden nicht rückgängig gemacht. Nach dem Stopp können Sie unten fortsetzen oder es erneut versuchen.", "停止を要求しました。現在の手順の後片付けが続く場合があります。完了済みの外部変更は元に戻りません。停止後、下で再開または再試行できます。", "已请求停止。当前步骤可能仍在收尾。已完成的外部更改不会撤销。停止后可在下方继续或重试。"),
+
 ]

@@ -56,6 +56,25 @@
     button.addEventListener('click', function () { request('/api/v1/notifications/personal/mute', {context:snapshot.context, item_id:item.id, scope:scope}); });
     return button;
   }
+  // A task waiting on your answer can be stopped from its alert in one action (AI-8).
+  function stopButton(item) {
+    const button = document.createElement('button'); button.type = 'button'; button.className = 'btn btn--danger';
+    button.textContent = 'Stop task'; button.dataset.alertId = item.id + '-stop';
+    button.addEventListener('click', async function () {
+      button.disabled = true;
+      try {
+        const response = await fetch('/api/v1/goals/' + Number(item.goal_id) + '/cancel', {method:'POST', credentials:'same-origin'});
+        if (!response.ok) throw response;
+        if (muteStatus) muteStatus.textContent = 'Task stopped. Open it to see what was done and to resume or try again.';
+        request('/api/v1/notifications/personal');
+      } catch (failure) {
+        button.disabled = false;
+        error.textContent = window.mvErrorText ? window.mvErrorText(failure, 'stop the task') : 'Could not stop the task. Try again.';
+        error.hidden = false;
+      }
+    });
+    return button;
+  }
   function showMuted(muted) {
     if (!muteStatus) return;
     muteStatus.replaceChildren();
@@ -116,6 +135,7 @@
         const seen = document.createElement('button'); seen.className = 'btn btn--ghost'; seen.textContent = 'Mark seen'; seen.dataset.alertId = item.id;
         seen.addEventListener('click', function () { request('/api/v1/notifications/personal/seen', {context:snapshot.context, item_id:item.id}); }); row.append(seen);
       }
+      if (item.goal_id && item.category === 'needs-decision') row.append(stopButton(item));
       if (item.goal_id) row.append(muteButton(item, 'task', 'Mute this task'));
       if (item.agent) row.append(muteButton(item, 'agent', 'Mute alerts from this agent'));
       items.append(row);
