@@ -384,14 +384,19 @@ def _open_workspace(request: Request, token: str):
         receipt = _original_receipt(request, token)
         if receipt is None:
             return _gone(request)
-        inv, _role, available = receipt
+        inv, role, available = receipt
         if not available or inv.grant_confirmed_at is None:
-            return _page(request, "accepted" if inv.grant_confirmed_at else "unconfirmed", inv=inv,
-                         message="This workspace is not currently available to your account.")
+            return _page(request, "accepted" if inv.grant_confirmed_at else "unconfirmed", inv=inv, token=token,
+                         current_role=role, message="This workspace is not currently available to your account.")
+        import os
+
+        # An installation pinned to the invited workspace is already in it.
+        if inv.tenant and os.environ.get("MAVERICK_TENANT", "").strip() == inv.tenant:
+            return RedirectResponse("/", status_code=303)
         try:
             select_active_tenant(request, inv.tenant)
         except HTTPException as exc:
-            return _page(request, "accepted", status=exc.status_code, inv=inv,
+            return _page(request, "accepted", status=exc.status_code, inv=inv, token=token, current_role=role,
                          message="This workspace could not be opened. Your installation may use a fixed workspace, or your access changed. Ask your administrator.")
         return RedirectResponse("/", status_code=303)
 
