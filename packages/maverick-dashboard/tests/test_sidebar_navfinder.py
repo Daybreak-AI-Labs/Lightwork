@@ -120,7 +120,9 @@ def test_page_finder_destinations_cover_the_visible_registry_beyond_the_sidebar(
         if ln["href"] not in unavailable
     ]
     assert unavailable.isdisjoint(markup.finder_hrefs)
-    assert "/fleets" in markup.finder_hrefs and "/fleets" not in markup.sidebar_hrefs
+    # Teams is on the rail now; a page folded out of it is found only here.
+    assert "/fleets" in markup.sidebar_hrefs
+    assert "/security/soc" in markup.finder_hrefs and "/security/soc" not in markup.sidebar_hrefs
     assert all(href.startswith("/") for href in markup.finder_hrefs)
     assert "#" not in markup.finder_hrefs
     assert not any(href.startswith("//") for href in markup.finder_hrefs)

@@ -2116,6 +2116,9 @@ def _grouped_links(
 ) -> list[dict]:
     ov = overrides() if role is not None or scope_roles else {}
     groups: list[dict] = []
+    # Groups follow the sidebar's order; a group reached only through folded
+    # pages follows them, so the finder never reorders the sidebar's groups.
+    sidebar_order: dict[str, int] = {}
     for page in PAGES:
         if not customer_ready(page):
             continue
@@ -2133,6 +2136,8 @@ def _grouped_links(
         # Merge by group label (first-seen order), not adjacency: a page whose
         # group differs from its list neighbours (e.g. an entry re-homed to
         # Admin) must join its group, not split it into a duplicate section.
+        if page.get("in_nav", True):
+            sidebar_order.setdefault(page["group"], len(sidebar_order))
         for g in groups:
             if g["label"] == page["group"]:
                 break
@@ -2150,7 +2155,8 @@ def _grouped_links(
             }
         )
     # Technical setup and diagnostics stay discoverable after everyday work.
-    return sorted(groups, key=lambda group: group["label"] == "Advanced tools")
+    return sorted(groups, key=lambda group: (group["label"] == "Advanced tools",
+                                             sidebar_order.get(group["label"], len(sidebar_order))))
 
 
 def matrix() -> list[dict]:
