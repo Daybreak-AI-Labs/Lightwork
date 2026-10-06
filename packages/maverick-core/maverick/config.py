@@ -583,6 +583,39 @@ def load_config(path: Path | None = None) -> dict:
     return cfg
 
 
+class AgentStepConfigError(ValueError):
+    """An invalid task-step setting, with no configured value in the message."""
+
+
+def get_agent_max_steps(fallback: int | None = None) -> int | None:
+    """Resolve the current task-step limit; malformed limits never become unlimited.
+
+    Preserve environment precedence, the explicit agent fallback, and the native
+    unlimited default. The ordinary Settings writer separately bounds its form.
+    """
+    message = (
+        "The task-step limit must be a positive whole number. "
+        "An administrator can review ‘Most steps an agent may take’ in All settings."
+    )
+    raw = os.environ.get("MAVERICK_MAX_STEPS")
+    if raw is None or not raw.strip():
+        table = load_config().get("agent", {})
+        if not isinstance(table, dict):
+            raise AgentStepConfigError(message)
+        raw = table.get("max_steps")
+    value = fallback
+    if raw is not None and not (isinstance(raw, str) and not raw.strip()):
+        if type(raw) not in (str, int):
+            raise AgentStepConfigError(message)
+        try:
+            value = int(raw)
+        except (TypeError, ValueError, OverflowError):
+            raise AgentStepConfigError(message) from None
+    if value is not None and (type(value) is not int or value < 1):
+        raise AgentStepConfigError(message)
+    return value
+
+
 def get_role_model(
     role: str,
     *,

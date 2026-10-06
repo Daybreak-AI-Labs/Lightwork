@@ -1202,6 +1202,9 @@ def _etag_matches(header: str, etag: str) -> bool:
 def _audit_value(setting: catalog.Setting, value: object) -> object:
     if setting.secret:
         return "set" if value else "not set"
+    if setting.control == "number" and not catalog.valid_number(setting, value):
+        encoded = json.dumps([type(value).__name__, value], sort_keys=True, default=repr).encode("utf-8")
+        return {"state": "invalid previous number", "fingerprint": hashlib.sha256(encoded).hexdigest()}
     if setting.control == "keys" and isinstance(value, list):
         return [catalog.key_fingerprint(k) for k in value]
     if setting.control == "document":
@@ -1262,6 +1265,11 @@ def _sealed_rows(setting: catalog.Setting, rows: object) -> object:
              for k, v in row.items()} for row in rows]
 
 
+def _require_valid_number(setting: catalog.Setting, value: object) -> None:
+    if setting.control == "number" and not catalog.valid_number(setting, value):
+        raise _Refused(400, f"{setting.label}: choose a valid number or its product default before continuing.")
+
+
 def _plan(body: CatalogUpdate) -> tuple[dict, list[dict], list[dict], dict]:  # noqa: C901
     """Validate a request against the catalog; nothing is written here."""
     layers = _sources()
@@ -1307,6 +1315,7 @@ def _plan(body: CatalogUpdate) -> tuple[dict, list[dict], list[dict], dict]:  # 
                     new = catalog.coerce(_resolved(setting, new), new)
                 except catalog.SettingError as exc:
                     raise _Refused(400, str(exc)) from exc
+            _require_valid_number(setting, new)
             writes[setting.path] = None
             prospective[setting.id] = new
             changes.append({"setting": setting, "old": old, "new": new})
@@ -1401,6 +1410,7 @@ def _plan(body: CatalogUpdate) -> tuple[dict, list[dict], list[dict], dict]:  # 
                 new = catalog.coerce(_resolved(setting, new), new)
             except catalog.SettingError as exc:
                 raise _Refused(400, str(exc)) from exc
+        _require_valid_number(setting, new)
         unchanged = old == new and (not item.reset or state["source"] != "here")
         if unchanged and marker not in writes and (item.reset or not setting.secret):
             writes.pop(setting.path, None)

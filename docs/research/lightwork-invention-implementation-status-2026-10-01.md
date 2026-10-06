@@ -249,3 +249,13 @@ proposed algorithms, strong comparators, native authority, direct UI, Copilot
 operations, and authenticated installed-product journeys are independently
 qualified, none of these 28 IDs should be claimed as a complete breakthrough or
 customer-ready capability.
+
+October 6 runtime follow-through narrows F04/F05: ordinary task-limit repair
+reaches an actual reviewed Settings save, and current typed task review refuses
+changed deployment settings before admission. Native route-learning feedback
+now follows its original model/role/tier and private tenant/path instead of the
+latest global choice. Retained-client, concurrent, retry, failure and pre-send
+refusal paths were checked with actual loopback provider HTTP. These are
+correctness repairs to existing learning, not a new research algorithm or proof
+of answer accuracy, causal value or independent audit custody. Counts remain
+6 partial product foundations, 18 bounded pilots and 4 parked/rejected results.

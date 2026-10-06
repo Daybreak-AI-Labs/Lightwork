@@ -95,6 +95,7 @@ from .auth import (
     require_suite,
     require_unscoped_board,
     require_websocket_principal_in_context,
+    route_path,
     stored_automation_identity,
     websocket_caller_principal,
 )
@@ -1235,9 +1236,9 @@ def enforce_page_visibility(
 
     # A route that carries its own credential (the signed consent webhook) has
     # no dashboard role to compare against the page policy of its parent page.
-    if auth_boundary._self_authenticated_path(request.url.path):
+    if auth_boundary._self_authenticated_path(route_path(request)):
         return
-    require_page_visible(request, request.url.path)
+    require_page_visible(request, route_path(request))
 
 
 def page_visible(request: Request, path: str) -> bool:
@@ -1332,7 +1333,7 @@ from .ai_governance_loop_composition import (  # noqa: E402
 async def _shutdown_admission(request: Request, call_next):
     supervisor = getattr(request.app.state, "lifecycle_supervisor", None)
     if (supervisor is not None and supervisor.phase in {"stopping", "draining", "degraded"}
-            and request.url.path != "/livez"):
+            and route_path(request) != "/livez"):
         return JSONResponse({"detail": "dashboard is shutting down"}, status_code=503,
                             headers={"Retry-After": "5"})
     return await call_next(request)
@@ -2350,7 +2351,7 @@ async def bound_public_governance_body(request: Request, call_next):
 
     if request.method not in {"POST", "PUT", "PATCH"}:
         return await call_next(request)
-    path = request.url.path
+    path = route_path(request)
     if path.startswith("/api/v1/public/consent/native/"):
         maximum = _MAX_NATIVE_CONSENT_BODY_BYTES
         detail = "native consent request body too large"
@@ -2404,7 +2405,7 @@ async def protect_public_consent_error_responses(request: Request, call_next):
     """Keep public errors private and expose them only to an enrolled origin."""
 
     response = await call_next(request)
-    if response.status_code < 400 or not request.url.path.startswith("/api/v1/public/consent/"):
+    if response.status_code < 400 or not route_path(request).startswith("/api/v1/public/consent/"):
         return response
     response.headers["Cache-Control"] = "no-store, private"
     response.headers["Pragma"] = "no-cache"
@@ -2434,7 +2435,7 @@ async def protect_public_consent_error_responses(request: Request, call_next):
 @app.middleware("http")
 async def bound_security_hunter_body(request: Request, call_next):
     """Cap hunter JSON before FastAPI/Pydantic parses nested telemetry."""
-    if request.method != "POST" or request.url.path not in _SECURITY_HUNTER_BODY_PATHS:
+    if request.method != "POST" or route_path(request) not in _SECURITY_HUNTER_BODY_PATHS:
         return await call_next(request)
     try:
         body = await _read_limited_request_body(
@@ -2466,7 +2467,7 @@ async def bound_security_hunter_body(request: Request, call_next):
 @app.middleware("http")
 async def bound_finance_operations_body(request: Request, call_next):
     """Cap finance JSON before Starlette/Pydantic buffers nested records."""
-    path = request.url.path
+    path = route_path(request)
     if request.method != "POST" or not path.startswith("/api/v1/finance-operations/"):
         return await call_next(request)
     maximum = _FINANCE_LARGE_BODY_LIMITS.get(path, _MAX_FINANCE_DEFAULT_BODY_BYTES)
@@ -2497,7 +2498,7 @@ async def bound_finance_operations_body(request: Request, call_next):
 async def bound_evidence_gateway_body(request: Request, call_next):
     """Bound gateway JSON before Starlette/Pydantic buffers evidence inputs."""
 
-    path = request.url.path
+    path = route_path(request)
     if request.method not in {"POST", "PUT"} or not path.startswith(_EVIDENCE_GATEWAY_PREFIX):
         return await call_next(request)
     maximum = (
@@ -2764,34 +2765,35 @@ async def http_metrics(request: Request, call_next):
 @app.middleware("http")
 async def bearer_auth(request: Request, call_next):
     expected = _dashboard_token() or None
+    path = route_path(request)
     if (
-        request.url.path in _AUTH_EXEMPT
-        or request.url.path.startswith("/share/")
-        or request.url.path.startswith("/scim/")
-        or request.url.path.startswith("/form/")
+        path in _AUTH_EXEMPT
+        or path.startswith("/share/")
+        or path.startswith("/scim/")
+        or path.startswith("/form/")
         # DSAR response links are addressed by their unguessable token,
         # exactly like /form/ — the requester has no dashboard bearer.
-        or request.url.path.startswith("/dsar/response/")
-        or request.url.path.startswith("/saml/")
-        or request.url.path.startswith("/auth/invite/")
+        or path.startswith("/dsar/response/")
+        or path.startswith("/saml/")
+        or path.startswith("/auth/invite/")
         # External integrations authenticate inside their route family
         # using agent, signed-sensor, or vendor-invitation credentials. The
         # trailing slash keeps /api/v1/external-agents under dashboard auth.
-        or request.url.path.startswith("/api/v1/external/")
+        or path.startswith("/api/v1/external/")
         # Public consent uses its own client and profile capabilities. Keep
         # the exact administration prefix under dashboard authentication.
-        or request.url.path.startswith("/api/v1/public/consent/")
+        or path.startswith("/api/v1/public/consent/")
         # Public policy links resolve an opaque stable link and optionally
         # a private bearer. The admin policy-publication prefix remains
         # under normal dashboard authentication.
-        or request.url.path.startswith("/api/v1/public/policies/")
+        or path.startswith("/api/v1/public/policies/")
         # Pairing bootstrap authenticates its own opaque, expiring device proof.
         # Browser approval and device administration remain under normal auth.
-        or request.url.path.startswith("/api/v1/devices/pairing/")
+        or path.startswith("/api/v1/devices/pairing/")
         # The public rights-request form (pages + JSON). Anonymous by
         # design; gated, origin-checked and token-addressed in its router.
-        or request.url.path.startswith("/rights/")
-        or request.url.path.startswith("/api/v1/public/rights/")
+        or path.startswith("/rights/")
+        or path.startswith("/api/v1/public/rights/")
     ):
         # /share/<token> self-authenticates with its signed, revocable token
         # (verified in the route, which 404s an invalid/expired/revoked one) --
@@ -2879,7 +2881,7 @@ async def bearer_auth(request: Request, call_next):
             # only behind the operator's explicit opt-in (see extension_cors).
             if not _is_same_origin(request) and _allowed_extension_origin(request) is None:
                 script_without_origin = (
-                    request.url.path.startswith("/api/")
+                    path.startswith("/api/")
                     and not request.headers.get("origin")
                     and not request.headers.get("referer")
                 )
@@ -2978,7 +2980,7 @@ async def ip_allowlist_gate(request: Request, call_next):
     probes pass (a load balancer's address is not a person's). The workspace
     list is checked later, in the authentication dependency, once the
     caller's workspace is known. Empty list: nothing changes."""
-    if request.url.path in _IP_ALLOWLIST_EXEMPT:
+    if route_path(request) in _IP_ALLOWLIST_EXEMPT:
         return await call_next(request)
     from . import ip_allowlist
 
@@ -2999,7 +3001,7 @@ async def ip_allowlist_gate(request: Request, call_next):
 def _wants_html(request: Request) -> bool:
     """True when the client prefers HTML (browser nav) over JSON (API)."""
     accept = (request.headers.get("accept") or "").lower()
-    if request.url.path.startswith(
+    if route_path(request).startswith(
         ("/api/", "/openapi", "/healthz", "/livez", "/readyz", "/metrics")
     ):
         return False
@@ -3011,7 +3013,7 @@ def _wants_html(request: Request) -> bool:
 
 def _not_found_page(request: Request):
     """The browser 404: a plain public page for dead share links, else the app's."""
-    if request.url.path.startswith("/share/"):
+    if route_path(request).startswith("/share/"):
         # A shared-result recipient has no account: an unknown, expired or
         # revoked link gets a plain public page (no detail), never the app shell.
         return templates.TemplateResponse(
@@ -3024,6 +3026,12 @@ def _not_found_page(request: Request):
         {"path": request.url.path},
         status_code=404,
     )
+
+
+def _task_limit_error(status, detail, headers, title, message):
+    if status == 400 and (headers or {}).get("X-Lightwork-Task-Settings") == "agent.max_steps":
+        return "Review the task limit", detail, "task_steps"
+    return title, message, ""
 
 
 @app.exception_handler(StarletteHTTPException)
@@ -3119,7 +3127,7 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
             message = "That date isn’t valid. Pick a day from the calendar, then try again."
         if status == 403 and exc.detail == BOARD_SCOPE_DETAIL:
             message = BOARD_SCOPE_DETAIL
-        gate = ""
+        title, message, gate = _task_limit_error(status, exc.detail, headers, title, message)
         reauthenticate = ""
         feature = {}
         if status == 403 and feature_off:
@@ -3203,7 +3211,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
             {"path": request.url.path},
             status_code=400,
         )
-    if request.url.path == "/api/v1/connection-setup" or request.url.path.startswith(
+    if route_path(request) == "/api/v1/connection-setup" or route_path(request).startswith(
         "/api/v1/connection-setup/"
     ):
         # Pydantic may place submitted secrets in input, msg, ctx, or even loc
@@ -3241,7 +3249,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     from fastapi.encoders import jsonable_encoder
 
     errors = jsonable_encoder(exc.errors())
-    if request.url.path.startswith(_EVIDENCE_GATEWAY_PREFIX):
+    if route_path(request).startswith(_EVIDENCE_GATEWAY_PREFIX):
         for error in errors:
             if isinstance(error, dict) and "input" in error:
                 error["input"] = "[redacted]"
@@ -3419,7 +3427,7 @@ async def security_headers(request: Request, call_next):
     #   - object-src 'none', base-uri 'none' → kill plugin + <base> tricks
     # This matters because the dashboard renders agent-produced text;
     # if any of it ever reaches an HTML sink, CSP is the backstop.
-    path = request.url.path
+    path = route_path(request)
     if path == "/redoc":
         csp = _DOCS_CSP
     else:
@@ -3546,7 +3554,7 @@ async def extension_cors(request: Request, call_next):
         return await call_next(request)
     if request.method == "OPTIONS" and request.headers.get("access-control-request-method"):
         allow_headers = "Authorization, Content-Type"
-        if request.url.path in {"/api/v1/goals", "/api/v1/goal-submissions/receipt"}:
+        if route_path(request) in {"/api/v1/goals", "/api/v1/goal-submissions/receipt"}:
             allow_headers += ", Idempotency-Key"
         return PlainTextResponse(
             "",

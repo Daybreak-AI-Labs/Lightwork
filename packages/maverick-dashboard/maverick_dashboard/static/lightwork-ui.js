@@ -1287,6 +1287,14 @@
             detail = window.mvPlainDetail(serverDetail);
           }
           errBox.textContent = detail;
+          if (resp.status === 400 && resp.headers.get('X-Lightwork-Task-Settings') === 'agent.max_steps') {
+            const settingsLink = document.createElement('a');
+            settingsLink.href = '/settings/all?id=agent.max_steps';
+            settingsLink.className = 'btn btn--ghost';
+            if (window.LightworkI18n) window.LightworkI18n.set(settingsLink, 'Review task settings');
+            else settingsLink.textContent = 'Review task settings';
+            errBox.append(document.createTextNode(' '), settingsLink);
+          }
           errBox.style.display = 'block';
         } catch (e) {
           errBox.textContent = 'Lightwork is not responding. Check your connection and try again.';

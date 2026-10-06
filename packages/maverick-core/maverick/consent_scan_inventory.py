@@ -2748,6 +2748,41 @@ class ConsentScanInventory:
             "truncated": len(rows) > page_size,
         }
 
+    @staticmethod
+    def _tracker_registration(review: Mapping[str, Any]) -> dict[str, Any]:
+        """The native registration request, independent of finding/reviewer identity."""
+        return {
+            "tracker_id": review["tracker_id"],
+            "kind": "web_tracker",
+            "vendor_id": review["vendor_id"],
+            "purpose_ids": sorted(review["purpose_ids"]),
+            "status": review["registry_action"],
+            "expected_revision": review["authority_expected_revision"],
+        }
+
+    def _bridge_reviews(self, connection, tenant, report, findings, now):
+        """Refuse contradictory mappings across the complete report before effects."""
+        reviews, registrations, review_groups = {}, {}, {}
+        for finding in findings:
+            tracker_key = finding["tracker_key"]
+            if tracker_key not in reviews:
+                reviews[tracker_key] = self._current_classification(
+                    connection, tenant, report["property_id"], tracker_key
+                )
+            review = reviews[tracker_key]
+            if (review is None or review["valid_until"] <= now
+                    or review["registry_action"] == "observe_only"):
+                continue
+            registration = self._tracker_registration(review)
+            previous = registrations.setdefault(review["tracker_id"], registration)
+            if previous != registration:
+                raise ConsentScanConflict(
+                    "These reviewed findings assign different settings to the same tracker. "
+                    "Review them consistently before applying. This attempt changed no trackers."
+                )
+            review_groups.setdefault(review["tracker_id"], set()).add(review["record_sha256"])
+        return reviews, review_groups
+
     def bridge_report(
         self,
         tenant_id: str,
@@ -2780,22 +2815,18 @@ class ConsentScanInventory:
                     for item in report["scanner_report"]["findings"]
                     if isinstance(item, dict)
                     and isinstance(item.get("tracker_key"), str)
-                    and (after is None or item["tracker_key"] > after)
                 ),
                 key=lambda item: item["tracker_key"],
             )
+            reviews, review_groups = self._bridge_reviews(connection, tenant, report, findings, now)
+            findings = [item for item in findings if after is None or item["tracker_key"] > after]
             page = findings[:page_size]
             reviewed: list[tuple[dict[str, Any], dict[str, Any]]] = []
             skipped_unknown = 0
             skipped_stale = 0
             skipped_observe_only = 0
             for finding in page:
-                review = self._current_classification(
-                    connection,
-                    tenant,
-                    report["property_id"],
-                    finding["tracker_key"],
-                )
+                review = reviews[finding["tracker_key"]]
                 if review is None:
                     skipped_unknown += 1
                 elif review["valid_until"] <= now:
@@ -2825,24 +2856,34 @@ class ConsentScanInventory:
                 return existing
         observations = []
         registered = 0
+        registered_ids: set[str] = set()
         try:
             from .consent_preferences import TrackerObservation
 
             for finding, review in reviewed:
-                registry_idempotency = "scan-reviewed-registry-" + _text_digest(
-                    review["record_sha256"]
-                )
-                self._tracker_authority.register_tracker(
-                    tenant,
-                    review["tracker_id"],
-                    "web_tracker",
-                    review["vendor_id"],
-                    review["purpose_ids"],
-                    review["registry_action"],
-                    expected_revision=review["authority_expected_revision"],
-                    idempotency_key=registry_idempotency,
-                )
-                registered += 1
+                registration = self._tracker_registration(review)
+                if review["tracker_id"] not in registered_ids:
+                    # Equivalent script/cookie findings share the native accepted
+                    # request even across pages or a lost return; current equality
+                    # is never substituted for that original idempotency receipt.
+                    registry_idempotency = "scan-reviewed-registry-" + _sha256(
+                        {"tenant": tenant, "report_id": report_ref,
+                         "report_sha256": report["scanner_report_sha256"],
+                         "review_sha256": sorted(review_groups[review["tracker_id"]]),
+                         **registration}
+                    )
+                    self._tracker_authority.register_tracker(
+                        tenant,
+                        registration["tracker_id"],
+                        registration["kind"],
+                        registration["vendor_id"],
+                        registration["purpose_ids"],
+                        registration["status"],
+                        expected_revision=registration["expected_revision"],
+                        idempotency_key=registry_idempotency,
+                    )
+                    registered_ids.add(review["tracker_id"])
+                    registered += 1
                 if review["registry_action"] == "approved":
                     observations.append(
                         TrackerObservation(

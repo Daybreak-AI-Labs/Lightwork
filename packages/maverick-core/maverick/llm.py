@@ -666,15 +666,30 @@ def offline_model_for_role(
 
 def model_for_role(role: str) -> str:
     """Resolve the live model route and enforce the admin hard allow-list."""
+    from .cost.router_v3 import clear_choice
+
+    clear_choice()
     return _apply_allowed_model_policy(_resolve_model_for_role(role))
 
 
-def _note_bandit(provider: str, model_id: str, error: object, dollars: object) -> None:
+def _capture_routing_credit(model: str):
+    try:
+        from .cost.router_v3 import capture_call
+
+        return capture_call(model)
+    except Exception:  # pragma: no cover -- learning never fails a call
+        logging.getLogger(__name__).debug("routing decision unavailable", exc_info=True)
+        return None
+
+
+def _note_bandit(provider: str, model_id: str, error: object, dollars: object,
+                 routing_credit=None) -> None:
     """Credit a finished call to the routing bandit ([routing] bandit)."""
     try:
         from .cost.router_v3 import note_call
 
-        note_call(provider, model_id, success=not error, dollars=float(dollars or 0.0))
+        note_call(provider, model_id, success=not error, dollars=float(dollars or 0.0),
+                  credit=routing_credit)
     except Exception:  # pragma: no cover -- learning never fails a call
         logging.getLogger(__name__).debug("routing bandit update skipped", exc_info=True)
 
@@ -872,7 +887,8 @@ def _feed_circuit(provider: str, error: bool) -> None:
         pass
 
 
-def _observe_provider_result(provider, model_id, latency_ms, dollars, error, exception, circuit_scope=None, probe=False):
+def _observe_provider_result(provider, model_id, latency_ms, dollars, error, exception, circuit_scope=None, probe=False,
+                             routing_credit=None):
     from .circuit_breaker import CircuitOpen
     from .circuit_breaker import get as get_circuit
 
@@ -891,7 +907,9 @@ def _observe_provider_result(provider, model_id, latency_ms, dollars, error, exc
         get().record(provider, model_id, latency_ms=latency_ms, dollars=dollars, error=error)
     except Exception:  # pragma: no cover -- never fail on stats
         pass
-    _note_bandit(provider, model_id, error, dollars)
+    # A non-transient 4xx need not mark a provider unhealthy, but the logical
+    # call still failed. Never turn that health classification into a reward.
+    _note_bandit(provider, model_id, error or exception is not None, dollars, routing_credit)
     _feed_circuit(circuit_scope or provider, error)
 
 
@@ -967,11 +985,13 @@ class _ProviderAttemptSequence:
         category: str,
         service: str | None,
         max_physical_attempts: int | None = None,
+        routing_credit=None,
     ):
         self.operation_id = operation_id
         self.category = category
         self.service = service
         self.max_physical_attempts = max_physical_attempts
+        self.routing_credit = routing_credit
         self._attempt_no = 0
         self._lock = threading.Lock()
 
@@ -996,6 +1016,7 @@ def _new_provider_attempt_sequence(
     default_category: str,
     operation_prefix: str,
     max_physical_attempts: int | None = None,
+    routing_credit=None,
 ) -> _ProviderAttemptSequence:
     from .provider_cost_cap import current_provider_operation
 
@@ -1012,6 +1033,7 @@ def _new_provider_attempt_sequence(
         category=context.category if context is not None else default_category,
         service=context.service if context is not None else None,
         max_physical_attempts=max_physical_attempts,
+        routing_credit=routing_credit,
     )
 
 
@@ -1149,6 +1171,7 @@ class _ProviderAttemptTracker:
         self.dispatch_guard = dispatch_guard
         self.initial_ticket = self._new_ticket()
         self.initial_used = False
+        self.attempt_started = False
         self.pending: _ProviderAttemptTicket | None = None
         self.finalized = False
 
@@ -1186,6 +1209,7 @@ class _ProviderAttemptTracker:
                 raise
         else:
             ticket = self._new_ticket()
+        self.attempt_started = True
         return ticket
 
     def after_attempt(self, ticket, response, error):
@@ -1225,6 +1249,7 @@ class _ProviderAttemptTracker:
             # envelope reservation as one physical dispatch.
             ticket = self.initial_ticket
             self.initial_used = True
+            self.attempt_started = True
         if ticket is None or ticket.finished:
             return
         ticket.finished = True
@@ -1780,6 +1805,10 @@ class LLM:
         # --model flag and the admin allow-list reach background runs. With
         # nothing configured this is DEFAULT_MODEL, as before.
         self.model = model or model_for_role("default")
+        # Bind only the actual returned live route. Equal explicit strings and
+        # subsequent context-local choices cannot acquire this decision.
+        self._routing_model = self.model
+        self._routing_credit = _capture_routing_credit(self.model)
         self._anthropic_api_key = api_key  # legacy back-compat
         # Compatibility/debug view: latest client created for each provider.
         self._clients: dict[str, Any] = {}
@@ -2007,12 +2036,16 @@ class LLM:
         """
         _require_tool_free_guarded_dispatch(tools, dispatch_guard, max_physical_attempts)
         _check_dispatch_guard(dispatch_guard)
+        raw_requested_model = model or self.model
+        routing_credit = _capture_routing_credit(raw_requested_model)
+        if raw_requested_model is self._routing_model and routing_credit is not None:
+            routing_credit = self._routing_credit
         _provider_sequence = _provider_sequence or _new_provider_attempt_sequence(
             default_category="inference",
             operation_prefix="llm",
             max_physical_attempts=max_physical_attempts,
+            routing_credit=routing_credit,
         )
-        raw_requested_model = model or self.model
         requested_model = require_model_allowed(raw_requested_model)
         # Provider failover (opt-in, default off): when a fallback chain is
         # configured for this model, try each in turn. No chain -> this block is
@@ -2176,7 +2209,10 @@ class LLM:
                 _err = _provider_failure_flag(_provider_error)
                 raise
             finally:
-                _observe_provider_result(provider, model_id, _dt_ms, _spent, _err, _provider_error, _circuit_scope, _provider_probe)
+                _observe_provider_result(provider, model_id, _dt_ms, _spent, _err, _provider_error, _circuit_scope, _provider_probe,
+                                         _provider_sequence.routing_credit if (
+                                             _provider_tracker is not None and _provider_tracker.attempt_started
+                                         ) else None)
             try:
                 from .observability import record_metric as _rm
                 _rm("llm_calls", labels={"provider": provider, "model": model_id})
@@ -2210,12 +2246,16 @@ class LLM:
         """Async twin of :meth:`complete`, with the same dispatch guards."""
         _require_tool_free_guarded_dispatch(tools, dispatch_guard, max_physical_attempts)
         _check_dispatch_guard(dispatch_guard)
+        raw_requested_model = model or self.model
+        routing_credit = _capture_routing_credit(raw_requested_model)
+        if raw_requested_model is self._routing_model and routing_credit is not None:
+            routing_credit = self._routing_credit
         _provider_sequence = _provider_sequence or _new_provider_attempt_sequence(
             default_category="inference",
             operation_prefix="llm",
             max_physical_attempts=max_physical_attempts,
+            routing_credit=routing_credit,
         )
-        raw_requested_model = model or self.model
         requested_model = require_model_allowed(raw_requested_model)
         # Provider failover (opt-in, default off) — see complete(). No configured
         # chain -> skipped, and the original single-call path below is unchanged.
@@ -2302,6 +2342,7 @@ class LLM:
                                         max_tokens, thinking_budget=thinking_budget)
         _held = budget.reserve(_est_cost) if budget is not None else 0.0
         _provider_probe = False
+        _provider_attempted = False
         try:
             _provider_probe = _enforce_circuit(_circuit_scope)
             with _trace_span(
@@ -2322,6 +2363,7 @@ class LLM:
 
                 async def _call():
                     # Each physical hedge has independent capacity and a receipt.
+                    nonlocal _provider_attempted
                     response = None
                     tracker = _ProviderAttemptTracker(
                         provider,
@@ -2346,7 +2388,10 @@ class LLM:
                         record_dispatch(_price_spec, system)
                         return response
                     finally:
-                        tracker.finalize(response, sys.exc_info()[1])
+                        try:
+                            tracker.finalize(response, sys.exc_info()[1])
+                        finally:
+                            _provider_attempted = _provider_attempted or tracker.attempt_started
 
                 hedge = (
                     None if _provider_sequence.max_physical_attempts == 1
@@ -2410,7 +2455,8 @@ class LLM:
             # cached-prompt discount per-provider (DeepSeek 0.1x, Gemini 0.25x).
             _spent = _call_spend(_price_spec, _resp, budget, _d0,
                                  getattr(client, "CACHE_READ_MULT", None))
-            _observe_provider_result(provider, model_id, _dt_ms, _spent, _err, _provider_error, _circuit_scope, _provider_probe)
+            _observe_provider_result(provider, model_id, _dt_ms, _spent, _err, _provider_error, _circuit_scope, _provider_probe,
+                                     _provider_sequence.routing_credit if _provider_attempted else None)
             try:
                 from .observability import record_metric as _rm
                 _rm("llm_calls", labels={"provider": provider, "model": model_id})

@@ -57,7 +57,9 @@ def _impact(setting):
 def _present_value(setting, value):
     # Keep immutable identities in accepted audit evidence; name them only in
     # the customer projection, without contacting Docker during history reads.
-    if setting.id == "plugins.workbench_image":
+    if setting.id == "plugins.workbench_image" or (
+        setting.control == "number" and not catalog.valid_number(setting, value)
+    ):
         return catalog.display_value(setting, value)
     return page._audit_value(setting, value)
 

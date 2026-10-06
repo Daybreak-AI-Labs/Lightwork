@@ -1733,11 +1733,8 @@ class Agent:
         # shows "most successful solutions resolve in ~25 rounds; long-
         # tail iteration past that has diminishing returns." Allow ops
         # to override globally via MAVERICK_MAX_STEPS, default 25.
-        from .env_setting import env_or_config
-        raw_steps = env_or_config("MAVERICK_MAX_STEPS", "agent", "max_steps")
-        self.max_steps = int(raw_steps) if raw_steps and raw_steps.strip() else max_steps
-        if self.max_steps is not None and (type(self.max_steps) is not int or self.max_steps < 1):
-            raise ValueError("MAVERICK_MAX_STEPS / max_steps must be a positive integer")
+        from .config import get_agent_max_steps
+        self.max_steps = get_agent_max_steps(max_steps)
         self.name = f"{role}-{depth}-{uuid.uuid4().hex[:6]}"
         # Register before tool construction: bus tool closures enforce the
         # SwarmContext roster on every send/receive/delegation. If an unusual

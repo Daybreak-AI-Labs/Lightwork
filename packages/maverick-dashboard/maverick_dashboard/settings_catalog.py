@@ -3147,8 +3147,42 @@ def _fmt(number: float) -> str:
     return str(number)
 
 
+def valid_number(setting: Setting, value: object) -> bool:
+    """Whether an effective numeric source meets this control's existing bounds."""
+    if value is None or value == "":
+        return setting.default is None
+    if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+        return False
+    try:
+        number = float(value)
+        if not math.isfinite(number):
+            return False
+        _coerce_value(setting, number / setting.scale)
+    except (SettingError, ValueError, TypeError, OverflowError):
+        return False
+    return True
+
+
+def _number_weakens(setting: Setting, old: object, new: object) -> bool:
+    old = None if old == "" else old
+    new = None if new == "" else new
+    if not valid_number(setting, new):
+        raise SettingError(f"{setting.label}: choose a valid number or its product default before continuing.")
+    if not valid_number(setting, old):
+        return bool(setting.warning)  # An unknown prior limit cannot establish a safe relaxation.
+    if not setting.warning or old == new:
+        return False
+    if setting.weaker == "lower":
+        return new is not None and (old is None or float(new) < float(old))
+    if setting.weaker == "higher":
+        return old is not None and (new is None or float(new) > float(old))
+    return setting.weaker == "change" and old != new
+
+
 def weakens(setting: Setting, old: object, new: object) -> bool:
     """True when moving from the effective ``old`` to ``new`` lowers a protection."""
+    if setting.control == "number":
+        return _number_weakens(setting, old, new)
     if not setting.warning or old == new:
         return False
     if setting.control == "toggle":
@@ -3169,15 +3203,6 @@ def weakens(setting: Setting, old: object, new: object) -> bool:
         if was is None:
             return False  # there was no limit to loosen
         return now is None or now[0] / now[1] > was[0] / was[1]
-    if setting.control == "number":
-        if setting.weaker == "lower":
-            if new is None:
-                return False
-            return old is None or float(new) < float(old)
-        if setting.weaker == "higher":
-            if new is None:
-                return old is not None
-            return old is not None and float(new) > float(old)
     if setting.control in {"list", "multiselect", "keys", "picks"}:
         return _list_loosens(setting, old, new)
     if setting.control == "document":
@@ -3319,6 +3344,8 @@ def display_value(setting: Setting, value: object) -> str:
     """Plain words for a value (never a secret's content)."""
     if setting.secret:
         return "Set" if value else "Not set"
+    if setting.control == "number" and not valid_number(setting, value):
+        return "The current number is invalid. Review a replacement or its product default."
     if (value is None or value == "" or value == []) and setting.none_text:
         return setting.none_text
     if value is None or value == "" or value == []:

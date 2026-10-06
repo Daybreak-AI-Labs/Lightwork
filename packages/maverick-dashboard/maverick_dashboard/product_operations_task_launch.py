@@ -10,6 +10,7 @@ from maverick.runner import (
 from pydantic import Field
 
 from . import api, auth, task_search
+from ._shared import require_task_settings_or_400, task_step_readiness
 from .api_schemas import GoalIn
 from .draft_api import context_for
 from .product_operations import Adapter, Outcome, Preview, Snapshot, StrictInput
@@ -82,24 +83,37 @@ def _policy():
             "configured_ceiling_dollars": configured_goal_ceiling_dollars(),
             "configured_ceiling_wall_seconds": configured_goal_ceiling_wall_seconds(),
             "api_ceiling_dollars": api._REST_GOAL_MAX_DOLLARS,
-            "api_ceiling_wall_seconds": api._REST_GOAL_MAX_WALL_SECONDS}
+            "api_ceiling_wall_seconds": api._REST_GOAL_MAX_WALL_SECONDS,
+            "agent_step_limit": task_step_readiness()}
 
 
 def start_snapshot(request, selection):
     auth.require_permission(request, "operate")
     policy = _policy()
-    blocked = ""
-    try:
-        api.require_provider_or_400()
-    except HTTPException as exc:
-        if exc.status_code not in {400, 503}:
-            raise
-        blocked = "Set up an available AI provider before starting a task."
+    steps = policy["agent_step_limit"]
+    blocked = "" if steps["ready"] else steps["reason"]
+    provider_ready = False
+    if steps["ready"]:
+        try:
+            api.require_provider_or_400()
+            provider_ready = True
+        except HTTPException as exc:
+            if exc.status_code not in {400, 503}:
+                raise
+            blocked = "Set up an available AI provider before starting a task."
     return Snapshot(digest({"context": context_for(request), "policy": policy,
-                            "provider_ready": not blocked}),
-        "Current native task limits and AI-provider readiness",
+                            "provider_ready": provider_ready}),
+        "Current task limits and AI connection",
         "Start one new task under current workspace limits. Acceptance starts work; it does not mean the task is complete.",
-        {"policy": policy, "provider_ready": not blocked, "setup_href": "/start"},
+        {"Most steps for each agent": steps["max_steps"] if steps["ready"] and steps["max_steps"] else
+             ("No step limit" if steps["ready"] else steps["reason"]),
+         "AI connection": "Ready to start" if provider_ready else
+             ("Not checked until the task limit is corrected" if not steps["ready"] else "Setup required"),
+         "Task spending limit": f"${policy['default_max_dollars']:g}" if policy["default_max_dollars"] is not None else "No spending limit",
+         "Task time limit": f"{policy['default_max_wall_seconds']:g} seconds" if policy["default_max_wall_seconds"] is not None else "No time limit",
+         "Levels of helpers": policy["default_max_depth"],
+         "Review settings": {"label": "Review task settings" if not steps["ready"] else "Review AI connection",
+                             "href": steps["settings"]["href"] if not steps["ready"] else "/start"}},
         [{"name": "title", "label": "Task", "kind": "text", "required": True, "max_length": 200},
          {"name": "description", "label": "Instructions (optional)", "kind": "textarea", "max_length": 12000},
          {"name": "max_dollars", "label": "Maximum dollars (blank uses workspace limit)", "kind": "number"},
@@ -112,6 +126,7 @@ def start_snapshot(request, selection):
 
 
 def start_prepare(request, selection, arguments):
+    require_task_settings_or_400()
     title = arguments["title"].strip()
     if not title:
         raise HTTPException(422, "Enter a task before reviewing its start.")
@@ -128,6 +143,7 @@ def start_prepare(request, selection, arguments):
          {"label": "Maximum dollars", "after": effective["max_dollars"]},
          {"label": "Maximum seconds", "after": effective["max_wall_seconds"]},
          {"label": "Levels of helpers", "after": effective["max_depth"]},
+         {"label": "Most steps for each agent", "after": policy["agent_step_limit"]["max_steps"] or "No step limit"},
          {"label": "External effects", "after": "Work may use authorized tools; review task progress and any approvals."}],
         {"policy": policy, "effective": effective})
 

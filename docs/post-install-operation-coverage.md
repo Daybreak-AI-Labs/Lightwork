@@ -1750,8 +1750,8 @@ The API reference serves pinned official Swagger UI 5.33.1 code, styling,
 Apache license, notice and third-party license text from the installation.
 Only these fixed public assets are sign-in exempt; ordinary API calls retain
 their current authorization. The existing OpenAPI and OAuth callback paths and local favicon remain
-available. Deployment-prefix URLs were qualified separately with sign-in
-disabled; authenticated reference access was qualified at the ordinary path.
+available. The subsequent authenticated mounted-reference repair is qualified separately
+below; ordinary endpoints retain their native authorization.
 The external Swagger validator is disabled. Redoc's existing distribution is outside this repair.
 
 The installer license explanation names the actual Settings > License and
@@ -1760,3 +1760,37 @@ Its default and decline behavior remain unchanged. An additional native
 scheduled retirement check confirmed the existing current-tenant directory
 selection, preserving another tenant's same-name skill and the configured floor;
 this confirmation required no production-code change.
+
+## October 6 task repair and accurate runtime feedback
+
+A malformed task-step limit now refuses before native task admission. Default
+Chat keeps the entered work and presents a working Review task settings action.
+The ordinary Settings flow reviews and saves a valid replacement; it conservatively
+warns when the previous numeric safety baseline was invalid. Blank and nonfinite
+prior values are handled without an error or raw-value disclosure. Invalid
+inherited replacements refuse before effects. Deployment-owned values stay
+locked and have a truthful remedy. Copilot seals the actual current limit and
+refuses a changed source before starting work.
+
+Equivalent independently reviewed script/cookie findings share one exact native
+tracker registration and retain both observations. Complete-report conflicting
+mappings refuse before the first page takes effect. Original idempotency receipts,
+not matching current registry values, control recovery. Native report bounds and
+existing approval authority remain unchanged.
+
+Optional cost-aware routing now keeps a bounded tenant/path cache and carries
+the original routing decision with the selected model into each logical call.
+Repeated retained clients keep their own legitimate decision; plain fixed-model
+calls and cross-tenant reuse supply no invented credit. Feedback follows the
+exact original role, tier and selected provider/model. Retries record the logical
+outcome once, different failover arms get no invented selection, actual escaped
+errors are failures, and pre-send refusals admit no outcome. These private local
+histories are not signed customer audit records and do not prove answer quality
+or measured savings. Qualification used actual local provider HTTP transport;
+no paid provider was contacted.
+
+The existing API reference now works with a real authenticated application mount.
+Native protected reads, body limits and error protections use the canonical ASGI
+route only. Forwarded headers, near prefixes and public-looking suffixes do not
+grant access. This qualifies the mounted API reference and the stated native
+boundaries; it does not certify every ordinary page beneath a deployment prefix.

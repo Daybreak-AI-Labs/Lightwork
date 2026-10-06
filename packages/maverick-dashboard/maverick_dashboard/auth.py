@@ -121,6 +121,33 @@ _SELF_AUTH_EXEMPT_PATHS = _OIDC_EXEMPT_PATHS | PUBLIC_STATIC_PATHS | frozenset(
 ) | SELF_AUTH_WEBHOOK_PATHS
 
 
+def route_path(connection) -> str:
+    """Return the route inside the server's ASGI application mount.
+
+    ASGI servers may retain the mount prefix in ``path``. Only the trusted
+    ``root_path`` may remove that leading prefix, at a complete segment;
+    forwarded headers and arbitrary matching suffixes never affect admission.
+    Connections from older direct callers keep their URL path unchanged.
+    """
+    scope = getattr(connection, "scope", None)
+    if isinstance(scope, dict):
+        path = scope.get("path")
+        root = scope.get("root_path", "")
+    else:
+        path, root = None, ""
+    if path is None:
+        path = getattr(getattr(connection, "url", None), "path", "")
+    if not isinstance(path, str):
+        return ""
+    if isinstance(root, str) and root.startswith("/"):
+        root = root.rstrip("/")
+        if root and path == root:
+            return "/"
+        if root and path.startswith(root + "/"):
+            return path[len(root):]
+    return path
+
+
 def _self_authenticated_path(path: str) -> bool:
     """Whether a route authenticates itself or bootstraps authentication.
 
@@ -1113,7 +1140,7 @@ def _resolve_principal(
     # Self-authenticated routes keep their own credential contract. A valid
     # static dashboard bearer has local-operator semantics; any other bearer
     # must verify as OIDC or fail instead of falling back to ambient identity.
-    self_authenticated = _self_authenticated_path(request.url.path)
+    self_authenticated = _self_authenticated_path(route_path(request))
     authorization = request.headers.get("authorization", "")
     if not self_authenticated and authorization:
         if _dashboard_token_authenticated(request):
@@ -1122,7 +1149,7 @@ def _resolve_principal(
         explicit_token = _bearer_token(request)
         if explicit_token.startswith("lwdev1_"):
             from .device_pairing import authenticate
-            principal = authenticate(explicit_token, request.method, request.url.path)
+            principal = authenticate(explicit_token, request.method, route_path(request))
             request.state.paired_device_verified = True
             return principal
         if explicit_token and _api_key_bearer(request):
@@ -1183,7 +1210,7 @@ def _enforce_workspace_policies(connection, principal) -> None:
     its second-factor requirement (the workspace's config overlay is active
     once the tenant is pinned). Sign-in bootstrap and sign-out paths are
     skipped so a refused session can still end itself."""
-    path = getattr(getattr(connection, "url", None), "path", "") or ""
+    path = route_path(connection)
     if _self_authenticated_path(path):
         return
     from .ip_allowlist import BLOCKED_MESSAGE, workspace_allows
@@ -1222,7 +1249,7 @@ async def _verify_off_loop(request, websocket):
     connection = request if request is not None else websocket
     explicit = connection is not None and connection.headers.get("authorization", "")
     remote_bearer = (explicit and not _dashboard_token_authenticated(connection)
-                     and (request is None or not _self_authenticated_path(request.url.path)))
+                     and (request is None or not _self_authenticated_path(route_path(request))))
     if not remote_bearer:
         return await run_in_threadpool(_resolve_principal, request=request, websocket=websocket)
     # Cap potentially remote verification before borrowing a worker. Probes and

@@ -6157,3 +6157,21 @@ The installer explains license enforcement in plain language and points to the
 existing License and All settings pages for later review instead of requiring
 configuration-file edits. Native scheduled skill retirement was also confirmed
 to stay within its current tenant and configured skills directory.
+
+### Correct task setup and routing feedback
+
+Invalid task limits stop new work before admission, preserve the entered task,
+and open the actual Settings repair control. Reviewed numeric repairs distinguish
+an unknown prior limit from a safe relaxation and keep deployment-owned limits
+visibly locked. Copilot reviews the same current limit.
+
+Equivalent reviewed website findings share one native tracker registration while
+retaining their separate observations. Conflicting mappings across the full report
+stop before an update. Existing exact original requests remain the retry authority.
+
+Optional route learning keeps each workspace's native history separate and binds
+feedback to the original role, tier and selected model. Retained clients preserve
+that decision; ordinary explicit model strings do not invent one. Failed calls
+remain failures, and refused pre-send work contributes no routing outcome.
+API-reference authorization and request protections also honor a real deployment
+mount prefix without trusting forwarding headers or matching arbitrary suffixes.
