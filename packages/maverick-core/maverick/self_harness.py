@@ -184,11 +184,12 @@ def load_addenda(path: Path | None = None) -> dict[str, str]:
     return {}
 
 
-def _write_addenda(addenda: dict[str, str], path: Path | None = None) -> None:
+def _write_addenda(addenda: dict[str, str], path: Path | None = None, *,
+                   effect_guard=None) -> None:
     p0 = path if path is not None else _store_path()
     if _world_routed(p0):
         from . import learning_store
-        learning_store.write_addenda_db(addenda)
+        learning_store.write_addenda_db(addenda, effect_guard=effect_guard)
         return
     # Route through atomic_write_text: a UNIQUE temp + os.replace + chmod 0600
     # that CLEANS THE TEMP UP on any failure. A hand-rolled fixed "<name>.tmp"
@@ -200,7 +201,8 @@ def _write_addenda(addenda: dict[str, str], path: Path | None = None) -> None:
     # fault-injection battery.)
     from .file_lock import atomic_write_text
     p = path if path is not None else _store_path()
-    atomic_write_text(p, json.dumps(addenda, indent=2, sort_keys=True), mode=0o600)
+    atomic_write_text(p, json.dumps(addenda, indent=2, sort_keys=True), mode=0o600,
+                      effect_guard=effect_guard)
 
 
 def _load_addenda_strict(path: Path) -> dict[str, str]:
@@ -474,14 +476,15 @@ def load_line_meta(path: Path | None = None) -> dict[str, dict]:
     return {}
 
 
-def _write_line_meta(meta: dict[str, dict], path: Path | None = None) -> None:
+def _write_line_meta(meta: dict[str, dict], path: Path | None = None, *,
+                     effect_guard=None) -> None:
     if _world_routed(path if path is not None else _store_path()):
         from . import learning_store
-        learning_store.write_line_meta_db(meta)
+        learning_store.write_line_meta_db(meta, effect_guard=effect_guard)
         return
     from .file_lock import atomic_write_text
     atomic_write_text(_meta_path(path),
-                      json.dumps(meta, indent=2, sort_keys=True), mode=0o600)
+                      json.dumps(meta, indent=2, sort_keys=True), mode=0o600, effect_guard=effect_guard)
 
 
 def _reconcile_meta(meta: dict[str, dict], model_id: str,
@@ -815,7 +818,8 @@ def forget_addendum(model_id: str, *, line: str | None = None,
 
 
 def retire_stale(*, older_than_days: float, model_id: str | None = None,
-                 now: float | None = None, path: Path | None = None) -> int:
+                 now: float | None = None, path: Path | None = None,
+                 strict: bool = False, before_write=None, write_guard_factory=None) -> int:
     """Retire learned lines not refreshed within ``older_than_days``.
 
     Prompt guidance goes stale as models, tools, and APIs change; a loop that
@@ -824,16 +828,18 @@ def retire_stale(*, older_than_days: float, model_id: str | None = None,
     so a line that keeps proving useful stays. A line with NO record (legacy /
     pre-sidecar) is NEVER retired -- its age is unknown. Removes from both the
     addenda block and the sidecar, audits each removal with phase ``retire``, and
-    returns the count. ``now`` is injectable for testing. Never raises."""
+    returns the count. ``now`` is injectable for testing. Legacy callers remain
+    best-effort; governed cycles use ``strict`` to retain failed/partial outcomes."""
     p = path if path is not None else _store_path()
     cutoff = (now if now is not None else time.time()) - older_than_days * 86400.0
     removed: list[tuple[str, str]] = []
     from .file_lock import cross_process_lock
     try:
-        with _lock, cross_process_lock(p), _store_rmw_lock(p):
+        with _lock, cross_process_lock(p, strict=strict), _store_rmw_lock(p):
             add = load_addenda(p)
             meta = load_line_meta(p)
             after = dict(add)
+            before_meta = {key: dict(row) for key, row in meta.items()}
             for m, block in list(add.items()):
                 # Match the BARE model so a per-model retire also covers that
                 # model's domain-scoped blocks (composite keys); ``m`` stays the
@@ -860,12 +866,28 @@ def retire_stale(*, older_than_days: float, model_id: str | None = None,
                     after.pop(m, None)
                 _reconcile_meta(meta, m, kept)
             if removed:
-                _write_addenda(after, p)
+                if before_write is not None:
+                    before_write()
+                staged_guard = (write_guard_factory(after, before_meta, meta)
+                                if write_guard_factory is not None else before_write)
+
+                def current_write():
+                    check_learning_halt("self_harness", "retirement")
+                    if staged_guard is not None:
+                        staged_guard()
+
+                current_write()
+                _write_addenda(after, p, effect_guard=current_write)
                 try:
-                    _write_line_meta(meta, p)
-                except Exception:  # pragma: no cover -- sidecar best-effort
-                    pass
-    except Exception:  # pragma: no cover -- retirement never perturbs a run
+                    _write_line_meta(meta, p, effect_guard=current_write)
+                except Exception:  # pragma: no cover -- legacy sidecar best-effort
+                    if strict:
+                        raise
+    except Halted:
+        raise
+    except Exception:  # pragma: no cover -- legacy retirement remains best-effort
+        if strict:
+            raise
         log.warning("self_harness: retire_stale failed", exc_info=True)
         return 0
     for m, ln in removed:
@@ -873,10 +895,13 @@ def retire_stale(*, older_than_days: float, model_id: str | None = None,
             from .audit import EventKind, record
             # Audit with the BARE model id (+ scope), never the raw NUL key.
             mid, ctx = _split_key(m)
-            record(EventKind.LEARNING_UPDATE, agent="self_harness", model_id=mid,
+            recorded = record(EventKind.LEARNING_UPDATE, agent="self_harness", model_id=mid,
                    scope=(ctx or None), rung="prompt", line=ln, phase="retire")
-        except Exception:  # pragma: no cover -- audit best-effort
-            pass
+            if strict and recorded is not True:
+                raise RuntimeError("The retired lesson could not be recorded; the change may remain")
+        except Exception:  # pragma: no cover -- legacy audit best-effort
+            if strict:
+                raise
     return len(removed)
 
 
@@ -2858,6 +2883,7 @@ class SelfHarnessReport:
     # judge is unreliable) and/or the promotion gate is disabled. Both are
     # best-effort reads; neither changes the pass's behavior (the gate still
     # enforces them), they only EXPLAIN it.
+    qualification_held: bool = False
     frozen: bool = False
     gate_enabled: bool = True
     # Outcome-driven lifecycle results, populated by the driver cycle from the

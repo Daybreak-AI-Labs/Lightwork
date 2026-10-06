@@ -6278,3 +6278,21 @@ repeatedly reporting a busy slot. Scheduled task creation records its intent
 before creation; a later attempt with an unconfirmed original creation reads that
 state and stops instead of creating another task. Ordinary confirmed task failure
 keeps the existing retry policy, and future schedule occurrences keep clean inputs.
+
+### Local lesson maintenance when AI checks are held
+
+Enabled stale-lesson retirement can run for the selected model even when the
+AI testing prerequisites are incomplete. New lessons and trial acceptance,
+failure and relapse decisions remain held. The result distinguishes held checks
+from actual retirement; missing model selection does not retire every model.
+
+Reviewed maintenance checks the current learning stop, sources, permissions and
+planned guidance generation at physical writes. A failed write or missing
+activity confirmation retains an incomplete outcome and any earlier saved
+change. Reading the original task does not start another pass. The nightly
+summary reports inspection-only when all model reports have held qualification.
+
+Assessment lists, due items and details use current specialist or workflow names
+from the authorized picker. A name unavailable in that view is identified as
+unavailable; an optional recorded reference remains available for support.
+Native record identity, version checks and review permissions are unchanged.

@@ -131,13 +131,17 @@ def _artifact():
             meta = _strict_object(self_harness._meta_path(path))
         if any(not isinstance(value, str) for value in raw.values()) or any(not isinstance(value, dict) for value in meta.values()):
             raise HTTPException(409, "Current learned instructions cannot be checked safely. Review and restore a verified learning copy before continuing.")
-        # Runtime recall/outcome counters are intentionally live. Publication
-        # identity, trial state, provenance and current source access are pinned.
-        incidental = {"recall_notes", "last_recalled_at", "recent_outcomes", "recall_success", "recall_failure"}
-        stable_meta = {key: {name: value for name, value in row.items() if name not in incidental} for key, row in meta.items()}
-        permissions = [[key, line, self_harness._shared_line_current(key, line, meta)]
-                       for key, block in raw.items() for line in self_harness._bullets(block)]
-        return digest([source, raw, stable_meta, permissions])
+        return _artifact_identity(source, raw, meta)
+
+
+def _artifact_identity(source, raw, meta):
+    # Runtime recall/outcome counters are intentionally live. Publication
+    # identity, trial state, provenance and current source access are pinned.
+    incidental = {"recall_notes", "last_recalled_at", "recent_outcomes", "recall_success", "recall_failure"}
+    stable_meta = {key: {name: value for name, value in row.items() if name not in incidental} for key, row in meta.items()}
+    permissions = [[key, line, self_harness._shared_line_current(key, line, meta)]
+                   for key, block in raw.items() for line in self_harness._bullets(block)]
+    return digest([source, raw, stable_meta, permissions])
 
 
 def _state(request, *, context=None, write=False):
@@ -276,6 +280,32 @@ def _deadline(expires):
         raise HTTPException(409, "This review expired. Review current work again; no new pass was admitted.")
 
 
+def _retirement_write_guard_factory(guard, expected_artifact):
+    def reviewed_stages(after, before_meta, after_meta):
+        # Only native planned states are eligible inside the still-held fences.
+        # A partial write never advances the accepted pass generation.
+        guard()
+        source = learning_store.guidance_source()
+        allowed = {expected_artifact[0],
+                   _artifact_identity(source, after, before_meta),
+                   _artifact_identity(source, after, after_meta)}
+        return lambda: guard(allowed_artifacts=allowed)
+    return reviewed_stages
+
+
+def _model_report(model, report, retired):
+    result = {"Model": model_label(model), "Repeated mistakes": report.mined,
+              "Lessons tried": report.proposed, "Passed testing": report.validated,
+              "Adopted": report.promoted, "Retired": retired,
+              "Approval gate off": not report.gate_enabled,
+              "Paused for calibration": report.frozen,
+              "Checks not completed": len(report.skipped)}
+    if report.qualification_held:
+        result.update({"AI checks": "Held; testing prerequisites are incomplete.",
+                       "Trial lesson decisions": "Held. Trial acceptance and failure checks were not run."})
+    return result
+
+
 def start(request, prepared, operation, *, expires):
     questions._request_id(operation)
 
@@ -303,13 +333,13 @@ def start(request, prepared, operation, *, expires):
     def run(job):
         expected_artifact = [prepared["artifact"]]
 
-        def guard():
+        def guard(*, allowed_artifacts=()):
             questions._authority(request, prepared["context"], write=True)
             if job.cancelled:
                 from maverick.learning_guard import Halted
                 raise Halted("self-harness", "dashboard-stop")
             current = _state(request, context=prepared["context"])
-            if current["source_revision"] != prepared["source_revision"] or current["artifact"] != expected_artifact[0]:
+            if current["source_revision"] != prepared["source_revision"] or current["artifact"] not in {expected_artifact[0], *allowed_artifacts}:
                 raise HTTPException(409, "The reviewed sources, models, settings or access changed. No further call or learning change was admitted.")
 
         @contextmanager
@@ -328,6 +358,7 @@ def start(request, prepared, operation, *, expires):
                     # while the same writer locks still exclude other writers.
                     expected_artifact[0] = _artifact()
 
+                advance.retirement_guard = _retirement_write_guard_factory(guard, expected_artifact)
                 yield advance
 
         with admission_scope():
@@ -357,10 +388,7 @@ def start(request, prepared, operation, *, expires):
                     evaluation_budget=budget, evaluation_corpus_manifest=state["corpus"], dispatch_guard=guard, effect_scope=effect_scope,
                     work_item_id="learning-pass:" + operation, raise_errors=True)
                 guard()
-                reports.append({"Model": model_label(model), "Repeated mistakes": report.mined, "Lessons tried": report.proposed,
-                                "Passed testing": report.validated, "Adopted": report.promoted, "Retired": retired,
-                                "Approval gate off": not report.gate_enabled, "Paused for calibration": report.frozen,
-                                "Checks not completed": len(report.skipped)})
+                reports.append(_model_report(model, report, retired))
         except Exception as exc:
             if not _cooperative_stop(job, exc):
                 raise

@@ -319,3 +319,12 @@ receipts, while unavailable queued tasks distinguish actual slot refusal from
 missing or unconfirmed work and stop uncertain scheduled creation from duplicating
 a task. These are operating repairs, not new invention mechanisms; the research
 status counts remain unchanged.
+
+Held-qualification maintenance follow-through permits explicitly enabled local
+stale-lesson retirement while keeping AI-dependent changes and trial decisions
+held. Strict governed persistence, current physical-write checks and truthful
+partial outcomes repair operation of the existing learning pass. Assessment
+names also follow current authorized product records. Neither change establishes
+a new learning algorithm, measured quality lift or completion of the broader
+assessment Copilot journey. Counts remain 6 partial product foundations,
+18 bounded pilots and 4 parked/rejected results.

@@ -667,7 +667,7 @@
       {% for f in features %}
       <div class="settings-toggle" data-settings-search-item id="feature-{{ f.name }}">
         <span class="settings-toggle__text">{{ 'Live progress outside the dashboard' if f.name == 'streaming' else f.name|feature_label }}
-          <br><span class="muted settings-toggle__help">Currently {{ 'on' if f.enabled else 'off' }}.
+          <br><span class="muted settings-toggle__help">Configured choice: {{ 'on' if f.enabled else 'off' }}. Open Review choice to check its source and any server override.
           {% if f.name == 'streaming' %}Show progress for tasks started outside the dashboard. Chat has its own live responses.
           {% elif f.info %}{{ f.info }}{% endif %}</span></span>
         <a class="btn" href="/settings/all?id=features.{{ f.name }}">Review choice</a>

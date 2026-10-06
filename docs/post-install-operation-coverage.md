@@ -1954,3 +1954,24 @@ owned-attempt failure without automatic replay. Scheduled creation saves an
 occurrence-only uncertainty marker before creating its task; a successor lease
 cannot create another task from an unconfirmed first creation. Existing actual
 task failure retries and clean future schedule inputs are preserved.
+
+## October 6 held AI checks and assessment names
+
+The existing learning pass separates missing AI qualification from explicitly
+enabled local stale-lesson retirement for its selected model. New guidance and
+trial graduation, demotion and relapse checks stay held. The ordinary result
+shows that distinction, and the nightly summary remains inspection-only when
+every model's qualification is held. Native stop and policy checks remain in
+force; unavailable model selection does not become whole-store retirement.
+
+Governed retirement uses strict persistence and activity confirmation. Physical
+file replacement and native database transactions receive the current guard;
+the approved intermediate and final guidance generations stay inside the held
+writer fence. Failed or unconfirmed work remains incomplete, including any
+earlier saved effect. Original-task reads do not dispatch another pass.
+
+Assessment register, due list, detail and confirmation copy use the current
+authorized specialist/workflow name, with an explicit unavailable-name fallback
+and optional recorded reference. Stored identity and native review version checks
+are preserved. This naming repair does not supply selected-assessment Copilot
+review coverage. The separate scoped trial-lifecycle issue remains tracked.

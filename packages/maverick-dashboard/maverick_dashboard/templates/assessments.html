@@ -199,6 +199,23 @@
   var draftMsg = document.getElementById('as-draft-msg');
   var pageMsg = document.getElementById('as-page-msg');
   var current = null;   // {kind, subject}
+  var subjectLabels = { agent: new Map(), flow: new Map() };
+  ['agent', 'flow'].forEach(function (kind) {
+    var select = document.getElementById('as-' + kind);
+    if (!select) return;
+    Array.prototype.forEach.call(select.options, function (option) {
+      if (option.value) subjectLabels[kind].set(option.value, option.textContent.trim());
+    });
+  });
+  function subjectName(kind, subject) {
+    var label = subjectLabels[kind] && subjectLabels[kind].get(subject);
+    return label || ((kind === 'agent' ? 'Specialist' : 'Workflow') + ' — name unavailable in this view');
+  }
+  function subjectReference(a) {
+    if (subjectLabels[a.kind] && subjectLabels[a.kind].has(a.subject)) return '';
+    return '<details><summary>Recorded reference</summary><p class="muted" style="overflow-wrap:anywhere;">'
+      + esc(a.subject) + '</p></details>';
+  }
 
   // Escape for both element-content and quoted-attribute contexts: the old
   // textContent->innerHTML trick left " and ' unescaped, so values placed in
@@ -275,7 +292,7 @@
       var b = document.createElement('button');
       b.type = 'button'; b.className = 'as-item'; b.dataset.kind = a.kind; b.dataset.subject = a.subject;
       if (current && current.kind === a.kind && current.subject === a.subject) b.classList.add('sel');
-      b.innerHTML = '<span class="as-item__main"><div class="as-item__name">' + esc(a.subject)
+      b.innerHTML = '<span class="as-item__main"><div class="as-item__name">' + esc(subjectName(a.kind, a.subject))
         + '</div><div class="as-item__sub">' + esc(KIND_LABEL[a.kind] || a.kind) + (a.open_high ? ' · ' + a.open_high + ' serious ' + (a.open_high === 1 ? 'issue' : 'issues') + ' open' : '') + '</div></span>'
         + lensesMini(a) + statusPill(a);
       b.addEventListener('click', function () { open(a.kind, a.subject); });
@@ -289,7 +306,7 @@
     if (!items.length) { dueEl.innerHTML = '<p class="muted">Nothing due. New drafts and changed subjects show up here.</p>'; return; }
     dueEl.innerHTML = items.map(function (a) {
       return '<button type="button" class="as-item" data-kind="' + esc(a.kind) + '" data-subject="' + esc(a.subject) + '">'
-        + '<span class="as-item__main"><div class="as-item__name">' + esc(a.subject) + '</div>'
+        + '<span class="as-item__main"><div class="as-item__name">' + esc(subjectName(a.kind, a.subject)) + '</div>'
         + '<div class="as-item__sub">' + esc(KIND_LABEL[a.kind] || a.kind) + (a.drift_note ? ' · changed since approval' : '') + '</div></span>' + statusPill(a) + '</button>';
     }).join('');
     Array.prototype.forEach.call(dueEl.querySelectorAll('.as-item'), function (el) {
@@ -315,10 +332,10 @@
     detailCard.hidden = false;
     var drift = a.drift_note ? '<div class="drift">Changed since it was approved: ' + esc(a.drift_note) + '</div>' : '';
     var head = '<div class="as-detail-head">'
-      + '<div class="as-card__title">' + esc(a.subject) + '</div>' + statusPill(a)
+      + '<div class="as-card__title">' + esc(subjectName(a.kind, a.subject)) + '</div>' + statusPill(a)
       + '<button type="button" class="btn btn--ghost" id="as-rerun" style="margin-inline-start:auto; font-size:var(--text-sm);">Re-assess</button>'
       + '<button type="button" class="btn btn--danger" id="as-del" style="font-size:var(--text-sm);">Delete</button></div>'
-      + '<p class="muted" style="margin:0 0 var(--space-2); font-size:var(--text-sm);">' + esc(KIND_LABEL[a.kind] || a.kind) + (a.description ? ' · ' + esc(a.description) : '') + '</p>'
+      + '<p class="muted" style="margin:0 0 var(--space-2); font-size:var(--text-sm);">' + esc(KIND_LABEL[a.kind] || a.kind) + (a.description ? ' · ' + esc(a.description) : '') + '</p>' + subjectReference(a)
       + '<p class="muted" id="as-detail-msg" role="status" aria-live="polite" style="margin:0 0 var(--space-3); font-size:var(--text-sm);"></p>';
     var lenses = Object.keys(a.lenses || {}).map(function (lens) {
       var lv = a.lenses[lens];
@@ -360,7 +377,7 @@
         .finally(function () { if (button.isConnected) button.disabled = false; });
     });
     document.getElementById('as-del').addEventListener('click', async function () {
-      if (!(await mvConfirm('Delete the assessment for ' + a.subject + '?', { okText: 'Delete assessment' }))) return;
+      if (!(await mvConfirm('Delete the assessment for ' + subjectName(a.kind, a.subject) + '?', { okText: 'Delete assessment' }))) return;
       var button = this; button.disabled = true;
       jfetch('/api/v1/assessments/' + a.kind + '/' + encodeURIComponent(a.subject)
         + '?expected_revision=' + encodeURIComponent(a.revision), { method: 'DELETE' })
@@ -409,7 +426,7 @@
   }
 
   function open(kind, subject, retryButton) {
-    pageMessage('Loading assessment “' + subject + '”…', false);
+    pageMessage('Loading assessment “' + subjectName(kind, subject) + '”…', false);
     jfetch('/api/v1/assessments/' + kind + '/' + encodeURIComponent(subject))
       .then(responseData)
       .then(function (result) {
@@ -474,7 +491,7 @@
       .then(responseData)
       .then(function (res) {
         if (!res.ok) { draftMsg.style.color = 'var(--danger)'; draftMsg.textContent = responseDetail(res, 'Could not run the assessment. Try again in a minute.'); return; }
-        var label = agent || (flowSel.options[flowSel.selectedIndex] || {}).textContent || name;
+        var label = subjectName(kind, name);
         draftMsg.style.color = 'var(--accent)'; draftMsg.textContent = 'Assessed ' + label + '.';
         renderDetail(res.data); reload();
       }).catch(function () { draftMsg.style.color = 'var(--danger)'; draftMsg.textContent = 'Could not run the assessment. Check your connection and try again.'; });
