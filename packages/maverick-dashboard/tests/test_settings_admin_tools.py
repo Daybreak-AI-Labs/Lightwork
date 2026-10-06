@@ -523,8 +523,9 @@ def test_organisation_data_download_and_erase(client, monkeypatch, tmp_path, aud
 def test_erase_is_refused_without_a_named_organisation(client, monkeypatch):
     from maverick import client as client_binding
     client_binding.reset_client_cache()
+    # The fixture binds this installation to another organisation.
     r = client.post("/api/v1/admin/system/client/erase", json={"organisation": "acme", "confirm": True})
-    assert r.status_code == 409 and "nothing was erased" in r.json()["detail"]
+    assert r.status_code == 409 and "nothing was erased" in r.json()["detail"].lower()
     _as_viewer(monkeypatch)
     assert client.post("/api/v1/admin/system/client/erase",
                        json={"organisation": "acme", "confirm": True}).status_code == 403

@@ -71,9 +71,12 @@ def test_admin_io_yields_to_another_request_and_preserves_tenant(monkeypatch, op
     monkeypatch.setattr(admin_pages, "_users_context", lambda request: {})
     monkeypatch.setattr(admin_pages, "_refresh_models_quietly", lambda provider: None)
     monkeypatch.setattr(config, "provider_configuration_state", lambda provider: {"configured": True})
+    from maverick_dashboard import provider_readiness
+    monkeypatch.setattr(provider_readiness, "workspace_readiness",
+                        lambda: {"providers": [{"name": "openai", "configured": True}]})
     monkeypatch.setattr(invites, "invites_enabled", lambda: True)
     monkeypatch.setattr(invites, "create_invite", lambda *args, **kwargs: (
-        SimpleNamespace(email="alice@example.test"), "test-invite-link",
+        SimpleNamespace(email="alice@example.test", expires_at=0.0), "test-invite-link",
     ))
     monkeypatch.setattr(importlib.import_module(module_name), method, slow_operation)
     app = FastAPI()
