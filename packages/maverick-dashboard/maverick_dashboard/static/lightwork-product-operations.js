@@ -90,6 +90,11 @@
     var complete = true, fullReview = !!(options && options.complete), remaining = fullReview ? 8192 : 160;
     var maximumEntries = fullReview ? 2048 : 35, maximumDepth = fullReview ? 12 : 6;
     function omitted(target) { complete = false; node('p', 'The complete details are available in the full controls.', target); }
+    function changeRow(item) {
+      return fullReview && item && typeof item === 'object' && !Array.isArray(item) && typeof item.label === 'string' &&
+        Object.keys(item).every(function (key) { return ['label', 'before', 'after'].includes(key); }) &&
+        (Object.prototype.hasOwnProperty.call(item, 'before') || Object.prototype.hasOwnProperty.call(item, 'after'));
+    }
     function append(target, item, depth) {
       if (--remaining < 0 || depth > maximumDepth) { omitted(target); return; }
       if (item === null || item === undefined) { node('span', 'Not specified', target); return; }
@@ -97,13 +102,27 @@
         var text = node('span', typeof item === 'boolean' ? (item ? 'Yes' : 'No') : item, target);
         text.style.whiteSpace = 'pre-wrap'; text.style.overflowWrap = 'anywhere'; return;
       }
-      if (typeof item.href === 'string' && typeof item.label === 'string' && safeLocalHref(item.href)) {
+      if (typeof item.href === 'string' && typeof item.label === 'string' && safeLocalHref(item.href) &&
+          (!fullReview || Object.keys(item).sort().join(',') === 'href,label')) {
         var local = node('a', item.label, target); local.href = item.href; local.className = 'btn btn--ghost'; return;
       }
       if (Array.isArray(item)) {
-        var ordered = node('ol', undefined, target);
-        item.slice(0, maximumEntries).forEach(function (entry) { append(node('li', undefined, ordered), entry, depth + 1); });
+        var named = item.every(changeRow), ordered = node(named ? 'div' : 'ol', undefined, target);
+        item.slice(0, maximumEntries).forEach(function (entry) { append(node(named ? 'section' : 'li', undefined, ordered), entry, depth + 1); });
         if (item.length > maximumEntries) omitted(target);
+        return;
+      }
+      if (changeRow(item)) {
+        var heading = node('h4', undefined, target);
+        append(heading, item.label, depth + 1);
+        heading.style.whiteSpace = 'pre-wrap'; heading.style.overflowWrap = 'anywhere';
+        if (Object.prototype.hasOwnProperty.call(item, 'before') && Object.prototype.hasOwnProperty.call(item, 'after')) {
+          var values = node('dl', undefined, target);
+          ['before', 'after'].forEach(function (key) {
+            node('dt', key === 'before' ? 'Current' : 'Proposed', values);
+            append(node('dd', undefined, values), item[key], depth + 1);
+          });
+        } else append(node('div', undefined, target), Object.prototype.hasOwnProperty.call(item, 'after') ? item.after : item.before, depth + 1);
         return;
       }
       var list = node('dl', undefined, target);

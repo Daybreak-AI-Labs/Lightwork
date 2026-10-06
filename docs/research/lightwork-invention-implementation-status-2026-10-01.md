@@ -269,6 +269,12 @@ generated-action probes; unavailable add-on names are disclosed. These are
 usability and recovery repairs, not a new learning mechanism, independently held
 audit trail or proven customer benefit. Research status counts remain unchanged.
 
+Privacy-notice decision follow-through requires both current administrator
+authority and named approval permission for access keys, with native checks
+after writer waits and before transaction completion. Ordinary refusals preserve
+the actual cause and uncertainty. This repairs existing governance behavior;
+it does not establish independent audit custody or change the research counts.
+
 Read-only connection diagnostics follow-through removes a false mutation phase
 from an existing Copilot operation. Its current scoped status stays usable with
 writes disabled and agrees with ordinary native records. This is product

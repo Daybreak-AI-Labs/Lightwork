@@ -9,6 +9,8 @@ this adapter performs no provider I/O, SDK deployment, or site mutation.
 from __future__ import annotations
 
 import hashlib
+import sqlite3
+import time
 from collections.abc import Callable, Mapping
 from dataclasses import asdict, is_dataclass
 from typing import Annotated, Any, Literal
@@ -365,6 +367,72 @@ def authority(request: Request, *, store_for=_default_store_for):
             detail="privacy-notice governance store is unavailable",
         )
     return notice, tenant, store
+
+
+def _fresh_decision_access(request: Request) -> None:
+    from . import auth, session_revocation
+
+    require_global_permission(request, "admin")
+    auth.require_api_key_scope(request, "approvals:decide")
+    principal = getattr(request.state, "principal", None)
+    claims = getattr(principal, "claims", None) or {}
+    via = claims.get("via")
+    fresh = principal
+    if via in {"session", "invite", "proxy"}:
+        fresh = (auth._session_principal(request) if via == "session" else
+                 auth._invite_session_principal(request) if via == "invite" else
+                 auth._proxy_principal(request))
+    expiry = claims.get("exp")
+    if (fresh is None or getattr(fresh, "principal", None) != auth.caller_principal(request)
+            or (expiry is not None and (type(expiry) not in {int, float}
+                or not time.time() < expiry < float("inf")))):
+        raise HTTPException(401, "Sign in again before reviewing this notice.")
+    subject = getattr(principal, "sub", None)
+    if subject is not None:
+        if (via not in {"session", "invite", "proxy", "api_key"}
+                and session_revocation.is_revoked(subject, claims.get("iat"))):
+            raise HTTPException(401, "Sign in again before reviewing this notice.")
+        auth._enforce_scim_active(fresh)
+        auth._enforce_workspace_policies(request, fresh)
+
+
+def _decision_guard(request: Request) -> Callable[[], None]:
+    from . import auth, workspace_tenants
+    from .draft_api import context_for
+
+    with auth.fresh_configuration():
+        _fresh_decision_access(request)
+        actor, tenant, context = auth.caller_principal(request), _tenant_id(), context_for(request)
+        selection = (workspace_tenants.get_selection_binding(actor)
+                     if getattr(request.state, "workspace_tenant_source", None) == "principal_selection" else None)
+
+    def guard():
+        with auth.fresh_configuration():
+            _fresh_decision_access(request)
+            if (auth.caller_principal(request) != actor or _tenant_id() != tenant
+                    or context_for(request) != context or (selection is not None
+                        and workspace_tenants.get_selection_binding(actor) != selection)):
+                raise HTTPException(409, "Your account or workspace changed. Reopen the current notice before reviewing it.")
+
+    return guard
+
+
+async def _guarded_decision(notice, function, *args, call, guard, **kwargs):
+    from maverick.authority_effects import authority_effect_fence
+
+    def decide():
+        with authority_effect_fence():
+            guard()
+            return function(*args, effect_guard=guard, **kwargs)
+
+    try:
+        return await call(notice, decide)
+    except HTTPException as exc:
+        if exc.status_code != 503:
+            raise
+        raise HTTPException(503, "This decision could not be confirmed. It may already be saved. Read the current notice before deciding again.") from exc
+    except (OSError, sqlite3.Error) as exc:
+        raise HTTPException(503, "This decision could not be confirmed. It may already be saved. Read the current notice before deciding again.") from exc
 
 
 def create_privacy_notice_governance_router(  # noqa: C901, PLR0915
@@ -730,15 +798,16 @@ def create_privacy_notice_governance_router(  # noqa: C901, PLR0915
         version: VersionPath,
         body: ApprovalIn,
     ):
-        require_global_permission(request, "admin")
+        guard = _decision_guard(request)
         notice, tenant, store = route_authority(request)
         return _without_lease(
-            await call(
+            await _guarded_decision(
                 notice,
                 store.approve_release,
                 tenant,
                 notice_id,
                 version,
+                call=call, guard=guard,
                 **body.model_dump(),
             )
         )
@@ -751,16 +820,17 @@ def create_privacy_notice_governance_router(  # noqa: C901, PLR0915
         role: ApprovalRole,
         body: ApprovalRevocationIn,
     ):
-        require_global_permission(request, "admin")
+        guard = _decision_guard(request)
         notice, tenant, store = route_authority(request)
         return _without_lease(
-            await call(
+            await _guarded_decision(
                 notice,
                 store.revoke_approval,
                 tenant,
                 notice_id,
                 version,
                 role=role,
+                call=call, guard=guard,
                 **body.model_dump(),
             )
         )
@@ -953,14 +1023,15 @@ def create_privacy_notice_governance_router(  # noqa: C901, PLR0915
         proposal_id: ObjectPath,
         body: UpdateProposalReviewIn,
     ):
-        require_global_permission(request, "admin")
+        guard = _decision_guard(request)
         notice, tenant, store = route_authority(request)
         return _without_lease(
-            await call(
+            await _guarded_decision(
                 notice,
                 store.review_update_proposal,
                 tenant,
                 proposal_id,
+                call=call, guard=guard,
                 **body.model_dump(),
             )
         )

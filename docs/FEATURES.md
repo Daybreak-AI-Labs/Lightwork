@@ -6389,3 +6389,18 @@ saved operation in Copilot. It rechecks the current account and workspace and
 does not submit another request, decision or activity write. Incomplete history
 or a pending activity receipt remains explicitly unconfirmed. Recording a review
 does not grant access; only the actual current policy can confirm permission.
+
+Privacy-notice release approval, approval withdrawal and update-proposal review
+require current administrator authority. Access keys also need approval
+permission in addition to administrator scope. Those decisions recheck the
+account, workspace, session and current key permissions after a writer wait and
+before the native transaction finishes. Independent reviewers, exact versions,
+original operation keys and native activity records keep their existing meaning.
+An unconfirmed decision asks the person to read the current notice before
+deciding again; ordinary failure messages distinguish missing key permission
+from author or approval-ownership restrictions.
+
+Copilot's standard change review shows named business headings and complete
+values. When both an existing and proposed value are supplied, their comparison
+is explicit. Other review shapes keep all their details, and an incomplete
+review still cannot be applied from the compact panel.
