@@ -363,3 +363,30 @@ test("a match only in an agent's description stays below the named records", asy
   assert.deepEqual(order, ["/chat/goal/2", "/agents?name=cx_kb_curator"], "the screen order matches the arrow-key order");
   ui.dom.window.close();
 });
+
+test("rows found for earlier words are cleared as soon as the words change", async () => {
+  const ui = menu({ find: true });
+  ui.responses.push({ ok: true, json: { results: [
+    { kind: "help", title: "Invite a colleague", labels: ["Invite a colleague"], context: "Administrator", href: "/help#how-invite" },
+  ] } });
+  ui.type("invite");
+  ui.timers.shift()();
+  await ui.flush();
+  assert.ok(ui.visible().includes("/help#how-invite"));
+  ui.type("activity log");
+  assert.ok(!ui.visible().includes("/help#how-invite"), "the earlier answer is gone before the new one arrives");
+  ui.dom.window.close();
+});
+
+test("a page named like the words stays above an agent with the same name", async () => {
+  const ui = menu({ find: true });
+  ui.responses.push({ ok: true, json: { results: [
+    { kind: "specialist", title: "Approvals", labels: ["Approvals", "Approvals specialist"], context: "", href: "/agents?name=approvals_desk" },
+  ] } });
+  ui.type("approvals");
+  ui.timers.shift()();
+  await ui.flush();
+  const order = ui.visible();
+  assert.ok(order.indexOf("/approvals") < order.indexOf("/agents?name=approvals_desk"), order.join(", "));
+  ui.dom.window.close();
+});

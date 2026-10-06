@@ -56,7 +56,7 @@
     var recordsOn = results.getAttribute("data-navfinder-records") !== null;
     var peopleTimer = null, peopleGeneration = 0;
     var findSource = results.getAttribute("data-navfinder-find");
-    var findTimer = null, findGeneration = 0;
+    var findTimer = null, findGeneration = 0, foundFor = "";
     // The destinations are server-rendered by GET /nav/finder (the same
     // role-filtered registry as the sidebar) and inserted on first open, so
     // every page does not carry the whole list. The list is never built here.
@@ -189,8 +189,10 @@
         entry.score = terms.length ? score(entry.option, query, terms) : 1;
         // Before the commands while nothing is typed.
         if (!terms.length && (entry.kind === 1 || entry.kind === 2)) entry.kind -= 3;
-        // The server matched it (question words aside), so it always shows.
-        if (entry.kind === 4 && !entry.score) entry.score = 1;
+        // The server matched it (question words aside), so it always shows;
+        // a page named as well wins, so a person, agent or topic needs a
+        // clearly better name match to come first.
+        if (entry.kind === 4) entry.score = Math.max(1, entry.score - 4);
       });
       // A person, agent or topic that matched only in its description waits
       // below the records (filterResults), so it never pushes a named task down.
@@ -645,8 +647,9 @@
     // only these destinations are accepted.
     var FOUND_KINDS = {person: "People", specialist: "Specialist", agent: "Agent", approval: "Approval waiting", help: "Help"};
     var FOUND_HREF = /^\/(?:users\?q=[^#\s]*#people|agents\?name=[A-Za-z0-9%_.-]+|approvals#approval-[A-Za-z0-9_-]{1,64}|help#how-[a-z0-9-]+)$/;
-    function setFound(rows) {
-      foundOptions.forEach(function (option) { option.parentElement.remove(); }); foundOptions = [];
+    function setFound(rows, forText) {
+      foundOptions.forEach(function (option) { option.parentElement.remove(); }); foundOptions = []; weakFound = [];
+      foundFor = rows.length ? String(forText || "") : "";
       rows.forEach(function (row, index) {
         if (!row || !FOUND_KINDS[row.kind] || typeof row.title !== "string" || typeof row.href !== "string" || !FOUND_HREF.test(row.href)) return;
         var built = resultRow("navfinder-found-", index, row, row.kind !== "help");
@@ -670,13 +673,15 @@
     function searchFound(text) {
       var generation = ++findGeneration;
       if (findTimer) global.clearTimeout(findTimer);
+      // Rows found for earlier words never stand in for the new ones.
+      if (foundOptions.length && text !== foundFor) setFound([]);
       if (!findSource || Array.from(String(text || "").replace(/\s+/g, "")).length < 2) { if (foundOptions.length) setFound([]); return; }
       findTimer = global.setTimeout(function () {
         findTimer = null;
         global.mvFetchJSON(findSource + "?q=" + encodeURIComponent(text.slice(0, 100)), {cache: "no-store"})
           .then(function (data) {
             if (generation !== findGeneration || parsed().scope !== "all") return;
-            setFound(data && Array.isArray(data.results) ? data.results : []);
+            setFound(data && Array.isArray(data.results) ? data.results : [], text);
           })
           .catch(function () { if (generation === findGeneration) setFound([]); });
       }, 200);

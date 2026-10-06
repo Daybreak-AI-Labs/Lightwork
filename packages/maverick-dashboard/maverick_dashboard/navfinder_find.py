@@ -76,7 +76,8 @@ def agents(request, terms, can_open_page) -> list[dict]:
         names = list(dict.fromkeys([title, humanize(agent["name"])]))
         labels = [*names, *(f"{name} {kind}" for name in names)]
         rank = _rank(labels, f"{' '.join(labels)} {description} {agent['name']}".casefold(), terms)
-        if rank is not None:
+        # Two thousand packs: a word met only in a description is noise here.
+        if rank is not None and rank <= 2:
             found.append((rank, {"kind": kind, "title": title, "labels": labels,
                                  "context": description, "href": "/agents?name=" + quote(agent["name"], safe="")}))
     return _best(found)
