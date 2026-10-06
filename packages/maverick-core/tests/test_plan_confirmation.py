@@ -30,8 +30,11 @@ def _agent(goal_id=7, episode_id=1):
     board = Blackboard()
     board.post("orchestrator", "plan", "role=orchestrator depth=0 brief=Match invoices to purchase orders")
     board.post("worker-1", "plan", "role=worker depth=1 brief=Email the supplier about the missing receipt")
-    fake = SimpleNamespace(name="worker-1", ctx=SimpleNamespace(goal_id=goal_id, episode_id=episode_id, blackboard=board,
-                                                               budget=SimpleNamespace(max_dollars=2.5)))
+    tools = SimpleNamespace(all=lambda: [SimpleNamespace(name=n) for n in ("read_file", "send_email", "http_fetch",
+                                                                           "write_file", "crm_update_contact")])
+    fake = SimpleNamespace(name="worker-1", tools=tools,
+                           ctx=SimpleNamespace(goal_id=goal_id, episode_id=episode_id, blackboard=board,
+                                               budget=SimpleNamespace(max_dollars=2.5)))
     fake._plan_summary = lambda name, args: Agent._plan_summary(fake, name, args)
     return fake
 
@@ -62,9 +65,48 @@ def test_the_plan_is_shown_once_before_the_first_outside_action(plan_on, monkeyp
     assert action == "confirm_plan" and how["provenance"] == "plan" and how["allow_auto_approve"] is False
     detail = how["detail"]
     assert "1. Match invoices to purchase orders; 2. Email the supplier about the missing receipt" in detail
-    assert "First action: send_email" in detail and "Spending cap for this task: $2.50" in detail
+    assert "First action: send an email to supplier@example.com" in detail
+    assert "Spending cap for this task: $2.50" in detail
     # A new run of the task asks again.
     assert _deny(_agent(episode_id=2), "send_email", {}) is None and len(asked) == 2
+
+
+def test_the_card_lists_the_plan_steps_and_the_outside_actions_in_plain_words(plan_on, monkeypatch):
+    from maverick.approval_cards import validate_approval_card
+
+    asked = _decide(monkeypatch, True)
+    _deny(_agent(goal_id=11), "send_email", {"to": "supplier@example.com", "body": "Hello"})
+    card = validate_approval_card(asked[0][1]["approval_card"])
+    assert card["action"] == "Check the plan before this task acts"
+    assert card["parameters"]["summary"] == [
+        "Step 1: Match invoices to purchase orders",
+        "Step 2: Email the supplier about the missing receipt",
+        "First outside action: send an email to supplier@example.com",
+    ]
+    effects = card["consequences"]["known_effects"]
+    # Every other outside action the agent can take, in plain words; reading
+    # inside Lightwork is not listed.
+    assert ("Later in this task it can also: open a web page, change a file in the workspace, "
+            "use crm update contact.") in effects
+    assert any("If you reject, nothing runs" in e for e in effects)
+    assert any("$2.50" in e and "a cap, not an estimate" in e for e in effects)
+    assert card["target"]["label"] == "Task 11"
+    assert card["consequences"]["unresolved_assumptions"] == []
+
+
+def test_a_task_without_a_written_plan_says_so_on_the_card(plan_on, monkeypatch):
+    from maverick.agent import Agent
+    from maverick.approval_cards import validate_approval_card
+    from maverick.blackboard import Blackboard
+
+    asked = _decide(monkeypatch, True)
+    fake = _agent(goal_id=12)
+    fake.ctx.blackboard = Blackboard()
+    fake.tools = None
+    asyncio.run(Agent._plan_denial(fake, "shell", {"cmd": "ls"}))
+    card = validate_approval_card(asked[0][1]["approval_card"])
+    assert card["parameters"]["summary"] == ["First outside action: run a command"]
+    assert card["consequences"]["unresolved_assumptions"] == ["The task wrote no plan before this first action."]
 
 
 def test_a_rejected_plan_runs_nothing_and_is_not_asked_again(plan_on, monkeypatch):

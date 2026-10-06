@@ -9217,6 +9217,10 @@ def _approval_source(provenance: str | None) -> str | None:
         return "Agent wants to change its own instructions"
     if provenance == "assessment":
         return "Assessment review"
+    if provenance == "plan":
+        # [autonomy] confirm_plan: the task's first outside action waits for
+        # a person to check the whole plan (maverick.plan_review).
+        return "Plan to check before the task acts"
     if provenance == "goal_risk":
         # A task held before it starts because its wording looks risky.
         return "Task waiting to start"

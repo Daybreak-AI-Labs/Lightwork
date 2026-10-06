@@ -42,7 +42,7 @@ import secrets
 import sys
 import threading
 import time
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
@@ -1269,6 +1269,53 @@ def consume_operation_consent(
         yield card
 
 
+def described_approval_card(
+    action: str,
+    *,
+    scope: str | None,
+    summary: str,
+    target_label: str,
+    request: Mapping[str, object],
+    what_it_will_do: Sequence[str],
+    known_effects: Sequence[str],
+    open_questions: Sequence[str] = (),
+    before: str,
+    after: str,
+    irreversible: bool,
+    requester: str | None = None,
+) -> dict[str, object]:
+    """An exact-request card whose plain words the caller writes.
+
+    The authority, budget and expiry come from the same live sources as every
+    other card, so a caller only describes the request; it cannot widen it."""
+    from ..approval_cards import build_approval_card, digest
+
+    authority, runtime_budget, _principal_is_current = _runtime_approval_authority(
+        actor_hint=requester,
+    )
+    return build_approval_card(
+        action=action,
+        summary=summary,
+        target_label=target_label,
+        target={"scope": scope},
+        parameters=dict(request),
+        parameter_summary=list(what_it_will_do),
+        actor=str(authority["actor"]),
+        workspace=str(authority["workspace"]),
+        role=str(authority["role"]),
+        authority_versions=dict(authority["versions"]),
+        input_versions={"request_sha256": digest(dict(request))},
+        credential_versions={"state": "not_applicable"},
+        budget=_operation_budget(runtime_budget, None),
+        expires_at=time.time() + _approval_card_ttl(),
+        known_effects=list(known_effects),
+        unresolved_assumptions=list(open_questions),
+        before=before,
+        after=after,
+        irreversible=irreversible,
+    )
+
+
 def _dashboard_approval_card(
     action: str,
     risk: str,
@@ -1279,49 +1326,26 @@ def _dashboard_approval_card(
 ) -> dict[str, object]:
     """Build a conservative exact-request card for unadapted consent callers."""
 
-    from ..approval_cards import build_approval_card, digest
-
     def label(value: object, fallback: str) -> str:
         text = " ".join(str(value or "").split())
         return (text or fallback)[:500]
 
-    authority, runtime_budget, _principal_is_current = _runtime_approval_authority(
-        actor_hint=requester,
-    )
     action_label = label(action, "requested operation")
-    target_label = label(scope, "the exact committed request scope")
     effect = label(detail, f"Run {action_label} once for the reviewed scope.")
-    request = {
-        "action": action,
-        "risk": risk,
-        "scope": scope,
-        "detail": detail,
-        "provenance": provenance,
-    }
-    return build_approval_card(
-        action=action_label,
+    return described_approval_card(
+        action_label,
+        scope=scope,
         summary=effect,
-        target_label=target_label,
-        target={"scope": scope},
-        parameters=request,
-        parameter_summary=[
-            "Authorize this exact committed action, scope, detail, and provenance once."
-        ],
-        actor=str(authority["actor"]),
-        workspace=str(authority["workspace"]),
-        role=str(authority["role"]),
-        authority_versions=dict(authority["versions"]),
-        input_versions={"request_sha256": digest(request)},
-        credential_versions={"state": "not_applicable"},
-        budget=_operation_budget(runtime_budget, None),
-        expires_at=time.time() + _approval_card_ttl(),
+        target_label=label(scope, "the exact committed request scope"),
+        request={"action": action, "risk": risk, "scope": scope, "detail": detail,
+                 "provenance": provenance},
+        what_it_will_do=["Authorize this exact committed action, scope, detail, and provenance once."],
         known_effects=[effect],
-        unresolved_assumptions=[
-            "This compatibility caller supplied no operation-specific credential metadata."
-        ],
+        open_questions=["This compatibility caller supplied no operation-specific credential metadata."],
         before="The requested operation has not been authorized.",
         after="The exact committed request may execute once after this decision.",
         irreversible=risk in {"high", "critical"},
+        requester=requester,
     )
 
 
@@ -1667,6 +1691,7 @@ __all__ = [
     "ConsentDecision",
     "ConsentDenied",
     "ConsentLedgerError",
+    "described_approval_card",
     "consume_operation_consent",
     "require_consent",
     "require_operation_consent",

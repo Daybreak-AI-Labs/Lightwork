@@ -309,6 +309,25 @@ _SPECULATION_HISTORY = 20
 _PLAN_DECISIONS: dict[tuple[int, int], bool] = {}
 _PLAN_DECISIONS_LOCK = threading.Lock()
 
+
+def _plan_facts(agent) -> tuple[list[str], list[str], float | None]:
+    """The plan so far (newest eight briefs), the agent's tool names and the
+    task's spending cap (a cap, not an estimate). Unreadable parts are empty."""
+    steps: list[str] = []
+    try:
+        for entry in agent.ctx.blackboard.by_kind("plan")[-8:]:
+            brief = str(entry.content).split("brief=", 1)[-1].strip()
+            if brief and brief not in steps:
+                steps.append(brief[:200])
+    except Exception:  # an unreadable plan is described as missing
+        steps = []
+    try:
+        tools = [t.name for t in agent.tools.all()]
+    except Exception:  # no tool list: only the first action is described
+        tools = []
+    cap = getattr(getattr(agent.ctx, "budget", None), "max_dollars", None)
+    return steps, tools, (float(cap) if isinstance(cap, int | float) else None)
+
 # W1-44: how many blackboard entries posted by OTHER agents since this agent's
 # last tool-running turn are appended to that turn's tool_results message, so
 # a running orchestrator sees fan-out caps, seals, denials and sibling findings
@@ -3634,23 +3653,10 @@ class Agent:
             raise
 
     def _plan_summary(self, name: str, args: dict) -> str:
-        """What a person reviews before the first action: the plan so far, the
-        first action and the task's spending cap (a cap, not an estimate)."""
-        steps = []
-        try:
-            for entry in self.ctx.blackboard.by_kind("plan")[-8:]:
-                brief = str(entry.content).split("brief=", 1)[-1].strip()
-                if brief and brief not in steps:
-                    steps.append(brief[:200])
-        except Exception:  # an unreadable plan is described as missing
-            steps = []
-        plan = "; ".join(f"{i}. {step}" for i, step in enumerate(steps, 1)) or "No written plan was recorded."
-        cap = getattr(self.ctx.budget, "max_dollars", None)
-        return (f"Lightwork wants to start acting on this task. Plan so far: {plan} "
-                f"First action: {name} ({_audit_summary(args, 160)}). "
-                + (f"Spending cap for this task: ${cap:.2f}. " if isinstance(cap, int | float) else "")
-                + "Approve to let it carry on, reject to stop before anything runs, or send it back "
-                  "with what to change.")
+        """What a person reviews before the first action, as one paragraph."""
+        from .plan_review import summary_text
+        steps, _tools, cap = _plan_facts(self)
+        return summary_text(steps, name, args, cap)
 
     async def _plan_denial(self, name: str, args: dict) -> str | None:
         """Ask once per task run, before the first action with an outside effect."""
@@ -3664,10 +3670,13 @@ class Agent:
         if decided is None:
             from .safety.consent import require_consent
             try:
+                from .plan_review import plan_card
+                steps, tools, cap = _plan_facts(self)
                 verdict = await asyncio.to_thread(
                     require_consent, "confirm_plan", risk="high", scope=f"task {key[0]}",
                     detail=self._plan_summary(name, args), provenance="plan",
-                    allow_auto_approve=False, consult_ledger=False)
+                    allow_auto_approve=False, consult_ledger=False,
+                    approval_card=plan_card(key[0], steps, name, args, tools, cap))
                 decided = bool(verdict.granted)
             except Exception:  # an unavailable decision is a refusal
                 decided = False
