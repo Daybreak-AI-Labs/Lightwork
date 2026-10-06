@@ -33,7 +33,8 @@ def _calls(text: str, name: str):
 
 
 def test_no_confirming_button_uses_a_generic_word():
-    pattern = re.compile(r"""okText\s*:\s*(?:[^,}]*\|\|\s*)?['"](%s)['"]""" % "|".join(GENERIC))
+    words = "|".join(GENERIC)
+    pattern = re.compile(r"""okText\s*:\s*(?:[^,}]*\|\|\s*)?['"](""" + words + r""")['"]""")
     found = [(name, text.count("\n", 0, m.start()) + 1, m.group(0)) for name, text in _sources()
              for m in pattern.finditer(text)]
     assert found == []
