@@ -2042,8 +2042,14 @@ from .invite_routes import router as invite_router  # noqa: E402
 # [dashboard] api_keys (404 when off).
 app.include_router(api_keys_router)
 from .local_owner_routes import router as local_owner_router  # noqa: E402
+from .session_expiry import page_session as _page_session  # noqa: E402
+from .session_expiry import router as session_expiry_router  # noqa: E402
 
 app.include_router(local_owner_router)
+app.include_router(session_expiry_router)
+# The page shell's sign-in timer (lightwork-session.js): when this browser's
+# sign-in ends and how to stay signed in. None when nobody is signed in.
+templates.env.globals["page_session"] = _page_session
 
 app.include_router(invite_router)
 # SCIM 2.0 user provisioning (/scim/v2). Self-gates on MAVERICK_SCIM_TOKEN and
@@ -3095,7 +3101,12 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
         # The owner and invited colleagues both sign in on that page.
         if ((local_owner_claimed() or passphrase_sign_in())
                 and request.url.path not in {"/auth/local-owner", "/auth/local-login"}):
-            return RedirectResponse("/auth/local-login", status_code=302)
+            # Back to this page after signing in again (the sign-in keeps
+            # only a local path; see local_owner_routes).
+            from urllib.parse import quote
+
+            return_to = request.url.path + (f"?{request.url.query}" if request.url.query else "")
+            return RedirectResponse(f"/auth/local-login?return_to={quote(return_to, safe='')}", status_code=302)
     if _wants_html(request):
         status = int(exc.status_code)
         title, message = {
