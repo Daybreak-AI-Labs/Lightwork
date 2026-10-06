@@ -106,7 +106,7 @@
           <p class="muted fl-help">“Can it start?” checks required actions. Connections, permissions and the AI service are checked when work starts.</p>
           {% if not fleet_can_start[fleet.name] %}<p class="muted">No one on this team passed the action check. Review setup above, then return to this team.</p>{% endif %}
         {% else %}
-          <p class="muted" style="margin-bottom: 0;">No agents on this team yet.</p>
+          <p class="muted" style="margin-bottom: 0;">No agents on this team yet. Add agents when you create or edit the team.</p>
         {% endif %}
         {% set runs = runs_by_fleet.get(fleet.name) %}
         <h3 class="fl-sub">Recent tasks</h3>
@@ -314,7 +314,7 @@
           const label = btn.dataset.label || btn.dataset.fleet;
           // One action with a way back (CTL-1): the team leaves the list at
           // once and is deleted when the Undo time is up.
-          const row = btn.closest('tr, li, article, .card');
+          const row = btn.closest('.panel');
           if (row) row.hidden = true;
           mvUndo('Team "' + label + '" removed. Past tasks stay in your task list.', {
             action: 'remove the team',

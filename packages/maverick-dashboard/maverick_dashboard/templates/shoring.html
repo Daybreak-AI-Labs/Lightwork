@@ -241,7 +241,7 @@
     {% endif %}
   {% endfor %}
   {% if not ns.any %}
-    <p class="muted">Nothing is waiting for a person in any business area.</p>
+    <p class="muted">Nothing is waiting for a person in any business area. Work that needs a person appears here.</p>
   {% endif %}
 </div>
 
@@ -413,7 +413,7 @@
     btn.addEventListener('click', function () {
       var key = btn.getAttribute('data-remove');
       // One action with a way back (CTL-1): removed when the Undo time is up.
-      var row = btn.closest('tr, li, article');
+      var row = btn.closest('.sh-fn');
       if (row) row.hidden = true;
       window.mvUndo('"' + btn.getAttribute('data-name') + '" removed from the book of work. Finished work and approvals are not affected.', {
         action: 'remove this business area',
