@@ -684,10 +684,10 @@ class ActionEpisodeReviewService:
             if row["status"] != "accepted" or payload is None or row["episode_sha256"] != expected_episode_sha256:
                 raise ActionEpisodeConflict("training use requires the exact accepted unexpired episode")
             review_hash = digest(payload["review"])
+            # The signed bundle recomputes exactly these fields; the reviewed
+            # decision identity is recorded with the commit, not in this hash.
             request_material = {"episode": expected_episode_sha256, "review": review_hash, "actor": ctx.actor,
                 "use_until": deadline, "retain_derived_copies": True, "rationale": rationale}
-            if decision is not None:
-                request_material["decision"] = decision
             request_hash = digest(request_material)
             existing = payload.get("training_grant")
             if existing is not None:

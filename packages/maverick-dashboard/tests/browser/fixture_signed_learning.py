@@ -78,8 +78,10 @@ def install(app, tenant: str, owner: str) -> None:
             approval_decision_attestation=token, action_runner=native_action, agent_runner=no_agent,
         )
 
-    def source_flow(index: int):
-        ref = f"local-ref-{index}"
+    def source_flow():
+        # One saved definition for both runs: a learning decision needs the
+        # reviewed procedure to still be the current one. The runs differ by
+        # their input, and the order uses the customer the lookup returned.
         return Flow(id=FLOW_ID, name="Reviewed local procedure", owner=owner,
                     start="approve_lookup", nodes={
             "approve_lookup": FlowNode(id="approve_lookup", kind="approval", prompt="Review lookup", next="lookup"),
@@ -87,7 +89,7 @@ def install(app, tenant: str, owner: str) -> None:
                                params={"query": "{{input.ref}}"}, output="customer", next="approve_create"),
             "approve_create": FlowNode(id="approve_create", kind="approval", prompt="Review order", next="create"),
             "create": FlowNode(id="create", kind="action", tool=CREATE,
-                               params={"customer_id": "customer-" + ref}, output="order"),
+                               params={"customer_id": "{{customer.customer_id}}"}, output="order"),
         })
 
     def result_schema(field: str):
@@ -101,8 +103,8 @@ def install(app, tenant: str, owner: str) -> None:
                     "calls": len(state["calls"])}
         with tenant_scope(tenant=tenant):
             prior = None
+            source = store.save_flow(source_flow())
             for index in range(2):
-                source = store.save_flow(source_flow(index))
                 run = _run_fixture(execution, source, owner=owner, data={"input": {"ref": f"local-ref-{index}"}},
                                         action_runner=native_action, agent_runner=no_agent)
                 if run.status != "paused_approval":
