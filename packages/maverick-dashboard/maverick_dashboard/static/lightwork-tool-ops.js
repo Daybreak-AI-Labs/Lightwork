@@ -287,7 +287,8 @@
             show(outcome); say(status, outcome.message);
             syncInstalled(outcome, row);
             invalidate(); lock(false);
-            await refresh();
+            // Refreshing the lists must not replace the confirmation the person just got.
+            if (await refresh()) say(status, outcome.message);
           } catch (failure) {
             if (started === generation) {
               invalidate();
