@@ -318,7 +318,7 @@ def _plan_facts(agent) -> tuple[list[str], list[str], float | None]:
         for entry in agent.ctx.blackboard.by_kind("plan")[-8:]:
             brief = str(entry.content).split("brief=", 1)[-1].strip()
             # The planner's top-level brief repeats the request as its description.
-            brief = brief.removeprefix("Top-level goal:").split(" Description:", 1)[0].strip()
+            brief = re.split(r"\s+Description:", brief.removeprefix("Top-level goal:"), maxsplit=1)[0].strip()
             if brief and brief not in steps:
                 steps.append(brief[:200])
     except Exception:  # an unreadable plan is described as missing

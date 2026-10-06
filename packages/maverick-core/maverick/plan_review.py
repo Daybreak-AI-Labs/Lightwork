@@ -80,11 +80,10 @@ def outside_actions(tool_names: Iterable[str], first: str) -> list[str]:
         elif group not in groups:
             groups.append(group)
     groups.sort(key=[label for label, _keys in _GROUPS].index)
-    if others:
-        named = ", ".join(others[:_NAMED_OTHERS])
-        more = len(others) - _NAMED_OTHERS
-        tail = f"{named} and {more} more" if more > 0 else named
-        groups.append(f"use {len(others)} other tool{'s' if len(others) != 1 else ''}: {tail}")
+    if len(others) > _NAMED_OTHERS:  # a long list of tool names helps nobody decide
+        groups.append(f"use {len(others):,} other tools it has been given")
+    elif others:
+        groups.append(f"use {len(others)} other tool{'s' if len(others) != 1 else ''}: {', '.join(others)}")
     return groups
 
 

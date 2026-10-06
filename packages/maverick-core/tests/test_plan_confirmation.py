@@ -116,7 +116,9 @@ def test_other_actions_are_grouped_in_plain_words_and_the_rest_counted():
              "clipboard", "arxiv", "semantic_scholar", "str_replace_editor"]
     assert outside_actions(tools, "send_email") == [
         "send messages or email", "change files in the workspace", "run commands or programs",
-        "save notes to its memory", "use 5 other tools: find controls, view video, clipboard, arxiv and 1 more"]
+        "save notes to its memory", "use 5 other tools it has been given"]
+    assert outside_actions(["arxiv", "clipboard_copy"], "shell") == ["use 2 other tools: arxiv, clipboard copy"]
+    assert outside_actions([f"tool_{i}" for i in range(3253)], "shell")[-1] == "use 3,253 other tools it has been given"
 
 
 def test_a_step_says_the_goal_once():
@@ -124,8 +126,8 @@ def test_a_step_says_the_goal_once():
     from maverick.blackboard import Blackboard
 
     board = Blackboard()
-    board.post("orchestrator", "plan", "role=orchestrator depth=0 brief=Top-level goal: Archive the drafts "
-               "Description: Archive the drafts")
+    board.post("orchestrator", "plan", "role=orchestrator depth=0 brief=Top-level goal: Archive the drafts\n"
+               "Description: Archive the drafts\nPrior conversation: none")
     fake = SimpleNamespace(tools=None, ctx=SimpleNamespace(blackboard=board, budget=None))
     assert _plan_facts(fake)[0] == ["Archive the drafts"]
 
