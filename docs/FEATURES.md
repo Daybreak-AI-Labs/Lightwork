@@ -6204,3 +6204,30 @@ examples cannot become invented training evidence. The ordinary form and
 Copilot show usable, skipped and unresolved counts before admission. Cross-checks
 abstain from missing or tied structural evidence; original answer-preference
 pairs remain available for their separate purpose.
+
+### Current signed skill preparation and local provider choices
+
+Learning shows whether automatic skill preparation is off, needs trusted
+publishers, lacks available signature verification, or can check signed matches.
+The ordinary status and Copilot use the same current protected read. A working
+Settings link opens the existing publisher-file upload. Missing prerequisites
+stop before catalog search or optional AI analysis and post a plain task
+observation; native signature enforcement remains unchanged. Readiness never
+promises that a matching signed skill exists.
+
+Local-first model choices use actual native provider identities and aliases,
+preserving the selected model string. Unsupported adapters are excluded. Probe
+ports agree with native Ollama and TGI dispatch; explicit role choices, the
+existing opt-in and configured fallback retain their precedence.
+
+Nightly learning review now stops the combined scheduled command visibly when
+the native learning stop is active, configuration cannot be read, or the review
+fails. It reports a nonzero exit and warns that earlier changes may already be
+saved. Explicitly disabled review stays a no-op; failure payloads are not copied
+into the user-facing refusal.
+
+Page controllers and styles in trusted literal template tags now use the same
+content-versioned URLs as the shell. Public unchanged scripts and styles can
+revalidate without another response body; private or refused assets keep their
+native authorization and cache policy. File metadata changes refresh cached
+hashes, including a file that appears after an earlier missing-file check.

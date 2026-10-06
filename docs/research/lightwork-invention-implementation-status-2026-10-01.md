@@ -278,3 +278,23 @@ failure evidence. Original answer-preference data stays intact. Native
 UI/Copilot admission, original recovery and scoring were checked with retained
 local examples. This fixes attribution and readiness, not a new reward-learning
 algorithm or independently measured quality lift.
+
+October 6 skill follow-through narrows F04/F05: current signed-acquisition
+prerequisites are visible in ordinary Learning and Copilot, with the existing
+trusted publisher upload/remedy. Native missing trust refuses before catalog or
+optional provider analysis; actual local signed installation was freshly
+verified without relaxing signature enforcement. Local provider aliases and
+ordinary model choices also agree with native dispatch. These are setup and
+correctness repairs, not general autonomous acquisition or a new learning
+algorithm; research status counts remain unchanged.
+
+Nightly combined-command follow-through also stops on native learning refusal,
+unreadable policy or an incomplete review instead of reporting a successful
+continuation. Prior changes may already be retained. This is operational
+truthfulness; the register research status counts remain unchanged.
+
+Asset follow-through makes trusted literal page controllers use current versioned
+URLs and revalidate unchanged public bytes after native authorization. Cached
+ordinary UI remained usable across both current-worker file changes and a native
+restart. This is deployment continuity, not an invention or quality-lift claim;
+research status counts remain unchanged.

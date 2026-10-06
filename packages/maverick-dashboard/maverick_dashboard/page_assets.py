@@ -54,6 +54,7 @@ ASSETS = (
     "lightwork-privacy-rights-orchestration.js",
     "lightwork-red-team-schedules.js",
     "lightwork-learning-loop.js",
+    "lightwork-learning-acquisition.js",
     "lightwork-learning-jobs.js",
     "lightwork-learning-test-cases.js",
     "lightwork-learning-holdout-setup.js",

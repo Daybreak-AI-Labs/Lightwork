@@ -146,6 +146,51 @@ def settings() -> dict:
         }
 
 
+def skill_acquisition_readiness() -> dict:
+    """Current prerequisites for automatic signed catalog-skill preparation.
+
+    No catalog request, publisher key disclosure or provider call is needed.
+    Being configured means Lightwork can check a match, not that a suitable
+    signed catalog entry exists. The final installer still verifies it.
+    """
+    from . import config
+    from .audit import signing
+    from .learning_guard import Halted
+
+    config.load_config()
+    notice = ("Automatic skill preparation accepts only signatures from publishers you trust. "
+              "A matching, correctly signed skill must still be available and pass the installation checks. "
+              "This check adds nothing and does not contact an AI service or the catalog.")
+    result = {"ready": False, "trusted_publishers": 0, "notice": notice}
+
+    def blocked(status, message, setting=None):
+        return {**result, "status": status, "message": message,
+                "remedy": {"href": "/settings/all?id=" + setting,
+                           "label": "Review trusted skill publishers" if setting == "skills.trusted_pubkeys" else "Review skill preparation settings"}
+                if setting else {"href": "/help", "label": "Open Help"}}
+
+    if config.config_source_errors(include_tenant=True):
+        return blocked("Settings need attention", "Current learning settings could not be checked. Ask your administrator to review them.")
+    cfg = settings()
+    if not enabled():
+        return blocked("Automatic learning is off", "Automatic catalog-skill preparation is off. Existing skills are kept.", "self_learning.enable")
+    if not cfg["preflight"]:
+        return blocked("Skill preparation is off", "New tasks are not checked for catalog skills before they start.", "self_learning.preflight")
+    trusted = config.get_skills()["trusted_pubkeys"]
+    result["trusted_publishers"] = sum(bool(re.fullmatch(r"[a-fA-F0-9]{64}", key)) for key in set(trusted))
+    if not result["trusted_publishers"]:
+        return blocked("Choose trusted skill publishers", "Automatic skill preparation cannot install a catalog skill until you choose a trusted publisher. Upload the publisher's public key in Trusted skill publishers.", "skills.trusted_pubkeys")
+    if not signing._have_crypto():
+        return blocked("Signature checking is unavailable", "This installation cannot verify publisher signatures. Ask your administrator to repair signature checking before automatic skill preparation can run.")
+    try:
+        check_learning_halt("self_learning", "skill_readiness")
+    except Halted:
+        return blocked("Learning is stopped", "Automatic skill preparation is paused by the current learning stop. Existing skills are kept.")
+    return {**result, "ready": True, "status": "Ready to check signed matches",
+            "message": "Lightwork can check for matching skills signed by your trusted publishers. Availability and the final signature are checked when a skill is added.",
+            "remedy": {"href": "/settings/all?id=skills.trusted_pubkeys", "label": "Review trusted skill publishers"}}
+
+
 # --------------------------------------------------------------------------
 # learned-capability ledger
 # --------------------------------------------------------------------------
@@ -2002,6 +2047,13 @@ async def preflight(
     """
     check_learning_halt("self_learning", "preflight_start")
     acquired: list[str] = []
+    readiness = skill_acquisition_readiness()
+    if not readiness["ready"]:
+        message = readiness["message"] + " No catalog skill was added. Review skill preparation on the Learning page."
+        log.info("Automatic skill preparation unavailable: %s", readiness["status"])
+        if blackboard is not None:
+            blackboard.post("orchestrator", "observation", message)
+        return acquired
     try:
         from .safety.secret_detector import redact
         safe_goal, _ = redact(str(goal_text or "")[:8_000])
@@ -2062,7 +2114,7 @@ __all__ = [
     "provider_egress_enabled",
     "write_generated_tool", "delete_generated_tool", "load_generated_tools",
     "GeneratedToolRemovalError", "audit_generated_source",
-    "preflight",
+    "preflight", "skill_acquisition_readiness",
     "validate_spec_url", "probe_openapi_spec", "discover_openapi_spec",
     "LEARNED_PATH", "GENERATED_TOOLS_DIR",  # noqa: F822 - dynamic __getattr__ API
     "TOOL_AUTHOR_SYSTEM",

@@ -1852,3 +1852,51 @@ duplicate admission performed one training, while a separately reviewed Copilot
 decision admitted a second. Missing-detail scoring remained visibly unscored;
 stale sources and revoked authority refused. These checks establish truthful
 evidence handling, not improved answer quality or customer learning lift.
+
+## October 6 current signed-skill preparation
+
+Ordinary Learning and typed Copilot show current signed-acquisition readiness and
+the exact existing Trusted skill publishers Settings remedy. The status reads
+current administration and account/workspace context without returning public
+key bytes or contacting a catalog/provider. Missing or withdrawn publisher trust
+stops native preflight before catalog search and optional AI analysis, with a
+plain task observation. Signature verification remains mandatory for acquisition.
+
+The native 320px journey uploaded an actual synthetic publisher public key,
+completed the governed Settings review/save and installed an actually signed
+skill from a declared local catalog boundary. Fresh cryptographic verification
+of the retained bytes succeeded; unsigned sources and withdrawn anchors refused.
+This qualifies native setup and signature handling, not a live catalog inventory,
+unseen skill suitability or independently measured learning improvement.
+
+Native local model choices also resolve actual canonical providers and aliases.
+Ordinary complete review, Cancel, Save with interrupted reply, exact original
+readback and protected Copilot form preservation passed. Unsupported local
+adapter names are excluded; valid aliases keep their selected strings and actual
+native client/probe identities. Explicit role choices win, opt-in stays off until
+chosen, and unavailable local inference preserves configured fallback. Arbitrary
+remote compatible endpoints are not declared local by this repair.
+
+The combined nightly command also distinguishes a native learning stop or
+unreadable configuration from an explicitly disabled review. Refusal and review
+failure produce a nonzero exit, stop continuation and disclose that earlier
+learning changes may already be saved. A declared controlled exception boundary
+verified payload-safe reporting; this does not establish live provider behavior.
+
+## October 6 page asset upgrade continuity
+
+Trusted literal script and stylesheet tags receive current content-versioned
+URLs, including inherited page controllers. Existing explicit query, fragment
+and dynamic references retain their template behavior. Public unchanged script
+and stylesheet requests support conditional bodyless revalidation after native
+route admission; private, refused and missing assets retain native behavior.
+Matching current public versions can be cached as immutable. Ordinary stale or
+unversioned controller URLs revalidate. Hash caches refresh against current file
+identity, size and modification metadata; missing files are checked again.
+
+The cached 320px browser ran changed controller bytes and completed an ordinary
+reviewed Settings save both in a live worker without resetting its hash cache and
+after a separately stopped and restarted native process. Unchanged bundled graph
+library bytes retained their upstream digest and returned a bodyless 304. This
+qualifies package asset continuity, not arbitrary privileged same-metadata file
+tampering or avoidance of every underlying local file read.

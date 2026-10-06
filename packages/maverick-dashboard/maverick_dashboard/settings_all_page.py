@@ -373,17 +373,20 @@ def _build_source_choices(source: str) -> list[tuple[str, str]]:  # noqa: C901 -
                     out.append((model, f"{model} ({PROVIDER_LABELS.get(provider, provider)})"))
         return out
     if source == "local_models":
-        from maverick.llm import catalog_specs
-        from maverick.provider_local_first import LOCAL_PROVIDERS, is_local
+        from maverick.llm import PROVIDER_LABELS, catalog_specs
+        from maverick.provider_local_first import is_local
+        from maverick.providers import _canonical
 
         from .model_pickers import config_catalog
 
         out = [("", "None chosen")]
         specs = [spec for spec, _label in catalog_specs()] + config_catalog()
         for spec in dict.fromkeys(specs):
-            if is_local(spec) and spec.split(":", 1)[0] in LOCAL_PROVIDERS:
+            if is_local(spec):
                 provider, _, model = spec.partition(":")
-                out.append((spec, f"{model} ({identity_format.humanize(provider)})"))
+                provider = _canonical(provider)
+                label = PROVIDER_LABELS.get(provider) or {"tgi": "Hugging Face (local)", "vllm": "vLLM (local)"}[provider]
+                out.append((spec, f"{model} ({label})"))
         return out
     if source == "tools":
         return [*TOOL_FAMILIES,

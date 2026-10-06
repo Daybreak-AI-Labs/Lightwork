@@ -59,7 +59,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from . import auth_metrics as _auth_metrics
 from . import health_routes as _health_routes
-from . import runtime_policy_recovery_api
+from . import learning_acquisition_api, runtime_policy_recovery_api
 from ._shared import (
     _any_provider_key_set,
     _get_sse_semaphore,
@@ -142,6 +142,7 @@ from .route_identity import (
 )
 from .settings_experience import router as settings_experience_router
 from .settings_runtime_status import router as settings_runtime_router
+from .static_asset_versioning import AssetVersionExtension, cache_response
 from .task_diagnostics import router as task_diagnostics_router
 from .task_handoffs_api import router as task_handoffs_router
 
@@ -307,32 +308,44 @@ templates.env.globals.setdefault("custom_theme_css", "")
 templates.env.globals.setdefault("custom_theme_names", [])
 templates.env.globals.setdefault("dir", "ltr")
 
-# Fingerprinted static URLs (W3-77). The shell CSS/JS links in base.html carry
-# a content hash (``/static/x.js?v=<sha256[:8]>``) computed once per process
-# from the file bytes, so a versioned request can be cached for a year while
-# an upgrade changes the URL and takes effect on the next page load -- no more
-# five minutes of mismatched CSS/JS against new HTML. Unversioned requests
-# (older pages, direct links) keep the short cache.
+# Content-versioned static URLs refresh when bundled file metadata changes.
+# Matching public versions may be cached for a year; canonical/stale script
+# and stylesheet URLs revalidate. Missing files are checked again next time.
 _SHELL_STATIC_DIR = Path(__file__).parent / "static"
-_STATIC_VERSIONS: dict[str, str] = {}
+_STATIC_VERSIONS: dict[str, tuple[tuple, str]] = {}
 STATIC_IMMUTABLE_CACHE = "public, max-age=31536000, immutable"
 STATIC_SHORT_CACHE = "public, max-age=300"
 
 
 def static_version(name: str) -> str:
-    """Short content hash of a bundled static asset ("" when unreadable, so
-    the link stays unversioned and short-cached rather than breaking)."""
-    cached = _STATIC_VERSIONS.get(name)
-    if cached is not None:
-        return cached
-    version = ""
-    if name and "/" not in name and not name.startswith("."):
-        try:
-            version = hashlib.sha256((_SHELL_STATIC_DIR / name).read_bytes()).hexdigest()[:8]
-        except OSError:
-            version = ""
-    _STATIC_VERSIONS[name] = version
-    return version
+    """Content hash cached against file identity, size and modification times.
+
+    An unreadable/changing file stays unversioned and is retried next time.
+    Public page controllers then use native revalidation rather than immutable
+    caching; other static routes retain their existing native cache policy.
+    """
+    if not name or "/" in name or "\\" in name or name.startswith("."):
+        return ""
+    path = _SHELL_STATIC_DIR / name
+    try:
+        before = path.stat()
+        identity = (str(path), before.st_dev, before.st_ino, before.st_size,
+                    before.st_mtime_ns, before.st_ctime_ns)
+        cached = _STATIC_VERSIONS.get(name)
+        if cached is not None and cached[0] == identity:
+            return cached[1]
+        contents = path.read_bytes()
+        after = path.stat()
+        if identity != (str(path), after.st_dev, after.st_ino, after.st_size,
+                        after.st_mtime_ns, after.st_ctime_ns) or len(contents) != after.st_size:
+            _STATIC_VERSIONS.pop(name, None)
+            return ""
+        version = hashlib.sha256(contents).hexdigest()[:8]
+        _STATIC_VERSIONS[name] = identity, version
+        return version
+    except OSError:
+        _STATIC_VERSIONS.pop(name, None)
+        return ""
 
 
 def static_url(name: str) -> str:
@@ -342,13 +355,15 @@ def static_url(name: str) -> str:
 
 
 templates.env.globals["static_url"] = static_url
+templates.env.add_extension(AssetVersionExtension)
 
 
 class StaticCacheMiddleware:
-    """Long-cache a ``/static/`` response only when its ``?v=`` matches the
-    asset's current content hash; every other static request keeps the route's
-    own short ``Cache-Control``. Pure ASGI so the 60+ static routes stay as
-    they are."""
+    """Cache matching public asset versions; revalidate public page controllers.
+
+    Public fixed script/style routes are admitted normally before conditional
+    responses; all private, denied and unknown assets keep native behavior.
+    """
 
     def __init__(self, app) -> None:
         self.app = app
@@ -359,25 +374,23 @@ class StaticCacheMiddleware:
             return
         name = scope["path"].rsplit("/", 1)[-1]
         query = scope.get("query_string", b"").decode("latin-1")
-        wanted = static_version(name)
-        immutable = bool(wanted) and any(
-            part == f"v={wanted}" for part in query.split("&")
-        )
-        if not immutable:
-            await self.app(scope, receive, send)
-            return
-
-        async def send_immutable(message) -> None:
-            if message.get("type") == "http.response.start" and message.get("status") == 200:
-                headers = [
-                    (k, v) for k, v in message.get("headers", [])
-                    if k.lower() != b"cache-control"
-                ]
-                headers.append((b"cache-control", STATIC_IMMUTABLE_CACHE.encode("ascii")))
-                message = {**message, "headers": headers}
+        unchanged = False
+        async def send_cached(message) -> None:
+            nonlocal unchanged
+            if message.get("type") == "http.response.start":
+                # Route authorization and any file-response wait happened first.
+                wanted = static_version(name)
+                immutable = bool(wanted) and any(
+                    part == f"v={wanted}" for part in query.split("&")
+                )
+                message, unchanged = cache_response(scope, message, wanted, immutable)
+            elif unchanged:
+                if message.get("type") == "http.response.pathsend" or not message.get("more_body", False):
+                    await send({"type": "http.response.body", "body": b""})
+                return
             await send(message)
 
-        await self.app(scope, receive, send_immutable)
+        await self.app(scope, receive, send_cached)
 
 
 from .i18n import t as _i18n_t  # noqa: E402
@@ -1494,6 +1507,7 @@ attach_unified_audit_scheduler(app)
 app.include_router(api_router)
 app.include_router(api_documentation_router)
 app.include_router(runtime_policy_recovery_api.router, prefix="/api/v1")
+app.include_router(learning_acquisition_api.router, prefix="/api/v1")
 app.include_router(draft_router)
 
 app.include_router(preferences_router)
