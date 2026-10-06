@@ -108,8 +108,17 @@ def test_page_floor_keeps_api_key_scopes_and_rejects_unknown_pages(monkeypatch, 
     monkeypatch.setenv("MAVERICK_DASHBOARD_ADMINS", "")
     rbac.set_role("user:customer", "operator")
     monkeypatch.setattr(auth, "_authorization_principal", lambda _request: "user:customer")
-    request = Request({"type": "http", "method": "GET", "path": "/", "headers": []})
+    # A current operate-scoped API key: each gate re-verifies the bearer.
+    from types import SimpleNamespace
+    key = SimpleNamespace(principal="user:customer",
+                          claims={"via": "api_key", "api_key_id": "key-1", "workspace": ""})
+    monkeypatch.setattr(auth, "_authenticate_api_key", lambda _request, _token: key)
+    request = Request({"type": "http", "method": "GET", "path": "/",
+                       "headers": [(b"authorization", b"Bearer test-key")]})
+    request.state.principal = key
+    request.state.api_key_id = "key-1"
     request.state.api_key_permissions = frozenset({"operate"})
+    request.state.api_key_scopes = frozenset({"tasks:write"})
     auth.require_page_permission(request, "/security")
     with pytest.raises(HTTPException) as denied:
         auth.require_page_permission(request, "/cache")
