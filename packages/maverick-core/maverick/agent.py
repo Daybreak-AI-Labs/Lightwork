@@ -3665,7 +3665,7 @@ class Agent:
             from .safety.consent import require_consent
             try:
                 verdict = await asyncio.to_thread(
-                    require_consent, "confirm_plan", risk="high", scope=f"goal:{key[0]}",
+                    require_consent, "confirm_plan", risk="high", scope=f"task {key[0]}",
                     detail=self._plan_summary(name, args), provenance="plan",
                     allow_auto_approve=False, consult_ledger=False)
                 decided = bool(verdict.granted)
