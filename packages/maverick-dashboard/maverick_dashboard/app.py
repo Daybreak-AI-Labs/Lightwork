@@ -10738,6 +10738,7 @@ def chat_page(request: Request, compose: str = "") -> HTMLResponse:
             # one limit that is true in code.
             "chat_examples": _chat_examples(request),
             "chat_limits": _CHAT_LIMITS,
+            "chat_capability": _CHAT_CAPABILITY,
             "compose_form": compose_form,
             "compose_form_available": page_visible(request, "/goal-builder"),
             "channels": _goal_builder_channels() if compose_form else [],
@@ -10760,6 +10761,7 @@ def _chat_examples(request: Request) -> dict:
         return {"department": None, "examples": [], "sample": None}
 
 
+from .chat_examples import CAPABILITY as _CHAT_CAPABILITY  # noqa: E402
 from .chat_examples import LIMITS as _CHAT_LIMITS  # noqa: E402
 
 

@@ -43,6 +43,7 @@
   </div>
   <h1 class="sr-only">{{ ui('Chat') }}</h1>
   <p class="cs-greet">{{ ui('What should Lightwork take on?') }}</p>
+  {% if chat_capability %}<p class="cs-limits" id="chat-capability">{{ ui(chat_capability) }}</p>{% endif %}
   {% if nav_mode == 'areas' and compose_form_available and can_create_goal %}<p><a href="/chat?compose=form">{{ ui('Use a step-by-step form instead') }}</a></p>{% endif %}
   {% if can_create_goal and model_route_ready and chat_examples and chat_examples.examples %}
   <section class="cs-examples" id="chat-examples" aria-labelledby="chat-examples-title">
