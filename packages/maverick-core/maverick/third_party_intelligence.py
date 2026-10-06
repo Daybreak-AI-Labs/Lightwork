@@ -448,6 +448,7 @@ class VendorProfile:
     created_at: float
     updated_at: float
     integrity_sha256: str
+    register_vendor_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -1744,6 +1745,8 @@ class ThirdPartyIntelligenceStore:
         idempotency_key: str,
         expected_revision: int = 0,
         now: float | None = None,
+        register_vendor_id: str | None = None,
+        effect_guard: Callable[[], None] | None = None,
     ) -> VendorProfile:
         tenant = _tenant(tenant_id)
         vendor = _id(vendor_id, "vendor_id")
@@ -1764,6 +1767,9 @@ class ThirdPartyIntelligenceStore:
         owner = _id(owner_ref, "owner_ref")
         actor = _id(actor_ref, "actor_ref")
         expected = _integer(expected_revision, "expected_revision", 0, 2**31 - 1)
+        registered = _id(register_vendor_id, "register_vendor_id") if register_vendor_id is not None else None
+        if registered is not None and expected == 0:
+            identity_digest = hashlib.sha256(f"lightwork.registered-vendor.identity.v1:{tenant}:{registered}".encode()).hexdigest()
         moment = _timestamp(self._clock() if now is None else now, "now")
         request = {
             "action": "upsert_vendor",
@@ -1781,6 +1787,8 @@ class ThirdPartyIntelligenceStore:
             "actor_ref": actor,
             "expected_revision": expected,
         }
+        if registered is not None:
+            request["register_vendor_id"] = registered
         with self._connect() as connection:
             self._begin(connection)
             request_sha, operation = self._operation(
@@ -1789,6 +1797,8 @@ class ThirdPartyIntelligenceStore:
             if operation is not None:
                 connection.commit()
                 return self.get_vendor(tenant, vendor)
+            if effect_guard is not None:
+                effect_guard()
             row = connection.execute(
                 "SELECT * FROM vendors WHERE tenant_id=? AND vendor_id=?",
                 (tenant, vendor),
@@ -1806,8 +1816,22 @@ class ThirdPartyIntelligenceStore:
                     raise ThirdPartyIntelligenceConflict(
                         "vendor expected revision does not match"
                     )
+                prior_register = previous.get("register_vendor_id")
+                if prior_register is not None and registered not in {None, prior_register}:
+                    raise ThirdPartyIntelligenceConflict("This intelligence profile is already bound to another registered vendor.")
+                registered = prior_register or registered
+                if prior_register is not None and previous["entity_identity_sha256"] != identity_digest:
+                    raise ThirdPartyIntelligenceConflict("A bound vendor's canonical entity identity cannot be replaced by caller-authored text.")
                 revision = expected + 1
                 created_at = float(previous["created_at"])
+            if registered is not None:
+                from . import vendor_management
+                from .paths import current_tenant_id_strict
+                if current_tenant_id_strict() != tenant or vendor_management.get_vendor(registered) is None:
+                    raise ThirdPartyIntelligenceConflict("Choose a current vendor from this workspace's register.")
+                for other in connection.execute("SELECT * FROM vendors WHERE tenant_id=? AND vendor_id<>?", (tenant, vendor)).fetchall():
+                    if self._row(other, "vendor").get("register_vendor_id") == registered:
+                        raise ThirdPartyIntelligenceConflict("This registered vendor already has an intelligence profile. Open that existing profile.")
             payload = {
                 "tenant_id": tenant,
                 "vendor_id": vendor,
@@ -1825,8 +1849,11 @@ class ThirdPartyIntelligenceStore:
                 "revision": revision,
                 "created_at": created_at,
                 "updated_at": moment,
+                "register_vendor_id": registered,
             }
             digest = _sha256(payload)
+            if effect_guard is not None:
+                effect_guard()
             connection.execute(
                 "INSERT INTO vendors VALUES(?,?,?,?) ON CONFLICT(tenant_id,vendor_id) "
                 "DO UPDATE SET payload_json=excluded.payload_json,"

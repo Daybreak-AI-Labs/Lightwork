@@ -5133,6 +5133,11 @@ def pick_advanced() -> dict[str, Any]:
             "Guidance is reviewed and read at the task's next safe point; existing task ownership, permissions and spending limits remain enforced.",
             default=True,
         ),
+        "allow_human_conversation_handoffs": _q_confirm(
+            "Allow reviewed human help inside Chat? People select an on-duty helper "
+            "and review the brief they share. AI pauses before the helper takes over; "
+            "returning to AI is a separate choice. Off by default.", default=False,
+        ),
         "allow_chat_message_actions": _q_confirm(
             "Let people try another answer, edit and resend a message, or branch from an earlier answer? "
             "The original conversation is kept. Alternatives use current access and spending limits; "
@@ -5740,11 +5745,12 @@ def pick_advanced() -> dict[str, Any]:
             default=False,
         ),
         "saml": _q_confirm(
-            "Enable SAML 2.0 SSO (alongside or instead of OIDC)? For enterprises "
+            "Prepare company single sign-on (SAML)? For enterprises "
             "whose IdP (Okta, Entra/Azure AD, ADFS) mandates SAML over OIDC. "
-            "Writes a [auth.saml] template you fill in with your SP/IdP details, "
-            "then hand /saml/metadata to the IdP. Needs the [saml] extra (pysaml2) "
-            "and the browser-login session secret. Off by default.",
+            "Keeps it inactive so current access stays available. After installation, "
+            "use Settings > All settings > Single sign-on to upload provider files, "
+            "try a real sign-in and review activation. Included in the standard "
+            "release runtime; off by default.",
             default=False,
         ),
         "security_autofix": _q_confirm(
@@ -6941,7 +6947,7 @@ def pick_notifications() -> tuple[dict[str, Any], list[str]]:
     personal_config = {"personal_alerts": personal_alerts, "personal_critical_bypass": personal_critical_bypass,
                        "personal_background": personal_background}
     if personal_background and _q_confirm(
-        "Allow people to opt into alerts in their verified Slack/Telegram private conversations? Requires My Data identity verification and configured bot channel allowlists.", default=False,
+        "Allow people to opt into alerts in their verified Slack, Telegram or Teams private conversations? Requires My data identity verification and configured channel access.", default=False,
     ):
         personal_config["personal_external"] = True
         personal_config["personal_dashboard_url"] = _q_text("HTTPS dashboard origin for authenticated notification links (no path):", default="")
@@ -9290,6 +9296,8 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
         _feature_locks.append("pack_editing = false")
     if advanced.get("allow_role_editing") is False:
         _feature_locks.append("role_editing = false")
+    if type(advanced.get("allow_human_conversation_handoffs")) is bool:
+        _feature_locks.append("human_conversation_handoffs = " + str(advanced["allow_human_conversation_handoffs"]).lower())
     if _feature_locks:
         lines.append("")
         lines.append("[features]")
@@ -9829,10 +9837,10 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
                 lines.append(f"{_toml_str(group)} = [{rendered}]")
     if advanced.get("saml"):
         lines.append("")
-        # SAML 2.0 SP browser SSO (alongside OIDC). Fill in the SP/IdP details
-        # then hand /saml/metadata to the IdP. Needs the [saml] extra (pysaml2)
-        # and the [auth.oidc] session_secret above. See docs/security-hardening.md.
+        # The ordinary guided setup supplies real values and separately reviews
+        # activation. An installer template must never disable owner sign-in.
         lines.append("[auth.saml]")
+        lines.append("enabled = false")
         lines.append('sp_entity_id = "https://YOUR-HOST/saml/metadata"')
         lines.append('acs_url = "https://YOUR-HOST/saml/acs"')
         lines.append('idp_metadata_url = "https://IDP/app/metadata"   # or idp_metadata_file')

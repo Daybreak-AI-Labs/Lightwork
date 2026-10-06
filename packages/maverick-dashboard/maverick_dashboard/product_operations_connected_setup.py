@@ -3,9 +3,10 @@ from __future__ import annotations
 
 import json
 
+from fastapi import HTTPException
 from maverick.governed_operations import digest
 
-from . import company_signin_tests, connected_event_sources_api
+from . import company_signin_migration, company_signin_tests, connected_event_sources_api
 from .product_operations import Adapter, EmptyInput, Preview, Snapshot
 
 
@@ -28,8 +29,14 @@ def signin_snapshot(request, _selection):
 
 def signin_prepare(request, selection, _arguments):
     value = signin_snapshot(request, selection)
-    return Preview(value.summary + " Open Settings to save the provider details, explicitly try a real sign-in and read the dated original results. Your current administrator access is kept.",
-        native={"open": {"label": "Set up and check company sign-in", "href": "/settings/all#settings-signin-guide"}})
+    try:
+        current, _owner = company_signin_migration.authority(request)
+    except HTTPException:
+        return Preview(value.summary + " Open Settings to save and check provider details. Managed installation policies still apply.",
+            native={"open": {"label": "Set up and check company sign-in", "href": "/settings/all#settings-signin-guide"}})
+    return Preview(value.summary + " Open Settings to try a real sign-in, explicitly grant administrator access, then separately review activation. No settings or roles change through this handoff.",
+        native={"company_signin_migration": {"context": current, "original": False},
+                "open": {"label": "Set up and check company sign-in", "href": "/settings/all#settings-signin-guide"}})
 
 
 def entries():

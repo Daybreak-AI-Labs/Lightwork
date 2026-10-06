@@ -229,8 +229,12 @@ class ChatThreads:
 
     def _require_open(self, connection, goal_id):
         from .goal_mutations import GoalMutationConflict
+        from .human_conversation_handoffs import require_ai_open
         from .task_handoffs import require_open
         try:
+            require_ai_open(self.world, goal_id,
+                            execute=lambda sql, args: self.store.execute(connection, sql, args),
+                            decode=self.store.open)
             require_open(self.world, goal_id,
                          execute=lambda sql, args: self.store.execute(connection, sql, args),
                          decode=self.store.open)

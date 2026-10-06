@@ -112,6 +112,7 @@ class ConversationInbox:
 
     def target(self, goal_id, *, write=True):
         from .chat_threads import ChatThreads
+        from .human_conversation_handoffs import require_ai_open
         from .task_handoffs import require_open
         if current_tenant_id_strict() != self.tenant:
             raise PermissionError("The workspace changed; reopen the conversation")
@@ -120,6 +121,7 @@ class ConversationInbox:
             raise PermissionError("This conversation belongs to another account or is unavailable")
         self.authorize(goal)
         if write:
+            require_ai_open(self.world, goal_id)
             require_open(self.world, goal_id)
         binding = ChatThreads(self.world).binding(goal_id)
         root_id = binding.root_id if binding else goal.id
@@ -397,6 +399,17 @@ receipt confirms delivery to this boundary, never semantic compliance.
                                  acknowledgement=acknowledgement)
 
 
+def _human_private(value):
+    sessions=value.get("human",{}).get("sessions",{}).values()
+    return bool(value.get("label") or value.get("until") or any(session.get("purpose") or session.get("messages")
+        or any(session.get("shared",{}).values()) for session in sessions))
+
+
+def _human_held(value):
+    from .human_conversation_handoffs import HELD
+    return any(session.get("state") in HELD for session in value.get("human",{}).get("sessions",{}).values())
+
+
 def owned_inventory(principal):
     """Owned My Data inventory; the adapter owns verified actor admission."""
     if not isinstance(principal, str) or not principal.startswith("user:"):
@@ -416,9 +429,9 @@ def owned_inventory(principal):
             record = STORE.get(record_id)
             if record and record.get("owner") == principal:
                 payload = _unpack(record)
-                if any(item["state"] != "erased" for item in payload["items"]):
+                if any(item["state"] != "erased" for item in payload["items"]) or _human_private(payload):
                     result.append({"id": record_id, "revision": record["revision"], "owner": principal,
-                                   "root_id": record["root_id"], "inflight": any(item["state"] in {"consuming", "dispatching"}
+                                   "root_id": record["root_id"], "inflight": _human_held(payload) or bool(payload.get("human", {}).get("sessions") and record.get("_audit_pending")) or any(item["state"] in {"consuming", "dispatching"}
                                        for item in payload["items"])})
                 if len(result) > 1000:
                     raise ValueError("Conversation inventory exceeds the reviewed bounded export; narrow the request")
@@ -431,8 +444,14 @@ def export_owned(principal, record_id, expected_revision):
         raise PermissionError("Conversation data is outside the reviewed owner scope")
     if type(expected_revision) is not int or record["revision"] != expected_revision:
         raise RecordConflict("Conversation data changed after the export review")
-    return {"id": record_id, "revision": record["revision"], "owner": principal, "root_id": record["root_id"],
-            "items": copy.deepcopy(_unpack(record)["items"])}
+    value=_unpack(record)
+    result={"id": record_id, "revision": record["revision"], "owner": principal, "root_id": record["root_id"],
+            "items": copy.deepcopy(value["items"])}
+    if "human" in value:
+        result["human_conversations"]=copy.deepcopy(value["human"])
+    if "label" in value:
+        result["on_duty"]={"label":value["label"],"until":value["until"]}
+    return result
 
 
 def erase_owned(principal, record_id, expected_revision, operation_id, *, actor):
@@ -452,12 +471,20 @@ def erase_owned(principal, record_id, expected_revision, operation_id, *, actor)
         return {"status": "unconfirmed" if record.get("_audit_pending") else "replayed", "revision": record["revision"]}
     if type(expected_revision) is not int or record["revision"] != expected_revision:
         raise RecordConflict("Conversation data changed after the erasure review")
+    if _human_held(value) or (value.get("human", {}).get("sessions") and record.get("_audit_pending")):
+        raise RecordConflict("Read the original decision and hand back any active human conversation first. Unconfirmed sharing and AI holds cannot be erased silently.")
     if any(item["state"] in {"consuming", "dispatching"} for item in value["items"]):
         raise RecordConflict("A conversation message is being consumed or admitted. Review its durable receipt before erasure")
     for item in value["items"]:
         item.update(text="", files=[], snapshot=None, acknowledgement=None, state="erased",
                     message="Private message contents erased by the reviewed owner data request.", revision=item["revision"] + 1)
+    for session in value.get("human",{}).get("sessions",{}).values():
+        session.update(shared={"title":"","brief":"","saved_reply":""},purpose="",messages=[],duty_label="",erased=True)
+    if "label" in value:
+        value.update(label="",until=0)
     for receipt in value["operations"].values():
+        if "item_id" not in receipt:
+            continue
         receipt["item"] = public_item(next(item for item in value["items"] if item["id"] == receipt["item_id"]))
     value["generation"] = value.get("generation", 0) + 1
     value.setdefault("erasures", {})[operation_id] = fingerprint

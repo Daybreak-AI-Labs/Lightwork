@@ -1075,6 +1075,8 @@ def _users_context(request: Request) -> dict:
     workspace_options, wm_tenant = _workspace_options(request)
     role_map = rbac.list_users()
     labels = _invite_labels(all_invites)
+    from .company_signin_tests import verified_people
+    labels.update(verified_people(request))
     grants = suite_grants.list_grants()
     people = _people(role_map, labels, [*grants, *bootstrap, *_signed_in_principals()])
     from .access_explanations import role_descriptions, standard_role

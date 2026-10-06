@@ -1164,6 +1164,7 @@ def get_features() -> dict:
         "deliverable_bundles": cfg.get("deliverable_bundles", False) is True,
         "project_workspaces": cfg.get("project_workspaces", False) is True,
         "task_handoffs": cfg.get("task_handoffs", False) is True,
+        "human_conversation_handoffs": cfg.get("human_conversation_handoffs", False) is True,
         "outcome_measurement": cfg.get("outcome_measurement", False) is True,
         "commitment_viability": cfg.get("commitment_viability", False) is True,
         "commitment_capability_learning": cfg.get("commitment_capability_learning", False) is True,

@@ -646,6 +646,10 @@ class TeamsChannel(Channel):
                               provider_sender_id=parsed.sender_aad)
         account = self.app_id
         route = {"service_url": parsed.service_url, "reply_to": parsed.activity_id}
+        if (parsed.conversation_type == "personal"
+                and (parsed.raw.get("conversation") or {}).get("conversationType") == "personal"):
+            route["private_destination"] = {"service_url": parsed.service_url, "conversation_id": parsed.conversation_id,
+                                            "tenant_id": parsed.tenant_id, "sender_id": parsed.principal_key, "app_id": self.app_id}
         external_id = parsed.conversation_id + ":" + parsed.activity_id
         try:
             receipt = await self.admit_message(msg, external_id=external_id, account=account,

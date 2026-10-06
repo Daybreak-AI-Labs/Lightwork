@@ -116,7 +116,7 @@ def begin(principal: str, channel: str) -> dict:
 
 
 def prove_channel_command(text: str, *, channel: str, user_id: str, sender_id: str | None = None,
-                          account_sha256: str | None = None) -> str | None:
+                          account_sha256: str | None = None, private_destination: dict | None = None) -> str | None:
     """Called after adapter authentication/tenant admission, before LLM history."""
     if not text.startswith("LIGHTWORK LINK"):
         return None
@@ -138,6 +138,10 @@ def prove_channel_command(text: str, *, channel: str, user_id: str, sender_id: s
             return "This channel identity already has a link. Unlink it from its current account first."
         candidate.update(status="proof_received", user_id=user_id, sender_id=sender_id or user_id,
                          account_sha256=account_sha256)
+        if channel == "teams" and private_destination is not None:
+            from .personal_notification_delivery import teams_destination
+
+            candidate["private_destination"] = teams_destination(private_destination, account_sha256, sender_id)
         _write(record, actor=candidate["principal"], action="channel_proof_received")
     return "Channel proof received. Return to My Data and confirm the displayed channel identity. Nothing is shared yet."
 
@@ -159,7 +163,8 @@ def confirm(principal: str, challenge_id: str, *, expected_revision: int) -> dic
             raise ValueError("Workspace identity-link capacity is full. Ask your administrator to retire unused links.")
         record["links"].append({"id": c["id"], "principal": principal, "channel": c["channel"],
                                 "user_id": c["user_id"], "sender_id": c["sender_id"],
-                                "account_sha256": c["account_sha256"], "verified_at": time.time()})
+                                "account_sha256": c["account_sha256"], "verified_at": time.time(),
+                                **({"private_destination": c["private_destination"]} if c.get("private_destination") else {})})
         record["challenges"] = [item for item in record["challenges"] if item["id"] != c["id"]]
         _write(record, actor=principal, action="link_confirmed")
         return state(principal)

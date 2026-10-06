@@ -142,10 +142,15 @@
         </label>
       </div>
     {% elif s.control == 'path' %}
+      {% if s.id == 'auth.saml.idp_metadata_file' and (s.value or '').startswith('managed-saml:') %}
+      <input type="hidden" id="{{ cid }}" data-input value="{{ s.value }}">
+      <p>Provider files are stored privately. <a href="/settings/all#company-saml-setup">Open guided single sign-on setup</a> to review a replacement.</p>
+      {% else %}
       <input class="input" type="text" id="{{ cid }}" data-input maxlength="{{ s.max_length }}"
              value="{{ s.value or '' }}" spellcheck="false" autocomplete="off"
              placeholder="{{ 'Full location of the folder on the server' if s.path_kind == 'folder' else 'Full location of the file on the server' }}"
              aria-describedby="{{ cid }}-help">
+      {% endif %}
     {% elif s.control == 'list' %}
       <div class="settings-all-list" data-list data-item-label="{{ s.item_label }}" data-item-hint="{{ s.item_hint }}" data-max-length="{{ s.max_length }}">
         <ul class="settings-all-list-items" aria-labelledby="{{ cid }}-label">
@@ -283,6 +288,10 @@
         <button class="btn btn--ghost" type="button" data-secret-replace aria-controls="{{ cid }}">{{ 'Replace' if s.is_set else 'Add' }}</button>
         <input class="input" type="password" id="{{ cid }}" data-input autocomplete="new-password"
                maxlength="{{ s.max_length }}" hidden aria-labelledby="{{ cid }}-label" aria-describedby="{{ cid }}-help">
+        {% if s.id == 'auth.oidc.session_secret' %}
+        <button class="btn btn--ghost" type="button" data-signin-key-create>{{ 'Create a replacement sign-in key' if s.is_set else 'Create a secure sign-in key' }}</button>
+        <p class="muted">Creates an unsaved protected value. Review Save setting before it changes sign-in.</p>
+        {% endif %}
       </div>
     {% endif %}
     {% if not s.locked %}

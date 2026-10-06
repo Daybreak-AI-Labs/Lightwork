@@ -9,7 +9,7 @@ from pydantic import Field
 from starlette.background import BackgroundTask
 
 from .plain_labels import money
-from .product_operations import Adapter, Outcome, Preview, Snapshot, StrictInput
+from .product_operations import Adapter, EmptyInput, Outcome, Preview, Snapshot, StrictInput
 
 
 class RebuildInput(StrictInput):
@@ -233,9 +233,29 @@ def precedent_prepare(request, selection, arguments):
                  for question, value in suggestions.items()], native={"suggestions": suggestions})
 
 
+def sources_snapshot(request, _selection):
+    import json
+
+    from . import knowledge_sources_api
+
+    value = json.loads(knowledge_sources_api.catalog(request).body)
+    return Snapshot(digest(value), "Saved company Knowledge sources",
+                    "Use named saved accounts and approved uses. New or refreshed content needs separate approval before specialists can use it.")
+
+
+def sources_prepare(request, selection, _arguments):
+    value = sources_snapshot(request, selection)
+    return Preview(value.summary + " Open the complete Knowledge form to choose a source, review its schedule and cost, read original outcomes or save a specialist draft. This handoff does not refresh, publish or change access.",
+                   native={"open": {"label": "Open company Knowledge sources", "href": "/knowledge-access#knowledge-sources"}})
+
+
 def entries():
     from .product_operations_knowledge_feedback import feedback_entries
-    return (*feedback_entries(), Adapter("knowledge.assessment_precedents", "Review precedent answers and sources", "learning", "/privacy", ("/privacy", "/finance", "/security", "/approvals", "/knowledge-access"), PrecedentInput, precedent_snapshot, precedent_prepare),
+    return (*feedback_entries(), Adapter("knowledge.sources.configure", "Manage company Knowledge sources", "learning", "/knowledge-access#knowledge-sources",
+                                        ("/knowledge-access", "/knowledge", "/agents", "/connections", "/research"),
+                                        EmptyInput, sources_snapshot, sources_prepare,
+                                        aliases=("connect company knowledge", "refresh SharePoint knowledge", "attach approved sources")),
+            Adapter("knowledge.assessment_precedents", "Review precedent answers and sources", "learning", "/privacy", ("/privacy", "/finance", "/security", "/approvals", "/knowledge-access"), PrecedentInput, precedent_snapshot, precedent_prepare),
             Adapter("knowledge.source_analysis", "Analyze an approved source", "learning", "/knowledge-access#source-analysis", ("/knowledge-access",), AnalysisInput, analysis_snapshot, analysis_prepare, analysis_execute, analysis_recover),
             Adapter("knowledge.rebuild", "Rebuild document search", "learning", "/knowledge-access", ("/knowledge-access",), RebuildInput, rebuild_snapshot, rebuild_prepare, rebuild_execute, rebuild_recover),
             Adapter("knowledge.rebuild_job", "Review or control rebuild progress", "learning", "/knowledge-access", ("/knowledge-access",), JobInput, job_snapshot, job_prepare, job_execute))

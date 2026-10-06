@@ -16,11 +16,27 @@
              copy='Added ' ~ (vendor.registered_at_date or '—') ~ (' by ' ~ (vendor.registered_by | identity) if vendor.registered_by else '') ~ '.') }}
   {% endcall %}
 
+  <section class="panel" id="vendor-profile" data-vendor-profile="{{ vendor.id }}">
+    <h2>Vendor lifecycle and risk</h2>
+    <p>One current view of this registered vendor’s assessments, screening decisions, contracts and open work. Existing identities are linked by an explicit decision.</p>
+    <div style="display:flex;gap:.5rem;flex-wrap:wrap"><button type="button" class="btn" data-vp-refresh>Refresh current vendor view</button><button type="button" class="btn" data-vp-read>Read original vendor decision</button></div>
+    <p data-vp-status role="status" aria-live="polite">Loading linked records…</p>
+    <div data-vp-content></div><div data-vp-review aria-live="polite"></div><div data-vp-original aria-live="polite"></div>
+  </section>
+  <style>
+    #vendor-profile, #vendor-profile * { min-width:0; overflow-wrap:anywhere; }
+    #vendor-profile label { display:grid; gap:.4rem; margin:.7rem 0; }
+    #vendor-profile input:not([type=checkbox]), #vendor-profile select, #vendor-profile textarea { width:100%; max-width:100%; }
+    #vendor-profile input[type=checkbox] { width:auto; }
+    #vendor-profile dd { margin-left:1rem; margin-bottom:.7rem; }
+  </style>
+  <script defer src="/static/lightwork-vendor-profile.js"></script>
+
   <div class="panel" id="vd-root" data-vendor="{{ vendor.id }}" data-revision="{{ vendor.revision }}" data-name="{{ vendor.name }}">
     <h2 style="margin-top:0">Status</h2>
     <div class="vd-actions" style="display:flex;gap:.5rem;flex-wrap:wrap">
       {% if vendor.status != 'under_review' %}<button type="button" class="btn" data-vd-status="under_review">Mark as under review</button>{% endif %}
-      {% if vendor.status != 'active' %}<button type="button" class="btn btn--primary" data-vd-status="active">Mark as active</button>{% endif %}
+      {% if vendor.status != 'active' %}<a class="btn btn--primary" href="#vendor-profile">Review assessment before activation</a>{% endif %}
       {% if vendor.status != 'offboarded' %}<button type="button" class="btn btn--danger" data-vd-status="offboarded">Stop using this vendor</button>{% endif %}
     </div>
     <p id="vd-msg" role="status" aria-live="polite" class="muted"></p>

@@ -168,8 +168,9 @@
     <ul id="ka-library-starters"></ul>
   </section>
 
+  {% include '_knowledge_sources.html' %}
   <noscript><p class="panel">JavaScript is required to revalidate and display governed knowledge sources.</p></noscript>
   {% if knowledge_tabs %}</div>{% endif %}
 </section>
 {% endblock %}
-{% block scripts_extra %}<script src="/static/lightwork-access-state.js" defer></script><script src="/static/lightwork-knowledge-access.js" defer></script><script src="/static/lightwork-knowledge-library.js" defer></script><script src="/static/lightwork-source-analysis.js" defer></script>{% endblock %}
+{% block scripts_extra %}<script src="/static/lightwork-access-state.js" defer></script><script src="/static/lightwork-knowledge-access.js" defer></script><script src="/static/lightwork-knowledge-library.js" defer></script><script src="/static/lightwork-source-analysis.js" defer></script><script src="/static/lightwork-knowledge-sources.js" defer></script>{% endblock %}

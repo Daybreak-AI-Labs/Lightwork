@@ -2810,8 +2810,10 @@ async def run_goal(
 ) -> str:
     """Hold task execution authority until all finalization work has stopped."""
     from .goal_mutations import GoalMutationConflict
+    from .human_conversation_handoffs import require_ai_open
     from .task_handoffs import apply_ceiling, require_open
     try:
+        require_ai_open(world, goal_id)
         require_open(world, goal_id)
     except GoalMutationConflict as exc:
         return f"BLOCKED: {exc}"
@@ -2856,6 +2858,7 @@ async def run_goal(
     sandbox = sandbox or LocalBackend()
     try:
         with execution_lease(world, goal_id):
+            require_ai_open(world, goal_id)
             require_open(world, goal_id)
             apply_ceiling(world, goal_id, budget)
             with bind_goal(world, goal_id, _execution_principal(user_id=user_id, capability=capability)), run_scope(world, goal_id, sandbox), organization_run_scope(

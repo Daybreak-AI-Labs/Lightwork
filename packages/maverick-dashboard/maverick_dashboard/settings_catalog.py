@@ -2769,6 +2769,16 @@ def _coerce_path(setting: Setting, value: object) -> str | None:
         raise SettingError(f"{setting.label}: use at most {setting.max_length} characters.")
     if not text:
         return None  # an emptied box means "stop setting this here"
+    if setting.id == "auth.saml.idp_metadata_file" and text.startswith("managed-saml:"):
+        from fastapi import HTTPException
+
+        from .company_saml_materials import resolve
+
+        try:
+            resolve(text)
+        except (HTTPException, ValueError, OSError) as exc:
+            raise SettingError("The protected uploaded provider files are unavailable. Review guided single sign-on setup.") from exc
+        return text
     from . import settings_paths
 
     try:
@@ -3367,6 +3377,8 @@ def lookup(tree: object, path: tuple[str, ...]) -> tuple[bool, object]:
 
 def _structured_display(setting: Setting, value: object) -> str | None:
     """Plain words for the picks, fingerprint, document and address controls."""
+    if setting.id == "auth.saml.idp_metadata_file" and str(value).startswith("managed-saml:"):
+        return "Protected uploaded provider files"
     if setting.id == "plugins.workbench_image":
         from maverick.sandbox.local_images import cached_label
         return cached_label(value)
