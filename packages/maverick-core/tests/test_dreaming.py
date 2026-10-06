@@ -1074,6 +1074,9 @@ class TestLearningGovernance:
         )
         assert rows and rows[0]["kind"] == "learning_update"
         assert "insights_written" in rows[0]
+        assert [row["phase"] for row in rows] == ["started", "completed"]
+        assert rows[0]["cycle_id"] == rows[1]["cycle_id"]
+        assert all(row["_require_signed"] is True for row in rows)
 
 
 class TestTenantIsolation:

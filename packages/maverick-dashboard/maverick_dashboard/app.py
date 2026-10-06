@@ -2096,26 +2096,6 @@ _DEFAULT_CSP = (
     "object-src 'none'"
 )
 
-# The plan-tree page pulls Cytoscape.js from jsdelivr (SRI-pinned in the
-# template). Allow that one host on script-src for this page only; every
-# other directive stays as locked-down as _DEFAULT_CSP. connect-src stays
-# 'self' — the live poll only ever fetches our own /api/v1 endpoint.
-_PLAN_TREE_CSP = (
-    "default-src 'self'; "
-    "img-src 'self' data:; "
-    "style-src 'self' 'unsafe-inline'; "
-    "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
-    "connect-src 'self'; "
-    "frame-ancestors 'none'; "
-    "base-uri 'none'; "
-    "form-action 'self'; "
-    "object-src 'none'"
-)
-
-# /goals/{id}/plan — the only page that loads the Cytoscape CDN script.
-_PLAN_TREE_PATH_RE = re.compile(r"^/goals/\d+/plan/?$")
-
-
 def _persist_pref_cookie(request, response, *, param, cookie, valid, max_age) -> None:
     """Set a preference cookie when ``?param=`` is a valid value. Shared by the
     font/density/lang persistence (the theme uses its own _set_theme_cookie)."""
@@ -3439,8 +3419,6 @@ async def security_headers(request: Request, call_next):
     path = request.url.path
     if path in {"/docs", "/redoc"}:
         csp = _DOCS_CSP
-    elif _PLAN_TREE_PATH_RE.match(path):
-        csp = _PLAN_TREE_CSP
     else:
         csp = _DEFAULT_CSP
     if path == "/connections" and str(request.base_url).rstrip("/") == "http://127.0.0.1:8765":

@@ -152,14 +152,19 @@
   });
 
   on('dsar-m365', function () {
+    var button = $('dsar-m365');
+    if (button.disabled) return;
+    button.disabled = true;
     say('Checking Microsoft 365…');
     call('POST', base + encodeURIComponent(requestId) + '/collect-microsoft365', { revision: revision }).then(function (body) {
-      say(body.message || 'Microsoft 365 checked.'); reloadSoon();
+      if (typeof body.revision === 'number' && body.revision > 0) revision = body.revision;
+      say(body.message || 'Microsoft 365 check is incomplete.');
+      if (body.complete === true) reloadSoon();
     }).catch(function (f) {
       if (f && f.status === 503) { say('Microsoft 365 is not connected. Ask an administrator to connect it.'); return; }
       if (f && f.status === 422) { say('This person is not a Microsoft 365 account, so their data must be collected another way.'); return; }
       fail(f, 'check Microsoft 365');
-    });
+    }).finally(function () { button.disabled = false; });
   });
 
   on('dsar-link', function () {

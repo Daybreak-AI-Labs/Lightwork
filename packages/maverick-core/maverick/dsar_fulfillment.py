@@ -455,9 +455,9 @@ def collect_graph_sources(
     ``$select=id`` — ids only, one bounded page each — and logs each probe
     through :func:`record_collection_source`. Message bodies and file
     bytes never transit; a fuller export stays the operator's export
-    pipeline. The token comes from ``$MAVERICK_GRAPH_TOKEN`` (the
-    platform's Graph convention), else the sealed ``[data_map] graph_token``
-    saved on the All settings page; tests inject ``fetcher``.
+    pipeline. The token comes from the data map's configured token variable
+    (by default ``$MAVERICK_GRAPH_TOKEN``), else the sealed
+    ``[data_map] graph_token`` saved on All settings; tests inject ``fetcher``.
     """
 
     _require_enabled()
@@ -469,12 +469,18 @@ def collect_graph_sources(
             "the DSAR subject is not a Microsoft 365 userPrincipalName; "
             "collect this subject's data through the export pipeline instead")
     if fetcher is None:
-        from .data_map import graph_token
+        from .data_map import DataMapConfigError, get_data_map_config, graph_token
 
-        token = graph_token()
+        try:
+            token_env = get_data_map_config()["graph_token_env"]
+        except DataMapConfigError as exc:
+            raise DsarFulfillmentConfigError(
+                "The Microsoft 365 connection settings are unavailable. "
+                "Review them in All settings before checking this request.") from exc
+        token = graph_token(token_env)
         if not token:
             raise DsarFulfillmentConfigError(
-                "Graph collection needs a token in $MAVERICK_GRAPH_TOKEN or the "
+                f"Graph collection needs a token in ${token_env} or the "
                 "Microsoft 365 access key in All settings "
                 "(Mail.ReadBasic.All + Files.Read.All)")
 

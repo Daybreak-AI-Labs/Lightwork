@@ -285,7 +285,7 @@
       }
       tr.appendChild(state);
       tr.appendChild(el("td", null, String(Array.isArray(run.findings) ? run.findings.length : 0)));
-      tr.appendChild(el("td", null, when(run.created_at)));
+      tr.appendChild(el("td", null, when(run.updated_at)));
       var actions = el("td");
       var wrap = el("div", "ga-actions", null);
       wrap.appendChild(button("View", "run-list", function () { showRun(run); }, "btn btn--ghost"));

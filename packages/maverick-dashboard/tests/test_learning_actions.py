@@ -224,7 +224,7 @@ def test_a_learning_run_is_recorded_with_who_started_it(client, monkeypatch, aud
     from maverick.audit import EventKind
     _admin(monkeypatch)
     audit_rows.clear()
-    report = dreaming.DreamReport(goals_replayed=4, insights_written=1, skills_distilled=2)
+    report = dreaming.DreamReport(goals_replayed=4, insights_written=1, skills_distilled=2, activity_recorded=True)
     monkeypatch.setattr(dreaming, "enabled", lambda: True)
     monkeypatch.setattr(dreaming, "settings", lambda: {"snapshots": True})
     monkeypatch.setattr(dreaming, "dream_cycle", lambda world: report)

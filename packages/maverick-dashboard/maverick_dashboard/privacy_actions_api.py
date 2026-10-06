@@ -69,8 +69,11 @@ async def collect_microsoft365(request: Request, request_id: str, body: CollectI
             more = " (more exist)" if probe.get("more") else ""
             found.append(f"{label}: {probe.get('items', 0)} item(s){more}")
         else:
-            found.append(f"{label}: nothing found")
-    return {"message": "Microsoft 365 checked. " + "; ".join(found) + "." if found else "Microsoft 365 checked."}
+            found.append(f"{label}: could not be checked")
+    complete = bool(found) and all(probe.get("collected") for probe in result.get("probes") or [])
+    heading = "Microsoft 365 checked." if complete else "Microsoft 365 check is incomplete."
+    return {"message": heading + (" " + "; ".join(found) + "." if found else ""),
+            "complete": complete, "revision": (result.get("record") or {}).get("revision", body.revision)}
 
 
 __all__ = ["SOURCE_LABELS", "router"]

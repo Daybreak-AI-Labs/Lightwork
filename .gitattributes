@@ -36,3 +36,6 @@
 /benchmarks/results/governance-frontier-v1/third-party-submissions/*.json text eol=lf -merge
 /benchmarks/results/governance-frontier-v1/leaderboard.json text eol=lf -merge
 /benchmarks/results/governance-frontier-v1/leaderboard.md text eol=lf -merge
+
+# Preserve upstream bytes for the locally served, integrity-pinned task-map library.
+/packages/maverick-dashboard/maverick_dashboard/static/cytoscape-3.30.2.min.js -text

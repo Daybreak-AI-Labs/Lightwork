@@ -7,7 +7,7 @@ from maverick.governed_operations import digest
 from pydantic import Field
 
 from . import auth
-from .learning_actions_api import current_snapshot_coverage, snapshot_label
+from .learning_actions_api import current_cycle_activity, current_snapshot_coverage, snapshot_label
 from .product_operations import Adapter, EmptyInput, Preview, Snapshot, StrictInput
 
 
@@ -56,6 +56,18 @@ def point_prepare(request, selection, arguments):
                            "learning_saved_point": {"name": arguments["point"], "revision": coverage["revision"]}})
 
 
+def cycles_snapshot(request, _selection):
+    current = current_cycle_activity(request)
+    return Snapshot(digest(current), "Today's recorded learning",
+                    "Read recorded cycle outcomes and check a saved point without repeating learning.",
+                    details=current)
+
+
+def cycles_prepare(request, selection, _arguments):
+    return Preview("Read the current activity evidence. An unconfirmed completion is not proof that learning changed nothing.",
+                   native=cycles_snapshot(request, selection).details)
+
+
 def entries():
     common = {"family": "learning", "direct_ui": "/learning#learning-review", "pages": ("/learning",)}
     return (
@@ -63,4 +75,6 @@ def entries():
                 snapshot=list_snapshot, prepare=list_prepare, aliases=("show learning safety copies",), **common),
         Adapter("learning.saved_point_coverage", "Open a saved learning point", input_model=SavedPointInput,
                 snapshot=points_snapshot, prepare=point_prepare, aliases=("review learning restoration",), **common),
+        Adapter("learning.recent_cycles", "Check recent learning", input_model=EmptyInput,
+                snapshot=cycles_snapshot, prepare=cycles_prepare, aliases=("check learning completion",), **common),
     )

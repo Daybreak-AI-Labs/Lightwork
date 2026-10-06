@@ -98,7 +98,7 @@ def _record(request: Request, action: str, **detail) -> None:
 
 def _halted(exc: Exception) -> HTTPException:
     return HTTPException(status_code=409, detail=(
-        "Learning is stopped for this installation right now, so nothing was changed."))
+        "Learning is stopped for this installation right now. Earlier work may have been kept. Check recent learning and the saved point before trying again."))
 
 
 @router.post("/learned/guidance/remove")
@@ -164,7 +164,12 @@ def _dream(preview: bool) -> dict:
     else:
         check_learning_halt("dreaming", "dashboard_start")
         with dreaming.learning_mutation_scope():
-            report = dreaming.dream_cycle(world)
+            try:
+                report = dreaming.dream_cycle(world)
+            except dreaming.DreamAuditError as exc:
+                if not exc.started:
+                    raise
+                report = exc.report
     return {"preview": preview, "tasks_reviewed": report.goals_replayed,
             "failures_reviewed": report.failures_replayed,
             "lessons_written": report.insights_written,
@@ -172,7 +177,63 @@ def _dream(preview: bool) -> dict:
             "skills_retired": report.skills_retired + report.skills_quarantined,
             "notes_tidied": report.reflexions_pruned + report.facts_pruned
             + report.insights_expired + report.insights_retired,
-            "paused": bool(report.learning_frozen)}
+            "paused": bool(report.learning_frozen),
+            "cycle_id": report.cycle_id, "saved_point": report.saved_point,
+            "activity_recorded": bool(report.activity_recorded),
+            "notice": ("Learning ran, but its completion record was not confirmed. Work already completed may have been kept. Check recent learning and review the saved point before deciding what to do next. Do not repeat the cycle to recover its result."
+                       if not preview and not report.activity_recorded else "")}
+
+
+def _authorized_dream(request: Request, preview: bool) -> dict:
+    from maverick.authority_effects import authority_effect_fence
+
+    from . import auth
+
+    # This dashboard path passes no model client: its default cycle is local
+    # and deterministic. Keep role changes outside its physical learning writes.
+    with authority_effect_fence(), auth.fresh_configuration():
+        require_global_permission(request, "admin")
+        if not preview:
+            from maverick import dreaming
+            if not dreaming.enabled():
+                raise HTTPException(409, "Turn on Dreaming under Learning systems first. No learning was run.")
+        return _dream(preview)
+
+
+def current_cycle_activity(request: Request) -> dict:
+    """Read current native evidence, never dispatch another learning cycle."""
+    require_global_permission(request, "admin")
+    from maverick import dreaming
+    try:
+        observed = dreaming.recent_cycle_activity()
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise HTTPException(503, "Recent learning cannot be safely checked right now. Review the activity record and learning safety copies. No learning was run.") from exc
+    rows = []
+    for row in observed:
+        item = {"when": _dt.datetime.fromtimestamp(row["time"], _dt.timezone.utc).strftime("%d %b %Y, %H:%M:%S UTC"),
+                "status": ("Completion recorded" if row["completion_recorded"] else "Start recorded; completion unconfirmed"),
+                "saved_point": row["saved_point"]}
+        if row["completion_recorded"]:
+            item.update(tasks_reviewed=row["goals_replayed"], failures_reviewed=row["failures_replayed"],
+                        lessons_written=row["insights_written"], skills_learned=row["skills_distilled"],
+                        skills_retired=row["skills_retired"] + row["skills_quarantined"])
+        rows.append(item)
+    result = {"cycles": rows, "notice": "The latest 20 recorded cycles from today, in this workspace. An unconfirmed completion or an absent record does not mean nothing changed. This check never repeats learning."}
+    if rows and rows[0]["saved_point"]:
+        name = rows[0]["saved_point"]
+        try:
+            coverage = current_snapshot_coverage(request, name)
+        except HTTPException:
+            result["saved_point_notice"] = "This cycle's saved point is no longer available for verified restoration. Review current learning before any new cycle."
+        else:
+            result["learning_saved_point"] = {"name": name, "revision": coverage["revision"]}
+    require_global_permission(request, "admin")
+    return result
+
+
+@router.get("/learning/dream/activity")
+async def dream_activity(request: Request) -> dict:
+    return await run_in_threadpool(current_cycle_activity, request)
 
 
 @router.post("/learning/dream")
@@ -186,15 +247,27 @@ async def run_dream(request: Request, body: DreamIn) -> dict:
     if not body.preview and not dreaming.settings().get("snapshots", True):
         raise HTTPException(409, "Turn on Save a restore point before learning in All settings, Memory & learning before starting. No learning was run.")
     try:
-        result = await run_in_threadpool(_dream, body.preview)
+        result = await run_in_threadpool(_authorized_dream, request, body.preview)
+    except dreaming.DreamAuditError as exc:
+        raise HTTPException(503, "Learning could not record its start, so no learning was run. In All settings, Security, turn on Sign the activity record and restart Lightwork if requested. If it is already on, check the Activity page before starting again.") from exc
     except Halted as exc:
         raise _halted(exc) from exc
     except (OSError, RuntimeError) as exc:
         raise HTTPException(503, "The learning cycle could not finish. Check learning safety copies and the current learning record before trying again.") from exc
-    if not body.preview:
-        await run_in_threadpool(
-            lambda: _record(request, "dream_run", **{k: v for k, v in result.items()
-                                                     if k != "preview"}))
+    if not body.preview and result["activity_recorded"]:
+        from maverick.audit import AuditRefused, EventKind, audit_event
+
+        from . import auth
+        try:
+            recorded = await run_in_threadpool(lambda: audit_event(
+                EventKind.LEARNING_UPDATE, agent="dashboard", _global=True,
+                action="dream_run", actor=auth.caller_principal(request) or "local administrator",
+                **{k: v for k, v in result.items() if k != "preview"}))
+        except AuditRefused:
+            recorded = False
+        if recorded is not True:
+            result["notice"] = "Learning completed and its cycle record was saved, but the administrator's activity entry was not confirmed. Check recent learning before deciding whether to run another cycle."
+    require_global_permission(request, "admin")
     return result
 
 

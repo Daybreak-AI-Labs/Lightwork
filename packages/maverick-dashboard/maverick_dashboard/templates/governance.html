@@ -402,7 +402,11 @@
   {% if not ai_literacy_enabled %}
   {{ module_gate('ai_literacy', 'Staff AI training tracking', detail='Record the training each role needs and the evidence that staff completed it.') }}
   {% else %}
-  {% if literacy_error %}<p class="muted">{{ literacy_error }}</p>{% endif %}
+  {% if literacy_error %}
+  <p role="status"><strong>Training status is unknown.</strong> Lightwork could not check the complete training record. A complete evidence download is unavailable. Review the records before relying on this report.</p>
+  <p class="muted">This view supports up to 500 roles, 2,000 people and 2,000 training completions.</p>
+  <a class="btn btn--ghost" href="/security/governance#literacy-title">Check the records again</a>
+  {% else %}
   {% if literacy_plane_status.reconciliation_required %}
   <p class="muted"><strong>Evidence review needed.</strong> These training records are not yet compliance evidence. Add the training provider, course version, expiry date and certificate for each one before relying on them.</p>
   {% else %}
@@ -485,6 +489,7 @@
       <button class="btn btn--ghost" type="button" id="literacy-download">Download the training evidence</button>
       <span id="literacy-complete-status" class="muted" role="status" aria-live="polite"></span></div>
   </form>
+  {% endif %}
   {% endif %}
 </section>
 

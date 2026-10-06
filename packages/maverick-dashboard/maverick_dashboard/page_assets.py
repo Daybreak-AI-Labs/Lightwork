@@ -13,6 +13,7 @@ from fastapi.responses import FileResponse, Response
 router = APIRouter()
 _STATIC = Path(__file__).parent / "static"
 ASSETS = (
+    "cytoscape-3.30.2.min.js",
     "lightwork-settings-catalog-requests.js",
     "lightwork-today.js",
     "lightwork-department-board.js",

@@ -33,7 +33,6 @@ from fastapi import (
 )
 from maverick.governed_records import RecordConflict
 from maverick.runner import (
-    DEFAULT_MAX_DEPTH,
     DEFAULT_MAX_DOLLARS,
     DEFAULT_MAX_WALL_SECONDS,
     clamp_task_limit,
@@ -1626,8 +1625,13 @@ def create_goal(
     bg: BackgroundTasks,
     response: Response,
 ) -> GoalOut:
-    return _create_goal(request, payload, bg, response,
-                        idempotency_key=request.headers.get("Idempotency-Key") or "")
+    from maverick.authority_effects import authority_effect_fence
+
+    # Keep app-owned authority and task settings stable through admission,
+    # including a wait for the native goal/receipt writer.
+    with authority_effect_fence():
+        return _create_goal(request, payload, bg, response,
+                            idempotency_key=request.headers.get("Idempotency-Key") or "")
 
 
 _REST_GOAL_MAX_DOLLARS = 100.0
@@ -1642,6 +1646,10 @@ def _rest_goal_limits(payload: GoalIn) -> dict[str, float | int]:
     policy for CLI/internal work, while an external REST submission receives
     the published $2/30-minute default and $100/24-hour upper bound.
     """
+    from maverick.env_setting import env_or_config_int
+
+    depth_ceiling = max(1, min(10, env_or_config_int(
+        "MAVERICK_DEFAULT_MAX_DEPTH", "swarm", "default_max_depth", 3)))
     dollars = payload.max_dollars
     if dollars is None:
         dollars = configured_max_dollars()
@@ -1655,7 +1663,8 @@ def _rest_goal_limits(payload: GoalIn) -> dict[str, float | int]:
     return {
         "max_dollars": min(requested_goal_dollars(dollars), _REST_GOAL_MAX_DOLLARS),
         "max_wall_seconds": min(requested_goal_wall_seconds(seconds), _REST_GOAL_MAX_WALL_SECONDS),
-        "max_depth": min(payload.max_depth, DEFAULT_MAX_DEPTH),
+        "max_depth": min(payload.max_depth if payload.max_depth is not None else depth_ceiling,
+                         depth_ceiling),
     }
 
 

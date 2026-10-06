@@ -209,7 +209,7 @@ class GoalIn(BaseModel):
     description: str = Field("", max_length=GOAL_DESCRIPTION_MAX_LENGTH)
     max_dollars: float | None = Field(None, ge=0.0, allow_inf_nan=False)
     max_wall_seconds: float | None = Field(None, ge=0.0, allow_inf_nan=False)
-    max_depth: int = Field(3, ge=1, le=5)
+    max_depth: int | None = Field(None, ge=1, le=10)
     template: str | None = None
     params: dict[str, str] | None = None
     # Run the goal AS a specialist pack: the orchestrator inherits a domain

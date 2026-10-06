@@ -25,6 +25,7 @@ class StartInput(StrictInput):
     description: str = Field(default="", max_length=12000)
     max_dollars: float | None = Field(default=None, ge=0, allow_inf_nan=False)
     max_wall_seconds: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+    max_depth: int | None = Field(default=None, ge=1, le=10)
 
 
 def find_snapshot(request, selection):
@@ -77,6 +78,7 @@ def _policy():
     defaults = api._rest_goal_limits(GoalIn(title="New task"))
     return {"default_max_dollars": defaults["max_dollars"],
             "default_max_wall_seconds": defaults["max_wall_seconds"],
+            "default_max_depth": defaults["max_depth"],
             "configured_ceiling_dollars": configured_goal_ceiling_dollars(),
             "configured_ceiling_wall_seconds": configured_goal_ceiling_wall_seconds(),
             "api_ceiling_dollars": api._REST_GOAL_MAX_DOLLARS,
@@ -101,7 +103,11 @@ def start_snapshot(request, selection):
         [{"name": "title", "label": "Task", "kind": "text", "required": True, "max_length": 200},
          {"name": "description", "label": "Instructions (optional)", "kind": "textarea", "max_length": 12000},
          {"name": "max_dollars", "label": "Maximum dollars (blank uses workspace limit)", "kind": "number"},
-         {"name": "max_wall_seconds", "label": "Maximum seconds (blank uses workspace limit)", "kind": "number"}],
+         {"name": "max_wall_seconds", "label": "Maximum seconds (blank uses workspace limit)", "kind": "number"},
+         {"name": "max_depth", "label": "Levels of helpers", "kind": "select", "value": None,
+          "choices": [{"value": None, "label": f"Use workspace limit ({policy['default_max_depth']} levels)"},
+                      *({"value": level, "label": f"{level} level{'s' if level != 1 else ''}"}
+                        for level in range(1, policy["default_max_depth"] + 1))]}],
         blocked)
 
 
@@ -121,6 +127,7 @@ def start_prepare(request, selection, arguments):
          {"label": "Instructions", "after": arguments["description"]},
          {"label": "Maximum dollars", "after": effective["max_dollars"]},
          {"label": "Maximum seconds", "after": effective["max_wall_seconds"]},
+         {"label": "Levels of helpers", "after": effective["max_depth"]},
          {"label": "External effects", "after": "Work may use authorized tools; review task progress and any approvals."}],
         {"policy": policy, "effective": effective})
 
@@ -169,5 +176,6 @@ def entries():
                 aliases=("find a task", "search my tasks", "find my task")),
         Adapter("tasks.start", "Start a new task", "tasks", "/chat", ("/chat", "/goals", "/today"),
                 StartInput, start_snapshot, start_prepare, start_execute, start_recover,
+                read_recovery=start_recover,
                 aliases=("start a task", "create a task", "new task")),
     )

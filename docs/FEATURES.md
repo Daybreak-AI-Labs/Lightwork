@@ -6112,3 +6112,25 @@ metadata without recovering or exposing the secret. A separately reviewed
 revocation and replacement handles a lost one-time key. Copilot opens the same
 protected ordinary controls and original reader. Existing API-key settings and
 installation choices govern the feature.
+
+### Recorded learning cycles and complete operating reads
+
+Learning requires a confirmed signed start before a cycle can save insights.
+Recent activity distinguishes recorded completion from an interrupted or
+unrecorded result and opens the actual retained saved point for separate
+restoration review. Copilot reads the same current-authority metadata without
+starting another cycle. Existing audit-signing and learning settings apply.
+
+Task starts use the current workspace helper-depth ceiling, including ordinary
+starts that omit a depth. A reviewed narrower choice remains available from
+Copilot. Original-outcome checks read the existing native task admission and
+never dispatch a replacement.
+
+Privacy source checks honor the configured Microsoft 365 token source. Failed
+or incomplete checks stay visibly incomplete instead of implying no personal
+data was found. AI-literacy reports either read every record within their
+supported bounds or clearly withhold a complete report. Governed-agent activity
+orders by actual last update, including after reopening the native store.
+
+Task maps package their pinned Cytoscape library locally with its MIT notice.
+Map, ordinary task navigation and live updates no longer need a public CDN.

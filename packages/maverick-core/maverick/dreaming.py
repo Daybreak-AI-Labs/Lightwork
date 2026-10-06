@@ -180,6 +180,9 @@ class DreamReport:
     skills_quarantined: int = 0
     learning_frozen: bool = False
     departments: list[str] = field(default_factory=list)
+    cycle_id: str = ""
+    saved_point: str = ""
+    activity_recorded: bool = False
 
     def summary(self) -> str:
         depts = ", ".join(self.departments) if self.departments else "(generic only)"
@@ -202,6 +205,16 @@ class DreamReport:
             f"rehearsal(s), pruned {self.reflexions_pruned} stale reflexion(s)."
             f"{extra} Departments touched: {depts}."
         )
+
+
+class DreamAuditError(RuntimeError):
+    """A cycle boundary was not confirmed; completed learning is not undone."""
+
+    def __init__(self, report: DreamReport, *, started: bool):
+        self.report = report
+        self.started = started
+        super().__init__("Learning completion was not recorded" if started
+                         else "Learning could not record its start")
 
 
 def _tokens(s: str) -> set[str]:
@@ -1454,7 +1467,7 @@ def dream_cycle(
     budget: Any | None = None,
     shield: Any | None = None,
 ) -> DreamReport:
-    """Run one full dream cycle. Deterministic and fail-open.
+    """Run one full dream cycle with recorded signed learning boundaries.
 
     Deterministic and LLM-free by default. If ``[dreaming] llm_consolidation``
     and the independent provider-egress authority are on, and a configured
@@ -1469,6 +1482,11 @@ def dream_cycle(
     check_learning_halt("dreaming", "start")
     cfg = {**settings(), **(settings_override or {})}
     report = DreamReport()
+    if audit:
+        report.cycle_id = uuid.uuid4().hex
+        current_snapshot = _mutation_snapshot.get()
+        report.saved_point = current_snapshot[1].name if current_snapshot else ""
+        _audit_cycle(report, phase="started")
     if insights_path is None:
         insights_path = globals()["insights_path"]()
     if rehearsals_path is None:
@@ -1607,15 +1625,16 @@ def _maybe_audit_cycle(report: DreamReport, *, audit: bool) -> None:
         _audit_cycle(report)
 
 
-def _audit_cycle(report: DreamReport) -> None:
-    """Learning audit trail: one tamper-evident row per dream cycle.
-
-    `maverick audit verify` then covers the learning system the same way it
-    covers tool calls -- provably governed learning. Never raises."""
+def _audit_cycle(report: DreamReport, *, phase: str = "completed") -> None:
+    """Do not mistake an unsigned, refused or unconfirmed row for a receipt."""
     try:
         from .audit import EventKind, record
-        record(
-            EventKind.LEARNING_UPDATE, agent="dreaming",
+        written = record(
+            EventKind.LEARNING_UPDATE, agent="dreaming", _require_signed=True,
+            event_id="dream:" + report.cycle_id + ":" + phase,
+            cycle_id=report.cycle_id, phase=phase, saved_point=report.saved_point,
+            goals_replayed=report.goals_replayed,
+            failures_replayed=report.failures_replayed,
             insights_written=report.insights_written,
             insights_expired=report.insights_expired,
             insights_retired=report.insights_retired,
@@ -1628,8 +1647,58 @@ def _audit_cycle(report: DreamReport) -> None:
             user_notes_written=report.user_notes_written,
             departments=",".join(report.departments),
         )
-    except Exception as e:  # pragma: no cover -- audit never blocks a dream
-        log.debug("dreaming: audit row skipped: %s", e)
+        if written is not True:
+            raise RuntimeError("The signed activity record did not confirm the row")
+    except Exception as exc:
+        # Completion failure must not imply that preceding learning was undone.
+        raise DreamAuditError(report, started=phase != "started") from exc
+    if phase == "completed":
+        report.activity_recorded = True
+
+
+def recent_cycle_activity() -> list[dict[str, Any]]:
+    """Verified current-day metadata only; missing completion is not failure.
+
+    This checks segment signatures, not external checkpoints or historical
+    completeness. Refuse an oversized/unreadable day instead of clipping it.
+    """
+    from .audit import default_audit_log, iter_events
+    from .audit.reader import event_paths
+
+    directory = default_audit_log().audit_dir
+    paths = event_paths(audit_dir=directory)
+    if not paths or not paths[0].exists():
+        return []
+    with cross_process_lock(paths[0], strict=True):
+        if paths[0].stat().st_size > 16 * 1024 * 1024:
+            raise RuntimeError("Today's activity record is too large for this view")
+        cycles = {}
+        for count, event in enumerate(iter_events(day=paths[0].stem, audit_dir=directory, strict=True, verify=True), 1):
+            if count > 10000:
+                raise RuntimeError("Today's activity record is too large for this view")
+            cycle = event.get("cycle_id")
+            if event.get("agent") != "dreaming" or not isinstance(cycle, str) or not re.fullmatch(r"[a-f0-9]{32}", cycle):
+                continue
+            phase = event.get("phase")
+            if phase not in {"started", "completed"}:
+                continue
+            row = cycles.setdefault(cycle, {"cycle_id": cycle, "completion_recorded": False})
+            if phase == "completed":
+                row["completion_recorded"] = True
+                for key in ("goals_replayed", "failures_replayed", "insights_written", "skills_distilled", "skills_retired", "skills_quarantined"):
+                    value = event.get(key)
+                    if type(value) is not int or value < 0:
+                        raise RuntimeError("The learning activity counts cannot be safely read")
+                    row[key] = value
+            when = event.get("ts")
+            if isinstance(when, bool) or not isinstance(when, (float, int)) or not 0 <= when < 253402300799:
+                raise RuntimeError("The learning activity time cannot be safely read")
+            row["time"] = when
+            name = event.get("saved_point", "")
+            if not isinstance(name, str) or (name and not re.fullmatch(r"[A-Za-z0-9._-]{1,80}", name)):
+                raise RuntimeError("The learning saved point cannot be safely read")
+            row["saved_point"] = name
+    return sorted(cycles.values(), key=lambda row: row["time"], reverse=True)[:20]
 
 
 # ---------- snapshots, rollback, dry-run (learning governance) ----------

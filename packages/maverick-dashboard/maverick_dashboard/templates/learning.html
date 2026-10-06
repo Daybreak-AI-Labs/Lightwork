@@ -429,8 +429,11 @@
       <div class="lrn__actions">
         <button type="button" class="btn btn--ghost" id="lrn-dream-preview">Preview what would change</button>
         <button type="button" class="btn btn--primary" id="lrn-dream-run">Learn now</button>
+        <button type="button" class="btn btn--ghost" id="lrn-dream-activity">Check recent learning</button>
       </div>
       <div id="lrn-dream-result" role="status" aria-live="polite"></div>
+      <div id="lrn-dream-activity-result" role="status" aria-live="polite"></div>
+      <p class="lrn__section-sub">Learning requires signed activity records. <a href="/settings/all?id=audit.sign">Review the activity record setting</a>.</p>
 
       <h3 class="lrn__section-h">Go back to a saved point</h3>
       <p class="lrn__section-sub">Restore the learned information covered by a saved point. Completed work and changes in connected services are not undone.</p>
@@ -489,13 +492,53 @@
     }
     function plural(n, one, many) { return n + ' ' + (n === 1 ? one : many); }
     function dreamLines(d) {
-      var head = d.preview ? 'If Lightwork learned now, it would:' : 'Done. Lightwork:';
+      var head = d.preview ? 'If Lightwork learned now, it would:' : (d.activity_recorded ? 'Learning completed. Lightwork:' : 'Learning completion is unconfirmed. The cycle reported:');
       return [head,
         '• review ' + plural(d.tasks_reviewed, 'finished task', 'finished tasks') + ' and ' + plural(d.failures_reviewed, 'problem', 'problems'),
         '• write ' + plural(d.lessons_written, 'lesson', 'lessons') + ' and learn ' + plural(d.skills_learned, 'skill', 'skills'),
         '• retire ' + plural(d.skills_retired, 'skill', 'skills') + ' that stopped working and tidy ' + plural(d.notes_tidied, 'old note', 'old notes')]
-        .concat(d.paused ? ['Learning is paused while its checks recover, so nothing new was kept.'] : []);
+        .concat(d.paused ? ['Learning is paused while its checks recover. Earlier changes may have been kept.'] : [])
+        .concat(d.notice ? [d.notice] : []);
     }
+    var dreamGeneration = 0;
+    function clearDreamState(event) {
+      if (event.detail && event.detail.reason === 'selection') return;
+      dreamGeneration += 1;
+      show('lrn-dream-result', []); show('lrn-dream-activity-result', []);
+    }
+    ['lightwork:workspace-changed', 'lightwork:account-context-changed', 'lightwork:copilot-context-changed'].forEach(function (name) {
+      document.addEventListener(name, clearDreamState);
+    });
+    window.addEventListener('lightwork:context-changed', clearDreamState);
+    $('lrn-dream-activity').addEventListener('click', async function () {
+      var button = $('lrn-dream-activity'), generation = dreamGeneration;
+      button.disabled = true;
+      show('lrn-dream-activity-result', ['Checking recorded learning…']);
+      var d = await call('GET', '/api/v1/learning/dream/activity', null, 'check recorded learning', 'lrn-dream-activity-result');
+      button.disabled = false;
+      if (!d || generation !== dreamGeneration) return;
+      var lines = [d.notice];
+      if (!(d.cycles || []).length) lines.push('There is no recorded cycle to show for today. This is not proof that earlier work failed or changed nothing.');
+      (d.cycles || []).forEach(function (cycle) {
+        var line = cycle.when + ' — ' + cycle.status;
+        if (cycle.lessons_written !== undefined) line += '. ' + plural(cycle.lessons_written, 'lesson written', 'lessons written') + ' and ' + plural(cycle.skills_learned, 'skill learned', 'skills learned') + '.';
+        lines.push(line);
+      });
+      if (d.saved_point_notice) lines.push(d.saved_point_notice);
+      show('lrn-dream-activity-result', lines);
+      if (d.learning_saved_point) {
+        var open = document.createElement('button'); open.type = 'button'; open.className = 'btn btn--ghost'; open.textContent = 'Review the latest cycle’s saved point';
+        open.addEventListener('click', async function () {
+          open.disabled = true;
+          var accepted = await window.LightworkLearningSavedPoints.open(d.learning_saved_point.name, d.learning_saved_point.revision);
+          if (open.isConnected && generation === dreamGeneration) {
+            open.disabled = false;
+            if (!accepted) window.mvToast('The saved point changed or is no longer available. Read the current saved points before restoring.', { error: true });
+          }
+        });
+        $('lrn-dream-activity-result').appendChild(open);
+      }
+    });
     var savedPointCoverage = null, savedPointGeneration = 0;
     async function loadCoverage() {
       var generation = ++savedPointGeneration, name = $('lrn-snapshot').value;
@@ -540,19 +583,22 @@
       await loadCoverage();
     }
     $('lrn-dream-preview').addEventListener('click', async function (ev) {
+      var generation = dreamGeneration;
       ev.target.disabled = true;
       show('lrn-dream-result', ['Working it out…']);
       var d = await call('POST', '/api/v1/learning/dream', { preview: true }, 'preview learning', 'lrn-dream-result');
       ev.target.disabled = false;
-      if (d) show('lrn-dream-result', dreamLines(d));
+      if (d && generation === dreamGeneration) show('lrn-dream-result', dreamLines(d));
     });
     $('lrn-dream-run').addEventListener('click', async function (ev) {
+      var generation = dreamGeneration;
       if (!(await mvConfirm('Learn from recent work now? A saved point is made first so you can go back.', { okText: 'Learn now' }))) return;
+      if (generation !== dreamGeneration) return;
       ev.target.disabled = true;
       show('lrn-dream-result', ['Learning…']);
       var d = await call('POST', '/api/v1/learning/dream', { preview: false }, 'run learning', 'lrn-dream-result');
       ev.target.disabled = false;
-      if (d) { show('lrn-dream-result', dreamLines(d)); loadSnapshots(); }
+      if (d && generation === dreamGeneration) { show('lrn-dream-result', dreamLines(d)); loadSnapshots(); }
     });
     $('lrn-rollback').addEventListener('click', async function (ev) {
       var sel = $('lrn-snapshot'), reviewed = savedPointCoverage;

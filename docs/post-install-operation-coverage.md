@@ -1659,3 +1659,50 @@ lookup retries at ten, twenty and thirty seconds using a declared local clock
 seam, without waiting or calling a provider. Unsafe or uncertain results retain
 the native no-repeat behavior. This does not guarantee every connected action
 can be retried or expand the existing native retry limit.
+
+## October 6 recorded cycles, operating reads and offline task maps
+
+A learning cycle confirms its signed start before any insight mutation. Missing
+signing or an unrecorded start refuses those effects. An unrecorded completion
+preserves the actual partial report, retained saved point and unknown outcome;
+the UI never turns it into a successful recorded cycle or repeats it. Recent
+activity verifies the bounded current-day signed chain before offering metadata
+and the original saved-point handoff. Ordinary and typed reads share current
+authority; physical learning writes repeat current settings inside their
+authority fence. Restoration remains a separate complete review. This is local
+signed-history integrity, not an externally anchored custody guarantee.
+
+Ordinary task starts that omit helper depth now use the live workspace ceiling.
+Named Copilot choices review the effective depth between one and ten and can
+narrow it. Changed settings or authority refuse a stale admission. Checking a
+lost original reads the retained native request and exact task without another
+dispatch. Existing spending, time and concurrency limits remain in force.
+
+Privacy source checks use the configured Microsoft 365 token environment name,
+including when the separately configured data-map feature is disabled. Invalid
+configuration and missing credentials refuse before transport. Partial and
+unavailable reads remain visibly incomplete, preserve the native record version
+and prevent immediate duplicate button submissions. Local qualification used
+fictional bounded Microsoft Graph responses, not a real tenant or external
+provider acceptance.
+
+AI-literacy requirements, gaps, evidence and plane status refuse incomplete
+classification when native role, assignment or completion sets exceed their
+supported bounds. The supported limits are 500 roles and 2,000 assignments or
+completions; a sentinel detects overflow. The ordinary page displays unavailable
+information with a working retry instead of a false empty result or a supposedly
+complete evidence export. This repairs correctness within existing bounds; it
+does not claim arbitrary-volume reporting or additional Copilot mutation scope.
+
+Governed-agent activity uses integrity-checked native update times and indexed,
+stable ordering rather than revision count. Current-state and tenant filtering
+use the same timestamp order. The ordinary table labels the value Last updated.
+Reopening the store preserves this order; malformed indexed source refuses
+unavailable information rather than inventing a recent timestamp.
+
+The task map serves the exact previously pinned Cytoscape version 3.30.2 from
+the installed dashboard, with its complete MIT notice and unchanged integrity
+pin. Its page uses the normal same-origin security policy. Native map,
+keyboard task navigation, live updates and existing Graph Editor review work
+with outside browser requests blocked. The map remains a view of native tasks;
+it does not introduce another execution path.

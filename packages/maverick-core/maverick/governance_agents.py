@@ -1246,11 +1246,27 @@ class GovernanceAgentStore:
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self.path, timeout=30.0, isolation_level=None)
         connection.row_factory = sqlite3.Row
+        connection.create_function(
+            "lightwork_governance_updated_at", 2, self._indexed_run_updated_at,
+            deterministic=True,
+        )
         connection.execute("PRAGMA foreign_keys=ON")
         connection.execute("PRAGMA busy_timeout=30000")
         connection.execute("PRAGMA secure_delete=ON")
         connection.execute("PRAGMA synchronous=FULL")
         return connection
+
+    @staticmethod
+    def _indexed_run_updated_at(payload_json: str, integrity_sha256: str) -> float:
+        """Validate the timestamp while SQLite maintains the recent-run index.
+
+        The indexed value is derived from existing canonical source material;
+        it is neither a mutable mirror nor a substitute for returned-row checks.
+        """
+        payload = json.loads(payload_json)
+        if not isinstance(payload, dict) or _sha256(payload) != integrity_sha256:
+            raise GovernanceAgentIntegrityError("persisted run failed integrity verification")
+        return _timestamp(payload.get("updated_at"), "persisted run update time")
 
     def _initialize(self) -> None:
         with self._connect() as connection:
@@ -1310,6 +1326,17 @@ class GovernanceAgentStore:
                 raise GovernanceAgentIntegrityError(
                     "governance-agent database schema is unsupported"
                 )
+            try:
+                for name, scope in (("run_recent", "tenant_id"),
+                                    ("run_state_recent", "tenant_id,state")):
+                    connection.execute(
+                        f"CREATE INDEX IF NOT EXISTS {name} ON runs({scope},"
+                        "lightwork_governance_updated_at(payload_json,integrity_sha256) DESC,run_id)"
+                    )
+            except sqlite3.DatabaseError as exc:
+                raise GovernanceAgentIntegrityError(
+                    "governance-agent recent review records are unavailable"
+                ) from exc
         ensure_private_file(self.path)
 
     @staticmethod
@@ -3062,15 +3089,14 @@ class GovernanceAgentStore:
         with self._connect() as connection:
             if state is None:
                 rows = connection.execute(
-                    "SELECT * FROM runs WHERE tenant_id=? ORDER BY updated_at DESC LIMIT ?".replace(
-                        "updated_at", "revision"
-                    ),
+                    "SELECT * FROM runs WHERE tenant_id=? ORDER BY "
+                    "lightwork_governance_updated_at(payload_json,integrity_sha256) DESC,run_id LIMIT ?",
                     (tenant, count),
                 ).fetchall()
             else:
                 rows = connection.execute(
                     "SELECT * FROM runs WHERE tenant_id=? AND state=? "
-                    "ORDER BY revision DESC LIMIT ?",
+                    "ORDER BY lightwork_governance_updated_at(payload_json,integrity_sha256) DESC,run_id LIMIT ?",
                     (tenant, state, count),
                 ).fetchall()
             runs: list[GovernanceAgentRun] = []
