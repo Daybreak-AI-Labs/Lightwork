@@ -6661,22 +6661,57 @@ async def review_assessment_endpoint(
     request: Request, kind: str, name: str, payload: AssessmentReviewIn
 ) -> dict:
     """Record a reviewer's accept / needs-work decision on one lens."""
-    require_permission(request, "admin")
     from maverick import assessments
+    from maverick.authority_effects import authority_effect_fence
+    from maverick.paths import current_tenant_id_strict
+
+    from . import auth, session_revocation, workspace_tenants
+
+    require_permission(request, "admin")
+    actor, tenant = caller_principal(request), current_tenant_id_strict()
+    selection = (workspace_tenants.get_selection_binding(actor)
+                 if getattr(request.state, "workspace_tenant_source", None) == "principal_selection" else None)
+
+    def guard():
+        with auth.fresh_configuration():
+            require_permission(request, "admin")
+            if caller_principal(request) != actor or current_tenant_id_strict() != tenant:
+                raise HTTPException(409, "Your account or workspace changed. Reopen this assessment before reviewing it.")
+            if selection is not None and selection != workspace_tenants.get_selection_binding(actor):
+                raise HTTPException(409, "Your workspace changed. Reopen this assessment before reviewing it.")
+            principal = getattr(request.state, "principal", None)
+            if principal is not None:
+                claims = principal.claims or {}
+                via = claims.get("via")
+                fresh = principal
+                if via in {"session", "invite", "proxy"}:
+                    fresh = (auth._session_principal(request) if via == "session" else
+                             auth._invite_session_principal(request) if via == "invite" else
+                             auth._proxy_principal(request))
+                expiry = claims.get("exp")
+                if (fresh is None or fresh.principal != actor
+                        or (expiry is not None and (type(expiry) not in (int, float)
+                            or not time.time() < expiry < float("inf")))
+                        or (via not in {"session", "invite", "proxy", "api_key"}
+                            and session_revocation.is_revoked(principal.sub, claims.get("iat")))):
+                    raise HTTPException(401, "Sign in again before reviewing this assessment.")
+                if via != "api_key":
+                    auth._enforce_scim_active(fresh)
+                auth._enforce_workspace_policies(request, fresh)
 
     try:
-        a = assessments.record_review(
-            _assess_kind(kind),
-            name,
-            payload.lens,
-            payload.decision,
-            reviewer=caller_principal(request) or "",
-            note=payload.note or "",
-            cadence_days=payload.cadence_days,
-            expected_revision=payload.expected_revision,
-        )
+        with authority_effect_fence():
+            guard()
+            a = assessments.record_review(
+                _assess_kind(kind), name, payload.lens, payload.decision,
+                reviewer=actor or "", note=payload.note or "",
+                cadence_days=payload.cadence_days, expected_revision=payload.expected_revision,
+                effect_guard=guard,
+            )
     except assessments.AssessmentVersionConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except (OSError, assessments.AssessmentRegisterError) as exc:
+        raise HTTPException(503, "This review could not be confirmed. It may already be saved. Check the current assessment before reviewing it again.") from exc
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     if a is None:

@@ -321,6 +321,31 @@
           else { var regionLink = node('a', 'Open complete checked answer regions', regionDestination); regionLink.href = '/learning/applicability?' + new URLSearchParams({flow: regionForm.flow, original: regionForm.original}).toString() + '#apr-author-h'; regionLink.className = 'btn btn--ghost'; }
           return;
         }
+        if (entry[0] === 'capability_assessment') {
+          var assessmentForm = entry[1], assessmentStarted = generation, assessmentSelection = JSON.stringify(context());
+          if (!assessmentForm || Array.isArray(assessmentForm) || Object.keys(assessmentForm).sort().join(',') !== 'context,kind,review,revision,source,subject' ||
+              !/^[a-f0-9]{64}$/.test(assessmentForm.context || '') || !/^[a-f0-9]{64}$/.test(assessmentForm.source || '') ||
+              !['agent', 'flow'].includes(assessmentForm.kind) || typeof assessmentForm.subject !== 'string' ||
+              !assessmentForm.subject || assessmentForm.subject.length > 256 || !Number.isSafeInteger(assessmentForm.revision) ||
+              assessmentForm.revision < 0 || typeof assessmentForm.review !== 'boolean') return;
+          var assessmentDestination = node('dd', undefined, list), assessmentControls = window.LightworkCapabilityAssessments;
+          var assessmentLabel = assessmentForm.review ? 'Open the complete assessment review' : 'Read the complete assessment findings';
+          if (window.location.pathname === '/assessments' && assessmentControls && typeof assessmentControls.open === 'function') button(assessmentLabel, assessmentDestination, async function (event) {
+            var isCurrent = function () { return active(assessmentStarted) && JSON.stringify(context()) === assessmentSelection; };
+            if (!isCurrent() || busy) return;
+            var assessmentButton = event.currentTarget; assessmentButton.disabled = true;
+            try {
+              var opened = await assessmentControls.open(assessmentForm.context, assessmentForm.kind, assessmentForm.subject,
+                assessmentForm.revision, assessmentForm.source, assessmentForm.review, isCurrent);
+              if (!isCurrent()) return;
+              status.textContent = opened ? 'The complete current assessment is open. Review any decision there.' : 'Your current work is kept. Check the selected assessment and access again.';
+              if (opened) { var close = document.getElementById('mv-copilot-close'); if (close) close.click(); }
+            } catch (_) { if (isCurrent()) status.textContent = 'The assessment could not be opened. Your current review is kept.'; }
+            finally { if (isCurrent() && assessmentButton.isConnected) assessmentButton.disabled = false; }
+          });
+          else { var assessmentLink = node('a', assessmentLabel, assessmentDestination); assessmentLink.href = '/assessments'; assessmentLink.className = 'btn btn--ghost'; }
+          return;
+        }
         if (entry[0] === 'report_download') {
           var reportForm = entry[1], reportStarted = generation, reportSelection = JSON.stringify(context());
           if (!reportForm || Array.isArray(reportForm) || Object.keys(reportForm).sort().join(',') !== 'context,kind' ||

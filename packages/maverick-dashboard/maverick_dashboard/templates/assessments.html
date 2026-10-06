@@ -199,6 +199,10 @@
   var draftMsg = document.getElementById('as-draft-msg');
   var pageMsg = document.getElementById('as-page-msg');
   var current = null;   // {kind, subject}
+  var renderedAssessment = null;
+  var assessmentFormOpen = false, assessmentConfirmOpen = false;
+  var viewGeneration = 0;
+  var canReview = {{ assessment_can_review|default(false)|tojson }};
   var subjectLabels = { agent: new Map(), flow: new Map() };
   ['agent', 'flow'].forEach(function (kind) {
     var select = document.getElementById('as-' + kind);
@@ -227,12 +231,18 @@
     });
   }
   function jfetch(url, opts) {
+    var started = viewGeneration;
     opts = opts || {}; opts.headers = opts.headers || {};
     if (opts.body) opts.headers['Content-Type'] = 'application/json';
-    return fetch(url, opts);
+    return fetch(url, opts).then(function (response) {
+      if (started !== viewGeneration) throw new Error('The current account or workspace changed.');
+      return response;
+    });
   }
   function responseData(response) {
+    var started = viewGeneration;
     return response.json().catch(function () { return {}; }).then(function (data) {
+      if (started !== viewGeneration) throw new Error('The current account or workspace changed.');
       return { ok: response.ok, status: response.status, data: data };
     });
   }
@@ -328,7 +338,9 @@
 
   function renderDetail(a) {
     pageMessage('', false);
-    current = { kind: a.kind, subject: a.subject };
+    var changedSelection = !current || current.kind !== a.kind || current.subject !== a.subject;
+    current = { kind: a.kind, subject: a.subject, revision: a.revision || 0 };
+    renderedAssessment = a;
     detailCard.hidden = false;
     var drift = a.drift_note ? '<div class="drift">Changed since it was approved: ' + esc(a.drift_note) + '</div>' : '';
     var head = '<div class="as-detail-head">'
@@ -363,7 +375,66 @@
       }).join('') + '</select></label>';
     detailEl.innerHTML = head + drift + lenses + cadence;
     wireDetail(a);
+    reviewAccess(canReview);
+    if (changedSelection) document.dispatchEvent(new CustomEvent('lightwork:copilot-selection', {
+      detail: {selection: {kind: 'capability_assessment', subject_kind: a.kind, subject: a.subject}}
+    }));
   }
+
+  function reviewAccess(allowed) {
+    canReview = allowed === true;
+    Array.prototype.forEach.call(document.querySelectorAll(
+      '#as-sweep, #as-draft, #as-rerun, #as-del, #as-cadence, .as-accept, .as-needs, .as-ev'),
+      function (control) { control.disabled = !canReview; });
+    if (!canReview) detailMessage('Read-only access. An administrator can record evidence, decisions or changes.', false);
+  }
+
+  window.LightworkCapabilityAssessmentView = {
+    selection: function () { return current; },
+    show: function (a, review, allowed) {
+      if (document.querySelector('#mv-form[open], #mv-confirm[open]')) {
+        pageMessage('Finish or cancel your open form before opening these assessment controls.', true); return false;
+      }
+      var same = current && current.kind === a.kind && current.subject === a.subject && current.revision === (a.revision || 0);
+      var cadence = document.getElementById('as-cadence');
+      if (!same && cadence && renderedAssessment && Number(cadence.value) !== (renderedAssessment.cadence_days || 0)) {
+        pageMessage('Your review frequency has not been saved. Finish or cancel that change before opening another version.', true);
+        return false;
+      }
+      if (!same) renderDetail(a);
+      reviewAccess(allowed);
+      var target = review ? document.getElementById('as-cadence') : detailEl.querySelector('.as-card__title');
+      if (!target) return false;
+      if (!review) target.tabIndex = -1;
+      detailCard.scrollIntoView({block: 'center'}); target.focus();
+      return true;
+    },
+    clear: function () {
+      viewGeneration += 1;
+      if (assessmentFormOpen) {
+        var cancel = document.getElementById('mv-form-cancel'); if (cancel) cancel.click();
+        var fields = document.getElementById('mv-form-fields'); if (fields) fields.replaceChildren();
+      }
+      if (assessmentConfirmOpen) {
+        var cancelConfirmation = document.getElementById('mv-confirm-cancel'); if (cancelConfirmation) cancelConfirmation.click();
+      }
+      current = null; renderedAssessment = null; lastItems = [];
+      reviewAccess(false);
+      detailEl.replaceChildren(); detailCard.hidden = true;
+      listEl.replaceChildren(); dueEl.replaceChildren(); tplSel.replaceChildren(); dueCount.textContent = 'Access changed';
+      ['agent', 'flow'].forEach(function (kind) {
+        var select = document.getElementById('as-' + kind);
+        if (select) { select.replaceChildren(); select.disabled = true; }
+        var input = document.getElementById('as-' + kind + '-typeahead');
+        if (input) { input.value = ''; input.disabled = true; var list = document.getElementById(input.getAttribute('list')); if (list) list.replaceChildren(); }
+        subjectLabels[kind].clear();
+      });
+      var filter = document.getElementById('as-agent-filter');
+      if (filter) { filter.value = ''; filter.disabled = true; }
+      draftMsg.textContent = '';
+      document.dispatchEvent(new CustomEvent('lightwork:copilot-selection', {detail: {selection: null}}));
+    }
+  };
 
   function wireDetail(a) {
     document.getElementById('as-rerun').addEventListener('click', function () {
@@ -377,12 +448,20 @@
         .finally(function () { if (button.isConnected) button.disabled = false; });
     });
     document.getElementById('as-del').addEventListener('click', async function () {
-      if (!(await mvConfirm('Delete the assessment for ' + subjectName(a.kind, a.subject) + '?', { okText: 'Delete assessment' }))) return;
+      assessmentConfirmOpen = true;
+      var confirmed;
+      try { confirmed = await mvConfirm('Delete the assessment for ' + subjectName(a.kind, a.subject) + '?', { okText: 'Delete assessment' }); }
+      finally { assessmentConfirmOpen = false; }
+      if (!confirmed) return;
       var button = this; button.disabled = true;
       jfetch('/api/v1/assessments/' + a.kind + '/' + encodeURIComponent(a.subject)
         + '?expected_revision=' + encodeURIComponent(a.revision), { method: 'DELETE' })
         .then(function (response) {
-          if (response.ok) { detailCard.hidden = true; current = null; reload(); return null; }
+          if (response.ok) {
+            detailCard.hidden = true; current = null; renderedAssessment = null;
+            document.dispatchEvent(new CustomEvent('lightwork:copilot-selection', {detail: {selection: null}}));
+            reload(); return null;
+          }
           return responseData(response).then(function (result) {
             mutationFailure(result, a, 'Delete failed. Refresh the page and try again.');
           });
@@ -395,9 +474,11 @@
       jfetch('/api/v1/assessments/' + a.kind + '/' + encodeURIComponent(a.subject) + '/review',
         { method: 'POST', body: JSON.stringify({ expected_revision: a.revision, lens: lens, decision: decision, cadence_days: isNaN(cad) ? 0 : cad }) })
         .then(responseData).then(function (result) {
-          if (!result.ok) { mutationFailure(result, a, 'Review was not saved.'); return; }
+          if (!result.ok) { mutationFailure(result, a, result.status === 503
+            ? 'The review could not be confirmed. It may already be saved; reload the current assessment before deciding again.'
+            : 'Review was not saved.'); return; }
           renderDetail(result.data); reload();
-        }).catch(function () { detailMessage('Review was not saved.', true); })
+        }).catch(function () { detailMessage('The review could not be confirmed. It may already be saved; reload the current assessment before deciding again.', true); })
         .finally(function () { if (button.isConnected) button.disabled = false; });
     }
     Array.prototype.forEach.call(detailEl.querySelectorAll('.as-accept'), function (el) {
@@ -408,10 +489,13 @@
     });
     Array.prototype.forEach.call(detailEl.querySelectorAll('.as-ev'), function (el) {
       el.addEventListener('click', async function () {
-        var vals = await mvForm('Add evidence', [
+        assessmentFormOpen = true;
+        var vals;
+        try { vals = await mvForm('Add evidence', [
           { key: 'note', label: 'Evidence note or link for “' + (window.mvHuman ? window.mvHuman(el.dataset.control) : el.dataset.control) + '”',
             type: 'text', required: true },
-        ], { okText: 'Add' });
+        ], { okText: 'Add' }); }
+        finally { assessmentFormOpen = false; }
         if (vals === null) return;
         el.disabled = true;
         jfetch('/api/v1/assessments/' + a.kind + '/' + encodeURIComponent(a.subject) + '/evidence',
@@ -431,8 +515,13 @@
       .then(responseData)
       .then(function (result) {
         if (!result.ok) {
-          pageMessage('', false);
-          detailMessage(responseDetail(result, 'Could not reload the latest assessment. Refresh the page and try again.'), true);
+          if ([401, 403].includes(result.status)) {
+            window.LightworkCapabilityAssessmentView.clear();
+            pageMessage('Your current access does not allow this assessment. Reopen the register after checking your access.', true);
+          } else {
+            pageMessage('', false);
+            detailMessage(responseDetail(result, 'Could not reload the latest assessment. Refresh the page and try again.'), true);
+          }
           return;
         }
         renderDetail(result.data);
@@ -450,13 +539,17 @@
   function reloadListSelection() { renderList(lastItems); }
 
   function reload() {
+    var started = viewGeneration;
     return window.mvFetchJSON('/api/v1/assessments').catch(function (error) {
-      if (error.status === 403) { listEl.innerHTML = '<div class="as-empty">You need auditor access to see assessments. Ask your administrator.</div>'; return null; }
+      if ([401, 403].includes(error.status)) {
+        window.LightworkCapabilityAssessmentView.clear();
+        listEl.innerHTML = '<div class="as-empty">You need auditor access to see assessments. Ask your administrator.</div>'; return null;
+      }
       if (!error.status) throw error;
       pageMessage('Could not load the assessment register. Reload to try again.', true);
       return null;
     }).then(function (j) {
-      if (!j) return;
+      if (!j || started !== viewGeneration) return;
       pageMessage('', false);
       lastItems = j.assessments || [];
       renderList(lastItems);
@@ -518,9 +611,11 @@
       });
   });
 
+  reviewAccess(canReview);
   // The shell's helpers (lightwork-ui.js) load after the page content.
   if (window.mvFetchJSON) reload(); else document.addEventListener('DOMContentLoaded', reload);
 })();
 </script>
 <script src="/static/lightwork-typeahead.js" defer></script>
+<script src="/static/lightwork-capability-assessments.js" defer></script>
 {% endblock %}

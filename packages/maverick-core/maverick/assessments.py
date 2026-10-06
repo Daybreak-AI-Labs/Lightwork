@@ -23,6 +23,7 @@ import json
 import time
 import uuid
 from collections import deque
+from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any
@@ -842,6 +843,7 @@ def _read_register_unlocked() -> tuple[dict[str, dict], int]:
 
 def _write_register_unlocked(
     data: dict[str, dict], *, expected_register_revision: int,
+    effect_guard: Callable[[], None] | None = None,
 ) -> int:
     path = _path()
     # CAS even though disciplined callers hold the strict lock.  This catches a
@@ -860,7 +862,7 @@ def _write_register_unlocked(
     atomic_write_text(
         path,
         json.dumps(payload, sort_keys=True, indent=2, default=str),
-        mode=0o600,
+        mode=0o600, effect_guard=effect_guard,
     )
     ensure_private_file(path, 0o600)
     return next_revision
@@ -1160,7 +1162,8 @@ def _audit_review_transaction(transaction: dict, phase: str) -> bool:
 def record_review(kind: str, name: str, lens: str, decision: str, *,
                   reviewer: str = "", note: str = "", cadence_days: int | None = None,
                   now: float | None = None,
-                  expected_revision: int | None = None) -> dict | None:
+                  expected_revision: int | None = None,
+                  effect_guard: Callable[[], None] | None = None) -> dict | None:
     """Record a reviewer's decision on one lens (``accepted`` / ``needs_work``).
     Accepting a lens marks its open findings accepted. When every lens is
     accepted the assessment is ``reviewed`` and (if a cadence is set) a re-review
@@ -1170,9 +1173,25 @@ def record_review(kind: str, name: str, lens: str, decision: str, *,
     if decision not in ("accepted", "needs_work"):
         raise ValueError("decision must be 'accepted' or 'needs_work'")
     now = time.time() if now is None else now
+    published = False
+
+    def guard():
+        if effect_guard is not None:
+            try:
+                effect_guard()
+            except Exception as exc:
+                if published:
+                    raise AssessmentAuditError(
+                        "assessment review was published but completion is unconfirmed"
+                    ) from exc
+                raise
+
+    # Older native callers do not need a callback and retain their writer hook.
+    write_options = {"effect_guard": guard} if effect_guard is not None else {}
     path = _path()
     ensure_private_directory(path.parent)
     with cross_process_lock(path, strict=True):
+        guard()
         data, register_revision = _read_register_unlocked()
         key = _key(kind, name)
         record = data.get(key)
@@ -1231,7 +1250,7 @@ def record_review(kind: str, name: str, lens: str, decision: str, *,
                 raise AssessmentAuditError("assessment review outbox is full")
             record[_REVIEW_TRANSACTIONS] = [*transactions, transaction]
             register_revision = _write_register_unlocked(
-                data, expected_register_revision=register_revision,
+                data, expected_register_revision=register_revision, **write_options,
             )
         candidate = deepcopy(transaction["candidate"])
         if _candidate_digest(candidate) != transaction.get("candidate_hash"):
@@ -1241,10 +1260,12 @@ def record_review(kind: str, name: str, lens: str, decision: str, *,
         # mandatory signed authorization to publish; neither phase claims that
         # the register was changed. A failed promotion therefore leaves the old
         # authoritative record plus a retryable durable candidate.
+        guard()
         if not _audit_review_transaction(transaction, "prepare"):
             raise AssessmentAuditError(
                 "assessment review prepare audit could not be committed"
             )
+        guard()
         if not _audit_review_transaction(transaction, "commit_authorized"):
             raise AssessmentAuditError(
                 "assessment review authorization audit could not be committed"
@@ -1255,19 +1276,22 @@ def record_review(kind: str, name: str, lens: str, decision: str, *,
         candidate[_REVIEW_TRANSACTIONS] = [published_transaction]
         data[key] = candidate
         register_revision = _write_register_unlocked(
-            data, expected_register_revision=register_revision,
+            data, expected_register_revision=register_revision, **write_options,
         )
+        published = True
+        guard()
         if _audit_review_transaction(published_transaction, "published"):
             candidate.pop(_REVIEW_TRANSACTIONS, None)
             data[key] = candidate
             try:
                 _write_register_unlocked(
-                    data, expected_register_revision=register_revision,
+                    data, expected_register_revision=register_revision, **write_options,
                 )
             except (OSError, AssessmentRegisterError):
                 # The published row is already signed. The durable on-disk
                 # receipt remains and a later read safely retries cleanup.
                 pass
+        guard()
         return _summarize(candidate)
 
 

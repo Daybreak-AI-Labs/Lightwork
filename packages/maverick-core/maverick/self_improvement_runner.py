@@ -1214,10 +1214,38 @@ def _build_holdout_authorizer(
     )
 
 
+def _lifecycle_review_options(*, strict, dispatch_guard, evaluation_budget, advance):
+    if not strict:
+        return {}
+
+    def current():
+        if evaluation_budget is not None:
+            evaluation_budget.check()
+        if dispatch_guard is not None:
+            dispatch_guard()
+
+    factory = getattr(advance, "lifecycle_guard", None)
+
+    def staged(after, before_meta, after_meta):
+        reviewed = factory(after, before_meta, after_meta)
+
+        def checked():
+            if evaluation_budget is not None:
+                evaluation_budget.check()
+            reviewed()
+
+        return checked
+
+    return {"strict": True, "before_write": current,
+            "write_guard_factory": staged if factory is not None else None,
+            "after_write": advance if callable(advance) else None}
+
+
 def _finish_self_harness_cycle(report, *, model_id, st, retire,
                                retire_after_days, score_with, score_without,
                                held_out, held_in, provider_work_item, effect_scope,
-                               dispatch_guard, strict=False, qualification_held=False):
+                               dispatch_guard, strict=False, qualification_held=False,
+                               evaluation_budget=None):
     """Keep separately authorized local maintenance independent of AI eligibility."""
     from . import self_harness
     from .learning_guard import check_learning_halt
@@ -1234,12 +1262,16 @@ def _finish_self_harness_cycle(report, *, model_id, st, retire,
     if resolved and self_harness.enabled() and not qualification_held:
         try:
             with effect_scope() if effect_scope is not None else nullcontext() as advance:
-                res = self_harness.review_canaries(resolved)
-                if (res.get("graduated") or res.get("demoted")) and callable(advance):
+                options = _lifecycle_review_options(strict=strict, dispatch_guard=dispatch_guard,
+                    evaluation_budget=evaluation_budget, advance=advance)
+                res = self_harness.review_canaries(resolved, **options)
+                if not strict and (res.get("graduated") or res.get("demoted")) and callable(advance):
                     advance()
             report.graduated = list(res.get("graduated", []))
             report.demoted = list(res.get("demoted", []))
         except Exception:  # pragma: no cover -- lifecycle never perturbs a run
+            if strict:
+                raise
             log.debug("self-harness canary review failed", exc_info=True)
         # Relapse recency guard (opt-in): AFTER the canary review, so a
         # line re-probated now gets adjudicated on the NEXT cycle's
@@ -1248,12 +1280,16 @@ def _finish_self_harness_cycle(report, *, model_id, st, retire,
             share = float((st or {}).get("relapse_failure_share") or 0.0)
             if share > 0:
                 with effect_scope() if effect_scope is not None else nullcontext() as advance:
+                    options = _lifecycle_review_options(strict=strict, dispatch_guard=dispatch_guard,
+                        evaluation_budget=evaluation_budget, advance=advance)
                     report.relapsed = self_harness.review_relapses(
                         resolved, failure_share=share,
-                        min_outcomes=int((st or {}).get("relapse_min_outcomes", 5)))
-                    if report.relapsed and callable(advance):
+                        min_outcomes=int((st or {}).get("relapse_min_outcomes", 5)), **options)
+                    if not strict and report.relapsed and callable(advance):
                         advance()
         except Exception:  # pragma: no cover -- lifecycle never perturbs a run
+            if strict:
+                raise
             log.debug("self-harness relapse review failed", exc_info=True)
         if ((st or {}).get("risk_limited") and (st or {}).get("efficacy_review")):
             report.skipped.append(
@@ -1354,7 +1390,7 @@ def run_self_harness_cycle(  # noqa: C901 - one fail-closed orchestration bounda
                 score_without=None, held_out=None, held_in=None,
                 provider_work_item=None, effect_scope=effect_scope,
                 dispatch_guard=dispatch_guard, strict=raise_errors,
-                qualification_held=True)
+                qualification_held=True, evaluation_budget=eval_budget)
         # AUTO-WIRE the live A/B from config so a scheduled cycle can actually
         # PROMOTE, not just dry-inspect: if the caller injected no scorers and
         # [self_harness] eval_corpus is set, build the model-generates /
@@ -1539,7 +1575,8 @@ def run_self_harness_cycle(  # noqa: C901 - one fail-closed orchestration bounda
             retire_after_days=retire_after_days, score_with=score_with,
             score_without=score_without, held_out=held_out, held_in=held_in,
             provider_work_item=provider_work_item, effect_scope=effect_scope,
-            dispatch_guard=dispatch_guard, strict=raise_errors)
+            dispatch_guard=dispatch_guard, strict=raise_errors,
+            evaluation_budget=eval_budget)
     except Halted:
         raise
     except Exception as exc:  # pragma: no cover -- maintenance stays best-effort

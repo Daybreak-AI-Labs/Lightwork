@@ -58,8 +58,12 @@ from starlette.concurrency import run_in_threadpool
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from . import auth_metrics as _auth_metrics
+from . import (
+    capability_assessment_controls_api,
+    learning_acquisition_api,
+    runtime_policy_recovery_api,
+)
 from . import health_routes as _health_routes
-from . import learning_acquisition_api, runtime_policy_recovery_api
 from ._shared import (
     _any_provider_key_set,
     _get_sse_semaphore,
@@ -1506,6 +1510,7 @@ install_shared_governance_inventory_composition(app)
 attach_unified_audit_scheduler(app)
 app.include_router(api_router)
 app.include_router(api_documentation_router)
+app.include_router(capability_assessment_controls_api.router, prefix="/api/v1")
 app.include_router(runtime_policy_recovery_api.router, prefix="/api/v1")
 app.include_router(learning_acquisition_api.router, prefix="/api/v1")
 app.include_router(draft_router)
@@ -7685,7 +7690,7 @@ def assessments_page(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(
         request,
         "assessments.html",
-        {"agents": agents, "flows": flows},
+        {"agents": agents, "flows": flows, "assessment_can_review": has_permission(request, "admin")},
     )
 
 

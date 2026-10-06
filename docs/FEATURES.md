@@ -6296,3 +6296,22 @@ Assessment lists, due items and details use current specialist or workflow names
 from the authorized picker. A name unavailable in that view is identified as
 unavailable; an optional recorded reference remains available for support.
 Native record identity, version checks and review permissions are unchanged.
+
+### Scoped trial decisions and protected assessment review
+
+Recorded trial outcomes change only the exact model and scope that supplied
+them. Identical lesson text in another department stays intact. Governed passes
+check current sources, evidence, learning stops and budgets at the native write,
+confirm each change before advancing, and retain failed or partial outcomes.
+Unreadable transfer history refuses its rewrite. Result summaries distinguish
+accepted, removed and returned-to-trial lessons. Legacy deliberate whole-model
+rollback and transfer-attempt memory keep their existing meaning.
+
+On Assessments, Copilot can open the selected specialist or workflow's complete
+current findings and, for an administrator, its existing human review controls.
+The protected handoff binds account, workspace, record version and content;
+opening it records no new review decision. Auditors retain readable findings
+without enabled administrator actions. A changed account clears private
+assessment content and its owned evidence dialog. Current review permission is
+checked after writer waits and again at physical replacement. A decision already
+published before a later refusal remains explicitly unconfirmed until read back.

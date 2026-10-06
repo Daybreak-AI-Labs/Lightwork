@@ -174,6 +174,7 @@ def _adapter_modules():
         product_operations_audit_checkpoints,
         product_operations_automation_imports,
         product_operations_budget,
+        product_operations_capability_assessments,
         product_operations_channel_people,
         product_operations_commitment_capability,
         product_operations_commitment_economic_alternatives,
@@ -264,6 +265,7 @@ def _adapter_modules():
         product_operations_workspace_people,
     )
     return (
+        product_operations_capability_assessments,
         product_operations_approvals,
         product_operations_decision_evidence,
         product_operations_flow_requalification,

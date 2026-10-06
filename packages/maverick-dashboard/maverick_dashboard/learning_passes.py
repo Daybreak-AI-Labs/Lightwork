@@ -220,7 +220,7 @@ def review_rows(prepared):
     return [{"label": "What can change", "after": NOTICE},
             {"label": "Included models and source", "after": prepared["summary"]},
             {"label": "Testing", "after": "AI testing is permitted; answers are checked by " + prepared["checker"] if prepared["egress"] else
-             "AI testing is off. The pass can inspect work and retire old lessons, but will make no AI testing calls."},
+             "AI testing is off. The pass can inspect work, review recorded trial outcomes and retire old lessons. It will make no AI testing calls; current learning approval rules still apply."},
             {"label": "Spending", "after": f"One shared per-pass ceiling: ${prepared['ceiling']:g}. Current provider and organization limits also apply." if prepared["ceiling"] is not None else
              "No per-pass dollar ceiling is set. Current provider and organization limits apply; set a ceiling in All settings if needed."},
             {"label": "New lessons", "after": "Put on trial first; stronger current safety settings still apply." if body["trial"] else "Use current learning approval and trial settings."},
@@ -293,10 +293,18 @@ def _retirement_write_guard_factory(guard, expected_artifact):
     return reviewed_stages
 
 
+def _check_current_budget(budget):
+    if budget is not None:
+        budget.check()
+
+
 def _model_report(model, report, retired):
     result = {"Model": model_label(model), "Repeated mistakes": report.mined,
               "Lessons tried": report.proposed, "Passed testing": report.validated,
               "Adopted": report.promoted, "Retired": retired,
+              "Trial lessons accepted": len(report.graduated),
+              "Trial lessons removed": len(report.demoted),
+              "Lessons returned to trial": len(report.relapsed),
               "Approval gate off": not report.gate_enabled,
               "Paused for calibration": report.frozen,
               "Checks not completed": len(report.skipped)}
@@ -332,6 +340,7 @@ def start(request, prepared, operation, *, expires):
 
     def run(job):
         expected_artifact = [prepared["artifact"]]
+        budget = None
 
         def guard(*, allowed_artifacts=()):
             questions._authority(request, prepared["context"], write=True)
@@ -341,6 +350,7 @@ def start(request, prepared, operation, *, expires):
             current = _state(request, context=prepared["context"])
             if current["source_revision"] != prepared["source_revision"] or current["artifact"] not in {expected_artifact[0], *allowed_artifacts}:
                 raise HTTPException(409, "The reviewed sources, models, settings or access changed. No further call or learning change was admitted.")
+            _check_current_budget(budget)
 
         @contextmanager
         def admission_scope():
@@ -359,6 +369,7 @@ def start(request, prepared, operation, *, expires):
                     expected_artifact[0] = _artifact()
 
                 advance.retirement_guard = _retirement_write_guard_factory(guard, expected_artifact)
+                advance.lifecycle_guard = _retirement_write_guard_factory(guard, expected_artifact)
                 yield advance
 
         with admission_scope():

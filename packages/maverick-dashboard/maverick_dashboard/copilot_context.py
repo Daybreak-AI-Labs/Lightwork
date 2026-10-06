@@ -1900,24 +1900,24 @@ _CONTEXTS = tuple(
         _registered(
             path="/assessments",
             summary=(
-                "Create, assign, answer, discuss, review, and decide governed assessments "
-                "against exact questionnaire and evidence revisions."
+                "Review the declared capabilities of specialists and workflows through "
+                "privacy, security and AI-risk findings."
             ),
             capabilities=(
-                "Coordinate assessment owners and due dates.",
-                "Keep threaded reviewer comments beside the governed assessment record.",
-                "Record evidence, review, and final decisions with separation of duties.",
+                "Choose a specialist or workflow and draft its assessment from declared capabilities.",
+                "Read each finding and add an evidence note or link.",
+                "With administrator access, approve a review, mark it as needing work and choose its review frequency.",
             ),
             boundaries=(
-                "Comments are collaboration evidence, not approval or a compliance conclusion.",
-                "A final decision still requires the configured human authority and exact revision.",
+                "Automatic findings are a review aid, not a legal conclusion or certification.",
+                "Auditors may read; administrator access and the current assessment revision are required for changes.",
             ),
             next_steps=(
-                "Open the assessment that needs attention.",
-                "Resolve evidence questions in the review thread before final disposition.",
+                "Open an assessment from Register or Needs attention and read its complete findings.",
+                "Review the evidence before approving each part; re-assess when its capabilities change.",
             ),
             suggested_questions=(
-                "How do assessment comments affect approval?",
+                "What do privacy, security and AI-risk reviews cover?",
                 "What should I review before deciding?",
             ),
         ),
@@ -2194,7 +2194,7 @@ _PANEL_TIPS = {
     "/third-party/collaboration": "A supplier's answer is their statement, not independently checked evidence.",
     "/security/governance": "These records support a review. They do not provide legal advice or certify a result.",
     "/security/assurance": "Local AI risk records support decisions. They are not legal conclusions or certification.",
-    "/assessments": "Comments help reviewers; they are not an approval or compliance conclusion.",
+    "/assessments": "Automatic findings help a person review declared capabilities; they are not a compliance conclusion.",
 }
 
 

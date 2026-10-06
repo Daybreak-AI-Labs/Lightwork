@@ -1975,3 +1975,29 @@ authorized specialist/workflow name, with an explicit unavailable-name fallback
 and optional recorded reference. Stored identity and native review version checks
 are preserved. This naming repair does not supply selected-assessment Copilot
 review coverage. The separate scoped trial-lifecycle issue remains tracked.
+
+## October 6 scoped trials and selected capability assessments
+
+The native trial lifecycle now carries the exact checked scope into demotion,
+graduation and relapse. Governed callers acquire the existing authority and
+guidance fences, read current complete state, and check exact planned generations,
+source permission, stop and budget at physical writes. Each confirmed change
+advances the existing current-state guard before the next decision. Failed
+metadata, transfer-history or activity confirmation propagates an incomplete
+outcome rather than an empty success. The ordinary result reports the three
+lifecycle counts. Default deliberate all-scope marking/removal and bare-model
+transfer-attempt memory semantics remain unchanged.
+
+The plural specialist/workflow assessment register has two protected Copilot
+read/handoff controls. They bind the selected native identity, current version,
+content digest and account/workspace; full findings stay in the authorized native
+view, and decisions use the existing lens-review writer. The page guide describes
+its actual privacy, security and AI-risk reviews. Auditor controls remain readable
+without offering administrator writes. Genuine account changes clear private
+findings and assessment-owned dialog contents; late reads cannot refill them.
+
+The existing review writer rechecks current permission after its register-lock
+wait, before signed review phases and at native replacement retries. Its durable
+prepare/authorize/publish protocol and record-version check are preserved. A late
+refusal after publication reports an unconfirmed saved decision; current native
+recovery reads that decision without recording another review.

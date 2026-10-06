@@ -483,8 +483,8 @@ def write_line_meta_db(meta: dict[str, dict], *, effect_guard=None) -> None:
         if effect_guard is not None:
             effect_guard()
 
-def load_transfer_tried_db() -> dict[str, float]:
-    """``{line_id: ts}`` transfer tried-memory ({} on any error)."""
+def load_transfer_tried_db(*, strict: bool = False) -> dict[str, float]:
+    """Transfer attempt memory; strict callers retain read failures."""
     pred, params = _tenant_predicate()
     try:
         with _conn() as c:
@@ -495,18 +495,24 @@ def load_transfer_tried_db() -> dict[str, float]:
     except LearningSchemaError:
         raise
     except Exception:
+        if strict:
+            raise
         log.debug("learning_store: tried read failed", exc_info=True)
         return {}
 
 
-def write_transfer_tried_db(tried: dict[str, float]) -> None:
+def write_transfer_tried_db(tried: dict[str, float], *, effect_guard=None) -> None:
     pred, params = _tenant_predicate()
     tcol, tph, tparam = _tenant_column()
     with _conn() as c:
+        if effect_guard is not None:
+            effect_guard()
         _exec(c, f"DELETE FROM harness_transfer_tried{_where(pred)}", params)
         for lid, ts in (tried or {}).items():
             _exec(c, f"INSERT INTO harness_transfer_tried (line_id, ts{tcol}) "
                      f"VALUES ({_ph(2)}{tph})", (str(lid), float(ts), *tparam))
+        if effect_guard is not None:
+            effect_guard()
 
 
 def _corpus_row_sensitive(kind: str) -> bool:

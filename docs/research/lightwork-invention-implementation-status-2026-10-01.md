@@ -328,3 +328,12 @@ names also follow current authorized product records. Neither change establishes
 a new learning algorithm, measured quality lift or completion of the broader
 assessment Copilot journey. Counts remain 6 partial product foundations,
 18 bounded pilots and 4 parked/rejected results.
+
+Scoped trial follow-through preserves other scopes with identical lesson text and
+checks current evidence, source permission, stops and budgets at governed native
+writes. Failed custody or confirmation retains an incomplete result. Protected
+assessment read/review handoffs also share the existing native identity, authority
+and version checks. These repairs improve product correctness and recoverability;
+synthetic reported outcome windows are not causal quality-lift evidence, and
+local audit confirmation is not independently held custody. Research status
+counts remain unchanged.
