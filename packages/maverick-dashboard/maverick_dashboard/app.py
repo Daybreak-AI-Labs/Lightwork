@@ -3033,6 +3033,11 @@ def _not_found_page(request: Request):
 def _task_limit_error(status, detail, headers, title, message):
     if status == 400 and (headers or {}).get("X-Lightwork-Task-Settings") == "agent.max_steps":
         return "Review the task limit", detail, "task_steps"
+    if status == 409 and isinstance(detail, dict) and detail.get("retryable") is True:
+        # Still changing (a task that has just started): the page reloads
+        # itself in a moment instead of asking the person to try again.
+        return ("Still getting this ready",
+                "This page is still being set up. It refreshes by itself in a moment.", "retry")
     return title, message, ""
 
 
@@ -12522,9 +12527,9 @@ def _chat_history_download_states(request: Request, w, turns) -> dict:
 @app.get("/chat/goal/{goal_id}/answer-panel", response_class=HTMLResponse)
 def chat_answer_panel(request: Request, goal_id: int) -> HTMLResponse:
     """Current authorized saved result, actions, release gate and artifact versions."""
-    from .answer_projection import projection
+    from .answer_projection import projection, settled
 
-    context = projection(request, _world(), goal_id)
+    context = settled(lambda: projection(request, _world(), goal_id))
     return templates.TemplateResponse(request, "_chat_answer_panel.html", context,
                                       headers={"Cache-Control": "no-store, private",
                                                "X-Lightwork-Context": context["conversation_context"]})
@@ -12532,6 +12537,13 @@ def chat_answer_panel(request: Request, goal_id: int) -> HTMLResponse:
 
 @app.get("/chat/goal/{goal_id}", response_class=HTMLResponse)
 def chat_goal(request: Request, goal_id: int) -> HTMLResponse:
+    """A task's page; built again when the task changed while it was read."""
+    from .answer_projection import settled
+
+    return settled(lambda: _chat_goal_page(request, goal_id))
+
+
+def _chat_goal_page(request: Request, goal_id: int) -> HTMLResponse:
     require_permission(request, "view")
     original_context = _conversation_context(request)
     w = _world()
