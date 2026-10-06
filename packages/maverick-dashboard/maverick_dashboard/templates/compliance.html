@@ -172,6 +172,8 @@
   </div>
 
   {% if groups %}
+    {% set hist = control_history or {} %}
+    {% if hist.checked_at %}<p class="muted" id="cmp-checked">Checked {{ hist.checked_at | datetime }}. Lightwork checks every protection again each hour, and each time this page opens.</p>{% endif %}
     {% for fw, group in groups.items() %}
     <div class="section-head"><h2>{{ group.label }}</h2></div>
     <div class="panel cmp-table">
@@ -179,6 +181,7 @@
         <thead>
           <tr>
             <th scope="col">Status</th>
+            <th scope="col">Since</th>
             <th scope="col">Protection</th>
             <th scope="col">Rule</th>
             <th scope="col">What it means</th>
@@ -194,6 +197,7 @@
               {% elif c.status == 'action_needed' %}<span class="badge blocked">{{ g.status_text }}</span>
               {% else %}<span class="badge pending">{{ g.status_text }}</span>{% endif %}
             </td>
+            <td>{% set since = ((hist.controls or {}).get(c.control) or {}).get('since') %}{% if since %}{{ since | datetime }}{% else %}<span class="muted">Not recorded</span>{% endif %}</td>
             <td>{{ c.control }}</td>
             <td>{{ c.regulation }}</td>
             <td class="muted">{{ g.about }}</td>
@@ -204,6 +208,16 @@
       </table>
     </div>
     {% endfor %}
+    {% if hist.changes %}
+    <details class="panel" id="cmp-history">
+      <summary>Status changes ({{ hist.changes | length }})</summary>
+      <ol class="cmp-history">
+        {% for change in hist.changes | reverse %}{% if loop.index <= 50 %}
+        <li>{{ change.at | datetime }}: {{ change.control }} went from {{ status_word(change['from']) }} to {{ status_word(change.to) }}</li>
+        {% endif %}{% endfor %}
+      </ol>
+    </details>
+    {% endif %}
   {% else %}
     <div class="panel">
       <p class="muted">Nothing to report for this filter. Choose &ldquo;All regulations&rdquo; above, or come back once Lightwork has done some work.</p>

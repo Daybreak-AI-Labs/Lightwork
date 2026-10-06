@@ -934,6 +934,11 @@ task_questions = true         # Insights page questions (need the dashboard's "d
 usability_survey = false      # optional ease-of-use survey (SUS + one question after top tasks); answers stay local
 usage_measures = false        # optional name-free counts: first result in the first session, AI suggestions used or dismissed
 
+[collaboration]
+comments = true               # comments and @mentions on tasks, runs, approvals and policies; mentions reach personal notifications
+suggestions = true            # agents and colleagues suggest edits to AI use rules, data use rules and privacy notices; accepting creates a draft that keeps its own approval
+ai_suggestions = true         # the AI assistant drafts a suggested edit when a person asks (within the per-task spending cap)
+
 [env_hunt.enrichment_sources.intel_feed]  # a lookup service your server registered
 enable = true
 

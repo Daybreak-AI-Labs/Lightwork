@@ -116,7 +116,7 @@
       <input class="input" name="context" required maxlength="120" placeholder="For example: Loan application triage">
       <span class="muted">The process or team that will use it.</span>
     </label>
-    <div class="gov-form__wide gov-actions"><button class="btn btn--primary" type="submit">Start an assessment</button>
+    <div class="gov-form__wide gov-actions"><button class="btn" type="submit">Start an assessment</button>
       <span id="fria-status" class="muted" role="status" aria-live="polite"></span></div>
   </form>
   <div id="fria-editor" hidden>
@@ -124,7 +124,7 @@
     <p class="muted">Answer each question in your own words. The assessment can be marked complete once all six are answered.</p>
     <div id="fria-elements"></div>
     <div class="gov-actions">
-      <button class="btn btn--primary" type="button" id="fria-save">Save answers</button>
+      <button class="btn" type="button" id="fria-save">Save answers</button>
       <button class="btn" type="button" id="fria-complete">Mark complete</button>
       <button class="btn" type="button" id="fria-outdate">Something changed — reopen it</button>
       <button class="btn" type="button" id="fria-notify">Record that you told the authority</button>
@@ -144,7 +144,7 @@
   {% else %}
   <form id="annex-open" class="gov-form">
     {{ asset_select('Which AI system?', help='Opens its nine-item documentation checklist.') }}
-    <div class="gov-form__wide gov-actions"><button class="btn btn--primary" type="submit">Open the checklist</button>
+    <div class="gov-form__wide gov-actions"><button class="btn" type="submit">Open the checklist</button>
       <span id="annex-status" class="muted" role="status" aria-live="polite"></span></div>
   </form>
   <div id="annex-editor" hidden>
@@ -199,7 +199,7 @@
     </label>
     <label class="gov-check"><input type="checkbox" name="harmonised"> Harmonised standards were applied</label>
     <label class="gov-check"><input type="checkbox" name="common_specs"> Common specifications were applied</label>
-    <div class="gov-form__wide gov-actions"><button class="btn btn--primary" type="submit">Record the route</button>
+    <div class="gov-form__wide gov-actions"><button class="btn" type="submit">Record the route</button>
       <span id="route-status" class="muted" role="status" aria-live="polite"></span></div>
   </form>
   <p id="route-modify-status" class="muted" role="status" aria-live="polite"></p>
@@ -228,7 +228,7 @@
     <label>Link to the plan
       <input class="input" name="plan_reference" required maxlength="512" placeholder="https://…">
     </label>
-    <div class="gov-form__wide gov-actions"><button class="btn btn--primary" type="submit">Record the plan</button>
+    <div class="gov-form__wide gov-actions"><button class="btn" type="submit">Record the plan</button>
       <span id="pmm-status" class="muted" role="status" aria-live="polite"></span></div>
   </form>
   <p id="pmm-review-status" class="muted" role="status" aria-live="polite"></p>
@@ -258,14 +258,14 @@
     <label>Registration number
       <input class="input" name="reference" required maxlength="512" placeholder="The number the registry gave you">
     </label>
-    <div class="gov-form__wide gov-actions"><button class="btn btn--primary" type="submit">Record the registration</button>
+    <div class="gov-form__wide gov-actions"><button class="btn" type="submit">Record the registration</button>
       <span id="registration-status" class="muted" role="status" aria-live="polite"></span></div>
   </form>
 
   <h3>Instructions for use</h3>
   <form id="ifu-open" class="gov-form">
     {{ asset_select('Which AI system?', help='Opens the six-item checklist of what the instructions must cover.') }}
-    <div class="gov-form__wide gov-actions"><button class="btn btn--primary" type="submit">Open the checklist</button>
+    <div class="gov-form__wide gov-actions"><button class="btn" type="submit">Open the checklist</button>
       <span id="ifu-status" class="muted" role="status" aria-live="polite"></span></div>
   </form>
   <div id="ifu-editor" hidden>
@@ -317,7 +317,7 @@
     <label>Link to the evidence
       <input class="input" name="reference" required maxlength="512" placeholder="https://…">
     </label>
-    <div class="gov-form__wide gov-actions"><button class="btn btn--primary" type="submit">Record the evidence</button>
+    <div class="gov-form__wide gov-actions"><button class="btn" type="submit">Record the evidence</button>
       <span id="gpai-assert-status" class="muted" role="status" aria-live="polite"></span></div>
   </form>
   {% else %}<p class="muted">No models tracked yet. Add each general-purpose model you provide below.</p>{% endif %}
@@ -363,7 +363,7 @@
     <label>Link to evidence of their training and authority
       <input class="input" name="reference" required maxlength="512" placeholder="https://…">
     </label>
-    <div class="gov-form__wide gov-actions"><button class="btn btn--primary" type="submit">Name the overseers</button>
+    <div class="gov-form__wide gov-actions"><button class="btn" type="submit">Name the overseers</button>
       <span id="deployer-oversight-status" class="muted" role="status" aria-live="polite"></span></div>
   </form>
   <form id="deployer-assert" class="gov-form">
@@ -383,7 +383,7 @@
     <label>Link to the evidence
       <input class="input" name="reference" required maxlength="512" placeholder="https://…">
     </label>
-    <div class="gov-form__wide gov-actions"><button class="btn btn--primary" type="submit">Record the evidence</button>
+    <div class="gov-form__wide gov-actions"><button class="btn" type="submit">Record the evidence</button>
       <span id="deployer-assert-status" class="muted" role="status" aria-live="polite"></span></div>
   </form>
   {% else %}<p class="muted">No systems tracked yet. Add each high-risk system you use below.</p>{% endif %}
@@ -447,7 +447,7 @@
       <legend>Trainings this role needs</legend>
     </fieldset>
     <div class="gov-form__wide gov-actions"><button class="btn btn--ghost" type="button" id="literacy-add-training">Add a training</button>
-      <button class="btn btn--primary" type="submit">Save the role's training</button>
+      <button class="btn" type="submit">Save the role's training</button>
       <span id="literacy-require-status" class="muted" role="status" aria-live="polite"></span></div>
   </form>
 
@@ -472,7 +472,7 @@
       </div>
       {% else %}<p class="muted">Add a role above first.</p>{% endif %}
     </fieldset>
-    <div class="gov-form__wide gov-actions"><button class="btn btn--primary" type="submit"{% if not literacy_roles %} disabled{% endif %}>Save roles</button>
+    <div class="gov-form__wide gov-actions"><button class="btn" type="submit"{% if not literacy_roles %} disabled{% endif %}>Save roles</button>
       <span id="literacy-assign-status" class="muted" role="status" aria-live="polite"></span></div>
   </form>
 
@@ -500,7 +500,7 @@
     <label>Link to the certificate or course record
       <input class="input" name="evidence_ref" required maxlength="512" placeholder="https://…">
     </label>
-    <div class="gov-form__wide gov-actions"><button class="btn btn--primary" type="submit">Record it</button>
+    <div class="gov-form__wide gov-actions"><button class="btn" type="submit">Record it</button>
       <button class="btn btn--ghost" type="button" id="literacy-download">Download the training evidence</button>
       <span id="literacy-complete-status" class="muted" role="status" aria-live="polite"></span></div>
   </form>
@@ -567,7 +567,7 @@
       </select>
     </label>
     <label class="gov-check"><input type="checkbox" name="widespread"> It is widespread (shortens the deadline to 2 days)</label>
-    <div class="gov-form__wide gov-actions"><button class="btn btn--primary" type="submit"{% if not assurance_incidents %} disabled{% endif %}>Declare serious incident</button>
+    <div class="gov-form__wide gov-actions"><button class="btn" type="submit"{% if not assurance_incidents %} disabled{% endif %}>Declare serious incident</button>
       <span id="incident-status" class="muted" role="status" aria-live="polite"></span></div>
   </form>
   {% endif %}
@@ -631,7 +631,7 @@
     </details>
     <label class="gov-form__wide gov-check"><input type="checkbox" name="confirm_dispatch" required>
       I agree to send eligible findings, accepted risks and incidents to the outside system.</label>
-    <div class="gov-form__wide gov-actions"><button class="btn btn--primary" type="submit">Send records now</button>
+    <div class="gov-form__wide gov-actions"><button class="btn" type="submit">Send records now</button>
       <span class="muted">Only an administrator can send. Anything that might have been sent twice is held for a check.</span></div>
   </form>
   <p id="gov-grc-status" role="status" aria-live="polite"></p>
@@ -653,7 +653,7 @@
     <div class="gov-form__wide" id="gov-grc-comparison" tabindex="-1"></div>
     <label class="gov-form__wide">Note<textarea class="textarea" name="note" required maxlength="2000" rows="3"></textarea></label>
     <div class="gov-form__wide gov-actions">
-      <button class="btn btn--primary" type="button" id="gov-grc-confirm" disabled>Confirm it was delivered</button>
+      <button class="btn" type="button" id="gov-grc-confirm" disabled>Confirm it was delivered</button>
       <button class="btn" type="button" id="gov-grc-keep-held">Save note and keep it held</button>
     </div>
     <p class="gov-form__wide" id="gov-grc-recovery-status" role="status" aria-live="polite"></p>
@@ -671,7 +671,7 @@
   const ASSET_NAMES = {{ ASSET_NAMES|tojson }};
   const nameOf = assetId => ASSET_NAMES[assetId] || "this AI system";
   const status = (id, text) => { const el = document.getElementById(id); if (el && window.mvStatus) window.mvStatus(el, text); else if (el) el.textContent = text; };
-  const say = (id, error, action) => status(id, "Could not " + action + ". " + ((error && error.message) || "Please try again."));
+  const say = (id, error, action) => status(id, "Could not " + action + ". " + ((error && error.message) || "Try again."));
   // Requests go through the shell's mvFetchJSON (lightwork-ui.js), which loads
   // after the page content; a failure is one plain sentence without the action.
   const shellReady = window.mvFetchJSON ? Promise.resolve() : new Promise(done => document.addEventListener("DOMContentLoaded", done));

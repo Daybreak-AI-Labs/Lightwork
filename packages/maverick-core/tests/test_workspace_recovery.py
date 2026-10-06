@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import sqlite3
 import subprocess
 import zipfile
@@ -688,3 +689,21 @@ def test_interrupted_confirmation_remains_visible_with_safety_snapshot(isolated_
 def test_independent_workers_and_stores_block_restore(settings, monkeypatch):
     monkeypatch.setattr(config, "load_config", lambda: settings)
     assert recovery.restore_blockers()
+
+
+def test_the_fresh_rehearsal_process_runs_the_same_application_code(tmp_path, monkeypatch):
+    """The retained-key rehearsal child must import the code that is running,
+    not another installed copy, or its identity check refuses every test.
+    It still inherits no operator settings or credentials."""
+    import importlib.util
+    from pathlib import Path
+
+    from maverick import workspace_recovery as recovery
+
+    monkeypatch.setenv("PYTHONPATH", "/somewhere/else")
+    monkeypatch.setenv("MAVERICK_ENCRYPTION_KEY", "00" * 32)
+    environment = recovery._custody_environment(tmp_path, "tenant-a")
+    roots = environment["PYTHONPATH"].split(os.pathsep)
+    assert str(Path(importlib.util.find_spec("maverick").origin).parent.parent) in roots
+    assert "/somewhere/else" not in roots
+    assert "MAVERICK_ENCRYPTION_KEY" not in environment

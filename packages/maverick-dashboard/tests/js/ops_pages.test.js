@@ -223,7 +223,7 @@ test('savings and performance additions draw plain rows', async (t) => {
   t.after(() => ui.window.close());
   assert.match(ui.document.getElementById('value-report-out').textContent, /cover 3 more/);
   assert.match(ui.document.getElementById('value-report-vendors').textContent, /Acme agents/);
-  assert.match(ui.document.getElementById('ops-charts-tasks').textContent, /2026-09-28/);
+  assert.match(ui.document.getElementById('ops-charts-tasks').textContent, /Sep 28, 2026/);
   assert.match(ui.document.getElementById('ops-charts-tools').textContent, /read_file/);
 });
 

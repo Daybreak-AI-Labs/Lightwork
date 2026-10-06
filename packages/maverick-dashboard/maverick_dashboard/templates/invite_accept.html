@@ -19,6 +19,7 @@
   {% if message %}<p class="own__alert" role="alert">{{ message }}</p>{% endif %}
   <div class="own__actions">
     {% if can_open %}<form method="post" action="/auth/invite/{{ invite.token }}/workspace" data-draft-recovery="off">
+      <input type="hidden" name="_expected_tenant" value="{{ request.state.workspace_expected_tenant | default('', true) }}">
       <button type="submit" class="btn btn--primary">Open {{ invite.workspace }}</button>
     </form>{% else %}<a href="/workspace/tenant?next=/" class="btn">Choose an available workspace</a>{% endif %}
   </div>

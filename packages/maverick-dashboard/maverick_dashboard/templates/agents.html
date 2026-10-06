@@ -21,7 +21,7 @@
       <div style="display: flex; gap: 0.25rem;">
         <button type="button" class="btn btn--ghost wf-up">Move up</button>
         <button type="button" class="btn btn--ghost wf-down">Move down</button>
-        <button type="button" class="btn btn--ghost btn--danger wf-del">Remove</button>
+        <button type="button" class="btn btn--ghost btn--danger wf-del">Remove step</button>
       </div>
     </div>
     <label style="display: block; margin-top: 0.4rem;">What to do in this step
@@ -172,7 +172,7 @@
   {% from "_hero.html" import hero, state %}
   {# The main action: a new custom agent. While a specialist is open, saving
      it is the main action, so the header link steps back to a plain button. #}
-  {% set agents_actions %}<a class="btn{% if not selected %} btn--primary{% endif %}" href="/agents?new=1#agent-form">New custom agent</a>{% endset %}
+  {% set agents_actions %}<a class="btn{% if not selected %} btn--primary{% endif %}" href="/agents?new=1#agent-form">Build a custom agent</a>{% endset %}
   {% call hero('Build your workforce', 'Agent Factory',
                subtitle='Build agents and tailor specialists',
                lede='Describe an agent in plain English — its job, the
@@ -607,7 +607,7 @@
   <script>
     // ---- shared page helpers: plain errors, readable names, action pickers ----
     function plainError(failure, what) {
-      return window.mvErrorText ? window.mvErrorText(failure, what) : 'Could not ' + what + '. Please try again.';
+      return window.mvErrorText ? window.mvErrorText(failure, what) : 'Could not ' + what + '. Try again.';
     }
     function humanName(v) {
       if (window.mvHuman) return window.mvHuman(v);
@@ -1346,6 +1346,25 @@
         }
         return { ok: true, extra: { publish_without_passing_tests: true, override_reason: String(answers.reason).trim() }, skipConfirm: true };
       }
+      // What taking actions away would have stopped, from the activity
+      // record of the last 30 days (ADM-3). Report only; "" when nothing is
+      // taken away or it can't be worked out.
+      const startAllow = words(document.getElementById('f-allow').value);
+      const startDeny = words(document.getElementById('f-deny').value);
+      async function toolChangePreview(name) {
+        const now = payload();
+        const lost = startAllow.filter((t) => !now.allow_tools.includes(t))
+          .concat(now.deny_tools.filter((t) => !startDeny.includes(t)));
+        if (creating || !lost.length) return '';
+        try {
+          const data = await window.mvFetchJSON('/api/v1/policy-preview/tools?tools=' + encodeURIComponent(lost.join(',')) +
+            '&agent=' + encodeURIComponent(name), {}, 'work out what this changes');
+          const what = lost.length === 1 ? 'the action it loses' : 'the ' + lost.length + ' actions it loses';
+          if (!data.recorded) return 'There is no tool use in the activity record for the last 30 days to compare ' + what + ' with. ';
+          return 'In the last 30 days it used ' + what + ' ' + data.calls + (data.calls === 1 ? ' time' : ' times') + ' in ' +
+            data.tasks + (data.tasks === 1 ? ' task' : ' tasks') + ' for ' + data.people + (data.people === 1 ? ' person. ' : ' people. ');
+        } catch (_) { return ''; }
+      }
       const saveBtn = document.getElementById('btn-save');
       saveBtn.addEventListener('click', async () => {
         if (!formReady()) return;
@@ -1356,8 +1375,9 @@
           fieldMessage('', '');
           const decision = await publishDecision();
           if (!decision.ok) return;
+          const foresee = await toolChangePreview(name);
           if (!decision.skipConfirm && !(await mvConfirm(
-            (creating ? 'Create the agent “' : 'Save your changes to the ' + kindWord() + ' “') + name + '”? Its allowed actions, steps and independence settings take effect for everyone who uses it.' + (decision.line || ''),
+            (creating ? 'Create the agent “' : 'Save your changes to the ' + kindWord() + ' “') + name + '”? ' + foresee + 'Its allowed actions, steps and independence settings take effect for everyone who uses it.' + (decision.line || ''),
             { okText: creating ? 'Create agent' : (kindWord() === 'specialist' ? 'Save specialist' : 'Save agent') }
           ))) return;
           await call('POST', `/api/v1/agents/${name}/override`, { ...payload(), ...decision.extra });

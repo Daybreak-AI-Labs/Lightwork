@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import time
 
 from fastapi import HTTPException
@@ -216,6 +217,35 @@ def _approval_fields(event: dict) -> dict:
     return safe
 
 
+_IDENTIFIER = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:/@-]{0,127}")
+
+
+def resource_fingerprint(resource: str) -> str:
+    """A short fingerprint of a file, address or table an AI action reached.
+
+    The record shows the fingerprint, never the name (a name is tool input);
+    an auditor who knows the name finds the action by searching for it."""
+    return hashlib.sha256(str(resource).strip().encode()).hexdigest()[:16]
+
+
+def ai_action_fields(event: dict) -> dict:
+    """Who acted and what it reached, for an AI action's row (ADM-5): the agent
+    or specialist and model (identifiers, not content), and how many
+    resources it reached with their fingerprints."""
+    safe = {}
+    for name in ("agent", "model"):
+        value = event.get(name)
+        if isinstance(value, str) and _IDENTIFIER.fullmatch(value):
+            safe[name] = value
+    resources = event.get("resources")
+    if isinstance(resources, list):
+        names = [item for item in resources[:5] if isinstance(item, str) and item.strip()]
+        safe["resources_reached"] = len(names)
+        if names:
+            safe["resource_fingerprints"] = [resource_fingerprint(item) for item in names]
+    return safe
+
+
 def _audit_fields(event: dict, *, kind: str = "") -> dict:
     """Control metadata only; free-form explanations and tool names stay private."""
     safe = {key: event[key] for key in (
@@ -237,6 +267,7 @@ def _audit_fields(event: dict, *, kind: str = "") -> dict:
             safe["phase"] = event["phase"]
     if isinstance(event.get("stage"), str) and event["stage"] in {"input", "tool", "output"}:
         safe["stage"] = event["stage"]
+    safe.update(ai_action_fields(event))
     if isinstance(event.get("decision"), str) and event["decision"] in {"approve", "deny", "timeout"}:
         safe["decision"] = event["decision"]
     if isinstance(event.get("rule"), str) and event["rule"] in {"capability", "deny_actions", "deny_min_risk", "deny_above",

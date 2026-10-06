@@ -78,12 +78,16 @@ def _approvals(world, principal: str, *, can_decide: bool, now: float) -> list[d
 
 
 def _results(world, principal: str, *, owner_filter: str | None, now: float,
-             seen: set[int] | frozenset[int] = frozenset()) -> tuple[list[dict[str, Any]], int]:
-    """Recent results, less those already seen in the app (and how many)."""
+             seen: set[int] | frozenset[int] = frozenset(),
+             muted: set[int] | frozenset[int] = frozenset()) -> tuple[list[dict[str, Any]], int]:
+    """Recent results, less those already seen in the app (and how many) and
+    those the person muted."""
     since = now - RECENT_DAYS * 86400
     out, skipped = [], 0
     for goal in world.list_goals(owner=owner_filter, limit=200, order="desc"):
         if goal.status in ("active", "pending") or float(goal.updated_at or 0) < since:
+            continue
+        if goal.id in muted:
             continue
         if goal.id in seen:
             skipped += 1
@@ -159,7 +163,8 @@ def _expiring_keys(principal: str, *, owner_filter: str | None, now: float) -> l
 def compose_digest(world, principal: str, *, can_decide: bool, sees_everything: bool = False,
                    now: float | None = None, time_zone: str = "UTC",
                    spend_limit: float | None = None,
-                   seen_goal_ids: set[int] | frozenset[int] | None = None) -> dict[str, Any]:
+                   seen_goal_ids: set[int] | frozenset[int] | None = None,
+                   muted_goal_ids: set[int] | frozenset[int] | None = None) -> dict[str, Any]:
     """Everything one person has waiting, as plain data.
 
     ``can_decide`` (the ``operate`` permission) shows the approvals queue they
@@ -186,7 +191,7 @@ def compose_digest(world, principal: str, *, can_decide: bool, sees_everything: 
         spend = {"dollars": 0.0, "runs": 0}
     local = datetime.fromtimestamp(current, tz=_zone(time_zone))
     results, left_out = _results(world, principal, owner_filter=owner_filter, now=current,
-                                 seen=frozenset(seen_goal_ids or ()))
+                                 seen=frozenset(seen_goal_ids or ()), muted=frozenset(muted_goal_ids or ()))
     digest = {
         "principal": principal,
         "generated_at": current,
@@ -229,13 +234,30 @@ def _seen_in_app(principal: str) -> frozenset[int]:
         return frozenset()
 
 
+def _muted_in_app(principal: str, now: float | None = None) -> frozenset[int]:
+    """Tasks this person muted from an alert or a message: left out of the summary too."""
+    if not str(principal).startswith("user:"):
+        return frozenset()
+    try:
+        from . import experience_preferences
+        from .personal_notifications import validate_preferences
+
+        values = experience_preferences.state(principal)["values"].get("notification_preferences", {})
+        current = time.time() if now is None else float(now)
+        return frozenset(int(goal) for goal, until in validate_preferences(values)["muted_tasks"].items()
+                         if until > current)
+    except Exception:  # noqa: BLE001 -- unreadable preferences mute nothing
+        log.debug("digest mute lookup failed", exc_info=True)
+        return frozenset()
+
+
 def prepare_digest(world, principal: str, *, can_decide: bool, prefs: dict[str, Any],
                    sees_everything: bool = False, now: float | None = None) -> dict[str, Any]:
     """The summary exactly as it is sent: the scheduler, "Send my summary
     now" and "Preview today's summary" all build it here."""
     return compose_digest(world, principal, can_decide=can_decide, sees_everything=sees_everything,
                           now=now, time_zone=str(prefs.get("time_zone") or "UTC"),
-                          seen_goal_ids=_seen_in_app(principal))
+                          seen_goal_ids=_seen_in_app(principal), muted_goal_ids=_muted_in_app(principal, now))
 
 
 def subject(digest: dict[str, Any]) -> str:
@@ -266,6 +288,31 @@ def approval_line(row: dict[str, Any], time_zone: str) -> str:
     return f"#{row['id']} {row['action']} ({row['risk_label']}). {need}. {due_text(row.get('decide_by'), time_zone)}."
 
 
+#: What a result asks of the person, by its status (NOT-1: every line says
+#: what is needed and by when, as the in-app alerts do).
+_RESULT_ACTION = {
+    "done": "Review the result", "blocked": "Open the task to see what it needs",
+    "failed": "Open the task to see why it stopped, then run it again",
+    "cancelled": "Nothing is needed",
+}
+
+
+def result_line(row: dict[str, Any]) -> str:
+    """One result: what happened, what it needs and that nothing is due."""
+    action = _RESULT_ACTION.get(str(row.get("status") or ""), "Review the result")
+    return f"{row['title']} ({row['status_label']}). {action}. Nothing is due."
+
+
+def question_line(row: dict[str, Any]) -> str:
+    return f"{row['question']} Answer it so the task can continue. The task waits until you answer."
+
+
+def key_line(row: dict[str, Any]) -> str:
+    days = int(row.get("days_left") or 0)
+    return (f"{row.get('label') or row.get('prefix')} stops working in {days} day(s). "
+            "Replace it before then so your scripts keep running.")
+
+
 def question_href(row: dict[str, Any]) -> str:
     return f"/chat/goal/{row['goal_id']}#question-panel" if row.get("goal_id") else "/chat"
 
@@ -284,12 +331,30 @@ def _spend_line(spend: dict[str, Any]) -> str:
     return line + "."
 
 
+def _quiet_link(digest: dict[str, Any], dashboard_url: str, scope: str, key: str = "") -> str:
+    """A one-action link that mutes a task, or stops this summary (NOT-2)."""
+    principal = str(digest.get("principal") or "")
+    if not dashboard_url or not principal.startswith("user:"):
+        return ""
+    try:
+        from .notification_unsubscribe import link
+
+        return link(dashboard_url, principal, scope, key)
+    except Exception:  # noqa: BLE001 -- the summary still goes out without it
+        log.debug("digest unsubscribe link unavailable", exc_info=True)
+        return ""
+
+
 def render_text(digest: dict[str, Any], *, dashboard_url: str = "") -> str:
     zone = str(digest.get("time_zone") or "UTC")
 
     def opened(href: str) -> str:
         link = _link(dashboard_url, href)
         return f" Open: {link}" if link else ""
+
+    def muted(row: dict[str, Any]) -> str:
+        link = _quiet_link(digest, dashboard_url, "task", str(row.get("id") or ""))
+        return f" Mute alerts about this task: {link}" if link else ""
 
     lines = [f"Your Lightwork summary for {digest['date_label']}", WHY, ""]
     if digest["approvals"]:
@@ -299,17 +364,17 @@ def render_text(digest: dict[str, Any], *, dashboard_url: str = "") -> str:
         lines.append("")
     if digest["questions"]:
         lines.append(f"{len(digest['questions'])} question(s) an agent is waiting on:")
-        lines += [f"  - {q['question']} The task waits until you answer.{opened(question_href(q))}"
+        lines += [f"  - {question_line(q)}{opened(question_href(q))}"
                   for q in digest["questions"]]
         lines.append("")
     if digest["results"]:
         lines.append(f"{len(digest['results'])} recent result(s):")
-        lines += [f"  - {r['title']} ({r['status_label']}).{opened(r.get('href') or '/goals')}"
+        lines += [f"  - {result_line(r)}{opened(r.get('href') or '/goals')}{muted(r)}"
                   for r in digest["results"]]
         lines.append("")
     if digest.get("expiring_keys"):
         lines.append(f"{len(digest['expiring_keys'])} access key(s) stop working within 7 days:")
-        lines += [f"  - {k['label'] or k['prefix']} (in {k['days_left']} day(s))"
+        lines += [f"  - {key_line(k)}{opened(k.get('href') or '/api-keys')}"
                   for k in digest["expiring_keys"]]
         lines.append("")
     if digest["empty"]:
@@ -318,6 +383,9 @@ def render_text(digest: dict[str, Any], *, dashboard_url: str = "") -> str:
     if dashboard_url:
         lines += ["", f"Open My work: {dashboard_url.rstrip('/')}/me",
                   f"Change or stop this summary: {dashboard_url.rstrip('/')}/me#daily-summary"]
+        stop = _quiet_link(digest, dashboard_url, "summary")
+        if stop:
+            lines.append(f"Stop this summary in one click: {stop}")
     return "\n".join(lines)
 
 
@@ -337,27 +405,34 @@ def render_html(digest: dict[str, Any], *, dashboard_url: str = "") -> str:
         link = _link(dashboard_url, href)
         return f" <a href=\"{esc(link)}\">Open</a>" if link else ""
 
+    def muted(row: dict[str, Any]) -> str:
+        link = _quiet_link(digest, dashboard_url, "task", str(row.get("id") or ""))
+        return f" · <a href=\"{esc(link)}\">Mute alerts about this task</a>" if link else ""
+
     body = [f"<h1 style=\"font-size:20px\">Your Lightwork summary</h1><p>{esc(digest['date_label'])}</p>",
             f"<p>{esc(WHY)}</p>"]
     body.append(section(f"{len(digest['approvals'])} waiting for your decision", [
         esc(approval_line(a, zone)) + opened("/approvals#approval-" + str(a["id"]))
         for a in digest["approvals"]]))
     body.append(section("Questions an agent is waiting on", [
-        esc(q["question"]) + " The task waits until you answer." + opened(question_href(q))
+        esc(question_line(q)) + opened(question_href(q))
         for q in digest["questions"]]))
     body.append(section("Recent results", [
-        f"{esc(r['title'])} <em>({esc(r['status_label'])})</em>" + opened(r.get("href") or "/goals")
+        esc(result_line(r)) + opened(r.get("href") or "/goals") + muted(r)
         for r in digest["results"]]))
     body.append(section("Access keys that stop working within 7 days", [
-        f"{esc(k['label'] or k['prefix'])} <em>(in {k['days_left']} day(s))</em>"
+        esc(key_line(k)) + opened(k.get("href") or "/api-keys")
         for k in digest.get("expiring_keys", [])]))
     if digest["empty"]:
         body.append("<p>Nothing is waiting for you today.</p>")
     body.append(f"<p>{esc(_spend_line(digest['spending']))}</p>")
     if dashboard_url:
         link = esc(dashboard_url.rstrip("/") + "/me")
+        stop = _quiet_link(digest, dashboard_url, "summary")
         body.append(f"<p><a href=\"{link}\">Open My work</a> · "
-                    f"<a href=\"{link}#daily-summary\">Change or stop this summary</a></p>")
+                    f"<a href=\"{link}#daily-summary\">Change or stop this summary</a>"
+                    + (f" · <a href=\"{esc(stop)}\">Stop this summary in one click</a>" if stop else "")
+                    + "</p>")
     return ("<!doctype html><html lang=\"en\"><body style=\"font-family:sans-serif;"
             "max-width:640px;margin:auto;color:#222\">" + "".join(body) + "</body></html>")
 
@@ -411,8 +486,13 @@ def _send_email(principal: str, digest: dict[str, Any], links: list[dict[str, An
     if not addresses:
         return False
     base = dashboard_url()
-    return any(send_email(address, subject(digest), render_text(digest, dashboard_url=base),
-                          html_body=render_html(digest, dashboard_url=base))
+    stop = _quiet_link(digest, base, "summary")
+    # Mail apps show their own Unsubscribe button for this header and press
+    # it with one POST (RFC 8058); it stops this summary.
+    extra: dict[str, Any] = {"html_body": render_html(digest, dashboard_url=base)}
+    if stop:
+        extra["headers"] = {"List-Unsubscribe": f"<{stop}>", "List-Unsubscribe-Post": "List-Unsubscribe=One-Click"}
+    return any(send_email(address, subject(digest), render_text(digest, dashboard_url=base), **extra)
                for address in addresses)
 
 

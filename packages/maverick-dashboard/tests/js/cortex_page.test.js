@@ -61,7 +61,7 @@ test("a failed search uses the shared plain error text", async () => {
   const ui = fixture({ respond: () => json({ detail: [{ loc: ["body", "k"], msg: "bad" }] }, 422) });
   ui.document.getElementById("ctx-recall-form").dispatchEvent(new ui.window.Event("submit", { cancelable: true }));
   await settle(); await settle();
-  assert.equal(ui.document.getElementById("ctx-recall-state").textContent, "Could not search.");
+  assert.equal(ui.document.getElementById("ctx-recall-state").textContent, "Could not search the memory.");
 });
 
 test("turning a source on confirms first and uses the admin feature switch", async () => {

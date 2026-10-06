@@ -183,9 +183,9 @@ test("contract parser accepts only the exact server-owned surface", () => {
   const normalized = portal.validateContract(validContract());
   assert.equal(normalized.schema, "lightwork.third-party-collaboration-contract.v1");
   assert.deepEqual(Array.from(normalized.required_question_ids), ["encryption-at-rest"]);
-  assert.throws(() => portal.validateContract({ ...validContract(), tenant_id: "tenant-a" }), /closed contract/);
-  assert.throws(() => portal.validateContract({ ...validContract(), provider_id: "provider-a" }), /closed contract/);
-  assert.throws(() => portal.validateContract({ ...validContract(), risk_score: 99 }), /closed contract/);
+  assert.throws(() => portal.validateContract({ ...validContract(), tenant_id: "tenant-a" }), /fields this page does not expect/);
+  assert.throws(() => portal.validateContract({ ...validContract(), provider_id: "provider-a" }), /fields this page does not expect/);
+  assert.throws(() => portal.validateContract({ ...validContract(), risk_score: 99 }), /fields this page does not expect/);
   assert.throws(() => portal.validateContract({ ...validContract(), limitations: [] }), /limitations/);
 });
 
@@ -193,14 +193,14 @@ test("contract parser enforces question visibility and file bounds", () => {
   const { LightworkThirdPartyPortal: portal } = parserContext();
   assert.throws(
     () => portal.validateContract({ ...validContract(), answered_question_ids: ["server-hidden-question"] }),
-    /outside the visible contract/,
+    /questions that are not on this page/,
   );
   assert.throws(
     () => portal.validateContract({
       ...validContract(),
       questions: [{ ...validContract().questions[0], response_type: "free_text" }],
     }),
-    /unsupported/,
+    /kind of answer this page does not support/,
   );
   assert.throws(
     () => portal.validateContract({
@@ -227,14 +227,14 @@ test("contract parser enforces question visibility and file bounds", () => {
 test("receipt parsers reject added scoring and identity claims", () => {
   const { LightworkThirdPartyPortal: portal } = parserContext();
   assert.equal(portal.validateDraftReceipt(draftReceipt()).revision, 1);
-  assert.throws(() => portal.validateDraftReceipt({ ...draftReceipt(), score: 100 }), /closed contract/);
+  assert.throws(() => portal.validateDraftReceipt({ ...draftReceipt(), score: 100 }), /fields this page does not expect/);
   assert.equal(portal.validateFinalReceipt(finalReceipt()).evidence_status, "respondent_attestation_unverified");
-  assert.throws(() => portal.validateFinalReceipt({ ...finalReceipt(), verified_identity: true }), /closed contract/);
+  assert.throws(() => portal.validateFinalReceipt({ ...finalReceipt(), verified_identity: true }), /fields this page does not expect/);
   const policy = { maximum_total_bytes: 100 };
   const file = { size: 20 };
   assert.equal(portal.validateEvidenceReceipt(evidenceReceipt(file), policy).size_bytes, 20);
-  assert.throws(() => portal.validateEvidenceReceipt({ ...evidenceReceipt(file), tenant_id: "t" }, policy), /closed contract/);
-  assert.throws(() => portal.validateEvidenceReceipt(evidenceReceipt({ size: 101 }), policy), /outside its bound/);
+  assert.throws(() => portal.validateEvidenceReceipt({ ...evidenceReceipt(file), tenant_id: "t" }, policy), /fields this page does not expect/);
+  assert.throws(() => portal.validateEvidenceReceipt(evidenceReceipt({ size: 101 }), policy), /outside the allowed range/);
 });
 
 test("file sizes and types read as words, never raw units or type codes", () => {

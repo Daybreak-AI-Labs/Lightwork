@@ -68,9 +68,11 @@
                {% if s.maximum is not none %}max="{{ s.maximum }}"{% endif %}
                step="{{ s.step }}"
                value="{{ '' if s.value is none else s.value }}"
-               {% if s.optional %}placeholder="No limit"{% endif %}>
+               {% if s.optional %}placeholder="No limit"{% endif %}
+               {% if s.preview_url %}data-preview-url="{{ s.preview_url }}"{% endif %}>
         <span class="muted" id="{{ cid }}-unit">{{ s.unit }}</span>
       </div>
+      {% if s.preview_url %}<div class="settings-all-preview" data-preview aria-live="polite"></div>{% endif %}
     {% elif s.control == 'rate' %}
       <div class="settings-all-number">
         <label for="{{ cid }}-count" class="sr-only">{{ s.label }}: how many</label>
@@ -285,7 +287,7 @@
     {% endif %}
     {% if not s.locked %}
     <div class="settings-all-actions">
-      <button class="btn btn--primary" type="button" data-save>Save</button>
+      <button class="btn btn--primary" type="button" data-save>Save setting</button>
       {% if s.test_label %}<button class="btn btn--ghost" type="button" data-test>{{ s.test_label }}</button>{% endif %}
       <button class="btn btn--ghost" type="button" data-reset>Reset to product default</button>
       <button class="btn btn--ghost" type="button" data-inherit>Use inherited value</button>

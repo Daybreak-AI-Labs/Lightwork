@@ -40,7 +40,7 @@
   <section class="panel" aria-labelledby="cp-policy-heading">
     <div class="section-head">
       <h2 id="cp-policy-heading">Consent policies</h2>
-      <button class="btn btn--primary" id="cp-policy-new" type="button"{% if not cp_on or not cp_admin %} disabled{% endif %}>New policy</button>
+      <button class="btn btn--primary" id="cp-policy-new" type="button"{% if not cp_on or not cp_admin %} disabled{% endif %}>Create policy</button>
     </div>
     <p class="muted">A policy lists what you use personal data for and the legal reason for each use. Publishing creates a new version; earlier versions are kept.</p>
     {% if not cp_admin %}<p class="muted">Only an administrator can publish policies.</p>{% endif %}
@@ -148,7 +148,7 @@
         <label>Partner<select class="select" name="vendor_id"></select></label>
         <label>Policy<select class="select" name="policy_key"></select></label>
         <div class="cw-actions">
-          <button class="btn btn--primary" type="submit">Check</button>
+          <button class="btn btn--primary" type="submit">Check consent</button>
           <button class="btn btn--ghost" type="button" data-cp-close="cp-decision-form">Close</button>
         </div>
         <div id="cp-decision" class="cw-wide cw-result" role="status" aria-live="polite"></div>

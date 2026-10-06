@@ -71,7 +71,7 @@
   }
 
   function errorText(failure, action) {
-    return window.mvErrorText ? window.mvErrorText(failure, action) : 'Could not ' + action + '. Please try again.';
+    return window.mvErrorText ? window.mvErrorText(failure, action) : 'Could not ' + action + '. Try again.';
   }
   function rows(scope) {
     return Array.prototype.slice.call((scope || root).querySelectorAll('.settings-all-row[data-setting-id]'));
@@ -1361,7 +1361,7 @@
       doc.value = '';
       return;
     }
-    var level = event.target.closest('select[data-preview-url]');
+    var level = event.target.closest('select[data-preview-url], input[data-preview-url]');
     if (level) await showPreview(level.closest('.settings-all-row'), level);
   });
 
@@ -1415,6 +1415,24 @@
     box.appendChild(only);
   }
 
+  // ---- what a shorter keep period would delete -------------------------------
+  // Report only, from a trial run of the clean-up (maverick.policy_preview).
+  function retentionPreview(box, data) {
+    var lead = document.createElement('p');
+    // The server names the unit in the right number ("1 message", "3 messages").
+    lead.textContent = data.days == null ? data.basis
+      : 'At the next clean-up, ' + data.count + ' ' + data.unit + ' older than ' +
+        count(data.days, 'day', 'days') + ' would be deleted.';
+    box.appendChild(lead);
+    if (data.days != null) {
+      var basis = document.createElement('p'); basis.className = 'muted'; basis.textContent = data.basis;
+      box.appendChild(basis);
+    }
+    var only = document.createElement('p'), strong = document.createElement('strong');
+    strong.textContent = 'Preview only. Nothing changes until you save.';
+    only.appendChild(strong); box.appendChild(only);
+  }
+
   // ---- what saving a choice would also change -------------------------------
   async function showPreview(row, select) {
     var box = row.querySelector('[data-preview]');
@@ -1434,6 +1452,7 @@
         return;
       }
       if (data.kind === 'approval_checks') { approvalPreview(box, data); return; }
+      if (data.kind === 'retention') { retentionPreview(box, data); return; }
       var lead = document.createElement('p');
       lead.textContent = (data.items || []).length
         ? 'Saving this also changes:' : 'Saving this changes nothing else: every setting it covers already matches.';

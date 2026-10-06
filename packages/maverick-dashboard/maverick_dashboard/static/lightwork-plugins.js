@@ -80,7 +80,7 @@
       return "This isn't allowed right now: you may need administrator rights, or installing may be switched off.";
     }
     if (global.mvErrorText) return global.mvErrorText(response, "save the plugin change");
-    return "Something went wrong. Please try again.";
+    return "Something went wrong. Try again.";
   }
 
   function defaultPayload(form, submitter) {

@@ -110,11 +110,11 @@
     if (!payload || payload.format !== 1 || !payload.editor || !payload.editor.flow || !Array.isArray(payload.editor.flow.nodes) || !payload.base) throw new Error('This recovery copy is not a supported flow draft.');
     var state = payload.editor, source = payload.base;
     if (!Number.isInteger(source.version) || source.version < 0 || typeof source.id !== 'string' || typeof source.revision !== 'string' ||
-        typeof state.id !== 'string' || typeof state.name !== 'string' || !Array.isArray(state.inputs) || typeof payload.brief !== 'string') throw new Error('This flow recovery copy has invalid editor fields. Current work was kept.');
+        typeof state.id !== 'string' || typeof state.name !== 'string' || !Array.isArray(state.inputs) || typeof payload.brief !== 'string') throw new Error('This saved copy of the flow is missing some of its fields, so it was not restored. Current work was kept.');
     var pending = [state.flow];
     while (pending.length) {
       var graph = pending.pop();
-      if (!graph || !Array.isArray(graph.nodes) || !graph.nodes.every(function (node) { return node && typeof node.id === 'string' && typeof node.kind === 'string'; })) throw new Error('This flow recovery copy has invalid steps. Current work was kept.');
+      if (!graph || !Array.isArray(graph.nodes) || !graph.nodes.every(function (node) { return node && typeof node.id === 'string' && typeof node.kind === 'string'; })) throw new Error('This saved copy of the flow has steps that could not be read, so it was not restored. Current work was kept.');
       graph.nodes.forEach(function (node) { if (node.body) pending.push(node.body); });
     }
     var before = JSON.stringify(recoveryPayload());
@@ -1620,7 +1620,7 @@
     if (window.mvErrorText) return window.mvErrorText(response, what);
     var status = response && response.status;
     if (status === 409) return 'Could not ' + what + '. This flow was changed since you opened it. Reload it and try again.';
-    return 'Could not ' + what + '. Please try again.';
+    return 'Could not ' + what + '. Try again.';
   }
   // Problems in words, naming the step ("The step “Send to Slack” needs an action chosen.").
   function problemText(f) {
@@ -2043,7 +2043,7 @@
       if (retry) retry.hidden = !draftNotes.length;
     } catch (e) {
       if (generation === draftGeneration) {
-        say(e.message || 'Could not draft the flow. Please try again.', true);
+        say(e.message || 'Could not draft the flow. Try again.', true);
         if (retry) retry.hidden = false;
       }
     } finally {
@@ -2712,7 +2712,7 @@
     if (!handoff || handoff.kind !== 'flow' || typeof handoff.brief !== 'string' || !handoff.brief.trim() ||
         Array.from(handoff.brief).length > 8000 || typeof handoff.context !== 'string' || !handoff.context ||
         !Number.isFinite(handoff.created_at) || Date.now() - handoff.created_at < 0 || Date.now() - handoff.created_at > 600000) {
-      say('This prepared draft is invalid or expired. Go back and prepare a brief of 8,000 characters or fewer.', true); return;
+      say('This prepared draft cannot be used or has expired. Go back and prepare a brief of 8,000 characters or fewer.', true); return;
     }
     var brief = document.getElementById('fd-nl');
     function hasDraft() { return brief.value.trim() || draftIsDirty() || rootFlow.id || rootFlow.name || rootFlow.nodes.length; }

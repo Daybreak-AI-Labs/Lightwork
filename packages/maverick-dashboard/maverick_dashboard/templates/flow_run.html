@@ -99,8 +99,7 @@
     <p id="lx-status" role="status" aria-live="polite" tabindex="-1">Checking whether this run can be an example…</p>
     <div class="fr__actions"><button type="button" class="btn btn--ghost" id="lx-refresh">Check current status</button></div>
     <div id="lx-enroll" hidden>
-      <p class="fr__msg">Lightwork keeps this run's starting details and what each action sent and got back, so you can review
-        it and let new flows learn from it. Approving each action stays a separate step on this page.</p>
+      <p class="fr__msg">Lightwork keeps this run's starting details and what each action sent and got back. You can review it and let new flows learn from it. Approving each action stays a separate step on this page.</p>
       <p class="fr__msg">Check what each part holds. Lightwork filled these in from this run and earlier ones; change anything that's
         wrong. A value that doesn't match stops the example from being kept, but never stops the run.</p>
       <div id="lx-describe"></div>
@@ -175,7 +174,7 @@
   var flowName = '';
   var assignedReviewOnly = false;
   function human(v) { return window.mvHuman ? window.mvHuman(v) : String(v || '').replace(/_/g, ' '); }
-  function plain(failure, what) { return window.mvErrorText ? window.mvErrorText(failure, what) : 'Could not ' + what + '. Please try again.'; }
+  function plain(failure, what) { return window.mvErrorText ? window.mvErrorText(failure, what) : 'Could not ' + what + '. Try again.'; }
   function stepLabel(id) {
     var n = (flowNodes || []).filter(function (x) { return x.id === id; })[0];
     return n ? (n.title || KIND_LABEL[n.kind] || 'that step') : 'the step that stopped';
@@ -706,5 +705,7 @@
     .catch(function () { watch(); });
 })();
 </script>
+{% if comments_enabled() and not request.query_params.get('approval_review') %}{% from "_comments.html" import comments %}{{ comments('run', run_id, 'Comments on this run') }}
+<script src="/static/lightwork-comments.js" defer></script>{% endif %}
 {% endblock %}
 {% block scripts_extra %}<script src="/static/lightwork-result-feedback.js" defer></script>{% if not request.query_params.get('approval_review') %}{% if learning_example_panel %}<script src="/static/lightwork-learning-example.js" defer></script>{% endif %}{% if learning_capture_panel %}<script src="/static/lightwork-learning-capture.js" defer></script>{% endif %}{% endif %}{% endblock %}

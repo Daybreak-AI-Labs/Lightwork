@@ -7,7 +7,7 @@ test('Copilot keeps a short account-scoped conversation in this tab and lets the
 
   const question = 'What can I do on this page?';
   await page.getByRole('textbox', {name: 'Ask Copilot about this page'}).fill(question);
-  await page.getByRole('button', {name: 'Send', exact: true}).click();
+  await page.getByRole('button', {name: 'Send question', exact: true}).click();
   const log = page.locator('#mv-copilot-log');
   await expect(log).toContainText(question);
   await expect.poll(async () => log.locator('.mv-copilot__msg--bot').count()).toBeGreaterThan(0);
@@ -23,7 +23,7 @@ test('Copilot keeps a short account-scoped conversation in this tab and lets the
   await expect(page.locator('#mv-copilot-log')).toBeEmpty();
 
   await page.getByRole('textbox', {name: 'Ask Copilot about this page'}).fill('What can I inspect?');
-  await page.getByRole('button', {name: 'Send', exact: true}).click();
+  await page.getByRole('button', {name: 'Send question', exact: true}).click();
   await expect(page.locator('#mv-copilot-log .mv-copilot__msg--bot')).toHaveCount(1);
   await page.getByRole('button', {name: 'Clear recent chat'}).click();
   await expect(page.locator('#mv-copilot-log')).toBeEmpty();

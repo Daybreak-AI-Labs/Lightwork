@@ -931,6 +931,29 @@ class TestToolLifecycleAudit:
         )
 
     @pytest.mark.asyncio
+    async def test_the_call_record_names_the_model_and_what_it_reached(
+        self, ctx, monkeypatch,
+    ):
+        """ADM-5: an AI action's record says which model acted and which
+        files, addresses or tables it reached."""
+        rows: list[tuple[str, dict]] = []
+        monkeypatch.setattr(
+            "maverick.audit.audit_event",
+            lambda kind, **payload: rows.append((str(kind), payload)) or True,
+        )
+
+        async def _succeed(_name, _args):
+            return "contents"
+
+        agent = Agent(ctx=ctx, role="researcher", brief="x")
+        monkeypatch.setattr(agent.tools, "run", _succeed)
+        await agent._run_tool("read_file", {"path": "reports/q3.csv", "limit": 10})
+
+        call = next(payload for kind, payload in rows if kind == "tool_call")
+        assert call["model"] == agent.model and call["model"]
+        assert call["resources"] == ["reports/q3.csv"]
+
+    @pytest.mark.asyncio
     async def test_tool_error_records_one_correlated_error_result(
         self, ctx, monkeypatch,
     ):

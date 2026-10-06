@@ -98,10 +98,33 @@
       if(offset&&page.revision!==current.revision){lock(false);await browse(0);return;}
       current.revision=page.revision;pageOffset=page.offset;nextOffset=page.next;list.replaceChildren();
       pageStatus.textContent=page.total+' saved questions. '+(page.cases.length?'Choose a question to review or change it.':'No questions are saved for this model.');
-      page.cases.forEach(function(row){var box=node('article',undefined,list);box.className='stack';if(!row.supported){node('h4',row.question,box);node('p',row.notice,box);return;}var choose=node('button',row.question,box);choose.type='button';choose.className='btn btn--ghost';choose.style.whiteSpace='pre-wrap';choose.style.overflowWrap='anywhere';choose.style.maxWidth='100%';choose.addEventListener('click',async function(){if(busy)return;if(unsaved&&window.mvConfirm&&!await window.mvConfirm('Replace the entered draft with this saved question? Your existing recovery copy remains separate.',{okText:'Open saved question'}))return;selectedCase={model:page.model,reference:row.value};question.value=row.question;expected.value=row.expected;unsaved=false;invalidate();editing.textContent='Correct the selected saved question. Other saved information stays in place.';reviewButton.textContent='Review correction';selection();lock(false);question.focus();});});
-      previous.hidden=!pageOffset;next.hidden=nextOffset===null;
+      bulkRows.clear();bulkModel=page.model;page.cases.forEach(function(row){var box=node('article',undefined,list);box.className='stack';if(!row.supported){node('h4',row.question,box);node('p',row.notice,box);return;}if(current.revision){box.dataset.bulkId=row.value;box.dataset.bulkLabel=String(row.question).slice(0,120);bulkRows.set(row.value,row);}var choose=node('button',row.question,box);choose.type='button';choose.className='btn btn--ghost';choose.style.whiteSpace='pre-wrap';choose.style.overflowWrap='anywhere';choose.style.maxWidth='100%';choose.addEventListener('click',async function(){if(busy)return;if(unsaved&&window.mvConfirm&&!await window.mvConfirm('Replace the entered draft with this saved question? Your existing recovery copy remains separate.',{okText:'Open saved question'}))return;selectedCase={model:page.model,reference:row.value};question.value=row.question;expected.value=row.expected;unsaved=false;invalidate();editing.textContent='Correct the selected saved question. Other saved information stays in place.';reviewButton.textContent='Review correction';selection();lock(false);question.focus();});});
+      previous.hidden=!pageOffset;next.hidden=nextOffset===null;bulkReady();
     }catch(error){if(started===generation){if(error.accessChanged){changed();return;}list.replaceChildren();pageStatus.textContent=error.message;}}
     finally{if(started===generation)lock(false);}
+  }
+  // Retire many saved questions at once (ADM-7): filter, select all
+  // matching, one counted confirmation, then a report of each question. Each
+  // retirement goes through the same review and save as a single one.
+  var bulkRows=new Map(),bulkModel='',bulk=null;
+  function bulkReady(){
+    if(!window.mvBulk)return;
+    if(bulk){bulk.refresh();return;}
+    if(!list.querySelector('article[data-bulk-id]'))return;
+    bulk=window.mvBulk({list:list,rows:'article[data-bulk-id]',noun:'question',nouns:'questions',filter:true,
+      actions:[{label:'Retire',verb:'Retire',danger:true,note:'Retired questions leave future checks. Their history stays.',
+        run:async function(item){
+          var row=bulkRows.get(item.id);if(!row||busy)throw{bulkReason:'Refresh the current collection before retiring questions.'};
+          try{
+            var state=await request('');
+            if(!current||state.context!==current.context)throw new Error('Your account or workspace changed. Refresh before continuing.');
+            var reviewed=await request('/change-review',{context:state.context,revision:state.revision,model:bulkModel,question:row.question,expected:row.expected,reference:item.id,action:'retire'});
+            var receipt=await request('/save',{token:reviewed.token,confirmed:true});
+            if(!receipt.confirmed)throw new Error(receipt.message||'Lightwork could not confirm the retirement.');
+          }catch(error){throw{bulkReason:error.bulkReason||error.message};}
+          return{note:'retired'};
+        },
+        after:function(){if(current)current.revision='';void load().then(function(){return browse(0);});}}]});
   }
   model.addEventListener('change',function(){resetSelection();list.replaceChildren();pageOffset=0;nextOffset=null;void browse(0);});
   document.getElementById('learning-case-browse').addEventListener('toggle',function(event){if(event.currentTarget.open&&!list.childElementCount)void browse(0);});

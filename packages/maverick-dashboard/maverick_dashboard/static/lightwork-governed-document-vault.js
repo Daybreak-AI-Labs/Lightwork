@@ -85,7 +85,7 @@
     if (status === 409) return "This document changed since you opened the page. Refresh and try again.";
     if (status === 413) return "That file is too large.";
     if (status === 415) return "That kind of file can't be stored here. Try a PDF, image or office document.";
-    return "Something went wrong. Please try again.";
+    return "Something went wrong. Try again.";
   }
 
   async function parseJsonResponse(response) {
@@ -198,7 +198,7 @@
       const result = await callback();
       return result;
     } catch (error) {
-      const message = error && error.code ? error.message : "Something went wrong. Please try again.";
+      const message = error && error.code ? error.message : "Something went wrong. Try again.";
       setStatus(operationStatus, message, true);
       technical(error && error.technical ? error.technical : undefined);
       throw error;

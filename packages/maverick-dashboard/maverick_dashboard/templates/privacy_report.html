@@ -8,8 +8,8 @@
   .rpt-note { color: var(--muted); font-size: var(--text-sm); }
   @media print {
     .sidebar, .topbar, nav, .rpt-actions, #mv-sidebar, header { display: none !important; }
-    .panel { break-inside: avoid; border: 1px solid #ccc; }
-    body { background: #fff; color: #000; }
+    .panel { break-inside: avoid; border: 1px solid var(--print-border); }
+    body { background: var(--print-paper); color: var(--print-ink-strong); }
   }
 </style>
 {% set status_labels = {
@@ -24,9 +24,9 @@
 {% macro days(n) %}{{ n }} {{ 'day' if n == 1 else 'days' }}{% endmacro %}
 
   <h1 class="page-title">Privacy program report</h1>
-  <p class="page-subtitle">Every number below is counted from your own records: assessments,
+  <p class="page-subtitle">Every number below is counted from your own records. These are assessments,
     vendor data agreements (DPAs), AI systems, the record of processing (GDPR Article 30),
-    data-subject requests and breaches. Generated {{ r.generated }}.</p>
+    data-subject requests and breaches. Generated {{ r.generated_at | datetime('absolute') }}.</p>
   <div class="rpt-actions">
     <button class="btn btn--primary" id="rpt-print" type="button">Print or save as PDF</button>
     <a class="btn btn--ghost" href="/api/v1/privacy/report" download="privacy-program-report.json">Download data</a>
@@ -80,8 +80,7 @@
       <div class="stat"><div class="num">{{ r.dsar.handled_on_time }} of {{ r.dsar.handled }}</div><div class="label">Handled requests answered on time</div></div>
       <div class="stat"><div class="num {{ 'pw-age-warn' if r.dsar.closed_without_response }}">{{ r.dsar.closed_without_response }}</div><div class="label">Closed without a recorded answer</div></div>
     </div>
-    <p class="rpt-note">A request counts as answered only when the answer is on record: recorded when it was
-      closed, marked answered by a named person, or a completion or refusal notice that was actually sent.
+    <p class="rpt-note">A request counts as answered only when the answer is on record. That means recorded when it was closed, marked answered by a named person, or a completion or refusal notice that was actually sent.
       A deletion request also needs what happened to the data, or the lawful reason for keeping it.
       Still open includes requests waiting for email confirmation or for deletion.
       This report uses recorded answers. It does not confirm delivery or deletion.

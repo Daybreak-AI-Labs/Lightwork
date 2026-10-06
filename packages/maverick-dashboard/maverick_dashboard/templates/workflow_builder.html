@@ -446,7 +446,7 @@
         <div class="picker__list" id="tp-list"></div>
         <div class="picker__foot">
           <span class="wf__hint" id="tp-hint"></span>
-          <button type="button" class="btn btn--primary" id="tp-done">{{ ui("Done") }}</button>
+          <button type="button" class="btn btn--primary" id="tp-done">{{ ui("Close the list") }}</button>
         </div>
       </div>
     </div>
@@ -819,7 +819,7 @@
       mvCopy(lines.join('\n'));
     });
     function plainErr(failure, what) {
-      return window.mvErrorText ? window.mvErrorText(failure, what) : 'Could not ' + what + '. Please try again.';
+      return window.mvErrorText ? window.mvErrorText(failure, what) : 'Could not ' + what + '. Try again.';
     }
     var inputFields = document.getElementById('wf-input-fields');
     function addInputField(name, field) {
@@ -1716,7 +1716,7 @@
       if (!handoff || handoff.kind !== 'agent' || typeof handoff.brief !== 'string' || !handoff.brief.trim() ||
           Array.from(handoff.brief).length > 8000 || typeof handoff.context !== 'string' || !handoff.context ||
           !Number.isFinite(handoff.created_at) || Date.now() - handoff.created_at < 0 || Date.now() - handoff.created_at > 600000) {
-        setStatus('This saved draft is invalid or expired. Return to Chat and prepare a brief of 8,000 characters or fewer.', true); return;
+        setStatus('This saved draft cannot be used or has expired. Return to Chat and prepare a brief of 8,000 characters or fewer.', true); return;
       }
       function hasDraft() {
         return brief.value.trim() || templateWorkspaceStarted || playbookWorkspaceStarted || fileInput.files.length ||

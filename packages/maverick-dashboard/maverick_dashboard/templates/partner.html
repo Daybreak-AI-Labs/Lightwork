@@ -13,8 +13,7 @@
 </style>
 
   <h1 class="page-title">Partner fleet</h1>
-  <p class="page-subtitle">Every client setup you run, on one screen — whether it is
-    working, which agent version it runs, its branding, and the value each one has
+  <p class="page-subtitle">Every client setup you run, on one screen. See whether it is working, which agent version it runs, its branding, and the value each one has
     counted, added up. Lightwork checks each client's own health and value pages.</p>
 
   <div class="pf-tiles" id="pf-tiles"></div>
@@ -58,7 +57,7 @@
   function fmt(n) { return (n || 0).toLocaleString(); }
   function problem(r, action) {
     return window.mvErrorText ? window.mvErrorText({ status: r && r.status }, action)
-                              : 'Could not ' + action + '. Please try again.';
+                              : 'Could not ' + action + '. Try again.';
   }
   function offline(action) { return 'Could not ' + action + ' — check your connection and try again.'; }
 

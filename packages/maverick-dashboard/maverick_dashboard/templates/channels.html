@@ -256,7 +256,7 @@
         <td>{% if link.status == 'active' %}Connected{% elif link.status == 'revoked' %}Disconnected{% else %}Pending audit{% endif %}</td><td>
           <form method="post" action="/channels/oidc/revoke" data-channels-ok="Disconnect chat account" data-channels-confirm="Disconnect this chat account from Lightwork tasks?">
             <input type="hidden" name="link_id" value="{{ link.id }}" />
-            <button type="submit" class="btn btn--danger">{% if link.status == 'active' %}Disconnect{% else %}Finish removal{% endif %}</button>
+            <button type="submit" class="btn btn--danger">{% if link.status == 'active' %}Disconnect account{% else %}Finish removal{% endif %}</button>
           </form>
         </td></tr>{% endfor %}</tbody>
     </table>

@@ -85,7 +85,7 @@
     catch (_error) { throw problem("Server response was not valid UTF-8.", "invalid_response", response.status); }
     var payload;
     try { payload = text ? JSON.parse(text) : {}; }
-    catch (_error) { throw problem("Request failed: the server returned an invalid JSON response.", "invalid_response", response.status); }
+    catch (_error) { throw problem("The reply from the server could not be read. Try again.", "invalid_response", response.status); }
     if (!response.ok) { throw problem("request failed", "request_failed", response.status); }
     return payload;
   }

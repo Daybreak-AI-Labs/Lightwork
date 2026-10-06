@@ -388,6 +388,26 @@ async def assign_label(request: Request, label_id: str, body: AssignLabelIn) -> 
     )
 
 
+class PolicyPreviewIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    document: dict[str, Any]
+
+
+@router.post("/policies/preview")
+async def preview_policy(request: Request, body: PolicyPreviewIn) -> dict:
+    """Which recorded requests to use data a rule would have covered in the
+    last 30 days. Report only: nothing is saved or switched on (ADM-3)."""
+    require_permission(request, "operate")
+    from maverick import policy_preview
+
+    ops, tenant, store = _authority()
+    requests = await _call(ops, store.list_records, tenant, "request", limit=499)
+    try:
+        return await run_in_threadpool(policy_preview.data_use_rule, body.document, requests)
+    except ops.DataUseValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
 @router.post("/policies/{policy_id}/versions", status_code=201)
 async def put_policy_version(
     request: Request, policy_id: str, body: PolicyVersionIn

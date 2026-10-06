@@ -56,7 +56,7 @@
 
   <div class="bd-kpis" id="bd-kpis"></div>
   <p class="sv-note" id="sv-basis">Estimated savings are directional, not measured: finished tasks ×
-    {{ cfg.hours_per_task }} hours per task × {{ cfg.currency }} {{ cfg.hourly_rate }} an hour, minus what
+    {{ cfg.hours_per_task }} hours per task × {{ cfg.hourly_rate | money(currency=cfg.currency) }} an hour, minus what
     Lightwork spent.
     {% if not assumptions_confirmed %}These are Lightwork&rsquo;s starting numbers, not yours yet.{% endif %}
     <a href="#sv-assumptions">{{ 'Change these numbers' if can_manage_assumptions else 'See these numbers' }}</a>{% if not can_manage_assumptions %}

@@ -323,3 +323,18 @@ def test_pending_withdrawal_blocks_content_and_recovers_without_rewriting_review
     assert review._open(context, selected.records.get(row["id"]))["review"] == bundle["body"]["review"]
     assert selected.get(context, source.id, run.run_id, detail=True)["withdrawal_detail"] == {
         "rationale": "Withdraw consent for new training use."}
+
+
+def test_a_grant_from_a_reviewed_decision_still_issues_a_valid_signed_bundle(enabled):
+    """The reviewed decision flow passes its decision identity to the grant. The
+    signed bundle must still validate, or nothing granted that way can teach a flow."""
+    selected, context, source, run, row = accepted()
+    decision = {"operation": "a" * 32, "context": "b" * 64, "binding": "c" * 64}
+    granted = selected.grant_training(context, source.id, run.run_id, expected_revision=row["revision"],
+        expected_episode_sha256=row["episode_sha256"], use_until=row["retain_until"] - 100,
+        retain_derived_copies=True, rationale="Allow bounded recipe copies; downloads are not remotely erased.",
+        decision=decision)
+    bundle = issue(selected, context, source, run, granted)
+    verified = provenance.verify_bundle(bundle, trust=provenance.local_trust(context.tenant),
+                                        expected_tenant=context.tenant, now=time.time())
+    assert verified["signature_status"] == "trusted"

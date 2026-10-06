@@ -55,7 +55,7 @@
       </dl>
       <p class="approval-private-why"><strong>Why you see this:</strong>
         {% if p.in_chat %}You're one of the people who can decide it. Your role{{ role_text }} lets you approve risky actions, and you're linked in Slack or Teams, where its card is posted. Decide there with the buttons on the card.
-        {% else %}Your role{{ role_text }} lets you approve risky actions in this workspace, but this request comes from a colleague's private task, so you can't open or decide it here.{% endif %}</p>
+        {% else %}Your role{{ role_text }} lets you approve risky actions in this workspace. This request comes from a colleague's private task, so you can't open or decide it here.{% endif %}</p>
     </article>{% endfor %}
     </div>
   </section>{% endif %}

@@ -29,22 +29,29 @@ test('administrator reviews a local suggestion, admits its exact version and wit
     {headers: {'X-Browser-Principal': 'browser-colleague'}});
   expect(denied.status()).toBe(403);
 
-  await suggestion.getByRole('button', {name: 'Add this skill'}).click();
-  const confirm = page.getByRole('dialog', {name: /Add.*agents.*skills/});
-  await expect(confirm).toBeVisible();
-  await confirm.getByRole('button', {name: 'Add skill'}).click();
-  await expect(page.locator('#to-learned-status')).toContainText(/Added customer renewal timing/i);
+  // Adding is a reviewed change: the exact instructions are shown, and the add stays
+  // disabled until the administrator confirms they read them.
+  await suggestion.getByRole('button', {name: 'Review adding this skill'}).click();
+  const review = page.locator('#to-learned-review');
+  await expect(review.getByRole('heading', {name: 'Review this skill before adding it'})).toBeVisible();
+  const add = review.getByRole('button', {name: 'Add reviewed skill'});
+  await expect(add).toBeDisabled();
+  await review.getByLabel('I reviewed this exact change and all displayed instructions.').check();
+  await add.click();
+  await expect(page.locator('#to-learned-status')).toContainText('Your original reviewed skill was added.');
   await expect(page.locator('#to-learned-added')).toContainText(/customer renewal timing/i);
   await expect(page.locator('#installed-skills [data-skill="customer-renewal-timing"]')).toBeVisible();
 
   await page.reload();
   await expect(page.locator('#to-learned-added')).toContainText(/customer renewal timing/i);
   await expect(page.locator('#to-learned-list')).toBeEmpty();
-  await page.locator('#to-learned-added').getByRole('button', {name: /Remove customer renewal timing/i}).click();
-  const remove = page.getByRole('dialog', {name: /Remove.*agents.*skills/});
-  await expect(remove).toBeVisible();
-  await remove.getByRole('button', {name: 'Remove skill'}).click();
-  await expect(page.locator('#to-learned-status')).toContainText(/Removed customer renewal timing/i);
+  await page.locator('#to-learned-added').getByRole('button', {name: /Review removal of customer renewal timing/i}).click();
+  await expect(review.getByRole('heading', {name: 'Review this skill removal'})).toBeVisible();
+  const remove = review.getByRole('button', {name: 'Remove reviewed skill'});
+  await expect(remove).toBeDisabled();
+  await review.getByLabel('I reviewed this exact change and all displayed instructions.').check();
+  await remove.click();
+  await expect(page.locator('#to-learned-result')).toContainText('Your original skill change');
   await expect(page.locator('#installed-skills [data-skill="customer-renewal-timing"]')).toHaveCount(0);
 
   await page.setViewportSize({width: 320, height: 900});

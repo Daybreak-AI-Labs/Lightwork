@@ -209,7 +209,7 @@
       if (response.status === 403) {
         throw fail("You do not have access to search knowledge, or your session changed. Reload the page and try again.");
       }
-      throw fail(window.mvErrorText ? window.mvErrorText(response, "search") : "The search did not work. Try again.");
+      throw fail(window.mvErrorText ? window.mvErrorText(response, "search the memory") : "The search did not work. Try again.");
     }
     return payload;
   }
@@ -327,7 +327,7 @@
       if (lattice) { lattice.pulse(Math.max(3, count * 2)); }
     } catch (error) {
       stateEl.textContent = error && error.code === "invalid_input" ? error.message
-        : (window.mvErrorText ? window.mvErrorText(error, "search") : "The search did not work. Try again.");
+        : (window.mvErrorText ? window.mvErrorText(error, "search the memory") : "The search did not work. Try again.");
     } finally {
       submit.disabled = false;
       submit.removeAttribute("aria-busy");

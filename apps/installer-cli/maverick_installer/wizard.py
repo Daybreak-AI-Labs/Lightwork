@@ -7177,6 +7177,45 @@ def pick_support() -> dict[str, Any]:
     return support
 
 
+def pick_collaboration() -> dict[str, Any]:
+    """Comments and @mentions on tasks, runs, approvals and policies. ON by default.
+
+    People discuss a piece of work where it lives and mention a colleague, who
+    gets it in their own notifications. Only people who can open the item can
+    read its comments or be mentioned. Written as ``[collaboration] comments``
+    (``maverick.comments``); declining writes ``comments = false``.
+    """
+    if _q_confirm(
+        "Let people comment on tasks, runs, approval requests and policies, and mention a colleague "
+        "to notify them? Only people who can open the item see its comments.",
+        default=True,
+    ):
+        return {}
+    return {"comments": False}
+
+
+def pick_suggestions() -> dict[str, Any]:
+    """Suggested edits to AI use rules, data use rules and privacy notices. ON by default.
+
+    Agents and colleagues suggest new wording; each suggestion changes nothing
+    until a person accepts it. Written as ``[collaboration] suggestions`` and
+    ``ai_suggestions`` (``maverick.policy_suggestions``); declining writes false.
+    """
+    if not _q_confirm(
+        "Let agents and colleagues suggest edits to your AI use rules, data use rules and privacy notices? "
+        "Each suggestion shows what it changes and why. Accepting one creates a draft that still needs its usual approval.",
+        default=True,
+    ):
+        return {"suggestions": False}
+    if _q_confirm(
+        "Let the AI assistant draft a suggested edit when someone asks? Each draft uses the AI service "
+        "within the spending cap for one task.",
+        default=True,
+    ):
+        return {}
+    return {"ai_suggestions": False}
+
+
 def pick_deliverable_handoff() -> tuple[dict[str, Any], list[str]]:
     """System-of-record hand-off for APPROVED deliverables. Returns
     (config, env_vars_needed).
@@ -10096,6 +10135,7 @@ def write_config(
     my_work: dict[str, Any] | None = None,
     notifications_email: dict[str, Any] | None = None,
     support: dict[str, Any] | None = None,
+    collaboration: dict[str, Any] | None = None,
     web_search_enabled: bool = False,
     skills: dict[str, Any] | None = None,
     self_learning: dict[str, Any] | None = None,
@@ -10300,6 +10340,7 @@ def write_config(
     lines += _cfg_table("notifications.email", notifications_email)
     lines += _cfg_table("my_work", my_work)
     lines += _cfg_table("support", support)
+    lines += _cfg_table("collaboration", collaboration)
     lines += _cfg_table("webhooks", webhooks)
     lines += _cfg_table("deliverables", deliverables)
     lines += _cfg_table("personas", personas)
@@ -11630,6 +11671,9 @@ def run(fast: bool = False, resume: bool = False) -> int:
     my_work_cfg, notifications_email, summary_envs = _daily_summary_step(state, channels)
     support_cfg = state.get("_support") if isinstance(state.get("_support"), dict) else pick_support()
     state["_support"] = support_cfg
+    collaboration_cfg = (state.get("_collaboration") if isinstance(state.get("_collaboration"), dict)
+                         else {**pick_collaboration(), **pick_suggestions()})
+    state["_collaboration"] = collaboration_cfg
     _save_partial(state)
 
     _announce()
@@ -11716,6 +11760,7 @@ def run(fast: bool = False, resume: bool = False) -> int:
         my_work=my_work_cfg,
         notifications_email=notifications_email,
         support=support_cfg,
+        collaboration=collaboration_cfg,
         web_search_enabled=web_search_enabled,
         skills=signed_skills
         if (

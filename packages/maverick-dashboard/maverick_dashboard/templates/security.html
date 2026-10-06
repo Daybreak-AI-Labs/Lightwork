@@ -477,7 +477,7 @@
             {% if policy_status == 'draft' %}<button class="btn" type="submit" data-set="target_status=review">Send for review</button>{% endif %}
             {% if policy_status == 'review' %}<button class="btn" type="submit" data-set="target_status=approved">Approve</button><button class="btn" type="submit" data-set="target_status=draft">Back to draft</button>{% endif %}
             {% if policy_status in ['approved','attested'] %}<button class="btn" type="submit" data-set="target_status=review">Review again</button>{% endif %}
-            <button class="btn btn--danger" type="submit" data-set="target_status=retired" data-confirm="Retire this policy? It can no longer be changed.">Retire</button>
+            <button class="btn btn--danger" type="submit" data-set="target_status=retired" data-confirm="Retire this policy? It can no longer be changed.">Retire policy</button>
             </span><span role="status" class="muted"></span>
           </form>
           {% if policy_status in ['approved','attested'] %}

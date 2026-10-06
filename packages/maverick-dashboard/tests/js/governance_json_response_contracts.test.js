@@ -226,7 +226,7 @@ for (const [file, functionName, args] of [...JSON_CLIENTS, ...TEXT_CLIENTS]) {
     };
 
     await assert.rejects(harness(file, functionName, args).invoke(response), (error) => {
-      assert.equal(error.message, MALFORMED_MESSAGE[file] || "Request failed: the server returned an invalid JSON response.");
+      assert.equal(error.message, MALFORMED_MESSAGE[file] || "The reply from the server could not be read. Try again.");
       assert.equal(error.message.includes(secret), false);
       return true;
     });
@@ -286,7 +286,7 @@ test("redact.html marks malformed 2xx as failed without exposing its body", asyn
   });
 
   const message = client.element("proof-badge").textContent;
-  assert.equal(message, "Could not read the result. Please try again.");
+  assert.equal(message, "Could not read the result. Try again.");
   assert.equal(message.includes(secret), false);
   assert.equal(client.element("proof-badge").className, "badge failure");
 });
@@ -299,6 +299,6 @@ test("redact.html shows a plain sentence instead of the server detail", async ()
     async json() { return { detail: "Reviewed redaction error." }; },
   });
 
-  assert.equal(client.element("proof-badge").textContent, "Could not check the text. Please try again.");
+  assert.equal(client.element("proof-badge").textContent, "Could not check the text. Try again.");
   assert.equal(client.element("proof-badge").className, "badge failure");
 });

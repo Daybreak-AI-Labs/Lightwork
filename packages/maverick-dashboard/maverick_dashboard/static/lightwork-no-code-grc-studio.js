@@ -390,7 +390,7 @@
   function plainError(error, action) {
     if (error && error.plain) { return error.message; }
     if (typeof global.mvErrorText === "function") { return global.mvErrorText(error, action); }
-    return "Could not " + action + ". Please try again.";
+    return "Could not " + action + ". Try again.";
   }
   function report(message, technical) {
     operationStatus.textContent = message;

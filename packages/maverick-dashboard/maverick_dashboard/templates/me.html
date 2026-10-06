@@ -134,7 +134,7 @@
         <td>{% if link.status == 'active' %}Connected{% elif link.status == 'revoked' %}Disconnected; finish removal{% else %}Confirmation needs retry{% endif %}</td><td>
           <form method="post" action="/me/channels/oidc/unlink" class="users-inline">
             <input type="hidden" name="link_id" value="{{ link.id }}" />
-            <button type="submit" class="btn btn--danger">{% if link.status == 'active' %}Disconnect{% else %}Finish removal{% endif %}</button>
+            <button type="submit" class="btn btn--danger">{% if link.status == 'active' %}Disconnect account{% else %}Finish removal{% endif %}</button>
           </form>
         </td></tr>
       {% endfor %}</tbody>
@@ -170,7 +170,7 @@
             <form method="post" action="/me/channels/unlink" class="users-inline">
               <input type="hidden" name="channel" value="{{ l.channel }}" />
               <input type="hidden" name="external_id" value="{{ l.external_id }}" />
-              <button type="submit" class="btn btn--danger" aria-label="Unlink {{ l.channel }} account {{ l.external_id }}">Unlink</button>
+              <button type="submit" class="btn btn--danger" aria-label="Unlink account {{ l.external_id }} on {{ l.channel }}">Unlink account</button>
             </form>
           </td>
         </tr>

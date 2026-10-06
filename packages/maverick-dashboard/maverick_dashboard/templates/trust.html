@@ -120,7 +120,7 @@
                     aria-label="Unblock {{ label }}">Unblock</button>
             {% else %}
             <button type="button" class="btn btn--danger" data-trust-revoke="{{ a.id }}" data-name="{{ label }}"
-                    aria-label="Block {{ label }}">Block</button>
+                    aria-label="Block agent {{ label }}">Block agent</button>
             {% endif %}
             {% if a.managed %}<button type="button" class="btn btn--ghost" data-trust-remove="{{ a.id }}" data-name="{{ label }}"
                     aria-label="Remove {{ label }}">Remove</button>{% endif %}

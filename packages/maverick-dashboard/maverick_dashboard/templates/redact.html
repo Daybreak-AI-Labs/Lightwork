@@ -40,13 +40,13 @@
         let d;
         try { d = await res.json(); }
         catch (e) {
-          const msg = "Could not read the result. Please try again.";
+          const msg = "Could not read the result. Try again.";
           badge.className = "badge failure"; badge.textContent = msg;
           mvToast(msg, { error: true });
           return;
         }
         if (!res.ok) {
-          const msg = window.mvErrorText ? window.mvErrorText({ status: res.status, headers: res.headers }, "check the text") : "Could not check the text. Please try again.";
+          const msg = window.mvErrorText ? window.mvErrorText({ status: res.status, headers: res.headers }, "check the text") : "Could not check the text. Try again.";
           badge.className = "badge failure"; badge.textContent = msg;
           mvToast(msg, { error: true });
           return;

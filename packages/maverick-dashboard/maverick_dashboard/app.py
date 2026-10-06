@@ -362,6 +362,32 @@ templates.env.globals["static_url"] = static_url
 templates.env.add_extension(AssetVersionExtension)
 
 
+def _comments_enabled() -> bool:
+    """Whether comment threads show on tasks, runs, approvals and policies."""
+    try:
+        from maverick.comments import enabled
+
+        return enabled()
+    except Exception:  # noqa: BLE001 -- an unreadable setting shows no thread
+        return False
+
+
+templates.env.globals["comments_enabled"] = _comments_enabled
+
+
+def _suggestions_enabled() -> bool:
+    """Whether suggested edits show on AI use rules."""
+    try:
+        from maverick.policy_suggestions import enabled
+
+        return enabled()
+    except Exception:  # noqa: BLE001 -- an unreadable setting shows no suggestions
+        return False
+
+
+templates.env.globals["suggestions_enabled"] = _suggestions_enabled
+
+
 class StaticCacheMiddleware:
     """Cache matching public asset versions; revalidate public page controllers.
 
@@ -1637,12 +1663,15 @@ app.middleware("http")(practice_mode.middleware)
 templates.context_processors.append(practice_mode.context)
 from .billing_invoice_api import router as billing_invoice_router  # noqa: E402
 from .channel_check_api import router as channel_check_router  # noqa: E402
+from .comments_api import router as comments_router  # noqa: E402
 from .dsar_export_handoff_api import router as dsar_export_handoff_router  # noqa: E402
 from .feature_actions_api import page_router as feature_actions_page_router  # noqa: E402
 from .feature_actions_api import router as feature_actions_router  # noqa: E402
 from .flow_action_fields import router as flow_action_fields_router  # noqa: E402
 from .mcp_presets import router as mcp_presets_router  # noqa: E402
 from .page_assets import router as page_assets_router  # noqa: E402
+from .policy_preview_api import router as policy_preview_router  # noqa: E402
+from .policy_suggestions_api import router as policy_suggestions_router  # noqa: E402
 from .provider_spending_api import router as provider_spending_router  # noqa: E402
 from .recovery_api import router as recovery_router  # noqa: E402
 from .recovery_mode import RecoveryOnlyMiddleware  # noqa: E402
@@ -1659,6 +1688,9 @@ from .voice_unlock_api import router as voice_unlock_router  # noqa: E402
 app.include_router(recovery_router)
 app.include_router(provider_spending_router)
 app.include_router(support_router)
+app.include_router(comments_router)
+app.include_router(policy_suggestions_router)
+app.include_router(policy_preview_router)
 app.include_router(system_checks_router)
 app.include_router(feature_actions_router)
 app.include_router(feature_actions_page_router)
@@ -2880,6 +2912,9 @@ async def bearer_auth(request: Request, call_next):
         # DSAR response links are addressed by their unguessable token,
         # exactly like /form/ — the requester has no dashboard bearer.
         or path.startswith("/dsar/response/")
+        # One-action mute links in notification messages: the signed link is
+        # the credential and only quiets that one person's own notifications.
+        or path.startswith("/unsubscribe/")
         or path.startswith("/saml/")
         or path.startswith("/auth/invite/")
         # External integrations authenticate inside their route family
@@ -4916,6 +4951,11 @@ async def privacy_page(request: Request) -> HTMLResponse:
     records, estate = await run_in_threadpool(_privacy_page_data)
     ctx["records"] = records
     ctx["estate"] = estate
+    if records.get("dsar"):
+        from . import people_directory
+
+        # Who a request can be assigned to: people who may work privacy requests.
+        ctx["dsar_assignees"] = await run_in_threadpool(people_directory.candidates, "operate")
     return templates.TemplateResponse(request, "privacy.html", ctx)
 
 
@@ -7063,6 +7103,31 @@ def _global_audit_tail(request: Request, audit_log, n: int, day: str | None) -> 
     return [{**e, "scope": "deployment"} for e in rows if isinstance(e, dict)]
 
 
+def _audit_matcher(*, kind: str, person: str, agent: str, q: str):
+    """The activity log's filter: kind of event, person, agent or specialist,
+    and words. Words also find an AI action by a file, address or table it
+    reached, which the row shows only as a fingerprint (ADM-5)."""
+    from . import audit_actions_api as _audit_plain
+    from .content_access import resource_fingerprint
+
+    needle = q.lower()
+    resource_hit = resource_fingerprint(q) if q else ""
+
+    def matches(e: dict) -> bool:
+        if kind and e.get("kind") != kind:
+            return False
+        if person and _audit_plain.event_person(e) != person:
+            return False
+        if agent and e.get("agent") != agent:
+            return False
+        if q and resource_hit in (e.get("resource_fingerprints") or []):
+            return True
+        return not needle or (needle in json.dumps(e, default=str).lower()
+                              or needle in _audit_plain.kind_label(e.get("kind")).lower())
+
+    return matches
+
+
 @app.get("/audit", response_class=HTMLResponse)
 async def audit_page(request: Request) -> HTMLResponse:
     """The activity log: recent events for a day or a date range, filtered by
@@ -7104,16 +7169,9 @@ async def audit_page(request: Request) -> HTMLResponse:
     read_report = ReadReport()
     kind = (request.query_params.get("kind") or "").strip()
     person = (request.query_params.get("person") or "").strip()
+    agent = (request.query_params.get("agent") or "").strip()[:128]
     q = (request.query_params.get("q") or "").strip()[:200]
-    needle = q.lower()
-
-    def _matches(e: dict) -> bool:
-        if kind and e.get("kind") != kind:
-            return False
-        if person and _audit_plain.event_person(e) != person:
-            return False
-        return not needle or (needle in json.dumps(e, default=str).lower()
-                              or needle in _audit_plain.kind_label(e.get("kind")).lower())
+    _matches = _audit_matcher(kind=kind, person=person, agent=agent, q=q)
 
     from datetime import datetime, timezone
     from urllib.parse import urlencode
@@ -7123,7 +7181,7 @@ async def audit_page(request: Request) -> HTMLResponse:
     from .audit_search import search_events
 
     window_note, next_href = "", None
-    events, kind_set, people_set = [], set(), set()
+    events, kind_set, people_set, agent_set = [], set(), set(), set()
     deployment_filter_view = False
     displayed_audit_log = audit_log
     if not filter_error:
@@ -7152,6 +7210,7 @@ async def audit_page(request: Request) -> HTMLResponse:
             before=before_event, scan_limit=_AUDIT_RANGE_SCAN_LIMIT,
         )
         events, kind_set, people_set = result["events"], result["kinds"], result["people"]
+        agent_set = result.get("agents", set())
         if deployment_filter_view:
             events = [{**event, "scope": "deployment"} for event in events]
         if not result["cursor_found"]:
@@ -7171,7 +7230,7 @@ async def audit_page(request: Request) -> HTMLResponse:
     # Deployment-wide records have a separate chain and are shown as a
     # clearly bounded recent view, never silently mixed into this cursor.
     deployment_events = []
-    if not (filter_error or since or until or before_event or kind or person or q):
+    if not (filter_error or since or until or before_event or kind or person or agent or q):
         deployment_events = await run_in_threadpool(
             _global_audit_tail, request, audit_log, min(n, 200), day)
     order = "oldest" if request.query_params.get("order") == "oldest" else "newest"
@@ -7194,6 +7253,8 @@ async def audit_page(request: Request) -> HTMLResponse:
             "kinds": kinds,
             "person": person,
             "people": [{"value": p, "label": _idfmt.humanize_principal(p).name} for p in people],
+            "agent": agent,
+            "agents": [{"value": a, "label": _idfmt.humanize(a)} for a in sorted(agent_set)],
             "q": q,
             "order": order,
             "can_admin": has_permission(request, "admin"),
@@ -7491,7 +7552,7 @@ async def simulate_research_page(
         research_error = (
             "Sign in with your own named account to run a practice study."
             if exc.status_code in (401, 403)
-            else "The practice study could not start. Please try again."
+            else "The practice study could not start. Try again."
         )
     except ValueError:
         status_code = 400
@@ -8251,6 +8312,14 @@ def _compliance_view(framework: str) -> dict:
         checks = compliance_report()
     except Exception:  # pragma: no cover - never 500 the console if core is absent
         return {"framework": framework, "groups": {}, "summary": {}, "disclaimer": ""}
+    history = {"checked_at": None, "controls": {}, "changes": []}
+    try:
+        from maverick.compliance_history import record
+
+        # Each visit is a check too: keep when it ran and since when each status holds.
+        history = record(checks)
+    except Exception:  # noqa: BLE001 -- the page renders without its history
+        log.warning("compliance history unavailable", exc_info=True)
     if framework != "all":
         checks = [c for c in checks if c.framework == framework]
     # Group by framework bucket ("eu"/"us") for labelled tables on the page.
@@ -8274,6 +8343,7 @@ def _compliance_view(framework: str) -> dict:
         "groups": groups,
         "summary": summary,
         "disclaimer": COMPLIANCE_DISCLAIMER,
+        "control_history": history,
     }
 
 
@@ -8308,9 +8378,10 @@ async def compliance_page(request: Request, tab: str = "") -> HTMLResponse:
         return with_landing_headers(templates.TemplateResponse(request, "autonomous_compliance.html", context))
     view = _compliance_view(request.query_params.get("framework") or "all")
     view["compliance_tabs"] = tabs if areas_on(request) else None
-    from .compliance_controls_api import RETENTION_FIELDS, guide_for
+    from .compliance_controls_api import RETENTION_FIELDS, STATUS_TEXT, guide_for
 
     view["guide_for"] = guide_for
+    view["status_word"] = lambda status: STATUS_TEXT.get(status, "Unknown").lower()
     view["retention_fields"] = RETENTION_FIELDS
     view["report_download_context"] = _conversation_context(request)
     view["can_admin"] = has_permission(request, "admin")
@@ -10899,9 +10970,20 @@ def chat_page(request: Request, compose: str = "") -> HTMLResponse:
             "chat_capability": _CHAT_CAPABILITY,
             "compose_form": compose_form,
             "compose_form_available": page_visible(request, "/goal-builder"),
+            "typical_cost": _own_typical_cost(request, w),
             "channels": _goal_builder_channels() if compose_form else [],
         },
     )
+
+
+def _own_typical_cost(request: Request, world) -> dict | None:
+    """What the signed-in person's own past tasks cost (none without a named account)."""
+    principal = caller_principal(request) or ""
+    if not principal.startswith("user:"):
+        return None
+    from maverick.typical_cost import typical_cost
+
+    return typical_cost(world, owner=principal)
 
 
 def _goal_builder_channels() -> list:

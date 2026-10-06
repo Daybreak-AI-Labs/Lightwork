@@ -22,7 +22,7 @@
 {% set readiness = r.get('readiness', {}) or {} %}
 {% call hero('Governed workspaces', 'Security readiness report',
              subtitle='Board pack',
-             lede='Made ' ~ r.get('generated','unknown') ~ ' from your security records: every control, what it
+             lede='Made ' ~ (r.generated_at | datetime('absolute') if r.get('generated_at') is number else 'at an unknown time') ~ ' from your security records: every control, what it
                    does, how far it is put in place, the reviewed evidence behind that, and who owns it.') %}
   {{ state('Current state',
            readiness.get('coverage_percent', 0) ~ '% of controls covered',

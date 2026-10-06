@@ -1158,7 +1158,7 @@
       throw error;
     }
     if (requested) {
-      if (!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/.test(requested)) throw new Error("The request link is invalid. Select a request from this workspace.");
+      if (!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/.test(requested)) throw new Error("The request link does not work. Select a request from this workspace.");
       render(await api("/cases/" + encodeURIComponent(requested)));
       try { window.sessionStorage.removeItem(connectionTaskKey); } catch (_) {}
       return "Linked request loaded. Review its evidence and current status.";

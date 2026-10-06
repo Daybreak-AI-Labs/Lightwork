@@ -74,7 +74,7 @@
     }
     if (!responseText) { return {}; }
     try { return JSON.parse(responseText); }
-    catch (_error) { throw plain("Lightwork sent an answer this page could not read. Please try again."); }
+    catch (_error) { throw plain("Lightwork sent an answer this page could not read. Try again."); }
   }
   async function request(path, method, body) {
     var options = { method: method || "GET", credentials: "same-origin", cache: "no-store", redirect: "error",

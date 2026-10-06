@@ -259,4 +259,6 @@
     });
   })();
   </script>
+  {% if comments_enabled() %}{% from "_comments.html" import comments %}{{ comments('policy', 'spending-limits', 'Comments on the spending limits') }}
+  <script src="/static/lightwork-comments.js" defer></script>{% endif %}
 {% endblock %}

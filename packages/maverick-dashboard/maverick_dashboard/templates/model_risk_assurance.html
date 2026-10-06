@@ -894,7 +894,7 @@ window.mraPlain = (failure, action) => (typeof window.mvErrorText === "function"
   ? window.mvErrorText(failure, action)
   : (failure instanceof TypeError
     ? "Could not reach the server — check your connection and try again."
-    : "Could not " + action + ". Please try again."));
+    : "Could not " + action + ". Try again."));
 // A refusal's body is never read: release it so the request ends instead of
 // staying open (the page never went quiet).
 window.mraFailure = response => {

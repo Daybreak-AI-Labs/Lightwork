@@ -2747,11 +2747,13 @@ class WorldModel:
         return [(str(r["owner"] or ""), float(r["ended_at"]), float(r["cost"] or 0.0)) for r in rows]
 
     def task_costs_for(self, *, domain: str = "", execution_principal: str = "",
-                       limit: int = 500) -> list[float]:
+                       limit: int = 500, owner: str = "") -> list[float]:
         """What the most recent finished tasks run by one specialist (``domain``)
-        or one agent (``execution_principal``) cost, newest first: the sum of
-        each task's finished runs. Read-only history for "typical cost"."""
-        column, value = ("g.domain", domain) if domain else ("g.execution_principal", execution_principal)
+        or one agent (``execution_principal``), or started by one person
+        (``owner``), cost, newest first: the sum of each task's finished runs.
+        Read-only history for "typical cost"."""
+        column, value = (("g.domain", domain) if domain else ("g.execution_principal", execution_principal)
+                         if execution_principal else ("g.owner", owner))
         if not value:
             return []
         rows = self._read_all(

@@ -44,13 +44,13 @@
             <td class="mcp-actions">
               <form method="post" action="/mcp/test">
                 <input type="hidden" name="name" value="{{ s.name }}" />
-                <button type="submit" class="btn btn--primary" aria-label="Test {{ label }}">Test</button>
+                <button type="submit" class="btn btn--primary" aria-label="Test server {{ label }}">Test server</button>
               </form>
               {% if s.removable %}
               <form method="post" action="/mcp/remove"
                     data-mcp-confirm="Remove the {{ label }} tool server? Agents will stop using its tools.">
                 <input type="hidden" name="name" value="{{ s.name }}" />
-                <button type="submit" class="btn btn--danger" aria-label="Remove {{ label }}">Remove</button>
+                <button type="submit" class="btn btn--danger" aria-label="Remove server {{ label }}">Remove server</button>
               </form>
               {% else %}<span class="muted">Only your administrator can remove it.</span>{% endif %}
             </td>
