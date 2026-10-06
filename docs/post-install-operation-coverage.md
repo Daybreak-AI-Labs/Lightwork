@@ -1297,7 +1297,117 @@ All settings accepts zero through ten retries, matching the native runner.
 Zero remains zero when the effective configuration is read, rather than silently
 becoming the default five. Eleven is outside the supported bound. The ordinary
 help explains that steps above the chosen ceiling need adjustment before running.
-This narrow correction closes the original UX-648 setting mismatch. Generic
-catalog-save original receipts and typed Copilot write coverage are a separate
-operating gap; inspecting the current setting after a lost reply does not prove
-that a particular original save succeeded.
+This narrow correction closes the original UX-648 setting mismatch. The later
+October 6 catalog-save work below supplies exact original receipts and protected
+Copilot handoff; inspecting a current setting alone still does not prove that a
+particular original save succeeded.
+
+## October 6 complete Settings, specialist-question and withdrawal journeys
+
+All settings now uses a complete sealed review and an actor/workspace-bound
+native original receipt for catalog changes, profile selection, presets and
+secret updates. Copilot opens those same ordinary controls and reads original
+results without exposing secret values. The actual settings writer checks
+authority and review expiry after its physical lock and validation waits,
+immediately before replacement. An uncertain original is never reapplied.
+An audit delivery failure leaves the result unconfirmed until canonical readback
+records the pending audit event. Full supported history has Older/Newer controls;
+the oldest entries in a 103-request collection remain reachable.
+
+The specialist-question panel in Chat now reviews the complete current question,
+selected specialists, connected model and limits before starting one durable
+request. It uses the native specialist/judge transport, permits at most one
+physical attempt and retains original results independently of a worker restart.
+An interrupted reply, disabled connection, expired review or lost permission
+cannot silently repeat the question. Admission audit failures stop before the
+provider; a completion audit failure withholds confirmation until its canonical
+event is recorded. The native fixture exercised three physical specialist/judge
+responses through a local transport with no outside provider traffic. All 48
+retained originals in the additional history fixture remained visible.
+
+Published privacy banners can now be withdrawn after the website/app definition
+changes. The review binds the complete current definition and exact active
+publication; its immutable native receipt distinguishes this actor's accepted
+withdrawal from a different person's later action. Ordinary controls and typed
+Copilot share the transaction and original readback. Failed receipt writes roll
+back the publication change. The public resolver already refused a stale
+publication before this repair; withdrawal records the explicit stopped state.
+Restoring a publication from a different configuration remains refused.
+Browser/site caches and independently hosted copies cannot be recalled.
+
+Actual native 320px journeys covered complete review and cancellation, interrupted
+replies, reload and zero-repeat original recovery, current-source changes, actual
+role loss, foreign actors and expiry while the physical writer waited. These
+checks used disposable local customer accounts and storage, without hosted CI.
+
+## October 6 exact learned values and independent structural transfer
+
+Large whole-number answers remain exact through local-rule qualification,
+requalification, work restructuring and Copilot result display. Ordinary expected
+answer controls accept the native output range without passing it through browser
+floating-point conversion. Public response projections send unsafe browser
+integers as decimal strings; native artifacts and execution continue to use
+their exact integers. Retained request and case collections expose their full
+supported thousand-record bound and explicitly refuse larger collections rather
+than silently hiding the oldest fifty entries.
+
+Structural sharing was exercised across two independent running installations
+with different storage, keys, owners, private input names, constants and bounds.
+The donor's downloaded file contained anonymous operation/type structure and no
+source names, values, constants, bounds or original run identifiers. The recipient
+used its ordinary file chooser, entered its own exact expected answers, checked
+two locally retained native cases and all three finite local input states, and
+matched an independent same-information binding search. Its unpublished local
+rule then returned exact 24-digit answers through ordinary controls and typed
+Copilot. A dropped qualification reply recovered its original result, and retry
+added no native execution. The donor could read no private recipient outcome.
+This establishes this bounded transfer journey, not general information privacy,
+unseen business accuracy, transferred savings or a novel research advantage.
+
+Designer and Teach preserve complete learned artifacts, native large-number
+values and signed recipe lineage through ordinary Save, Undo/Redo, Try, download
+and encrypted recovery. A recovered copy from the older format inherits exact
+artifact values only from a freshly authorized matching base definition; a
+different projection or changed base cannot supply missing evidence. Internal
+custody metadata stays out of normal exports and customer comparison rows.
+Ordinary teaching examples, refinement and distinguishing questions now accept
+the native exact whole-number output range. Bounds are rejected explicitly;
+constants and long text are not silently shortened. Native 320px journeys saved
+and executed genuine large-answer rules, recovered both current and older
+encrypted drafts, answered an actual distinguishing question and saved a
+currently admitted signed recipe without dropping its lineage. No AI fallback
+or connected business action was used for those local-rule checks.
+
+## October 6 complete finite teaching-question acquisition
+
+Learning's Plan teaching questions page and fourteen typed Copilot operations
+now share one source-bound native service. Owners select a saved taught step,
+optional published local check rule and named output, earlier permitted effort
+reports, explicit defaults and separately reviewed use grants. The plan includes
+every possible answer branch for the complete declared finite domain, rather
+than selecting a question from only the examples already observed. It reports
+the same-information exhaustive decision-policy comparison alongside the current
+estimated and actually reported effort. Neither an estimated effort point nor
+agreement with a saved rule is reported as a measured customer improvement.
+
+Ordinary Yes/No, text and exact whole-number answers narrow the full alternatives.
+All declared situations can then be checked by both the proposed rule and the
+unchanged native published reference. A matching result opens an exact private
+unsaved draft in Teach. Every contributing source/answer must allow creation of
+that separately owned rule; Teach shows the complete adoption review and requires
+explicit independent acceptance before the normal current-version Save writer.
+The saved rule remains unpublished. Later source-report withdrawal stops future
+question-planning reuse; a separately accepted saved rule has its ordinary owner,
+withdrawal and publication controls.
+
+The actual native fixture checked six full Boolean behaviors across seven
+situations, two reported distinguishing answers, fourteen complete native
+Boolean rule/reference runs and eight large-answer native runs. Ordinary Teach
+accepted the exact large draft only after its complete review. Interrupted
+originals survived a process restart without running again or restoring spent
+allowance. Changed publications, transferred workflows, withdrawn grants, actual
+writer expiry and actual role loss stopped further work. Original-owner
+metadata-only withdrawal/removal stayed reachable after source removal and when
+the capability was off; it did not expose private source bodies or revive grants.
+All paths used native local services and 320px ordinary controls, without an
+outside provider or hosted CI.

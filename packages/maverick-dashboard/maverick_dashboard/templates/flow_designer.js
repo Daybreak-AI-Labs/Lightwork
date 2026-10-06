@@ -113,9 +113,10 @@
       var current = response.ok && await (typeof FDRecipeInputs !== 'undefined' && typeof response.text === 'function'
         ? FDRecipeInputs.responseJson(response) : response.json());
       if (!current || current.id !== source.id || current.revision !== source.revision || current.version !== source.version) throw new Error('The saved flow changed after this recovery copy. Current work was kept. Compare the copies and copy your edits into the latest flow before saving.');
+      FDRecipeInputs.inheritEvidence(state.flow, current);
     }
     if (before !== JSON.stringify(recoveryPayload())) throw new Error('Your newer canvas edits were kept. Review the recovery copy again.');
-    if (state.flow.learned_recipe != null) FDRecipeInputs.flowText(state.flow);
+    FDRecipeInputs.flowText(state.flow);
     pushHistory();
     rootFlow = JSON.parse(JSON.stringify(state.flow)); flow = rootFlow;
     rootFlow.version = source.version; rootFlow.revision = source.revision;
@@ -235,7 +236,7 @@
     });
     var notify = document.getElementById('fd-notify');
     snapshot._editorSettings.notify = !!(notify && notify.checked);
-    return snapshot.learned_recipe == null ? JSON.stringify(snapshot) : FDRecipeInputs.flowText(snapshot);
+    return FDRecipeInputs.flowText(snapshot);
   }
   // An explicit creation receipt can bind the exact unsaved history that
   // preceded that request. Empty revisions alone never match saved history.
@@ -1380,7 +1381,7 @@
     var out = serializeFlow({ id: (idInput.value || rootFlow.id || '').trim(),
       name: nameInput.value || rootFlow.name || 'Untitled flow', start: rootFlow.start, nodes: rootFlow.nodes,
       learned_recipe: rootFlow.learned_recipe, recipe_lineage: rootFlow.recipe_lineage,
-      recipe_teaching: rootFlow.recipe_teaching });
+      recipe_teaching: rootFlow.recipe_teaching, _fdEvidence: rootFlow._fdEvidence });
     out.notify = !!(notifyEl && notifyEl.checked);
     out.max_seconds = parseFloat((document.getElementById('fd-maxsec') || {}).value) || 0;
     out.max_dollars = parseFloat((document.getElementById('fd-maxdollars') || {}).value) || 0;
@@ -1538,6 +1539,7 @@
       learned_recipe: f.learned_recipe == null ? null : JSON.parse(JSON.stringify(f.learned_recipe)),
       recipe_lineage: f.recipe_lineage == null ? null : JSON.parse(JSON.stringify(f.recipe_lineage)),
       recipe_teaching: f.recipe_teaching == null ? null : JSON.parse(JSON.stringify(f.recipe_teaching)),
+      _fdEvidence: f._fdEvidence == null ? null : JSON.parse(JSON.stringify(f._fdEvidence)),
       published_version: parseInt(f.published_version, 10) || 0,
       published_revision: String(f.published_revision || '') };
     var notifyEl = document.getElementById('fd-notify'); if (notifyEl) notifyEl.checked = !!f.notify;
@@ -1674,8 +1676,7 @@
     say('Saving…');
     try {
       var response = await apiFetch('/api/v1/flows', {
-        method: 'POST', body: body.learned_recipe == null ? JSON.stringify({ flow: body })
-          : '{"flow":' + FDRecipeInputs.flowText(body) + '}'
+        method: 'POST', body: '{"flow":' + FDRecipeInputs.flowText(body) + '}'
       });
       var result = await readMutationResult(response, 'Save');
       if (result.id !== body.id || !Number.isInteger(result.version) || result.version < 1 ||
@@ -1805,7 +1806,7 @@
       buttons.forEach(function (button) { button.disabled = true; button.setAttribute('aria-busy', 'true'); });
       try {
         var response = await apiFetch(url, { method: 'POST',
-          body: learnedPlan ? FDRecipeInputs.payloadText(learnedPlan, payload) : JSON.stringify(payload) });
+          body: FDRecipeInputs.payloadText(learnedPlan, payload) });
         var result = await readMutationResult(response, 'Run');
         if (typeof result.run_id !== 'string' || !result.run_id.trim() ||
             typeof result.status !== 'string' || !result.status.trim() || result.dry_run !== dryRun) {
@@ -2222,7 +2223,7 @@
     if (bad.length) { say('Some action settings aren’t filled in correctly. Check the steps and try again.', true); return; }
     var body = toApiFlow();
     var wire;
-    try { wire = body.learned_recipe == null ? JSON.stringify(body, null, 2) : FDRecipeInputs.flowText(body); }
+    try { wire = FDRecipeInputs.flowText(body); }
     catch (error) { say(error.message, true); return; }
     var blob = new Blob([wire], { type: 'application/json' });
     var a = document.createElement('a');
@@ -2409,9 +2410,7 @@
       body = { message: text, flow: toApiFlow(), history: chatHistory.concat([{ role: 'user', content: text }]).slice(-12), run_id: lastRunId || '' };
       // Preserve retained evidence's exact numbers in both directions, just as
       // Save/Test do. JSON.stringify alone changes integral floats into ints.
-      wire = body.flow.learned_recipe == null ? JSON.stringify(body)
-        : '{"message":' + JSON.stringify(text) + ',"flow":' + FDRecipeInputs.flowText(body.flow) +
-          ',"history":' + JSON.stringify(body.history) + ',"run_id":' + JSON.stringify(body.run_id) + '}';
+      wire = FDRecipeInputs.payloadText(null, body);
     } catch (e) {
       say('This workflow could not be prepared for Copilot. Save your changes, reopen it, and try again.', true);
       return null;
@@ -2481,7 +2480,7 @@
           // Copilot edits do not save or publish. Never let its response replace
           // the current server-issued compare-and-set/publication metadata.
           chatSavedKeys.forEach(function (key) { j.flow[key] = rootFlow[key]; });
-          if (j.flow.learned_recipe != null) FDRecipeInputs.flowText(j.flow);
+          FDRecipeInputs.flowText(j.flow);
           pushHistory();                                      // "undo what the AI did" is one Ctrl+Z
           placeNewNodes(j.flow);
           var keep = { x: view.x, y: view.y, k: view.k };

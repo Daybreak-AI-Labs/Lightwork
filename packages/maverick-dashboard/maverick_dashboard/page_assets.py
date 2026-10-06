@@ -13,6 +13,7 @@ from fastapi.responses import FileResponse, Response
 router = APIRouter()
 _STATIC = Path(__file__).parent / "static"
 ASSETS = (
+    "lightwork-settings-catalog-requests.js",
     "lightwork-today.js",
     "lightwork-department-board.js",
     "lightwork-department-team-updates.js",
@@ -67,6 +68,7 @@ ASSETS = (
     "lightwork-recovery-visibility.js",
     "lightwork-procedure-interactions.js",
     "lightwork-request-program.js",
+    "lightwork-operator-acquisition.js",
     "lightwork-workflow-step-checks.js",
     "lightwork-commitment-economic-alternatives.js",
     "lightwork-flow-requalification.js",

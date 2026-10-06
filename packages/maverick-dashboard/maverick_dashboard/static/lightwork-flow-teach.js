@@ -13,7 +13,25 @@
   const STATUS = { accepted: 'Reviewed and accepted', awaiting_review: 'Waiting for review', rejected: 'Not accepted',
     withdrawn: 'No longer used', expired: 'Expired', none: 'Not collected as an example' };
   const state = { overview: null, flow: null, artifact: null, recipe: null, pkg: null, bundles: [], trust: null,
-    question: null, draft: null, draftMode: null, busy: false, ruleStep: null };
+    question: null, draft: null, draftMode: null, busy: false, ruleStep: null, artifactWire: null };
+  let authoringGeneration = 0, accountGeneration = 0, acquiredDraft = null;
+  root.addEventListener('input', () => { authoringGeneration++; });
+  root.addEventListener('change', () => { authoringGeneration++; });
+  function acquisitionContextChanged(event) {
+    if (event.detail && event.detail.reason === 'selection') return;
+    accountGeneration++;
+    if (acquiredDraft) {
+      if (state.draft === acquiredDraft.flow) { state.draft = null; $('ft-save').hidden = true; }
+      acquiredDraft = null;
+      if ($('ft-acquisition-review')) $('ft-acquisition-review').remove();
+      syncNextActions();
+    }
+  }
+  ['lightwork:account-context-changed', 'lightwork:workspace-changed', 'lightwork:copilot-context-changed'].forEach(name => {
+    window.addEventListener(name, acquisitionContextChanged);
+    document.addEventListener(name, acquisitionContextChanged);
+  });
+  window.addEventListener('lightwork:context-changed', acquisitionContextChanged);
 
   function make(tag, cls, text) {
     const node = document.createElement(tag);
@@ -24,6 +42,8 @@
   function say(text, id) { window.mvStatus($(id || 'ft-status'), text); }
   function human(value) { return typeof window.mvHuman === 'function' ? window.mvHuman(value) : String(value).replace(/[_.-]+/g, ' '); }
   function failText(failure, what) {
+    const plain = failure instanceof Error && typeof window.mvPlainDetail === 'function' && window.mvPlainDetail(failure.message);
+    if (plain) return plain;
     return typeof window.mvErrorText === 'function' ? window.mvErrorText(failure, what) : 'Could not ' + what + '. Please try again.';
   }
   async function api(path, body, method, source) {
@@ -34,8 +54,46 @@
       headers['X-Lightwork-Flow-Revision'] = current.revision;
       if (current.context) headers['X-Lightwork-Teaching-Context'] = current.context;
     }
-    return window.mvFetchJSON(path, {method: method || (body === undefined ? 'GET' : 'POST'), cache: 'no-store',
-      headers: headers, body: body});
+    const rulePath = path.startsWith('/api/v1/flows/' + enc + '/teach/rule/');
+    const draftPath = path.endsWith('/draft') && path.startsWith('/api/v1/flows/');
+    const questionPath = path.startsWith('/api/v1/flows/' + enc + '/operator-questions');
+    if (rulePath || draftPath || questionPath || path === '/api/v1/flows/' + enc || path === '/api/v1/flows') {
+      const response = await fetch(path, {method: method || (body === undefined ? 'GET' : 'POST'), cache: 'no-store',
+        credentials: 'same-origin', headers, body: body === undefined ? undefined : typeof body === 'string' ? body : ruleBody(body)});
+      if (!response.ok) throw response;
+      return FDRecipeInputs.responseJson(response);
+    }
+    return window.mvFetchJSON(path, {method: method || (body === undefined ? 'GET' : 'POST'), cache: 'no-store', headers, body});
+  }
+  function whole(text, limit) {
+    if (!/^-?(0|[1-9]\d*)$/.test(text) || text === '-0' || text.length > 26) return null;
+    const value = BigInt(text);
+    return value < -limit || value > limit ? null : text;
+  }
+  // Only reviewed whole-number answers and retained native artifacts use exact
+  // JSON literals. Ordinary inputs stay within the native safe integer bounds.
+  function ruleBody(body) {
+    return '{' + Object.keys(body).map(key => {
+      let value;
+      if (key === 'artifact') {
+        if (body.artifact !== state.artifact || !state.artifactWire) throw new Error('Load the current rule before continuing.');
+        const holder = FDRecipeInputs.parseText('{"artifact":' + state.artifactWire + '}');
+        if (JSON.stringify(holder.artifact) !== JSON.stringify(body.artifact)) throw new Error('The learned rule changed. Load it again.');
+        value = FDRecipeInputs.fieldText(holder, 'artifact');
+      } else if (key === 'flow') value = FDRecipeInputs.flowText(body.flow);
+      else if (key === 'output' && $('tq-answer-wrap').querySelector('[data-kind]')?.dataset.kind === 'integer') {
+        value = whole(String(body.output), 1000000000000000000000000n);
+        if (value === null) throw new Error('Enter the complete whole-number answer within the supported range.');
+      }
+      else if (key === 'examples') value = '[' + body.examples.map(example => {
+        const integer = (body.output_kind || state.artifact && state.artifact.spec.output_type || $('tr-output').value) === 'integer';
+        const answer = integer ? whole(String(example.output), 1000000000000000000000000n) : JSON.stringify(example.output);
+        if (answer === null) throw new Error('Enter each whole-number answer in full, within the supported range.');
+        return '{"inputs":' + JSON.stringify(example.inputs) + ',"output":' + answer + '}';
+      }).join(',') + ']';
+      else value = JSON.stringify(body[key]);
+      return JSON.stringify(key) + ':' + value;
+    }).join(',') + '}';
   }
   function syncNextActions() {
     const readyRecipe = Boolean(state.recipe) && !state.busy;
@@ -48,7 +106,7 @@
     $('sg-inspect').disabled = !readyPackage;
     $('sg-download').disabled = !readyPackage;
     $('sg-approve').disabled = !readyPackage || !signedReady;
-    $('ft-save-go').disabled = !state.draft || state.busy;
+    $('ft-save-go').disabled = !state.draft || state.busy || Boolean(acquiredDraft && !acquiredDraft.accepted.checked);
     $('ft-save-cancel').disabled = state.busy;
   }
   async function guarded(what, action, statusId) {
@@ -78,6 +136,8 @@
 
   // ---- saving drafts through the normal flow save --------------------------------
   function offerSave(draft, note, mode) {
+    if (!acquiredDraft || acquiredDraft.flow !== draft) acquiredDraft = null;
+    if (!acquiredDraft && $('ft-acquisition-review')) $('ft-acquisition-review').remove();
     state.draft = draft; state.draftMode = mode;
     $('ft-save-note').textContent = note;
     $('ft-save-go').textContent = mode === 'new' ? 'Save as a new flow' : 'Save as the flow’s next version';
@@ -85,17 +145,36 @@
     syncNextActions();
     if (!state.busy) $('ft-save-go').focus();
   }
-  $('ft-save-cancel').addEventListener('click', () => { state.draft = null; $('ft-save').hidden = true; syncNextActions(); say('Nothing was saved.'); });
+  $('ft-save-cancel').addEventListener('click', () => { state.draft = null; acquiredDraft = null;
+    if ($('ft-acquisition-review')) $('ft-acquisition-review').remove();
+    $('ft-save').hidden = true; syncNextActions(); say('Nothing was saved.'); });
   $('ft-save-go').addEventListener('click', () => guarded('save the flow', async () => {
     if (!state.draft) return;
+    const draft = state.draft, acquisition = acquiredDraft, generation = accountGeneration;
+    if (acquisition && !acquisition.accepted.checked) { say('Review the complete local rule and choose its separate acceptance first.'); return; }
     const ok = typeof window.mvConfirm === 'function' && await window.mvConfirm(state.draftMode === 'new'
       ? 'Save this as a new flow? It is not published or run until you choose to.'
       : 'Save this change as the flow’s next version? The published version keeps running until you publish again.',
       { okText: 'Save' });
     if (!ok) return;
-    const saved = await api('/api/v1/flows', { flow: state.draft });
+    if (generation !== accountGeneration || state.draft !== draft || acquiredDraft !== acquisition) {
+      say('Your current work was kept. Review the current flow and access before saving.'); return;
+    }
+    if (acquisition) {
+      const current = await readAcquiredDraft(acquisition.id);
+      if (generation !== accountGeneration || state.draft !== draft || acquiredDraft !== acquisition ||
+          current.context !== acquisition.context || !sameSource(current.base, acquisition.source) ||
+          current.flow_json !== acquisition.json || FDRecipeInputs.flowText(draft) !== acquisition.reviewed ||
+          !acquisition.accepted.checked || JSON.stringify(current.adoption_review) !== JSON.stringify(acquisition.rows)) {
+        say('The flow, examples or access changed. Your draft was kept. Return to the learning result and review its current draft again.'); return;
+      }
+    }
+    const saved = await api('/api/v1/flows', acquisition
+      ? '{"flow":' + acquisition.json + ',"acquisition":' + JSON.stringify(acquisition.id) + ',"acquisition_acceptance":true}' : { flow: draft });
     $('ft-save').hidden = true;
     state.draft = null;
+    acquiredDraft = null;
+    if ($('ft-acquisition-review')) $('ft-acquisition-review').remove();
     const link = make('a', null, 'Open it in the flow designer');
     link.href = '/flows/designer/' + encodeURIComponent(saved.id);
     $('ft-status').replaceChildren('Saved (version ' + saved.version + '). Publishing stays a separate step. ', link);
@@ -129,8 +208,8 @@
     return Array.from($('tr-inputs').children).map(row => {
       const get = role => row.querySelector('[data-role="' + role + '"]');
       const decl = { name: get('name').value.trim(), kind: get('kind').value };
-      if (decl.kind === 'integer') { decl.min = parseInt(get('min').value, 10) || 0; decl.max = parseInt(get('max').value, 10) || 0; }
-      if (decl.kind === 'string') decl.max_length = Math.min(1024, Math.max(1, parseInt(get('len').value, 10) || 200));
+      if (decl.kind === 'integer') { decl.min = Number(get('min').value); decl.max = Number(get('max').value); }
+      if (decl.kind === 'string') decl.max_length = Number(get('len').value);
       return decl;
     });
   }
@@ -142,8 +221,8 @@
       control.value = value === false ? 'false' : 'true';
     } else {
       control = make('input', 'input');
-      control.type = kind === 'integer' ? 'number' : 'text';
-      if (kind === 'integer') { control.step = '1'; control.required = true; }
+      control.type = 'text';
+      if (kind === 'integer') { control.inputMode = 'numeric'; control.required = true; control.pattern = '-?(0|[1-9][0-9]*)'; }
       control.value = value == null ? '' : String(value);
     }
     control.dataset.kind = kind;
@@ -155,7 +234,8 @@
     if (control.dataset.kind === 'boolean') return control.value === 'true';
     if (control.dataset.kind === 'integer') {
       if (!control.value.trim()) return null;
-      const n = Number(control.value); return Number.isSafeInteger(n) ? n : null;
+      const exact = whole(control.value.trim(), control.dataset.answer ? 1000000000000000000000000n : 1000000000000n);
+      return exact === null ? null : control.dataset.answer ? exact : Number(exact);
     }
     return control.value;
   }
@@ -182,7 +262,20 @@
     });
   }
   function examplesReady() {
+    for (const row of $('tr-inputs').children) {
+      const get = role => row.querySelector('[data-role="' + role + '"]');
+      if (get('kind').value === 'integer') {
+        const low = whole(get('min').value.trim(), 1000000000000n), high = whole(get('max').value.trim(), 1000000000000n);
+        if (low === null || high === null || BigInt(low) > BigInt(high)) {
+          say('Choose complete whole-number input limits between −1,000,000,000,000 and 1,000,000,000,000.'); get('min').focus(); return false;
+        }
+      } else if (get('kind').value === 'string' && (!/^\d+$/.test(get('len').value) || Number(get('len').value) < 1 || Number(get('len').value) > 1024)) {
+        say('Choose a longest text length between 1 and 1,024.'); get('len').focus(); return false;
+      }
+    }
     for (const control of $('tr-examples').querySelectorAll('[data-input],[data-answer]')) {
+      control.setCustomValidity(control.dataset.kind === 'integer' && readValue(control) === null
+        ? 'Enter a whole number in the supported range.' : '');
       if (!control.checkValidity()) {
         control.reportValidity(); control.focus();
         say('Complete the highlighted example value before learning.');
@@ -192,12 +285,17 @@
     return true;
   }
   function renderExamples() {
-    const kept = examples();
+    const kept = Array.from($('tr-examples').children).map(row => {
+      const inputs = {}, read = control => control.dataset.kind === 'boolean' ? control.value === 'true' : control.value;
+      row.querySelectorAll('[data-input]').forEach(control => { inputs[control.dataset.input] = read(control); });
+      return {inputs, output: read(row.querySelector('[data-answer]'))};
+    });
     $('tr-examples').replaceChildren();
     (kept.length ? kept : [null, null]).forEach(v => exampleRow(v));
   }
-  function showRule(artifact, summary) {
+  function showRule(artifact, summary, exact) {
     state.artifact = artifact;
+    state.artifactWire = exact;
     state.ruleStep = selectedStep();
     $('tr-summary').textContent = summary.rules + (summary.rules === 1 ? ' rule fits' : ' rules fit') + ' your '
       + summary.examples + (summary.examples === 1 ? ' example.' : ' examples.')
@@ -216,11 +314,18 @@
     $('tr-try-out').textContent = '';
   }
   function constants() {
-    return $('tr-constants').value.split(',').map(v => v.trim()).filter(Boolean).slice(0, 8).map(v => {
-      if (/^-?\d{1,12}$/.test(v)) return Number(v);
+    const values = $('tr-constants').value.split(',').map(v => v.trim()).filter(Boolean);
+    if (values.length > 8) throw new Error('Use at most eight constants. Your entered values were kept.');
+    return values.map(v => {
+      if (/^-?\d+$/.test(v)) {
+        const exact = whole(v, 1000000000000n);
+        if (exact === null) throw new Error('Whole-number constants must be between −1,000,000,000,000 and 1,000,000,000,000.');
+        return Number(exact);
+      }
       if (/^(yes|true)$/i.test(v)) return true;
       if (/^(no|false)$/i.test(v)) return false;
-      return v.slice(0, 200);
+      if (Array.from(v).length > 1024) throw new Error('Each text constant must have at most 1,024 characters. Your text was kept.');
+      return v;
     });
   }
   function selectedStep() { return $('tr-step').value; }
@@ -257,6 +362,71 @@
       if (!(state.overview.tools || []).length) tools.append(make('p', 'muted', 'This flow has no actions yet.'));
     }
   }
+  function sameSource(left, right) {
+    return left && right && left.id === right.id && left.version === right.version && left.revision === right.revision;
+  }
+  async function readAcquiredDraft(id) {
+    const response = await fetch('/api/v1/operator-acquisition/' + encodeURIComponent(id) + '/draft', {
+      credentials: 'same-origin', cache: 'no-store', headers: { Accept: 'application/json' }
+    });
+    if (!response.ok) throw response;
+    const raw = await response.text();
+    if (raw.length > 16 * 1024 * 1024) throw new Error('The complete learning review is too large to open safely.');
+    const result = JSON.parse(raw);
+    if (!result || result.saved !== false || result.published !== false || !/^[a-f0-9]{64}$/.test(result.context || '') ||
+        typeof result.flow_json !== 'string' || !result.flow || result.flow.id !== flowId ||
+        !sameSource(result.base, result.flow) || typeof result.note !== 'string' ||
+        !Array.isArray(result.adoption_review) || !result.adoption_review.length || result.adoption_review.length > 1000 ||
+        result.adoption_review.some(row => !row || typeof row !== 'object' || Array.isArray(row) ||
+          Object.keys(row).sort().join(',') !== 'label,value' || typeof row.label !== 'string' || typeof row.value !== 'string') ||
+        new TextEncoder().encode(JSON.stringify(result.adoption_review)).length > 6000000)
+      throw new Error('The prepared learning result could not be confirmed.');
+    result.flow = FDRecipeInputs.parseText(result.flow_json);
+    if (!sameSource(result.base, result.flow)) throw new Error('The prepared learning result changed.');
+    return result;
+  }
+  function showAcquisitionReview(rows) {
+    if ($('ft-acquisition-review')) $('ft-acquisition-review').remove();
+    const section = make('section', 'panel ft__section'); section.id = 'ft-acquisition-review';
+    section.append(make('h2', null, 'Review and accept the local rule'));
+    rows.forEach(row => {
+      const detail = /^Recorded (source details|resulting definition)$/.test(row.label);
+      const box = make(detail ? 'details' : 'div', 'ft__result');
+      box.append(make(detail ? 'summary' : 'h3', null, row.label));
+      const value = make('p', null, row.value); value.style.whiteSpace = 'pre-wrap'; value.style.overflowWrap = 'anywhere';
+      box.append(value); section.append(box);
+    });
+    const label = make('label', 'ft__inline'), accepted = make('input'); accepted.type = 'checkbox';
+    label.append(accepted, 'I reviewed the complete sources, examples and consequences, and independently accept this local rule.');
+    accepted.addEventListener('change', syncNextActions); section.append(label);
+    $('ft-save').before(section);
+    return accepted;
+  }
+  async function receiveAcquisition(initialGeneration) {
+    const id = new URLSearchParams(location.search).get('acquisition');
+    if (!id) return false;
+    if (!/^OAC-[a-f0-9]{32}$/.test(id)) { say('This learning result link is invalid. Open the original learning result again.'); return true; }
+    const source = state.overview && state.overview.flow, generation = accountGeneration;
+    const entered = () => authoringGeneration !== initialGeneration || state.draft || state.artifact || state.recipe ||
+      state.pkg || state.question || state.trust || state.bundles.length;
+    const unchanged = () => generation === accountGeneration && !entered() &&
+      sameSource(source, state.overview && state.overview.flow) && state.overview.flow.context === source.context;
+    if (!source || entered()) { say('Your entered work was kept. The prepared learning result was not loaded.'); return true; }
+    const result = await readAcquiredDraft(id);
+    if (!unchanged() || result.context !== source.context || !sameSource(result.base, source)) {
+      say('Your entered work was kept. The flow, examples or access changed; open the current learning result again.'); return true;
+    }
+    const latest = await api('/api/v1/flows/' + enc + '/teach');
+    if (!unchanged() || !sameSource(latest.flow, source) || latest.flow.context !== source.context) {
+      say('Your entered work was kept. The flow or access changed while the result loaded.'); return true;
+    }
+    acquiredDraft = { id, context: result.context, source, flow: result.flow,
+      json: result.flow_json, reviewed: FDRecipeInputs.flowText(result.flow), rows: result.adoption_review,
+      accepted: showAcquisitionReview(result.adoption_review) };
+    offerSave(result.flow, result.note, 'update');
+    say('The checked local rule is ready to review and save. Nothing was saved or published.');
+    return true;
+  }
   $('tr-step').addEventListener('change', showCurrent);
   $('tr-add-input').addEventListener('click', () => { if ($('tr-inputs').children.length < 6) { inputRow({}); renderExamples(); } });
   $('tr-add-example').addEventListener('click', () => { if ($('tr-examples').children.length < 64) exampleRow(null); });
@@ -268,7 +438,7 @@
       inputs: declarations(), output_kind: $('tr-output').value, examples: examples(), constants: constants(),
       combined: style === 'combined', max_operations: Number($('tr-ops').value) || 3
     }, undefined, source);
-    showRule(result.artifact, result.summary);
+    showRule(result.artifact, result.summary, FDRecipeInputs.fieldText(result, 'artifact'));
     say('Learned. Try some inputs, then use the rule in the step.');
     return { status: 'learned' };
   }
@@ -277,7 +447,7 @@
     if (!state.artifact) return;
     if (!examplesReady()) return { status: 'needs_input', message: 'Complete the highlighted example value on Teach before adding it.' };
     const result = await api('/api/v1/flows/' + enc + '/teach/rule/add-examples', { artifact: state.artifact, examples: examples() }, undefined, source);
-    showRule(result.artifact, result.summary);
+    showRule(result.artifact, result.summary, FDRecipeInputs.fieldText(result, 'artifact'));
     say('Added. The earlier examples were kept.');
     return { status: 'learned' };
   }
@@ -287,7 +457,8 @@
     const inputs = {};
     $('tr-try').querySelectorAll('[data-input]').forEach(c => { inputs[c.dataset.input] = readValue(c); });
     const result = await api('/api/v1/flows/' + enc + '/teach/rule/try', { artifact: state.artifact, inputs: inputs });
-    const value = result.value === true ? 'Yes' : result.value === false ? 'No' : result.value;
+    const value = result.value === true ? 'Yes' : result.value === false ? 'No'
+      : typeof result.value === 'number' ? FDRecipeInputs.fieldText(result, 'value') : result.value;
     $('tr-try-out').textContent = (result.answered ? 'Answer: ' + value + '. ' : '') + result.explanation;
   }, 'tr-try-out'));
   $('tr-attach').addEventListener('click', () => guarded('use the rule in this step', async () => {
@@ -302,7 +473,9 @@
   async function loadCurrentRule() {
     const flow = await api('/api/v1/flows/' + enc);
     const node = (flow.nodes || []).find ? (flow.nodes || []).find(n => n.id === selectedStep()) : (flow.nodes || {})[selectedStep()];
-    const artifact = node && node.learned_operator && node.learned_operator.artifact;
+    const holder = node && node.learned_operator
+      ? FDRecipeInputs.parseText(FDRecipeInputs.fieldText(node, 'learned_operator')) : null;
+    const artifact = holder && holder.artifact;
     if (!artifact) { say('This step has no learned rule.'); return; }
     const spec = artifact.spec || {};
     $('tr-inputs').replaceChildren();
@@ -311,7 +484,7 @@
     $('tr-examples').replaceChildren();
     exampleRow(null);
     showRule(artifact, { rules: (artifact.candidates || []).length || 1, examples: artifact.example_count || 0,
-      inputs: Object.keys(spec.inputs || {}).sort().map(n => ({ name: n, kind: spec.inputs[n].type })) });
+      inputs: Object.keys(spec.inputs || {}).sort().map(n => ({ name: n, kind: spec.inputs[n].type })) }, FDRecipeInputs.fieldText(holder, 'artifact'));
     say('The current rule is loaded. Add examples to improve it, or try it.');
     return { status: 'ready' };
   }
@@ -333,11 +506,15 @@
         return;
       }
       const inputs = record.question.inputs;
+      const question = FDRecipeInputs.parseText(FDRecipeInputs.fieldText(record, 'question'));
+      const predictions = FDRecipeInputs.parseText(FDRecipeInputs.fieldText(question, 'predictions'));
       $('tq-inputs').textContent = 'For ' + Object.keys(inputs).map(k => human(k) + ' = ' + inputs[k]).join(', ') + ', the rules answer: '
-        + (record.question.predictions || []).map(p => String(p.output) + ' (' + p.candidate_count + ')').join(' or ') + '.';
+        + predictions.map(p => (typeof p.output === 'number' ? FDRecipeInputs.fieldText(p, 'output') : String(p.output))
+          + ' (' + p.candidate_count + ')').join(' or ') + '.';
       const kind = (step.rule && step.rule.output_kind) || 'string';
       const wrap = $('tq-answer-wrap');
       wrap.replaceChildren(valueControl(kind, null, 'The right answer'));
+      wrap.querySelector('[data-kind]').dataset.answer = '1';
       $('tq-case').hidden = false;
       say('What should the answer be?', 'tq-status');
     }, 'tq-status'));
@@ -346,7 +523,8 @@
       if (!record) return;
       const reason = $('tq-reason').value.trim();
       if (!reason) { say('Say briefly why this is the right answer.', 'tq-status'); return; }
-      const output = readValue($('tq-answer-wrap').querySelector('[data-kind]'));
+      const control = $('tq-answer-wrap').querySelector('[data-kind]'), output = readValue(control);
+      if (output === null) { say('Enter the complete whole-number answer within the supported range.', 'tq-status'); control.focus(); return; }
       const answered = await api('/api/v1/flows/' + enc + '/operator-questions/' + record.id + '/answer',
         { expected_revision: record.revision, output: output, reviewed: true, rationale: reason });
       $('tq-case').hidden = true;
@@ -631,10 +809,11 @@
   renderExamples();
   syncRecipeStyle();
   syncNextActions();
+  const initialAuthoringGeneration = authoringGeneration;
   guarded('load this flow', async () => {
     await loadOverview();
     await loadRuns();
     await loadApproved();
-    say('');
+    if (!await receiveAcquisition(initialAuthoringGeneration)) say('');
   });
 })();

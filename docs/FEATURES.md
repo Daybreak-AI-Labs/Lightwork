@@ -5990,3 +5990,28 @@ expiry apply. Original records are distinct from fresh calculations and remain
 unconfirmed after a calculation-to-receipt gap. Historical private values require
 current source permission. These local mechanisms do not publish workflows,
 reserve resources, establish future accuracy or demonstrate research superiority.
+
+### Complete teaching-question plans and native original recovery
+
+Learning → Plan teaching questions starts from an owned saved taught step and
+all its surviving simple rules. Ordinary selectors choose an optional owned
+published check rule, its named answer and earlier permitted effort reports.
+The complete finite question plan covers every possible answer branch;
+unreported effort uses the explicitly entered default. Yes/No and exact
+whole-number/text answers have complete source and use-permission review.
+Independent whole-domain native execution checks a proposed rule before Teach
+can open its private unsaved draft. A separate full acceptance review and
+source grant are required before normal Save; publication remains separate.
+
+This default-off Features/installer control supports one to three inputs,
+thirty-two complete situations and sixteen different surviving behaviors.
+Question, planning and native-run allowances remain spent after withdrawal,
+removal, interrupted replies or worker restart. Original history and an owner's
+metadata-only Stop remain available when the capability is off or its original
+workflow was removed. Current permissions, source versions, meaning and review
+dates are checked again at admission, execution and the physical writer.
+
+All settings, Chat's specialist questions and consent-banner withdrawal now
+have ordinary complete review and exact native original readback. Their
+Copilot paths share the same protected services or hand off to their complete
+ordinary forms. Copilot does not repeat uncertain original work.

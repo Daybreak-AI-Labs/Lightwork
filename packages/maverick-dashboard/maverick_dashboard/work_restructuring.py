@@ -84,7 +84,9 @@ def listing(request, flow=""):
         available(request)
         current, _qualified, components, _candidate = source._current(request, flow)
         baseline, publication = current[4], current[5]
-        retained = source.records().list(limit=1000)
+        retained = source.records().list(limit=1001)
+        if len(retained) > 1000:
+            raise HTTPException(503, "The complete case collection exceeds its supported bound. Nothing was omitted; narrow or repair the collection before continuing.")
         for row in retained:
             if (row.get("owner"), row.get("tenant"), row.get("context"), row.get("flow_id"), row.get("kind")) != (owner, tenant, context, flow, "retain"):
                 continue
@@ -96,7 +98,6 @@ def listing(request, flow=""):
                                     "revision": row["revision"], "values": source._display(row["case"]["inputs"])})
         result.update(name=baseline.name, version=baseline.version, release=publication["release_id"],
                       components=[item["label"] for item in components])
-        result["cases"] = result["cases"][-50:]
     authority(request, context)
     result["revision"] = engine.digest(result)
     return result
@@ -280,9 +281,11 @@ def original(request, identifier):
 
 def history(request):
     tenant, owner, context = authority(request)
-    rows = records().list(limit=1000)
+    rows = records().list(limit=1001)
+    if len(rows) > 1000:
+        raise HTTPException(503, "The complete original history exceeds its supported bound. Nothing was omitted; original results remain readable individually.")
     choices = [{"value": row["id"], "label": row["name"] + " / " + datetime_text(row["created_at"], seconds=True)} for row in rows
-               if (row.get("tenant"), row.get("owner"), row.get("context")) == (tenant, owner, context)][-50:]
+               if (row.get("tenant"), row.get("owner"), row.get("context")) == (tenant, owner, context)]
     authority(request, context)
     return {"context": context, "choices": choices}
 

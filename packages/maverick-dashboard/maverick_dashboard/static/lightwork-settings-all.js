@@ -300,27 +300,6 @@
   }
 
   // ---- saving --------------------------------------------------------------
-  async function send(changes, confirmed, revision) {
-    var response = await window.fetch(API, {
-      method: 'POST', cache: 'no-store', credentials: 'same-origin',
-      headers: {'Content-Type': 'application/json', Accept: 'application/json'},
-      body: JSON.stringify({changes: changes, confirm: !!confirmed, expected_revision: revision})
-    });
-    var data = null;
-    try { data = await response.json(); } catch (ignore) { data = null; }
-    return {response: response, data: data};
-  }
-  function warningText(list) {
-    var lines = list.map(function (item) { return item.label + ': ' + item.warning; });
-    var access = list.some(function (item) { return item.kind === 'access'; });
-    var learning = list.some(function (item) { return item.kind === 'learning'; });
-    var lowers = list.some(function (item) { return item.kind !== 'access' && item.kind !== 'learning'; });
-    var lead = lowers ? 'This lowers a protection. ' : '';
-    if (access) lead += 'This changes how people get into Lightwork. ';
-    if (learning) lead += 'This turns on learning systems. ';
-    return lead + lines.join(' ') + ' Do you want to go ahead?';
-  }
-
   // ---- "Test connection" / "Check this location" ------------------------------
   function checkValue(row) {
     var control = row.dataset.control;
@@ -365,30 +344,11 @@
       });
     });
     try {
-      if (window.mvReviewSettings) {
-        var reviewed = await window.mvReviewSettings(changes, revision);
-        if (!reviewed) { busyRows.forEach(function (row) { say(row, 'Draft kept. Nothing was changed.'); }); return; }
-        changes = reviewed.changes; revision = reviewed.revision;
-      }
-      var result = await send(changes, false, revision);
-      if (result.response.status === 409 && result.data && result.data.conflicts) {
-        var review = result.data.conflicts.map(function (item) {
-          return item.label + ': current ' + item.current + ' (' + item.source + ')';
-        }).join('\n');
-        var merge = await window.mvConfirm('Your draft is kept. Review the current settings:\n' + review +
-          '\nApply your draft to this newly reviewed configuration?', {okText: 'Apply reviewed draft'});
-        if (!merge) return;
-        revision = result.data.revision;
-        result = await send(changes, false, revision);
-      }
-      if (result.response.status === 409 && result.data && Array.isArray(result.data.confirm)) {
-        var ok = await window.mvConfirm(warningText(result.data.confirm), {okText: 'Change anyway'});
-        if (!ok) {
-          busyRows.forEach(function (row) { say(row, 'Not changed.'); });
-          return;
-        }
-        result = await send(changes, true, revision);
-      }
+      if (!window.mvReviewSettings || !window.LightworkSettingsCatalog) throw new Error('The complete protected settings review is unavailable. Your draft is kept; reload this page.');
+      var reviewed = await window.mvReviewSettings(changes, revision);
+      if (!reviewed) { busyRows.forEach(function (row) { say(row, 'Draft kept. Nothing was changed.'); }); return; }
+      changes = reviewed.changes; revision = reviewed.revision;
+      var result = await window.LightworkSettingsCatalog.save(reviewed);
       if (!result.response.ok) {
         var message = result.data && typeof result.data.message === 'string'
           ? result.data.message : errorText(result.response, action);
@@ -401,6 +361,10 @@
         busyRows.forEach(function (row) { say(row, result.data.message); });
         announce(result.data.message);
         updateFilter();
+        return;
+      }
+      if (result.data.original && (!result.data.groups || !result.data.original.confirmed)) {
+        busyRows.forEach(function (row) { say(row, result.data.original.message + ' Your current editable choices were kept.'); });
         return;
       }
       applyAll(result.data || {}, changes.map(function (item) { return item.id; }));

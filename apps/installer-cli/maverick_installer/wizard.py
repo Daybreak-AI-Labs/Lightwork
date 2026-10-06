@@ -5198,6 +5198,9 @@ def pick_advanced() -> dict[str, Any]:
         "allow_procedure_interactions": _q_confirm(
             "Enable check local rules together? Compare two owned local rules in both orders and check all supported starting values before any combined use.", default=False,
         ),
+        "allow_operational_competence_acquisition": _q_confirm(
+            "Enable teaching-question planning? Compare supported rule alternatives and use only currently permitted effort reports. Teaching and publication remain separate reviews.", default=False,
+        ),
         "allow_request_program": _q_confirm(
             "Enable prepare an answer for this request? Check bounded arrangements of your existing taught rules against permitted original cases for one request. Nothing is published automatically.", default=False,
         ),
@@ -9102,6 +9105,8 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
         _feature_locks.append("private_task_computation = true")
     if advanced.get("allow_procedure_interactions") is True:
         _feature_locks.append("procedure_interactions = true")
+    if advanced.get("allow_operational_competence_acquisition") is True:
+        _feature_locks.append("operational_competence_acquisition = true")
     if advanced.get("allow_request_program") is True:
         _feature_locks.append("request_program = true")
     if advanced.get("allow_commitment_economic_alternatives") is True:

@@ -135,6 +135,7 @@ FEATURE_DEFAULTS = {
     "commitment_capability_learning": False,
     "semantic_rule_reuse": False,
     "procedure_interactions": False,
+    "operational_competence_acquisition": False,
     "request_program": False,
     "commitment_economic_alternatives": False,
     "workflow_step_checks": False,
@@ -214,6 +215,7 @@ FEATURE_INFO = {
     "portable_competence": "Release only reviewed anonymous local rule structures. Qualify them against a target workflow and its own permitted cases before any local use.",
     "private_task_computation": "Check a bounded rule using a permitted task attachment and release only a separately approved fixed answer. Original data stays private.",
     "procedure_interactions": "Compare two owned local rules in both orders and check all supported starting values before any combined use.",
+    "operational_competence_acquisition": "Plan questions from a rule's complete supported alternatives and current permitted effort reports. Teaching and publication remain separate reviews.",
     "request_program": "Check bounded arrangements of your existing taught rules against permitted original cases for one request. Nothing is published automatically.",
     "commitment_economic_alternatives": "Compare reported offer prices and full incremental costs with currently protected commitments. Results remain conditional on your stated facts.",
     "workflow_step_checks": "Check one owned taught step against ordinary entered values without running the whole workflow or any connected action.",
@@ -1727,7 +1729,7 @@ def _catalog_generic_sections() -> tuple[str, ...]:
 REMOVE = object()
 
 
-def set_catalog_values(changes: dict[tuple[str, ...], object]) -> dict[tuple[str, ...], object]:
+def set_catalog_values(changes: dict[tuple[str, ...], object], *, before_effect=None) -> dict[tuple[str, ...], object]:
     """Write All-settings values to the overlay in ONE locked save.
 
     ``changes`` maps a catalog key path (``("safety", "profile")``) to its
@@ -1787,7 +1789,7 @@ def set_catalog_values(changes: dict[tuple[str, ...], object]) -> dict[tuple[str
             else:
                 node[key] = value
         _prune_empty_tables(data, {path[0] for path in changes})
-        _write(data)
+        _write(data, before_effect=before_effect)
     config.reset_config_cache()
     return previous
 

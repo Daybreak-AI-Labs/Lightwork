@@ -139,8 +139,7 @@ test("unknown artifact cannot fall back to manual sample input", () => {
 // Execute the actual designer run function, including its request and receipt checks.
 function runner(prompt) {
   const calls = [], messages = [], watched = [];
-  const rootFlow = {id: "case", name: "Case", published: true, nodes: [{id: "start", kind: "approval", prompt: "Review"}], start: "start", learned_recipe: artifact()};
-  inputs.parseText(JSON.stringify(rootFlow));
+  const rootFlow = inputs.parseText(JSON.stringify({id: "case", name: "Case", published: true, nodes: [{id: "start", kind: "approval", prompt: "Review"}], start: "start", learned_recipe: artifact()}));
   const button = {setAttribute() {}, removeAttribute() {}, focus() {this.focused = true;}};
   const context = {rootFlow, publishedFlow: clone(rootFlow), flowInputs: [], runInFlight: false, FDCore: core,
     FDActionFields: {async ready() {}, check() { return []; }},
@@ -150,7 +149,7 @@ function runner(prompt) {
     apiFetch: async (url, options) => {calls.push({url, options});
       const result = url.endsWith('/published') ? {flow: context.publishedFlow, release_id: 'a'.repeat(64)} :
         {run_id: "run", status: "paused_approval", dry_run: url.endsWith("dry-run")};
-      return {ok: true, text: async () => JSON.stringify(result)};
+      return {ok: true, text: async () => JSON.stringify(result, (key, value) => key === '_fdEvidence' ? undefined : value)};
     },
     readMutationResult: inputs.responseJson,
     say: (message, error) => messages.push({message, error}), watchRun: id => watched.push(id),
@@ -165,12 +164,12 @@ function runner(prompt) {
 async function turn() { await new Promise(resolve => setImmediate(resolve)); }
 for (const dry of [false, true]) test(`actual ${dry ? "test" : "published"} run submits form values and preserves graph`, async () => {
   const ui = runner(async plan => inputs.read(plan, values(plan, {quantity: 3})));
-  const before = clone(ui.context.rootFlow);
+  const before = JSON.parse(inputs.flowText(ui.context.rootFlow));
   ui.context.run(dry); await turn();
   assert.equal(ui.calls.length, dry ? 1 : 2);
   const body = JSON.parse(ui.calls.at(-1).options.body);
   assert.deepEqual(body.data, {input: {quantity: 3}});
-  assert.deepEqual(ui.context.rootFlow, before);
+  assert.deepEqual(JSON.parse(inputs.flowText(ui.context.rootFlow)), before);
   if (dry) assert.deepEqual(body.flow, before);
   else assert.equal(body.expected_release_id, 'a'.repeat(64));
   assert.deepEqual(ui.watched, ["run"]);

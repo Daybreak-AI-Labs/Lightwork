@@ -26,6 +26,7 @@ from . import flow_requalification as source
 from . import local_flow_promotions as release
 from . import work_restructuring as evidence
 from .plain_labels import datetime_text
+from .scalar_wire import whole_number
 
 PAGE = "/learning/portable-rules"
 API = "/api/v1/learning/portable-rules"
@@ -108,7 +109,10 @@ def listing(request, flow=""):
         current, baseline, publication = _flow(request, flow)
         node = baseline.nodes[baseline.start]
         value.update(name=baseline.name, version=baseline.version, output_type=node.learned_operator["artifact"]["spec"]["output_type"], inputs=node.learned_operator["artifact"]["spec"]["inputs"])
-        for row in source.records().list(limit=1000):
+        retained = source.records().list(limit=1001)
+        if len(retained) > 1000:
+            raise HTTPException(409, "The current case picker supports one thousand retained requests. No cases were silently hidden.")
+        for row in retained:
             if (row.get("owner"), row.get("tenant"), row.get("context"), row.get("flow_id"), row.get("kind")) != (owner, tenant, context, flow, "retain"):
                 continue
             try:
@@ -118,7 +122,6 @@ def listing(request, flow=""):
             if row["baseline"] != publication:
                 continue
             value["cases"].append({"value": row["id"], "label": "Original case " + str(len(value["cases"]) + 1) + " / " + datetime_text(row["case"]["created"], seconds=True), "values": source._display(row["case"]["inputs"])})
-        value["cases"] = value["cases"][-50:]
         value["source"] = {"publication": publication, "draft": [current[6], current[7]]}
     authority(request, context)
     value["revision"] = engine.digest(value)
@@ -180,8 +183,10 @@ def material(request, arguments):
         item = {"id": identifier, "source_revision": row["revision"], "source_binding": row["binding"], "run": row["case"]["run_id"], "inputs": row["case"]["inputs"]}
         if body.kind == "qualify":
             from maverick.flow import learned_operator as scalar
-            scalar._scalar(body.expected[index], node.learned_operator["artifact"]["spec"]["output_type"], output=True)
-            item["expected"] = body.expected[index]
+            output_type = node.learned_operator["artifact"]["spec"]["output_type"]
+            expected = whole_number(body.expected[index]) if output_type == "integer" else body.expected[index]
+            scalar._scalar(expected, output_type, output=True)
+            item["expected"] = expected
         selected.append(item)
     if len(distinct_inputs) < 2:
         raise HTTPException(409, "Choose original cases with at least two different declared input combinations. Repeated work cannot manufacture independent support.")
@@ -337,8 +342,10 @@ def original(request, identifier):
 
 def history(request):
     tenant, owner, context = authority(request)
-    rows = records().list(limit=1000)
-    value = {"context": context, "choices": [{"value": row["id"], "kind": row["kind"], "label": {"share": "Shared rule structure", "qualify": "Local rule qualification", "run": "Qualified local answer"}[row["kind"]] + " / " + datetime_text(row["created_at"], seconds=True)} for row in rows if (row.get("tenant"), row.get("owner"), row.get("context")) == (tenant, owner, context)][-50:]}
+    rows = records().list(limit=1001)
+    if len(rows) > 1000:
+        raise HTTPException(503, "The complete original history exceeds its supported bound. Nothing was omitted; original results remain readable individually.")
+    value = {"context": context, "choices": [{"value": row["id"], "kind": row["kind"], "label": {"share": "Shared rule structure", "qualify": "Local rule qualification", "run": "Qualified local answer"}[row["kind"]] + " / " + datetime_text(row["created_at"], seconds=True)} for row in rows if (row.get("tenant"), row.get("owner"), row.get("context")) == (tenant, owner, context)]}
     authority(request, context)
     return value
 

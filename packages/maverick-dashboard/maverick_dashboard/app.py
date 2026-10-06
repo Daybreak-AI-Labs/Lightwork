@@ -1835,13 +1835,16 @@ from . import (  # noqa: E402
     commitment_capability_api,
     commitment_economic_alternatives_api,
     competence_transport_api,
+    consent_publication_withdrawal_api,
     flow_requalification_api,
     grc_draft_changes_api,
     learning_distinctions_api,
+    operator_acquisition_api,
     private_task_computation_api,
     procedure_interactions_api,
     recovery_visibility_api,
     request_program_api,
+    settings_catalog_requests_api,
     shared_decision_evidence_api,
     work_restructuring_api,
     workflow_step_checks,
@@ -1859,7 +1862,10 @@ app.include_router(private_task_computation_api.router)
 app.include_router(recovery_visibility_api.router)
 app.include_router(procedure_interactions_api.router)
 app.include_router(request_program_api.router)
+app.include_router(operator_acquisition_api.router)
+app.include_router(consent_publication_withdrawal_api.router, prefix="/api/v1")
 app.include_router(workflow_step_checks.router)
+app.include_router(settings_catalog_requests_api.router, prefix="/api/v1")
 from .plugin_practice_forms_api import router as plugin_practice_forms_router  # noqa: E402
 
 app.include_router(plugin_practice_forms_router)

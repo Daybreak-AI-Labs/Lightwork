@@ -12,6 +12,7 @@
   .cs-viewpoints__form { display: grid; gap: var(--space-2); margin-top: var(--space-3); }
   .cs-viewpoints__form .textarea, .cs-viewpoints__form .select { width: 100%; box-sizing: border-box; max-width: 100%; }
   .cs-viewpoints p, .cs-viewpoints li { overflow-wrap: anywhere; }
+  .cs-viewpoints dd { margin-inline-start: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
   .cs-viewpoints__sides { display: grid; gap: var(--space-2); border: 1px solid var(--border); border-radius: var(--radius-md); padding: var(--space-3); }
   .cs-viewpoints__side { border-inline-start: 3px solid var(--border); padding-inline-start: var(--space-3); margin-block: var(--space-3); }
   /* What Lightwork can do: example requests, then one plain limit. */
@@ -74,7 +75,6 @@
     <button class="btn btn--ghost" type="button">{{ ui('Refresh budget') }}</button>
   </details>
   <script src="/static/lightwork-budget-guidance.js" defer></script>
-  {% if model_route_ready %}
   <details class="panel cs-viewpoints" id="viewpoints">
     <summary>{{ ui('Weighing up a decision? Get two viewpoints first') }}</summary>
     <form id="vp-form" class="cs-viewpoints__form" novalidate>
@@ -95,12 +95,24 @@
         <input id="vp-against" class="input" type="text" maxlength="300" placeholder="{{ ut('Leave blank for: the answer is no, the idea is flawed') }}">
       </fieldset>
       <p class="muted">{{ ui('One side argues for, the other argues against, and a neutral judge weighs them up. This uses AI, counts toward your spending limits and costs at most $1.00 each time. Nothing else is started.') }}</p>
-      <button type="submit" class="btn btn--primary" id="vp-run">{{ ui('Get two viewpoints') }}</button>
+      <button type="submit" class="btn btn--primary" id="vp-run" disabled>{{ ui('Review two viewpoints') }}</button>
     </form>
+    <div class="stack" id="vp-review"></div>
+    <details class="stack" id="vp-history">
+      <summary>{{ ui('Your original viewpoints') }}</summary>
+      <p class="muted">{{ ui('Read the same saved answers after leaving Chat. Checking an original request never starts AI again.') }}</p>
+      <label for="vp-saved">{{ ui('Original question') }}</label>
+      <select class="select" id="vp-saved"><option value="">{{ ui('Choose an original question') }}</option></select>
+    </details>
+    <div class="button-row">
+      <button type="button" class="btn btn--ghost" id="vp-refresh">{{ ui('Refresh current choices') }}</button>
+      <button type="button" class="btn btn--ghost" id="vp-original" hidden>{{ ui('Check original outcome') }}</button>
+    </div>
     <p id="vp-status" role="status" aria-live="polite" tabindex="-1"></p>
+    <a class="btn btn--ghost" href="/settings#settings-integrations" id="vp-setup" hidden>{{ ui('Review AI connection') }}</a>
     <div id="vp-result" hidden></div>
+    <p class="muted">{{ ui('Your retained questions are shown. Saved answers remain available after a restart. An interrupted request may have an unknown outcome; Lightwork will never repeat it automatically.') }}</p>
   </details>
-  {% endif %}
   {% endif %}
 </div>
 {% endif %}
@@ -205,7 +217,7 @@
 
 {% block scripts_extra %}
 <script src="/static/lightwork-file-selection.js" defer></script>
-{% if model_route_ready and can_create_goal %}<script src="/static/lightwork-viewpoints.js" defer></script>{% endif %}
+{% if can_create_goal %}<script src="/static/lightwork-viewpoints.js" defer></script>{% endif %}
 <script>
   function chatCopy(node, source, values) { if (window.LightworkI18n) window.LightworkI18n.set(node, source, values); else node.textContent = source.replace(/\{(\w+)\}/g, function (_, key) { return (values || {})[key] === undefined ? '{' + key + '}' : values[key]; }); }
   function chatText(source) { return window.LightworkI18n ? window.LightworkI18n.text(source) : source; }

@@ -11,6 +11,7 @@ from starlette.concurrency import run_in_threadpool
 
 from . import local_flow_promotions as release
 from . import work_restructuring as native
+from .scalar_wire import exact_integers
 
 router = APIRouter()
 PURPOSE = "lightwork.local-work-grouping-review.v1"
@@ -28,7 +29,7 @@ class ApplyIn(BaseModel):
 
 
 def response(value):
-    return JSONResponse(value, headers={"Cache-Control": "no-store, private"})
+    return JSONResponse(exact_integers(value), headers={"Cache-Control": "no-store, private"})
 
 
 @router.get(native.PAGE)

@@ -591,6 +591,8 @@ class ConnectionIn(BaseModel):
 class FlowSaveIn(BaseModel):
     """A draft flow definition (a graph of typed nodes) to create or replace."""
     flow: dict
+    acquisition: str | None = Field(None, pattern=r"^OAC-[a-f0-9]{32}$")
+    acquisition_acceptance: bool = Field(False, strict=True)
 
 
 class FlowDryRunIn(BaseModel):

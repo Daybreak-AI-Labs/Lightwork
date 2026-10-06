@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from . import flow_requalification as native
 from . import local_flow_promotions as release
+from .scalar_wire import exact_integers
 
 router = APIRouter()
 PURPOSE = "lightwork.rule-requalification-review.v1"
@@ -38,7 +39,7 @@ class ReviewStatusIn(BaseModel):
 
 
 def response(value):
-    return JSONResponse(value, headers={"Cache-Control": "private, no-store"})
+    return JSONResponse(exact_integers(value), headers={"Cache-Control": "private, no-store"})
 
 
 @router.get(native.PAGE)

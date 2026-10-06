@@ -237,6 +237,49 @@
           else { var visibilityLink = node('a', 'Open complete local practice controls', visibilityDestination); visibilityLink.href = '/learning/recovery-visibility'; visibilityLink.className = 'btn btn--ghost'; }
           return;
         }
+        if (entry[0] === 'settings_catalog_form') {
+          var catalogForm = entry[1], catalogStarted = generation, catalogSelection = JSON.stringify(context());
+          if (!catalogForm || Array.isArray(catalogForm) || Object.keys(catalogForm).sort().join(',') !== 'context,original' ||
+              typeof catalogForm.context !== 'string' || !/^[a-f0-9]{64}$/.test(catalogForm.context) || typeof catalogForm.original !== 'boolean') return;
+          var catalogDestination = node('dd', undefined, list), catalogControl = window.LightworkSettingsCatalog;
+          var catalogLabel = catalogForm.original ? 'Read my original settings requests' : 'Open protected organization settings';
+          if (catalogControl && typeof catalogControl.open === 'function') button(catalogLabel, catalogDestination, async function (event) {
+            var isCurrent = function () { return active(catalogStarted) && JSON.stringify(context()) === catalogSelection; };
+            if (!isCurrent() || busy) return;
+            var catalogButton = event.currentTarget; catalogButton.disabled = true;
+            try {
+              var opened = await catalogControl.open(catalogForm.context, catalogForm.original, isCurrent);
+              if (!isCurrent()) return;
+              status.textContent = opened ? 'The protected settings controls are open.' : 'Your entered work is kept. Refresh the current settings before continuing.';
+              if (opened) { var close = document.getElementById('mv-copilot-close'); if (close) close.click(); }
+            } catch (_) { if (isCurrent()) status.textContent = 'The settings controls could not be opened. Your entered work is kept.'; }
+            finally { if (isCurrent() && catalogButton.isConnected) catalogButton.disabled = false; }
+          });
+          else { var catalogLink = node('a', catalogLabel, catalogDestination); catalogLink.href = catalogForm.original ? '/settings/all#settings-original-requests' : '/settings/all'; catalogLink.className = 'btn btn--ghost'; }
+          return;
+        }
+        if (entry[0] === 'operator_acquisition_author') {
+          var acquisitionAuthor = entry[1], acquisitionStarted = generation, acquisitionSelection = JSON.stringify(context());
+          if (!acquisitionAuthor || Array.isArray(acquisitionAuthor) || Object.keys(acquisitionAuthor).sort().join(',') !== 'binding,context,flow' ||
+              typeof acquisitionAuthor.context !== 'string' || !/^[a-f0-9]{64}$/.test(acquisitionAuthor.context) ||
+              typeof acquisitionAuthor.binding !== 'string' || !/^[a-f0-9]{64}$/.test(acquisitionAuthor.binding) ||
+              typeof acquisitionAuthor.flow !== 'string' || acquisitionAuthor.flow.length < 1 || acquisitionAuthor.flow.length > 256) return;
+          var acquisitionDestination = node('dd', undefined, list), acquisitionControl = window.LWOperatorAcquisition;
+          if (acquisitionControl && typeof acquisitionControl.openAuthor === 'function') button('Open the complete teaching plan', acquisitionDestination, async function (event) {
+            var isCurrent = function () { return active(acquisitionStarted) && JSON.stringify(context()) === acquisitionSelection; };
+            if (!isCurrent() || busy) return;
+            var acquisitionButton = event.currentTarget; acquisitionButton.disabled = true;
+            try {
+              var opened = await acquisitionControl.openAuthor(acquisitionAuthor, {isCurrent: isCurrent});
+              if (!isCurrent()) return;
+              status.textContent = opened ? 'The complete protected teaching form is open.' : 'Your entered teaching work is kept. Review the current controls.';
+              if (opened) { var close = document.getElementById('mv-copilot-close'); if (close) close.click(); }
+            } catch (_) { if (isCurrent()) status.textContent = 'The teaching form could not be opened. Your entered work is kept.'; }
+            finally { if (isCurrent() && acquisitionButton.isConnected) acquisitionButton.disabled = false; }
+          });
+          else { var acquisitionLink = node('a', 'Open the complete teaching plan', acquisitionDestination); acquisitionLink.href = '/learning/acquisition?flow=' + encodeURIComponent(acquisitionAuthor.flow) + '#oac-author'; acquisitionLink.className = 'btn btn--ghost'; }
+          return;
+        }
         if (entry[0] === 'commitment_economic_author') {
           var economicAuthor = entry[1], economicStarted = generation, economicSelection = JSON.stringify(context());
           if (!economicAuthor || Array.isArray(economicAuthor) || Object.keys(economicAuthor).sort().join(',') !== 'binding,context,parent' ||
@@ -891,6 +934,9 @@
               : item.id.startsWith('commitments.economics.')
                 ? !!(window.LWCommitmentEconomics && window.LWCommitmentEconomics.renderReview &&
                      window.LWCommitmentEconomics.renderReview(formHost, review.changes) === true)
+              : item.id.startsWith('learning.acquisition.')
+                ? !!(window.LWOperatorAcquisition && window.LWOperatorAcquisition.renderReview &&
+                     window.LWOperatorAcquisition.renderReview(formHost, review.changes) === true)
               : item.id.startsWith('tasks.private_check.')
                 ? !!(window.LWPrivateTaskComputation && window.LWPrivateTaskComputation.renderReview &&
                      window.LWPrivateTaskComputation.renderReview(formHost, review.changes) === true)

@@ -14,13 +14,17 @@
   // [{key:'fields.due_date', name:'due_date', value:'x'}]. Internal
   // bookkeeping (format markers, schema variants) is left out.
   function flatten(value, path, name, out) {
-    if (out.length >= 200) return out;
+    if (out.length >= 200) { out.truncated = true; return out; }
     if (Array.isArray(value)) {
       if (value.every(function (item) { return item === null || typeof item !== 'object'; })) {
         out.push({key:path, name:name, value:value.map(show).join(', ')});
       } else value.forEach(function (item, index) { flatten(item, path + '.' + index, name + ' ' + (index + 1), out); });
     } else if (value && typeof value === 'object') {
       Object.keys(value).forEach(function (key) {
+        if (key === '_fdEvidence' && root.FDRecipeInputs && value[key] && typeof value[key] === 'object' &&
+            Object.keys(value[key]).length && Object.keys(value[key]).every(function (field) {
+              try { return root.FDRecipeInputs.fieldText(value, field) === value[key][field]; } catch (_error) { return false; }
+            })) return;
         if (!path && (key === 'format' || key === 'variants')) return;
         flatten(value[key], path ? path + '.' + key : key, (!path && key === 'fields') ? '' : key, out);
       });
@@ -31,8 +35,7 @@
     if (value === true) return 'Yes';
     if (value === false) return 'No';
     if (value === null || value === undefined || value === '') return '(empty)';
-    var text = String(value);
-    return text.length > 300 ? text.slice(0, 300) + '…' : text;
+    return String(value);
   }
   function assertSafe(value, depth) {
     if ((depth || 0) > 25) throw new Error('This draft is too complex for recovery storage. Save it before leaving.');
@@ -158,8 +161,9 @@
       var control = null;
       try { control = options.host.querySelector('[name="' + String(row.name).replace(/["\\]/g, '\\$&') + '"]') ||
         (/^[A-Za-z][\w-]*$/.test(row.name) ? doc.getElementById(row.name) : null); } catch (_error) { control = null; }
-      var text = control && control.labels && control.labels[0] ? control.labels[0].textContent :
-        control ? control.getAttribute('aria-label') : '';
+      var label = control && control.labels && control.labels[0] ? control.labels[0].cloneNode(true) : null;
+      if (label) label.querySelectorAll('[data-mv-required]').forEach(function (marker) { marker.remove(); });
+      var text = label ? label.textContent : control ? control.getAttribute('aria-label') : '';
       text = String(text || '').replace(/\s+/g, ' ').trim();
       if (text) return text;
       if (root.mvHuman) return root.mvHuman(row.name || row.key);
@@ -174,21 +178,30 @@
       var changedRows = order.filter(function (key) { return rows[key].saved !== rows[key].current; });
       contents.replaceChildren();
       var note = doc.createElement('p'); note.className = 'muted';
+      var partial = before.truncated || after.truncated;
       note.textContent = changedRows.length
         ? changedRows.length + (changedRows.length === 1 ? ' field differs' : ' fields differ') + ' between the recovery copy and your current draft.' +
           (order.length > changedRows.length ? ' Fields that are the same are not shown.' : '')
-        : 'The recovery copy matches your current draft.';
+        : same(saved, current) ? 'The recovery copy matches your current draft.'
+        : 'Some draft values or saved learning evidence differ. This comparison does not show every difference. Review the complete draft after restoring and before saving.';
+      if (partial) note.textContent += ' Only the first 200 fields of each draft are shown; other fields may differ.';
       contents.append(note);
       if (!changedRows.length) return;
-      var table = doc.createElement('table'), head = doc.createElement('thead'), headRow = doc.createElement('tr'), bodyEl = doc.createElement('tbody');
-      ['Field', 'Recovery copy', 'Current draft'].forEach(function (label) { var th = doc.createElement('th'); th.scope = 'col'; th.textContent = label; headRow.append(th); });
-      head.append(headRow); table.append(head, bodyEl);
       changedRows.forEach(function (key) {
-        var tr = doc.createElement('tr'), th = doc.createElement('th'), a = doc.createElement('td'), b = doc.createElement('td');
-        th.scope = 'row'; th.textContent = fieldLabel(rows[key].row); a.textContent = rows[key].saved; b.textContent = rows[key].current;
-        tr.append(th, a, b); bodyEl.append(tr);
+        var field = doc.createElement('section'), heading = doc.createElement('h4'), values = doc.createElement('div');
+        field.className = 'draft-recovery__field';
+        heading.textContent = fieldLabel(rows[key].row);
+        heading.style.cssText = 'margin-block:var(--space-3) var(--space-2);font-size:var(--text-sm);overflow-wrap:anywhere';
+        values.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,18rem),1fr));gap:var(--space-2);min-width:0';
+        [['Recovery copy', rows[key].saved], ['Current draft', rows[key].current]].forEach(function (value) {
+          var column = doc.createElement('div'), label = doc.createElement('p'), text = doc.createElement('pre');
+          column.style.minWidth = '0'; label.textContent = value[0];
+          text.textContent = value[1]; text.tabIndex = 0; text.setAttribute('aria-label', value[0]);
+          text.style.cssText = 'margin:0;padding:var(--space-2);border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface-sunken)';
+          column.append(label, text); values.append(column);
+        });
+        field.append(heading, values); contents.append(field);
       });
-      contents.append(table);
     }
     async function call(method, body) {
       var response = await send('/api/v1/drafts/' + slot, {method:method, cache:'no-store', headers:{'Content-Type':'application/json','X-Lightwork-Draft-Context':context}, ...(body ? {body:JSON.stringify(body)} : {})});

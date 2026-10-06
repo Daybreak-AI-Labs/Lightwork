@@ -2,7 +2,15 @@
 {% from "_hero.html" import hero %}
 {% from "_module_gate.html" import module_gate %}
 {% block title %}Banner and preference center · Lightwork{% endblock %}
-{% block head_extra %}<link rel="stylesheet" href="/static/lightwork-consent-workbench.css">{% endblock %}
+{% block head_extra %}<link rel="stylesheet" href="/static/lightwork-consent-workbench.css">
+<style>
+#cpp-withdrawal-original { min-width: 0; overflow-wrap: anywhere; }
+#cpp-withdrawal-original .cw-toolbar label { min-width: 0; flex: 1 1 12rem; }
+#cpp-withdrawal-original select, #cpp-withdrawal-original button { min-width: 0; max-width: 100%; white-space: normal; }
+#cpp-withdrawal-original .cw-facts { grid-template-columns: minmax(0, 1fr); }
+#cpp-withdrawal-original dt { font-weight: 600; margin-top: var(--space-3); }
+#cpp-withdrawal-original dd { margin: var(--space-1) 0 0; }
+</style>{% endblock %}
 {% block content %}
 {% set pub_on = consent_publishing_enabled %}
 {% set pub_admin = consent_can_admin if consent_can_admin is defined else true %}
@@ -140,6 +148,28 @@
       </form>
     </section>
   </fieldset>
+
+  {% if pub_admin %}
+  <section class="panel" id="cpp-withdrawal-original" aria-labelledby="cpp-withdrawal-heading" data-draft-recovery="off">
+    <h2 id="cpp-withdrawal-heading">Original banner withdrawal</h2>
+    <p class="muted">An interrupted reply never repeats the withdrawal. Read your original request here; the current banner and your original decision are shown separately. Publishing history and people's recorded choices are kept.</p>
+    <div class="cw-toolbar">
+      <label>Original request<select class="select" id="cpp-withdrawal-requests"><option value="">Choose a request</option></select></label>
+      <button class="btn" type="button" id="cpp-withdrawal-refresh">Refresh requests</button>
+      <button class="btn" type="button" id="cpp-withdrawal-read" disabled>Read original result</button>
+    </div>
+    <p id="cpp-withdrawal-status" class="muted" role="status" aria-live="polite"></p>
+    <div id="cpp-withdrawal-result" class="cw-result" role="status" aria-live="polite"></div>
+    <section id="cpp-withdrawal-review" class="cw-editor" hidden aria-labelledby="cpp-withdrawal-review-title">
+      <h3 id="cpp-withdrawal-review-title" tabindex="-1">Review the banner to withdraw</h3>
+      <div id="cpp-withdrawal-changes" class="cw-result"></div>
+      <div class="cw-actions">
+        <button class="btn btn--danger" type="button" id="cpp-withdrawal-confirm">Withdraw reviewed banner</button>
+        <button class="btn btn--ghost" type="button" id="cpp-withdrawal-cancel">Keep the banner</button>
+      </div>
+    </section>
+  </section>
+  {% endif %}
 
   <section class="panel" id="cpp-signing" aria-labelledby="cpp-signing-heading" data-can-admin="{{ 'true' if pub_admin else 'false' }}">
     <h2 id="cpp-signing-heading">Signing key</h2>

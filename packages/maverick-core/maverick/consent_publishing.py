@@ -632,10 +632,11 @@ class ConsentPublishingStore:
                     args.append(resource_id)
                 total = connection.execute("SELECT count(*) FROM publishing_properties p WHERE " + where, args).fetchone()[0]
                 rows = connection.execute(
-                    "SELECT p.*, coalesce(h.current_revision, 0) AS publication_revision FROM publishing_properties p "
-                    "LEFT JOIN consent_publication_heads h ON h.tenant = p.tenant AND h.property_id = p.property_id WHERE "
+                    "SELECT p.*, coalesce(h.current_revision, 0) AS publication_revision, a.action AS publication_action FROM publishing_properties p "
+                    "LEFT JOIN consent_publication_heads h ON h.tenant = p.tenant AND h.property_id = p.property_id "
+                    "LEFT JOIN consent_publications a ON a.tenant=h.tenant AND a.property_id=h.property_id AND a.publication_id=h.current_publication_id AND a.publication_revision=h.current_revision WHERE "
                     + where + " ORDER BY p.property_id LIMIT ? OFFSET ?", [*args, limit, offset]).fetchall()
-                items = [{**self._property_result(row, tenant), "publication_revision": int(row["publication_revision"])} for row in rows]
+                items = [{**self._property_result(row, tenant), "publication_revision": int(row["publication_revision"]), "publication_action": row["publication_action"]} for row in rows]
             else:
                 where = "v.tenant = ? AND v.resource_kind = ? AND instr(lower(v.resource_id || ' ' || v.locale), lower(?)) > 0"
                 args = [tenant, kind, query]
@@ -2356,6 +2357,8 @@ class ConsentPublishingStore:
         expected_property_revision: int,
         expected_publication_revision: int,
         idempotency_key: str,
+        before_write: Callable[[dict[str, Any], dict[str, Any]], None] | None = None,
+        receipt_owner: str | None = None,
     ) -> dict[str, Any]:
         """CAS-replace the active publication head with an immutable tombstone.
 
@@ -2383,6 +2386,8 @@ class ConsentPublishingStore:
             "expected_property_revision": expected_property,
             "expected_publication_revision": expected_publication,
         }
+        if receipt_owner is not None:
+            request["receipt_owner"] = _text(receipt_owner, "receipt_owner", _DIGEST_RE)
         request_sha = _sha256(request)
         now = _timestamp(self._clock(), "clock")
         policy = self._signing_policy()
@@ -2432,14 +2437,14 @@ class ConsentPublishingStore:
                 current_result = self._publication_result(current, tenant)
                 if int(current["publication_revision"]) != current_revision:
                     raise ConsentPublishingError("publication head revision is invalid")
-                if int(current["property_revision"]) != expected_property:
-                    raise PublishingConflict(
-                        "active publication belongs to a different property revision"
-                    )
                 if current_result["action"] == "withdraw":
                     current_result = self._with_stored_signature(
                         connection, tenant, current_result
                     )
+                    if before_write is not None:
+                        before_write(property_result, current_result)
+                    if receipt_owner is not None:
+                        current_result["withdrawal_receipt"] = {"owner": receipt_owner, "changed": False, "recorded_at": _timestamp(self._clock(), "clock")}
                     self._save_replay(
                         connection,
                         tenant=tenant,
@@ -2460,6 +2465,9 @@ class ConsentPublishingStore:
                     tombstone,
                     maximum=_MAX_BUNDLE_BYTES,
                 ).decode("ascii")
+                if before_write is not None:
+                    before_write(property_result, current_result)
+                now = _timestamp(self._clock(), "clock")
                 result = self._insert_publication(
                     connection,
                     tenant=tenant,
@@ -2479,6 +2487,8 @@ class ConsentPublishingStore:
                     signer=signer,
                     signed_at=now,
                 )
+                if receipt_owner is not None:
+                    result["withdrawal_receipt"] = {"owner": receipt_owner, "changed": True, "recorded_at": now}
                 self._save_replay(
                     connection,
                     tenant=tenant,
@@ -2493,6 +2503,48 @@ class ConsentPublishingStore:
                 if connection.in_transaction:
                     connection.execute("ROLLBACK")
                 raise
+
+    def withdrawal_preview(self, tenant_id: str, property_id: str) -> dict[str, Any]:
+        """Read the current property and exact head from one native snapshot."""
+        tenant = self._tenant(tenant_id)
+        property_ref = _text(property_id, "property_id")
+        with self._snapshot() as connection:
+            property_result = self._property_result(self._property_row(connection, tenant, property_ref), tenant)
+            row = connection.execute(
+                "SELECT p.* FROM consent_publications p JOIN consent_publication_heads h "
+                "ON h.tenant=p.tenant AND h.property_id=p.property_id AND h.current_publication_id=p.publication_id "
+                "AND h.current_revision=p.publication_revision WHERE p.tenant=? AND p.property_id=?",
+                (tenant, property_ref),
+            ).fetchone()
+            if row is None:
+                raise PublishingConflict("property has no valid publication head to withdraw")
+            return {"property": property_result, "head": self._publication_result(row, tenant)}
+
+    def withdrawal_original(
+        self, tenant_id: str, property_id: str, *, expected_property_revision: int,
+        expected_publication_revision: int, idempotency_key: str, receipt_owner: str,
+    ) -> dict[str, Any] | None:
+        """Read only the atomically accepted exact owner-bound withdrawal request."""
+        tenant = self._tenant(tenant_id)
+        request = {"operation": "withdraw", "property_id": _text(property_id, "property_id"),
+                   "expected_property_revision": _revision(expected_property_revision, "expected_property_revision"),
+                   "expected_publication_revision": _revision(expected_publication_revision, "expected_publication_revision"),
+                   "receipt_owner": _text(receipt_owner, "receipt_owner", _DIGEST_RE)}
+        with self._snapshot() as connection:
+            result = self._replay(connection, tenant=tenant, key_sha256=self._idempotency_key(idempotency_key), request_sha256=_sha256(request))
+            if result is not None:
+                row = connection.execute(
+                    "SELECT * FROM consent_publications WHERE tenant=? AND property_id=? AND publication_id=?",
+                    (tenant, request["property_id"], result.get("publication_id")),
+                ).fetchone()
+                if row is None:
+                    raise ConsentPublishingError("the original withdrawal publication is unavailable")
+                actual = self._publication_result(row, tenant)
+                if actual["action"] != "withdraw" or any(result.get(key) != value for key, value in actual.items()):
+                    raise ConsentPublishingError("the original withdrawal publication could not be verified")
+        if result is not None and result.get("withdrawal_receipt", {}).get("owner") != receipt_owner:
+            raise ConsentPublishingError("the accepted withdrawal owner could not be verified")
+        return result
 
     @staticmethod
     def _denied(property_id: str, evaluated_at: float, reason: str) -> dict[str, Any]:

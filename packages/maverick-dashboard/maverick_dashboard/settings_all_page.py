@@ -1062,6 +1062,7 @@ def all_settings_page(
     from maverick.oidc import login_enabled
 
     from .saml import _session_secret, saml_enabled
+    from .settings_catalog_requests import authority
 
     return _app().templates.TemplateResponse(request, "settings_all.html", {
         "groups": groups,
@@ -1075,6 +1076,7 @@ def all_settings_page(
         "served": bool(words or changed),
         "oidc_login_active": login_enabled(),
         "saml_login_active": saml_enabled() and bool(_session_secret()),
+        "settings_request_context": authority(request),
     })
 
 
@@ -1112,6 +1114,7 @@ class CatalogUpdate(BaseModel):
     expected_revision: str = Field(..., pattern=r"^[0-9a-f]{64}$")
     changes: list[SettingChange] = Field(min_length=1, max_length=len(catalog.SETTINGS))
     confirm: bool = False
+    reviewed_token: str | None = Field(default=None, max_length=1048576)
 
 
 @router.get(API_PATH + "/choices/{setting_id}")
@@ -1589,17 +1592,25 @@ async def catalog_update(request: Request, body: CatalogUpdate, full: bool = Fal
     def save() -> JSONResponse:
         from . import settings_store
 
+        if body.reviewed_token:
+            if not body.confirm:
+                raise HTTPException(422, "Confirm the complete reviewed changes before saving.")
+            from .settings_catalog_requests import apply
+            value, status = apply(request, body.reviewed_token, full=full)
+            return JSONResponse(value, status_code=status, headers={"Cache-Control": "private, no-store"})
         with settings_store._locked(strict=True):
             return _catalog_update_locked(request, body, full)
 
     return await run_in_threadpool(save)
 
 
-def _catalog_update_locked(request: Request, body: CatalogUpdate, full: bool=False) -> JSONResponse:
+def _catalog_update_locked(request: Request, body: CatalogUpdate, full: bool=False, *, effect_guard=None) -> JSONResponse:
     """Save or reset settings. The reply carries the rows the save touched
     (``?full=1``: every row, as ``GET`` lists them)."""
     _app()._require_same_origin(request)
     auth.require_global_permission(request, 'admin')
+    if effect_guard is not None:
+        effect_guard()
     from maverick.audit import AuditRefused
 
     from . import settings_governance_level, settings_store
@@ -1636,19 +1647,23 @@ def _catalog_update_locked(request: Request, body: CatalogUpdate, full: bool=Fal
     asked = {item.id for item in body.changes}
     before = None if full else catalog_state()
     if not writes:
+        if effect_guard is not None:
+            effect_guard()
         if learning:
             settings_governance_level.turn_on(learning, auth.caller_principal(request) or 'local administrator')
         state = _saved_state(before, asked)
         return JSONResponse({'changed': [], 'restart': False, **state}, headers={'Cache-Control': 'no-store'})
     actor = auth.caller_principal(request) or 'local administrator'
     from . import settings_quorum
+    if effect_guard is not None:
+        effect_guard()
     hold, approved = settings_quorum.review(changes, actor, _audit_value)
     if hold is not None:
         state = _saved_state(before, asked)
         return JSONResponse({'changed': [], 'restart': False, 'quorum': hold, 'message': hold['message'], **state}, status_code=202, headers={'Cache-Control': 'no-store'})
     payload = {path: settings_store.REMOVE if value is None else value for path, value in writes.items()}
     try:
-        previous = settings_store.set_catalog_values(payload)
+        previous = settings_store.set_catalog_values(payload, before_effect=effect_guard)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail='That setting is not available here.') from exc
     except (OSError, TypeError, settings_store.SecuritySuiteConfigUnavailable) as exc:

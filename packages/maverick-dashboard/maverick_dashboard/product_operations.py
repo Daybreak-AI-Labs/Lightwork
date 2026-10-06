@@ -25,6 +25,7 @@ from starlette.concurrency import run_in_threadpool
 
 from . import auth
 from .draft_api import context_for
+from .scalar_wire import exact_integers
 
 router = APIRouter(prefix="/api/v1/copilot/product-operations", tags=["copilot-product-operations"])
 TTL = 600
@@ -181,6 +182,7 @@ def _adapter_modules():
         product_operations_compliance_questionnaires,
         product_operations_connections,
         product_operations_consent_jobs,
+        product_operations_consent_publication,
         product_operations_conversation,
         product_operations_decision_evidence,
         product_operations_department_boards,
@@ -218,6 +220,7 @@ def _adapter_modules():
         product_operations_model_answer_scoring,
         product_operations_models,
         product_operations_notifications,
+        product_operations_operator_acquisition,
         product_operations_outcome_pilots,
         product_operations_personal_data,
         product_operations_plugin_environment,
@@ -232,6 +235,7 @@ def _adapter_modules():
         product_operations_request_program,
         product_operations_retention,
         product_operations_reward_training,
+        product_operations_settings_catalog,
         product_operations_skills,
         product_operations_specialist_tests,
         product_operations_stop,
@@ -241,6 +245,7 @@ def _adapter_modules():
         product_operations_task_views,
         product_operations_tasks,
         product_operations_today,
+        product_operations_viewpoints,
         product_operations_webhook_recovery,
         product_operations_work_restructuring,
         product_operations_workflow_explanation,
@@ -315,10 +320,13 @@ def _adapter_modules():
         product_operations_record_history,
         product_operations_procedure_interactions,
         product_operations_request_program,
+        product_operations_operator_acquisition,
         product_operations_recovery_visibility,
+        product_operations_consent_publication,
         product_operations_retention,
         product_operations_reward_training,
         product_operations_manual_skills,
+        product_operations_settings_catalog,
         product_operations_learning_passes,
         product_operations_learning_example_decisions,
         product_operations_skills,
@@ -332,6 +340,7 @@ def _adapter_modules():
         product_operations_workspace_people,
         product_operations_work_restructuring,
         product_operations_webhook_recovery,
+        product_operations_viewpoints,
     )
 
 
@@ -381,7 +390,7 @@ def _adapter(request, page, selection, identifier):
 
 
 def _response(value, *, background=None, delete_cookies=()):
-    response = JSONResponse(value, headers={"Cache-Control": "private, no-store"}, background=background)
+    response = JSONResponse(exact_integers(value), headers={"Cache-Control": "private, no-store"}, background=background)
     for name in delete_cookies:
         if name in {"mvk_theme", "mvk_font", "mvk_density", "mvk_text_size", "mvk_glass", "mvk_lang"}:
             response.delete_cookie(name, path="/")

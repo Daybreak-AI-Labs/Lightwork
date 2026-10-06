@@ -38,7 +38,7 @@
       </select></div>
 
     <div class="ft__field"><label for="tr-constants">Numbers or words a rule may compare against (optional, up to 8, separated by commas)</label>
-      <input id="tr-constants" class="input" type="text" maxlength="400" placeholder="For example: 100, gold"></div>
+      <input id="tr-constants" class="input" type="text" maxlength="16391" placeholder="For example: 100, gold"></div>
 
     <h3>Examples</h3>
     <div id="tr-examples" class="ft__table" role="group" aria-label="Examples"></div>
@@ -187,5 +187,6 @@
   .ft__save { position: sticky; bottom: var(--space-3); }
   .ft label.ft__cell { display: grid; gap: var(--space-1); font-size: var(--text-sm); }
 </style>
+<script>{% include "flow_designer_inputs.js" %}</script>
 <script src="/static/lightwork-flow-teach.js" defer></script>
 {% endblock %}

@@ -6823,11 +6823,17 @@ def save_flow_endpoint(request: Request, payload: FlowSaveIn) -> dict:
     flow.owner = prior.owner if (prior and prior.owner) else (caller_principal(request) or "")
     _require_learned_flow_evidence(flow)
     try:
-        store.save_flow(
-            flow,
-            expected_version=(payload.flow.get("version") if prior is not None else 0),
-            expected_revision=(payload.flow.get("revision") if prior is not None else ""),
-        )
+        def save_current():
+            return store.save_flow(
+                flow,
+                expected_version=(payload.flow.get("version") if prior is not None else 0),
+                expected_revision=(payload.flow.get("revision") if prior is not None else ""),
+            )
+        if payload.acquisition is not None:
+            from .operator_acquisition import save_acquired
+            save_acquired(request, payload.acquisition, payload.acquisition_acceptance, flow, save_current)
+        else:
+            save_current()
     except store.FlowVersionConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:

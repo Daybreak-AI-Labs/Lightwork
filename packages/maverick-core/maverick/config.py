@@ -1136,6 +1136,7 @@ def get_features() -> dict:
         "commitment_capability_learning": cfg.get("commitment_capability_learning", False) is True,
         "semantic_rule_reuse": cfg.get("semantic_rule_reuse", False) is True,
         "procedure_interactions": cfg.get("procedure_interactions", False) is True,
+        "operational_competence_acquisition": cfg.get("operational_competence_acquisition", False) is True,
         "request_program": cfg.get("request_program", False) is True,
         "commitment_economic_alternatives": cfg.get("commitment_economic_alternatives", False) is True,
         "workflow_step_checks": cfg.get("workflow_step_checks", False) is True,

@@ -42,12 +42,12 @@
         if (selected.length !== changes.length) {
           apply.disabled = true;
           try {
-            var next = await call('/api/v1/settings/catalog/review',{changes:selected,expected_revision:plan.revision});
+            var next = await window.LightworkSettingsCatalog.review(selected, plan.revision);
             dialog.close(); dialog.remove(); resolve(await pickReview(next,selected));
           } catch (failure) { error.textContent = failure.message; apply.disabled = false; }
           return;
         }
-        done({changes:selected,revision:plan.revision});
+        done({changes:selected,revision:plan.revision,token:plan.token,operation:plan.operation,context:plan.context});
       });
       dialog.addEventListener('cancel',function (event) { event.preventDefault(); done(null); });
       dialog.appendChild(cancel); dialog.appendChild(apply); document.body.appendChild(dialog); dialog.showModal(); cancel.focus();
@@ -55,27 +55,24 @@
   }
   window.mvReviewSettings = async function (changes, revision) {
     var plan;
-    try { plan = await call('/api/v1/settings/catalog/review',{changes:changes,expected_revision:revision}); }
+    try { plan = await window.LightworkSettingsCatalog.review(changes, revision); }
     catch (failure) {
       if (failure.status !== 409 || !failure.data.conflicts) throw failure;
       var text = failure.data.conflicts.map(function (item) { return item.label + ': ' + item.current + ' (' + item.source + ')'; }).join('\n');
       if (!(await window.mvConfirm('Settings changed. Your draft is kept. Review current values:\n' + text + '\nCompare your draft against this configuration?',{okText:'Review changes'}))) return null;
-      plan = await call('/api/v1/settings/catalog/review',{changes:changes,expected_revision:failure.data.revision});
+      plan = await window.LightworkSettingsCatalog.review(changes, failure.data.revision);
     }
     return pickReview(plan, changes);
   };
   async function saveExternal(changes, revision, status) {
     var reviewed = await window.mvReviewSettings(changes,revision); if (!reviewed) return;
     try {
-      var result = await call('/api/v1/settings/catalog',{changes:reviewed.changes,expected_revision:reviewed.revision});
+      var saved = await window.LightworkSettingsCatalog.save(reviewed), result = saved.data;
+      if (!saved.response.ok || !result.original || (!result.original.confirmed && result.original.state !== 'approval')) throw new Error(result.message || (result.original && result.original.message) || 'The original save is unconfirmed. Read its original result; your draft is kept.');
       if (!result.quorum) document.dispatchEvent(new CustomEvent('lightwork:settings-saved', {detail: {ids: result.changed || []}}));
       status.textContent = result.quorum ? result.message : 'Settings saved. Reload this page when your other drafts are saved to see their current values.';
     } catch (failure) {
-      if (failure.status !== 409 || !Array.isArray(failure.data.confirm)) throw failure;
-      if (!(await window.mvConfirm(failure.data.confirm.map(function (item) { return item.label + ': ' + item.warning; }).join('\n'),{okText:'Confirm changes'}))) return;
-      var confirmed = await call('/api/v1/settings/catalog',{changes:reviewed.changes,expected_revision:reviewed.revision,confirm:true});
-      if (!confirmed.quorum) document.dispatchEvent(new CustomEvent('lightwork:settings-saved', {detail: {ids: confirmed.changed || []}}));
-      status.textContent = confirmed.quorum ? confirmed.message : 'Settings saved. Other drafts on this page were kept; they will require conflict review.';
+      throw failure;
     }
   }
   var panel = document.getElementById('settings-tools'); if (!panel) return;

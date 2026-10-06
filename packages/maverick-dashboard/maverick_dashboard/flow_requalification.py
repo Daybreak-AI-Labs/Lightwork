@@ -79,9 +79,11 @@ def listing(request, flow_id=""):
         current, qualified, left, right = _current(request, flow_id)
         _tenant, _owner, _context, candidate, baseline, publication, _root, bundle = current
         native = store.list_run_metadata(flow_id=flow_id, owner=owner, limit=200)
-        retained = records().list(limit=1000)
+        retained = records().list(limit=1001)
+        if len(retained) > 1000:
+            raise HTTPException(503, "The complete case collection exceeds its supported bound. Nothing was omitted; narrow or repair the collection before continuing.")
         evidence = [row for row in retained if row.get("owner") == owner and row.get("tenant") == tenant
-            and row.get("flow_id") == flow_id and row.get("kind") == "retain"][-50:]
+            and row.get("flow_id") == flow_id and row.get("kind") == "retain"]
         result.update(name=candidate.name, version=candidate.version, baseline_version=baseline.version,
             changed=bundle != publication["release_digest"],
             practices=[{"value": row.run_id, "when": row.created, "state": row.status} for row in native
@@ -310,9 +312,11 @@ def original(request, identifier):
 
 def history(request):
     tenant, owner, context = authority(request)
-    rows = records().list(limit=1000)
+    rows = records().list(limit=1001)
+    if len(rows) > 1000:
+        raise HTTPException(503, "The complete original history exceeds its supported bound. Nothing was omitted; original results remain readable individually.")
     result = [{"value": row["id"], "name": row["name"], "kind": row["kind"], "when": row["created_at"], "state": row["state"]} for row in rows
-        if row.get("tenant") == tenant and row.get("owner") == owner and row.get("context") == context][-50:]
+        if row.get("tenant") == tenant and row.get("owner") == owner and row.get("context") == context]
     authority(request, context)
     return {"context": context, "choices": result}
 
