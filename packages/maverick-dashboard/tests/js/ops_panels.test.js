@@ -58,14 +58,16 @@ test('checkpoints list days to choose, offer a receipt per row and publish after
   t.after(() => ui.window.close());
   const days = [...ui.document.querySelectorAll('#ops-ckpt-day option')].map((o) => o.value);
   assert.deepEqual(days, ['2026-01-02', '2026-01-01']);
+  // Each day reads in the shared date format; the value stays the calendar day.
+  assert.equal(ui.document.querySelector('#ops-ckpt-day option').textContent, 'Jan 2, 2026');
   const receipt = ui.document.querySelector('#ops-ckpt-rows a');
   assert.equal(receipt.getAttribute('href'), '/api/v1/audit/checkpoints/1/receipt');
-  assert.match(ui.document.getElementById('ops-ckpt-rows').textContent, /2026-01-01.*Checkpoint.*3/);
+  assert.match(ui.document.getElementById('ops-ckpt-rows').textContent, /Jan 1, 2026.*Checkpoint.*3/);
   ui.document.getElementById('ops-ckpt-publish').click();
   await ui.settle();
-  assert.match(ui.confirms[0], /Publish the checkpoint of 2026-01-02/);
+  assert.match(ui.confirms[0], /Publish the checkpoint of Jan 2, 2026/);
   assert.deepEqual(posts(ui, '/publish')[0].body, {day: '2026-01-02', after_erasure: false});
-  assert.match(ui.document.getElementById('ops-ckpt-result').textContent, /Published checkpoint 2 for 2026-01-02/);
+  assert.match(ui.document.getElementById('ops-ckpt-result').textContent, /Published checkpoint 2 for Jan 2, 2026/);
 });
 
 test('retiring a checkpoint asks first and sends only the row it showed', async (t) => {

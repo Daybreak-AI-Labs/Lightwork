@@ -32,7 +32,7 @@ test('typing a brief during source verification prevents a late flow restore',as
 
 test('malformed flow recovery cannot partially replace an editor',async()=>{
   const ui=flowFixture();const before=ui.context.rootFlow;ui.payload.editor.flow.nodes=[null];
-  await assert.rejects(ui.context.restoreRecovery(ui.payload),/invalid steps/);assert.equal(ui.context.rootFlow,before);ui.dom.window.close();
+  await assert.rejects(ui.context.restoreRecovery(ui.payload),/steps that could not be read/);assert.equal(ui.context.rootFlow,before);ui.dom.window.close();
 });
 
 function workflowFixture(){

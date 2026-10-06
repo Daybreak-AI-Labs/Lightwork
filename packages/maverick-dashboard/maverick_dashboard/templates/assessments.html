@@ -365,7 +365,7 @@
     var head = '<div class="as-detail-head">'
       + '<div class="as-card__title">' + esc(subjectName(a.kind, a.subject)) + '</div>' + statusPill(a)
       + '<button type="button" class="btn btn--ghost" id="as-rerun" style="margin-inline-start:auto; font-size:var(--text-sm);">Re-assess</button>'
-      + '<button type="button" class="btn btn--danger" id="as-del" style="font-size:var(--text-sm);">Delete</button></div>'
+      + '<button type="button" class="btn btn--danger" id="as-del" style="font-size:var(--text-sm);">Delete assessment</button></div>'
       + '<p class="muted" style="margin:0 0 var(--space-2); font-size:var(--text-sm);">' + esc(KIND_LABEL[a.kind] || a.kind) + (a.description ? ' · ' + esc(a.description) : '') + '</p>' + subjectReference(a)
       + '<p class="muted" id="as-detail-msg" role="status" aria-live="polite" style="margin:0 0 var(--space-3); font-size:var(--text-sm);"></p>';
     var lenses = Object.keys(a.lenses || {}).map(function (lens) {
@@ -467,26 +467,36 @@
       }).catch(function (error) { if (!error.contextChanged) mutationFailure(null, a, 'Re-assessment could not be confirmed.'); })
         .finally(function () { if (button.isConnected) button.disabled = false; });
     });
-    document.getElementById('as-del').addEventListener('click', async function () {
-      assessmentConfirmOpen = true;
-      var confirmed;
-      try { confirmed = await mvConfirm('Delete the assessment for ' + subjectName(a.kind, a.subject) + '?', { okText: 'Delete assessment' }); }
-      finally { assessmentConfirmOpen = false; }
-      if (!confirmed) return;
-      var button = this; button.disabled = true;
-      jfetch('/api/v1/assessments/' + a.kind + '/' + encodeURIComponent(a.subject)
-        + '?expected_revision=' + encodeURIComponent(a.revision), { method: 'DELETE' })
-        .then(function (response) {
-          if (response.ok) {
-            detailCard.hidden = true; current = null; renderedAssessment = null;
-            document.dispatchEvent(new CustomEvent('lightwork:copilot-selection', {detail: {selection: null}}));
-            reload(); return null;
-          }
-          return responseData(response).then(function (result) {
-            mutationFailure(result, a, 'Deletion was refused.');
-          });
-        }).catch(function (error) { if (!error.contextChanged) mutationFailure(null, a, 'Deletion could not be confirmed.'); })
-        .finally(function () { if (button.isConnected) button.disabled = false; });
+    document.getElementById('as-del').addEventListener('click', function () {
+      // One action with a way back (CTL-1): the assessment closes at once and
+      // is deleted, at the revision shown, when the Undo time is up. A refusal
+      // (for example, it changed since you opened it) puts it back with the
+      // page's own explanation.
+      var button = this;
+      detailCard.hidden = true;
+      mvUndo('Assessment for {subject} deleted.', { values: {subject: subjectName(a.kind, a.subject)},
+        action: 'delete the assessment',
+        run: function (keepalive) {
+          return jfetch('/api/v1/assessments/' + a.kind + '/' + encodeURIComponent(a.subject)
+            + '?expected_revision=' + encodeURIComponent(a.revision), { method: 'DELETE', keepalive: keepalive })
+            .then(function (response) {
+              if (response.ok) return response;
+              return responseData(response).then(function (result) {
+                mutationFailure(result, a, 'Deletion was refused.');
+                throw { handled: true };
+              });
+            }, function (error) {
+              if (!error.contextChanged) mutationFailure(null, a, 'Deletion could not be confirmed.');
+              throw { handled: true };
+            });
+        },
+        undo: function () { detailCard.hidden = false; if (button.isConnected) button.focus(); },
+        done: function () {
+          current = null; renderedAssessment = null;
+          document.dispatchEvent(new CustomEvent('lightwork:copilot-selection', {detail: {selection: null}}));
+          reload();
+        }
+      });
     });
     function decide(lens, decision, button) {
       var cad = parseInt(document.getElementById('as-cadence').value, 10);

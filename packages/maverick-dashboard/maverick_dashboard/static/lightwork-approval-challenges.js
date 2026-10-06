@@ -117,7 +117,9 @@
     let submitted = false, result, failure;
     lock(true);
     try {
-      if (!window.mvConfirm || !await window.mvConfirm(prompt) || ticket !== generation || state?.context !== context) return;
+      const okText = {'': 'Build challenge', '/import': 'Review this file', '/setup': body.enabled ? 'Allow challenges' : 'Stop challenges'}[path]
+        || {check: 'Check scenario', export: 'Authorize sharing', resolve: 'Mark as unknown', remove: 'Remove practice'}[path.split('/').pop()] || 'Save this change';
+      if (!window.mvConfirm || !await window.mvConfirm(prompt, {okText}) || ticket !== generation || state?.context !== context) return;
       submitted = true; clear();
       if (tracked) savePending({id: identity, context, operation: body.operation, action: path.endsWith('/check') ? 'check' : path === '/import' ? 'import' : 'generate'});
       result = await request(path, {...body, context, confirm: true});

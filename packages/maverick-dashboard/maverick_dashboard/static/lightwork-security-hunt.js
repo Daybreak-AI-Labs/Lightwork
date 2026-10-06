@@ -164,7 +164,7 @@
     if (inv.summary) { panel.appendChild(el("p", null, inv.summary)); }
     var items = inv.timeline || inv.evidence || [];
     if (!items.length) {
-      panel.appendChild(el("p", "muted", "No events recorded for this investigation yet."));
+      panel.appendChild(el("p", "muted", "No events recorded for this investigation yet. Events appear here as the investigation finds them."));
     } else {
       var ol = el("ol");
       items.slice(0, 100).forEach(function (t) {
@@ -284,7 +284,7 @@
     var list = (summary && summary.attack_heatmap) || [];
     if (!list.length) {
       var tr = el("tr");
-      var td = el("td", "muted", "No kinds of attack seen yet.");
+      var td = el("td", "muted", "No kinds of attack seen yet. They appear here when a check matches activity.");
       td.colSpan = 3; tr.appendChild(td); body.appendChild(tr);
       return;
     }
@@ -374,7 +374,7 @@
     clear(body);
     if (!customChecks.length) {
       var tr = el("tr");
-      var td = el("td", "muted", "No checks of your own yet.");
+      var td = el("td", "muted", "No checks of your own yet. Add one above to look for a pattern you care about.");
       td.colSpan = 4; tr.appendChild(td); body.appendChild(tr);
       return;
     }

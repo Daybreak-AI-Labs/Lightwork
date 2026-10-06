@@ -75,7 +75,7 @@
     <span class="bd-live"><span class="dot" aria-hidden="true"></span>Live
       <span class="bd-stamp" id="bd-stamp" role="status" aria-live="off">Loading…</span></span>
     {% from "_tabs.html" import panel_tabs %}
-    {{ panel_tabs('Time range', [('30', '30 days'), ('90', '90 days'), ('180', '6 months'), ('365', '1 year')], '90', id='bd-range', data='days', controls=false, activation='manual') }}
+    {{ panel_tabs('Time range', [('30', '30 days'), ('90', '90 days'), ('180', '6 months'), ('365', '1 year')], '90', id='bd-range', data='days', controls=false, activation='manual', hash='range-') }}
   </div>
 
   <div class="bd-kpis" id="bd-kpis"></div>
@@ -128,7 +128,7 @@
       {% endfor %}
     </div>
     {% else %}
-    <p class="muted">{{ 'Activity is unavailable or partial; see the source notices.' if source_errors else 'No recorded interventions in this window.' }}</p>
+    <p class="muted">{{ 'Activity is unavailable or partial; see the source notices.' if source_errors else 'No recorded interventions in this window. Stops, holds and approvals appear here when a person or rule steps in.' }}</p>
     {% endif %}
   </div>
 
@@ -162,7 +162,7 @@
       <label for="ov-until" data-ov-when="range">To
         <input type="date" id="ov-until" name="until" value="{{ until or '' }}" class="input" />
       </label>
-      <button type="submit" class="btn btn--primary">Show</button>
+      <button type="submit" class="btn btn--primary">Show these days</button>
     </form>
   </details>
   <div class="panel">
@@ -184,7 +184,7 @@
         </tbody>
       </table>
     {% else %}
-      <p class="muted">{{ 'Activity is unavailable or partial; see the source notices.' if source_errors else 'No recorded interventions on this day.' }}</p>
+      <p class="muted">{{ 'Activity is unavailable or partial; see the source notices.' if source_errors else 'No recorded interventions on this day. Choose another day above to compare.' }}</p>
       <p><button type="button" class="btn btn--ghost" id="ov-pick-day">Pick another day</button></p>
     {% endif %}
   </div>
@@ -293,7 +293,7 @@
           (window.mvMoney ? window.mvMoney(Number(d.cost_dollars || 0)) : '$' + Number(d.cost_dollars || 0).toFixed(2)) + (counts ? ' · ' + counts : '')));
         var evs = d.events || [];
         if (!evs.length) {
-          panel.appendChild(el('p', 'muted', 'No steps recorded yet.'));
+          panel.appendChild(el('p', 'muted', 'No steps recorded yet. Steps appear here as the task runs.'));
         } else {
           var ol = el('ol');
           evs.forEach(function (e) {

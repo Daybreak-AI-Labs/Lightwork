@@ -71,7 +71,7 @@ def test_facts_page_offers_remove_and_reads_plainly(client) -> None:
 
     client.post("/api/v1/facts", json={"key": "company_name", "value": "Acme"})
     page = client.get("/facts").text
-    assert "data-remove-fact" in page and ">Remove</button>" in page
+    assert "data-remove-fact" in page and ">Remove fact</button>" in page
     assert 'data-key="company_name"' in page and ">Company name<" in page
     assert developer_terms(page) == []
 

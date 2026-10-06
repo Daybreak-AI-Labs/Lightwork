@@ -54,9 +54,13 @@ test('accepted examples need separate permission, and withdrawal stops a learned
       await expect(page.locator('#lx-grant')).toBeVisible();
       await page.locator('#lx-grant-reason').fill('Allow this reviewed local example to teach a bounded flow.');
       await page.locator('#lx-grant-copies').check();
+      // Permission is a reviewed decision: every retained detail is shown and must be confirmed.
       await page.locator('#lx-grant-go').click();
-      await expect(page.locator('#mv-confirm')).toBeVisible();
-      await page.locator('#mv-confirm-ok').click();
+      const decision = page.locator('#lx-decision-review');
+      const confirm = decision.getByRole('button', {name: 'Confirm learning permission', exact: true});
+      await expect(confirm).toBeDisabled();
+      await decision.getByLabel('I reviewed every retained detail and this decision.').check();
+      await confirm.click();
       await expect(page.locator('#lx-status')).toContainText('new flows may learn from it');
     }
 

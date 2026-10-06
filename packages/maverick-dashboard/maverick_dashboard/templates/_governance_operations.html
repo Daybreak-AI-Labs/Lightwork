@@ -252,6 +252,7 @@
         <thead><tr><th scope="col">Rules</th><th scope="col">Status</th><th scope="col">Version in use</th><th scope="col">Actions</th></tr></thead>
         <tbody id="ai-policy-management-policies"><tr><td colspan="4">Loading rules…</td></tr></tbody>
       </table></div>
+      {% if suggestions_enabled is defined and suggestions_enabled() %}{% from "_policy_suggestions.html" import policy_suggestions, policy_suggestions_script %}{{ policy_suggestions() }}{{ policy_suggestions_script() }}{% endif %}
       <div class="assurance-table"><table>
         <caption>Exceptions to the rules</caption>
         <thead><tr><th scope="col">Exception</th><th scope="col">Rules</th><th scope="col">Status</th><th scope="col">Ends</th><th scope="col">Actions</th></tr></thead>
@@ -558,14 +559,12 @@
     <h3 id="ai-conformity-title">EU AI Act launch readiness</h3>
       <p>Collect what the EU AI Act asks for before a system goes to market.</p>
       <details class="assurance-muted"><summary>What this does and doesn't prove</summary><p>You record the evidence the EU AI Act asks for before a
-      launch, and a second person approves it. This is an internal checklist: it
-      does not decide what the law says, sign a declaration, add a CE mark or
+      launch, and a second person approves it. This is an internal checklist. It does not decide what the law says, sign a declaration, add a CE mark or
       show that a regulator accepted anything.</p>
       <details><summary>Technical details</summary><p>Manage human-declared FRIA, Annex IV,
       Article 43, post-market, draft-declaration, and CE-readiness evidence
       against the official consolidated Regulation. This internal workflow
-      does not classify a system as law, perform conformity assessment, sign
-      a declaration, create or affix a CE mark, certify, or record regulator
+      does not classify a system as law, perform conformity assessment or sign a declaration. It does not create or affix a CE mark, certify, or record regulator
       or notified-body acceptance.</p></details></details>
     <form id="ai-conformity-list" class="assurance-form">
       <input type="hidden" name="limit" value="100">
@@ -734,8 +733,7 @@
       comparison or that the comparison kept everyone anonymous.</p>
       <details><summary>Technical details</summary><p>Prepare and inspect voluntary, aggregate-only
       benchmark contributions backed by exact evidence. An operator may pin
-      versioned Ed25519 report trust roots and an HTTPS coordinator, but every
-      transmission remains a separate human action with literal consent and an
+      versioned Ed25519 report trust roots and an HTTPS coordinator. Every transmission remains a separate human action with literal consent and an
       idempotency key. Pseudonymous export, transport, and signatures do not
       establish cohort inclusion, anonymity, representative methodology, or
       independently verified differential privacy.</p></details></details>
@@ -828,10 +826,7 @@
       for you, and the list does not prove every AI tool was found. Web traffic,
       people, prompts and answers are never accepted.</p>
       <details><summary>Technical details</summary><p>Register, approve, bind, and revoke sensor
-      identities, and admit privacy-safe normalized observations. This is a
-      control plane only: it deploys no live browser, network, OAuth, SaaS,
-      identity-directory, or data-catalog sensors and makes no completeness
-      claim about enterprise AI discovery. Raw traffic, people, prompts, and
+      identities, and admit privacy-safe normalized observations. This is a control plane only. It deploys no live browser, network, OAuth, SaaS, identity-directory, or data-catalog sensors. It makes no completeness claim about enterprise AI discovery. Raw traffic, people, prompts, and
       model outputs are not accepted.</p></details></details>
     <form id="ai-discovery-sensor-list" class="assurance-form">
       <input type="hidden" name="limit" value="100">
@@ -1005,7 +1000,7 @@
       <p class="assurance-muted">Only an administrator who is signed in can use the agent identity controls.</p>
       {% endif %}
     </details>
-    <p id="ai-identity-governance-snapshot" class="assurance-muted" role="status" aria-live="polite">Nothing has been read yet in this browser session.</p>
+    <p id="ai-identity-governance-snapshot" class="assurance-muted" role="status" aria-live="polite">Nothing has been read yet in this browser session. Choose a connected service and select Read now.</p>
     <details open>
       <summary>Identities</summary>
       <div class="assurance-table"><table>
@@ -1247,7 +1242,7 @@
     if (response.status === 409) return "This was changed since you opened it. Choose it again in the table and retry.";
     if (response.status === 400 || response.status === 422) return "Some of the details need fixing. Check them and try again.";
     if (response.status === 503) return "This feature is not available right now. It may need to be turned on or set up first.";
-    return `Could not ${fallback}. Please try again.`;
+    return `Could not ${fallback}. Try again.`;
   };
   // One JSON request through the shell's mvFetchJSON: one plain sentence per
   // failure, never a status code or server wording.
@@ -1564,7 +1559,7 @@
       await fillFingerprints(form);
       return await action();
     }
-    catch (error) { setStatus(statusId, plainMessage(error, "That did not work. Please try again.")); return null; }
+    catch (error) { setStatus(statusId, plainMessage(error, "That did not work. Try again.")); return null; }
     finally {
       delete form.dataset.inFlight;
       if (button) { button.disabled = false; button.removeAttribute("aria-busy"); }
@@ -2117,7 +2112,7 @@
         displayTime(item.expires_at)
       ], {kind: "signal", key: item.signal_id || item.id, label: words(item.signal_code || item.category),
           fields: {signal_id: item.signal_id || item.id, expected_revision: item.revision}}));
-      if (!signals.length) emptyRow(target, 6, "No signals are recorded for this AI system yet.");
+      if (!signals.length) emptyRow(target, 6, "No signals are recorded for this AI system yet. Signals appear here as monitoring reports on it.");
       document.querySelectorAll("select[data-signal-options]").forEach(select => {
         select.replaceChildren(new Option("Choose the newer signal", ""));
         signals.forEach(item => select.appendChild(new Option(`${words(item.signal_code || item.category)} (${displayTime(item.observed_at)})`, item.signal_id || item.id)));
@@ -3077,7 +3072,7 @@
         displayTime(item.observed_at), item.current === true ? "Yes" : "No"
       ], {kind: "observation", key: item.observation_id, label: words(item.normalized?.ai_product_code || "observation"),
           fields: {observation_id: item.observation_id}}));
-      if (!rows.length) emptyRow(target, 5, "Nothing recorded yet. No discovery-completeness conclusion is shown.");
+      if (!rows.length) emptyRow(target, 5, "Nothing recorded yet. Observations appear here after a discovery run. No discovery-completeness conclusion is shown.");
       setStatus("ai-discovery-observation-list-status", `${rows.length} observation(s) shown.`);
     } catch (error) {
       clear(target); emptyRow(target, 5, "Observations could not be loaded. No live collection or completeness conclusion is shown. Refresh the page and try again.");
@@ -3377,7 +3372,7 @@
       renderIdentityChoices();
       setStatus("ai-identity-choices-status", result.available === true
         ? `${identityChoices.federation_bindings.length} agent identit${identityChoices.federation_bindings.length === 1 ? "y" : "ies"} and ${identityChoices.purview_intents.length} prepared change(s) available.`
-        : "No agent identities are enrolled for this workspace yet. Whoever runs Lightwork enrolls them on the server.");
+        : "No agent identities are enrolled for this workspace yet. Ask whoever runs Lightwork to enroll them on the server.");
     } catch (error) {
       purviewLabels.loaded = true;
       renderPurviewLabels();
@@ -3391,7 +3386,7 @@
     if (!button) return;
     button.disabled = true; button.setAttribute("aria-busy", "true"); setStatus(statusId, message);
     try { return await action(); }
-    catch (error) { setStatus(statusId, plainMessage(error, "That did not work. Please try again.")); return null; }
+    catch (error) { setStatus(statusId, plainMessage(error, "That did not work. Try again.")); return null; }
     finally { button.disabled = false; button.removeAttribute("aria-busy"); }
   };
   const identityFederationInput = form => {

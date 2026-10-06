@@ -27,7 +27,7 @@
 
   function errorText(failure, action) {
     if (global.mvErrorText) return global.mvErrorText(failure, action);
-    return 'Could not ' + action + '. Please try again.';
+    return 'Could not ' + action + '. Try again.';
   }
 
   // One JSON request (mvFetchJSON). A refusal rejects with the shared plain
@@ -100,7 +100,7 @@
   function table(container, columns, rows, actions, empty) {
     container.textContent = '';
     if (!rows || !rows.length) {
-      var p = el('p', 'muted', (empty && empty.text) || 'Nothing here yet.');
+      var p = el('p', 'muted', (empty && empty.text) || 'Nothing here yet. Items appear here once they are added.');
       container.appendChild(p);
       if (empty && empty.action) container.appendChild(button(empty.action.label, 'primary', empty.action.run));
       return;
@@ -144,7 +144,7 @@
   function badge(text, kind) { return el('span', 'badge ' + (kind || 'info'), text); }
 
   function confirm(message, okText) {
-    return global.mvConfirm ? global.mvConfirm(message, { okText: okText || 'Continue' }) : Promise.resolve(false);
+    return global.mvConfirm ? global.mvConfirm(message, { okText: okText || 'Save this change' }) : Promise.resolve(false);
   }
 
   function form(title, fields, okText) {

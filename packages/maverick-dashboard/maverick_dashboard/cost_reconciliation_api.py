@@ -77,6 +77,8 @@ def projection(request, *, day: str | None = None, goal_id: int | None = None):
     except (ValueError, OSError, RuntimeError):
         result["ledgers"].append({"name": "Acknowledged personal usage", "state": "unavailable", "amount": None,
                                   "scope": "A named identity and readable usage ledger are required."})
+    if goal_id is None:
+        _practice_ledgers(result, owner, selected, start, end)
     # Exact work-item receipts remain separately grouped by their original period.
     # An all-task day report can only associate tasks with episodes in that day;
     # selecting a task also reveals receipts for a run interrupted before that row.
@@ -109,6 +111,33 @@ def projection(request, *, day: str | None = None, goal_id: int | None = None):
     if owner != (auth.caller_principal(request) or ""):
         raise product_error(409, "cost_account_changed", "Your account changed. Refresh the cost evidence.")
     return result
+
+
+def _practice_ledgers(result, owner, selected, start, end):
+    """Practice runs cost real provider money and their calls are in the
+    provider receipts, so they are listed as their own records here: never
+    inside the runtime or personal-usage totals, and never against limits."""
+    from maverick import practice, practice_costs, quotas
+
+    line = practice_costs.summary(owner, since=start.timestamp(), until=end.timestamp())
+    if line:
+        result["ledgers"].append({"name": "Practice runs", "state": "available", "period": selected.isoformat(),
+            "currency": "USD", "amount": line["dollars"], "unknown_count": line["unknown_runs"],
+            "basis": f"Real provider cost of practice runs; {practice_costs.NOT_COUNTED}",
+            "scope": f"{line['runs']} practice runs started in this UTC day. Provider receipts include these calls; "
+                     "the runtime record above does not.", "href": "/spend"})
+    try:
+        if not owner or practice.active():
+            return
+        with practice.scope():
+            usage = quotas.UsageLedger().usage(owner, day=selected.isoformat())
+    except (ValueError, OSError, RuntimeError):
+        return
+    if usage.get("dollars"):
+        result["ledgers"].append({"name": "Practice usage", "state": "available", "period": selected.isoformat(),
+            "currency": "USD", "amount": usage["dollars"],
+            "basis": f"Acknowledged practice usage; {practice_costs.NOT_COUNTED} or quotas",
+            "scope": "This account's practice usage on this UTC day, kept on its own ledger.", "href": "/budget"})
 
 
 @router.get("/cost-reconciliation")

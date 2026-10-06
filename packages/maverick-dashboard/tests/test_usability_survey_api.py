@@ -125,3 +125,47 @@ def test_the_setting_is_in_the_catalog_off_by_default():
 
     row = next(s for s in settings_catalog.SETTINGS if s.top == "analytics" and s.key == "usability_survey")
     assert row.default is False and row.control == "toggle"
+
+
+def _measures_on(tmp_path):
+    from maverick import config
+
+    (tmp_path / "config.toml").write_text("[analytics]\nusability_survey = true\nusage_measures = true\n")
+    config.reset_config_cache()
+
+
+def test_suggestion_counts_and_first_results_reach_the_results_page(isolated, monkeypatch):
+    """ONB-1 and AI-13 measures: off unless turned on; then pages report
+    suggestions, a person's first finished result is noted, and the
+    administrators' page shows both without names."""
+    from maverick import usage_measures
+    from maverick_dashboard._shared import _world
+
+    _as(monkeypatch, "user:kim", role="operator")
+    off = _client().post("/api/v1/usage-measures/suggestion",
+                         json={"kind": "copilot-question", "item": "How do I invite?", "event": "shown"})
+    assert off.status_code == 200 and off.json() == {"recorded": False}
+    assert usage_measures.suggestion_report() == []
+    _measures_on(isolated)
+    app = _client()
+    assert 'lightwork-usage-measures.js' in app.get("/start").text  # first seen; the script loads
+    for event in ("shown", "dismissed", "shown"):
+        r = app.post("/api/v1/usage-measures/suggestion",
+                     json={"kind": "copilot-question", "item": "How do I invite?", "event": event})
+        assert r.status_code == 200 and r.json() == {"recorded": True}
+    assert app.post("/api/v1/usage-measures/suggestion",
+                    json={"kind": "Copilot!", "event": "shown"}).status_code == 422
+    world = _world()
+    gid = world.create_goal("Summarize vendor spend", "", owner="user:kim")
+    world.set_goal_status(gid, "done", result="Here is the summary.")
+    assert app.get(f"/chat/goal/{gid}").status_code == 200
+    first = {row["role"]: row for row in usage_measures.first_session_report()}
+    assert first["operator"]["people"] == 1 and first["operator"]["first_session"] == 1
+    _as(monkeypatch, "user:admin", role="admin")
+    page = _client().get("/users/usability-survey").text
+    main = page.split("<main", 1)[-1].split("</main>", 1)[0]
+    assert "First result in the first session" in main and "Copilot suggested questions" in main
+    assert "Shown again after dismissal" in main and "user:kim" not in main and "How do I invite" not in main
+    foreign = TestClient(_client().app, headers={"Origin": "https://elsewhere.example"})
+    assert foreign.post("/api/v1/usage-measures/suggestion",
+                        json={"kind": "copilot-question", "event": "shown"}).status_code == 403

@@ -16,6 +16,7 @@ import logging
 import os
 import re
 import secrets as _secrets
+import threading
 import time
 import uuid
 from dataclasses import dataclass
@@ -304,6 +305,30 @@ _STEP_BUDGET_WARNING = _step_budget_warning_setting()
 
 # How many of an agent's recent tool calls speculative reads predict from.
 _SPECULATION_HISTORY = 20
+# AI-3: one plan decision per task run, shared by every agent in it.
+_PLAN_DECISIONS: dict[tuple[int, int], bool] = {}
+_PLAN_DECISIONS_LOCK = threading.Lock()
+
+
+def _plan_facts(agent) -> tuple[list[str], list[str], float | None]:
+    """The plan so far (newest eight briefs), the agent's tool names and the
+    task's spending cap (a cap, not an estimate). Unreadable parts are empty."""
+    steps: list[str] = []
+    try:
+        for entry in agent.ctx.blackboard.by_kind("plan")[-8:]:
+            brief = str(entry.content).split("brief=", 1)[-1].strip()
+            # The planner's top-level brief repeats the request as its description.
+            brief = re.split(r"\s+Description:", brief.removeprefix("Top-level goal:"), maxsplit=1)[0].strip()
+            if brief and brief not in steps:
+                steps.append(brief[:200])
+    except Exception:  # an unreadable plan is described as missing
+        steps = []
+    try:
+        tools = [t.name for t in agent.tools.all()]
+    except Exception:  # no tool list: only the first action is described
+        tools = []
+    cap = getattr(getattr(agent.ctx, "budget", None), "max_dollars", None)
+    return steps, tools, (float(cap) if isinstance(cap, int | float) else None)
 
 # W1-44: how many blackboard entries posted by OTHER agents since this agent's
 # last tool-running turn are appended to that turn's tool_results message, so
@@ -1103,6 +1128,29 @@ def _audit_summary(value: Any, limit: int = 200) -> str:
         s = repr(value)
     s = " ".join((s or "").split())
     return s[:limit] + ("…" if len(s) > limit else "")
+
+
+# Argument names that say what a tool reads or changes: a file, an address,
+# a table. Their values go in the activity record as the resources an AI
+# action accessed (ADM-5), bounded like every other summary.
+_RESOURCE_ARGS = ("path", "file", "file_path", "filename", "url", "uri", "table", "database",
+                  "bucket", "repo", "repository", "channel", "to", "recipient", "dataset")
+
+
+def _resources_accessed(args: Any, limit: int = 5) -> list[str]:
+    """The files, addresses and tables a tool call names, for the audit record."""
+    if not isinstance(args, dict):
+        return []
+    found: list[str] = []
+    for key in _RESOURCE_ARGS:
+        value = args.get(key)
+        values = value if isinstance(value, (list, tuple)) else [value]
+        for item in values:
+            if isinstance(item, str) and item.strip():
+                found.append(_audit_summary(item))
+            if len(found) >= limit:
+                return found
+    return found
 
 
 def _tool_status(output: str) -> str:
@@ -3629,6 +3677,68 @@ class Agent:
                 )
             raise
 
+    def _plan_summary(self, name: str, args: dict) -> str:
+        """What a person reviews before the first action, as one paragraph."""
+        from .plan_review import summary_text
+        steps, _tools, cap = _plan_facts(self)
+        return summary_text(steps, name, args, cap)
+
+    async def _plan_denial(self, name: str, args: dict) -> str | None:
+        """Ask once per task run, before the first action with an outside effect."""
+        from . import practice
+        from .autonomy import confirm_plan_enabled
+        if practice.tool_allowed(name) or not confirm_plan_enabled():
+            return None
+        key = (int(getattr(self.ctx, "goal_id", 0) or 0), int(getattr(self.ctx, "episode_id", 0) or 0))
+        with _PLAN_DECISIONS_LOCK:
+            decided = _PLAN_DECISIONS.get(key)
+        if decided is None:
+            from .safety.consent import require_consent
+            try:
+                from .plan_review import plan_card
+                steps, tools, cap = _plan_facts(self)
+                verdict = await asyncio.to_thread(
+                    require_consent, "confirm_plan", risk="high", scope=f"task {key[0]}",
+                    detail=self._plan_summary(name, args), provenance="plan",
+                    allow_auto_approve=False, consult_ledger=False,
+                    approval_card=plan_card(key[0], steps, name, args, tools, cap))
+                decided = bool(verdict.granted)
+            except Exception:  # an unavailable decision is a refusal
+                decided = False
+            with _PLAN_DECISIONS_LOCK:
+                decided = _PLAN_DECISIONS.setdefault(key, decided)
+                if len(_PLAN_DECISIONS) > 10000:
+                    _PLAN_DECISIONS.pop(next(iter(_PLAN_DECISIONS)))
+        if decided:
+            return None
+        return ("The plan was not confirmed, so nothing ran. Do not take any action. Finish by telling the "
+                "person what you planned to do, so they can change the request and start again.")
+
+    async def _practice_denial(self, name: str, args: dict) -> str | None:
+        """Record, instead of run, a tool that leaves the practice workspace.
+
+        The approval a live run would need is still asked for (in the
+        practice Approvals page), so people practise the decision too; the
+        tool never runs whatever the answer."""
+        from . import practice
+        if not practice.active() or practice.tool_allowed(name):
+            return None
+        from .safety.consent import require_consent
+        from .safety.tool_risk import tool_risk
+        try:
+            verdict = await asyncio.to_thread(
+                require_consent, name, risk=tool_risk(name), provenance="practice", consult_ledger=False,
+                detail=(f"Practice mode: {self.name} wants to use {name}. Deciding lets you practise "
+                        "this approval; the action does not run either way."))
+            granted = bool(verdict.granted)
+        except Exception:  # an unavailable approval is a refusal, as in live work
+            granted = False
+        if not granted:
+            practice.record("refused", name, _audit_summary(args), goal_id=self.ctx.goal_id)
+            return (f"Practice mode: {name} was not approved, so it did not run. Nothing was sent, "
+                    "paid or changed outside practice.")
+        return practice.record("tool", name, _audit_summary(args), goal_id=self.ctx.goal_id)
+
     async def _run_tool(self, name: str, args: dict) -> str:
         # Add to the action sequence only after all pre-dispatch checks pass.
         # A refused call must not masquerade as an executed action in credit,
@@ -3709,7 +3819,10 @@ class Agent:
             return _NotExecutedToolResult(d)
 
         # Autonomy servo (Loop 2): low run-trust tightens the risk ceiling.
-        if (d := self._autonomy_denial(name, cap)) is not None:
+        # AI-3: with [autonomy] confirm_plan on, a person confirms the plan
+        # before the task's first action that could reach outside Lightwork.
+        if ((d := self._autonomy_denial(name, cap)) is not None
+                or (d := await self._plan_denial(name, args)) is not None):
             return _NotExecutedToolResult(d)
 
         # Org oversight control plane (enterprise): policy DENY or REQUIRE_HUMAN
@@ -3721,7 +3834,11 @@ class Agent:
         )
         if _governance_refusal is not None:
             return _NotExecutedToolResult(_governance_refusal)
-        if (d := await self._ifc_denial(name, args)) is not None:
+        # Practice mode runs last: after every approval and policy check has
+        # had its say, a tool that would reach outside the practice workspace
+        # is recorded in the practice outbox instead of running.
+        if ((d := await self._ifc_denial(name, args)) is not None
+                or (d := await self._practice_denial(name, args)) is not None):
             return _NotExecutedToolResult(d)
 
         # PreToolUse hooks: any registered hook can BLOCK the call by
@@ -3772,6 +3889,10 @@ class Agent:
             origin="agent",
             principal=principal,
             input_summary=_audit_summary(args),
+            # Which model acted and what it reached, so an AI action's record
+            # says both (ADM-5).
+            model=str(getattr(self, "model", "") or ""),
+            resources=_resources_accessed(args),
             **_checked_tags(name, keys=_compliance_profiles),
         ):
             return _NotExecutedToolResult(

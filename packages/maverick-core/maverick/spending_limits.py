@@ -359,10 +359,15 @@ def mark_recorded(budget) -> None:
 
 
 def _live(tenant, principal=None, receipts: dict | None = None) -> float:
+    from . import practice
+
+    practising = practice.active()
     total = 0.0
     for budget in _active_budgets():
         if getattr(budget, "_spending_tenant", None) != tenant:
             continue
+        if bool(getattr(budget, "_spending_practice", False)) != practising:
+            continue  # practice and live spending are counted apart
         if principal is not None and _budget_principal(budget) != principal:
             continue
         total += _unrecorded(budget, receipts)
@@ -381,19 +386,67 @@ def _message(scope: str, limit: dict, used: float) -> str:
             "in Admin > Spending limits.")
 
 
+def practice_cap(principal: str, limits: dict | None = None) -> float:
+    """The daily practice spending cap for ``principal``: ``[practice]
+    daily_spend_cap``, never more than a real limit that applies to them."""
+    from . import practice
+
+    limits = limits if limits is not None else load()
+    amounts = [practice.spend_cap()]
+    for limit in (limit_for(principal, limits), limits["workspace"]):
+        if limit is not None:
+            amounts.append(float(limit["amount"]))
+    return min(amounts)
+
+
+def practice_spent_today(principal: str, ledger: tuple[dict, dict] | None = None) -> float:
+    """Practice spending today (call inside practice: it reads the practice ledger)."""
+    usage, receipts = ledger or _ledger()
+    return recorded_spend("day", principal, usage) + _live(current_tenant(), principal, receipts)
+
+
+def _practice_message(cap: float, used: float) -> str:
+    return (f"The practice spending limit of {_money(cap)} per day has been reached "
+            f"({_money(used)} spent today in practice). Practice spending is kept apart, so your "
+            "real spending limits are not affected. An administrator can change the practice limit "
+            "in Settings.")
+
+
+def _admit_practice(budget, projected: float, limits: dict) -> None:
+    principal = _budget_principal(budget)
+    if budget is not None:
+        budget._spending_tenant = current_tenant()
+        budget._spending_practice = True
+        _track(budget)
+    cap = practice_cap(principal, limits)
+    used = practice_spent_today(principal)  # includes this run's unrecorded spend
+    if used + projected > cap:
+        raise SpendingLimitReached(_practice_message(cap, used))
+
+
 def admit(budget, projected: float = 0.0) -> None:
     """Refuse a paid request that would take a person or the workspace past
-    its limit. Raises :class:`SpendingLimitReached`; no limit set = no cost."""
+    its limit. Raises :class:`SpendingLimitReached`; no limit set = no cost.
+
+    In practice mode the practice cap applies instead, on the practice ledger,
+    so practice spending never uses up a real limit (:mod:`maverick.practice`)."""
+    from . import practice
+
     try:
         limits = load()
     except SpendingLimitError as exc:
         raise SpendingLimitReached(
             "The spending limits could not be read, so paid requests are paused. "
             "An administrator can fix them in Admin > Spending limits.") from exc
-    if limits["workspace"] is None and limits["default"] is None and not limits["users"]:
-        return
     projected = float(projected or 0.0)
     projected = max(0.0, projected) if math.isfinite(projected) else math.inf
+    if practice.active():
+        _admit_practice(budget, projected, limits)
+        return
+    if budget is not None:
+        budget._spending_practice = False
+    if limits["workspace"] is None and limits["default"] is None and not limits["users"]:
+        return
     tenant = current_tenant()
     principal = _budget_principal(budget)
     if budget is not None:
@@ -423,7 +476,12 @@ def admit(budget, projected: float = 0.0) -> None:
 def start_refusal(principal: str) -> str | None:
     """A plain reason to refuse starting a goal because a daily or monthly
     limit is already used up, else None."""
+    from . import practice
+
     limits = load()
+    if practice.active():
+        cap, used = practice_cap(principal, limits), practice_spent_today(principal)
+        return _practice_message(cap, used) if used >= cap else None
     own = limit_for(principal, limits)
     workspace = limits["workspace"]
     if workspace is None and (own is None or own["period"] == "task"):

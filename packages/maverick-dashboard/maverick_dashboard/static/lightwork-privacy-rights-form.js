@@ -16,7 +16,7 @@
   function fail(el, failure, action) {
     // Turned off is not "no permission": offer Turn on in place when allowed.
     if (window.mvShowFeatureOff && window.mvShowFeatureOff(el, failure, action)) return;
-    text(el, window.mvErrorText ? window.mvErrorText(failure, action) : 'Could not ' + action + '. Please try again.');
+    text(el, window.mvErrorText ? window.mvErrorText(failure, action) : 'Could not ' + action + '. Try again.');
   }
   function call(method, url, body) {
     return window.mvFetchJSON(url, { method: method, body: body });
@@ -99,9 +99,16 @@
       if (canAdmin) {
         var del = el('button', { type: 'button', class: 'btn btn--danger', text: 'Delete' });
         del.addEventListener('click', function () {
-          var ask = window.mvConfirm ? window.mvConfirm('Delete the form for ' + p.name + '? Its page stops working immediately.', { okText: 'Delete form' }) : Promise.resolve(window.confirm('Delete ' + p.name + '?'));
-          ask.then(function (ok) { if (!ok) return; return call('DELETE', BASE + '/properties/' + encodeURIComponent(p.slug)).then(loadProperties); })
-            .catch(function (f) { fail(status, f, 'delete the property'); });
+          // One action with a way back (CTL-1): the form's page keeps working
+          // until the Undo time is up, then the form is deleted.
+          var card = del.closest('.panel');
+          if (card) card.hidden = true;
+          window.mvUndo('Form for {name} deleted. Its page stops working.', { values: {name: p.name},
+            action: 'delete the property',
+            run: function (keepalive) { return fetch(BASE + '/properties/' + encodeURIComponent(p.slug), { method: 'DELETE', keepalive: keepalive, headers: { Accept: 'application/json' } }); },
+            undo: function () { if (card) card.hidden = false; del.focus(); },
+            done: function () { return loadProperties(); }
+          });
         });
         actions.push(del);
       }

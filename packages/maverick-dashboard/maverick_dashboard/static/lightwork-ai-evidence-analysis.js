@@ -74,7 +74,7 @@ function plainError(status, action) {
   }
   if (status === 403) return `Could not ${action}. You do not have permission to do this.`;
   if (status === 409) return `Could not ${action}. This changed since you opened it. Refresh the page and try again.`;
-  return `Could not ${action}. Something went wrong. Please try again.`;
+  return `Could not ${action}. Something went wrong. Try again.`;
 }
 
 async function apiRequest(path, options = {}, action = "finish this") {
@@ -101,7 +101,7 @@ async function run(label, operation) {
   try {
     return await operation();
   } catch (error) {
-    setStatus(operationStatus, error && error.message ? error.message : "Something went wrong. Please try again.", true);
+    setStatus(operationStatus, error && error.message ? error.message : "Something went wrong. Try again.", true);
     technical(error && error.technical ? error.technical : undefined);
     throw error;
   }
@@ -211,7 +211,7 @@ function renderAnalyses() {
   tbody.textContent = "";
   if (!state.analyses.length) {
     const tr = document.createElement("tr");
-    const td = cell(can.operate ? "No analyses here yet. Use Analyze a document above to start one." : "No analyses here yet.");
+    const td = cell(can.operate ? "No analyses here yet. Use Analyze a document above to start one." : "No analyses here yet. They appear here when an operator analyzes a document.");
     td.colSpan = 6;
     tr.appendChild(td);
     tbody.appendChild(tr);

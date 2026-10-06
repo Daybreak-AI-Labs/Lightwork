@@ -153,7 +153,7 @@ def test_partner_registry_check_and_rollup(monkeypatch):
     assert page.status_code == 200 and "Partner fleet" in page.text
     from test_support.plain_language import developer_terms
     assert developer_terms(page.text) == []
-    assert "mvConfirm(" in page.text          # removing a client asks first
+    assert "mvUndo(" in page.text             # removing a client offers Undo first
 
     assert client.delete(
         f"/api/v1/partner/tenants/{tid}").json()["deleted"] == tid

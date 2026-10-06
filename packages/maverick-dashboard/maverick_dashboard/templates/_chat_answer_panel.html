@@ -33,6 +33,26 @@
           {% if answer_agent.updated_text %}{{ ui('Last recorded change: {date}', date=answer_agent.updated_text) }}{% else %}{{ ui('no recorded changes') }}{% endif %}
         </p>
         {% if answer_agent.history_note %}<p class="muted">{{ ui(answer_agent.history_note) }}</p>{% endif %}
+        {% if answer_agent.since_last_use %}
+        {# AI-12: the first answer after a change says so, once; hiding it is remembered in this browser. #}
+        <div class="answer-agent__notice" id="answer-agent-notice" role="note" data-notice-key="agent-change:{{ answer_agent.agent }}:{{ answer_agent.since_last_use[0].ts }}">
+          <p>{% if answer_agent.kind == 'specialist' %}{{ ui('This specialist changed since you last used it:') }}{% else %}{{ ui('This agent changed since you last used it:') }}{% endif %}
+            {% for row in answer_agent.since_last_use %}{{ row.date_text }}, {{ row.changes | join('; ') }}{% if not loop.last %} · {% endif %}{% endfor %}</p>
+          <button type="button" class="btn btn--ghost" data-hide-notice>{{ ui('Hide this notice') }}</button>
+        </div>
+        <script>
+        (function () {
+          var notice = document.getElementById('answer-agent-notice');
+          if (!notice) return;
+          var key = 'lightwork-hidden-notice:' + notice.getAttribute('data-notice-key');
+          try { if (window.localStorage.getItem(key)) notice.hidden = true; } catch (_) { /* no storage: the notice stays */ }
+          notice.querySelector('[data-hide-notice]').addEventListener('click', function () {
+            notice.hidden = true;
+            try { window.localStorage.setItem(key, '1'); } catch (_) { /* hidden for this view only */ }
+          });
+        })();
+        </script>
+        {% endif %}
         {% if answer_agent.changed_since %}
         <p class="answer-agent__since" id="answer-agent-since">{% if answer_agent.kind == 'specialist' %}{{ ui('This specialist has changed since this answer:') }}{% else %}{{ ui('This agent has changed since this answer:') }}{% endif %}
           {% for row in answer_agent.changed_since %}{{ row.date_text }}, {{ row.changes | join('; ') }}{% if not loop.last %} · {% endif %}{% endfor %}</p>
@@ -76,7 +96,7 @@
       {% endif %}
       {% if goal.status in ('done', 'blocked', 'failed') %}
         {% if goal.status in ('blocked', 'failed') %}
-        <p><a class="btn btn--ghost" href="/tasks/{{ goal.id }}/diagnostics">{{ ui("Review safe task diagnostics") }}</a> · <a class="btn btn--ghost" href="/help?task={{ goal.id }}#issue-report">{{ ui("Prepare support report") }}</a></p>
+        <p><a class="btn btn--ghost" href="/tasks/{{ goal.id }}/diagnostics">{{ ui("Review safe task diagnostics") }}</a> · <a class="btn btn--ghost" href="/help?task={{ goal.id }}#issue-report">{{ ui("Prepare support report") }}</a> · <a class="btn btn--ghost" href="/help?task={{ goal.id }}#get-help" data-get-help>{{ ui('Get help from a person') }}</a></p>
         {% endif %}
         {# Always-available thumbs up/down (unlike the gated approval above): any
            finished result can be rated, and the verdict grounds a real outcome
@@ -109,6 +129,7 @@
           </form>
           <button id="feedback-recover" class="btn btn--ghost" type="button" hidden style="min-height:44px;">{{ ui('Check my original feedback') }}</button>
           <span id="feedback-msg" role="status" aria-live="polite" class="muted" style="flex-basis:100%;min-height:1em;"></span>
+          <p id="feedback-hand-off" hidden style="flex-basis:100%;margin:0;">{{ ui("Still not right? A person can help, with this task attached.") }} <a class="btn btn--ghost" href="/help?task={{ goal.id }}#get-help" data-get-help>{{ ui('Get help from a person') }}</a></p>
         </div>{% endif %}
         {% if goal.result %}<div class="answer-actions" role="group" aria-label="{{ ut('Answer actions') }}">
           <button id="copy-result" class="btn btn--ghost" type="button">{{ ui('Copy answer') }}</button>

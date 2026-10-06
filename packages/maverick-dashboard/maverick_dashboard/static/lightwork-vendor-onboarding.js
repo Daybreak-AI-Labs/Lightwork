@@ -751,7 +751,7 @@
       ...(record.reconciliation_history || []).map(item => `${date(item.checked_at)} · Read-only Jira check: ${friendly(item.outcome)}.`),
       ...(record.exceptions || []).map(item => typeof item === "string" ? item : "An exception was recorded (see Technical details)."),
     ];
-    show("history", history.join("\n\n") || "No reviewer decisions or exceptions yet.");
+    show("history", history.join("\n\n") || "No reviewer decisions or exceptions yet. They appear here when a reviewer decides.");
     reviewRefreshRequired = false;
     buttons();
     if (sameCase && !sameReview)
@@ -1158,7 +1158,7 @@
       throw error;
     }
     if (requested) {
-      if (!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/.test(requested)) throw new Error("The request link is invalid. Select a request from this workspace.");
+      if (!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/.test(requested)) throw new Error("The request link does not work. Select a request from this workspace.");
       render(await api("/cases/" + encodeURIComponent(requested)));
       try { window.sessionStorage.removeItem(connectionTaskKey); } catch (_) {}
       return "Linked request loaded. Review its evidence and current status.";

@@ -27,7 +27,7 @@
     <div id="vd-link-box" class="panel" hidden></div>
   </div>
 
-  <div class="section-head"><h2>Contracts</h2><button type="button" class="btn btn--primary" data-vd-add="contract">Add contract</button></div>
+  <div class="section-head"><h2>Contracts</h2><button type="button" class="btn" data-vd-add="contract">Add contract</button></div>
   <div class="panel{% if not vendor.contracts %} empty{% endif %}">
     {% if vendor.contracts %}
       <table>
@@ -46,13 +46,13 @@
       </table>
     {% else %}
       <p class="muted">No contracts yet. Add the data processing agreement and the master services agreement so Lightwork can remind you before they renew.</p>
-      <button type="button" class="btn btn--primary" data-vd-add="contract">Add contract</button>
+      <button type="button" class="btn" data-vd-add="contract">Add contract</button>
     {% endif %}
   </div>
 
-  <div class="section-head"><h2>Questionnaires</h2>{% if questionnaire_types %}<button type="button" class="btn btn--primary" data-vd-add="questionnaire">Send a questionnaire</button>{% endif %}</div>
+  <div class="section-head"><h2>Questionnaires</h2>{% if questionnaire_types %}<button type="button" class="btn" data-vd-add="questionnaire">Send a questionnaire</button>{% endif %}</div>
   <div class="panel{% if not vendor.questionnaires %} empty{% endif %}">
-    {% if questionnaire_unavailable %}<p role="alert">We can't check questionnaire replies right now. Please try again before following up with this vendor.</p>{% endif %}
+    {% if questionnaire_unavailable %}<p role="alert">We can't check questionnaire replies right now. Try again before following up with this vendor.</p>{% endif %}
     {% if vendor.questionnaires %}
       <table>
         <thead><tr><th scope="col">Questionnaire</th><th scope="col">Status</th>
@@ -73,13 +73,13 @@
       </table>
     {% else %}
       <p class="muted">No questionnaires sent yet. Send one and Lightwork gives you a link the vendor can answer without an account.</p>
-      {% if questionnaire_types %}<button type="button" class="btn btn--primary" data-vd-add="questionnaire">Send a questionnaire</button>{% endif %}
+      {% if questionnaire_types %}<button type="button" class="btn" data-vd-add="questionnaire">Send a questionnaire</button>{% endif %}
     {% endif %}
   </div>
 
   <section class="panel" id="vd-replies" hidden aria-live="polite"></section>
 
-  <div class="section-head"><h2>Linked records</h2><button type="button" class="btn btn--primary" data-vd-add="link">Link a record</button></div>
+  <div class="section-head"><h2>Linked records</h2><button type="button" class="btn" data-vd-add="link">Link a record</button></div>
   <div class="panel{% if not vendor.links %} empty{% endif %}">
     {% if vendor.links %}
       <table>
@@ -91,12 +91,12 @@
         </tbody>
       </table>
     {% else %}
-      <p class="muted">No reviews, assessments or other records are linked to this vendor yet.</p>
-      <button type="button" class="btn btn--primary" data-vd-add="link">Link a record</button>
+      <p class="muted">No reviews, assessments or other records are linked to this vendor yet. Start a review above to add the first one.</p>
+      <button type="button" class="btn" data-vd-add="link">Link a record</button>
     {% endif %}
   </div>
 
-  <div class="section-head"><h2>Monitoring notes</h2><button type="button" class="btn btn--primary" data-vd-add="note">Add a note</button></div>
+  <div class="section-head"><h2>Monitoring notes</h2><button type="button" class="btn" data-vd-add="note">Add a note</button></div>
   <div class="panel{% if not vendor.monitoring_notes %} empty{% endif %}">
     {% if vendor.monitoring_notes %}
       <table>
@@ -115,7 +115,7 @@
       </table>
     {% else %}
       <p class="muted">No monitoring notes yet. Add one when something changes, such as a security incident or a new sub-processor.</p>
-      <button type="button" class="btn btn--primary" data-vd-add="note">Add a note</button>
+      <button type="button" class="btn" data-vd-add="note">Add a note</button>
     {% endif %}
   </div>
 
@@ -148,7 +148,7 @@
     var link = window.location.origin + d.form_path;
     var field = Object.assign(document.createElement('input'), { className: 'input', readOnly: true, value: link });
     field.setAttribute('aria-label', 'Questionnaire link');
-    var copy = Object.assign(document.createElement('button'), { type: 'button', className: 'btn btn--primary', textContent: 'Copy link' });
+    var copy = Object.assign(document.createElement('button'), { type: 'button', className: 'btn', textContent: 'Copy link' });
     copy.addEventListener('click', function () { window.mvCopy(link); });
     box.append(field, copy);
     revision = d.revision || revision;

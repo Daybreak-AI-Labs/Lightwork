@@ -23,7 +23,7 @@
     model = await call(''); byId('ed-new').hidden = !model.enabled;
     choose(byId('ed-person'), model.people.filter(p => !p.admin)); choose(byId('ed-custodian'), model.people.filter(p => p.admin && p.active));
     say(model.enabled ? 'Current cases loaded. Dispatching steps without a later confirmation have an unknown outcome; do not repeat them blindly.' : 'Departure actions are off. Existing cases remain readable. An installation administrator can enable actions in Settings.');
-    const cases = byId('ed-cases'); cases.replaceChildren(); if (!model.cases.length) cases.appendChild(node('p', 'No departure cases yet.'));
+    const cases = byId('ed-cases'); cases.replaceChildren(); if (!model.cases.length) cases.appendChild(node('p', 'No departure cases yet. Start one above when someone leaves, to hand over their work.'));
     model.cases.forEach(row => {
       const article = node('article'); article.className = 'panel'; article.appendChild(node('h3', row.person + ' — ' + row.status.replaceAll('_', ' ')));
       article.appendChild(node('p', row.closure ? row.closure.notice : 'Review current inventory, assign every item and external obligation to an active administrator, then review closure. Unknown provider outcomes remain explicitly retained obligations.'));

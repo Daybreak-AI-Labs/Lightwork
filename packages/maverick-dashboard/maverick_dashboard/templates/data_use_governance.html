@@ -33,7 +33,7 @@
   <section class="panel" aria-labelledby="dug-assets-heading">
     <div class="section-head">
       <h2 id="dug-assets-heading">Data sets</h2>
-      <button class="btn btn--primary" type="button" id="dug-new-asset"{% if not du_on or not du_admin %} disabled{% endif %}>Add a data set</button>
+      <button class="btn" type="button" id="dug-new-asset"{% if not du_on or not du_admin %} disabled{% endif %}>Add a data set</button>
     </div>
     <p class="muted">A data set is a table, file or feed of data. List its fields so rules can refer to them.</p>
     <div id="dug-assets"><p class="muted">Loading data sets…</p></div>
@@ -70,7 +70,7 @@
         </label>
         <label class="cw-wide">Or attach its description<input class="input" type="file" name="evidence_file"></label>
         <div class="cw-actions">
-          <button class="btn btn--primary" type="submit">Save</button>
+          <button class="btn" type="submit">Save</button>
           <button class="btn btn--ghost" type="button" data-dug-close="dug-catalog">Cancel</button>
         </div>
       </fieldset>
@@ -85,9 +85,9 @@
   <section class="panel" aria-labelledby="dug-context-heading">
     <div class="section-head">
       <h2 id="dug-context-heading">Why each data set may be used</h2>
-      <button class="btn btn--primary" type="button" id="dug-new-context"{% if not du_on or not du_admin %} disabled{% endif %}>Record a reason</button>
+      <button class="btn" type="button" id="dug-new-context"{% if not du_on or not du_admin %} disabled{% endif %}>Record a reason</button>
     </div>
-    <p class="muted">Before any request is allowed, a data set needs four up-to-date reasons, each from a different source: its business purpose, the laws that apply, the consent people gave, and how sensitive it is.</p>
+    <p class="muted">Before any request is allowed, a data set needs four up-to-date reasons, each from a different source. They are its business purpose, the laws that apply, the consent people gave, and how sensitive it is.</p>
     <div id="dug-contexts"><p class="muted">Loading…</p></div>
     <form id="dug-context" class="cw-editor" hidden novalidate>
       <fieldset id="dug-context-controls" class="cw-form" data-feature-enabled="{{ 'true' if du_on else 'false' }}"{% if not du_on %} disabled aria-disabled="true"{% endif %}>
@@ -113,7 +113,7 @@
           <label>Version of the source record<input class="input" type="number" name="source_revision" min="1" value="1"></label>
         </details>
         <div class="cw-actions">
-          <button class="btn btn--primary" type="submit">Save reason</button>
+          <button class="btn" type="submit">Save reason</button>
           <button class="btn btn--ghost" type="button" data-dug-close="dug-context">Cancel</button>
         </div>
       </fieldset>
@@ -123,7 +123,7 @@
   <section class="panel" aria-labelledby="dug-labels-heading">
     <div class="section-head">
       <h2 id="dug-labels-heading">Labels</h2>
-      <button class="btn btn--primary" type="button" id="dug-new-label"{% if not du_on or not du_admin %} disabled{% endif %}>Create a label</button>
+      <button class="btn" type="button" id="dug-new-label"{% if not du_on or not du_admin %} disabled{% endif %}>Create a label</button>
     </div>
     <p class="muted">Labels mark fields that need extra care, such as personal or financial data. Rules can apply only to labelled fields.</p>
     <div id="dug-labels"><p class="muted">Loading…</p></div>
@@ -152,7 +152,7 @@
         </label>
         <label class="cw-wide">What it means<textarea class="textarea" name="evidence_note" rows="2" maxlength="2000" placeholder="Email addresses of customers and prospects"></textarea></label>
         <div class="cw-actions">
-          <button class="btn btn--primary" type="submit">Save label</button>
+          <button class="btn" type="submit">Save label</button>
           <button class="btn btn--ghost" type="button" data-dug-close="dug-label">Cancel</button>
         </div>
       </fieldset>
@@ -168,7 +168,7 @@
         <label>Field<select class="select" name="field_id" required></select></label>
         <label class="cw-wide">Why this field gets the label<textarea class="textarea" name="evidence_note" rows="2" maxlength="2000"></textarea></label>
         <div class="cw-actions">
-          <button class="btn btn--primary" type="submit">Label field</button>
+          <button class="btn" type="submit">Label field</button>
           <button class="btn btn--ghost" type="button" data-dug-close="dug-assign">Cancel</button>
         </div>
       </fieldset>
@@ -178,9 +178,9 @@
   <section class="panel" aria-labelledby="dug-policies-heading">
     <div class="section-head">
       <h2 id="dug-policies-heading">Rules</h2>
-      <button class="btn btn--primary" type="button" id="dug-new-policy"{% if not du_on or not du_admin %} disabled{% endif %}>Create a rule</button>
+      <button class="btn" type="button" id="dug-new-policy"{% if not du_on or not du_admin %} disabled{% endif %}>Create a rule</button>
     </div>
-    <p class="muted">A rule says what happens when a project asks to use data: allow it, block it, hide part of each value, show only some rows, or send it to a person. A rule only takes effect after a second person switches it on.</p>
+    <p class="muted">A rule says what happens when a project asks to use data. It can allow it, block it, hide part of each value, show only some rows, or send it to a person. A rule only takes effect after a second person switches it on.</p>
     <div id="dug-policies"><p class="muted">Loading rules…</p></div>
     <form id="dug-policy" class="cw-editor" hidden novalidate>
       <fieldset id="dug-policy-controls" class="cw-form" data-feature-enabled="{{ 'true' if du_on else 'false' }}"{% if not du_on %} disabled aria-disabled="true"{% endif %}>
@@ -218,17 +218,20 @@
           <button class="btn btn--ghost" type="button" id="dug-add-control">Add another step</button>
         </fieldset>
         <div class="cw-actions">
-          <button class="btn btn--primary" type="submit">Save as draft</button>
+          <button class="btn" type="submit">Save as draft</button>
+          <button class="btn btn--ghost" type="button" id="dug-policy-preview">Preview what it covers</button>
           <button class="btn btn--ghost" type="button" data-dug-close="dug-policy">Cancel</button>
         </div>
+        <p class="muted cw-wide" id="dug-policy-preview-result" role="status"></p>
       </fieldset>
     </form>
+    {% if suggestions_enabled is defined and suggestions_enabled() %}{% from "_policy_suggestions.html" import policy_suggestions, policy_suggestions_script %}{{ policy_suggestions("data-use-rule", "A draft takes effect only after another administrator reviews and activates it.", "h3") }}{{ policy_suggestions_script() }}{% endif %}
   </section>
 
   <section class="panel" aria-labelledby="dug-exceptions-heading">
     <div class="section-head">
       <h2 id="dug-exceptions-heading">Time-limited exceptions</h2>
-      <button class="btn btn--primary" type="button" id="dug-new-exception"{% if not du_on %} disabled{% endif %}>Ask for an exception</button>
+      <button class="btn" type="button" id="dug-new-exception"{% if not du_on %} disabled{% endif %}>Ask for an exception</button>
     </div>
     <p class="muted">An exception replaces one step of a rule for a limited time. An administrator must approve it, and it ends on its end date.</p>
     <div id="dug-exceptions"><p class="muted">Loading…</p></div>
@@ -255,7 +258,7 @@
         <label>Ends on<input class="input" type="date" name="expires_at" required></label>
         <label class="cw-wide">Why it is needed<textarea class="textarea" name="evidence_note" rows="2" maxlength="2000" required></textarea></label>
         <div class="cw-actions">
-          <button class="btn btn--primary" type="submit">Send for approval</button>
+          <button class="btn" type="submit">Send for approval</button>
           <button class="btn btn--ghost" type="button" data-dug-close="dug-exception">Cancel</button>
         </div>
       </fieldset>
@@ -265,7 +268,7 @@
   <section class="panel" aria-labelledby="dug-requests-heading">
     <div class="section-head">
       <h2 id="dug-requests-heading">Requests to use data</h2>
-      <button class="btn btn--primary" type="button" id="dug-new-request"{% if not du_on %} disabled{% endif %}>Ask to use data</button>
+      <button class="btn" type="button" id="dug-new-request"{% if not du_on %} disabled{% endif %}>Ask to use data</button>
     </div>
     <div id="dug-requests"><p class="muted">Loading requests…</p></div>
     <form id="dug-request" class="cw-editor" hidden novalidate>
@@ -291,7 +294,7 @@
         <fieldset class="cw-wide"><legend>Purpose</legend><div class="cw-checks" id="dug-request-purposes"></div></fieldset>
         <label class="cw-wide">Why the project needs it<textarea class="textarea" name="evidence_note" rows="2" maxlength="2000" required></textarea></label>
         <div class="cw-actions">
-          <button class="btn btn--primary" type="submit">Send request</button>
+          <button class="btn" type="submit">Send request</button>
           <button class="btn btn--ghost" type="button" data-dug-close="dug-request">Cancel</button>
           {% if not data_use_projects %}<a class="btn btn--ghost" href="/projects">Create a project</a>{% endif %}
         </div>
@@ -302,7 +305,7 @@
       <div id="dug-decision-body"></div>
       <fieldset id="dug-compile" class="cw-actions"{% if not data_use_compiler_enabled %} disabled aria-disabled="true"{% endif %}>
         <legend class="sr-only">Prepare database rules</legend>
-        <button class="btn btn--primary" type="button" id="dug-compile-button">Prepare database rules</button>
+        <button class="btn" type="button" id="dug-compile-button">Prepare database rules</button>
         <a class="btn btn--ghost" href="/data-use/providers">Apply them in Snowflake or Databricks</a>
       </fieldset>
       <div id="dug-compile-result" class="cw-result" role="status" aria-live="polite"></div>
@@ -759,6 +762,31 @@
     }
     $("dug-scope-assets").addEventListener("change", scopeFields);
     $("dug-new-policy").addEventListener("click", function () { openPolicy(null); });
+    function ruleDocument(form) {
+      var conditions = {};
+      CONDITIONS.forEach(function (c) { conditions[c[0]] = ticked(form, "cond_" + c[0]); });
+      conditions.label_any = ticked(form, "cond_label_any");
+      return {scope: {asset_ids: ticked(form, "scope_asset"), field_ids: ticked(form, "scope_field"), project_ids: ticked(form, "scope_project"), actions: ticked(form, "scope_action")}, conditions: conditions, controls: readControls()};
+    }
+    // What a rule would have covered in the last 30 days, from the recorded
+    // requests to use data (ADM-3). Report only; "" when it can't be worked out.
+    async function rulePreviewText(doc) {
+      try {
+        var data = await call("/policies/preview", {method: "POST", json: {document: doc}});
+        if (!data.considered) return "No requests to use data were recorded in the last 30 days, so there is nothing to compare it with.";
+        return "In the last 30 days it would have covered " + data.requests + " of " + data.considered + " requests to use data, from " +
+          data.projects + (data.projects === 1 ? " project" : " projects") + " and " + data.people + (data.people === 1 ? " person" : " people") + "." +
+          (data.conditional ? " It also depends on the reasons for using the data, which are checked when a request is decided, so it may cover fewer." : "");
+      } catch (error) { return ""; }
+    }
+    $("dug-policy-preview").addEventListener("click", async function () {
+      var out = $("dug-policy-preview-result");
+      try {
+        var text = await rulePreviewText(ruleDocument($("dug-policy")));
+        if (window.mvStatus) window.mvStatus(out, (text || "The preview could not be worked out. Try again.") + " Preview only. Nothing changes until a second administrator switches the rule on.");
+        else out.textContent = text;
+      } catch (error) { if (window.mvStatus) window.mvStatus(out, error.plain || "Check the rule's steps first.", {error: true}); }
+    });
     $("dug-policy").addEventListener("submit", async function (event) {
       event.preventDefault();
       var form = event.currentTarget, f = form.elements;
@@ -769,16 +797,15 @@
           policyId = CW.slug(f.policy_name.value, "rule");
           if (state.policies.some(function (p) { return p.policy_id === policyId; })) { say("A rule with that name already exists. Use “Change” on it instead.", true); return; }
         }
-        var conditions = {};
-        CONDITIONS.forEach(function (c) { conditions[c[0]] = ticked(form, "cond_" + c[0]); });
-        conditions.label_any = ticked(form, "cond_label_any");
-        var documentBody = {scope: {asset_ids: ticked(form, "scope_asset"), field_ids: ticked(form, "scope_field"), project_ids: ticked(form, "scope_project"), actions: ticked(form, "scope_action")}, conditions: conditions, controls: readControls()};
+        var documentBody = ruleDocument(form);
         await call("/policies/" + encodeURIComponent(policyId) + "/versions", {method: "POST", json: {version: Number(f.version.value), document: documentBody, expected_current_version: Number(f.expected_current_version.value), expected_revision: Number(f.expected_revision.value), idempotency_key: f.idempotency_key.value}});
         form.hidden = true; say("Rule saved as a draft. Ask a different administrator to switch it on."); await refresh();
       } catch (error) { sayError(error, "save the rule"); }
     });
     async function activatePolicy(policy) {
-      if (!(await CW.confirm("Switch on the rule “" + CW.human(policy.policy_id) + "”? New requests will be decided with it straight away.", "Switch on"))) return;
+      var latest = versionOf(policy.policy_id, policy.current_version);
+      var foresee = latest ? await rulePreviewText(latest.document) : "";
+      if (!(await CW.confirm("Switch on the rule “" + CW.human(policy.policy_id) + "”? " + (foresee ? foresee + " " : "") + "New requests will be decided with it straight away.", "Switch on"))) return;
       try {
         await call("/policies/" + encodeURIComponent(policy.policy_id) + "/activate", {method: "POST", json: {version: policy.current_version, reviewed_at: nowSeconds() - 1, expected_revision: policy.revision, idempotency_key: CW.reference()}});
         say("Rule switched on."); await refresh();
@@ -945,4 +972,6 @@
   }
 })();
 </script>
+{% if comments_enabled() %}{% from "_comments.html" import comments %}{{ comments('policy', 'data-use', 'Comments on the data use rules') }}
+<script src="/static/lightwork-comments.js" defer></script>{% endif %}
 {% endblock %}

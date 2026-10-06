@@ -62,6 +62,7 @@ from ._shared import _world_cache as _world_cache  # re-export: tests clear api.
 from ._shared import dashboard_token as _dashboard_token
 from .answer_feedback_operations import FeedbackChangeIn as FeedbackIn
 from .api_schemas import (
+    AGENT_PUBLISH_FIELDS,
     ActiveTenantIn,
     AgentGraduationIn,
     AgentOverrideIn,
@@ -3140,7 +3141,7 @@ async def vendor_questionnaire_responses(request: Request, response: Response,
     except vm.QuestionnaireResponsesUnavailable as exc:
         raise HTTPException(
             status_code=503,
-            detail="We couldn't check questionnaire replies. Please try again shortly.",
+            detail="We couldn't check questionnaire replies. Try again shortly.",
         ) from exc
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="no such vendor") from exc
@@ -3166,7 +3167,7 @@ async def replace_vendor_questionnaire_link(
     except vm.QuestionnaireLinkUnavailable as exc:
         raise HTTPException(
             status_code=503,
-            detail="The old link could not be safely closed. Please try again.",
+            detail="The old link could not be safely closed. Try again.",
         ) from exc
     except RecordConflict as exc:
         raise HTTPException(status_code=409, detail="This vendor changed. Refresh and try again.") from exc
@@ -9571,8 +9572,12 @@ def get_spend(request: Request) -> dict:
     w = _world()
     total = w.total_spend(owner=owner)
     episodes = w.list_episodes(limit=30, owner=owner)
+    from maverick import practice_costs
+
     return {
         "total": total,
+        # Practice runs cost real provider money; reported apart, never in "total".
+        "practice": practice_costs.summary(owner),
         "episodes": [
             {
                 "id": e.id,
@@ -9615,7 +9620,11 @@ async def get_savings(request: Request, days: int = 90) -> dict:
     cfg = resolution["effective_assumptions"]
     view = value_scope(request)
     report = await run_in_threadpool(savings_mod.compute, _world(), window_days=days, cfg=cfg, owner=view["owner"])
+    from maverick import practice_costs
+
+    practice = await run_in_threadpool(practice_costs.summary, view["owner"], since=practice_costs.window(days))
     return {
+        "practice": practice,  # real provider cost of practice runs, not part of the savings
         "enabled": cfg["enable"],
         "scope": view["scope"],
         "report": savings_mod.to_dict(report),
@@ -13916,6 +13925,66 @@ def _record_agent_reset_intent(request: Request, name: str, fields: list[str]) -
         raise HTTPException(status_code=503, detail="The activity record is unavailable; no change was made.")
 
 
+def _publish_check(name: str, payload: AgentOverrideIn, before_view: dict | None) -> dict:
+    """The test result these instructions have, and whether publishing needs one."""
+    from maverick.agent_publish_policy import require_passing_tests
+    from maverick.llm import model_for_role
+
+    from . import agent_publish_gate
+
+    creating = before_view is None
+    return agent_publish_gate.check(
+        name, model=model_for_role(name), current_instructions=(before_view or {}).get("persona", ""),
+        new_instructions=payload.persona, creating=creating, required=require_passing_tests())
+
+
+def _require_tested_instructions(request: Request, name: str, payload: AgentOverrideIn,
+                                 before_view: dict | None) -> None:
+    """Changed instructions need a passing run of the saved tests, or a recorded reason."""
+    try:
+        verdict = _publish_check(name, payload, before_view)
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="The saved test results could not be read. Nothing was changed.") from exc
+    if not verdict["blocked"]:
+        return
+    reason = " ".join((payload.override_reason or "").split())
+    if not payload.publish_without_passing_tests:
+        raise HTTPException(status_code=409, detail=(
+            "These instructions have no passing test run. Run the saved tests on them, "
+            "or publish without passing tests and give a reason. Nothing was changed."))
+    if len(reason) < 8:
+        raise HTTPException(status_code=422, detail="Give a reason of at least 8 characters for publishing without passing tests.")
+    from maverick.audit import AuditRefused, EventKind, audit_event
+
+    try:
+        recorded = audit_event(
+            EventKind.CONTROL_PLANE_ACTION, agent="dashboard",
+            verb="agent_published_without_passing_tests",
+            actor=caller_principal(request) or "local administrator", specialist=name,
+            reason=reason, tests=verdict["tests"], latest=verdict["latest"])
+    except AuditRefused as exc:
+        raise HTTPException(status_code=503, detail="The activity record is unavailable; no change was made.") from exc
+    if not recorded:
+        raise HTTPException(status_code=503, detail="The activity record is unavailable; no change was made.")
+
+
+@router.post("/agents/{name}/publish-check")
+def agent_publish_check(request: Request, name: str, payload: AgentOverrideIn) -> dict:
+    """What the saved tests say about these instructions, before publishing them."""
+    _require_pack_editing(request)
+    from urllib.parse import quote
+
+    from maverick.agent_publish_policy import require_passing_tests
+    from maverick.domain_edit import resolved_view
+
+    try:
+        verdict = _publish_check(name, payload, resolved_view(name))
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="The saved test results could not be read. Try again shortly.") from exc
+    return {**verdict, "gate_on": require_passing_tests(),
+            "tests_url": "/workforce?specialist=" + quote(name, safe="") + "#wo-my-tests"}
+
+
 @router.post("/agents/{name}/validate")
 def validate_agent_override(request: Request, name: str, payload: AgentOverrideIn) -> dict:
     """Lint the merged result of a proposed override without persisting it."""
@@ -13924,7 +13993,8 @@ def validate_agent_override(request: Request, name: str, payload: AgentOverrideI
     _require_pack_editing(request)
     from maverick.domain_edit import validate_override
 
-    errors, warnings = validate_override(name, payload.model_dump(exclude_unset=True, exclude_none=True))
+    errors, warnings = validate_override(name, payload.model_dump(exclude_unset=True, exclude_none=True,
+                                                                  exclude=set(AGENT_PUBLISH_FIELDS)))
     errors.extend(_agent_autonomy_errors(name, payload))
     try:
         errors.extend(_agent_action_errors(name, payload))
@@ -13951,13 +14021,14 @@ def save_agent_override(request: Request, name: str, payload: AgentOverrideIn) -
         if payload.autonomy is None and "autonomy" in previous:
             raise OverrideConflict(_this_one(name) + " has independence settings. Reload the editor before saving.")
         before_view = resolved_view(name)
+        _require_tested_instructions(request, name, payload, before_view)
         if payload.autonomy is not None:
             before = (before_view or {}).get("autonomy", {}).get("pack", {})
             after = payload.autonomy.model_dump()
             if before != after:
                 _record_agent_autonomy_intent(request, name, before, after)
         view = write_override(name, payload.model_dump(exclude_unset=True, exclude_none=True,
-                                                       exclude={"expected_generation"}),
+                                                       exclude={"expected_generation", *AGENT_PUBLISH_FIELDS}),
                               expected_generation=payload.expected_generation, return_view=True)
         _record_agent_change(request, name, before_view, view)
         return view

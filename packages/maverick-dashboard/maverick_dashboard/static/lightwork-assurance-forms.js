@@ -613,7 +613,7 @@
   });
 
   const exceptionScope = assets => ({type: "group", children: [
-    {type: "checkset", key: "asset_ids", label: "AI systems it covers", options: assets, emptyText: "No AI systems are recorded yet."},
+    {type: "checkset", key: "asset_ids", label: "AI systems it covers", options: assets, emptyText: "No AI systems are recorded yet. Add one in the AI system inventory first."},
     {type: "checkset", key: "statement_ids", label: "Rules it covers", options: [], emptyText: "Choose a policy in the table above to see its rules."},
     {type: "checkset", key: "risk_tiers", label: "Risk levels it covers", options: RISK_TIERS}
   ], transform: value => {

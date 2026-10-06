@@ -19,13 +19,15 @@
   function say(node, text) { window.mvStatus(node, String(text || '')); }
   function plural(n, one, many) { return n + ' ' + (n === 1 ? one : (many || one + 's')); }
   function human(value) { return window.mvHuman ? window.mvHuman(value) : String(value || ''); }
+  // A calendar day in the shared date format ("Oct 6, 2026"); the raw value stays the option value.
+  function dayText(day) { return (window.mvDateAbsolute && window.mvDateAbsolute(day)) || String(day || ''); }
   function when(stamp) {
     if (typeof stamp === 'number') return window.mvWhen ? window.mvWhen(stamp) : new Date(stamp * 1000).toLocaleString();
     var d = new Date(stamp);
     return isNaN(d.getTime()) ? '' : window.mvTimeAbsolute ? window.mvTimeAbsolute(stamp) : d.toLocaleString();
   }
   function errorText(failure, action) {
-    return window.mvErrorText ? window.mvErrorText(failure, action) : 'Could not ' + action + '. Please try again.';
+    return window.mvErrorText ? window.mvErrorText(failure, action) : 'Could not ' + action + '. Try again.';
   }
   async function failText(failure, action) {
     // A server sentence written for people is shown as is.
@@ -144,7 +146,7 @@
           daySel.textContent = '';
           if (!data.days.length) daySel.appendChild(el('option', null, 'No days recorded yet'));
           data.days.forEach(function (d) {
-            var o = el('option', null, d.day + (d.has_checkpoint ? ' (has a checkpoint)' : ''));
+            var o = el('option', null, dayText(d.day) + (d.has_checkpoint ? ' (has a checkpoint)' : ''));
             o.value = d.day;
             daySel.appendChild(o);
           });
@@ -162,23 +164,23 @@
             var keep = el('a', 'btn btn--ghost', 'Keep a receipt');
             keep.href = '/api/v1/audit/checkpoints/' + encodeURIComponent(c.sequence) + '/receipt';
             keep.setAttribute('download', '');
-            keep.setAttribute('aria-label', 'Keep a receipt for the checkpoint of ' + c.day);
+            keep.setAttribute('aria-label', 'Keep a receipt for the checkpoint of ' + dayText(c.day));
             actions.appendChild(keep);
             if (canAdmin && c.can_retire) {
               var retire = button('Retire', 'btn btn--danger');
               retire.setAttribute('data-sequence', String(c.sequence));
-              retire.setAttribute('aria-label', 'Retire the checkpoint of ' + c.day);
+              retire.setAttribute('aria-label', 'Retire the checkpoint of ' + dayText(c.day));
               retire.addEventListener('click', busy(retire, async function () {
-                if (!(await confirmed('Retire the checkpoint of ' + c.day + '? That day was deleted by your record-keeping policy; retiring records that on purpose so later checks do not flag it. This cannot be undone.', 'Retire'))) return;
+                if (!(await confirmed('Retire the checkpoint of ' + dayText(c.day) + '? That day was deleted by your record-keeping policy; retiring records that on purpose so later checks do not flag it. This cannot be undone.', 'Retire'))) return;
                 try {
                   await request('/api/v1/audit/checkpoints/retire', {method: 'POST', json: {sequence: c.sequence, confirm: true}});
-                  say(result, 'The checkpoint of ' + c.day + ' was retired.');
+                  say(result, 'The checkpoint of ' + dayText(c.day) + ' was retired.');
                   await load();
                 } catch (failure) { say(result, await failText(failure, 'retire the checkpoint')); }
               }));
               actions.appendChild(retire);
             }
-            return [c.day, c.kind, String(c.entries), when(c.created_at), actions];
+            return [dayText(c.day), c.kind, String(c.entries), when(c.created_at), actions];
           }), 'Published checkpoints, newest first'));
       } catch (failure) {
         say(rows, await failText(failure, 'load the checkpoints'));
@@ -192,12 +194,12 @@
       var erasure = $('ops-ckpt-erasure') && $('ops-ckpt-erasure').checked;
       var message = erasure
         ? 'Start a new checkpoint for ' + day + ' because its log changed after a person\'s data was erased? The earlier checkpoint stays on record.'
-        : 'Publish the checkpoint of ' + day + '? It is kept in a separate folder so a later change to that day can be proven.';
+        : 'Publish the checkpoint of ' + dayText(day) + '? It is kept in a separate folder so a later change to that day can be proven.';
       if (!(await confirmed(message, 'Publish'))) return;
       say(result, 'Publishing…');
       try {
         var done = await request('/api/v1/audit/checkpoints/publish', {method: 'POST', json: {day: day, after_erasure: !!erasure}});
-        say(result, 'Published checkpoint ' + done.sequence + ' for ' + done.day + '. Keep its receipt somewhere else, such as your email, so rolling it back can be caught.');
+        say(result, 'Published checkpoint ' + done.sequence + ' for ' + dayText(done.day) + '. Keep its receipt somewhere else, such as your email, so rolling it back can be caught.');
         await load();
       } catch (failure) { say(result, await failText(failure, 'publish the checkpoint')); }
     }));
@@ -219,7 +221,7 @@
             (v.keys_pinned ? ' Every checkpoint is signed with a pinned key.' : '') +
             (v.pinned ? ' Your kept receipt matches too.' : ' Choose a receipt you kept independently to compare checkpoint history through that receipt.')));
         } else if (v.none_yet) {
-          result.appendChild(el('p', null, 'No checkpoints have been published yet.'));
+          result.appendChild(el('p', null, 'No checkpoints have been published yet. Publish one above to fix the audit history at this point.'));
         } else {
           result.appendChild(el('p', null, 'Problems were found:'));
           var ul = el('ul');
@@ -605,7 +607,7 @@
       var data = await request('/api/v1/governance-ops/gateway');
       box.textContent = '';
       box.appendChild(el('p', null, data.summary));
-      if (!data.callers.length) { box.appendChild(el('p', 'muted', 'No app has used the AI gateway yet.')); return; }
+      if (!data.callers.length) { box.appendChild(el('p', 'muted', 'No app has used the AI gateway yet. Apps appear here after their first request through the gateway.')); return; }
       box.appendChild(table(['App', 'Team', 'AI model', 'Requests', 'Last result', 'Last used'], data.callers.map(function (c) {
         return [c.app, c.team, c.model, String(c.calls), c.last_result, when(c.last_seen)];
       }), 'Apps that used the AI gateway, most recent first'));

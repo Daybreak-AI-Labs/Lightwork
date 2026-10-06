@@ -173,4 +173,10 @@ ROWS = [
     ("Job-named areas", "Rubriques par métier", "Bereiche nach Aufgaben", "業務別のエリア", "按工作命名的区域"),
     ("Same as everyone", "Comme tout le monde", "Wie für alle", "全員と同じ", "与所有人相同"),
     ("Applies from the next page you open. Who can open each page does not change.", "S’applique à partir de la prochaine page que vous ouvrez. Les personnes autorisées à ouvrir chaque page ne changent pas.", "Gilt ab der nächsten Seite, die Sie öffnen. Wer welche Seite öffnen darf, ändert sich nicht.", "次に開くページから適用されます。各ページを開ける人は変わりません。", "从您打开的下一个页面开始生效。谁可以打开每个页面不会改变。"),
+    # Ctrl+K: people, agents and specialists, approvals and help (navfinder_find.py).
+    ("Specialist", "Spécialiste", "Spezialist", "スペシャリスト", "专家"),
+    ("Agent", "Agent", "Agent", "エージェント", "智能体"),
+    ("Approval waiting", "Approbation en attente", "Freigabe ausstehend", "承認待ち", "待审批"),
+    ("{count} person, agent, approval or help topic", "{count} personne, agent, approbation ou sujet d’aide", "{count} Person, Agent, Freigabe oder Hilfethema", "{count}件の人・エージェント・承認・ヘルプ", "{count}个人员、智能体、审批或帮助主题"),
+    ("{count} people, agents, approvals or help topics", "{count} personnes, agents, approbations ou sujets d’aide", "{count} Personen, Agenten, Freigaben oder Hilfethemen", "{count}件の人・エージェント・承認・ヘルプ", "{count}个人员、智能体、审批或帮助主题"),
 ]

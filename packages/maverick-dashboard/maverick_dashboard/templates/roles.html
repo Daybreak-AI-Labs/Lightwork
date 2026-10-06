@@ -167,7 +167,7 @@
           if (r.ok) { show('Saved.'); window.location.search = '?role=' + encodeURIComponent(role); }
           else show(mvErrorText(r, 'save your changes'));
         } catch (error) {
-          show(error instanceof Error ? error.message : 'Your changes could not be saved. Please try again.');
+          show(error instanceof Error ? error.message : 'Your changes could not be saved. Try again.');
         } finally {
           finishMutation(saveBtn);
         }
@@ -185,7 +185,7 @@
           if (r.ok) { show('Back to built-in settings.'); window.location.search = '?role=' + encodeURIComponent(role); }
           else show(mvErrorText(r, 'reset the role'));
         } catch (error) {
-          show(error instanceof Error ? error.message : 'The role could not be reset. Please try again.');
+          show(error instanceof Error ? error.message : 'The role could not be reset. Try again.');
         } finally {
           finishMutation(resetBtn);
         }

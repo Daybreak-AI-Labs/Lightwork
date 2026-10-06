@@ -43,7 +43,7 @@ def snapshot(request, selection):
         {"name": "minutes", "label": "Finish each local case check within this many minutes", "kind": "number", "value": 10, "min": 1, "max": 50, "step": 1},
         {"name": "max_steps", "label": "Total calculation steps, including all separate comparisons", "kind": "number", "value": 512, "min": 4, "max": 1024, "step": 1},
         {"name": "max_seconds", "label": "Total local calculation time in seconds", "kind": "number", "value": 15, "min": 1, "max": 30, "step": 1}],
-        blocked="Grouping local work is off. An administrator can enable Share preparation safely in Settings." if not selected["enabled"] else "Choose a named published workflow in Group local work first." if not flows else
+        blocked="Grouping local work is off. An administrator can enable Share preparation safely in Settings." if not selected["enabled"] else "Choose a named published workflow in Share preparation safely first." if not flows else
         "Retain at least two different original cases with current reuse permission first." if len(selected["cases"]) < 2 else "")
 
 

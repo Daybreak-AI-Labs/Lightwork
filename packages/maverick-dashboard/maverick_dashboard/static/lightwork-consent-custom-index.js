@@ -231,7 +231,7 @@
           { label: "What happened", value: (e) => ACTIONS[e.action] || CW.human(e.action) },
           { label: "Question", value: (e) => { const x = state.indexes.find((i) => i.index_id === e.index_id); return x ? CW.human(x.element_name) : ""; } },
         ],
-        empty: { title: "Nothing has happened yet." },
+        empty: { title: "Nothing has happened yet.", body: "Changes to this index appear here once it is saved or used." },
       });
     } catch (error) { explain(operationStatus, error, "load the history"); }
   }));

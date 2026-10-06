@@ -1830,6 +1830,15 @@ async def catalog_preview(request: Request, setting_id: str, value: str = "") ->
 
     headers = {"Cache-Control": "no-store"}
     setting = catalog.BY_ID.get(setting_id)
+    if setting is not None and setting.preview == "retention":
+        # A shorter keep period: what the next clean-up would delete (a dry run).
+        from maverick import policy_preview
+        try:
+            shown = await run_in_threadpool(policy_preview.retention, setting.key, value)
+        except ValueError as exc:
+            return JSONResponse({"detail": str(exc), "message": str(exc)}, status_code=422,
+                                headers=headers)
+        return JSONResponse(shown, headers=headers)
     if setting is not None and setting.preview == "approval_checks":
         # The approval threshold: what the recorded checks would have needed (report only).
         from . import approval_threshold_preview

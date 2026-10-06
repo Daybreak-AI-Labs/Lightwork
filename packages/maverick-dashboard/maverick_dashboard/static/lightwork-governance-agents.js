@@ -79,7 +79,7 @@
     if (typeof window.mvErrorText === "function") return window.mvErrorText({ status: status, headers: headers }, action);
     if (status === 403) return "Could not " + action + ". You do not have permission to do this.";
     if (status === 409) return "Could not " + action + ". This changed since you opened it. Refresh and try again.";
-    return "Could not " + action + ". Something went wrong. Please try again.";
+    return "Could not " + action + ". Something went wrong. Try again.";
   }
   function unexpected() { return new Error("Lightwork returned something unexpected. Refresh the page and try again."); }
 
@@ -131,7 +131,7 @@
     output.textContent = details === undefined ? "" : typeof details === "string" ? details : JSON.stringify(details, null, 2);
   }
   function failed(error) {
-    say(error && error.message ? error.message : "Something went wrong. Please try again.", error && error.technical ? error.technical : undefined);
+    say(error && error.message ? error.message : "Something went wrong. Try again.", error && error.technical ? error.technical : undefined);
   }
   function ask(message, okText) {
     if (typeof window.mvConfirm === "function") return window.mvConfirm(message, { okText: okText });
@@ -267,7 +267,7 @@
     var filter = document.getElementById("ga-runs-filter").value;
     var shown = runs.filter(function (run) { return !filter || run.agent_kind === filter; });
     if (!shown.length) {
-      emptyRow(tbody, 6, can.operate ? "No reviews yet. Use Start a review on one of the assistants above." : "No reviews yet.");
+      emptyRow(tbody, 6, can.operate ? "No reviews yet. Use Start a review on one of the assistants above." : "No reviews yet. They appear here when an operator starts one.");
       return;
     }
     tbody.textContent = "";

@@ -15,6 +15,6 @@
         var data = await response.json(); if (current !== generation) return;
         finder.setSettings(data.items.filter(function (item) { return /^\/(?:settings(?:[?#].*)?|settings\/all\?.*|preferences(?:#preference-[a-z_]+)?|notifications#notification-preferences|workspace\/tenant#tsel-title|channels|connections|plugins|learning)$/.test(item.href); }));
       } catch (_failure) { /* The existing finder stays usable when settings search is unavailable. */ }
-    },250);
+    },60);
   });
 })();

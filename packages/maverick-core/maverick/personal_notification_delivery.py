@@ -133,8 +133,11 @@ def _post(url, token, payload) -> dict:
     return value
 
 
-def send_private(link: dict, text: str) -> None:
-    """Current bot identity must match the account that proved the link."""
+def send_private(link: dict, text: str, buttons: list[dict] | None = None) -> None:
+    """Current bot identity must match the account that proved the link.
+
+    ``buttons`` are Slack button elements (the one-action mute); Telegram
+    messages carry the same choice as a link in ``text``."""
     channel, token = _transport(link)
     sender = link["sender_id"]
     if channel == "telegram":
@@ -156,8 +159,11 @@ def send_private(link: dict, text: str) -> None:
         if (not isinstance(target, dict) or target.get("is_im") is not True or target.get("user") != sender
                 or not re.fullmatch(r"D[A-Z0-9]{7,30}", str(target.get("id") or ""))):
             raise Refused
-        posted = _post("https://slack.com/api/chat.postMessage", token,
-                       {"channel": target["id"], "text": text, "mrkdwn": False, "unfurl_links": False, "unfurl_media": False})
+        message = {"channel": target["id"], "text": text, "mrkdwn": False, "unfurl_links": False, "unfurl_media": False}
+        if buttons:
+            message["blocks"] = [{"type": "section", "text": {"type": "plain_text", "text": text[:2900], "emoji": False}},
+                                 {"type": "actions", "elements": buttons[:5]}]
+        posted = _post("https://slack.com/api/chat.postMessage", token, message)
         if not isinstance(posted.get("ts"), str):
             raise Unconfirmed
 
@@ -227,7 +233,27 @@ class DeliveryStore:
         return [item for item in items if item["id"] not in consumed]
 
 
+def _mute_choice(principal: str, base: str, item: dict) -> tuple[str, str, dict] | None:
+    """The one-action mute for one alert (NOT-2): its words, link and Slack button."""
+    try:
+        from .notification_unsubscribe import for_item, sign
+        from .slack_interactive import mute_button
+
+        target = for_item(item)
+        if target is None:
+            return None
+        token = sign(principal, *target)
+    except Exception:  # noqa: BLE001 -- the alert still goes out without it
+        return None
+    words = "Mute alerts about this task" if target[0] == "task" else "Mute alerts from this agent"
+    return words, base + "/unsubscribe/" + token, mute_button(token, words)
+
+
 def dispatch(principal: str, inbox: dict, preferences: dict) -> None:
+    from . import practice
+    if practice.active():  # practice mode: personal messages are recorded, never sent
+        practice.record("personal message", "Slack or Telegram message", {"items": len(inbox.get("items") or [])})
+        return
     from .personal_identity import linked_channels, principal_current
     settings = _settings()
     if preferences["mode"] == "off" or not principal_current(principal):
@@ -259,13 +285,19 @@ def dispatch(principal: str, inbox: dict, preferences: dict) -> None:
             if claimed is None:
                 continue
             ident, fresh = claimed
-            links = []
+            links, buttons = [], []
             for item in fresh[:5]:
                 href = item.get("href", "")
                 if (isinstance(href, str) and href.startswith("/") and not href.startswith("//")
                         and not any(char in href for char in "\r\n\\")):
                     # Why, what and by when, never task text; then the exact link.
-                    links.append(alert_brief(item, time_zone=preferences["timezone"]) + "\n" + base + href)
+                    line = alert_brief(item, time_zone=preferences["timezone"]) + "\n" + base + href
+                    quiet = _mute_choice(principal, base, item)
+                    if quiet:
+                        line += "\n" + quiet[0] + ": " + quiet[1]
+                        if len(buttons) < 4:
+                            buttons.append(quiet[2])
+                    links.append(line)
             text = "Lightwork has " + str(len(fresh)) + " update(s) for you. Sign in to review.\n" + "\n".join(links)
             if len(fresh) > 5 or not links:
                 text += "\n" + base + "/notifications"
@@ -276,7 +308,10 @@ def dispatch(principal: str, inbox: dict, preferences: dict) -> None:
                 current = next((value for value in linked_channels(principal) if value["id"] == link["id"]), None)
                 if current != link:
                     raise Refused
-                send_private(link, text)
+                if buttons and link["channel"] == "slack":
+                    send_private(link, text, buttons)
+                else:
+                    send_private(link, text)
             except (Refused, ValueError):
                 store.finish(ident, "failed", "Not accepted. Review the linked identity, channel access and bot configuration. No automatic retry.")
             except Exception:

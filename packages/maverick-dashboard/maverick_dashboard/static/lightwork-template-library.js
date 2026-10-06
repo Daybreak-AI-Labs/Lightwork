@@ -12,7 +12,7 @@
     if (status === 404) return 'This template is no longer available. Refresh the page.';
     if (status === 409) return 'This template changed since you opened it. Refresh the page and try again. Your details are still here.';
     if (window.mvErrorText) return window.mvErrorText(response, action);
-    return 'Could not ' + action + '. Please try again.';
+    return 'Could not ' + action + '. Try again.';
   }
   function plain(text) { var e = new Error(text); e.plain = true; return e; }
   var find = document.getElementById('tplm-find');
@@ -85,7 +85,7 @@
       if (request !== filter.request) return;
       filter.names = result.suggested.map(function (item) { return item.name; });
       filter.mode = filter.names.length ? 'suggested' : 'all';
-      filter.notice = filter.names.length ? 'Review suggestions before use.' : 'No suggestions yet.';
+      filter.notice = filter.names.length ? 'Review suggestions before use.' : 'No suggestions yet. Browse all templates below.';
       renderFilters();
     } catch (error) {
       if (request !== filter.request) return;

@@ -32,8 +32,8 @@
     if(status===409)return what+"This was changed since you opened it. Refresh the page and try again.";
     if(status===400||status===422)return what+"Some of the details need fixing. Check what you entered and try again.";
     if(status===429)return what+"Too many requests right now. Wait a moment and try again.";
-    if(status>=500)return what+"Something went wrong on our side. Please try again in a minute.";
-    return what+"Please try again.";
+    if(status>=500)return what+"Something went wrong on our side. Try again in a minute.";
+    return what+"Try again.";
   }
   function node(tag,source,values){return product(document.createElement(tag),source,values);}
   function choices(select,rows,placeholder){select.replaceChildren(node("option",placeholder));select.firstChild.value="";rows.forEach(row=>{const option=userNode("option",row.label);option.value=String(row.value);select.append(option);});}

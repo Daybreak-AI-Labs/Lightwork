@@ -61,7 +61,7 @@
       const readable = raw && /^[A-Z][^{}<>=_\[\]\\/]*[.!?]$/.test(raw.trim()) && raw.length <= 400;
       const message = readable ? raw.trim()
         : typeof window.mvErrorText === 'function' ? window.mvErrorText({status: r.status, headers: r.headers}, 'save that')
-        : (r.status === 422 || r.status === 400 ? 'Some of the details need fixing. Check what you entered and try again.' : 'That could not be completed. Please try again.');
+        : (r.status === 422 || r.status === 400 ? 'Some of the details need fixing. Check what you entered and try again.' : 'That could not be completed. Try again.');
       const error = new Error(message); error.status = r.status; throw error;
     }
     if (data.context !== context) { clearAuthority(); const error = new Error('The account or workspace changed. Reload this page.'); error.status = 409; throw error; }

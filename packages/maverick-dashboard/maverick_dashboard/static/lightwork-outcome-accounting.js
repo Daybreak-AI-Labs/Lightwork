@@ -435,7 +435,7 @@
     const costs = object(report.costs, 'Portfolio costs');
     const knownTotals = totals(costs.known_totals, 'Recorded cost totals');
     const overflows = overflowCurrencies(costs.aggregate_overflow_currencies, 'Cost aggregate overflow');
-    if (knownTotals.some(([code]) => overflows.includes(code))) fail('Recorded cost totals are invalid. Refresh the page and try again.');
+    if (knownTotals.some(([code]) => overflows.includes(code))) fail('Recorded cost totals do not reconcile. Refresh the page and try again.');
     const totalsComplete = boolean(costs.totals_complete, 'Cost total completeness');
     if (totalsComplete !== (overflows.length === 0)) fail('Cost total completeness does not reconcile.');
     const incomplete = count(costs.incomplete_records, 'Incomplete cost count', MAX_PAGE + 1);
@@ -902,7 +902,7 @@
     }
     const records = node('section', undefined, 'op-accounting-records');
     records.appendChild(node('h3', 'Visible outcome records'));
-    if (!validated.records.length) records.appendChild(node('p', 'No admitted outcome records are visible in this scope.'));
+    if (!validated.records.length) records.appendChild(node('p', 'No admitted outcome records are visible in this scope. Records appear here when a pilot task finishes and its outcome is recorded.'));
     validated.records.forEach((record, index) => records.appendChild(renderRecord(record, index, generation)));
     fragments.push(records);
     host.replaceChildren(...fragments);

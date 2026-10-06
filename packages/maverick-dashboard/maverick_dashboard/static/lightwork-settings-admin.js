@@ -9,7 +9,7 @@
     return node;
   }
   function errorText(failure, action) {
-    return window.mvErrorText ? window.mvErrorText(failure, action) : 'Could not ' + action + '. Please try again.';
+    return window.mvErrorText ? window.mvErrorText(failure, action) : 'Could not ' + action + '. Try again.';
   }
   function badge(ok, yes, no) {
     return el('span', 'badge ' + (ok ? 'active' : 'blocked'), ok ? yes : no);
@@ -27,7 +27,7 @@
         return;
       }
       event.preventDefault();
-      window.mvConfirm(form.dataset.confirm, {okText: form.dataset.confirmOk || 'Confirm'}).then(function (ok) {
+      window.mvConfirm(form.dataset.confirm, {okText: form.dataset.confirmOk || 'Save this change'}).then(function (ok) {
         if (!ok) return;
         form.dataset.confirmed = 'true';
         if (form.requestSubmit) form.requestSubmit(); else form.submit();

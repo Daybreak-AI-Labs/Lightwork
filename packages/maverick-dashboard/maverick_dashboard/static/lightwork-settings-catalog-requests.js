@@ -54,7 +54,7 @@
     if (pending && !Array.from(choice.options).some(function (item) { return item.value === pending; })) choice.add(new Option('Last reviewed original request', pending));
     choice.value = selected; read.disabled = !choice.value; offset = result.data.offset; nextOffset = result.data.next_offset;
     previous.disabled = offset === 0; next.disabled = nextOffset === null;
-    page.textContent = result.data.total ? 'Showing ' + (offset + 1) + '–' + Math.min(offset + 100, result.data.total) + ' of ' + result.data.total + ' retained requests.' : 'No original requests are retained for this account and workspace.';
+    page.textContent = result.data.total ? 'Showing ' + (offset + 1) + '–' + Math.min(offset + 100, result.data.total) + ' of ' + result.data.total + ' retained requests.' : 'No original requests are kept for this account and workspace. Requests you send from Settings appear here.';
     return true;
   }
   function remember(plan) {

@@ -127,8 +127,10 @@ def test_channel_question_stays_with_authenticated_sender_and_thread(monkeypatch
             return asyncio.run(srv._handle_message(
                 ChannelMessage("slack", "C123", sender, text, thread)))
         assert "Private customer?" in send("U1", "root-1", "Prepare report")
-        assert send("U2", "root-1", "Other work") == "Separate task"
-        assert send("U1", "root-2", "Different thread") == "Separate task"
+        # An agent's answer is the whole reply, under the AI mark (AI-2).
+        for reply in (send("U2", "root-1", "Other work"), send("U1", "root-2", "Different thread")):
+            answer, mark = reply.split("\n\n", 1)
+            assert answer == "Separate task" and mark.startswith("-- Written by an agent in Lightwork.")
         assert asyncio.run(srv._handle_message(ChannelMessage(
             "slack", "C123", "U1", "Unrelated thread", "root-3",
             question_reply_only=True,

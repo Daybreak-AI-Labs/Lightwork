@@ -40,7 +40,7 @@
       if (b.disabled) return;
       b.disabled = true;
       Promise.resolve().then(handler).catch(function (error) {
-        statusEl.textContent = error && error.message ? error.message : "Something went wrong. Please try again.";
+        statusEl.textContent = error && error.message ? error.message : "Something went wrong. Try again.";
       }).then(function () { b.disabled = false; });
     });
     return b;

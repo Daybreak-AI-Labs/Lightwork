@@ -37,7 +37,7 @@
   }
   function regulationName(key, fallback) { return REGULATION_NAMES[key] || fallback || human(key); }
   function errorText(failure, action) {
-    return window.mvErrorText ? window.mvErrorText(failure, action) : "Could not " + action + ". Please try again.";
+    return window.mvErrorText ? window.mvErrorText(failure, action) : "Could not " + action + ". Try again.";
   }
   function say(text) { window.mvStatus(operationState, text); }
 

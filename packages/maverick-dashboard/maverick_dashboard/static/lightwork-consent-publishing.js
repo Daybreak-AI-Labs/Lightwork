@@ -246,7 +246,7 @@
     }
     function checks(name, options, chosen) {
       var box = CW.el("div", "cw-checks");
-      if (!options.length) box.appendChild(CW.el("span", "muted", "Nothing saved yet."));
+      if (!options.length) box.appendChild(CW.el("span", "muted", "Nothing saved yet. Save a choice above to use it here."));
       options.forEach(function (o) {
         var l = CW.el("label"), c = input(name, "checkbox", (chosen || []).indexOf(o.value) >= 0);
         c.value = o.value; l.append(c, " " + o.label); box.appendChild(l);
@@ -460,7 +460,7 @@
             { label: "Live now", value: function (h) { return h === head && h.action !== "withdraw" ? CW.badge("Live", "ok") : ""; } },
           ],
           actions: [{ label: "Restore this version", when: function (h) { return canAdmin && h !== head && h.action !== "withdraw"; }, run: function (h, b) { restore(p, h, b); } }],
-          empty: { title: "Nothing has been published here yet." },
+          empty: { title: "Nothing has been published here yet.", body: "Publish a reviewed version above to put it live." },
         });
       } catch (error) { CW.fail(status, error, "load the publishing history"); }
     }

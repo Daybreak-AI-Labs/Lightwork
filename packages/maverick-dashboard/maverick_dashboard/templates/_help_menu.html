@@ -8,7 +8,7 @@
   <div class="prefs__panel help-menu__panel" role="group" aria-label="{{ ut('Help') }}" lang="{{ ul('Help') }}">
     {% if help_topic %}<a class="help-menu__item" href="/help#how-{{ help_topic.slug }}" data-help-topic="{{ help_topic.slug }}">{{ ui('How this works') }}: {{ help_topic.title }}</a>{% endif %}
     <a class="help-menu__item" href="/help#get-help" data-get-help>{{ ui('Get help from a person') }}</a>
-    <a class="help-menu__item" href="/help" aria-label="{{ ut('Help and diagnostics') }}" lang="{{ ul('Help and diagnostics') }}">{{ ui('Help and diagnostics') }}</a>
+    <a class="help-menu__item" href="/help"{% if request and request.url.path == '/help' %} aria-current="page"{% endif %} aria-label="{{ ut('Help and diagnostics') }}" lang="{{ ul('Help and diagnostics') }}">{{ ui('Help and diagnostics') }}</a>
     {% if support_status_page_url %}<a class="help-menu__item" href="{{ support_status_page_url }}" target="_blank" rel="noopener noreferrer" data-service-status-link>{{ ui('Service status') }}<span class="sr-only"> (opens in a new tab)</span></a>{% endif %}
   </div>
 </details>

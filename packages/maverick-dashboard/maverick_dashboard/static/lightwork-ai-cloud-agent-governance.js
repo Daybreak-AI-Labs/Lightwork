@@ -76,7 +76,7 @@
     }
     if (status === 403) { return "Could not " + action + ". You do not have permission to do this."; }
     if (status === 409) { return "Could not " + action + ". This changed since you opened it. Refresh the page and try again."; }
-    return "Could not " + action + ". Something went wrong. Please try again.";
+    return "Could not " + action + ". Something went wrong. Try again.";
   }
   var CONFLICTS = {
     cloud_agent_dispatch_requires_reconciliation:
@@ -124,7 +124,7 @@
       (typeof technical === "string" ? technical : JSON.stringify(technical, null, 2));
   }
   function failed(error) {
-    say(error && error.message ? error.message : "Something went wrong. Please try again.",
+    say(error && error.message ? error.message : "Something went wrong. Try again.",
       error && error.technical ? error.technical : undefined);
   }
 
@@ -489,7 +489,7 @@
     var tbody = document.getElementById("cag-reviews");
     var reviews = body.reviews || [];
     if (!reviews.length) {
-      emptyRow(tbody, 4, "No Databricks mapping reviews yet.");
+      emptyRow(tbody, 4, "No Databricks mapping reviews yet. Reviews appear here after a mapping is checked.");
       return;
     }
     tbody.textContent = "";

@@ -363,6 +363,32 @@ templates.env.globals["static_url"] = static_url
 templates.env.add_extension(AssetVersionExtension)
 
 
+def _comments_enabled() -> bool:
+    """Whether comment threads show on tasks, runs, approvals and policies."""
+    try:
+        from maverick.comments import enabled
+
+        return enabled()
+    except Exception:  # noqa: BLE001 -- an unreadable setting shows no thread
+        return False
+
+
+templates.env.globals["comments_enabled"] = _comments_enabled
+
+
+def _suggestions_enabled() -> bool:
+    """Whether suggested edits show on AI use rules."""
+    try:
+        from maverick.policy_suggestions import enabled
+
+        return enabled()
+    except Exception:  # noqa: BLE001 -- an unreadable setting shows no suggestions
+        return False
+
+
+templates.env.globals["suggestions_enabled"] = _suggestions_enabled
+
+
 class StaticCacheMiddleware:
     """Cache matching public asset versions; revalidate public page controllers.
 
@@ -728,10 +754,21 @@ def _nav_context(request: Request) -> dict:
                                      can_open_page=can_open_page, global_admin=viewer_global_admin,
                                      personal=personal),
         "nav_go_to_keys": GO_TO_KEYS,
+        # Where a page kept out of the sidebar sits: its highlighted parent in
+        # the sidebar and the breadcrumb (ui_visibility.where).
+        "nav_where": _nav_where(request, groups, finder),
         # The navigation style ("classic" or "areas") and, in areas mode, the
         # areas and where this page sits in them.
         **area_context(request, role, finder, switched_off, viewer_global_admin),
     }
+
+
+def _nav_where(request, groups, finder):
+    from . import ui_visibility
+    try:
+        return ui_visibility.where(request.url.path, groups, finder)
+    except Exception:  # pragma: no cover -- shell rendering never fails on it
+        return None
 
 
 templates.context_processors.append(_nav_context)
@@ -796,6 +833,7 @@ templates.env.globals.setdefault("help_topic", None)
 templates.env.globals.setdefault("support_status_page_url", "")
 templates.env.globals.setdefault("help_menu_text", False)
 templates.env.globals.setdefault("service_status", None)
+templates.env.globals.setdefault("service_notices", [])
 # Requestless renders cannot prove authority; the request processor supplies
 # permitted destinations, including full navigation in verified local mode.
 templates.env.globals.setdefault("nav_groups", [])
@@ -957,10 +995,12 @@ def _warm_dashboard_caches() -> dict[str, float]:
     """Pay the dashboard's once-per-process first-hit costs now.
 
     Measured cold on a 4 vCPU box: first ``GET /`` 1.25 s (Jinja compile),
-    first ``/openapi.json`` 4.2 s (schema build, which also materialises
-    every lazily included route), ``builtin_domains()`` 0.78 s (2,031 pack
-    files), ``_build_shield()`` 37 ms. Each step is independent and
-    fail-open; the returned timings are for logs and tests.
+    every included route's context about 2.5 s (FastAPI 0.141 builds them
+    on the first request that routes past them), ``builtin_domains()``
+    0.78 s (2,031 pack files), ``_build_shield()`` 37 ms. Each step is
+    independent and fail-open; the returned timings are for logs and tests.
+    The OpenAPI schema (about 4.3 s, needed only by /openapi.json and the
+    guided API forms) is not built here: :func:`_build_openapi_when_idle`.
     """
     timings: dict[str, float] = {}
 
@@ -984,16 +1024,70 @@ def _warm_dashboard_caches() -> dict[str, float]:
 
         builtin_domains()
 
+    def _agents() -> None:
+        # The agent roster's tool inventory (about 0.6 s cold), cached per
+        # installation configuration. Ctrl+K's first agent lookup needs it;
+        # nothing in it is about a person.
+        from maverick.domain_edit import list_agents
+
+        list_agents()
+
+    def _routes() -> None:
+        # Request routing needs these contexts; the schema build used to be
+        # what materialised them (58edcc4b), at four seconds of extra CPU.
+        from .route_identity import iter_compatible_route_contexts
+
+        for _context in iter_compatible_route_contexts(app.routes):
+            pass
+
     def _shield() -> None:
         from maverick.orchestrator import _build_shield
 
         _build_shield()
 
-    _step("templates", _templates)
-    _step("openapi", app.openapi)
+    # The pack catalogue first: the first Ctrl+K search after start needs it,
+    # and the OpenAPI build after it is the slowest step.
     _step("domains", _domains)
+    _step("agents", _agents)
+    _step("routes", _routes)
+    _step("templates", _templates)
     _step("shield", _shield)
     return timings
+
+
+def _warm_pack_catalogue() -> None:
+    """Parse the shipped pack catalogue (2,031 files) and the roster's tool
+    inventory before hook discovery: both are person-independent and cached
+    for the process, and Ctrl+K's first agent lookup needs them."""
+    try:
+        from maverick.domain_edit import list_agents
+
+        list_agents()
+    except Exception:  # pragma: no cover - warm-up is best-effort
+        log.debug("pack catalogue warm-up skipped", exc_info=True)
+
+
+def _build_openapi_when_idle(quiet: float = 10.0, sleep=time.sleep, limit: float = 1800.0) -> bool:
+    """Build the OpenAPI schema once the dashboard has been quiet for
+    ``quiet`` seconds, so its seconds of CPU do not land on someone's first
+    searches. Ten seconds, not one or two: a person opening the dashboard
+    pauses that long only rarely while working, but often while a browser
+    starts. A request for /openapi.json before then builds it on demand, as
+    FastAPI always did. Gives up after ``limit`` seconds of steady traffic."""
+    from . import request_activity
+
+    waited = 0.0
+    while not request_activity.quiet_for(quiet):
+        if waited >= limit:
+            return False
+        sleep(0.5)
+        waited += 0.5
+    try:
+        app.openapi()
+    except Exception:  # pragma: no cover - the schema still builds on demand
+        log.debug("OpenAPI warm-up skipped", exc_info=True)
+        return False
+    return True
 
 
 def _warm_goal_runtime() -> None:
@@ -1004,6 +1098,7 @@ def _warm_goal_runtime() -> None:
     startup."""
 
     def _warm() -> None:
+        _warm_pack_catalogue()
         try:
             import asyncio as _asyncio
 
@@ -1015,6 +1110,7 @@ def _warm_goal_runtime() -> None:
         timings = _warm_dashboard_caches()
         log.info("dashboard warm-up done: %s",
                  ", ".join(f"{k} {v * 1000:.0f} ms" for k, v in timings.items()))
+        _build_openapi_when_idle()
 
     threading.Thread(target=_warm, name="lightwork-warm-hooks", daemon=True).start()
 
@@ -1549,20 +1645,35 @@ from .usability_survey_api import survey_context as _usability_survey_context  #
 app.include_router(approval_waits_router)
 app.include_router(usability_survey_router)
 templates.context_processors.append(_usability_survey_context)
+from . import usage_measures_api as _usage_measures_api  # noqa: E402
+
+# ONB-1 / AI-13 research measures: off unless [analytics] usage_measures.
+app.include_router(_usage_measures_api.router)
+templates.context_processors.append(_usage_measures_api.context)
 app.include_router(conversation_organization_router)
 from .first_outcome_api import router as first_outcome_router  # noqa: E402
 from .in_app_routes import router as in_app_router  # noqa: E402
 
 app.include_router(in_app_router)
 app.include_router(first_outcome_router)
+from . import practice_mode  # noqa: E402
+
+# ONB-4: a person's practice session runs in the separate practice workspace,
+# with a marker on every screen and live changes refused until Back to live.
+app.include_router(practice_mode.router)
+app.middleware("http")(practice_mode.middleware)
+templates.context_processors.append(practice_mode.context)
 from .billing_invoice_api import router as billing_invoice_router  # noqa: E402
 from .channel_check_api import router as channel_check_router  # noqa: E402
+from .comments_api import router as comments_router  # noqa: E402
 from .dsar_export_handoff_api import router as dsar_export_handoff_router  # noqa: E402
 from .feature_actions_api import page_router as feature_actions_page_router  # noqa: E402
 from .feature_actions_api import router as feature_actions_router  # noqa: E402
 from .flow_action_fields import router as flow_action_fields_router  # noqa: E402
 from .mcp_presets import router as mcp_presets_router  # noqa: E402
 from .page_assets import router as page_assets_router  # noqa: E402
+from .policy_preview_api import router as policy_preview_router  # noqa: E402
+from .policy_suggestions_api import router as policy_suggestions_router  # noqa: E402
 from .provider_spending_api import router as provider_spending_router  # noqa: E402
 from .recovery_api import router as recovery_router  # noqa: E402
 from .recovery_mode import RecoveryOnlyMiddleware  # noqa: E402
@@ -1579,6 +1690,9 @@ from .voice_unlock_api import router as voice_unlock_router  # noqa: E402
 app.include_router(recovery_router)
 app.include_router(provider_spending_router)
 app.include_router(support_router)
+app.include_router(comments_router)
+app.include_router(policy_suggestions_router)
+app.include_router(policy_preview_router)
 app.include_router(system_checks_router)
 app.include_router(feature_actions_router)
 app.include_router(feature_actions_page_router)
@@ -1842,6 +1956,9 @@ from .department_team_updates_api import router as department_team_updates_route
 
 app.include_router(department_team_updates_router)
 app.include_router(answer_feedback_router)
+from .flow_run_feedback import router as flow_run_feedback_router  # noqa: E402
+
+app.include_router(flow_run_feedback_router)
 from .compliance_questionnaire_builder_api import (  # noqa: E402
     router as compliance_questionnaire_builder_router,
 )
@@ -2797,6 +2914,9 @@ async def bearer_auth(request: Request, call_next):
         # DSAR response links are addressed by their unguessable token,
         # exactly like /form/ — the requester has no dashboard bearer.
         or path.startswith("/dsar/response/")
+        # One-action mute links in notification messages: the signed link is
+        # the credential and only quiets that one person's own notifications.
+        or path.startswith("/unsubscribe/")
         or path.startswith("/saml/")
         or path.startswith("/auth/invite/")
         # External integrations authenticate inside their route family
@@ -3372,12 +3492,19 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
               reference, occurred_at, request.method, route,
               exc_info=(type(exc), exc, exc.__traceback__))
     headers = {"Cache-Control": "private, no-store", "X-Lightwork-Failure-Reference": reference}
+    from maverick.service_status import READ_ONLY_REFUSAL, is_read_only_error
+
+    # CTL-5: a write refused by a read-only database says what broke, that
+    # saved work is safe and what to do, never the database error itself.
+    read_only = is_read_only_error(exc)
+    status = 503 if read_only else 500
     if _wants_html(request):
         try:
             return templates.TemplateResponse(
                 request, "500.html", {"failure_reference": reference, "failure_time": occurred_at,
-                                      "uncertain_mutation": request.method not in {"GET", "HEAD"}},
-                status_code=500, headers=headers,
+                                      "uncertain_mutation": request.method not in {"GET", "HEAD"},
+                                      "read_only_error": read_only},
+                status_code=status, headers=headers,
             )
         except Exception:
             # Deliberately independent of the normal layout and its data reads.
@@ -3388,8 +3515,10 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
                 f'<a href="/help?failure={reference}">Open Help</a></html>',
                 status_code=500, headers=headers,
             )
-    return JSONResponse({"detail": "The request could not be completed. Check its current state before retrying a change.",
-                         "failure_reference": reference, "occurred_at": occurred_at}, status_code=500, headers=headers)
+    detail = READ_ONLY_REFUSAL if read_only else (
+        "The request could not be completed. Check its current state before retrying a change.")
+    return JSONResponse({"detail": detail, "failure_reference": reference, "occurred_at": occurred_at},
+                        status_code=status, headers=headers)
 
 
 @app.middleware("http")
@@ -3999,6 +4128,7 @@ async def learning_page(request: Request) -> HTMLResponse:
             "snap": _learning_snapshot(request),
             "learning_can_manage": has_global_permission(request, "admin"),
             "agent_feedback": _agent_feedback_summary(),
+            "flow_feedback": _flow_feedback_summary(),
             "learning_can_operate": has_permission(request, "operate"),
         },
     )
@@ -4013,6 +4143,25 @@ def _agent_feedback_summary() -> list[dict]:
         rows = goal_feedback_store.summary_by_agent(world=_world())
         for row in rows:
             row["title"] = agent_title(row["agent"])
+        return rows
+    except Exception:  # pragma: no cover -- the page renders without the summary
+        return []
+
+
+def _flow_feedback_summary() -> list[dict]:
+    """Useful / not useful per flow for the Learning page (flow_run_feedback.py)."""
+    try:
+        from maverick.flow import store as flow_store
+
+        from . import flow_run_feedback
+
+        rows = flow_run_feedback.summary_by_flow()
+        for row in rows:
+            try:
+                flow = flow_store.load_flow(row["flow_id"])
+            except Exception:  # noqa: BLE001 -- a removed or unreadable flow keeps its id
+                flow = None
+            row["title"] = (getattr(flow, "name", "") or row["flow_id"]) if flow else row["flow_id"]
         return rows
     except Exception:  # pragma: no cover -- the page renders without the summary
         return []
@@ -4259,6 +4408,7 @@ def _deliverable_specs() -> list[dict]:
 @app.get("/deliverables", response_class=HTMLResponse)
 def deliverables_page(request: Request, role: str = "") -> HTMLResponse:
     """Show the caller's completed work; explicit role links browse pack output."""
+    from . import auth as _auth
     from .auth import caller_suites
     from .deliverables import PAGE_SIZE, build_inbox, persona_roles_for, recent_runs_by_domain
 
@@ -4289,6 +4439,8 @@ def deliverables_page(request: Request, role: str = "") -> HTMLResponse:
             "browse": False, "recent_results": shown, "awaiting": awaiting,
             "result_labels": {domain: spec["deliverable"] for domain, spec in gates.items()},
             "results_page": page, "results_more": len(rows) > PAGE_SIZE,
+            # Only the task owner may rate a result (answer_feedback_operations).
+            "feedback_owner": _auth.caller_principal(request) or "", "can_rate": has_permission(request, "operate"),
         })
 
     # Job-function scoping: a scoped caller's inbox lists only their
@@ -4661,8 +4813,17 @@ def spend_page(request: Request) -> HTMLResponse:
         "spend.html",
         {"episodes": episodes, "total": w.total_spend(owner=value_view["owner"]),
          "goal_titles": goal_titles, "csv_months": months, "episode_provenance": episode_provenance,
-         "value_view": value_view, "spend_recorded_at": _newest_cost_at(w, value_view["owner"])},
+         "value_view": value_view, "spend_recorded_at": _newest_cost_at(w, value_view["owner"]),
+         "practice_cost": _practice_cost_text(value_view["owner"], when="across all time")},
     )
+
+
+def _practice_cost_text(owner, *, when: str, since: float | None = None) -> str:
+    """The labelled practice line for a cost view (maverick.practice_costs), or ""."""
+    from maverick import practice_costs
+
+    line = practice_costs.summary(owner, since=since)
+    return practice_costs.label(line, when) if line else ""
 
 
 # One assessment engine, one workspace chassis per department: each
@@ -4792,6 +4953,11 @@ async def privacy_page(request: Request) -> HTMLResponse:
     records, estate = await run_in_threadpool(_privacy_page_data)
     ctx["records"] = records
     ctx["estate"] = estate
+    if records.get("dsar"):
+        from . import people_directory
+
+        # Who a request can be assigned to: people who may work privacy requests.
+        ctx["dsar_assignees"] = await run_in_threadpool(people_directory.candidates, "operate")
     return templates.TemplateResponse(request, "privacy.html", ctx)
 
 
@@ -6676,6 +6842,8 @@ def savings_page(request: Request, days: int = 90) -> HTMLResponse:
             "can_manage_assumptions": has_global_permission(request, "operate"),
             "value_view": value_view,
             "assumptions_confirmed": assumptions_confirmed(),
+            "practice_cost": _practice_cost_text(value_view["owner"], when=f"in the last {days} days, not part of these savings",
+                                                 since=time.time() - days * 86400),
         },
     )
 
@@ -6771,6 +6939,16 @@ def billing_page(request: Request, format: str = "", period: str = "", receipt_o
                                  episode.input_tokens, episode.output_tokens, episode.tool_calls,
                                  *export_fields(episode)])
                 yield buf.getvalue()
+            # Practice runs cost real provider money: one labelled row, apart from the real runs.
+            from maverick import practice_costs
+
+            extra = practice_costs.export_row(practice_costs.summary(owner, since=start.timestamp(),
+                                                                     until=end.timestamp()), 9 + len(EXPORT_HEADERS))
+            if extra:
+                buf.seek(0)
+                buf.truncate(0)
+                writer.writerow(extra)
+                yield buf.getvalue()
         safe_tenant = "".join(c for c in tenant if c.isalnum() or c in "-_")[:64] or "workspace"
         return StreamingResponse(rows(), media_type="text/csv",
             headers={"Content-Disposition": f'attachment; filename="statement-{safe_tenant}-{sel}.csv"',
@@ -6786,8 +6964,11 @@ def billing_page(request: Request, format: str = "", period: str = "", receipt_o
     if previous and previous["cost"] > 0 and not previous["unknown_cost_runs"] and not current["unknown_cost_runs"]:
         delta_pct = round((current["cost"] - previous["cost"]) / previous["cost"] * 100, 1)
     series = [months[k] for k in sorted(months, reverse=True)][:12]
+    from maverick import practice_costs
     from maverick.quotas import UsageLedger, UsageLedgerError
 
+    _practice = practice_costs.summary(owner, since=practice_costs.month_bounds()[0])
+    practice_cost = practice_costs.label(_practice, "this month") if _practice else ""
     receipt_error = None
     receipts = {"items": [], "total": 0, "offset": max(0, receipt_offset), "limit": 50, "has_more": False}
     try:
@@ -6807,6 +6988,7 @@ def billing_page(request: Request, format: str = "", period: str = "", receipt_o
             "series": series,
             "usage_receipts": receipts,
             "usage_receipt_error": receipt_error,
+            "practice_cost": practice_cost,
             "spend_recorded_at": newest_cost_at,
             "invoice_admin": has_global_permission(request, "admin"),
             "invoice_workspaces": _invoice_workspaces(tenant, tenant_label),
@@ -6923,6 +7105,31 @@ def _global_audit_tail(request: Request, audit_log, n: int, day: str | None) -> 
     return [{**e, "scope": "deployment"} for e in rows if isinstance(e, dict)]
 
 
+def _audit_matcher(*, kind: str, person: str, agent: str, q: str):
+    """The activity log's filter: kind of event, person, agent or specialist,
+    and words. Words also find an AI action by a file, address or table it
+    reached, which the row shows only as a fingerprint (ADM-5)."""
+    from . import audit_actions_api as _audit_plain
+    from .content_access import resource_fingerprint
+
+    needle = q.lower()
+    resource_hit = resource_fingerprint(q) if q else ""
+
+    def matches(e: dict) -> bool:
+        if kind and e.get("kind") != kind:
+            return False
+        if person and _audit_plain.event_person(e) != person:
+            return False
+        if agent and e.get("agent") != agent:
+            return False
+        if q and resource_hit in (e.get("resource_fingerprints") or []):
+            return True
+        return not needle or (needle in json.dumps(e, default=str).lower()
+                              or needle in _audit_plain.kind_label(e.get("kind")).lower())
+
+    return matches
+
+
 @app.get("/audit", response_class=HTMLResponse)
 async def audit_page(request: Request) -> HTMLResponse:
     """The activity log: recent events for a day or a date range, filtered by
@@ -6964,16 +7171,9 @@ async def audit_page(request: Request) -> HTMLResponse:
     read_report = ReadReport()
     kind = (request.query_params.get("kind") or "").strip()
     person = (request.query_params.get("person") or "").strip()
+    agent = (request.query_params.get("agent") or "").strip()[:128]
     q = (request.query_params.get("q") or "").strip()[:200]
-    needle = q.lower()
-
-    def _matches(e: dict) -> bool:
-        if kind and e.get("kind") != kind:
-            return False
-        if person and _audit_plain.event_person(e) != person:
-            return False
-        return not needle or (needle in json.dumps(e, default=str).lower()
-                              or needle in _audit_plain.kind_label(e.get("kind")).lower())
+    _matches = _audit_matcher(kind=kind, person=person, agent=agent, q=q)
 
     from datetime import datetime, timezone
     from urllib.parse import urlencode
@@ -6983,7 +7183,7 @@ async def audit_page(request: Request) -> HTMLResponse:
     from .audit_search import search_events
 
     window_note, next_href = "", None
-    events, kind_set, people_set = [], set(), set()
+    events, kind_set, people_set, agent_set = [], set(), set(), set()
     deployment_filter_view = False
     displayed_audit_log = audit_log
     if not filter_error:
@@ -7012,6 +7212,7 @@ async def audit_page(request: Request) -> HTMLResponse:
             before=before_event, scan_limit=_AUDIT_RANGE_SCAN_LIMIT,
         )
         events, kind_set, people_set = result["events"], result["kinds"], result["people"]
+        agent_set = result.get("agents", set())
         if deployment_filter_view:
             events = [{**event, "scope": "deployment"} for event in events]
         if not result["cursor_found"]:
@@ -7031,7 +7232,7 @@ async def audit_page(request: Request) -> HTMLResponse:
     # Deployment-wide records have a separate chain and are shown as a
     # clearly bounded recent view, never silently mixed into this cursor.
     deployment_events = []
-    if not (filter_error or since or until or before_event or kind or person or q):
+    if not (filter_error or since or until or before_event or kind or person or agent or q):
         deployment_events = await run_in_threadpool(
             _global_audit_tail, request, audit_log, min(n, 200), day)
     order = "oldest" if request.query_params.get("order") == "oldest" else "newest"
@@ -7054,6 +7255,8 @@ async def audit_page(request: Request) -> HTMLResponse:
             "kinds": kinds,
             "person": person,
             "people": [{"value": p, "label": _idfmt.humanize_principal(p).name} for p in people],
+            "agent": agent,
+            "agents": [{"value": a, "label": _idfmt.humanize(a)} for a in sorted(agent_set)],
             "q": q,
             "order": order,
             "can_admin": has_permission(request, "admin"),
@@ -7351,7 +7554,7 @@ async def simulate_research_page(
         research_error = (
             "Sign in with your own named account to run a practice study."
             if exc.status_code in (401, 403)
-            else "The practice study could not start. Please try again."
+            else "The practice study could not start. Try again."
         )
     except ValueError:
         status_code = 400
@@ -8111,6 +8314,14 @@ def _compliance_view(framework: str) -> dict:
         checks = compliance_report()
     except Exception:  # pragma: no cover - never 500 the console if core is absent
         return {"framework": framework, "groups": {}, "summary": {}, "disclaimer": ""}
+    history = {"checked_at": None, "controls": {}, "changes": []}
+    try:
+        from maverick.compliance_history import record
+
+        # Each visit is a check too: keep when it ran and since when each status holds.
+        history = record(checks)
+    except Exception:  # noqa: BLE001 -- the page renders without its history
+        log.warning("compliance history unavailable", exc_info=True)
     if framework != "all":
         checks = [c for c in checks if c.framework == framework]
     # Group by framework bucket ("eu"/"us") for labelled tables on the page.
@@ -8134,6 +8345,7 @@ def _compliance_view(framework: str) -> dict:
         "groups": groups,
         "summary": summary,
         "disclaimer": COMPLIANCE_DISCLAIMER,
+        "control_history": history,
     }
 
 
@@ -8168,9 +8380,10 @@ async def compliance_page(request: Request, tab: str = "") -> HTMLResponse:
         return with_landing_headers(templates.TemplateResponse(request, "autonomous_compliance.html", context))
     view = _compliance_view(request.query_params.get("framework") or "all")
     view["compliance_tabs"] = tabs if areas_on(request) else None
-    from .compliance_controls_api import RETENTION_FIELDS, guide_for
+    from .compliance_controls_api import RETENTION_FIELDS, STATUS_TEXT, guide_for
 
     view["guide_for"] = guide_for
+    view["status_word"] = lambda status: STATUS_TEXT.get(status, "Unknown").lower()
     view["retention_fields"] = RETENTION_FIELDS
     view["report_download_context"] = _conversation_context(request)
     view["can_admin"] = has_permission(request, "admin")
@@ -9226,6 +9439,10 @@ def _approval_source(provenance: str | None) -> str | None:
         return "Agent wants to change its own instructions"
     if provenance == "assessment":
         return "Assessment review"
+    if provenance == "plan":
+        # [autonomy] confirm_plan: the task's first outside action waits for
+        # a person to check the whole plan (maverick.plan_review).
+        return "Plan to check before the task acts"
     if provenance == "goal_risk":
         # A task held before it starts because its wording looks risky.
         return "Task waiting to start"
@@ -10753,11 +10970,23 @@ def chat_page(request: Request, compose: str = "") -> HTMLResponse:
             # one limit that is true in code.
             "chat_examples": _chat_examples(request),
             "chat_limits": _CHAT_LIMITS,
+            "chat_capability": _CHAT_CAPABILITY,
             "compose_form": compose_form,
             "compose_form_available": page_visible(request, "/goal-builder"),
+            "typical_cost": _own_typical_cost(request, w),
             "channels": _goal_builder_channels() if compose_form else [],
         },
     )
+
+
+def _own_typical_cost(request: Request, world) -> dict | None:
+    """What the signed-in person's own past tasks cost (none without a named account)."""
+    principal = caller_principal(request) or ""
+    if not principal.startswith("user:"):
+        return None
+    from maverick.typical_cost import typical_cost
+
+    return typical_cost(world, owner=principal)
 
 
 def _goal_builder_channels() -> list:
@@ -10775,6 +11004,7 @@ def _chat_examples(request: Request) -> dict:
         return {"department": None, "examples": [], "sample": None}
 
 
+from .chat_examples import CAPABILITY as _CHAT_CAPABILITY  # noqa: E402
 from .chat_examples import LIMITS as _CHAT_LIMITS  # noqa: E402
 
 
@@ -12553,6 +12783,14 @@ def chat_answer_panel(request: Request, goal_id: int) -> HTMLResponse:
                                                "X-Lightwork-Context": context["conversation_context"]})
 
 
+def _stop_progress(world, goal):
+    from .stop_progress import summarize
+    try:
+        return summarize(world, goal)
+    except Exception:  # pragma: no cover -- never 500 the goal page
+        return None
+
+
 @app.get("/chat/goal/{goal_id}", response_class=HTMLResponse)
 def chat_goal(request: Request, goal_id: int) -> HTMLResponse:
     require_permission(request, "view")
@@ -12634,6 +12872,7 @@ def chat_goal(request: Request, goal_id: int) -> HTMLResponse:
             "can_operate": not handed_off and has_permission(request, "operate") and (caller_principal(request) or "") == (g.owner or ""),
             "handoff_closed": handed_off,
             "stop": stop,
+            "stop_progress": _stop_progress(w, g),
             "show_technical_details": show_technical,
             "submission_key": secrets.token_urlsafe(24),
             "submission": SubmissionStore(w).for_goal(goal_id),
@@ -13212,6 +13451,14 @@ def cost_csv(request: Request, month: str | None = None) -> StreamingResponse:
             yield buf.getvalue()
             buf.seek(0)
             buf.truncate(0)
+        # Practice runs cost real provider money: one labelled row, apart from the real runs.
+        from maverick import practice_costs
+
+        extra = practice_costs.export_row(practice_costs.summary(owner, since=start_ts, until=end_ts),
+                                          9 + len(EXPORT_HEADERS))
+        if extra:
+            writer.writerow(extra)
+            yield buf.getvalue()
 
     fname = f"maverick-cost-{month}.csv" if month else "maverick-cost-all.csv"
     return StreamingResponse(
@@ -14784,11 +15031,14 @@ def main() -> None:
 # contexts and request-scope route objects receive the same final identity.
 _stabilize_effective_route_names(app)
 
-# Outermost (added last): every middleware and handler below it shares one
-# per-request memo for configuration-derived authorization predicates.
+# Every middleware and handler below the memo shares one per-request memo for
+# configuration-derived authorization predicates. Outside it (added last), the
+# activity count lets start-up work wait for a quiet moment.
 from ._request_memo import RequestMemoMiddleware  # noqa: E402
+from .request_activity import RequestActivityMiddleware  # noqa: E402
 
 app.add_middleware(RequestMemoMiddleware)
+app.add_middleware(RequestActivityMiddleware)
 
 
 if __name__ == "__main__":

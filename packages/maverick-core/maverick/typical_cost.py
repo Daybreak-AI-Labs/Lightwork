@@ -62,15 +62,16 @@ def summarize(costs: list[float], minimum: int) -> dict[str, Any]:
 
 
 def typical_cost(world, *, specialist: str = "", agent_principal: str = "",
-                 minimum: int | None = None) -> dict[str, Any]:
+                 owner: str = "", minimum: int | None = None) -> dict[str, Any]:
     """Typical cost of one specialist's (by pack name) or one agent's (by its
-    principal) finished tasks in the world the caller opened, which is already
+    principal) finished tasks, or of one person's own (``owner``, shown under
+    the chat's Start button), in the world the caller opened, which is already
     scoped to the viewer's workspace. A store that can't be read gives no
     range rather than a guess."""
     needed = min_runs() if minimum is None else minimum
     try:
         costs = world.task_costs_for(domain=specialist, execution_principal=agent_principal,
-                                     limit=HISTORY_LIMIT)
+                                     limit=HISTORY_LIMIT, **({"owner": owner} if owner else {}))
     except Exception:  # noqa: BLE001 -- no history is shown as no history
         costs = []
     return summarize(costs, needed)

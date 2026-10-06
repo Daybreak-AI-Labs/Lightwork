@@ -3146,9 +3146,10 @@ class PostgresWorldModel:
         return [(str(r[0] or ""), float(r[1]), float(r[2] or 0.0)) for r in rows]
 
     def task_costs_for(self, *, domain: str = "", execution_principal: str = "",
-                       limit: int = 500) -> list[float]:
+                       limit: int = 500, owner: str = "") -> list[float]:
         """The SQLite backend's contract, inside the active tenant."""
-        column, value = ("g.domain", domain) if domain else ("g.execution_principal", execution_principal)
+        column, value = (("g.domain", domain) if domain else ("g.execution_principal", execution_principal)
+                         if execution_principal else ("g.owner", owner))
         if not value:
             return []
         frag, fparams = _tenant_scope("g.tenant_id")

@@ -62,7 +62,9 @@ test('invited colleague sets a passphrase, signs out and signs back in on a phon
     expect((await phone.cookies()).some(cookie=>cookie.name==='mvk_session')).toBe(false);
     await page.locator('input[name="password2"]').fill(passphrase);
     await page.getByRole('button',{name:'Accept invitation',exact:true}).click();
-    await expect(page).not.toHaveURL(/\/auth\/invite\//);
+    // Acceptance ends on the saved result for this account (the link cannot grant again).
+    await expect(page.getByRole('heading',{name:'Invitation accepted'})).toBeVisible();
+    await expect(page.locator('main')).toContainText('it does not give access again');
     expect((await phone.cookies()).some(cookie=>cookie.name==='mvk_session')).toBe(true);
 
     // Sign out, then come back: the sign-in page is styled and accepts the passphrase.
@@ -78,10 +80,16 @@ test('invited colleague sets a passphrase, signs out and signs back in on a phon
     await page.getByRole('button',{name:'Sign in',exact:true}).click();
     await expect(page).not.toHaveURL(/\/auth\/local-login/);
     expect((await phone.cookies()).some(cookie=>cookie.name==='mvk_session')).toBe(true);
-    // The used link explains itself instead of locking anyone out.
-    const reused=await page.goto(origin+link);
+    // The used link explains itself instead of locking anyone out: its own account
+    // reads the saved result, and anyone else is told it is no longer available.
+    const reread=await page.goto(origin+link);
+    expect(reread.status()).toBe(200);
+    await expect(page.getByRole('heading',{name:'Invitation accepted'})).toBeVisible();
+    const stranger=await browser.newContext({extraHTTPHeaders:{}});contexts.push(stranger);
+    const other=await stranger.newPage();
+    const reused=await other.goto(origin+link);
     expect(reused.status()).toBe(410);
-    await expect(page.getByRole('heading',{name:'Invitation not available'})).toBeVisible();
+    await expect(other.getByRole('heading',{name:'Invitation not available'})).toBeVisible();
     expect(errors).toEqual([]);
   }finally{
     try{

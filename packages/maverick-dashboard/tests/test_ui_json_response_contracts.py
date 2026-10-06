@@ -78,7 +78,7 @@ def test_governance_workbenches_fail_closed_on_invalid_json() -> None:
         # Every client fails closed on an unreadable response; the plain
         # wordings keep code words off the page.
         assert (PLAIN_INVALID_JSON.get(
-            name, "Request failed: the server returned an invalid JSON response."
+            name, "The reply from the server could not be read. Try again."
         ) in source
                 or "could not be confirmed" in source
                 or "Could not read the result." in source

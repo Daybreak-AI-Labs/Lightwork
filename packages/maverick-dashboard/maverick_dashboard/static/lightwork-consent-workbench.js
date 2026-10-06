@@ -6,7 +6,7 @@
 (function (root) {
   'use strict';
   var doc = root.document;
-  var INVALID = 'Request failed: the server returned an invalid JSON response.';
+  var INVALID = 'The reply from the server could not be read. Try again.';
 
   function el(tag, cls, text) {
     var node = doc.createElement(tag);
@@ -36,7 +36,7 @@
 
   function errorText(failure, action) {
     if (typeof root.mvErrorText === 'function') return root.mvErrorText(failure, action);
-    return (action ? 'Could not ' + action + '. ' : '') + 'Something went wrong. Please try again.';
+    return (action ? 'Could not ' + action + '. ' : '') + 'Something went wrong. Try again.';
   }
 
   // Write a message into a status line; errors switch it to an alert.
@@ -215,7 +215,7 @@
   }
 
   function confirm(message, okText) {
-    if (typeof root.mvConfirm === 'function') return root.mvConfirm(message, { okText: okText || 'Confirm' });
+    if (typeof root.mvConfirm === 'function') return root.mvConfirm(message, { okText: okText || 'Save this change' });
     return Promise.resolve(false);
   }
 

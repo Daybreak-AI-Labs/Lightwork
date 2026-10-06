@@ -110,7 +110,7 @@
       saved.appendChild(el('p', 'Uncertain earlier copy of ' + row.day + ' · ' + location + ' · attempted ' + new Date(row.attempted_at).toLocaleString() + '. ' + row.meaning));
     });
     var separate = document.getElementById('audit-maintenance-separate'); if (separate) separate.hidden = !value.separate_copy_available;
-    if (!value.reviews.length) saved.appendChild(el('p', 'No maintenance reviews have been saved for this account and workspace.', 'muted'));
+    if (!value.reviews.length) saved.appendChild(el('p', 'No maintenance reviews have been saved yet. Reviews you save above appear here.', 'muted'));
     value.reviews.forEach(function (row) {
       var line = el('div', '', 'aud-actions');
       line.appendChild(el('span', (row.action === 'seal' ? 'Encryption' : 'Storage copy') + ' · ' + date(row.recorded_at) + ' · ' + state(row.state)));

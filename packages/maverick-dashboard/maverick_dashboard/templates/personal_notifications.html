@@ -43,6 +43,7 @@
     {% for value,label in [('needs-decision','Needs my answer or decision'),('blocked','Blocked work'),('failed','Work that did not finish'),('completed','Completed work'),('changed-result','Changed results'),('deadline','Approaching or overdue deadlines')] %}
     <label><input type="checkbox" name="event" value="{{ value }}"> {{ label }}</label>
     {% endfor %}
+    <label><input type="checkbox" name="mentions"> When someone mentions me in a comment</label>
   </fieldset>
   <fieldset><legend>Private delivery channels</legend>
     <p>Link and explicitly confirm your own identity in <a href="/my-data">My data</a>, then select it here to opt into private alerts. Slack and Telegram are supported. Each message says why you get the alert, what it needs and by when, with a sign-in link to it, and never includes task text. Anything you already saw here is not sent again. Organization webhook alerts stay separate.</p>

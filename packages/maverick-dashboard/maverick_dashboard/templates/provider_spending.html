@@ -7,6 +7,8 @@
   <p>What each AI service has cost, and money set aside for requests whose final cost isn't known yet.
     Set-aside money is never refunded or retried automatically.</p>
   {% if spend_freshness_known %}{% from "_spend_freshness.html" import spend_freshness %}{{ spend_freshness(spend_recorded_at, live=true) }}{% endif %}
+  {# Practice calls are real provider charges already in these totals (maverick.practice_costs). #}
+  <p class="practice-cost" id="spend-practice" data-practice-cost{% if not practice_cost %} hidden{% endif %}>{{ practice_cost }}</p>
   <p id="spend-status" role="status" aria-live="polite">Loading spending…</p>
   <p class="spend-row">
     <button type="button" id="spend-refresh" class="btn">Refresh</button>

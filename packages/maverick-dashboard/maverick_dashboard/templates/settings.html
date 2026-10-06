@@ -389,7 +389,7 @@
           <input type="checkbox" name="models" value="{{ m.spec }}"{% if m.spec in allowed_models %} checked{% endif %} />
         </label>
         {% endfor %}
-        {% if not g.models %}<p class="muted">No models known for this provider yet.</p>{% endif %}
+        {% if not g.models %}<p class="muted">No models known for this provider yet. Save its key and press Test connection to load them.</p>{% endif %}
       </details>
       {% endfor %}
       <p class="settings-foot">
@@ -688,8 +688,7 @@
     <p class="muted settings-lead">
       {% if api_keys_enabled %}
       People create their own keys on <a href="/account/api-keys">Account &rsaquo; Access keys</a>.
-      A key only does what its scopes allow and never more than its owner's role, it stops
-      on its expiry date, and it can be rotated or revoked at any time. Administrators see
+      A key only does what its scopes allow and never more than its owner's role. It stops on its expiry date, and it can be rotated or revoked at any time. Administrators see
       every key there and can create service accounts: named identities for programs that
       hold keys and a role but cannot sign in.
       {% else %}
@@ -1210,8 +1209,8 @@
         // A form that asks first (Remove key, reset visibility) confirms
         // before anything is sent; declining sends nothing.
         if (form.dataset.confirm) {
-          var confirmText = {okText: form.dataset.confirmOk || 'Confirm'};
-          var agreed = window.mvConfirm ? await window.mvConfirm(form.dataset.confirm, confirmText) : window.confirm(form.dataset.confirm);
+          var agreed = window.mvConfirm ? await window.mvConfirm(form.dataset.confirm, {okText: form.dataset.confirmOk || 'Save this change'})
+            : window.confirm(form.dataset.confirm);
           if (!agreed) { delete form.dataset.saving; return; }
         }
         var status = form.querySelector('[data-save-status]') || providerStatus(form);

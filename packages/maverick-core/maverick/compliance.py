@@ -29,6 +29,41 @@ DEFAULT_DISCLOSURE = (
 
 _UNSET = object()
 
+# The mark under every agent-written answer Lightwork sends to a chat app or by
+# email (AI-2). Unlike the first-turn disclosure it is on every answer and
+# cannot be turned off; it says where to see how the answer was made.
+AI_ANSWER_LABEL = "Written by an agent in Lightwork. AI can make mistakes, so check important facts."
+
+
+def ai_answer_label(goal_id: int, base_url: str = "") -> str:
+    """One line naming the answer as AI-written, with the way into "why":
+    the task's Steps page (every step the agent took)."""
+    goal = int(goal_id)
+    where = (f"See how it was made: {base_url.rstrip('/')}/goals/{goal}/trajectory" if base_url
+             else f"See how it was made: open task #{goal} in Lightwork and choose Steps.")
+    return f"-- {AI_ANSWER_LABEL} {where}"
+
+
+# Channels that speak the reply: a read-out link is noise, so the mark is one
+# plain sentence. Channels with a short message limit get a one-line mark.
+SPOKEN_CHANNELS = frozenset({"voice", "glasses", "discord-stage", "streaming_voice"})
+SHORT_CHANNELS = frozenset({"sms", "rcs", "bluesky", "mastodon", "threads", "irc"})
+
+
+def label_ai_answer(text: str, goal_id: int, base_url: str | None = None, channel: str = "") -> str:
+    """``text`` with the AI mark under it, in the form ``channel`` can carry."""
+    if channel in SPOKEN_CHANNELS:
+        return f"{text}\n\nWritten by an agent in Lightwork."
+    if channel in SHORT_CHANNELS:
+        return f"{text}\n\n-- Written by an agent in Lightwork. Task #{int(goal_id)}."
+    if base_url is None:
+        try:
+            from .daily_digest import dashboard_url
+            base_url = dashboard_url()
+        except Exception:  # no link is better than a wrong one
+            base_url = ""
+    return f"{text}\n\n{ai_answer_label(goal_id, base_url)}"
+
 
 def _custom_disclosure():
     """Return a 3-state result:

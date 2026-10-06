@@ -30,7 +30,7 @@
   function failText(failure) {
     return typeof window.mvErrorText === 'function'
       ? window.mvErrorText(failure, 'show what changed')
-      : 'Could not show what changed. Please try again.';
+      : 'Could not show what changed. Try again.';
   }
   function valid(data) {
     if (!data || typeof data !== 'object' || !Array.isArray(data.files) || data.files.length > 100) return false;

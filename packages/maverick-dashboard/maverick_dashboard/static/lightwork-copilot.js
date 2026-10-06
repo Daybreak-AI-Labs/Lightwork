@@ -204,6 +204,10 @@
     rememberRecent(question, reply, token);
   }
 
+  // AI-13: suggestions shown, used and left unused (only while usage measures are on).
+  var shownSuggestions = [];
+  function measure(item, event) { if (typeof window.mvSuggestion === "function") window.mvSuggestion("copilot-question", item, event); }
+
   function renderContext(context) {
     var selected = context && typeof context === "object" ? context : fallback;
     if (current) {
@@ -214,6 +218,7 @@
     clear(tips); tips.hidden = true;
     if (hello && typeof selected.intro === "string" && selected.intro) hello.textContent = selected.intro;
     clear(prompts);
+    shownSuggestions = [];
     var suggestions = Array.isArray(selected.suggestions) && selected.suggestions.length
       ? selected.suggestions : (selected.suggested_questions || fallback.suggested_questions);
     suggestions.slice(0, 3)
@@ -222,9 +227,13 @@
         button.type = "button";
         button.className = "mv-copilot__prompt";
         button.textContent = String(question);
+        measure(String(question), "shown");
+        shownSuggestions.push(String(question));
         // One click asks; the answer links to the control when there is one.
         button.addEventListener("click", function () {
           if (sending) return;
+          measure(String(question), "accepted");
+          shownSuggestions = shownSuggestions.filter(function (q) { return q !== String(question); });
           input.value = String(question);
           if (typeof form.requestSubmit === "function") form.requestSubmit();
           else form.dispatchEvent(new Event("submit", {cancelable: true}));
@@ -438,6 +447,8 @@
     generation += 1; sending = false; input.readOnly = false; sendButton.disabled = false; sendButton.removeAttribute('aria-busy');
     if (controller()) controller().release();
     if (window.LightworkProductOperations) window.LightworkProductOperations.close();
+    shownSuggestions.forEach(function (question) { measure(question, "dismissed"); });
+    shownSuggestions = [];
     panel.hidden = true;
     fab.setAttribute("aria-expanded", "false");
     pageTriggers.forEach(function (trigger) { trigger.setAttribute("aria-expanded", "false"); });

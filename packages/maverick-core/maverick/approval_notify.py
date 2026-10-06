@@ -65,6 +65,10 @@ def approval_created(approval_id: int, *, provenance: str | None = None, world=N
     """
     if provenance == "settings_quorum":
         return  # protected-settings changes are decided in the dashboard only
+    from . import practice
+    if practice.active():  # practice approvals stay in the practice Approvals page
+        practice.record("approval card", "Slack or Teams approval card", {"approval": approval_id})
+        return
     install_announcers()
     if not announcements_configured():
         return

@@ -83,6 +83,7 @@ def test_built_in_packs_are_specialists_and_everything_else_is_an_agent():
 
 def test_saving_and_resetting_an_agent_writes_the_changelog(tmp_path, monkeypatch):
     monkeypatch.setenv("MAVERICK_DOMAINS_DIR", str(tmp_path / "domains"))
+    monkeypatch.setattr("maverick.agent_publish_policy.require_passing_tests", lambda: False)  # changelog only, not the publish gate
     r = client.post("/api/v1/agents/proc_po_chaser/override", json={"persona": "You are the strict PO Confirmation Chaser."})
     assert r.status_code == 200, r.text
     rows = changelog.entries("proc_po_chaser", include_workspace=False)

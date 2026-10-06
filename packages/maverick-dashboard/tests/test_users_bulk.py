@@ -58,7 +58,7 @@ def test_bulk_change_confirms_the_count_then_reports_and_undoes(client):
                                             "role": "operator"}).text
     words = text(page)
     assert "Change the role of 2 people to Operator?" in words
-    assert "Yes, change 2 people" in words
+    assert "Change the role for 2 people" in words
     assert roles()["user:ana@corp.com"] == "viewer"  # nothing changed yet
     # Step 2: confirm with the count that was shown.
     page = client.post("/users/bulk", data={

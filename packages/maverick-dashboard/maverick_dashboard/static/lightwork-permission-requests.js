@@ -52,7 +52,7 @@
     model = next; say(model.enabled ? 'Current policy loaded. Reviews do not change permissions automatically.' : 'New permission requests are disabled. Current explanations and saved cases remain available.');
     choices();
     const cases = $('par-cases'); cases.replaceChildren();
-    if (!model.records.length) cases.appendChild(node('p', 'No visible permission requests.'));
+    if (!model.records.length) cases.appendChild(node('p', 'No visible permission requests. Requests appear here when someone asks for more access.'));
     model.records.forEach(row => {
       const article = node('article'); article.className = 'panel'; article.appendChild(node('h3', row.label + ' — ' + ({requested: 'Requested', reviewing: 'Under review', denied: 'Declined', effective: 'Permission confirmed'}[row.status] || 'Saved request'))); article.appendChild(node('p', row.reason)); explanation(article, row.current);
       if (row.decision_note) article.appendChild(node('p', 'Reviewer: ' + row.decision_note));

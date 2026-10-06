@@ -269,7 +269,7 @@ def _smtp_session(mail: dict):
 
 
 def send_email(to: str, subject: str, text_body: str, *, html_body: str | None = None,
-               cfg: dict | None = None) -> bool:
+               cfg: dict | None = None, headers: dict[str, str] | None = None) -> bool:
     """Send one message through ``[notifications.email]``. False when mail is
     not set up or the server refuses; never raises. Logs the failure type only
     (an SMTP error can echo credentials)."""
@@ -278,6 +278,11 @@ def send_email(to: str, subject: str, text_body: str, *, html_body: str | None =
     from email.message import EmailMessage
     from email.utils import formatdate, make_msgid
 
+    from . import practice
+
+    if practice.active():  # practice mode: recorded, never sent
+        practice.record("email", "Email", {"to": to, "subject": subject})
+        return False
     mail = _email_config(cfg)
     recipient = " ".join(str(to or "").split())
     if not recipient or "@" not in recipient:
@@ -302,6 +307,11 @@ def send_email(to: str, subject: str, text_body: str, *, html_body: str | None =
     message["Subject"] = " ".join(str(subject or "Lightwork").split())[:200]
     message["Date"] = formatdate(localtime=True)
     message["Message-ID"] = make_msgid(domain="lightwork.local")
+    # One-click unsubscribe (RFC 8058) and similar list headers; values are
+    # links Lightwork made, never message content.
+    for name, value in (headers or {}).items():
+        if name in {"List-Unsubscribe", "List-Unsubscribe-Post"} and "\n" not in value and "\r" not in value:
+            message[name] = value
     message.set_content(str(text_body or ""))
     if html_body:
         message.add_alternative(str(html_body), subtype="html")
@@ -435,6 +445,11 @@ def notify(
     straight through, and with batching unconfigured this is a no-op. When an
     item is queued for a later batch, the call returns 0 (fired *now*).
     """
+    from . import practice
+
+    if practice.active():  # practice mode: recorded, never sent
+        practice.record("alert", title, {"body": body, "priority": priority})
+        return 0
     cfg = _load_config()
     # Normalize: backend names are user-typed (config/TOML or the `backends`
     # arg) and matched case-sensitively in _dispatch ("ntfy"/"discord"/...), so

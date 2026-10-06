@@ -297,12 +297,15 @@ _shared_lock = threading.Lock()
 def shared() -> UxStore:
     """Resolve the caller's workspace on every access, preserving its lock."""
     global _shared
+    from . import practice
     from .paths import data_dir
 
     # The previous singleton could write another workspace's records into its
     # first workspace's file. Those rows carry no verifiable workspace lineage;
     # do not silently assign them to that first workspace during an upgrade.
-    path = data_dir("dashboard", "ux_store-v2.json").resolve()
+    # Practice tasks are numbered in their own world database, so their pins,
+    # views and notes are kept in practice too (maverick.practice).
+    path = data_dir("practice" if practice.active() else "dashboard", "ux_store-v2.json").resolve()
     with _shared_lock:
         if _shared is None:
             _shared = {}

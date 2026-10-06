@@ -3129,6 +3129,28 @@ def acknowledge_dsar(request_id: str, *, acknowledged_by: str = "") -> dict | No
                           event="dsar.acknowledged")
 
 
+def assign_dsar(request_id: str, assignee: str, *, assigned_by: str = "") -> dict | None:
+    """Name the person who works a request (``""`` leaves it unassigned).
+
+    The caller checks that the assignee may work privacy requests; this
+    records the change and keeps the previous assignee on the record so the
+    change can be undone exactly."""
+    who = str(assignee or "").strip()[:200]
+    if who and not who.startswith("user:"):
+        raise ValueError("Choose a person to assign the request to.")
+
+    def _assign(record: dict) -> bool:
+        if (record.get("assignee") or "") == who:
+            return False
+        record["previous_assignee"] = record.get("assignee") or ""
+        record["assignee"] = who
+        record["assigned_at"] = time.time()
+        record["assigned_by"] = _actor_label(assigned_by)
+        return True
+
+    return _dsar_mutation(request_id, _assign, action="assign", actor=assigned_by)
+
+
 def extend_dsar(
     request_id: str, *, reason: str, days: int | None = None,
     extended_by: str = "",

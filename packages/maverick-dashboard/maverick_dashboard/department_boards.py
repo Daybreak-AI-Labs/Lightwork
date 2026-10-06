@@ -219,6 +219,31 @@ def _spend(request, world, owner, days):
             "_read_domains": [domain for domain, admitted in cache.items() if admitted]}
 
 
+def _practice_line(request, owner, days):
+    """Practice runs cost real provider money: the same permitted-own,
+    department-checked population as the real figures, read from the practice
+    world and reported on its own line, never inside the board's totals."""
+    from maverick import practice, practice_costs
+
+    if practice.active():
+        return None  # a practising person's board already is practice
+    try:
+        world = practice_costs.practice_world()
+        if world is None:
+            return None
+        with practice.scope():
+            totals = _spend(request, world, owner, days)["totals"]
+    except Exception:  # noqa: BLE001 -- the board stays readable without the practice line
+        return None
+    if not totals["runs"]:
+        return None
+    line = {"dollars": totals["dollars"], "runs": totals["runs"], "unknown_runs": totals["unknown_prices"],
+            "input_tokens": totals["input_tokens"], "output_tokens": totals["output_tokens"],
+            "counted_against_limits": False}
+    line["text"] = practice_costs.label(line, f"in the last {days} days")
+    return line
+
+
 def _workforce(request, world, goals, prices):
     from maverick.domain import available_domains
     profiles = available_domains()
@@ -358,6 +383,7 @@ def build(request, board: str, days: int | None = None) -> dict:
         payload = prices if board == "spend" else _workforce(request, world, goals, prices) if board == "workforce" else _savings(request, world, owner, goals, prices)
         prices.pop("_domain_prices", None)
         prices.pop("_read_domains", None)
+        payload["practice"] = _practice_line(request, owner, days)
     admitted_domains = {row["domain"] or "" for row in goals}
     # A fork can acquire an inherited department or a pack can disappear while
     # the grants remain unchanged. Check the native mapping again at release.
