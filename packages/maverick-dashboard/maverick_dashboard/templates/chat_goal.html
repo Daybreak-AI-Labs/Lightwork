@@ -376,6 +376,7 @@
       {% set download = (thread_downloads or {}).get(t.id, {}) %}
       {% if download.allowed %}<a class="btn btn--ghost" href="/chat/goal/{{ t.goal_id }}/download.md?turn_id={{ t.id }}">Download answer</a>{% endif %}
       <a class="btn btn--ghost" href="/chat/goal/{{ t.goal_id }}">Open answer</a>
+      {% if can_operate %}<button type="button" class="btn btn--ghost" data-chat-message-action="branch" data-goal="{{ t.goal_id }}" data-turn="{{ t.id }}"{% if run_open %} disabled{% endif %}>Branch from here</button>{% endif %}
       {% if download.note %}<span class="muted">{{ download.note }}</span>{% endif %}
       {% endif %}
       <span class="muted turn-copy-status" role="status" aria-live="polite"></span>
@@ -404,6 +405,13 @@
       {% endif %}
     </div>
   </div>
+
+  {% if goal.id == latest_chat_goal_id %}<div class="answer-actions print-control" role="group" aria-label="Saved message actions">
+    <button type="button" class="btn btn--ghost" data-chat-message-action="edit" data-goal="{{ goal.id }}"{% if not can_operate %} disabled data-permission-disabled="1"{% elif run_open %} disabled{% endif %}>Edit and resend</button>
+    <button type="button" class="btn btn--ghost" data-chat-message-action="retry" data-goal="{{ goal.id }}"{% if not can_operate %} disabled data-permission-disabled="1"{% elif run_open %} disabled{% endif %}>Try again</button>
+    <button type="button" class="btn btn--ghost" data-chat-message-action="branch" data-goal="{{ goal.id }}"{% if not can_operate %} disabled data-permission-disabled="1"{% elif run_open %} disabled{% endif %}>Branch from here</button>
+  </div>{% endif %}
+  {% include "_chat_message_actions.html" %}
 
   <details id="attachments-panel" style="display: none; margin: var(--space-2) 0;">
     <summary style="cursor: pointer; color: var(--muted); font-size: var(--text-sm); width: max-content;">

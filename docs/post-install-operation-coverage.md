@@ -1,5 +1,46 @@
 # Post-install operation coverage
 
+## October 6 product completion batch
+
+| Customer operation | Complete controls | Result and boundary |
+| --- | --- | --- |
+| Retry, edit or branch a Chat answer (UX-376) | Message buttons and protected Copilot form; answer-only default, complete copied-context review and separate connected-action choice | A new independently admitted conversation preserves the original. Exact original admission reads resolve a lost response without dispatching twice. Current source access continues to govern copied content. |
+| Operate a workflow pilot (F04) | Prepare an unstarted task, freeze the full plan, record observations and complete costs, independently review, inspect value/history; ordinary forms and four reviewed Copilot writes | Native SQLite/pooled-PostgreSQL prepared-task admission is atomic. Pilot records support local and PostgreSQL governed storage with current-authority callbacks at transaction completion. Operator evidence is attributed; release exposure and causal benefit are not inferred. |
+| Choose useful information for a decision (P14/N05) | Complete named decision authoring, robust choice check, checked joint observation reservation, unknown-check acknowledgement and original requests | Exact decimal losses/costs and all declared joint answers are checked within bounded question, effort, time and cost limits. Unknown work cannot silently repeat or refund spent allowance. No supplier, financial or other business action executes. |
+
+Authenticated native browser journeys exercised these direct and Copilot paths,
+interrupted replies and 320px layouts. Prepared-task admission additionally ran
+against the real pooled PostgreSQL backend. These are operating qualifications
+for the named paths, without hosted CI or paid-provider calls.
+
+The next completed batch adds irreversible erasure of an already removed
+workspace through a complete native review and the same protected Copilot
+review. Erasure retains the original operation before touching files. An
+interrupted deletion stays unconfirmed; reading or retrying that original
+does not continue deletion. A separately acknowledged cleanup has its own
+review and original. Backups and external copies are explicitly separate.
+The older HTTP Remove action cannot bypass this review with a purge parameter.
+
+Suggest mode saves a complete, encrypted, readable proposal in the task's
+results and returns a non-executed result to learning. It asks for no approval
+to execute the proposed action. Request mode still requires a person’s approval;
+Observe refuses the action. The native checks used a declared local effect
+transport and inspected the actual saved artifact and signed intent.
+
+Original backlog fixes in this batch cover UX-116/146/151, UX-135/161/162,
+UX-182/183/185/213 and the inactive Settings control in UX-215. Retained tax
+content is checked against current signing anchors; update retrieval and
+connector addresses are confined. Unknown tools remain visibly unclassified
+and receive a conservative high risk floor. Future retention cutoffs are
+refused. Incident alerts and the insurance pack read both complete bounded
+registers, distinguish an unavailable inventory from no incidents, and close
+the first-report clock after filing. Diagnostics read the same effective
+saved settings as the dashboard; finance status includes operating-profile
+gates and active custom specialists. The SSH client retains local agent
+authentication without retaining provider secrets. The developer container
+uses a virtual environment. The ineffective answer-reuse setting is removed;
+its standalone internal cache is not presented as a working customer feature.
+
 Source review: October 1, 2026; selected journeys updated October 6. This is a working gap register against the
 [customer experience contract](./customer-experience-contract.md), not a claim
 that the entire platform has been inventoried or accepted. A working backend,
@@ -2073,3 +2114,25 @@ position errors open their disclosure before focus. The same form is hosted in
 local Recovery Copilot. Current context, exact source/review bindings and native
 recording/recovery writers are unchanged; collection choices do not verify
 delivery or unknown outside effects.
+
+## Visual workflow questions (UX385)
+
+Decision and repeat-while steps expose ordinary question groups. Users choose
+the information, comparison and Text, Number or Yes/No value, add or remove
+questions, and select all questions or any matching group. Every question inside
+a group must match. Existing combined conditions and quoted text containing
+“and” or “or” retain the native engine's meaning. Incomplete edits block saving
+with a readable explanation; unsupported existing expressions remain unchanged.
+Saved flows use the existing versioned flow writer and publication controls.
+This adds no separate execution engine or condition format.
+### Connected work and retained results (UX117, UX134, UX168/373, UX389)
+
+The governance screens and Copilot now review canonical saved source records before connector writeback, read the original matching receipt after later exports and retain uncertain outcomes without automatically repeating a send. Privacy request evidence distinguishes operator attestations from actual connector observations; an absent active record does not prove that retained copies were erased.
+
+Slack and Telegram can receive bounded exports and rendered HTML from the actual owned task result through the encrypted delivery journal. Original text and file chunks remain separate; a missing file receipt stays uncertain and is not automatically sent again. Teams currently shows named result availability and an available private task link because its existing channel transport cannot upload those files. Arbitrary model-supplied filesystem paths and binary document conversion are not supported by this path.
+
+Connected automations have ordinary saved-account and container choices for SharePoint files, Salesforce records, ServiceNow tickets and Teams messages. A dated source preview establishes the starting point before explicit creation. Current account grants and source revisions are checked at native reads and at the guarded registry write. Matching original creation requests preserve the existing position; changed requests cannot overwrite the same name.
+
+### Company sign-in before activation (UX075, partial)
+
+Settings has a real provider sign-in check using the saved company account details before activation, with native authorization-code exchange, PKCE, signature and nonce verification. It retains dated, account-bound results while keeping current administrator access, roles and sign-in settings. Changed settings, expired checks, invalid replies and repeated callbacks cannot claim a new verified result. A connection-only check remains separately labelled. Guided provider presets, uploaded SAML metadata and a verified local-owner activation/recovery migration remain open; this addition does not claim those are complete.

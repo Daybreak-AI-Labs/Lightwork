@@ -273,7 +273,8 @@ def set_trigger(name: str, template: str, source: str, *, config: dict | None = 
                 flow_owner: str = "", flow_revision: str = "",
                 template_snapshot: dict | None = None,
                 mint_public_form_token: bool = False,
-                expected_owner: str | None = None) -> dict:
+                expected_owner: str | None = None,
+                create_only: bool = False, effect_guard=None) -> dict:
     """Create or replace an event trigger (by slugified name). Raises ValueError
     on an un-sluggable name. Preserves the existing cursor on replace unless one
     is passed, so re-saving a trigger doesn't replay its whole backlog.
@@ -312,6 +313,8 @@ def set_trigger(name: str, template: str, source: str, *, config: dict | None = 
             raise ValueError("template snapshot does not match the trigger target")
         template_rev = snapshot_revision(normalised_snapshot)
     with _locked():
+        if effect_guard is not None:
+            effect_guard()
         existing = list_triggers()
         tenant = str(tenant)
         kept = [
@@ -328,6 +331,13 @@ def set_trigger(name: str, template: str, source: str, *, config: dict | None = 
         if (prior is not None and expected_owner is not None
                 and prior.get("owner", "") != expected_owner):
             raise FormTriggerConflict("This automation belongs to another person.")
+        if create_only and prior is not None:
+            planned = {"source": str(source), "config": dict(config or {}), "template": str(template),
+                       "flow": str(flow), "params": {str(k): str(v) for k, v in (params or {}).items()},
+                       "interval_seconds": int(interval_seconds)}
+            if any(prior.get(key) != value for key, value in planned.items()):
+                raise FormTriggerConflict("An automation already uses this name. Read its original result or choose a different name.")
+            return prior
         resolved_config = (
             _api_form_config(config, prior, existing)
             if source == "form" and mint_public_form_token else dict(config or {})
@@ -394,6 +404,8 @@ def set_trigger(name: str, template: str, source: str, *, config: dict | None = 
                 if waiting:
                     raise FormTriggerPending(waiting)
         kept.append(rec)
+        if effect_guard is not None:
+            effect_guard()
         _write(kept)
     return rec
 

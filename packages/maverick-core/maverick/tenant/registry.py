@@ -907,6 +907,209 @@ def list_removed_tenants() -> list[dict[str, object]]:
     return sorted(rows, key=lambda row: float(row["removed_at"]), reverse=True)
 
 
+def _erasure_root(tid):
+    """An exact retired namespace, never the shared home or a linked folder."""
+    from pathlib import Path
+    root = maverick_home() / "tenants" / _tenant_segment(tid)
+    parent = root.parent
+    if parent.is_symlink() or root.is_symlink():
+        raise ValueError("Linked workspace folders cannot be erased here.")
+    if root.resolve().parent != parent.resolve() or root == Path(maverick_home()):
+        raise ValueError("Workspace storage is outside its reserved folder.")
+    return root
+
+
+def _erasure_stamp(path):
+    import stat
+    value = path.lstat()
+    if stat.S_ISLNK(value.st_mode) or not (stat.S_ISREG(value.st_mode) or stat.S_ISDIR(value.st_mode)):
+        raise ValueError("Workspace storage includes a linked or unsupported item.")
+    return [value.st_dev, value.st_ino, value.st_mode, value.st_size,
+            value.st_mtime_ns, value.st_ctime_ns]
+
+
+def _erasure_tree(root, check):
+    """Full local metadata selection. Private file bodies never enter reviews."""
+    entries, pending, total = [], [root], 0
+    if not root.exists():
+        return entries, total
+    while pending:
+        check()
+        path = pending.pop()
+        stamp = _erasure_stamp(path)
+        relative = path.relative_to(root).as_posix()
+        directory = path.is_dir()
+        entries.append({"path": relative, "directory": directory, "stamp": stamp})
+        if len(entries) > 50000:
+            raise ValueError("This workspace has more than 50,000 local items. Its complete erasure review is unavailable; nothing was erased.")
+        if directory:
+            pending.extend(sorted(path.iterdir(), reverse=True))
+        else:
+            total += stamp[3]
+    return entries, total
+
+
+def _erasure_attempts(saved):
+    rows = saved.get("erasures", [])
+    if not isinstance(rows, list) or len(rows) > 1000:
+        raise TenantRegistryError("Workspace erasure history is unavailable.")
+    seen = set()
+    for row in rows:
+        if (not isinstance(row, dict) or not isinstance(row.get("operation"), str)
+                or row["operation"] in seen or row.get("result") not in {"unconfirmed", "confirmed"}
+                or not isinstance(row.get("actor"), str) or not isinstance(row.get("context"), str)):
+            raise TenantRegistryError("Workspace erasure history is unavailable.")
+        seen.add(row["operation"])
+    return rows
+
+
+def _erasure_snapshot_unlocked(tid, check):
+    check()
+    saved = _retirement(tid)
+    if saved is None or saved.get("state", "removed") != "removed" or tid in _load():
+        raise ValueError("Choose a workspace that is still removed.")
+    root = _erasure_root(tid)
+    entries, total = _erasure_tree(root, check)
+    rows = _erasure_attempts(saved)
+    pending = rows[-1]["operation"] if rows and rows[-1]["result"] == "unconfirmed" else ""
+    material = {"home": str(maverick_home().resolve()), "removed": saved, "entries": entries}
+    revision = hashlib.sha256(json.dumps(material, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    record = saved.get("record") or {}
+    check()
+    return {"workspace": tid, "name": str(record.get("display_name") or tid),
+            "removed_at": saved["deleted_at"], "files": sum(not e["directory"] for e in entries),
+            "folders": sum(e["directory"] for e in entries), "bytes": total,
+            "previous_attempt": pending, "revision": revision}, saved, entries
+
+
+def erasure_review(tenant_id: str, *, effect_guard=None) -> dict:
+    """Read the complete exact local selection for a removed workspace."""
+    from ..budget import Budget
+    budget = Budget(max_wall_seconds=15, max_dollars=0, max_tool_calls=0)
+    def check():
+        budget.check()
+        if effect_guard is not None:
+            effect_guard()
+    tid = _lookup_id(tenant_id)
+    with _locked(strict=True):
+        value, _saved, _entries = _erasure_snapshot_unlocked(tid, check)
+        return value
+
+
+def erasure_original(tenant_id: str, operation: str, *, actor: str, context: str, effect_guard=None):
+    """Pure original lookup; never infer an earlier outcome from current absence."""
+    tid = _lookup_id(tenant_id)
+    with _locked(strict=True):
+        if effect_guard is not None:
+            effect_guard()
+        saved = _retirement(tid)
+        rows = _erasure_attempts(saved) if saved is not None else []
+        for row in rows:
+            if row["operation"] == operation and row["actor"] == actor and row["context"] == context:
+                if effect_guard is not None:
+                    effect_guard()
+                return dict(row)
+        return None
+
+
+def erasure_history(tenant_id: str, *, actor: str, context: str, effect_guard=None) -> list[dict]:
+    """Complete metadata history for this exact original actor/context."""
+    tid = _lookup_id(tenant_id)
+    with _locked(strict=True):
+        if effect_guard is not None:
+            effect_guard()
+        saved = _retirement(tid)
+        rows = _erasure_attempts(saved) if saved is not None else []
+        values = [dict(row) for row in rows if row["actor"] == actor and row["context"] == context]
+        if effect_guard is not None:
+            effect_guard()
+        return values
+
+
+def _erasure_save(tid, saved, check):
+    atomic_write_text(_retirement_path(tid), json.dumps(saved, sort_keys=True), effect_guard=check)
+
+
+def _erasure_unlink(root, entries, check):
+    """Guard every actual unlink, keeping any interrupted attempt unknown."""
+    for entry in sorted(entries, key=lambda e: (e["path"].count("/"), len(e["path"])), reverse=True):
+        check()
+        path = root if entry["path"] == "." else root / entry["path"]
+        # Check every parent again: no link introduced after the reviewed walk
+        # may redirect an unlink outside this exact reserved namespace.
+        for parent in (path, *path.parents):
+            if parent.is_symlink():
+                raise ValueError("Workspace storage changed during erasure. Check the original result.")
+            if parent == root:
+                break
+        actual = _erasure_stamp(path)
+        expected = entry["stamp"]
+        # Our own child removals change directory dates/size, not its identity.
+        if actual[:3] != expected[:3] or (not entry["directory"] and actual != expected):
+            raise ValueError("Workspace storage changed during erasure. Check the original result.")
+        check()
+        path.rmdir() if entry["directory"] else path.unlink()
+
+
+def erase_removed_tenant(tenant_id: str, *, revision: str, operation: str, actor: str,
+                        context: str, previous_attempt: str = "", effect_guard=None) -> dict:
+    """Reviewed retired-only purge using the native deletion history.
+
+    Existing delete/purge callers are unchanged. A durable unknown original is
+    reserved before any unlink; only a separate reviewed current intention can
+    continue cleanup. Namespace/deletion evidence remains after local erasure.
+    """
+    from ..audit import audit_event
+    from ..budget import Budget
+    budget = Budget(max_wall_seconds=15, max_dollars=0, max_tool_calls=0)
+    def check():
+        budget.check()
+        if effect_guard is not None:
+            effect_guard()
+    tid = _lookup_id(tenant_id)
+    with _locked(strict=True):
+        check()
+        saved = _retirement(tid)
+        rows = _erasure_attempts(saved) if saved is not None else []
+        original = next((r for r in rows if r["operation"] == operation), None)
+        if original is not None:
+            if original["actor"] != actor or original["context"] != context:
+                raise PermissionError("This original erasure belongs to another account or workspace.")
+            return dict(original)
+        value, saved, entries = _erasure_snapshot_unlocked(tid, check)
+        if value["revision"] != revision or value["previous_attempt"] != previous_attempt:
+            raise ValueError("The removed workspace changed. Review its remaining records again.")
+        if len(rows) >= 1000:
+            raise ValueError("The retained erasure history is full. Nothing was erased.")
+        row = {"operation": operation, "actor": actor, "context": context, "result": "unconfirmed",
+               "started_at": time.time(), "reviewed_revision": revision, "previous_attempt": previous_attempt,
+               "files": value["files"], "folders": value["folders"], "bytes": value["bytes"]}
+        saved["erasures"] = [*rows, row]
+        # Once physical erasure may start, restoration must remain closed even
+        # if a reply/audit/final save is interrupted.
+        saved["purged"] = True
+        _erasure_save(tid, saved, check)
+        if not audit_event("workspace_erasure_started", agent=actor, _global=True,
+                           tenant=tid, operation=operation, files=row["files"], previous_attempt=previous_attempt):
+            raise TenantRegistryError("Erasure admission could not be recorded. The original remains unconfirmed.")
+        check()
+        root = _erasure_root(tid)
+        current_entries, _total = _erasure_tree(root, check)
+        if current_entries != entries:
+            raise ValueError("The local records changed after admission. This original remains unconfirmed; review the remaining records separately.")
+        _erasure_unlink(root, entries, check)
+        check()
+        if _erasure_root(tid).exists():
+            raise TenantRegistryError("Local erasure could not be confirmed. Check the original result.")
+        if not audit_event("workspace_erasure_completed", agent=actor, _global=True,
+                           tenant=tid, operation=operation, files=row["files"]):
+            raise TenantRegistryError("The records may be erased, but completion could not be recorded. Check the original result.")
+        row["result"] = "confirmed"
+        row["finished_at"] = time.time()
+        _erasure_save(tid, saved, check)
+        return dict(row)
+
+
 def restore_tenant(tenant_id: str) -> TenantRecord:
     """Restore one retained workspace as paused, without restoring old access.
 

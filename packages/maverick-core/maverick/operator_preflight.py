@@ -66,17 +66,6 @@ def _config_state() -> tuple[Check, dict[str, Any] | None]:
     from .config import config_path, config_source_errors, load_config
 
     path = config_path()
-    if not path.is_file():
-        return (
-            Check(
-                "config",
-                "Configuration",
-                "blocked",
-                f"No configuration file at {path}.",
-                "maverick init --fast",
-            ),
-            None,
-        )
     try:
         cfg = load_config()
         errors = config_source_errors()
@@ -119,7 +108,7 @@ def _config_state() -> tuple[Check, dict[str, Any] | None]:
             "config",
             "Configuration",
             "ready",
-            f"Loaded {path}.",
+            f"Loaded {path}." if path.is_file() else "Loaded current saved settings and environment choices.",
         ),
         cfg,
     )

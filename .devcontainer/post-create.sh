@@ -3,6 +3,9 @@
 # the same way CI does, so tests and the CLI work out of the box.
 set -euo pipefail
 
+python3 -m venv .venv
+export PATH="$PWD/.venv/bin:$PATH"
+
 pip install -e ./packages/maverick-core
 pip install --no-deps -e ./packages/maverick-shield
 pip install --no-deps -e ./packages/maverick-channels

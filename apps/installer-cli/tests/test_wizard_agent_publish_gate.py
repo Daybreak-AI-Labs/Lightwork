@@ -55,4 +55,3 @@ def test_both_agent_factory_choices_share_one_table(tmp_path, monkeypatch):
     cfg = _write(cfg_dir, monkeypatch, {"jd_hiring": False, "require_passing_tests": False})
     assert cfg.count("[agent_factory]") == 1
     assert "jd_hiring = false" in cfg and "require_passing_tests = false" in cfg
-

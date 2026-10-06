@@ -117,7 +117,7 @@ def _record_id(channel, account, external_id):
 
 
 def _cleanup_paths(record_id, digests):
-    if (not isinstance(digests, list) or len(digests) > MAX_ATTACHMENTS
+    if (not isinstance(digests, list) or len(digests) > 2 * MAX_ATTACHMENTS
             or any(not isinstance(digest, str) for digest in digests)):
         raise ValueError("Invalid channel attachment cleanup manifest")
     return [_blob_path(record_id, digest) for digest in digests]
@@ -128,7 +128,7 @@ def _legacy_cleanup_digests(record_id):
     directory = _blob_path(record_id, "0" * 64).parent
     try:
         with os.scandir(directory) as entries:
-            retained = list(islice(entries, MAX_ATTACHMENTS + 1))
+            retained = list(islice(entries, 2 * MAX_ATTACHMENTS + 1))
     except FileNotFoundError:
         return []
     digests = [entry.name for entry in retained]
@@ -471,11 +471,12 @@ class DeliveryJournal:
         try:
             if "cleanup_pending" not in row:
                 digests = (_legacy_cleanup_digests(row["id"]) if row.get("compacted") else
-                           [item["sha256"] for item in row["message"].get("attachments", [])])
+                           list(dict.fromkeys(item["sha256"] for item in [
+                               *row["message"].get("attachments", []), *row.get("reply_files", [])])))
                 _cleanup_paths(row["id"], digests)
                 # CAS establishes durable cleanup intent before any deletion.
                 # Retrying this state bypasses the updated_at retention cutoff.
-                row = self.change(row, message={}, reply=None, chunks={}, route={},
+                row = self.change(row, message={}, reply=None, reply_files=[], reply_source=None, chunks={}, route={},
                                   cleanup_pending=digests, compacted=False)
             for path in _cleanup_paths(row["id"], row["cleanup_pending"]):
                 _assert_work_allowed()
@@ -493,6 +494,104 @@ async def admit_message(msg, *, external_id, account, authorize, route=None, jou
     return await asyncio.to_thread(journal.admit, msg, external_id=external_id, account=account, route=route)
 
 
+def _require_reply_source(row):
+    source = row.get("reply_source")
+    if source is None:
+        return
+    from maverick.channel_reply_results import require_source
+
+    if (source.get("channel") != row["channel"]
+            or source.get("account_sha256") != row["account_sha256"]):
+        raise PermissionError("Saved reply source does not belong to this chat account")
+    require_source(source)
+
+
+def _freeze_reply_files(row, reply, material):
+    from maverick.attachments import (
+        _seal_context,
+        _verify_stored_attachment,
+        is_sealed_file,
+        validate_attachment,
+    )
+    from maverick.authority_effects import authority_effect_fence
+    from maverick.crypto_at_rest import seal_bound
+    from maverick.file_lock import atomic_write_bytes, cross_process_lock, ensure_private_directory
+
+    files = material["files"]
+    if (not isinstance(files, list) or len(files) > MAX_ATTACHMENTS
+            or reply.attachments != [item["filename"] for item in files]):
+        raise ValueError("Native reply file selection changed")
+    prepared = {**row, "reply_source": material["source"]}
+    saved, total = [], 0
+    for item in files:
+        data = item["data"]
+        sha = validate_attachment(item["filename"], item["mime"], data, existing_total=total)
+        if sha != item["sha256"]:
+            raise ValueError("Native reply file content changed")
+        total += len(data)
+        path = _blob_path(row["id"], sha)
+        ensure_private_directory(path.parent)
+        with authority_effect_fence(), cross_process_lock(path, strict=True):
+            _require_reply_source(prepared)
+            if path.exists():
+                _verify_stored_attachment(path, sha)
+            if not path.exists() or not is_sealed_file(path):
+                atomic_write_bytes(path, seal_bound(data, _seal_context(path), portable=True),
+                                   effect_guard=lambda: _require_reply_source(prepared))
+            _require_reply_source(prepared)
+        saved.append({"filename": item["filename"], "mime": item["mime"],
+                      "sha256": sha, "size_bytes": len(data), "source": item["source"]})
+    _require_reply_source(prepared)
+    return {"reply_files": saved, "reply_source": material["source"]}
+
+
+async def saved_reply_files(reply):
+    """Only files frozen with this exact encrypted native reply may be shipped."""
+    attempt = _ACTIVE.get()
+    if not reply.attachments or not isinstance(attempt, _DeliveryAttempt):
+        return []
+    row = await asyncio.to_thread(attempt.journal.get, attempt.record_id)
+    if row.get("reply") != asdict(reply):
+        raise DeliveryUnknown("Saved reply changed before file delivery")
+    await asyncio.to_thread(_require_reply_source, row)
+    return list(row.get("reply_files", []))
+
+
+def _read_reply_file(row, item):
+    from maverick.attachments import (
+        _SEAL_OVERHEAD,
+        MAX_FILE_BYTES,
+        _decode_stored,
+        _verify_stored_attachment,
+        validate_attachment,
+    )
+
+    if item not in row.get("reply_files", []):
+        raise DeliveryUnknown("File does not belong to this saved reply")
+    _require_reply_source(row)
+    path = _blob_path(row["id"], item["sha256"])
+    _verify_stored_attachment(path, item["sha256"])
+    with path.open("rb") as stream:
+        stored = stream.read(MAX_FILE_BYTES + _SEAL_OVERHEAD + 1)
+    data = _decode_stored(stored, path, item["sha256"])
+    if (len(data) != item["size_bytes"]
+            or validate_attachment(item["filename"], item["mime"], data) != item["sha256"]):
+        raise DeliveryUnknown("Saved reply file failed its content check")
+    _require_reply_source(row)
+    return data
+
+
+async def read_reply_file(item):
+    attempt = _ACTIVE.get()
+    if not isinstance(attempt, _DeliveryAttempt):
+        raise DeliveryNotSent("File delivery requires a saved native reply")
+    row = await asyncio.to_thread(attempt.journal.get, attempt.record_id)
+    data = await asyncio.to_thread(_read_reply_file, row, item)
+    if not attempt.authorize():
+        raise DeliveryNotSent("Chat authorization changed before file delivery")
+    return data
+
+
 async def _execute_claimed(channel, inbound, claimed, *, journal, authorize):
     """Run the handler for a claimed receipt and record its outcome. Every exit
     records one: a result, or ``execution_unknown`` with a reply to the sender."""
@@ -506,10 +605,14 @@ async def _execute_claimed(channel, inbound, claimed, *, journal, authorize):
         reply = as_reply(await channel.handler(inbound))
         if len(reply.text) > MAX_TEXT_CHARS or len(reply.attachments) > MAX_ATTACHMENTS:
             raise ValueError("Channel reply exceeds durable outbox bound")
+        material = getattr(inbound, "_channel_reply_material", None)
+        extras = (await asyncio.to_thread(_freeze_reply_files, claimed, reply, material)
+                  if material is not None else {})
         return await asyncio.to_thread(
             journal.change, claimed, execution="completed", delivery="ready",
             reply=asdict(reply),
             question_watch=getattr(inbound, "_channel_question_watch", None),
+            **extras,
         )
     except asyncio.CancelledError:
         # Recorded synchronously: a second cancellation cannot interrupt it,
@@ -588,7 +691,9 @@ async def process_message(channel, msg, *, external_id, account, authorize, send
         reply = Reply(**row["reply"])
         # The outer operation protects adapters whose provider offers no
         # chunk API. Instrumented adapters additionally receipt each chunk.
-        await context.send_chunk("reply", row["reply"], lambda: send(reply), idempotent=idempotent)
+        payload = ({"reply": row["reply"], "files": row["reply_files"], "source": row["reply_source"]}
+                   if "reply_files" in row else row["reply"])
+        await context.send_chunk("reply", payload, lambda: send(reply), idempotent=idempotent)
     except Exception:
         # The owning chunk transition records the outcome atomically. A
         # duplicate observer (or failed receipt write) cannot overwrite a
@@ -760,6 +865,9 @@ class _DeliveryAttempt:
             self.outer_attempt_id = attempt_id
         try:
             _assert_work_allowed()
+            if not self.authorize():
+                raise DeliveryNotSent("Channel sender authorization changed before sending")
+            await asyncio.to_thread(_require_reply_source, row)
             if not self.authorize():
                 raise DeliveryNotSent("Channel sender authorization changed before sending")
             result = await call()

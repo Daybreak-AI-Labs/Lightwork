@@ -165,23 +165,68 @@
 
   function renderWork(c, work, failedCallbacks) {
     var failedByTask = {};
+    var evidenceById = {};
+    (work.evidence || []).forEach(function (e) { evidenceById[e.evidence_id] = e; });
+    document.getElementById('pro-evidence-review').hidden = true;
     failedCallbacks.forEach(function (callback) {
       if (callback.case_id === c.case_id && callback.state === 'dead_letter') failedByTask[callback.task_id] = callback;
     });
     R.table(document.getElementById('pro-case-tasks'), [
       { label: 'System', value: function (t) { return sourceName(t.source_id); } },
       { label: 'Step', value: function (t) { return PHASE[t.phase] || R.human(t.phase); } },
-      { label: 'Status', value: function (t) { return failedByTask[t.task_id] ? R.badge('Needs attention', 'blocked') : badge(TASK_STATE, t.state); } },
+      { label: 'Status', value: function (t) {
+        if (failedByTask[t.task_id]) return R.badge('Needs attention', 'blocked');
+        var e = evidenceById[t.evidence_id];
+        if (t.state === 'complete' && e && e.evidence_origin === 'manual_attestation') return R.badge('Complete by manual statement', 'warn');
+        if (t.state === 'complete' && e && e.evidence_origin === 'legacy_unattributed') return R.badge('Complete; evidence origin unknown', 'warn');
+        return badge(TASK_STATE, t.state);
+      } },
+      { label: 'Evidence basis', value: function (t) {
+        var e = evidenceById[t.evidence_id];
+        return e ? evidenceSummary(e) : 'No result recorded';
+      } },
     ], work.tasks, [
       { label: 'Approve deletion', kind: 'danger', when: function (t) { return canAdmin && t.destructive && !t.approved_by && c.status !== 'closed'; }, run: function (t) { approveDestructive(t); } },
       { label: 'Try again', when: function (t) { return canAdmin && !!failedByTask[t.task_id] && c.status !== 'closed'; }, run: function (t) { retryFailedWork(c, t, failedByTask[t.task_id]); } },
-      { label: 'Record result', when: function (t) { return t.phase === 'redact' && t.state === 'planned' && c.status !== 'closed'; }, run: function (t) { recordResult(c, t); } },
+      { label: 'Record manual statement', when: function (t) { return t.phase === 'redact' && t.state === 'planned' && c.status !== 'closed'; }, run: function (t) { recordResult(c, t); } },
+      { label: 'Review original evidence', when: function (t) { return !!evidenceById[t.evidence_id]; }, run: function (t) { reviewEvidence(evidenceById[t.evidence_id]); } },
     ], { text: 'No systems searched yet. Use “Search a system”.' });
     R.table(document.getElementById('pro-case-manifests'), [
       { label: 'Checked', value: function (m) { return R.when(m.created_at); } },
       { label: 'Systems covered', value: function (m) { return (m.covered_source_ids || []).map(sourceName).join(', ') || 'None'; } },
       { label: 'Not covered', value: function (m) { return (m.uncovered_sources || []).map(function (u) { return sourceName(u.source_id) + (u.reason ? ' (' + R.human(u.reason) + ')' : ''); }).join(', ') || 'None'; } },
+      { label: 'Manual statements', value: function (m) { return (m.manually_attested_source_ids || []).map(sourceName).join(', ') || 'None recorded in this check'; } },
+      { label: 'Evidence origin unknown', value: function (m) { return (m.unattributed_source_ids || []).map(sourceName).join(', ') || 'None recorded in this check'; } },
     ], work.manifests, null, { text: 'Not checked yet. Use “Check completeness” once each system is done.' });
+  }
+
+  function evidenceSummary(e) {
+    if (e.evidence_origin === 'manual_attestation') return 'Manually attested; independently unverified';
+    if (e.evidence_origin !== 'provider_runtime') return 'Older evidence; origin not established';
+    if (e.verification_basis === 'provider_active_record_absence') return 'No match in the system’s active-record lookup; retained copies unknown';
+    return 'Connected-system response; review its retention result';
+  }
+
+  function reviewEvidence(e) {
+    var panel = document.getElementById('pro-evidence-review');
+    var box = document.getElementById('pro-evidence-details');
+    box.textContent = '';
+    var fields = [
+      ['System', sourceName(e.source_id)], ['Step', PHASE[e.phase] || R.human(e.phase)],
+      ['Recorded result', R.human(e.status)], ['Evidence basis', evidenceSummary(e)],
+      ['What this establishes', e.verification_summary || 'The origin of this older evidence was not recorded. Verification is not established.'],
+      ['Records involved', e.record_count], ['Recorded', R.when(e.created_at)],
+      ['Retention observation', e.provider_retention_state ? R.human(e.provider_retention_state) : 'Not established'],
+    ];
+    var dl = R.el('dl');
+    fields.forEach(function (field) { dl.appendChild(R.el('dt', '', field[0])); dl.appendChild(R.el('dd', '', field[1])); });
+    box.appendChild(dl);
+    var technical = R.el('details');
+    technical.appendChild(R.el('summary', '', 'Exact evidence references'));
+    technical.appendChild(R.el('pre', 'pro-output', JSON.stringify(e, null, 2)));
+    box.appendChild(technical);
+    panel.hidden = false;
+    panel.scrollIntoView({ block: 'nearest' });
   }
 
   function retryFailedWork(c, t, callback) {
@@ -198,7 +243,7 @@
     return R.pickFile().then(function (file) {
       if (!file) return null;
       return R.fingerprint(file).then(function (fp) {
-        return { sha256: fp.sha256, ref: prefix + '-' + R.slug(file.name, 'document') };
+        return { sha256: fp.sha256, ref: prefix + '-' + R.slug(file.name, 'document'), selectedName: file.name };
       });
     });
   }
@@ -284,23 +329,30 @@
   }
 
   function recordResult(c, t) {
-    R.form('Record the result: ' + (PHASE[t.phase] || R.human(t.phase)), [
+    R.form('Record your manual statement: ' + (PHASE[t.phase] || R.human(t.phase)), [
       { key: 'status', label: 'What happened', type: 'select', default: 'complete', options: [
         { value: 'complete', label: 'Done' }, { value: 'not_found', label: 'No records found' },
         { value: 'partial', label: 'Partly done' }, { value: 'failed', label: 'Failed' },
       ] },
       { key: 'count', label: 'Records involved', type: 'number', default: 0, required: true },
-    ], 'Choose proof document').then(function (v) {
+    ], 'Choose supporting document').then(function (v) {
       if (!v) return null;
       var count = parseInt(v.count, 10);
       if (!(count >= 0)) { say('Enter how many records were involved (0 or more).'); return null; }
       return proof('receipt').then(function (pf) {
-        if (!pf) { say('Attach the receipt or export from the system.'); return null; }
-        return R.call('PUT', API + '/cases/' + encodeURIComponent(c.case_id) + '/sources/' + encodeURIComponent(t.source_id) +
+        if (!pf) { say('Choose the document supporting your statement. Lightwork records its fingerprint without independently checking its contents.'); return null; }
+        return R.confirm('Record your statement for ' + sourceName(t.source_id) + ': ' + (PHASE[t.phase] || R.human(t.phase)) +
+          ', result ' + R.human(v.status) + ', ' + count + ' records, supporting document ' + pf.selectedName + '. This saves your statement and the chosen document’s fingerprint. ' +
+          'Lightwork does not independently verify the document or deletion in the connected system. ' +
+          (v.status === 'complete' || v.status === 'not_found' ? 'This marks the workflow step complete and may allow closure after independent approval.' : 'The workflow step remains incomplete.'), 'Record manual statement').then(function (confirmed) {
+          if (!confirmed) return null;
+          return R.call('PUT', API + '/cases/' + encodeURIComponent(c.case_id) + '/sources/' + encodeURIComponent(t.source_id) +
           '/phases/' + encodeURIComponent(t.phase) + '/evidence/' + encodeURIComponent(R.newId('evidence')), {
+          manual_attestation: true,
           status: v.status, provider_evidence_sha256: pf.sha256, record_count: count, opaque_ref: pf.ref,
           expected_task_revision: t.revision, idempotency_key: R.newKey(),
-        }).then(function () { say('Result recorded.'); return load(); });
+          }).then(function () { say('Your manual statement was recorded. Independent verification remains unconfirmed.'); return load(); });
+        });
       });
     }).catch(function (f) {
       if (f && f.status === 409) { say('This system has not finished its work yet. Try again after it has run.'); return; }
@@ -342,7 +394,7 @@
   }
 
   function approveClosure(c) {
-    R.confirm('Approve closing this request? You must not be the person who opened it.', 'Approve').then(function (ok) {
+    R.confirm('Approve closing this request? Review the original evidence for every system first. Manually recorded statements remain independently unverified, and an active-record lookup does not prove permanent removal from retained copies or backups. Closing records workflow completion. You must not be the person who opened it.', 'Approve').then(function (ok) {
       if (!ok) return;
       R.call('POST', API + '/cases/' + encodeURIComponent(c.case_id) + '/closure/approve', { expected_revision: c.revision, idempotency_key: R.newKey() })
         .then(function () { say('Closing approved. The person who opened the request can now close it.'); return load(); })
@@ -355,7 +407,7 @@
   }
 
   function closeCase(c) {
-    R.confirm('Close this request? It can no longer be changed.', 'Close request').then(function (ok) {
+    R.confirm('Close this request? It can no longer be changed. Closure records workflow completion and does not certify deletion. The original evidence retains each manual statement or connected-system observation.', 'Close request').then(function (ok) {
       if (!ok) return;
       R.call('POST', API + '/cases/' + encodeURIComponent(c.case_id) + '/close', { expected_revision: c.revision, idempotency_key: R.newKey() })
         .then(function () { say('Request closed.'); return load(); })

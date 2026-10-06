@@ -461,4 +461,3 @@ def unsubscribe(request: Request, token: str):
     if link["undo"]:
         return _quiet_page(request, done=undone, detail="You can change this any time in your notification settings.")
     return _quiet_page(request, done=done + ".", detail=detail, undo_token=undo_token)
-

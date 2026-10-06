@@ -1,5 +1,20 @@
 # Invention register: implementation status
 
+October 6 product integration: complete ordinary and Copilot workflow-pilot
+controls now prepare unstarted tasks, freeze plans, record complete observations
+and costs, request independent review, and read the exact original write after
+an interrupted reply. Task preparation uses one native SQLite/PostgreSQL
+transaction. P14/N05 now include exact robust-choice qualification and the
+least-cost joint observation batch across every declared possible answer, plus
+complete named situation authoring and conservative unknown-check recovery.
+Chat alternatives independently admit retry, edit/resend and earlier-answer
+branches with default answer-only execution and retained current source access.
+These are implemented product functions with native UI/Copilot journey evidence;
+they do not change the distinct research dispositions or claim causal customer
+lift. Pilot records now support local and PostgreSQL governed storage; guarded
+decision records currently require local storage. The [operation coverage](../post-install-operation-coverage.md)
+records these functional boundaries separately from the research status counts.
+
 Initial static source review on October 1, 2026 at `1c27445dda93e21e2eb38ef2dde5193646832da8`;
 dated follow-through below updates the selected implementations through October 6.
 This maps the 28 stable IDs in the [invention register](lightwork-invention-register.md)

@@ -7,7 +7,8 @@ Set up:
   4. Bot token scopes: `chat:write`, `commands`, `im:history`,
      `channels:history`, `groups:history`, `app_mentions:read`, `users:read`,
      `im:write` (daily summary DMs); `files:read` if people share files
-     (shared files become goal attachments)
+     (shared files become goal attachments); `files:write` to deliver saved
+     task outputs and rendered replies
   5. Subscribe to bot events `message.im`, `message.channels`,
      `message.groups`, `app_mention`; turn on Interactivity; add the slash
      command `/lightwork`
@@ -30,12 +31,20 @@ Requires::
 from __future__ import annotations
 
 import asyncio
+import io
 import logging
 import os
 import re
 
 from .base import Channel, IncomingMessage, is_allowed, normalize_allowlist
-from .delivery import DeliveryNotSent, DeliveryUnknown, delivery_active, send_chunk
+from .delivery import (
+    DeliveryNotSent,
+    DeliveryUnknown,
+    delivery_active,
+    read_reply_file,
+    saved_reply_files,
+    send_chunk,
+)
 
 log = logging.getLogger(__name__)
 
@@ -121,9 +130,27 @@ class SlackChannel(Channel):
         return msg
 
     async def _send_saved(self, msg, reply, route):
+        files = await saved_reply_files(reply)
+        thread = reply.thread_ref or route.get("reply_to")
         if reply.text:
-            return await self.send_threaded(msg.user_id, reply.text,
-                                            reply_to=route.get("reply_to"))
+            await self.send_threaded(msg.user_id, reply.text, reply_to=thread)
+        receipt = None
+        for index, item in enumerate(files):
+            async def upload(item=item):
+                data = await read_reply_file(item)
+                # This SDK call has multiple remote phases. A failure can follow
+                # upload acceptance, so it must remain unknown, never retryable.
+                with io.BytesIO(data) as document:
+                    result = await self._web.files_upload_v2(channel=msg.user_id,
+                        thread_ts=thread, filename=item["filename"], file=document)
+                returned = result.get("files") or []
+                identity = returned[0].get("id") if len(returned) == 1 else None
+                if result.get("ok") is False or not isinstance(identity, str) or not identity:
+                    raise DeliveryUnknown("Slack file attachment has no confirmed receipt")
+                return identity
+            receipt = await send_chunk("file-" + str(index), {"recipient": msg.user_id,
+                "thread": thread, **{key: item[key] for key in ("filename", "mime", "size_bytes", "sha256")}}, upload)
+        return receipt
 
     async def _download_files(self, event: dict) -> list[dict]:
         """Download a message's shared files into IncomingMessage.attachments.

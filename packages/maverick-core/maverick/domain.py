@@ -1099,7 +1099,8 @@ def agent_from_profile(profile: DomainProfile, ctx, task: str, *,
     # bindings. The plain base catalog cannot establish deployment readiness.
     names = {tool.name for tool in agent.tools.all()}
     missing = sorted({name for step in profile.workflow for name in step.tools} - names)
-    if missing:
+    from .chat_message_actions import answer_only_runtime
+    if missing and not answer_only_runtime():
         raise ValueError(
             f"Domain {profile.name!r} cannot deploy: required workflow tools unavailable: "
             + ", ".join(missing)

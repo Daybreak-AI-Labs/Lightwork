@@ -1636,15 +1636,20 @@ def atomic_write_text_chunks(
     return count
 
 
-def atomic_write_bytes(path: str | Path, data: bytes, *, mode: int = 0o600) -> None:
+def atomic_write_bytes(path: str | Path, data: bytes, *, mode: int = 0o600,
+                       effect_guard: Callable[[], None] | None = None) -> None:
     """Byte-for-byte sibling of :func:`atomic_write_text` for binary payloads
     (e.g. an at-rest-sealed blob): unique temp in the same directory, then
     ``os.replace`` into position; the temp is cleaned up on any failure."""
-    atomic_write_bytes_chunks(path, (data,), mode=mode)
+    if effect_guard is None:
+        atomic_write_bytes_chunks(path, (data,), mode=mode)
+    else:
+        atomic_write_bytes_chunks(path, (data,), mode=mode, effect_guard=effect_guard)
 
 
 def atomic_write_bytes_chunks(
     path: str | Path, chunks: Iterable[bytes], *, mode: int = 0o600,
+    effect_guard: Callable[[], None] | None = None,
 ) -> int:
     """Publish a private binary stream atomically after all chunks and fsync.
 
@@ -1669,9 +1674,15 @@ def atomic_write_bytes_chunks(
             f.flush()
             os.fsync(f.fileno())
             if os.name == "nt":
-                _windows_replace_open_fd(f.fileno(), path)
+                if effect_guard is None:
+                    _windows_replace_open_fd(f.fileno(), path)
+                else:
+                    _windows_replace_open_fd(f.fileno(), path, effect_guard=effect_guard)
             else:
-                _replace_with_retry(tmp, path)
+                if effect_guard is None:
+                    _replace_with_retry(tmp, path)
+                else:
+                    _replace_with_retry(tmp, path, effect_guard=effect_guard)
     except BaseException:
         if fd >= 0:
             try:

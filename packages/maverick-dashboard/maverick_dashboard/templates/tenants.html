@@ -137,15 +137,33 @@
     {% for removed in removed_tenants %}
     <div class="settings-row-form" data-removed-workspace="{{ removed.id }}" data-removed-name="{{ removed.display_name }}">
       <strong>{{ removed.display_name }}</strong>
-      <span class="muted">Reference: {{ removed.id }}</span>
       {% if removed.restorable %}
       <button type="button" class="btn" data-tenant-restore>Restore as paused</button>
       {% else %}
       <span class="muted">Records cannot be restored here. Ask an administrator to check the backup.</span>
       {% endif %}
+      <button type="button" class="btn btn--danger" data-workspace-erase>Review permanent erasure</button>
+      <button type="button" class="btn" data-workspace-erasure-history>Read erasure results</button>
     </div>
     {% endfor %}
     <p id="removed-tenants-msg" role="status" aria-live="polite" class="muted tenants-msg"></p>
+    <section id="workspace-erasure-review" class="panel" hidden aria-labelledby="workspace-erasure-title">
+      <h3 id="workspace-erasure-title" tabindex="-1">Review permanent local erasure</h3>
+      <div id="workspace-erasure-details"></div>
+      <label class="tenants-field"><input id="workspace-erasure-confirm" type="checkbox"> I reviewed every consequence and want to permanently erase these local records.</label>
+      <div class="tenants-actions">
+        <button type="button" class="btn btn--danger" id="workspace-erasure-apply" disabled>Erase the reviewed local records</button>
+        <button type="button" class="btn" id="workspace-erasure-cancel">Cancel</button>
+        <button type="button" class="btn" id="workspace-erasure-original" hidden>Check this original result</button>
+      </div>
+    </section>
+    <section id="workspace-erasure-history" hidden aria-labelledby="workspace-erasure-history-title">
+      <h3 id="workspace-erasure-history-title" tabindex="-1">Original erasure results</h3>
+      <div id="workspace-erasure-history-rows"></div>
+      <label class="tenants-field"><input type="checkbox" id="workspace-erasure-acknowledge"> I understand that an earlier unconfirmed erasure may already have erased records. I want a separate review of remaining cleanup.</label>
+      <button type="button" class="btn" id="workspace-erasure-new-review">Review remaining cleanup separately</button>
+    </section>
+    <p id="workspace-erasure-message" role="status" aria-live="polite" class="muted tenants-msg"></p>
   </details>
   {% endif %}
   <details class="panel tenants-advanced" id="tenant-keys-panel">

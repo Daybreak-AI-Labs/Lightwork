@@ -11,8 +11,9 @@ readable result.
 ``RichRenderChannel`` wraps any :class:`maverick_channels.base.Channel`:
 on ``send`` it detects rich blocks, writes the artifact under
 ``data_dir("rich_render/")`` (0600), and either hands the file to an injected
-``deliver(user_id, path)`` (adapters that can ship files) or appends the path
-to the text. Messages without rich blocks pass through byte-identical.
+``deliver(user_id, path)`` (adapters that can ship files). Without a file
+transport it explains that limitation; a server-local path is never a link.
+Native server replies are instead prepared inside durable delivery custody.
 
 Opt-in via ``[channels] rich_render = true`` (env
 ``MAVERICK_CHANNELS_RICH_RENDER``); off by default — no adapter behavior
@@ -155,8 +156,8 @@ class RichRenderChannel:
     """Wrap any Channel: rich replies also ship as a rendered HTML artifact.
 
     ``deliver(user_id, path)`` is the adapter-specific file hand-off (e.g. a
-    Telegram sendDocument call); without one, the artifact path is appended
-    to the text so the user can open it. Plain messages pass through
+    Telegram sendDocument call); without one, text explains that a rendered
+    file cannot be attached in this chat. Plain messages pass through
     untouched. Wrapping is a pure decorator — ``start``/``stop``/attribute
     access proxy to the inner channel.
     """
@@ -175,6 +176,10 @@ class RichRenderChannel:
         if not has_rich_blocks(text):
             await self._inner.send(user_id, text)
             return
+        if self._deliver is None:
+            await self._inner.send(user_id, text +
+                "\n\nThis chat cannot attach a rendered copy. The original reply is shown above.")
+            return
         try:
             path = write_artifact(text, out_dir=self._out_dir)
         except Exception:  # rendering must never lose the reply
@@ -190,8 +195,6 @@ class RichRenderChannel:
                 await self._deliver(user_id, path)
             except Exception:  # pragma: no cover -- delivery is best-effort
                 log.exception("rich artifact delivery failed (%s)", path)
-        else:
-            await self._inner.send(user_id, f"{text}\n\n{note} {path}")
 
 
 def maybe_wrap(channel, *, deliver=None):

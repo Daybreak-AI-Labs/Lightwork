@@ -105,6 +105,7 @@ from .auth import (
     websocket_caller_principal,
 )
 from .budget_guidance_api import router as budget_guidance_router
+from .chat_message_actions_api import router as chat_message_actions_router
 from .commitment_viability_api import router as commitment_viability_router
 from .conversation_inbox_api import router as conversation_inbox_router
 from .conversation_organization import present_title as _conversation_title
@@ -146,9 +147,11 @@ from .route_identity import (
 )
 from .settings_experience import router as settings_experience_router
 from .settings_runtime_status import router as settings_runtime_router
+from .specialist_drafts_api import router as specialist_drafts_router
 from .static_asset_versioning import AssetVersionExtension, cache_response
 from .task_diagnostics import router as task_diagnostics_router
 from .task_handoffs_api import router as task_handoffs_router
+from .workspace_erasure_api import router as workspace_erasure_router
 
 _MAX_USER_SPEND_METRIC_SERIES = _health_routes.MAX_USER_SPEND_METRIC_SERIES
 _USER_SPEND_OVERFLOW_LABEL = _health_routes.USER_SPEND_OVERFLOW_LABEL
@@ -1628,6 +1631,9 @@ app.include_router(settings_runtime_router)
 templates.context_processors.append(_display_preference_context)
 app.include_router(record_search_router)
 app.include_router(conversation_inbox_router)
+app.include_router(chat_message_actions_router, prefix="/api/v1")
+app.include_router(workspace_erasure_router)
+app.include_router(specialist_drafts_router)
 app.include_router(action_center_router)
 app.include_router(outcome_accounting_router)
 app.include_router(outcome_pilots_router)
@@ -2171,6 +2177,11 @@ app.include_router(ekko_router)
 # flow isn't fully configured, so including the router unconditionally is inert
 # off by default. See maverick_dashboard.oidc_login.
 app.include_router(oidc_login_router)
+from .company_signin_tests import router as company_signin_tests_router  # noqa: E402
+from .connected_event_sources_api import router as connected_event_sources_router  # noqa: E402
+
+app.include_router(company_signin_tests_router)
+app.include_router(connected_event_sources_router, prefix="/api/v1")
 # Email invite links (/auth/invite/{token}): single-use onboarding links an
 # admin mints on /users. Self-gates on [dashboard] invites (default off), so
 # including it unconditionally is inert. See maverick_dashboard.invite_routes.
@@ -5990,9 +6001,10 @@ async def _ai_incident_page_data(module: Any) -> dict[str, Any]:
                         "status": record.get("status"),
                         "deadline_citation": record.get("deadline_citation"),
                         "clock_label": (
-                            "OVERDUE"
-                            if is_overdue
-                            else f"{remaining / 86_400:.1f}d left"
+                            {"initial_reported": "First report filed; full report to follow",
+                             "complete_reported": "Full report filed", "withdrawn": "Withdrawn"}
+                            .get(record.get("status"))
+                            or ("OVERDUE" if is_overdue else f"{remaining / 86_400:.1f}d left")
                         ),
                         "overdue": is_overdue,
                         "revision": record.get("revision"),
@@ -10959,7 +10971,8 @@ def chat_page(request: Request, compose: str = "") -> HTMLResponse:
 
     workspace = workspace_readiness()
     w = _world()
-    recent = w.list_goals(owner=goal_owner_filter(request), limit=10, order="desc")
+    recent = [goal for goal in w.list_goals(owner=goal_owner_filter(request), limit=10, order="desc")
+              if can_access_goal(request, goal)]
     # "Use template" on /templates links here with ?title=&description= to
     # prefill the form (never auto-start; the user reviews, edits, submits).
     prefill_title = (request.query_params.get("title") or "")[:200]
@@ -11078,7 +11091,8 @@ def _chat_threads(request: Request, w, *, active_root: int | None = None) -> lis
         target = w.goal_stream_state(target_id)
         if target is None:
             continue
-        assert_goal_access(request, target)
+        if not can_access_goal(request, target):
+            continue
         stop_kind = ""
         if target.status == "blocked":
             try:
@@ -13064,6 +13078,13 @@ def shared_goal(request: Request, token: str) -> HTMLResponse:
 def _require_shared_goal_release(world, goal, goal_id: int):
     """Fail closed when a removed policy or revoked sign-off blocks sharing."""
     try:
+        from maverick.chat_message_actions import require_copy_sources
+        from maverick.conversation_inbox import current_authority
+
+        require_copy_sources(world, goal_id, authorize=current_authority)
+    except Exception as exc:
+        raise HTTPException(status_code=404, detail="not found") from exc
+    try:
         from maverick.domain import available_domains, deliverable_release_allowed
 
         profile = available_domains().get(goal.domain) if goal.domain else None
@@ -13125,7 +13146,7 @@ def _shared_goal_in_scope(request: Request, token: str) -> HTMLResponse:
     # already copied. Fail closed without revealing whether a gate exists.
     if g.status != "done" or not g.result:
         raise HTTPException(status_code=404, detail="not found")
-    prof = _require_shared_goal_release(w, g, goal_id)
+    _require_shared_goal_release(w, g, goal_id)
     from .deliverable_sharing import release_matches, release_snapshot, source_generation
     try:
         generation = source_generation(w) if token.startswith("r1_") else None
@@ -13140,8 +13161,7 @@ def _shared_goal_in_scope(request: Request, token: str) -> HTMLResponse:
     # Re-check after materializing the composite payload. If an artifact or
     # result changed between the first authorization read and these reads, its
     # transaction revoked sign-off; never render that mixed-version snapshot.
-    if prof is not None:
-        _require_shared_goal_release(w, g, goal_id)
+    _require_shared_goal_release(w, g, goal_id)
     try:
         fresh_goal = w.get_goal(goal_id)
         if (fresh_goal is None or w.resolve_share_link(token) != goal_id
@@ -13661,6 +13681,8 @@ async def shell_copilot_js() -> FileResponse:
 @app.get("/static/lightwork-thread-history.js")
 @app.get("/static/lightwork-employee-companion.css")
 @app.get("/static/lightwork-product-operations.js")
+@app.get("/static/lightwork-specialist-drafts.js")
+@app.get("/static/lightwork-connected-event-sources.js")
 @app.get("/static/lightwork-settings-search.js")
 @app.get("/static/lightwork-shortcuts.js")
 @app.get("/static/lightwork-pins.js")
@@ -13675,6 +13697,7 @@ async def shell_copilot_js() -> FileResponse:
 @app.get("/static/lightwork-portal-routing-key.js")
 @app.get("/static/lightwork-task-file-recovery.js")
 @app.get("/static/lightwork-connections.js")
+@app.get("/static/lightwork-chat-message-actions.js")
 @app.get("/static/lightwork-account-inventory.js")
 @app.get("/static/lightwork-schedule-management.js")
 @app.get("/static/lightwork-connection-setup.js")

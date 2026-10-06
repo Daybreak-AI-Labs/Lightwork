@@ -39,8 +39,15 @@
   .ov-entry-form .input { box-sizing:border-box;width:100%;max-width:100%; }
   .ov-entry-form fieldset { border:1px solid var(--border);border-radius:var(--radius-md);padding:var(--space-3); }
 </style>
-<div id="outcome-pilots" data-context="{{ pilot_context }}">
+<div id="outcome-pilots" data-context="{{ pilot_context }}" data-enabled="{{ 'true' if pilot_enabled else 'false' }}">
   <p id="op-status" role="status" aria-live="polite"></p>
+  <section class="panel" id="op-original-controls" aria-labelledby="op-original-heading">
+    <h2 id="op-original-heading">Check an original pilot request</h2>
+    <p>A lost reply can leave a saved or partly saved change. Read its original outcome before another save. This never repeats the request.</p>
+    <button type="button" class="btn" id="op-original-check">Check original outcome</button>
+    <div id="op-original-result" role="status" aria-live="polite"></div>
+  </section>
+  <section class="panel" id="op-guided-review" aria-live="polite"></section>
   <section class="panel" aria-labelledby="op-accounting-title">
     <h2 id="op-accounting-title">Outcome and cost accounting</h2>
     <p>Technical verification, human acceptance, and complete cost are reported separately. Failed, cancelled, and unresolved work remains in the denominator.</p>

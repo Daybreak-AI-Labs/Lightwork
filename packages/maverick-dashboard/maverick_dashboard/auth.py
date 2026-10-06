@@ -890,7 +890,7 @@ def can_access_goal_principal(principal: str | None, goal) -> bool:
     return getattr(goal, "owner", "") == principal
 
 
-def can_access_goal(request: Request, goal) -> bool:
+def _goal_read_policy(request: Request, goal) -> bool:
     """Whether the caller may read/mutate ``goal``.
 
     Ownership grants normal access. A named administrator needs an independent
@@ -913,6 +913,27 @@ def can_access_goal(request: Request, goal) -> bool:
 
     return may_read_employee_content(request, getattr(goal, "owner", ""),
                                      resource_kind="goal", resource_id=str(goal.id))
+
+
+def can_access_goal(request: Request, goal) -> bool:
+    """A copied conversation keeps every original source's current access rules."""
+    if not _goal_read_policy(request, goal):
+        return False
+    from maverick.attachments import AttachmentRejected
+    from maverick.chat_message_actions import require_copy_sources
+    from maverick.knowledge_task_context import SourceContextUnavailable
+
+    from ._shared import _world
+
+    def authorize(source):
+        if not _goal_read_policy(request, source):
+            raise PermissionError("A copied source is unavailable to this account.")
+
+    try:
+        require_copy_sources(_world(), goal.id, authorize=authorize)
+    except (PermissionError, SourceContextUnavailable, AttachmentRejected):
+        return False
+    return True
 
 
 def assert_goal_access(request: Request, goal) -> None:

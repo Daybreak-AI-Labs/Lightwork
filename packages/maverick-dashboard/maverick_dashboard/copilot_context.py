@@ -207,8 +207,8 @@ _OPERATIONAL_GUIDES = (
      "Where are my finished results?", "How do I download an answer?"),
     ("/automations", "Automations", "Manage schedules, connected-service starts, new-item starts and recent flow runs.",
      "Create a schedule or event automation when its source, flow and required access are ready.",
-     "Open Schedules to create timed work, or Starts when new items arrive for an event-based start.",
-     "Saving a schedule does not confirm a future run; check occurrence history after its due time.",
+     "Open Schedules for timed work, or Starts when new items arrive to choose a saved SharePoint, Salesforce, ServiceNow or Teams account, review its dated source snapshot and explicitly arm the selected work.",
+     "A source preview confirms its observed starting point; saving does not confirm future delivery. Read an original creation result without recreating or polling the source.",
      "How do I schedule a workflow?", "Where can I check recent runs?"),
     # Insights
     ("/overview", "Overview", "See recorded task momentum, current task states, recent work and department activity.",
@@ -358,9 +358,9 @@ _OPERATIONAL_GUIDES = (
      "Whichever applicable limit is reached first stops new spending; a limit is not an invoice.",
      "Which spending limit applies first?", "How do I set a personal limit?"),
     ("/tenants", "Workspaces", "Create and manage separate workspaces, their daily limits and feature choices.",
-     "Create a workspace, review its features, or pause and resume one when authorized.",
+     "Create a workspace, review its features, pause or resume one, or review erasure of a removed workspace when authorized.",
      "Use Create a workspace for a new team; open Your workspaces before changing an existing one.",
-     "Pause or removal affects that workspace's access and work; review its people and history first.",
+     "Pause or removal affects access and work. Erasure permanently removes reviewed local records; backups and external copies need separate care.",
      "How do I create a workspace?", "Where do I set its daily limit?"),
     # Common pages reached from those workspaces
     ("/help", "Help and diagnostics", "Prepare a support report or a reviewed draft about a task that stopped.",
@@ -416,10 +416,12 @@ _CONTEXTS = tuple(
             capabilities=(
                 "Start a task from your message, or draft a flow or agent when those choices are available.",
                 "Attach files, review the task budget, and continue work in a saved chat.",
+                "Copy, print, share or download an answer; try another answer, edit and resend, or branch from a saved answer when enabled.",
             ),
             boundaries=(
                 "Sending a message starts work and may use a paid AI service; spending limits and approval rules still apply.",
                 "Starting or continuing work depends on your access and whether an AI service is ready.",
+                "An alternative keeps the original conversation and starts separately reviewed work. Connected actions may repeat effects, so answer-only is the default.",
             ),
             next_steps=(
                 "Describe the result you need, then add any useful files or details.",
@@ -1546,6 +1548,8 @@ _CONTEXTS = tuple(
                 "Raw subject and external request references are HMACed and never persisted or returned.",
                 "Identity status records external evidence only; Lightwork does not perform identity verification.",
                 "Callbacks are local worker intent, not network transport, provider write, response delivery, or completeness proof.",
+                "Manual result statements and document fingerprints remain independently unverified; open the native complete evidence review before manually attesting.",
+                "A connected-system active-record lookup with no match does not prove purge from retained copies or backups. Closure and completeness describe workflow status, not deletion certification.",
             ),
             next_steps=(
                 "Confirm case, HMAC, task, callback, and package authorities are composed.",
@@ -2067,7 +2071,7 @@ def context_for_page(page: object) -> CopilotPageContext:
         if kind in {"task", "task_chat"}:
             section = parts[1] if kind == "task" else ""
             label = "Current chat task" if kind == "task_chat" else {"plan": "Task plan", "trajectory": "Task timeline", "errors": "Task errors"}.get(section, "Task result")
-            base = _registered_page_context("/goals")
+            base = _CONTEXT_BY_PATH["/chat"] if kind == "task_chat" else _registered_page_context("/goals")
             assert base is not None
             return replace(
                 base, path=path, title=label,
@@ -2183,7 +2187,7 @@ _PANEL_TIPS = {
     "/privacy": "Draft analysis helps with review; it is not legal advice or final approval.",
     "/privacy/data-discovery": "No findings in a report do not prove that no private data exists.",
     "/privacy/regulatory-intelligence": "Sources must be cleared for their intended use before they are added.",
-    "/privacy/rights-orchestration": "Lightwork records identity-check evidence from another source; it does not verify identity itself.",
+    "/privacy/rights-orchestration": "Lightwork records identity-check evidence from another source; it does not verify identity itself. Open the native complete evidence review before manually attesting. Manual result statements remain independently unverified, and an active-record lookup with no match does not certify permanent deletion.",
     "/privacy/rights-consumer-delivery": "A case or package does not prove someone's identity. Access needs a separate check.",
     "/privacy/notice-governance": "A finished local release does not confirm browser behavior or legal sufficiency.",
     "/privacy/drop": "A finished local record does not confirm that California's DROP service accepted it.",

@@ -1,5 +1,19 @@
 (function () {
   'use strict';
+  function renderReview(container, changes) {
+    if (!container || !Array.isArray(changes) || changes.length > 256 || changes.some(row => !row || typeof row.label !== 'string' || !row.label || Object.keys(row).some(key => !['label','before','after'].includes(key)) || !Object.hasOwn(row,'after') || typeof row.after !== 'string' || (Object.hasOwn(row,'before') && typeof row.before !== 'string')) || new TextEncoder().encode(JSON.stringify(changes)).length > 1048576) throw new Error('The complete review cannot be displayed. Nothing was shortened; saving is unavailable.');
+    const list = document.createElement('div'); list.style.overflowWrap = 'anywhere';
+    for (const row of changes) {
+      const section = document.createElement('section'), title = document.createElement('h4'); title.textContent = row.label; section.append(title);
+      for (const key of Object.hasOwn(row,'before') ? ['before','after'] : ['after']) {
+        if (Object.hasOwn(row,'before')) { const label = document.createElement('strong'); label.textContent = key === 'before' ? 'Current' : 'Proposed'; section.append(label); }
+        const value = document.createElement('p'); value.textContent = row[key]; value.style.whiteSpace = 'pre-wrap'; section.append(value);
+      }
+      list.append(section);
+    }
+    container.replaceChildren(list); return true;
+  }
+  window.LightworkOutcomePilots = {renderReview};
   const root = document.getElementById('outcome-pilots');
   if (!root) return;
   const context = root.dataset.context;
@@ -8,13 +22,17 @@
   const loadMore = $('op-load-more');
   let sources = [], current = null, busy = false, serial = 0, lostAuthority = false, releaseReady = false;
   let pilotCursor = '';
+  let review = null, dirty = false, ownsSelection = false, publishedSelection = '';
+  const calls = new Set(), originalStorage = 'lightwork-pilot-original';
   const node = (tag, text) => { const e = document.createElement(tag); if (text !== undefined) e.textContent = text; return e; };
   const operation = () => crypto.randomUUID();
   const sourceKey = source => source.kind + ':' + source.reference;
-  const publishSelection = id => document.dispatchEvent(new CustomEvent('lightwork:copilot-selection',
-    {detail:{selection:id ? {kind:'outcome_pilot',id} : {}}}));
+  const publishSelection = id => { if ((!id && !ownsSelection) || (ownsSelection && publishedSelection === id)) return; ownsSelection = !!id; publishedSelection = id;
+    document.dispatchEvent(new CustomEvent('lightwork:copilot-selection', {detail:{selection:id ? {kind:'outcome_pilot',id} : {}}})); };
   function clearAuthority() {
     lostAuthority = true; releaseReady = false; current = null; sources = []; pilotCursor = ''; report.replaceChildren(); $('op-independent-report').replaceChildren();
+    ++serial; calls.forEach(call => call.abort()); calls.clear(); review = null; dirty = false;
+    $('op-guided-review').replaceChildren(); $('op-original-result').replaceChildren();
     publishSelection('');
     if ($('op-prepared')) $('op-prepared').replaceChildren();
     root.querySelectorAll('textarea,input').forEach(input => { input.value = ''; });
@@ -22,9 +40,13 @@
     if (loadMore) loadMore.hidden = true;
   }
   async function request(path, method, body) {
-    const r = await fetch('/api/v1/outcome-pilots' + path, {method: method || 'GET', cache:'no-store',
+    const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 15000); calls.add(controller);
+    let r;
+    try { r = await fetch((path.startsWith('!') ? '/api/v1/outcome-pilot-controls' + path.slice(1) : '/api/v1/outcome-pilots' + path), {method: method || 'GET', cache:'no-store', signal:controller.signal,
       headers: {'Content-Type':'application/json', 'X-Lightwork-Pilot-Context':context},
-      ...(body ? {body: JSON.stringify(body)} : {})});
+      ...(body ? {body: JSON.stringify(body)} : {})}); }
+    catch (error) { throw new Error(controller.signal.aborted ? 'The response could not be confirmed. Check the original outcome before another save.' : 'Lightwork is not responding. Keep your inputs and check the original outcome before another save.'); }
+    finally { clearTimeout(timer); calls.delete(controller); }
     if ([401,403].includes(r.status)) {
       clearAuthority();
     }
@@ -50,6 +72,9 @@
     root.querySelectorAll('button,input,select,textarea').forEach(b => { b.disabled = disabled || lostAuthority; });
     $('op-export').disabled = disabled || lostAuthority || !current;
     $('op-candidate').disabled = disabled || lostAuthority || !releaseReady;
+    const confirm = $('op-guided-review').querySelector('[data-save-review]');
+    if (confirm) confirm.disabled = disabled || lostAuthority || !review || !$('op-guided-review').querySelector('[data-review-confirm]').checked;
+    if(root.dataset.enabled!=='true'){root.querySelectorAll('button,input,select,textarea').forEach(button=>button.disabled=true);$('op-original-check').disabled=busy||lostAuthority;}
   }
   async function mutation(task) {
     if (busy) return;
@@ -57,6 +82,53 @@
     try { await task(); status.textContent = 'Saved. The current report is shown below.'; }
     catch (e) { status.textContent = e.message + (lostAuthority ? ' Reload this page to recheck access and current state.' : ' Your inputs are still here. Refresh the source before retrying.'); status.focus(); }
     finally { busy = false; controls(false); }
+  }
+  function invalidateReview() { review = null; $('op-guided-review').replaceChildren(); }
+  function showOriginal(row) {
+    const host = $('op-original-result'); host.replaceChildren(node('h3','Original pilot request'), node('p',row.message));
+    if (row.title) host.append(node('p',row.title));
+    if (row.href && /^\/(?:outcome-pilots(?:\?pilot=OPL-[a-f0-9]{48})?|chat\/goal\/\d+)$/.test(row.href)) { const link = node('a','Open current records'); link.href = row.href; host.append(link); }
+  }
+  async function readOriginal() {
+    if (busy || lostAuthority) return;
+    let value; try { value = JSON.parse(sessionStorage.getItem(originalStorage) || 'null'); } catch (_) { value = null; }
+    if (!value || !['prepare','plan','observe','review'].includes(value.kind) || !/^[a-f0-9]{32}$/.test(value.operation) || !/^(?:OPL-[a-f0-9]{48})?$/.test(value.pilot) || !/^(?:[1-9][0-9]?|100)?$/.test(value.case)) { $('op-original-result').replaceChildren(node('p','No original pilot request is selected in this browser. Select a saved pilot to read its current records.')); return; }
+    const started = serial; busy = true; controls(true);
+    try { const row = await request('!/original?' + new URLSearchParams(value)); if (started === serial && !lostAuthority) showOriginal(row); }
+    catch (error) { if (started === serial && !lostAuthority) $('op-original-result').replaceChildren(node('p',error.message + ' No save was repeated.')); }
+    finally { if (started === serial) { busy = false; controls(false); } }
+  }
+  async function reviewSubmit(form, kind, values, pilot='', caseId='', saved=()=>{}) {
+    if (busy || lostAuthority) return;
+    const started = serial; busy = true; controls(true); status.textContent = 'Preparing the complete current review…';
+    try {
+      const row = await request('!/review','POST',{kind,pilot,case:caseId,values});
+      if (started !== serial || lostAuthority) return;
+      const host = $('op-guided-review'); renderReview(host,row.changes); review = {row,kind,pilot,case:caseId};
+      host.prepend(node('h3','Review every detail before saving'));
+      const label = node('label'), checkbox = node('input'); checkbox.type = 'checkbox'; checkbox.dataset.reviewConfirm = ''; label.append(checkbox,node('span',' I reviewed the complete source, scope and proposed change.')); host.append(label);
+      const button = node('button','Save reviewed change'); button.type = 'button'; button.className = 'btn btn--primary'; button.dataset.saveReview=''; button.disabled=true; host.append(button);
+      checkbox.addEventListener('change',()=>button.disabled=busy||lostAuthority||!review||!checkbox.checked);
+      button.addEventListener('click',async()=>{
+        if (busy || lostAuthority || !review || !checkbox.checked) return;
+        const pending = review, version = serial; busy=true; controls(true);
+        try {
+          // Only opaque request metadata is stored locally; the review text
+          // and sealed request remain in memory and are never auto-submitted.
+          sessionStorage.setItem(originalStorage,JSON.stringify({kind:pending.kind,operation:pending.row.operation,pilot:pending.pilot,case:pending.case}));
+          review=null; button.disabled=true;
+          const result=await request('!/save','POST',{token:pending.row.token,confirmed:true});
+          if(version!==serial||lostAuthority)return;
+          showOriginal(result); status.textContent=result.message;
+          if(result.confirmed){dirty=false;host.replaceChildren(); await saved(result);}
+          else host.replaceChildren(node('p','The original outcome is not confirmed. Use Check original outcome; this save will not be repeated.'));
+        }catch(error){if(version===serial&&!lostAuthority){host.replaceChildren(node('p',error.message+' Use Check original outcome. Saving was not repeated.'));status.textContent='The original result is not confirmed. It may already be partly saved.';}}
+        finally{busy=false;controls(false);}
+      });
+      const cancel=node('button','Cancel this review');cancel.type='button';cancel.className='btn';cancel.addEventListener('click',invalidateReview);host.append(cancel);
+      host.tabIndex=-1;host.focus();host.scrollIntoView({block:'start'});
+    } catch(error) { if(started===serial&&!lostAuthority) { status.textContent=error.message+' Your entered work is kept.'; invalidateReview(); } }
+    finally { if(started===serial) {busy=false;controls(false);} }
   }
   function addCase() {
     const count = $('op-planned-cases').children.length;
@@ -194,7 +266,7 @@
       details.append(node('p', 'Leave unknown values blank. Enter non-overlapping effort: preparation, review, and rework are separate. Reported total cost includes all attempts.'));
       if (c.learning_exclusion) details.append(node('p', c.learning_exclusion.enforced ? 'Local learning exclusion receipt: ' + c.learning_exclusion.policy_id : 'Local learning exclusion receipt is unavailable or no longer matches these task inputs. Refresh the page and try again.'));
       details.append(node('p', 'Human and rework cost details are operator reports. They are already part of your reported total; provider allocations are shown separately and are not added automatically.'));
-      const form = node('form'), grid = node('div'); grid.className = 'op-grid';
+      const form = node('form'), grid = node('div'); grid.className = 'op-grid'; form.dataset.pilotCase = c.id;
       measurements.forEach(([key,label,type]) => field(grid,key,label,(c.measurement || {})[key],type));
       form.append(grid); coverageFields(form, c.measurement || null);
       const criteria = node('label','Did this case meet the frozen criteria?'), select = node('select'); select.name = 'criteria_met'; select.className = 'input';
@@ -204,15 +276,14 @@
       const feedback = node('p'); feedback.setAttribute('role','status'); feedback.setAttribute('aria-live','polite'); form.append(feedback);
       form.addEventListener('submit', event => {
         event.preventDefault(); if (!form.reportValidity()) return;
-        const fd = new FormData(form), body = {expected_revision:data.revision, operation_id:form.dataset.operation || operation(), source_version:c.source.version};
+        const fd = new FormData(form), body = {expected_revision:data.revision, source_version:c.source.version};
         measurements.forEach(([key,,type]) => { const v = String(fd.get(key) || '').trim(); body[key] = v === '' ? null : type ? v : Number(v); });
         body.cost_coverage = Object.fromEntries(costCoverageFamilies.map(([family]) => [family, {
           status: String(fd.get('coverage_' + family + '_status') || 'unknown'),
           note: String(fd.get('coverage_' + family + '_note') || '').trim(),
         }]));
         body.criteria_met = fd.get('criteria_met') === '' ? null : fd.get('criteria_met') === 'true';
-        form.dataset.operation = body.operation_id;
-        mutation(async () => { await request('/' + data.id + '/cases/' + c.id, 'PUT', body); feedback.textContent = 'Observation saved.'; delete form.dataset.operation; await load(data.id); });
+        reviewSubmit(form,'observe',body,data.id,c.id,()=>load(data.id));
       });
       form.addEventListener('input', () => { delete form.dataset.operation; });
       details.append(form); report.append(details);
@@ -221,6 +292,7 @@
     else report.append(node('p','Provider cost controls could not load. Reload this page before allocating billing evidence.'));
   }
   async function load(id) {
+    if(dirty&&current){status.textContent='Your entered observations are kept. Finish the current review before replacing this report.';chosen.value=current.id;return false;}
     const ticket = ++serial;
     if (!id) { current = null; report.replaceChildren(); $('op-export').disabled = true; publishSelection(''); return; }
     try { const data = await request('/' + id); if (ticket === serial) { draw(data); publishSelection(data.id); } }
@@ -259,10 +331,9 @@
     if (candidate && !releaseReady) { status.textContent = 'Release comparisons are unavailable. Check release readiness again before saving this plan.'; return; }
     if (candidate && mode !== 'exclude_local_learning') { status.textContent = 'An improvement candidate needs protected evaluation tasks. Choose that learning-data treatment and record prior-exposure checks.'; return; }
     if (mode === 'exclude_local_learning' && (prior.length < 20 || cases.some(c => c.kind !== 'goal'))) { status.textContent = 'Protected pilots need task cases and a prior-exposure statement of at least 20 characters.'; return; }
-    const body = {title:fd.get('title'),customer:fd.get('customer'),workflow:fd.get('workflow'),criteria:fd.get('criteria'),cases, learning_mode:mode, prior_exposure_statement:prior,
-      operation_id:form.dataset.operation || operation()}; form.dataset.operation = body.operation_id;
+    const body = {title:fd.get('title'),customer:fd.get('customer'),workflow:fd.get('workflow'),criteria:fd.get('criteria'),cases:cases.map(c=>({kind:c.kind,reference:c.reference,label:c.label})), learning_mode:mode, prior_exposure_statement:prior};
     if (candidate) body.candidate_id = candidate;
-    mutation(async () => { const saved = await request('', 'POST', body); await refreshThroughSelected(saved.id); await load(saved.id); form.reset(); delete form.dataset.operation; $('op-plan-details').open = false; });
+    reviewSubmit(form,'plan',body,'','',async result=>{const id=new URL(result.href,location.origin).searchParams.get('pilot');await refreshThroughSelected(id);await load(id);form.reset();$('op-plan-details').open=false;});
   });
   $('op-plan').addEventListener('input', () => { delete $('op-plan').dataset.operation; });
   $('op-learning-mode').addEventListener('change', () => { $('op-prior-exposure').required = $('op-learning-mode').value === 'exclude_local_learning'; });
@@ -307,8 +378,8 @@
       form.addEventListener('submit', event => {
         event.preventDefault(); if (!form.reportValidity()) return;
         const body = {expected_revision:packet.revision, evidence_version:packet.learning_policy.evidence_version, decision:decision.value,
-          notes:form.querySelector('textarea').value, confirm:confirm.checked, operation_id:form.dataset.operation || operation()}; form.dataset.operation = body.operation_id;
-        mutation(async () => { await request('/independent-review/' + encodeURIComponent(identifier),'POST',body); host.replaceChildren(node('p','Independent review recorded. The owner’s current report will show whether its evidence remains current.')); });
+          notes:form.querySelector('textarea').value, confirm:confirm.checked};
+        reviewSubmit(form,'review',body,identifier,'',()=>host.replaceChildren(node('p','Independent review recorded. The owner’s current report will show whether its evidence remains current.')));
       });
       form.addEventListener('input', () => { delete form.dataset.operation; }); host.append(form);
     });
@@ -320,19 +391,21 @@
     const picker = $('op-review-reference'), note = $('op-review-note');
     if (!picker || reviewQueueLoaded || reviewQueueLoading || lostAuthority) return;
     reviewQueueLoading = true;
+    const started = serial, controller = new AbortController(), timer = setTimeout(() => controller.abort(),15000); calls.add(controller);
     note.textContent = 'Loading pilots waiting for review…';
     try {
       // Read directly: a person who is not an administrator is simply told
       // who can review, without resetting the rest of the page.
       let r;
       try {
-        r = await fetch('/api/v1/outcome-pilots/independent-review', {cache:'no-store',
+        r = await fetch('/api/v1/outcome-pilots/independent-review', {cache:'no-store', signal:controller.signal,
           headers: {'X-Lightwork-Pilot-Context':context}});
       } catch (_) { throw new Error('Lightwork is not responding. Check your connection and try again.'); }
       if (r.status === 401 || r.status === 403) throw new Error('Only an administrator who did not create a pilot can review it. Sign in with that account to see pilots waiting for review.');
       if (!r.ok) throw new Error(typeof window.mvErrorText === 'function' ? window.mvErrorText(r, 'load pilots waiting for review') : 'Pilots waiting for review could not be loaded. Try again.');
       let data;
       try { data = await r.json(); } catch (_) { throw new Error('Pilots waiting for review could not be loaded. Try again.'); }
+      if (started !== serial || lostAuthority) return;
       if (!data || data.context !== context) throw new Error('The account or workspace changed. Reload this page.');
       const items = Array.isArray(data.items) ? data.items.filter(item => item && /^OPL-[A-Za-z0-9_-]+$/.test(String(item.id || ''))) : [];
       picker.replaceChildren(new Option(items.length ? 'Choose a pilot' : 'No pilots are waiting for review', ''));
@@ -345,9 +418,11 @@
       note.textContent = items.length ? '' : 'No protected pilots from other people are waiting in this workspace.';
       reviewQueueLoaded = true;
     } catch (error) {
+      if (started !== serial || lostAuthority) return;
       picker.replaceChildren(new Option('Pilots could not be loaded', ''));
       note.textContent = error.message || 'Only an administrator who did not create a pilot can review it.';
     } finally {
+      clearTimeout(timer); calls.delete(controller);
       reviewQueueLoading = false;
     }
   }
@@ -392,15 +467,48 @@
     $('op-prepare').addEventListener('input', () => { delete $('op-prepare').dataset.operation; });
     $('op-prepare').addEventListener('submit', event => {
       event.preventDefault(); const form = event.currentTarget; if (!form.reportValidity()) return;
-      const fd = new FormData(form), body = {title:fd.get('title'),description:fd.get('description'),domain:fd.get('domain'),operation_id:form.dataset.operation || operation()};
-      form.dataset.operation = body.operation_id;
-      mutation(async () => {
-        const saved = await request('/prepared-tasks','POST',body);
+      const fd = new FormData(form), body = {title:fd.get('title'),description:fd.get('description'),domain:fd.get('domain')};
+      reviewSubmit(form,'prepare',body,'','',async saved=>{
         $('op-prepared').replaceChildren(node('span', 'Prepared: ' + saved.title + '. Choose it in the pilot plan before starting. '));
         const link = node('a','Open task'); link.href = saved.href; $('op-prepared').append(link);
         await refreshSources(); form.reset(); delete form.dataset.operation;
       });
     });
   }
-  Promise.all([refreshList(), refreshSources().then(() => { for (let i=0; i<4; i++) addCase(); })]).catch(e => { status.textContent = e.message; });
+  async function open(value, stillCurrent=()=>true) {
+    if(!value||Object.keys(value).sort().join(',')!=='action,case,context,pilot'||value.context!==context||!['prepare','plan','observe','review','costs','value','history'].includes(value.action)||typeof value.pilot!=='string'||!/^(?:OPL-[a-f0-9]{48})?$/.test(value.pilot)||typeof value.case!=='string'||!/^(?:[1-9][0-9]?|100)?$/.test(value.case)||busy||lostAuthority||!stillCurrent())return false;
+    const started=serial;
+    const authority=await request('!');
+    if(started!==serial||busy||lostAuthority||!stillCurrent())return false;
+    if(!authority.enabled&&value.action!=='history'){status.textContent='Workflow pilots is turned off. Original request reads remain available.';return false;}
+    if(value.pilot&&(!current||current.id!==value.pilot)){
+      if(dirty||review){status.textContent='Your current entered work is kept. Finish or cancel it before opening another pilot.';return false;}
+      const next=await request('/'+encodeURIComponent(value.pilot));
+      if(started!==serial||busy||lostAuthority||!stillCurrent())return false;
+      if(!Array.from(chosen.options).some(option=>option.value===value.pilot))chosen.append(new Option(next.title,value.pilot));
+      chosen.value=value.pilot;draw(next);publishSelection(value.pilot);
+    }
+    if(!stillCurrent())return false;
+    let destination;
+    if(value.action==='prepare'||value.action==='plan'){
+      $('op-plan-details').open=true;destination=value.action==='prepare'?$('op-prepare'):$('op-plan');
+      if(value.action==='prepare')destination.closest('details').open=true;
+    }else if(value.action==='review'){$('op-review-panel').open=true;await loadReviewQueue();if(started!==serial||busy||lostAuthority||!stillCurrent())return false;destination=$('op-review-reference');}
+    else if(value.action==='observe'){destination=value.case?report.querySelector('[data-pilot-case="'+value.case+'"]'):report; if(!current){status.textContent='Choose a saved pilot before recording observations.';return false;}if(destination&&destination.closest('details'))destination.closest('details').open=true;}
+    else if(value.action==='costs'){destination=$('op-cost-form');if(!destination){status.textContent='Choose a current pilot with permitted provider billing before allocating costs.';return false;}const section=destination.closest('details');if(section)section.open=true;}
+    else if(value.action==='value')destination=$('ov-pilot');else destination=$('op-original-controls');
+    if(!destination||!stillCurrent())return false;destination.tabIndex=-1;destination.focus();destination.scrollIntoView({block:'start'});return true;
+  }
+  window.LightworkOutcomePilots={open,renderReview};
+  document.addEventListener('lightwork:copilot-selection',event=>{const selection=event.detail&&event.detail.selection;if(!selection||selection.kind!=='outcome_pilot'||selection.id!==publishedSelection)ownsSelection=false;});
+  $('op-original-check').addEventListener('click',()=>void readOriginal());
+  root.addEventListener('input',event=>{if(!$('op-guided-review').contains(event.target)){dirty=true;invalidateReview();}});
+  root.addEventListener('change',event=>{if(!$('op-guided-review').contains(event.target)&&event.target!==chosen&&event.target.id!=='op-review-reference'){dirty=true;invalidateReview();}});
+  function contextChanged(event){if(event.detail&&event.detail.reason==='selection')return;clearAuthority();status.textContent='Your account, workspace or access changed. Private pilot details were cleared. Reload this page.';}
+  document.addEventListener('lightwork:workspace-changed',contextChanged);document.addEventListener('lightwork:account-context-changed',contextChanged);document.addEventListener('lightwork:copilot-context-changed',contextChanged);window.addEventListener('lightwork:context-changed',contextChanged);
+  window.addEventListener('beforeunload',event=>{if(dirty||review){event.preventDefault();event.returnValue='';}});
+  window.addEventListener('pagehide',()=>calls.forEach(call=>call.abort()));
+  if(root.dataset.enabled!=='true'){status.replaceChildren(node('span','Workflow pilots is turned off. Original request reads remain available. '));const link=node('a','Review workflow pilot settings');link.href='/settings#feature-outcome_measurement';status.append(link);controls(true);return;}
+  busy=true;controls(true);
+  Promise.all([refreshList(), refreshSources().then(() => { for (let i=0; i<4; i++) addCase(); })]).then(async()=>{const pilot=new URLSearchParams(location.search).get('pilot');if(pilot&&/^OPL-[a-f0-9]{48}$/.test(pilot)){await refreshThroughSelected(pilot);await load(pilot);}}).catch(e => { status.textContent = e.message; }).finally(()=>{busy=false;controls(false);});
 })();

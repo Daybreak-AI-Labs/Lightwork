@@ -25,14 +25,14 @@ def snapshot(request, selection):
     context = page_context(request).get("record_search_context")
     if not context:
         raise HTTPException(403, "Record discovery is disabled. An administrator can enable it in Settings.")
-    return Snapshot(digest([context, list(SOURCES)]), "Historical record metadata", "Find older records by business metadata; private bodies and document contents are excluded.", fields=[
+    return Snapshot(digest([context, list(SOURCES)]), "Saved record details", "Find older records by name, reference and date. This search excludes private message bodies and document contents.", fields=[
         {"name": "source", "label": "Source", "kind": "select", "required": True,
          "choices": [{"value": code, "label": value[0]} for code, value in SOURCES.items()]},
         {"name": "query", "label": "Name or reference", "kind": "text"},
         {"name": "after", "label": "On or after (YYYY-MM-DD, UTC)", "kind": "text"},
         {"name": "before", "label": "On or before (YYYY-MM-DD, UTC)", "kind": "text"},
         {"name": "oldest", "label": "Oldest first", "kind": "boolean", "value": False}],
-        details={"continuation": "Use the returned next_cursor for the next bounded window with exactly the same filters. No cursor is an access grant."})
+        details={"More results": "Continue to another page using the same filters. Current access is checked for each page."})
 
 
 def prepare(request, selection, arguments):
@@ -44,7 +44,7 @@ def prepare(request, selection, arguments):
             raise ValueError
     except ValueError as exc:
         raise HTTPException(422, "Choose valid UTC dates in chronological order.") from exc
-    return Preview("Read one bounded historical metadata window using your current source access. No model, connector action or data change.", native=arguments)
+    return Preview("Read one page of saved record details using your current access. This search starts no AI work and changes no records.", native=arguments)
 
 
 def execute(request, selection, arguments, native, operation):
@@ -53,8 +53,8 @@ def execute(request, selection, arguments, native, operation):
         result = search_history(request, **native)
     except ValueError as exc:
         raise HTTPException(409, str(exc)) from exc
-    return Outcome("confirmed", "Current historical metadata returned. Counts describe this page only; continue when a next cursor is present.", result)
+    return Outcome("confirmed", "Current saved record details returned. Counts describe this page only; continue when another page is available.", result)
 
 
 def entries():
-    return (Adapter("knowledge.history", "Find historical record metadata", "learning", "/goals?find_history=tasks", ("*",), HistoryInput, snapshot, prepare, execute),)
+    return (Adapter("knowledge.history", "Find a saved record", "learning", "/goals?find_history=tasks", ("*",), HistoryInput, snapshot, prepare, execute),)

@@ -523,7 +523,7 @@
         </section>
         {% endif %}
         <div class="af-actions">
-          <button type="button" class="btn btn--primary" id="btn-save">{{ 'Create custom agent' if creating else ('Save specialist' if selected_kind == 'specialist' else 'Save agent') }}</button>
+          <button type="button" class="btn btn--primary" id="btn-save">Save draft</button>
           <button type="button" class="btn" id="btn-validate">Check settings</button>
           {% if not creating and selected %}<button type="button" class="btn {{ 'btn--ghost' if selected.is_builtin else 'btn--danger' }}" id="btn-reset"
             data-agent-change="{{ selected.name }}" data-agent-change-action="{{ 'reset_builtin' if selected.is_builtin else 'remove_custom' }}">{{ 'Reset to built-in' if selected.is_builtin else 'Remove custom agent' }}</button>{% endif %}
@@ -532,6 +532,39 @@
         <p class="muted">Editing is disabled in this deployment.</p>
         {% endif %}
       </form>
+
+      {% if editable %}
+      <section class="panel" id="specialist-drafts" data-specialist-drafts aria-labelledby="specialist-drafts-title" style="margin-top: var(--space-4);">
+        <h3 id="specialist-drafts-title">Preview, try and publish</h3>
+        <p>Keep a draft before changing the specialist people use. Preview shows every entered setting together with the other settings being preserved.</p>
+        <p>Answer checks send the draft instructions and fictional questions to your configured AI service. They use no tools, files, company knowledge or shared learning. A plausible answer does not prove connected actions work.</p>
+        <label for="sd-title">Draft name (optional)</label><input class="input" id="sd-title" data-sd-title maxlength="120" placeholder="For example, Clearer invoice follow-up">
+        <div class="af-actions" style="margin-block: var(--space-3);">
+          <button class="btn" type="button" data-sd-action="preview">Preview entered draft</button>
+          <button class="btn btn--ghost" type="button" data-sd-action="refresh">Refresh retained versions</button>
+        </div>
+        <label for="sd-task">Fictional sample request</label><textarea class="input" id="sd-task" data-sd-task rows="3" maxlength="4000" placeholder="Ask about a made-up situation. Do not enter private company information."></textarea>
+        <div class="af-actions" style="margin-block: var(--space-3);">
+          <button class="btn" type="button" data-sd-action="try">Try entered draft</button>
+          <button class="btn" type="button" data-sd-action="check">Check every saved question on entered draft</button>
+        </div>
+        <p class="muted">One shared check allowance: at most $0.25, 10,000 input tokens, 640 output tokens and two minutes. A stopped or partial run does not count as a complete passing check.</p>
+        <p><a href="/workforce{% if selected %}?specialist={{ selected.name | urlencode }}{% endif %}#wo-my-tests">Add or edit saved answer questions in Workforce</a></p>
+        <label for="sd-draft">Saved draft</label><select class="input" id="sd-draft" data-sd-draft><option value="">Choose…</option></select>
+        <div class="af-actions" style="margin-block: var(--space-3);"><button class="btn" type="button" data-sd-action="load">Load draft into editor</button><button class="btn btn--primary" type="button" data-sd-action="publish">Review Publish</button></div>
+        <label for="sd-earlier">Earlier definition</label><select class="input" id="sd-earlier" data-sd-earlier><option value="">Choose…</option></select>
+        <button class="btn" type="button" data-sd-action="restore" style="margin-block: var(--space-3);">Review Restore</button>
+        <label for="sd-reason">Reason for proceeding without a complete passing check (optional)</label><textarea class="input" id="sd-reason" data-sd-reason rows="2" maxlength="300"></textarea>
+        <label><input type="checkbox" data-sd-acknowledge> I read any earlier unconfirmed original and acknowledge that earlier work may already exist. This is a separate new intent.</label>
+        <p class="muted">Publication requires the current passing-test policy or your explicit recorded reason. Restoring also requires a fresh full review; it does not discard all tailoring.</p>
+        <p data-sd-status role="status" aria-live="polite"></p>
+        <div data-sd-review tabindex="-1"></div>
+        <button class="btn" type="button" data-sd-read-original hidden>Read this original decision</button>
+        <label for="sd-original">Earlier original decision</label><select class="input" id="sd-original" data-sd-original><option value="">Choose…</option></select>
+        <div data-sd-result aria-live="polite"></div>
+      </section>
+      <style>.specialist-draft-review-row{padding-block:var(--space-3);border-bottom:1px solid var(--border);overflow-wrap:anywhere}.specialist-draft-review-row h3{margin-top:0}.specialist-draft-review-row dl{margin-block:var(--space-2)}.specialist-draft-review-row dt{font-weight:600}.specialist-draft-review-row dd{margin-inline-start:var(--space-3)}#specialist-drafts .input{display:block;width:100%;margin-block:var(--space-2)}#specialist-drafts [data-sd-review]>label{display:block;margin-block:var(--space-3)}#specialist-drafts [data-sd-review]>button{margin:var(--space-1)}</style>
+      {% endif %}
 
       {% if selected and (selected.errors or selected.warnings) %}
       <div class="panel" style="margin-top: 1rem;">
@@ -675,6 +708,7 @@
         box.appendChild(sel);
       }
       paint();
+      document.addEventListener('lightwork:specialist-draft-loaded', paint);
     }
     function mountToolPicks() { document.querySelectorAll('.af-toolpick').forEach(mountToolPick); }
 
@@ -882,6 +916,7 @@
       var installed = null;
 
       function sync() { input.value = sel.join(' '); }
+      document.addEventListener('lightwork:specialist-draft-loaded', function () { sel = input.value.split(/\s+/).filter(Boolean); render(); });
       function render() {
         host.textContent = '';
         var seen = {};
@@ -1115,10 +1150,12 @@
       const creating = form.dataset.creating === '1';
       const idInput = document.getElementById('f-new-id');
       const msg = document.getElementById('agent-msg');
+      let retainedDraftName = '';
       // The target agent name: the pre-selected pack, or (new mode) the id typed
       // in. Normalized to the lowercase/underscore shape packs use.
       function targetName() {
         if (!creating) return form.dataset.name;
+        if (retainedDraftName && idInput.value.trim() === retainedDraftName) return retainedDraftName;
         return (idInput ? idInput.value : '').trim().toLowerCase().replace(/[^a-z0-9_]+/g, '_').replace(/^_+|_+$/g, '');
       }
       const words = (s) => s.split(/\s+/).filter(Boolean);
@@ -1366,34 +1403,52 @@
         } catch (_) { return ''; }
       }
       const saveBtn = document.getElementById('btn-save');
+      let loadedDraftProfile = null;
+      window.LWSpecialistDraftEditor = {
+        name: targetName,
+        identify: name => { if (creating && idInput && !idInput.value.trim()) { retainedDraftName = name; idInput.value = name; idTouched = true; } },
+        get: () => ({...(loadedDraftProfile || {}), ...payload()}),
+        apply: value => {
+          if (creating && idInput) { retainedDraftName = value.name; idInput.value = value.name; idTouched = true; }
+          loadedDraftProfile = structuredClone(value);
+          document.getElementById('f-description').value = value.description;
+          document.getElementById('f-persona').value = value.persona;
+          document.getElementById('f-allow').value = value.allow_tools.join(' ');
+          document.getElementById('f-deny').value = value.deny_tools.join(' ');
+          document.getElementById('f-risk').value = value.max_risk;
+          document.querySelectorAll('#risk-seg [data-risk]').forEach(button => { const on = button.dataset.risk === value.max_risk; button.classList.toggle('on', on); button.setAttribute('aria-pressed', String(on)); });
+          stepsEl.replaceChildren();
+          value.workflow.forEach(step => {
+            const row = document.getElementById('wf-row-tpl').content.firstElementChild.cloneNode(true);
+            row.querySelector('.wf-name').value = step.name; row.querySelector('.wf-instruction').value = step.instruction;
+            row.querySelector('.wf-tools').value = step.tools.join(' '); row.querySelector('.wf-gate').value = step.gate || ''; stepsEl.append(row);
+          });
+          mountToolPicks();
+          if (value.autonomy) {
+            ['default','low','medium','high'].forEach(risk => { document.getElementById('f-auto-' + risk).value = value.autonomy[risk] || ''; });
+            document.getElementById('f-auto-onboarding').checked = value.autonomy.onboarding;
+          }
+          document.dispatchEvent(new CustomEvent('lightwork:specialist-draft-loaded'));
+        }
+      };
       saveBtn.addEventListener('click', async () => {
         if (!formReady()) return;
         const name = targetName();
         if (!name) { show('Give your ' + kindWord() + ' a name first.', false); return; }
-        if (!beginMutation(saveBtn)) return;
-        try {
-          fieldMessage('', '');
-          const decision = await publishDecision();
-          if (!decision.ok) return;
-          const foresee = await toolChangePreview(name);
-          if (!decision.skipConfirm && !(await mvConfirm(
-            (creating ? 'Create the agent “' : 'Save your changes to the ' + kindWord() + ' “') + name + '”? ' + foresee + 'Its allowed actions, steps and independence settings take effect for everyone who uses it.' + (decision.line || ''),
-            { okText: creating ? 'Create agent' : (kindWord() === 'specialist' ? 'Save specialist' : 'Save agent') }
-          ))) return;
-          await call('POST', `/api/v1/agents/${name}/override`, { ...payload(), ...decision.extra });
-          try { window.sessionStorage.removeItem(proposedKey(name)); } catch (_) { /* nothing kept */ }
-          show(creating ? 'Custom agent created.' : 'Deployed.', true);
-          window.location.search = '?name=' + encodeURIComponent(name);
-        } catch (error) {
-          show(error instanceof Error ? error.message : 'That didn\'t work. Refresh the page and try again.', false);
-          fieldMessage(error && error.field, error && error.message);
-        } finally {
-          finishMutation(saveBtn);
-        }
+        if (window.LWSpecialistDrafts) { await window.LWSpecialistDrafts.reviewEntered('save'); return; }
+        show('The complete draft controls are unavailable. Refresh Agent Factory before saving.', false);
+        return;
       });
     })();
   </script>
   {% endif %}
+  <section class="panel" id="specialist-original-history" data-specialist-original-history hidden aria-labelledby="specialist-original-title">
+    <h2 id="specialist-original-title">Your original specialist decisions</h2>
+    <p>Read the retained outcome without repeating a Save draft, answer request or publication. Private source details are withheld when current access is unavailable.</p>
+    <label for="specialist-original-choice">Original decision</label><select id="specialist-original-choice" class="input"><option value="">Choose…</option></select>
+    <button type="button" class="btn" data-specialist-history-refresh>Refresh original decisions</button>
+    <p data-specialist-history-status role="status" aria-live="polite"></p><div data-specialist-history-result></div>
+  </section>
 
   {% if selected %}
   <style>

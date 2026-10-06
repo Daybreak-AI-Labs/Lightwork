@@ -54,12 +54,12 @@
     <button class="btn btn--ghost" type="button" id="gov-refresh-attention">Refresh</button></div>
   <p id="gov-attention-status" role="status" aria-live="polite" class="muted"></p>
   <div id="gov-attention-summary">
+  {% set incidents = attention.sections.serious_incidents %}
   {% if attention.attention_count %}
   <p class="gov-actions">
-    {% set incidents = attention.sections.serious_incidents %}
     {% if incidents and incidents.enabled %}
-    {% if incidents.overdue %}<span class="badge failed">{{ incidents.overdue|length }} incident report{{ 's' if incidents.overdue|length != 1 }} overdue</span>{% endif %}
-    {% if incidents.due_soon %}<span class="badge warn">{{ incidents.due_soon|length }} incident report{{ 's' if incidents.due_soon|length != 1 }} due soon</span>{% endif %}
+    {% if incidents.overdue_count %}<span class="badge failed">{{ incidents.overdue_count }} incident report{{ 's' if incidents.overdue_count != 1 }} overdue</span>{% endif %}
+    {% if incidents.due_soon_count %}<span class="badge warn">{{ incidents.due_soon_count }} incident report{{ 's' if incidents.due_soon_count != 1 }} due soon</span>{% endif %}
     {% endif %}
     {% set lit = attention.sections.ai_literacy %}
     {% if lit and lit.enabled %}
@@ -83,8 +83,10 @@
     {% endif %}
   </p>
   {% else %}
-  <p class="muted">Nothing needs attention right now. Items appear here when a control fails or a review is due.</p>
+  <p class="muted">{% if incidents and not incidents.complete %}No alerts were found in the records that could be read. Incident reporting needs a current check.{% else %}Nothing needs attention in the available records right now. Items appear here when a control fails or a review is due.{% endif %}</p>
   {% endif %}
+  {% if incidents and incidents.unavailable_registers %}<p class="badge warn" role="status">Incident reporting is incomplete. {% for register in incidents.unavailable_registers %}{{ 'Serious-incident declarations' if register == 'declarations' else 'Article 73 incident records' }} could not be read.{% if not loop.last %} {% endif %}{% endfor %} Refresh to check again; unavailable records may contain deadlines.</p>{% endif %}
+  {% if incidents and incidents.enabled %}<p class="muted">{{ incidents.notice }}{% if incidents.listed_ids_truncated %} Totals include every supported retained record; detailed alert references show the first 50 in deadline order.{% endif %}</p>{% endif %}
   {% for name, section in attention.sections.items() %}{% if section.error %}
   <p class="muted">{{ name|humanize }} alerts could not be loaded. The other alerts are shown above.</p>
   {% endif %}{% endfor %}
@@ -523,7 +525,7 @@
       <th scope="row">{{ ai_incident_categories.get(row.category, {}).get('label') or row.category|humanize }}</th>
       <td>{{ row.member_state }}</td>
       <td>{{ STATUS.get(row.status, row.status|humanize) }}</td>
-      <td>{% if row.overdue %}<span class="badge failed">Overdue</span>{% else %}{{ row.clock_label|replace('d left', ' days left') }}{% endif %}</td>
+      <td>{% if row.status == 'initial_reported' %}First report filed; full report to follow{% elif row.status == 'complete_reported' %}Full report filed{% elif row.status == 'withdrawn' %}Withdrawn{% elif row.overdue %}<span class="badge failed">Overdue</span>{% else %}{{ row.clock_label|replace('d left', ' days left') }}{% endif %}</td>
       <td class="gov-actions">{% if row.status in ('declared', 'initial_reported') %}
         {% if row.status == 'declared' %}<button class="btn btn--ghost" type="button" data-incident-submit="{{ row.id }}" data-kind="initial" data-revision="{{ row.revision }}">Record first report</button>{% endif %}
         <button class="btn btn--ghost" type="button" data-incident-submit="{{ row.id }}" data-kind="complete" data-revision="{{ row.revision }}">Record full report</button>
@@ -704,10 +706,12 @@
       const summary = document.getElementById("gov-attention-summary");
       summary.replaceChildren();
       const count = document.createElement("p");
-      count.textContent = result.attention_count ? `${result.attention_count} item${result.attention_count === 1 ? "" : "s"} need attention.` : "Nothing needs attention right now.";
+      const incidents = result.sections.serious_incidents;
+      const incomplete = incidents && incidents.complete === false;
+      count.textContent = result.attention_count ? `${result.attention_count} item${result.attention_count === 1 ? "" : "s"} need attention.` : incomplete ? "No alerts were found in the records that could be read. Incident reporting needs a current check." : "Nothing needs attention in the available records right now.";
       summary.appendChild(count);
       const labels = {
-        serious_incidents: {label:"Serious incidents",fields:{overdue:"reports overdue",due_soon:"reports due soon"}},
+        serious_incidents: {label:"Serious incidents",fields:{overdue_count:"reports overdue",due_soon_count:"reports due soon"}},
         ai_literacy: {label:"Staff AI training",fields:{missing:"trainings not done",expired:"trainings expired",expiring_soon:"trainings expiring soon"}},
         eu_conformity: {label:"EU AI Act",fields:{outdated_frias:"assessments reopened",reassessment_required:"systems needing a new assessment"}},
         vendors: {label:"Suppliers",fields:{contracts_overdue:"contracts past renewal",contracts_due_soon:"contracts renewing soon"}},
@@ -716,6 +720,11 @@
       Object.entries(labels).forEach(([name, definition]) => {
         const section = result.sections[name];
         if (!section) return;
+        if (name === "serious_incidents" && section.unavailable_registers && section.unavailable_registers.length) {
+          const warning = document.createElement("p"); warning.className = "badge warn";
+          warning.textContent = "Incident reporting is incomplete. " + section.unavailable_registers.map(value => value === "declarations" ? "Serious-incident declarations could not be read." : "Article 73 incident records could not be read.").join(" ") + " Refresh to check again; unavailable records may contain deadlines.";
+          summary.appendChild(warning);
+        }
         if (section.error) {
           const warning = document.createElement("p"); warning.className = "muted";
           warning.textContent = `${definition.label} alerts could not be loaded. The other alerts are shown.`;
@@ -726,6 +735,11 @@
           if (!number) return;
           const item = document.createElement("p"); item.textContent = `${definition.label}: ${number} ${label}.`; summary.appendChild(item);
         });
+        if (name === "serious_incidents" && section.enabled) {
+          const notice = document.createElement("p"); notice.className = "muted";
+          notice.textContent = section.notice + (section.listed_ids_truncated ? " Totals include every supported retained record; detailed alert references show the first 50 in deadline order." : "");
+          summary.appendChild(notice);
+        }
       });
       status("gov-attention-status", "Alerts refreshed.");
     }

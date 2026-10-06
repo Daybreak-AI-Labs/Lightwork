@@ -145,4 +145,3 @@ def find(request, query: str, can_open_page) -> list[dict]:
         except Exception:  # a closed or unreadable source adds nothing  # noqa: BLE001
             continue
     return results
-

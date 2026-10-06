@@ -103,15 +103,16 @@ def _write_local_audit_keypair(key_dir, private_bytes, public_bytes):
     return key_id
 
 
-def test_missing_config_has_stable_blocker_and_copyable_next_action(isolated_config):
+def test_missing_config_uses_effective_defaults_and_provider_remedy(isolated_config):
     from maverick.operator_preflight import collect
 
     report = collect()
 
     assert report.ready is False
     assert report.schema == "lightwork.operator-preflight.v1"
-    assert _by_id(report)["config"].status == "blocked"
-    assert report.next_action == "maverick init --fast"
+    assert _by_id(report)["config"].status == "ready"
+    assert _by_id(report)["provider"].status == "blocked"
+    assert report.next_action == "Lightwork Settings > Models"
     # No volatile timestamp: two reads produce the exact same automation shape.
     assert report.to_dict() == collect().to_dict()
     assert not (isolated_config.parent / "state").exists()
