@@ -4662,8 +4662,17 @@ def spend_page(request: Request) -> HTMLResponse:
         "spend.html",
         {"episodes": episodes, "total": w.total_spend(owner=value_view["owner"]),
          "goal_titles": goal_titles, "csv_months": months, "episode_provenance": episode_provenance,
-         "value_view": value_view, "spend_recorded_at": _newest_cost_at(w, value_view["owner"])},
+         "value_view": value_view, "spend_recorded_at": _newest_cost_at(w, value_view["owner"]),
+         "practice_cost": _practice_cost_text(value_view["owner"], when="across all time")},
     )
+
+
+def _practice_cost_text(owner, *, when: str, since: float | None = None) -> str:
+    """The labelled practice line for a cost view (maverick.practice_costs), or ""."""
+    from maverick import practice_costs
+
+    line = practice_costs.summary(owner, since=since)
+    return practice_costs.label(line, when) if line else ""
 
 
 # One assessment engine, one workspace chassis per department: each
@@ -6677,6 +6686,8 @@ def savings_page(request: Request, days: int = 90) -> HTMLResponse:
             "can_manage_assumptions": has_global_permission(request, "operate"),
             "value_view": value_view,
             "assumptions_confirmed": assumptions_confirmed(),
+            "practice_cost": _practice_cost_text(value_view["owner"], when=f"in the last {days} days, not part of these savings",
+                                                 since=time.time() - days * 86400),
         },
     )
 
@@ -6772,6 +6783,16 @@ def billing_page(request: Request, format: str = "", period: str = "", receipt_o
                                  episode.input_tokens, episode.output_tokens, episode.tool_calls,
                                  *export_fields(episode)])
                 yield buf.getvalue()
+            # Practice runs cost real provider money: one labelled row, apart from the real runs.
+            from maverick import practice_costs
+
+            extra = practice_costs.export_row(practice_costs.summary(owner, since=start.timestamp(),
+                                                                     until=end.timestamp()), 9 + len(EXPORT_HEADERS))
+            if extra:
+                buf.seek(0)
+                buf.truncate(0)
+                writer.writerow(extra)
+                yield buf.getvalue()
         safe_tenant = "".join(c for c in tenant if c.isalnum() or c in "-_")[:64] or "workspace"
         return StreamingResponse(rows(), media_type="text/csv",
             headers={"Content-Disposition": f'attachment; filename="statement-{safe_tenant}-{sel}.csv"',
@@ -6787,8 +6808,11 @@ def billing_page(request: Request, format: str = "", period: str = "", receipt_o
     if previous and previous["cost"] > 0 and not previous["unknown_cost_runs"] and not current["unknown_cost_runs"]:
         delta_pct = round((current["cost"] - previous["cost"]) / previous["cost"] * 100, 1)
     series = [months[k] for k in sorted(months, reverse=True)][:12]
+    from maverick import practice_costs
     from maverick.quotas import UsageLedger, UsageLedgerError
 
+    _practice = practice_costs.summary(owner, since=practice_costs.month_bounds()[0])
+    practice_cost = practice_costs.label(_practice, "this month") if _practice else ""
     receipt_error = None
     receipts = {"items": [], "total": 0, "offset": max(0, receipt_offset), "limit": 50, "has_more": False}
     try:
@@ -6808,6 +6832,7 @@ def billing_page(request: Request, format: str = "", period: str = "", receipt_o
             "series": series,
             "usage_receipts": receipts,
             "usage_receipt_error": receipt_error,
+            "practice_cost": practice_cost,
             "spend_recorded_at": newest_cost_at,
             "invoice_admin": has_global_permission(request, "admin"),
             "invoice_workspaces": _invoice_workspaces(tenant, tenant_label),
@@ -13211,6 +13236,14 @@ def cost_csv(request: Request, month: str | None = None) -> StreamingResponse:
             yield buf.getvalue()
             buf.seek(0)
             buf.truncate(0)
+        # Practice runs cost real provider money: one labelled row, apart from the real runs.
+        from maverick import practice_costs
+
+        extra = practice_costs.export_row(practice_costs.summary(owner, since=start_ts, until=end_ts),
+                                          9 + len(EXPORT_HEADERS))
+        if extra:
+            writer.writerow(extra)
+            yield buf.getvalue()
 
     fname = f"maverick-cost-{month}.csv" if month else "maverick-cost-all.csv"
     return StreamingResponse(

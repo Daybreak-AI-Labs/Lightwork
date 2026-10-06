@@ -13,6 +13,7 @@ from datetime import date
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, Response
+from maverick import practice_costs
 from starlette.concurrency import run_in_threadpool
 
 from .auth import require_global_permission
@@ -69,7 +70,22 @@ async def invoice_summary(request: Request, tenant: str = Query(..., min_length=
                    "charge_display": f"{amount:.{places}f}", "kind": row["kind"],
                    "usage": row["in_tokens"] + row["out_tokens"]} for row, amount in zip(rows, amounts, strict=True)],
         "closed_period": bool(inv.invoice_id),
+        "practice": await run_in_threadpool(_practice_line, tenant, since, until),
     }, headers={"Cache-Control": "private, no-store"})
+
+
+def _practice_line(tenant: str, since: date | None, until: date | None) -> dict | None:
+    """Practice runs in this workspace and period (only for the active workspace,
+    whose practice record this server can read)."""
+    from datetime import datetime, timedelta, timezone
+
+    from maverick.paths import current_tenant
+
+    if tenant.strip() != (current_tenant() or "default"):
+        return None
+    start = datetime.combine(since, datetime.min.time(), timezone.utc).timestamp() if since else None
+    end = (datetime.combine(until, datetime.min.time(), timezone.utc) + timedelta(days=1)).timestamp() if until else None
+    return practice_costs.summary(None, since=start, until=end)
 
 
 @router.get("/invoice.csv")
@@ -90,6 +106,10 @@ async def invoice_csv(request: Request, tenant: str = Query(..., min_length=1, m
     writer.writerow([])
     writer.writerow(["Total", "", f"{total:.{places}f}", ""])
     writer.writerow(["Rounding", "Currency-aware allocation reconciles the visible lines to this total; original rated contents are unchanged.", "", ""])
+    practice = await run_in_threadpool(_practice_line, tenant, since, until)
+    if practice:  # real provider cost of practice runs: shown, never charged on this invoice
+        writer.writerow(["Practice", f"Practice runs ({practice_costs.NOT_COUNTED}; not charged on this invoice)",
+                         f"{practice['dollars']:.2f}", practice["input_tokens"] + practice["output_tokens"]])
     if inv.invoice_id:
         writer.writerow(["Invoice number", inv.invoice_id, "", ""])
     safe = "".join(ch for ch in tenant if ch.isalnum() or ch in "-_")[:64] or "workspace"

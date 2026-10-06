@@ -9493,8 +9493,12 @@ def get_spend(request: Request) -> dict:
     w = _world()
     total = w.total_spend(owner=owner)
     episodes = w.list_episodes(limit=30, owner=owner)
+    from maverick import practice_costs
+
     return {
         "total": total,
+        # Practice runs cost real provider money; reported apart, never in "total".
+        "practice": practice_costs.summary(owner),
         "episodes": [
             {
                 "id": e.id,
@@ -9537,7 +9541,11 @@ async def get_savings(request: Request, days: int = 90) -> dict:
     cfg = resolution["effective_assumptions"]
     view = value_scope(request)
     report = await run_in_threadpool(savings_mod.compute, _world(), window_days=days, cfg=cfg, owner=view["owner"])
+    from maverick import practice_costs
+
+    practice = await run_in_threadpool(practice_costs.summary, view["owner"], since=practice_costs.window(days))
     return {
+        "practice": practice,  # real provider cost of practice runs, not part of the savings
         "enabled": cfg["enable"],
         "scope": view["scope"],
         "report": savings_mod.to_dict(report),

@@ -28,6 +28,7 @@
   {% endcall %}
   {% from "_spend_freshness.html" import spend_freshness %}
   {{ spend_freshness(spend_recorded_at) }}
+  {% include "_practice_cost.html" %}
   {# Whose tasks these numbers count (value_views). #}
   <p class="muted" id="sp-scope">{% if value_view.scope == 'workspace' %}The heading and charts cover the whole
     workspace, totals only. Per-task rows are not shown in this view.{% else %}These numbers

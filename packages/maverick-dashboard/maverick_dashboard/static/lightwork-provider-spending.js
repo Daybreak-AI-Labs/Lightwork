@@ -119,6 +119,8 @@
         ? ` ${health.unresolved_count.toLocaleString()} request${health.unresolved_count === 1 ? '' : 's'} still need a final cost.` : '')
       + (health.single_file_copy_available === false
         ? ' This history needs a full Workspace recovery backup; the smaller checked copy is unavailable.' : '');
+    const practiceLine = document.getElementById('spend-practice');
+    if (practiceLine) { practiceLine.textContent = state.practice ? state.practice.text : ''; practiceLine.hidden = !state.practice; }
     message(state.available ? 'Spending is up to date.' : 'Spending records can\'t be read safely right now. Requests to providers with a limit are paused; no balance was reset.');
     if (!state.providers.length && state.available) {
       paragraph(el('spend-balances'), 'No spending limits are set for any provider.');
