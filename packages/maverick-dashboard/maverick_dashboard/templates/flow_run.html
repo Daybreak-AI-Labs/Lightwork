@@ -691,5 +691,7 @@
     .catch(function () { watch(); });
 })();
 </script>
+{% if comments_enabled() and not request.query_params.get('approval_review') %}{% from "_comments.html" import comments %}{{ comments('run', run_id, 'Comments on this run') }}
+<script src="/static/lightwork-comments.js" defer></script>{% endif %}
 {% endblock %}
 {% block scripts_extra %}{% if not request.query_params.get('approval_review') %}{% if learning_example_panel %}<script src="/static/lightwork-learning-example.js" defer></script>{% endif %}{% if learning_capture_panel %}<script src="/static/lightwork-learning-capture.js" defer></script>{% endif %}{% endif %}{% endblock %}

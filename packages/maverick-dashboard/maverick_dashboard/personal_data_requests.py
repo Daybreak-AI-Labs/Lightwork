@@ -21,7 +21,7 @@ from .draft_store import DraftStore
 
 STORE = GovernedRecordStore("personal_data_requests", "PDR", "personal_data_request")
 KINDS = {"preference_notes", "conversation_history", "recovery_drafts",
-         "companion_history", "experience_preferences", "model_memory", "notification_receipts", "diagnostic_reports", "activation_drafts", "project_defaults", "model_test_history", "generated_tools", "conversation_inbox", "saved_views_and_pins"}
+         "companion_history", "experience_preferences", "model_memory", "notification_receipts", "diagnostic_reports", "activation_drafts", "project_defaults", "model_test_history", "generated_tools", "conversation_inbox", "saved_views_and_pins", "comments"}
 DIAGNOSTICS = GovernedRecordStore("owned_task_diagnostics", "OTD", "owned_task_diagnostics")
 EXCEPTIONS = [
     {"store": "workspace_gallery_curation", "state": "retained", "reason": "Gallery curation is a separate workspace record. Erasing an account's saved views and task pins does not delete featured task content or curator history."},
@@ -166,6 +166,9 @@ def preview(actor, channel, user_id, selected, world):
         elif kind == "project_defaults":
             from maverick.project_workspaces import owned_defaults_inventory
             target["records"] = owned_defaults_inventory(actor)
+        elif kind == "comments":
+            from maverick import comments
+            target["count"] = comments.count_by(actor)
         targets.append(target)
     holds = preservation_snapshot()
     result = {"owner": actor, "channel": channel, "user_id": user_id, "targets": targets,
@@ -271,6 +274,10 @@ def _erase_target(world, row, target):
     if kind == "experience_preferences":
         from maverick.experience_preferences import erase_personal
         return {"state": "purged", "removed": erase_personal(actor)}
+    if kind == "comments":
+        from maverick import comments
+        return {"state": "purged", "removed": comments.erase_person(actor),
+                "retained": "Other people's comments, including ones that mention you, are theirs and remain."}
     if kind == "notification_receipts":
         from maverick.personal_notification_delivery import remove_personal_history
         return {"state": "purged", "result": remove_personal_history(actor), "retained": "Notification preferences, provider records and recipient enrollment are separate."}

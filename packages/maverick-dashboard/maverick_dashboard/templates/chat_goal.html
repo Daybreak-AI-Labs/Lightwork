@@ -592,6 +592,8 @@
     </div>
   </div>
   {% include "_conversation_inbox_panel.html" %}
+  {% if comments_enabled() %}{% from "_comments.html" import comments %}{{ comments('task', goal.id, 'Comments on this task') }}
+  <script src="/static/lightwork-comments.js" defer></script>{% endif %}
 
 </div>
 {% endblock %}

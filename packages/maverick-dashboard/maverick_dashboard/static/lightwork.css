@@ -941,6 +941,18 @@
     .mv-bulk__title { margin: 0 0 var(--space-2); font-size: var(--text-base); }
     .mv-bulk__lines { margin: 0 0 var(--space-3); padding-inline-start: 1.2rem; }
     .mv-bulk__failed { color: var(--danger); }
+    /* Comment threads with @mentions (templates/_comments.html). */
+    .mv-comments__title { margin: 0 0 var(--space-1); font-size: var(--text-lg); }
+    .mv-comments--collapsed { margin-top: var(--space-2); }
+    .mv-comments--collapsed > summary { cursor: pointer; color: var(--brand); font-size: var(--text-sm); }
+    .mv-comments__lede { margin: 0 0 var(--space-3); font-size: var(--text-sm); }
+    .mv-comments__list { list-style: none; margin: 0 0 var(--space-3); padding: 0; display: grid; gap: var(--space-2); }
+    .mv-comments__item { padding: var(--space-2) var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface-1); }
+    .mv-comments__meta { margin: 0 0 var(--space-1); font-size: var(--text-sm); color: var(--muted); }
+    .mv-comments__text { margin: 0 0 var(--space-2); white-space: pre-wrap; overflow-wrap: anywhere; }
+    .mv-comments__form { display: grid; gap: var(--space-2); }
+    .mv-comments__mention { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+    .mv-comments__mentioned { margin: 0; font-size: var(--text-sm); }
     /* Shared empty / get-started state: centered title + body + one next
        step. Markup: templates/_empty_state.html or window.mvEmpty(). */
     .mv-empty { text-align: center; padding: var(--space-6) var(--space-4); border: 1px dashed var(--border); border-radius: var(--radius-lg); background: var(--surface-1); color: var(--muted); }

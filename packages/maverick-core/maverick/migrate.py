@@ -41,6 +41,8 @@ KNOWN_SECTIONS = frozenset({
     # [alerts] enabled: operational alerts (maverick.ops_alert), changeable
     # on Settings > All settings.
     "alerts",
+    # [collaboration] comments: comment threads and @mentions (maverick.comments).
+    "collaboration",
     # [first_outcome] department / sample_workspace_created: the department
     # first task picked at setup (maverick.sample_outcomes).
     "first_outcome",

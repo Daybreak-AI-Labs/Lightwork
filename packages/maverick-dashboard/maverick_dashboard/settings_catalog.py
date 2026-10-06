@@ -942,6 +942,12 @@ SETTINGS: tuple[Setting, ...] = (
     S("notifications", "personal_dashboard_url", "Dashboard address for personal notification links",
       "The HTTPS origin people use to sign in, without a path, query or credentials. Messages say why each alert was sent, what it needs and by when, with authenticated links, and never include task text.",
       "text", "Integrations", "", "maverick.personal_notification_delivery"),
+    S("collaboration", "comments", "Comments and mentions",
+      "Let people comment on tasks, workflow runs, approval requests and policy pages, and mention a "
+      "colleague to notify them in their own notifications. Only people who can open the item can read "
+      "its comments or be mentioned. On by default.",
+      "toggle", "People & access", True, "maverick.comments",
+      aliases="comment comments mention mentions discuss discussion thread collaborate"),
     S("support", "status_page_url", "Service status page",
       "A public page that shows whether your Lightwork service is up and its incident history. When set, the Help menu on every page links to it, and so does the notice shown while an AI service is paused. Leave empty to show no link.",
       "text", "Integrations", "", "maverick.config", pattern=r"(" + _HTTPS + r")?",

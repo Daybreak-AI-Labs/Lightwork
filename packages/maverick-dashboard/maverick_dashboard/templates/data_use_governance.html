@@ -945,4 +945,6 @@
   }
 })();
 </script>
+{% if comments_enabled() %}{% from "_comments.html" import comments %}{{ comments('policy', 'data-use', 'Comments on the data use rules') }}
+<script src="/static/lightwork-comments.js" defer></script>{% endif %}
 {% endblock %}

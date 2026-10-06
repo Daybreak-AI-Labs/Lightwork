@@ -14,6 +14,7 @@
    a sentence, never a mapping; the raw record is under Technical details. #}
 {% macro _budget_text(budget) -%}{{ budget | approval_spending }}{%- endmacro %}
 {% from "_empty_state.html" import empty_state %}
+{% from "_comments.html" import comments %}
 <div id="approval-queue" class="approval-list" aria-label="Requests waiting for your decision">
 {% if approvals %}
   {% for a in approvals %}
@@ -88,6 +89,7 @@
           <p class="approval-card-error" role="alert">This older request is missing the details needed to approve it safely. Reject it and ask for a new request.</p>
         {% endif %}
       </div>
+      {% if comments_enabled() %}{{ comments('approval', a.id, 'Comments on this request', collapsed=True) }}{% endif %}
       <p class="approval-item__decided muted" hidden></p>
       {% if own_note %}<p class="muted approval-own-note" id="approval-own-note-{{ a.id }}">{{ own_note }}</p>{% endif %}
       <div class="approval-actions">
@@ -771,3 +773,4 @@
   <button type="button" id="request-decision-more" class="btn btn--ghost">Load decisions</button>
 </details>
 <script src="/static/lightwork-approval-history.js" defer></script>
+{% if comments_enabled() %}<script src="/static/lightwork-comments.js" defer></script>{% endif %}

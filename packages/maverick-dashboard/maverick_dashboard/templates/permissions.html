@@ -509,5 +509,7 @@
       });
     })();
   </script>
+  {% if comments_enabled() and permissions_can_manage_tools %}{% from "_comments.html" import comments %}{{ comments('policy', 'tools', 'Comments on the tool permissions') }}
+  <script src="/static/lightwork-comments.js" defer></script>{% endif %}
   {% if permission_tabs %}</div>{% endif %}
 {% endblock %}

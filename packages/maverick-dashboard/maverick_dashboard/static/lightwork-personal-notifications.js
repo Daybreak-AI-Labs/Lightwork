@@ -11,7 +11,7 @@
   const muteStatus = document.getElementById('personal-notification-mute-status');
   let snapshot = null, editSnapshot = null, dirty = false, busy = false, mutes = {}, agentMutes = {}, timer = null, controller = null;
   const scalar = ['mode','timezone','digest_time','quiet_start','quiet_end'];
-  const checks = ['quiet_enabled','critical_exceptions','watch_all_projects'];
+  const checks = ['quiet_enabled','critical_exceptions','watch_all_projects','mentions'];
   function clearPrivate() {
     items.replaceChildren(); form.reset(); form.hidden = true;
     ['notification-project-watches','notification-mutes','personal-external-links','personal-delivery-receipts'].forEach(function (id) { document.getElementById(id).replaceChildren(); });

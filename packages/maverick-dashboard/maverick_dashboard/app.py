@@ -344,6 +344,19 @@ def static_url(name: str) -> str:
 templates.env.globals["static_url"] = static_url
 
 
+def _comments_enabled() -> bool:
+    """Whether comment threads show on tasks, runs, approvals and policies."""
+    try:
+        from maverick.comments import enabled
+
+        return enabled()
+    except Exception:  # noqa: BLE001 -- an unreadable setting shows no thread
+        return False
+
+
+templates.env.globals["comments_enabled"] = _comments_enabled
+
+
 class StaticCacheMiddleware:
     """Long-cache a ``/static/`` response only when its ``?v=`` matches the
     asset's current content hash; every other static request keeps the route's
@@ -1536,6 +1549,7 @@ app.include_router(in_app_router)
 app.include_router(first_outcome_router)
 from .billing_invoice_api import router as billing_invoice_router  # noqa: E402
 from .channel_check_api import router as channel_check_router  # noqa: E402
+from .comments_api import router as comments_router  # noqa: E402
 from .dsar_export_handoff_api import router as dsar_export_handoff_router  # noqa: E402
 from .feature_actions_api import page_router as feature_actions_page_router  # noqa: E402
 from .feature_actions_api import router as feature_actions_router  # noqa: E402
@@ -1558,6 +1572,7 @@ from .voice_unlock_api import router as voice_unlock_router  # noqa: E402
 app.include_router(recovery_router)
 app.include_router(provider_spending_router)
 app.include_router(support_router)
+app.include_router(comments_router)
 app.include_router(system_checks_router)
 app.include_router(feature_actions_router)
 app.include_router(feature_actions_page_router)

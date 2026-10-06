@@ -148,6 +148,9 @@ def _projection(request, actor: str, *, world=None) -> tuple[list[dict], list[di
     sources.extend(warning_sources(actor))
     from maverick.spending_alerts import sources as spending_alert_sources
     sources.extend(spending_alert_sources(actor, admin=admin))
+    # Someone named this person in a comment they can still open (NOT-4).
+    from .comments_api import mention_sources
+    sources.extend(mention_sources(actor))
     # Every alert says why, what is needed and by when, whatever produced it.
     return [explain(source) for source in sources], tasks, list(projects.values()), limited
 
