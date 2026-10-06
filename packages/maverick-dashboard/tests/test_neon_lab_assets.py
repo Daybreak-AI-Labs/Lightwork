@@ -107,3 +107,15 @@ def test_shell_uses_the_mark(noauth):
     page = noauth.get("/start", headers={"Authorization": "Bearer secret-token"}).text
     assert "/static/daybreak-mark.png" in page
     assert "/static/daybreak-logo.jpg" in page   # favicon stays on the lockup
+
+
+def test_brand_mark_is_sized_for_the_top_bar():
+    # Shown 30 px tall in both shells; the 425 x 323 original (154 KB) was
+    # the largest download on every page, before any of the page's text,
+    # on a slow phone connection. Three times the shown size stays sharp.
+    import struct
+    from pathlib import Path
+
+    data = (Path(__file__).resolve().parents[1] / "maverick_dashboard" / "static" / "daybreak-mark.png").read_bytes()
+    width, height = struct.unpack(">II", data[16:24])
+    assert height >= 90 and len(data) < 25_000

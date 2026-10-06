@@ -88,8 +88,14 @@
       disclosure = doc.createElement('details'); disclosureTitle = doc.createElement('summary');
       disclosure.className = 'draft-recovery__compact'; disclosureTitle.textContent = 'Draft recovery';
       disclosureTitle.style.cssText = 'cursor:pointer;color:var(--muted);font-size:var(--text-xs);line-height:1.5';
+      // Opened, the row floats above the composer: it opens by itself when
+      // recovery needs attention, and growing the dock in place pushed the
+      // conversation up (a 0.17 layout shift on phones).
       var disclosureBody = doc.createElement('div');
-      disclosureBody.style.cssText = 'margin-top:var(--space-2);max-height:min(44vh,24rem);overflow:auto;overflow-wrap:anywhere';
+      disclosure.style.position = 'relative';
+      disclosureBody.style.cssText = 'position:absolute;inset-inline:0;bottom:calc(100% + var(--space-1));z-index:var(--z-popover);' +
+        'max-height:min(44vh,24rem);overflow:auto;overflow-wrap:anywhere;padding:var(--space-3);background:var(--surface-1);' +
+        'border:1px solid var(--border);border-radius:var(--radius-md);box-shadow:var(--shadow-lg)';
       while (panel.firstChild) disclosureBody.appendChild(panel.firstChild);
       if (options.information) disclosureBody.appendChild(options.information);
       disclosure.append(disclosureTitle, disclosureBody); panel.append(disclosure);

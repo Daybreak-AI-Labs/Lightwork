@@ -392,7 +392,9 @@
         clearInvalid(e.target);
         err.textContent = '';
       }
-      ack.checked = false; typed.value = ''; err.textContent = '';
+      // Only reset what changed: writing a text field's value makes the
+      // browser lay the page out at once, before the dialog can open.
+      ack.checked = false; if (typed.value) typed.value = ''; err.textContent = '';
       clearInvalid(ack); clearInvalid(typed);
       typedWrap.hidden = !critical;
       return new Promise(function (resolve) {

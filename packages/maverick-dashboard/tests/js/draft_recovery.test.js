@@ -193,3 +193,16 @@ test('a slow recovery check says it is checking',async()=>{
   assert.ok(ui.labels.includes('Checking draft recovery…'),JSON.stringify(ui.labels));
   assert.equal(ui.summary.textContent,'Draft recovery ready');ui.dom.window.close();
 });
+
+// A recovery problem opens Chat's compact row by itself, with no input from
+// the person. Opening it in place grew the docked composer from 331 to 544 px
+// and pushed the conversation up (layout shift 0.17-0.19 on phones), so the
+// opened row floats above the composer instead of resizing the dock.
+test('the compact row opens above the composer without resizing it',async()=>{
+  const ui=await compactRow(20);
+  const body=ui.summary.nextElementSibling;
+  assert.equal(body.style.position,'absolute');
+  assert.match(body.style.bottom,/100%/);
+  assert.equal(ui.summary.parentElement.style.position,'relative');
+  ui.dom.window.close();
+});

@@ -73,8 +73,10 @@ test('every sign-in field takes a paste and a password manager fill',async({brow
     await paste(page,page.locator('input[name="password"]'),passphrase,log);
     await paste(page,page.locator('input[name="password2"]'),passphrase,log);
     await page.getByRole('button',{name:'Accept invitation',exact:true}).click();
-    await expect(page).not.toHaveURL(/\/auth\/invite\//);
-    expect((await colleague.cookies()).some(cookie=>cookie.name==='mvk_session')).toBe(true);
+    // Accepting now stays on the invitation and confirms the saved grant
+    // (reopening the link reads that result) instead of redirecting.
+    await expect(page.getByRole('heading',{name:'Invitation accepted',exact:true})).toBeVisible();
+    await expect(page.locator('.own__lede')).toContainText('paste-colleague@example.test');
 
     // Signed out: paste works on the sign-in page, and a manager's fill signs in.
     await page.goto(origin+'/auth/logout');
