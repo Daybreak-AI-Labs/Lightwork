@@ -191,7 +191,11 @@ def test_revision_requires_rationale_supersedes_old_and_requires_fresh_card(
             "X-Lightwork-Approval-Binding": old_card["binding_sha256"],
         },
     )
-    assert old_replay.status_code == 404
+    # The reviewed vote path refuses a decided round as stale (409) and says to
+    # read its current status; the superseded request stays denied.
+    assert old_replay.status_code == 409, old_replay.text
+    assert "Read its current status" in old_replay.text
+    assert w.get_approval(old_id).status == "denied"
 
     fresh_card = _structured_card(
         action="browser.click", expires_at=old_card["expires_at"] + 60,
