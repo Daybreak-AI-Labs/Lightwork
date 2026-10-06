@@ -310,7 +310,14 @@ def text_blocks(title: str, body: str) -> list[dict[str, Any]]:
 def digest_blocks(digest: dict[str, Any], *, dashboard_url: str = "") -> list[dict[str, Any]]:
     """The daily summary as Block Kit: the same content as the My work page,
     with what each item needs, by when, and a link to it."""
-    from .daily_digest import WHY, approval_line, question_href
+    from .daily_digest import (
+        WHY,
+        approval_line,
+        key_line,
+        question_href,
+        question_line,
+        result_line,
+    )
 
     blocks: list[dict[str, Any]] = [{"type": "header", "text": _plain(
         f"Your Lightwork summary · {digest.get('date_label', '')}".strip(" ·"))}]
@@ -331,18 +338,18 @@ def digest_blocks(digest: dict[str, Any], *, dashboard_url: str = "") -> list[di
     if questions:
         blocks.append({"type": "section", "text": _mrkdwn(
             f"*{len(questions)} question{'s' if len(questions) != 1 else ''} an agent is waiting on*\n"
-            + "\n".join(f"• {q['question']} The task waits until you answer.{opened(question_href(q))}"
+            + "\n".join(f"• {question_line(q)}{opened(question_href(q))}"
                          for q in questions[:10]))})
     if results:
         blocks.append({"type": "section", "text": _mrkdwn(
             f"*{len(results)} recent result{'s' if len(results) != 1 else ''}*\n"
-            + "\n".join(f"• {r['title']} — {r['status_label']}{opened(r.get('href') or '/goals')}"
+            + "\n".join(f"• {result_line(r)}{opened(r.get('href') or '/goals')}"
                          for r in results[:10]))})
     keys = digest.get("expiring_keys") or []
     if keys:
         blocks.append({"type": "section", "text": _mrkdwn(
             f"*{len(keys)} access key{'s' if len(keys) != 1 else ''} stop working within 7 days*\n"
-            + "\n".join(f"• {k.get('label') or k.get('prefix')} — in {k.get('days_left', 0)} day(s)"
+            + "\n".join(f"• {key_line(k)}{opened(k.get('href') or '/api-keys')}"
                         for k in keys[:10]))})
     if not (approvals or questions or results or keys):
         blocks.append({"type": "section", "text": _mrkdwn("Nothing is waiting for you today.")})

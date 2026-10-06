@@ -288,6 +288,31 @@ def approval_line(row: dict[str, Any], time_zone: str) -> str:
     return f"#{row['id']} {row['action']} ({row['risk_label']}). {need}. {due_text(row.get('decide_by'), time_zone)}."
 
 
+#: What a result asks of the person, by its status (NOT-1: every line says
+#: what is needed and by when, as the in-app alerts do).
+_RESULT_ACTION = {
+    "done": "Review the result", "blocked": "Open the task to see what it needs",
+    "failed": "Open the task to see why it stopped, then run it again",
+    "cancelled": "Nothing is needed",
+}
+
+
+def result_line(row: dict[str, Any]) -> str:
+    """One result: what happened, what it needs and that nothing is due."""
+    action = _RESULT_ACTION.get(str(row.get("status") or ""), "Review the result")
+    return f"{row['title']} ({row['status_label']}). {action}. Nothing is due."
+
+
+def question_line(row: dict[str, Any]) -> str:
+    return f"{row['question']} Answer it so the task can continue. The task waits until you answer."
+
+
+def key_line(row: dict[str, Any]) -> str:
+    days = int(row.get("days_left") or 0)
+    return (f"{row.get('label') or row.get('prefix')} stops working in {days} day(s). "
+            "Replace it before then so your scripts keep running.")
+
+
 def question_href(row: dict[str, Any]) -> str:
     return f"/chat/goal/{row['goal_id']}#question-panel" if row.get("goal_id") else "/chat"
 
@@ -339,17 +364,17 @@ def render_text(digest: dict[str, Any], *, dashboard_url: str = "") -> str:
         lines.append("")
     if digest["questions"]:
         lines.append(f"{len(digest['questions'])} question(s) an agent is waiting on:")
-        lines += [f"  - {q['question']} The task waits until you answer.{opened(question_href(q))}"
+        lines += [f"  - {question_line(q)}{opened(question_href(q))}"
                   for q in digest["questions"]]
         lines.append("")
     if digest["results"]:
         lines.append(f"{len(digest['results'])} recent result(s):")
-        lines += [f"  - {r['title']} ({r['status_label']}).{opened(r.get('href') or '/goals')}{muted(r)}"
+        lines += [f"  - {result_line(r)}{opened(r.get('href') or '/goals')}{muted(r)}"
                   for r in digest["results"]]
         lines.append("")
     if digest.get("expiring_keys"):
         lines.append(f"{len(digest['expiring_keys'])} access key(s) stop working within 7 days:")
-        lines += [f"  - {k['label'] or k['prefix']} (in {k['days_left']} day(s))"
+        lines += [f"  - {key_line(k)}{opened(k.get('href') or '/api-keys')}"
                   for k in digest["expiring_keys"]]
         lines.append("")
     if digest["empty"]:
@@ -390,13 +415,13 @@ def render_html(digest: dict[str, Any], *, dashboard_url: str = "") -> str:
         esc(approval_line(a, zone)) + opened("/approvals#approval-" + str(a["id"]))
         for a in digest["approvals"]]))
     body.append(section("Questions an agent is waiting on", [
-        esc(q["question"]) + " The task waits until you answer." + opened(question_href(q))
+        esc(question_line(q)) + opened(question_href(q))
         for q in digest["questions"]]))
     body.append(section("Recent results", [
-        f"{esc(r['title'])} <em>({esc(r['status_label'])})</em>" + opened(r.get("href") or "/goals") + muted(r)
+        esc(result_line(r)) + opened(r.get("href") or "/goals") + muted(r)
         for r in digest["results"]]))
     body.append(section("Access keys that stop working within 7 days", [
-        f"{esc(k['label'] or k['prefix'])} <em>(in {k['days_left']} day(s))</em>"
+        esc(key_line(k)) + opened(k.get("href") or "/api-keys")
         for k in digest.get("expiring_keys", [])]))
     if digest["empty"]:
         body.append("<p>Nothing is waiting for you today.</p>")
