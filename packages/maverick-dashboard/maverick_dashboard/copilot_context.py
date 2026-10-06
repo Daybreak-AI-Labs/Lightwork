@@ -416,10 +416,12 @@ _CONTEXTS = tuple(
             capabilities=(
                 "Start a task from your message, or draft a flow or agent when those choices are available.",
                 "Attach files, review the task budget, and continue work in a saved chat.",
+                "Copy, print, share or download an answer; try another answer, edit and resend, or branch from a saved answer when enabled.",
             ),
             boundaries=(
                 "Sending a message starts work and may use a paid AI service; spending limits and approval rules still apply.",
                 "Starting or continuing work depends on your access and whether an AI service is ready.",
+                "An alternative keeps the original conversation and starts separately reviewed work. Connected actions may repeat effects, so answer-only is the default.",
             ),
             next_steps=(
                 "Describe the result you need, then add any useful files or details.",
@@ -2067,7 +2069,7 @@ def context_for_page(page: object) -> CopilotPageContext:
         if kind in {"task", "task_chat"}:
             section = parts[1] if kind == "task" else ""
             label = "Current chat task" if kind == "task_chat" else {"plan": "Task plan", "trajectory": "Task timeline", "errors": "Task errors"}.get(section, "Task result")
-            base = _registered_page_context("/goals")
+            base = _CONTEXT_BY_PATH["/chat"] if kind == "task_chat" else _registered_page_context("/goals")
             assert base is not None
             return replace(
                 base, path=path, title=label,

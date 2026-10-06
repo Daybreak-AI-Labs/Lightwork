@@ -4466,6 +4466,15 @@ class Agent:
             # Waiting for a swarm model slot counts against the wall clock too.
             slot = getattr(self.ctx, "model_slot", None)
             async with slot() if slot else contextlib.nullcontext():
+                from .chat_message_actions import answer_only_runtime, require_dispatch_sources
+                require_dispatch_sources()
+                if answer_only_runtime() and not kw.get("tools"):
+                    previous_guard = kw.get("dispatch_guard")
+                    def source_guard():
+                        require_dispatch_sources()
+                        if previous_guard is not None:
+                            previous_guard()
+                    kw["dispatch_guard"] = source_guard
                 from .instruction_capture import runtime_scope
                 with runtime_scope(getattr(self.ctx, "world", None),
                                    getattr(self.ctx, "goal_id", None),

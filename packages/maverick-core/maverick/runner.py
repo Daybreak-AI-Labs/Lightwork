@@ -477,6 +477,9 @@ def run_goal_in_thread(
         goal = world.get_goal(goal_id)
         if goal is None:
             return _unavailable_goal_run("missing", detailed_outcome=detailed_outcome)
+        from .chat_message_actions import runtime_limits, runtime_scope
+        alternative, max_dollars, max_wall_seconds, max_depth, capability = runtime_limits(
+            world, goal, max_dollars, max_wall_seconds, max_depth, capability)
         from .task_handoffs import closure
         if closure(world, goal_id):
             return "blocked"
@@ -512,7 +515,7 @@ def run_goal_in_thread(
         from .trace_pin import pin_trace
         pin_trace(world, goal_id)
         try:
-            with run_scope(director):
+            with run_scope(director), runtime_scope(world, goal_id, alternative):
                 run_goal_sync(
                     llm, world, budget,
                     goal_id, sandbox=sandbox, max_depth=max_depth,

@@ -5081,6 +5081,11 @@ def pick_advanced() -> dict[str, Any]:
             "Guidance is reviewed and read at the task's next safe point; existing task ownership, permissions and spending limits remain enforced.",
             default=True,
         ),
+        "allow_chat_message_actions": _q_confirm(
+            "Let people try another answer, edit and resend a message, or branch from an earlier answer? "
+            "The original conversation is kept. Alternatives use current access and spending limits; "
+            "connected actions require a separate review.", default=True,
+        ),
         "allow_personal_preferences": _q_confirm(
             "Allow account-scoped writing style, display preferences, pinned pages, saved task filters and daily work layout? "
             "Personal choices never grant tools or change security or retention policy.",
@@ -9163,6 +9168,9 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
     elif advanced.get("allow_conversation_inbox") is False:
         # On by default, so only a deliberate "no" is written (and stays off).
         lines.extend(["", "[conversation_inbox]", "enabled = false"])
+    if type(advanced.get("allow_chat_message_actions")) is bool:
+        lines.extend(["", "[chat_message_actions]",
+                      "enabled = " + str(advanced["allow_chat_message_actions"]).lower()])
     if advanced.get("tree_of_thought"):
         lines.append("")
         lines.append("[planning]")

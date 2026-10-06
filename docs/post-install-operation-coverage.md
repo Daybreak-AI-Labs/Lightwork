@@ -1,5 +1,18 @@
 # Post-install operation coverage
 
+## October 6 product completion batch
+
+| Customer operation | Complete controls | Result and boundary |
+| --- | --- | --- |
+| Retry, edit or branch a Chat answer (UX-376) | Message buttons and protected Copilot form; answer-only default, complete copied-context review and separate connected-action choice | A new independently admitted conversation preserves the original. Exact original admission reads resolve a lost response without dispatching twice. Current source access continues to govern copied content. |
+| Operate a workflow pilot (F04) | Prepare an unstarted task, freeze the full plan, record observations and complete costs, independently review, inspect value/history; ordinary forms and four reviewed Copilot writes | Native SQLite/pooled-PostgreSQL prepared-task admission is atomic. Plan records currently require local governed storage. Operator evidence is attributed; release exposure and causal benefit are not inferred. |
+| Choose useful information for a decision (P14/N05) | Complete named decision authoring, robust choice check, checked joint observation reservation, unknown-check acknowledgement and original requests | Exact decimal losses/costs and all declared joint answers are checked within bounded question, effort, time and cost limits. Unknown work cannot silently repeat or refund spent allowance. No supplier, financial or other business action executes. |
+
+Authenticated native browser journeys exercised these direct and Copilot paths,
+interrupted replies and 320px layouts. Prepared-task admission additionally ran
+against the real pooled PostgreSQL backend. These are operating qualifications
+for the named paths, without hosted CI or paid-provider calls.
+
 Source review: October 1, 2026; selected journeys updated October 6. This is a working gap register against the
 [customer experience contract](./customer-experience-contract.md), not a claim
 that the entire platform has been inventoried or accepted. A working backend,

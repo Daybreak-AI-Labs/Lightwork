@@ -159,6 +159,17 @@ class _GovernedRecordValidationError(ValueError):
     """Controlled validation diagnostic safe to cross the provider boundary."""
 
 
+def _local_effect_guard(backend, effect_guard):
+    """Keep optional physical callbacks local and legacy backend calls unchanged."""
+    if effect_guard is None:
+        return {}
+    if not isinstance(backend, LocalGovernedRecordBackend):
+        raise GovernedRecordBackendError(
+            "physical effect callbacks require the local record backend"
+        )
+    return {"effect_guard": effect_guard}
+
+
 class GovernedRecordBackend(Protocol):
     """Narrow persistence seam used by :class:`GovernedRecordStore`."""
 
@@ -237,10 +248,10 @@ class LocalGovernedRecordBackend:
         return time.time()
 
     def save(
-        self, record, *, expected_revision=None, fence=None, max_records=None,
+        self, record, *, expected_revision=None, fence=None, max_records=None, effect_guard=None,
     ):
         def operation():
-            return self._save(record, expected_revision=expected_revision, fence=fence, max_records=max_records)
+            return self._save(record, expected_revision=expected_revision, fence=fence, max_records=max_records, effect_guard=effect_guard)
         if self._lookup is None:
             return operation()
         record_id = _valid_record_id(record.get("id"), self._store.prefix)
@@ -254,6 +265,7 @@ class LocalGovernedRecordBackend:
         expected_revision: int | None = None,
         fence: GovernedMutationFence | None = None,
         max_records: int | None = None,
+        effect_guard=None,
     ) -> dict[str, Any]:
         if fence is not None:
             raise GovernedRecordBackendError(
@@ -263,6 +275,7 @@ class LocalGovernedRecordBackend:
             return self._store.save(
                 record,
                 expected_revision=expected_revision,
+                effect_guard=effect_guard,
             )
         maximum = _capacity_limit(max_records)
         from .file_lock import cross_process_lock, ensure_private_directory
@@ -291,6 +304,7 @@ class LocalGovernedRecordBackend:
             return self._store.save(
                 record,
                 expected_revision=expected_revision,
+                effect_guard=effect_guard,
             )
 
     def load(self, record_id: str) -> dict[str, Any] | None:
@@ -314,11 +328,11 @@ class LocalGovernedRecordBackend:
         )
 
     def update(
-        self, record_id, mutate, *, expected_revision=None, metadata_only=False, fence=None,
+        self, record_id, mutate, *, expected_revision=None, metadata_only=False, fence=None, effect_guard=None,
     ):
         def operation():
             return self._update(record_id, mutate, expected_revision=expected_revision,
-                                metadata_only=metadata_only, fence=fence)
+                                metadata_only=metadata_only, fence=fence, effect_guard=effect_guard)
         if self._lookup is None:
             return operation()
         try:
@@ -330,7 +344,7 @@ class LocalGovernedRecordBackend:
             self.lookup_spec.keys(value)
         return self._lookup.mutate(record_id, lambda: self._update(
             record_id, validated_mutation, expected_revision=expected_revision,
-            metadata_only=metadata_only, fence=fence))
+            metadata_only=metadata_only, fence=fence, effect_guard=effect_guard))
 
     def _update(
         self,
@@ -340,6 +354,7 @@ class LocalGovernedRecordBackend:
         expected_revision: int | None = None,
         metadata_only: bool = False,
         fence: GovernedMutationFence | None = None,
+        effect_guard=None,
     ) -> dict[str, Any] | None:
         if fence is not None:
             raise GovernedRecordBackendError(
@@ -350,6 +365,7 @@ class LocalGovernedRecordBackend:
             mutate,
             expected_revision=expected_revision,
             metadata_only=metadata_only,
+            effect_guard=effect_guard,
         )
 
     def delete(self, record_id: str, *, expected_revision: int) -> bool:
@@ -2040,6 +2056,7 @@ class GovernedRecordStore:
         actor: str,
         fence: GovernedMutationFence | None = None,
         max_records: int | None = None,
+        effect_guard: Callable[[], None] | None = None,
     ) -> dict[str, Any]:
         runtime_metrics.increment(
             "lightwork_governed_record_ops_total", op="create",
@@ -2065,19 +2082,22 @@ class GovernedRecordStore:
             else _capacity_limit(max_records)
         )
         backend = self._backend()
+        guarded = _local_effect_guard(backend, effect_guard)
         if fence is None and maximum is None:
-            saved = backend.save(value, expected_revision=0)
+            saved = backend.save(value, expected_revision=0, **guarded)
         elif fence is not None and maximum is None:
             saved = backend.save(
                 value,
                 expected_revision=0,
                 fence=fence,
+                **guarded,
             )
         elif fence is None:
             saved = backend.save(
                 value,
                 expected_revision=0,
                 max_records=maximum,
+                **guarded,
             )
         else:
             saved = backend.save(
@@ -2085,6 +2105,7 @@ class GovernedRecordStore:
                 expected_revision=0,
                 fence=fence,
                 max_records=maximum,
+                **guarded,
             )
         return self._flush(
             saved,
@@ -2100,6 +2121,7 @@ class GovernedRecordStore:
         action: str,
         actor: str,
         fence: GovernedMutationFence | None = None,
+        effect_guard: Callable[[], None] | None = None,
     ) -> dict[str, Any] | None:
         runtime_metrics.increment(
             "lightwork_governed_record_ops_total", op="update",
@@ -2124,11 +2146,13 @@ class GovernedRecordStore:
             _queue_audit(current, action_name, actor_name)
 
         backend = self._backend()
+        guarded = _local_effect_guard(backend, effect_guard)
         if fence is None:
             saved = backend.update(
                 str(record_id or ""),
                 _mutate,
                 expected_revision=expected_revision,
+                **guarded,
             )
         else:
             saved = backend.update(
@@ -2136,6 +2160,7 @@ class GovernedRecordStore:
                 _mutate,
                 expected_revision=expected_revision,
                 fence=fence,
+                **guarded,
             )
         if saved is None:
             return None

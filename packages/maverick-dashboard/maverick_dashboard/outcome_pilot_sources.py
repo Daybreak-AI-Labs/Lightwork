@@ -183,12 +183,12 @@ def choices(request):
         coverage.append({"kind": "vendor", "status": "partial" if len(rows) > 200 else "current"})
     except Exception:
         coverage.append({"kind": "vendor", "status": "unavailable"})
-    specialists = [{"domain": s["domain"], "label": s.get("name") or s["domain"]}
+    specialists = [{"domain": s["domain"], "label": s.get("name") or s["domain"].replace("_", " ").title()}
                    for s in _deliverable_specs() if s.get("gate") and domain_suites_allowed(request, s["domain"])]
     return {"items": items, "coverage": coverage, "specialists": specialists}
 
 
-def prepare_task(request, body, context):
+def prepare_task(request, body, context, *, before_write=None):
     from maverick.domain import enabled_domains, suites_for_domain
 
     from .app import _deliverable_specs, _world
@@ -215,6 +215,20 @@ def prepare_task(request, body, context):
     identifier = world.lookup_processed_message(channel, key)
     if identifier is not None:
         return previous(identifier)
+    if before_write is not None:
+        from maverick.attachment_submissions import SubmissionStore
+
+        # The existing admission writer retains goal, blocked state, original
+        # marker and receipt in one native SQLite/PostgreSQL transaction.
+        receipt = SubmissionStore(world).create(
+            token="outcome-pilot-preparation:" + key,
+            fingerprint=digest([context, actor, body]), owner=actor,
+            title=body["title"], description=body["description"], domain=domain,
+            manifest=[], kind="outcome-pilot-preparation",
+            initial_status="blocked", initial_result=PREPARED,
+            processed_message={"channel": channel, "key": key},
+            before_create=lambda _connection: before_write())
+        return previous(receipt["goal_id"])
     identifier = world.create_goal(body["title"], body["description"], owner=actor, domain=domain)
     world.set_goal_status(identifier, "blocked", result=PREPARED)
     if not world.mark_message_processed(channel, key, goal_id=identifier):

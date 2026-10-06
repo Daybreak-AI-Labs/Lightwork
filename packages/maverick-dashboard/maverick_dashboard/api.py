@@ -1957,7 +1957,9 @@ def list_goals(
         if before_id is None:
             response.headers["Pagination-Next-Offset"] = str(offset + limit)
         response.headers["Pagination-Next-Before-Id"] = str(goals[-1].id)
-    return [_to_goal_out(g) for g in goals]
+    # Continuation follows scanned rows, including copied conversations whose
+    # original source access has since ended. Those rows expose no content.
+    return [_to_goal_out(g) for g in goals if can_access_goal(request, g)]
 
 
 @router.get("/goals/search-context")

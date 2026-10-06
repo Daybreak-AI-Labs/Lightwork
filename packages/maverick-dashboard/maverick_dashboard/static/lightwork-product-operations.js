@@ -21,6 +21,22 @@
   }
   if (search) search.addEventListener('input', filterControls);
   function button(text, parent, handler) { var control = node('button', text, parent); control.type = 'button'; control.disabled = busy; control.className = 'btn btn--ghost'; control.addEventListener('click', handler); return control; }
+  function protectedControls(parent, label, href, open) {
+    var started = generation, selection = JSON.stringify(context());
+    if (typeof open !== 'function') { var link = node('a', label, parent); link.href = href; link.className = 'btn btn--ghost'; return; }
+    button(label, parent, async function (event) {
+      var isCurrent = function () { return active(started) && JSON.stringify(context()) === selection; };
+      if (!isCurrent() || busy) return;
+      lock(true);
+      try {
+        var opened = await open(isCurrent);
+        if (!isCurrent()) return;
+        status.textContent = opened ? 'The complete controls are open; your entered choices were kept.' : 'The selection or your access changed. Review the current controls.';
+        if (opened) { var close = document.getElementById('mv-copilot-close'); if (close) close.click(); }
+      } catch (_) { if (isCurrent()) status.textContent = 'The controls could not be opened. Your current work is kept.'; }
+      finally { lock(false); }
+    });
+  }
   function context() {
     if (overrideSelection) return overrideSelection;
     var approval = window.location.hash.match(/^#approval-([1-9]\d*)$/);
@@ -129,6 +145,47 @@
       var entries = Object.entries(item);
       if (entries.length > maximumEntries) omitted(target);
       entries.slice(0, maximumEntries).forEach(function (entry) {
+        if (entry[0] === 'outcome_pilot_form') {
+          var pilotForm = entry[1];
+          if (!pilotForm || Array.isArray(pilotForm) || Object.keys(pilotForm).sort().join(',') !== 'action,case,context,pilot' ||
+              typeof pilotForm.context !== 'string' || !/^[a-f0-9]{64}$/.test(pilotForm.context) ||
+              !['plan','prepare','observe','review','costs','value','history'].includes(pilotForm.action) ||
+              typeof pilotForm.pilot !== 'string' || !/^(?:OPL-[a-f0-9]{48})?$/.test(pilotForm.pilot) ||
+              typeof pilotForm.case !== 'string' || !/^(?:[1-9]\d?|100)?$/.test(pilotForm.case)) return;
+          var pilotControl = window.LightworkOutcomePilots;
+          protectedControls(node('dd', undefined, list), 'Open complete pilot controls',
+            '/outcome-pilots' + (pilotForm.pilot ? '?pilot=' + encodeURIComponent(pilotForm.pilot) : ''),
+            pilotControl && typeof pilotControl.open === 'function' ? function (isCurrent) { return pilotControl.open(pilotForm, isCurrent); } : null);
+          return;
+        }
+        if (entry[0] === 'chat_message_action') {
+          var chatForm = entry[1];
+          if (!chatForm || Array.isArray(chatForm) || Object.keys(chatForm).sort().join(',') !== 'action,context,goal,source' ||
+              typeof chatForm.context !== 'string' || typeof chatForm.source !== 'string' ||
+              !/^[a-f0-9]{64}$/.test(chatForm.context || '') || !/^[a-f0-9]{64}$/.test(chatForm.source || '') ||
+              !Number.isSafeInteger(chatForm.goal) || chatForm.goal < 1 || !['retry','edit','branch'].includes(chatForm.action)) return;
+          var chatControl = window.LightworkChatMessageActions;
+          var chatLabel = {retry:'Try another answer', edit:'Edit and resend your message', branch:'Branch from a saved answer'}[chatForm.action];
+          protectedControls(node('dd', undefined, list), chatLabel, '/chat/goal/' + chatForm.goal,
+            chatControl && typeof chatControl.open === 'function' ? function (isCurrent) {
+              return chatControl.open(chatForm.context, chatForm.goal, chatForm.action, chatForm.source, isCurrent);
+            } : null);
+          return;
+        }
+        if (entry[0] === 'decision_evidence_author') {
+          var decisionForm = entry[1];
+          if (!decisionForm || Array.isArray(decisionForm) || Object.keys(decisionForm).sort().join(',') !== 'binding,context,review' ||
+              typeof decisionForm.context !== 'string' || typeof decisionForm.binding !== 'string' ||
+              !/^[a-f0-9]{64}$/.test(decisionForm.context || '') || !/^[a-f0-9]{64}$/.test(decisionForm.binding || '') ||
+              typeof decisionForm.review !== 'string' || !/^(?:SDE-[a-f0-9]{32})?$/.test(decisionForm.review)) return;
+          var decisionControl = window.LWDecisionEvidence;
+          protectedControls(node('dd', undefined, list), 'Open the complete decision form',
+            '/decision-evidence' + (decisionForm.review ? '?review=' + encodeURIComponent(decisionForm.review) : '') + '#sde-editor',
+            decisionControl && typeof decisionControl.openAuthor === 'function' ? function (isCurrent) {
+              return decisionControl.openAuthor(decisionForm, {isCurrent:isCurrent});
+            } : null);
+          return;
+        }
         if (entry[0] === 'channels_people') {
           var channelPeople = entry[1], channelStarted = generation, channelSelection = JSON.stringify(context());
           if (!channelPeople || Array.isArray(channelPeople) || Object.keys(channelPeople).sort().join(',') !== 'channel,context' ||
@@ -1145,6 +1202,9 @@
               : item.id === 'learning.run_joint_rules'
                 ? !!(window.LightworkJointRules && window.LightworkJointRules.renderReview &&
                      window.LightworkJointRules.renderReview(formHost, review.changes) === true)
+              : ['learning.pilot_prepare_task', 'learning.pilot_freeze_plan', 'learning.pilot_observe', 'learning.pilot_independent_review'].includes(item.id)
+                ? !!(window.LightworkOutcomePilots && window.LightworkOutcomePilots.renderReview &&
+                     window.LightworkOutcomePilots.renderReview(formHost, review.changes) === true)
               : item.id.startsWith('decisions.')
                 ? !!(window.LWDecisionEvidence && window.LWDecisionEvidence.renderReview &&
                      window.LWDecisionEvidence.renderReview(formHost, review.changes) === true)

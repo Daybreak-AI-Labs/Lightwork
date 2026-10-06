@@ -103,15 +103,19 @@ class ChatThreads:
         cursor = " AND t.id < ?" if before_id is not None else ""
         cursor_values = (int(before_id),) if before_id is not None else ()
         size = max(1, min(100, int(limit)))
+        receipt = self.store.for_goal(goal_id) if goal_id == binding.root_id else None
+        copied_root = goal_id if receipt and receipt["detail"].get("alternative") else -1
         rows = self._rows(
             "SELECT t.id,t.conversation_id,t.goal_id,t.role,t.content,t.ts "
             "FROM turns t JOIN goals g ON g.id=t.goal_id "
             "JOIN conversations c ON c.id=t.conversation_id "
             "WHERE t.conversation_id=? AND g.owner=? AND (g.id=? OR g.parent_id=?) "
-            f"AND g.id < ? AND {gs} AND {cs}{cursor} "
+            f"AND (g.id < ? OR (g.id=? AND t.id < (SELECT MAX(u.id) FROM turns u "
+            "WHERE u.conversation_id=t.conversation_id AND u.goal_id=g.id AND u.role='user'))) "
+            f"AND {gs} AND {cs}{cursor} "
             "AND t.role IN ('user','assistant') ORDER BY t.id DESC LIMIT ?",
             (binding.conversation_id, binding.owner, binding.root_id, binding.root_id,
-             goal_id, *gv, *cv, *cursor_values, size + 1),
+             goal_id, copied_root, *gv, *cv, *cursor_values, size + 1),
         )
         return list(reversed([Turn(r[0], r[1], r[2], r[3], self.store.open(r[4]), r[5])
                               for r in rows[:size]])), len(rows) > size
@@ -162,7 +166,7 @@ class ChatThreads:
                            for row in self.members(binding, connection=connection)):
             raise SubmissionConflict(_BUSY)
 
-    def record(self, connection, *, root_id, goal_id, owner, text):
+    def record(self, connection, *, root_id, goal_id, owner, text, prior=()):
         """Bind a newly admitted draft inside the goal/receipt transaction."""
         now = time.time()
         identity = f"{owner or 'local'}/{root_id}"
@@ -180,6 +184,14 @@ class ChatThreads:
         conversation_id = int(self._rows("SELECT c.id FROM conversations c WHERE "
                                         f"c.channel='web' AND c.user_id=? AND {scope}",
                                         (identity, *scoped), connection=connection)[0][0])
+        if prior:
+            if root_id != goal_id or len(prior) > 100:
+                raise SubmissionConflict("Copied history requires a new bounded conversation")
+            for turn in prior:
+                if set(turn) != {"role", "content", "at"} or turn["role"] not in {"user", "assistant"}:
+                    raise SubmissionConflict("Copied message history is invalid")
+                self.store.execute(connection, "INSERT INTO turns(conversation_id,goal_id,role,content,ts) "
+                    "VALUES(?,?,?,?,?)", (conversation_id, goal_id, turn["role"], self.store.seal(turn["content"]), turn["at"]))
         if root_id != goal_id and self.binding(root_id, connection=connection) is None:
             # Explicitly replying to a pre-chat task opens its conversation.
             # Merely viewing/resuming an ordinary API goal never does this.

@@ -73,6 +73,7 @@ class Adapter:
     recover: Callable[[Request, dict, dict, dict, str], Outcome | None] | None = None
     aliases: tuple[str, ...] = ()
     read_recovery: Callable[[Request, dict, dict, dict, str], Outcome | None] | None = None
+    review_max_bytes: int = 45000
 
 
 class StrictInput(BaseModel):
@@ -96,7 +97,7 @@ class PrepareInput(ContextInput):
 
 
 class RecoveryInput(StrictInput):
-    token: str = Field(min_length=1, max_length=64000)
+    token: str = Field(min_length=1, max_length=2097152)
 
 
 class ExecuteInput(RecoveryInput):
@@ -176,6 +177,7 @@ def _adapter_modules():
         product_operations_budget,
         product_operations_capability_assessments,
         product_operations_channel_people,
+        product_operations_chat_messages,
         product_operations_commitment_capability,
         product_operations_commitment_economic_alternatives,
         product_operations_commitments,
@@ -289,6 +291,7 @@ def _adapter_modules():
         product_operations_task_views,
         product_operations_connections,
         product_operations_channel_people,
+        product_operations_chat_messages,
         product_operations_consent_jobs,
         product_operations_notifications,
         product_operations_department_boards,
@@ -493,11 +496,11 @@ def prepare(request: Request, body: PrepareInput):
                 "arguments": arguments, "native": preview.native,
                 "operation_id": secrets.token_hex(16), "expires_at": time.time() + TTL}
     encoded = json.dumps(material, sort_keys=True, allow_nan=False)
-    if len(encoded.encode("utf-8")) > 45000:
+    if len(encoded.encode("utf-8")) > min(adapter.review_max_bytes, 1400000):
         raise HTTPException(422, "This review is too large for Copilot. Your draft is kept; use the native editor for the complete content.")
     try:
         token = crypto_at_rest.seal_to_str(encoded)
-        if not crypto_at_rest.is_sealed_str(token):
+        if not crypto_at_rest.is_sealed_str(token) or len(token) > 2097152:
             raise ValueError("sealed preparation required")
     except Exception as exc:
         raise HTTPException(503, "This review could not be prepared securely. Use the native controls or refresh later.") from exc

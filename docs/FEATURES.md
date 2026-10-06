@@ -6,7 +6,7 @@
   removal in Your paired devices. Mobile/watch/vision settings store the
   connection securely. See [scope, retention and qualification](device-pairing.md).
 
-What Lightwork **does today**, grounded in the code on `main`. This is the
+What Lightwork **does today**, grounded in the current repository code. This is the
 catalogue of built features and tools; the forward backlog (what's *not* done
 yet) lives in [`ROADMAP.md`](./ROADMAP.md). When a roadmap item ships, it moves
 here.
@@ -24,6 +24,32 @@ here.
   `[dashboard] local_owner_setup`; see [first run](getting-started.md#first-run).
 
 ## Agent kernel & orchestration
+
+- **Conversation alternatives** — Try again, Edit and resend, and Branch from
+  here open a complete review before starting a separate conversation. The
+  original stays intact; the selected prior messages, answered clarifications,
+  files and named account restrictions are retained. Answer only is the default;
+  repeating connected actions requires a separate choice and review. Settings
+  and the installer expose `[chat_message_actions] enabled`. Copilot opens the
+  same protected form. Interrupted admission reads its original receipt without
+  repeating work; copied content keeps its sources' current access rules.
+
+- **Complete workflow-pilot controls** — ordinary forms and Copilot prepare
+  unstarted tasks, freeze a paired plan, record time and complete cost evidence,
+  and obtain an independent review. Each write has a complete consequence review
+  and a pure original-outcome reader. Prepared tasks are admitted atomically on
+  SQLite and PostgreSQL; pilot-plan creation currently requires the local
+  governed-record backend. Task start and release publication remain separate.
+  Reported measurements do not by themselves establish causal improvement.
+
+- **Decision checks and joint observation planning** — Decision evidence accepts
+  named possible situations, choices, exact decimal losses and observation costs.
+  It checks whether a choice stays acceptable across every remaining declared
+  situation, then finds the least-cost joint observation batch whose possible
+  answers each support a choice, within the entered limits. UI and Copilot share
+  check, reservation, acknowledgement and original-outcome controls. The bounded
+  model supports eight facts, sixteen cases, four choices and 128 situations;
+  it records operator premises and requests, without executing business actions.
 
 - **Employee companion preview** - default-off `[features] employee_companions`
   adds an explicitly enrolled employee's private conversation and workspace-admin

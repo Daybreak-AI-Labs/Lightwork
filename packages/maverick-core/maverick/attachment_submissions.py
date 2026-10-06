@@ -25,6 +25,16 @@ class SubmissionConflict(ValueError):
     pass
 
 
+def _preparation_inputs(status, result, marker):
+    if status not in {"draft", "blocked"} or (result is not None and not isinstance(result, str)):
+        raise SubmissionConflict("Choose a draft or an explicitly prepared, unstarted task")
+    if marker is not None and (
+            not isinstance(marker, dict) or set(marker) != {"channel", "key"}
+            or any(not isinstance(value, str) or not value or len(value) > 200
+                   or any(ord(char) < 32 for char in value) for value in marker.values())):
+        raise SubmissionConflict("Use the exact original task preparation identity")
+
+
 @dataclass(frozen=True)
 class AttachmentAdmission:
     """Metadata admission preserves an existing stored path verbatim."""
@@ -121,8 +131,11 @@ class SubmissionStore:
 
     def create(self, *, token, fingerprint, owner, title, description, manifest,
                parent_id=None, domain="", project_id=None, kind="chat",
-               chat_text=None, chat_root_id=None, connection_references=None):
+               chat_text=None, chat_root_id=None, connection_references=None,
+               chat_prior=(), attachment_records=(), submission_detail=None, before_create=None,
+               initial_status="draft", initial_result=None, processed_message=None):
         from .template_connections import packed
+        _preparation_inputs(initial_status, initial_result, processed_message)
         selection = packed(owner, connection_references or [])
         key = self.token_key(token, owner)
         with self.transaction("submission:" + key) as connection:
@@ -132,6 +145,9 @@ class SubmissionStore:
                     raise SubmissionConflict("Submission key already belongs to different content")
                 prior["created"] = False
                 return prior
+            if before_create is not None:
+                before_create(connection)
+            self._prepared_marker(connection, processed_message)
             chat = None
             if chat_text is not None:
                 from .chat_threads import ChatThreads
@@ -151,7 +167,10 @@ class SubmissionStore:
                 if self.execute(connection, parent_sql, parent_values).fetchone() is None:
                     raise SubmissionConflict("Parent task is unavailable in this tenant")
             columns = "parent_id,title,description,status,created_at,updated_at,owner,domain,project_id,connection_selection"
-            values = [parent_id, self.seal(title), self.seal(description), "draft", now, now, owner, domain, project_id, self.seal(selection)]
+            values = [parent_id, self.seal(title), self.seal(description), initial_status, now, now, owner, domain, project_id, self.seal(selection)]
+            if initial_result is not None:
+                columns += ",result"
+                values.append(self.seal(initial_result))
             if not self.sqlite:
                 columns += ",tenant_id"
                 values.append(self.tenant)
@@ -159,15 +178,49 @@ class SubmissionStore:
             cursor = self.execute(connection, sql + ("" if self.sqlite else " RETURNING id"), tuple(values))
             goal_id = int(cursor.lastrowid if self.sqlite else cursor.fetchone()[0])
             detail = {"manifest": manifest, "kind": kind,
-                      "message": "Submission admitted as a draft; preparing attachments."}
+                      "message": ("Pilot task prepared; no work has started. Freeze its pilot plan before starting it separately."
+                                  if initial_status == "blocked" else "Submission admitted as a draft; preparing attachments.")}
+            if processed_message is not None:
+                detail["processed_message"] = dict(processed_message)
+            if submission_detail:
+                if set(submission_detail) & set(detail):
+                    raise SubmissionConflict("Submission metadata cannot replace native admission state")
+                detail.update(submission_detail)
             if chat is not None:
                 detail["conversation_id"] = chat.record(connection, root_id=chat_root_id or goal_id,
-                                                       goal_id=goal_id, owner=owner, text=chat_text)
+                                                       goal_id=goal_id, owner=owner, text=chat_text,
+                                                       prior=chat_prior)
+            if attachment_records:
+                self.admit(goal_id, attachment_records, connection=connection, verify_existing=True)
+            self._prepared_marker(connection, processed_message, goal_id=goal_id, now=now)
             self.execute(connection, "INSERT INTO attachment_submissions "
                          "(submission_key,tenant_id,owner,goal_id,fingerprint,state,detail,updated_at) "
-                         "VALUES(?,?,?,?,?,'draft',?,?)",
-                         (key, self.tenant, owner, goal_id, fingerprint, self.seal(json.dumps(detail)), now))
-            return {**self._receipt(connection, key), "created": True}
+                         "VALUES(?,?,?,?,?,?,?,?)",
+                         (key, self.tenant, owner, goal_id, fingerprint,
+                          "admitted" if initial_status == "blocked" else "draft", self.seal(json.dumps(detail)), now))
+            result = {**self._receipt(connection, key), "created": True}
+            if before_create is not None:
+                before_create(connection)
+            return result
+
+    def _prepared_marker(self, connection, marker, *, goal_id=None, now=None):
+        if marker is None:
+            return
+        if goal_id is None:
+            scope, scoped = ("1=1", ()) if self.sqlite else self.scope()
+            existing = self.execute(connection, "SELECT goal_id FROM processed_messages "
+                f"WHERE channel=? AND external_id=? AND {scope}",
+                (marker["channel"], marker["key"], *scoped)).fetchone()
+            if existing is not None:
+                raise SubmissionConflict("This original task preparation is already retained. Read its original outcome; no new task was created.")
+            return
+        columns = "channel,external_id,goal_id,seen_at"
+        values = [marker["channel"], marker["key"], goal_id, now]
+        if not self.sqlite:
+            columns += ",tenant_id"
+            values.append(self.tenant)
+        self.execute(connection, f"INSERT INTO processed_messages({columns}) "
+            f"VALUES({','.join('?' for _ in values)})", tuple(values))
 
     def update(self, key, *, state, message, coverage=None):
         if state not in {"draft", "admitted", "ready", "rejected"}:

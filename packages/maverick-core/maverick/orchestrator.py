@@ -986,9 +986,11 @@ async def _apply_brief_enrichments(
     # gaps and pre-acquire matching catalog skills before the swarm
     # starts, so the agent's first turn already has them. Provider egress,
     # MCP acquisition and generated tools retain separate authority gates.
+    from .chat_message_actions import answer_only_runtime, require_dispatch_sources
+    require_dispatch_sources()
     with _enrich("self-learning preflight"):
         from . import self_learning
-        if self_learning.enabled() and self_learning.settings()["preflight"]:
+        if not answer_only_runtime() and self_learning.enabled() and self_learning.settings()["preflight"]:
             acquired = await self_learning.preflight(
                 llm, f"{goal.title}\n{goal.description or ''}", budget,
                 blackboard,

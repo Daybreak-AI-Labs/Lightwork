@@ -1201,6 +1201,18 @@ def get_features() -> dict:
     }
 
 
+def get_chat_message_actions() -> dict:
+    """Conversation alternatives respect both workspace and organization controls."""
+    workspace = load_config().get("chat_message_actions", {})
+    organization = load_global_config().get("chat_message_actions", {})
+    return {"enabled": (
+        not config_source_errors(include_tenant=True)
+        and isinstance(workspace, dict) and isinstance(organization, dict)
+        and workspace.get("enabled", True) is True
+        and organization.get("enabled", True) is True
+    )}
+
+
 def get_first_outcome() -> dict:
     """Return the ``[first_outcome]`` section written by setup: which
     department's sample first task the user picked and whether its sample

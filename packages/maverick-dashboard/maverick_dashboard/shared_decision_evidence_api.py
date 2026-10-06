@@ -21,7 +21,7 @@ PURPOSE = "lightwork.shared-decision-review.v1"
 class ReviewIn(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     context: str = Field(pattern=r"^[a-f0-9]{64}$")
-    action: str = Field(pattern=r"^(create|edit|consent|withdraw|refresh|acquire|answer|remove)$")
+    action: str = Field(pattern=r"^(create|edit|consent|withdraw|refresh|acquire|answer|remove|qualify|acquire_batch|acknowledge)$")
     arguments: dict
     id: str | None = Field(default=None, pattern=r"^SDE-[a-f0-9]{32}$")
 
@@ -60,6 +60,16 @@ def page(request: Request):
 @router.get("/api/v1/decision-evidence")
 def listing(request: Request):
     return _response(_call(native.listing, request))
+
+
+@router.get("/api/v1/decision-evidence/history")
+def history(request: Request):
+    return _response(_call(native.historical_requests, request))
+
+
+@router.get("/api/v1/decision-evidence/author")
+def author(request: Request, review: str = ""):
+    return _response(_call(native.author_handoff, request, review))
 
 
 @router.get("/api/v1/decision-evidence/{identifier}")
