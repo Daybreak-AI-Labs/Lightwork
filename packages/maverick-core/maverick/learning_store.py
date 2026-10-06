@@ -90,8 +90,10 @@ def _sqlite_path() -> Path:
     (``data_dir`` scopes to the active tenant) -- computed at CALL time, so
     env/tenant changes and per-test isolation apply, unlike the import-frozen
     ``world_model.DEFAULT_DB`` constant."""
+    from . import practice
     from .paths import data_dir
-    return data_dir("world.db")
+    # Practice runs learn nothing into the real world model.
+    return practice.world_path() if practice.active() else data_dir("world.db")
 
 
 def _pg_dsn() -> str:

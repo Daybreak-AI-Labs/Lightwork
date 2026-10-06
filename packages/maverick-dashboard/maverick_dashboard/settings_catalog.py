@@ -352,6 +352,11 @@ SETTINGS: tuple[Setting, ...] = (
       "Screen agent answers for leaked secrets or harmful content.",
       "toggle", "Safety", True, "maverick.config", weaker=False,
       warning="Answers will be shown without being checked for leaked secrets or harmful content."),
+    S("practice", "enable", "Offer practice mode",
+      "Let people switch to a separate practice workspace to try tasks, specialists and approvals. In "
+      "practice nothing is sent, paid or changed outside practice, and nothing counts as real work. AI "
+      "use still counts toward spending limits.", "toggle", "Safety", True, "maverick.practice",
+      aliases="practice sandbox try test drive safe mode training demo"),
     S("safety", "compartments", "Share blocked threats across a team of agents",
       "When one agent's check blocks a threat, the other agents on the same task are protected from it too.",
       "toggle", "Safety", False, "maverick.config"),

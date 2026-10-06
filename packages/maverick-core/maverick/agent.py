@@ -3629,6 +3629,13 @@ class Agent:
                 )
             raise
 
+    def _practice_denial(self, name: str, args: dict) -> str | None:
+        """Record, instead of run, a tool that leaves the practice workspace."""
+        from . import practice
+        if not practice.active() or practice.tool_allowed(name):
+            return None
+        return practice.record("tool", name, _audit_summary(args), goal_id=self.ctx.goal_id)
+
     async def _run_tool(self, name: str, args: dict) -> str:
         # Add to the action sequence only after all pre-dispatch checks pass.
         # A refused call must not masquerade as an executed action in credit,
@@ -3721,7 +3728,11 @@ class Agent:
         )
         if _governance_refusal is not None:
             return _NotExecutedToolResult(_governance_refusal)
-        if (d := await self._ifc_denial(name, args)) is not None:
+        # Practice mode runs last: after every approval and policy check has
+        # had its say, a tool that would reach outside the practice workspace
+        # is recorded in the practice outbox instead of running.
+        if ((d := await self._ifc_denial(name, args)) is not None
+                or (d := self._practice_denial(name, args)) is not None):
             return _NotExecutedToolResult(d)
 
         # PreToolUse hooks: any registered hook can BLOCK the call by

@@ -228,6 +228,10 @@ class DeliveryStore:
 
 
 def dispatch(principal: str, inbox: dict, preferences: dict) -> None:
+    from . import practice
+    if practice.active():  # practice mode: personal messages are recorded, never sent
+        practice.record("personal message", "Slack or Telegram message", {"items": len(inbox.get("items") or [])})
+        return
     from .personal_identity import linked_channels, principal_current
     settings = _settings()
     if preferences["mode"] == "off" or not principal_current(principal):

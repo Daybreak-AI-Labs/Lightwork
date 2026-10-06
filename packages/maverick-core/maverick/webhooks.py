@@ -371,6 +371,11 @@ def fire(
     retried delivery. Returns the number of deliveries started; 0 when nobody
     is subscribed (silent no-op for users who haven't opted in).
     """
+    from . import practice
+
+    if practice.active():  # practice mode: recorded, never posted
+        practice.record("webhook", event, {"urls": len(urls or [])})
+        return 0
     envelope = build_envelope(event, payload, record=record, link=link, occurred_at=occurred_at)
     # Serialize defensively: fire() promises never to raise into the run
     # loop, so a non-serializable payload must degrade to a no-op, not

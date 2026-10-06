@@ -232,7 +232,7 @@
 <link rel="preload" as="script" href="{{ asset('lightwork-ui.js') }}">
 {% include "_journey_i18n.html" %}
 </head>
-<body class="chat-shell theme-{{ theme or 'dark' }} font-{{ font or 'default' }} density-{{ density or 'comfortable' }} glass-{{ glass or 'off' }}" data-global-admin="{{ '1' if viewer_global_admin else '0' }}">
+<body class="chat-shell {% if practice_mode %}is-practice {% endif %}theme-{{ theme or 'dark' }} font-{{ font or 'default' }} density-{{ density or 'comfortable' }} glass-{{ glass or 'off' }}" data-global-admin="{{ '1' if viewer_global_admin else '0' }}">
 {% if lang and lang != 'en' %}<aside class="locale-coverage" aria-label="{{ ut("Translation coverage") }}" lang="{{ ul("Translation coverage") }}">{{ ui('Some controls are translated. Other sections remain in English. These draft translations need language and consequence-copy review.') }} {{ ui('User-written content is kept in its original language.') }}</aside>{% endif %}
   <a class="skip-link" href="#content">{{ ui("Skip to content") }}</a>
   {% include "_icon_sprite.html" %}
@@ -312,6 +312,7 @@
   {% include "_shortcuts.html" %}
   <main id="content" tabindex="-1">
     {% include "_halt_banner.html" %}
+    {% include "_practice_banner.html" %}
     {% include "_service_status_banner.html" %}{% if nav_mode == 'areas' %}{% include "_area_nav.html" %}{% endif %}
     {# In the job-named navigation, chat pages can be pinned like any other
        page (the base shell's "Pin to sidebar"; lightwork-pins.js binds it). #}
@@ -378,6 +379,7 @@
   <script src="{{ asset('lightwork-ui.js') }}"></script>
   <script src="{{ asset('lightwork-markdown.js') }}"></script>
   <script src="{{ asset('lightwork-voice.js') }}" defer></script>
+  <script src="{{ asset('lightwork-practice.js') }}" defer></script>
   <script src="{{ asset('lightwork-navfinder.js') }}" defer></script>
   <script src="{{ asset('lightwork-shortcuts.js') }}" defer></script>
   <script src="{{ asset('lightwork-pins.js') }}" defer></script>

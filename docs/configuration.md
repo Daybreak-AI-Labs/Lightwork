@@ -921,6 +921,9 @@ client_token = ""             # MAVERICK_PROXY_CLIENT_TOKEN (sealed when set on 
 jd_hiring = true              # Agent Factory: draft or match agents from a job description
 require_passing_tests = true  # changed instructions publish only after every saved test passes (or with a recorded reason)
 
+[practice]
+enable = true                 # offer practice mode: a separate practice workspace where nothing is sent, paid or changed
+
 [analytics]
 task_questions = true         # Insights page questions (need the dashboard's "duckdb" extra)
 usability_survey = false      # optional ease-of-use survey (SUS + one question after top tasks); answers stay local

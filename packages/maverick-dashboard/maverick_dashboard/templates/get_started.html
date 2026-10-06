@@ -190,6 +190,18 @@
   </section>
   {% endif %}
 
+  {% if can_operate and practice_available and not practice_mode %}
+  {# ONB-4: a safe place to try tasks, specialists and approvals. #}
+  <section class="panel gs__practice" aria-labelledby="gs-practice-title" style="margin-bottom:var(--space-5)">
+    <h2 id="gs-practice-title">Practice first, without real effects</h2>
+    <p>Practice mode gives you a separate place to try tasks, specialists and approvals. Nothing is sent, paid or
+      changed outside practice, and nothing there counts as real work. A marker stays on every screen until you
+      choose Back to live.</p>
+    <button type="button" class="btn" data-practice-start data-practice-status="gs-practice-status">Start practice mode</button>
+    <p id="gs-practice-status" role="status" aria-live="polite"></p>
+  </section>
+  {% endif %}
+
   {% macro check_rows(report) %}
       <ul class="gs__checks">
         {% for check in report.checks %}

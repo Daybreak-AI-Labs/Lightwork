@@ -241,6 +241,7 @@ KNOWN_SCHEMA: dict[str, set[str] | None] = {
     # Agent Factory: JD hiring (maverick.jd_hiring) and the publish gate
     # (maverick.agent_publish_policy).
     "agent_factory": {"jd_hiring", "require_passing_tests"},
+    "practice": {"enable"},
     "first_outcome": {"department", "sample_workspace_created"},
     # Work discovery is a high-trust client-controlled sensor.  Keep this
     # section fixed-key so misspelled retention/privacy knobs do not silently
@@ -723,6 +724,7 @@ _BOOL_KEYS: dict[str, set[str]] = {
     },
     "analytics": {"mcp_client_language", "task_questions", "usability_survey"},
     "agent_factory": {"jd_hiring", "require_passing_tests"},
+    "practice": {"enable"},
     "self_learning": {
         "preflight",
         "create_tools",

@@ -278,6 +278,11 @@ def send_email(to: str, subject: str, text_body: str, *, html_body: str | None =
     from email.message import EmailMessage
     from email.utils import formatdate, make_msgid
 
+    from . import practice
+
+    if practice.active():  # practice mode: recorded, never sent
+        practice.record("email", "Email", {"to": to, "subject": subject})
+        return False
     mail = _email_config(cfg)
     recipient = " ".join(str(to or "").split())
     if not recipient or "@" not in recipient:
@@ -435,6 +440,11 @@ def notify(
     straight through, and with batching unconfigured this is a no-op. When an
     item is queued for a later batch, the call returns 0 (fired *now*).
     """
+    from . import practice
+
+    if practice.active():  # practice mode: recorded, never sent
+        practice.record("alert", title, {"body": body, "priority": priority})
+        return 0
     cfg = _load_config()
     # Normalize: backend names are user-typed (config/TOML or the `backends`
     # arg) and matched case-sensitively in _dispatch ("ntfy"/"discord"/...), so

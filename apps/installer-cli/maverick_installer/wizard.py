@@ -1472,6 +1472,7 @@ def pick_capabilities() -> dict[str, Any]:
         default=True,
     )
     require_passing_tests = pick_agent_publish_gate()
+    practice_mode = pick_practice_mode()
     return {
         "computer_use": use_computer,
         "browser": use_browser,
@@ -1482,7 +1483,23 @@ def pick_capabilities() -> dict[str, Any]:
         "tool_exposure": tool_exposure,
         "jd_hiring": jd_hiring,
         "require_passing_tests": require_passing_tests,
+        "practice_mode": practice_mode,
     }
+
+
+def pick_practice_mode() -> bool:
+    """Offer practice mode. ON by default.
+
+    People can switch to a separate practice workspace to try tasks,
+    specialists and approvals; anything that would leave Lightwork is
+    recorded instead of sent, and a marker shows on every screen. Written
+    under ``[practice]`` as ``enable`` only when turned off.
+    """
+    return _q_confirm(
+        "Offer practice mode? People can try tasks, specialists and approvals in "
+        "a separate practice workspace where nothing is sent, paid or changed.",
+        default=True,
+    )
 
 
 def pick_agent_publish_gate() -> bool:
@@ -10195,6 +10212,8 @@ def write_config(
     # JD hiring lives under [agent_factory] (kernel: maverick.jd_hiring).
     jd_hiring = bool(capability_config.pop("jd_hiring", True))
     require_passing_tests = bool(capability_config.pop("require_passing_tests", True))
+    # Practice mode lives under [practice] (kernel: maverick.practice), written only when off.
+    practice_mode = bool(capability_config.pop("practice_mode", True))
     # Tool exposure lives under [tools] (kernel: maverick.agent via
     # config.get_tool_exposure); "core" is the default, so only "full" is
     # written (write-only-on-divergence, like the other [tools] keys).
@@ -10203,6 +10222,7 @@ def write_config(
 
     lines += _cfg_capabilities(capability_config, embedded_flash)
     lines += _cfg_agent_factory(jd_hiring, require_passing_tests)
+    lines += [] if practice_mode else ["", "[practice]", "enable = false"]
     lines += _cfg_suites(suites)
     lines += _cfg_license(license_cfg)
     lines += _cfg_advanced(advanced, providers)

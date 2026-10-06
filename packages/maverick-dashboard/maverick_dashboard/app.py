@@ -1534,6 +1534,13 @@ from .in_app_routes import router as in_app_router  # noqa: E402
 
 app.include_router(in_app_router)
 app.include_router(first_outcome_router)
+from . import practice_mode  # noqa: E402
+
+# ONB-4: a person's practice session runs in the separate practice workspace,
+# with a marker on every screen and live changes refused until Back to live.
+app.include_router(practice_mode.router)
+app.middleware("http")(practice_mode.middleware)
+templates.context_processors.append(practice_mode.context)
 from .billing_invoice_api import router as billing_invoice_router  # noqa: E402
 from .channel_check_api import router as channel_check_router  # noqa: E402
 from .dsar_export_handoff_api import router as dsar_export_handoff_router  # noqa: E402
