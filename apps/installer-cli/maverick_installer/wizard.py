@@ -5309,6 +5309,11 @@ def pick_advanced() -> dict[str, Any]:
             "disagreement is resolved or a human approves.",
             default=False,
         ),
+        "confirm_plan": _q_confirm(
+            "Show the plan before acting? Before a task's first action that could reach "
+            "outside Lightwork, show its plan in Approvals and wait for a person.",
+            default=False,
+        ),
         "headless_assume": _q_confirm(
             "Autonomous (headless) mode? When no human is available to answer, the "
             "agent states a reasonable assumption and continues instead of stalling "
@@ -8688,11 +8693,14 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
         lines.append("")
         lines.append("[connector_limits]")
         lines.append(f"max_attempts = {int(advanced['connector_max_attempts'])}")
-    if advanced.get("autonomy_gate") or advanced.get("headless_assume"):
+    if advanced.get("autonomy_gate") or advanced.get("headless_assume") or advanced.get("confirm_plan"):
         lines.append("")
         lines.append("[autonomy]")
         if advanced.get("autonomy_gate"):
             lines.append("enable = true")
+        # AI-3: a person confirms the plan before the first outside action.
+        if advanced.get("confirm_plan"):
+            lines.append("confirm_plan = true")
         # Independent axis: assume-and-proceed instead of blocking on ask_user.
         if advanced.get("headless_assume"):
             lines.append("headless_assume = true")

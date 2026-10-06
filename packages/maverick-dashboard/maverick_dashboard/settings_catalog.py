@@ -428,6 +428,12 @@ SETTINGS: tuple[Setting, ...] = (
     S("autonomy", "enable", "Extra checks on uncertain work",
       "When agents disagree or are unsure, double-check the answer and tighten what risky tools may do.",
       "toggle", "Safety", False, "maverick.autonomy", env=("MAVERICK_AUTONOMY_GATE",)),
+    S("autonomy", "confirm_plan", "Show the plan before acting",
+      "Before a task's first action that could reach outside Lightwork (a message, a payment, a change in a "
+      "connected system or a command), show its plan, first action and spending cap in Approvals and wait. "
+      "Approve to carry on, reject to stop before anything runs, or send it back with what to change.",
+      "toggle", "Safety", False, "maverick.autonomy",
+      aliases="plan before acting confirm plan review plan approve plan"),
     S("autonomy", "headless_assume", "Carry on when nobody can answer",
       "When no person is available to answer a question, let the agent make a reasonable assumption instead of waiting.",
       "toggle", "Safety", False, "maverick.autonomy", env=("MAVERICK_AUTONOMOUS",), weaker=True,

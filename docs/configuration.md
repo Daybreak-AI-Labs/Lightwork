@@ -921,6 +921,9 @@ client_token = ""             # MAVERICK_PROXY_CLIENT_TOKEN (sealed when set on 
 jd_hiring = true              # Agent Factory: draft or match agents from a job description
 require_passing_tests = true  # changed instructions publish only after every saved test passes (or with a recorded reason)
 
+[autonomy]
+confirm_plan = false          # show the plan in Approvals and wait before a task's first action that reaches outside Lightwork
+
 [practice]
 enable = true                 # offer practice mode: a separate practice workspace where nothing is sent, paid or changed
 

@@ -2085,6 +2085,9 @@ def get_autonomy() -> dict:
 
     return {
         "enable": bool(cfg.get("enable", False)),
+        # AI-3: show the plan and wait for a person before a task's first
+        # action with an outside effect. Independent of ``enable``; off by default.
+        "confirm_plan": cfg.get("confirm_plan", False) is True,
         "min_confidence": _clamp01("min_confidence", 0.5),
         "disagreement_high": _clamp01("disagreement_high", 0.5),
         "escalate_verification": bool(cfg.get("escalate_verification", True)),

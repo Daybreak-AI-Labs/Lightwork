@@ -405,6 +405,21 @@ def test_headless_assume_writes_and_is_read(tmp_path, monkeypatch):
     assert autonomy.autonomy_enabled() is False
 
 
+def test_confirm_plan_writes_and_is_read(tmp_path, monkeypatch):
+    """Rule-6 loop (AI-3): the wizard's show-the-plan toggle writes [autonomy]
+    confirm_plan, and the kernel reads it back independently of the gate."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.delenv("MAVERICK_AUTONOMY_GATE", raising=False)
+    cfg_dir = tmp_path / ".maverick"
+    cfg_dir.mkdir(parents=True, exist_ok=True)
+    cfg = _write(cfg_dir, monkeypatch, {"confirm_plan": True})
+    assert tomllib.loads(cfg)["autonomy"] == {"confirm_plan": True}
+
+    from maverick import autonomy
+    assert autonomy.confirm_plan_enabled() is True
+    assert autonomy.autonomy_enabled() is False
+
+
 def test_governed_actions_writes_and_is_read(tmp_path, monkeypatch):
     """Rule-6 loop: the wizard's governed-actions toggle writes [actions] enable,
     and the kernel's lineage gate reads it back."""

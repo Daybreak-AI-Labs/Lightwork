@@ -16,6 +16,7 @@ import logging
 import os
 import re
 import secrets as _secrets
+import threading
 import time
 import uuid
 from dataclasses import dataclass
@@ -304,6 +305,9 @@ _STEP_BUDGET_WARNING = _step_budget_warning_setting()
 
 # How many of an agent's recent tool calls speculative reads predict from.
 _SPECULATION_HISTORY = 20
+# AI-3: one plan decision per task run, shared by every agent in it.
+_PLAN_DECISIONS: dict[tuple[int, int], bool] = {}
+_PLAN_DECISIONS_LOCK = threading.Lock()
 
 # W1-44: how many blackboard entries posted by OTHER agents since this agent's
 # last tool-running turn are appended to that turn's tool_results message, so
@@ -3629,6 +3633,53 @@ class Agent:
                 )
             raise
 
+    def _plan_summary(self, name: str, args: dict) -> str:
+        """What a person reviews before the first action: the plan so far, the
+        first action and the task's spending cap (a cap, not an estimate)."""
+        steps = []
+        try:
+            for entry in self.ctx.blackboard.by_kind("plan")[-8:]:
+                brief = str(entry.content).split("brief=", 1)[-1].strip()
+                if brief and brief not in steps:
+                    steps.append(brief[:200])
+        except Exception:  # an unreadable plan is described as missing
+            steps = []
+        plan = "; ".join(f"{i}. {step}" for i, step in enumerate(steps, 1)) or "No written plan was recorded."
+        cap = getattr(self.ctx.budget, "max_dollars", None)
+        return (f"Lightwork wants to start acting on this task. Plan so far: {plan} "
+                f"First action: {name} ({_audit_summary(args, 160)}). "
+                + (f"Spending cap for this task: ${cap:.2f}. " if isinstance(cap, int | float) else "")
+                + "Approve to let it carry on, reject to stop before anything runs, or send it back "
+                  "with what to change.")
+
+    async def _plan_denial(self, name: str, args: dict) -> str | None:
+        """Ask once per task run, before the first action with an outside effect."""
+        from . import practice
+        from .autonomy import confirm_plan_enabled
+        if practice.tool_allowed(name) or not confirm_plan_enabled():
+            return None
+        key = (int(getattr(self.ctx, "goal_id", 0) or 0), int(getattr(self.ctx, "episode_id", 0) or 0))
+        with _PLAN_DECISIONS_LOCK:
+            decided = _PLAN_DECISIONS.get(key)
+        if decided is None:
+            from .safety.consent import require_consent
+            try:
+                verdict = await asyncio.to_thread(
+                    require_consent, "confirm_plan", risk="high", scope=f"goal:{key[0]}",
+                    detail=self._plan_summary(name, args), provenance="plan",
+                    allow_auto_approve=False, consult_ledger=False)
+                decided = bool(verdict.granted)
+            except Exception:  # an unavailable decision is a refusal
+                decided = False
+            with _PLAN_DECISIONS_LOCK:
+                decided = _PLAN_DECISIONS.setdefault(key, decided)
+                if len(_PLAN_DECISIONS) > 10000:
+                    _PLAN_DECISIONS.pop(next(iter(_PLAN_DECISIONS)))
+        if decided:
+            return None
+        return ("The plan was not confirmed, so nothing ran. Do not take any action. Finish by telling the "
+                "person what you planned to do, so they can change the request and start again.")
+
     async def _practice_denial(self, name: str, args: dict) -> str | None:
         """Record, instead of run, a tool that leaves the practice workspace.
 
@@ -3734,7 +3785,10 @@ class Agent:
             return _NotExecutedToolResult(d)
 
         # Autonomy servo (Loop 2): low run-trust tightens the risk ceiling.
-        if (d := self._autonomy_denial(name, cap)) is not None:
+        # AI-3: with [autonomy] confirm_plan on, a person confirms the plan
+        # before the task's first action that could reach outside Lightwork.
+        if ((d := self._autonomy_denial(name, cap)) is not None
+                or (d := await self._plan_denial(name, args)) is not None):
             return _NotExecutedToolResult(d)
 
         # Org oversight control plane (enterprise): policy DENY or REQUIRE_HUMAN
