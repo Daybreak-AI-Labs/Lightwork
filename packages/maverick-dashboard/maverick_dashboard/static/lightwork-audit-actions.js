@@ -113,8 +113,8 @@
     var separate = document.getElementById('audit-maintenance-separate'); if (separate) separate.hidden = !value.separate_copy_available;
     // Loaded: the first-load line goes; a message from an action stays.
     if (message.textContent === loadingText) say('');
-    if (!value.reviews.length) saved.appendChild(window.mvEmpty('No maintenance reviews saved yet',
-      'Encryption and storage-copy reviews you start above are kept here for this account and workspace.', null, {compact: true}));
+    if (!value.reviews.length) saved.appendChild(window.mvEmpty((window.LightworkI18n ? window.LightworkI18n.text('No maintenance reviews saved yet') : 'No maintenance reviews saved yet'),
+      (window.LightworkI18n ? window.LightworkI18n.text('Encryption and storage-copy reviews you start above are kept here for this account and workspace.') : 'Encryption and storage-copy reviews you start above are kept here for this account and workspace.'), null, {compact: true}));
     value.reviews.forEach(function (row) {
       var line = el('div', '', 'aud-actions');
       line.appendChild(el('span', (row.action === 'seal' ? 'Encryption' : 'Storage copy') + ' · ' + date(row.recorded_at) + ' · ' + state(row.state)));

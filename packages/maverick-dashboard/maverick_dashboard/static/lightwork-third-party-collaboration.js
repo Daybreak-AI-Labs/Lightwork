@@ -112,8 +112,8 @@
       // The list never stays on "Loading…": say what happened and offer a retry.
       var box = document.getElementById("tpc-invitations");
       box.textContent = "";
-      box.appendChild(window.mvEmpty("Invitations could not be loaded", R.errorText(f, "load the invitations"),
-        { label: "Try again", onClick: loadAll }));
+      box.appendChild(window.mvEmpty((window.LightworkI18n ? window.LightworkI18n.text("Invitations could not be loaded") : "Invitations could not be loaded"), R.errorText(f, "load the invitations"),
+        { label: (window.LightworkI18n ? window.LightworkI18n.text("Try again") : "Try again"), onClick: loadAll }));
     });
   }
 

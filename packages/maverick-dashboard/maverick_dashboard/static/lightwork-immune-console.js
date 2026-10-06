@@ -262,12 +262,12 @@
     try {
       renderSummary(await window.mvFetchJSON(root.dataset.apiUrl, {}, "load the safety summary"));
       try { choices = await window.mvFetchJSON("/api/v1/immune/choices"); renderChoices(); } catch (e) { /* choices stay as they were */ }
-      settleLoading("Not available right now. Reload the page to try again.");
+      settleLoading((window.LightworkI18n ? window.LightworkI18n.text("Not available right now. Reload the page to try again.") : "Not available right now. Reload the page to try again."));
       if (!keepStatus) { say("Up to date."); }
     } catch (error) {
       say("");
       fail(error.message);
-      settleLoading("Could not be loaded. Reload the page to try again.");
+      settleLoading((window.LightworkI18n ? window.LightworkI18n.text("Could not be loaded. Reload the page to try again.") : "Could not be loaded. Reload the page to try again."));
     }
   }
 

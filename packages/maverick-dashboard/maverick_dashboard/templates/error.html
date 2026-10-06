@@ -10,6 +10,7 @@
     {% if status == 403 %}<a class="btn" href="/workspace/tenant">Choose a workspace</a>{% endif %}
     <a class="btn" href="/">Back to home</a>
   {% endset %}
+  {% if gate == 'retry' and ut is defined %}{% set title = ut(title) %}{% set message = ut(message) %}{% endif %}
   {{ hero('', title, lede=message, title_id='request-error-title', actions=error_actions) }}
   {% if gate == 'off' and feature %}
     {# The feature is off, not forbidden: whoever may turn it on can do so here. #}
@@ -35,7 +36,8 @@
       } catch (e) {}
       if (count >= 3) {
         try { sessionStorage.removeItem(key); } catch (e) {}
-        document.getElementById('error-retry-status').textContent = 'It is taking longer than usual. Reload this page in a minute.';
+        var late = 'It is taking longer than usual. Reload this page in a minute.';
+        document.getElementById('error-retry-status').textContent = window.LightworkI18n ? window.LightworkI18n.text(late) : late;
         return;
       }
       try { sessionStorage.setItem(key, (count + 1) + ':' + Date.now()); } catch (e) { return; }

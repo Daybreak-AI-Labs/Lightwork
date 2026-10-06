@@ -17,7 +17,10 @@
   var WARN_SECONDS = 120, KEEP_MINUTES = 120, LONGEST_WAIT = 6 * 3600 * 1000;
   var SECRET = /pass|secret|token|key|otp|code/i;
   function meta(name) { var m = document.querySelector('meta[name="' + name + '"]'); return m ? m.getAttribute('content') || '' : ''; }
-  function t(text) { return window.LightworkI18n ? window.LightworkI18n.text(text) : text; }
+  function t(text, values) {
+    if (window.LightworkI18n) return window.LightworkI18n.text(text, values);
+    return values ? text.replace(/\{([a-z]+)\}/g, function (whole, name) { return name in values ? String(values[name]) : whole; }) : text;
+  }
   var here = window.location.pathname + window.location.search;
   var KEY = 'lightwork.session-kept:' + here;
   var signIn = meta('lightwork-session-sign-in') || '/auth/local-login';
@@ -143,7 +146,8 @@
     if (warned) { schedule(); return; }
     warned = true; schedule();
     var minutes = Math.max(1, Math.round(left / 60));
-    var message = t('Your sign-in ends in about ' + minutes + (minutes === 1 ? ' minute.' : ' minutes.')) + ' ' +
+    var message = (minutes === 1 ? t('Your sign-in ends in about 1 minute.')
+      : t('Your sign-in ends in about {minutes} minutes.', {minutes: minutes})) + ' ' +
       t('Stay signed in to keep working. What you typed stays on this page either way.');
     var ok = window.mvConfirm ? await window.mvConfirm(message, {okText: 'Stay signed in', cancelText: 'Not now'}) : false;
     if (ok) await stay();

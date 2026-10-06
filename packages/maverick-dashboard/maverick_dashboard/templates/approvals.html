@@ -13,11 +13,12 @@
        can't open (it belongs to a colleague's private task). #}
     <div id="approvals-current-state" data-flow-count="{{ flow_approvals | length }}" data-private-count="{{ private_count }}"
          data-in-chat="{{ '1' if (private_cards | default([]) | selectattr('in_chat') | list) else '0' }}" data-coverage="{{ flow_approval_coverage }}">
+    {% macro _t(source, count='') %}{{ ut(source, count=count) if ut is defined else source | replace('{count}', count) }}{% endmacro %}
     {{ state('Current state',
-             (open_count ~ (' request waiting' if open_count == 1 else ' requests waiting')) if open_count
-               else ((private_count ~ (" request is waiting that you can't open here" if private_count == 1 else " requests are waiting that you can't open here")) if private_count
-               else '0 requests waiting'),
-             badge='Action needed' if open_count or (private_cards | default([]) | selectattr('in_chat') | list) else ('Waiting' if private_count else ('Check needed' if flow_approval_coverage != 'current' else 'All clear')),
+             ((_t('1 request waiting') if open_count == 1 else _t('{count} requests waiting', count=open_count))) if open_count
+               else ((_t("1 request is waiting that you can't open here") if private_count == 1 else _t("{count} requests are waiting that you can't open here", count=private_count)) if private_count
+               else _t('0 requests waiting')),
+             badge=_t('Action needed') if open_count or (private_cards | default([]) | selectattr('in_chat') | list) else (_t('Waiting') if private_count else (_t('Check needed') if flow_approval_coverage != 'current' else _t('All clear'))),
              badge_class='warn' if open_count or private_count or flow_approval_coverage != 'current' else 'ok',
              copy='Approve, reject, or send a request back with a note saying what should change.' if open_count or not private_count
                else 'The person who asked can open and decide their own request.') }}

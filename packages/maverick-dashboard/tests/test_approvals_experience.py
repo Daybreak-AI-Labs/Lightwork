@@ -287,13 +287,13 @@ def test_decision_buttons_name_the_action_they_decide(tmp_path):
     w = _world(tmp_path)
     _queue(w, action="send_email", risk="medium")
     text = _client().get("/approvals").text
-    assert re.search(r'data-action="approve"[^>]*>Approve "Send email"</button>', text)
-    assert re.search(r'data-action="deny">Reject "Send email"</button>', text)
+    assert re.search(r'data-action="approve"[^>]*>Approve &#34;Send email&#34;</button>', text)
+    assert re.search(r'data-action="deny">Reject &#34;Send email&#34;</button>', text)
     source = TEMPLATE.read_text(encoding="utf-8")
     # No bare yes or generic OK on any approval button or confirmation.
     assert "Yes, approve" not in source
     assert not re.search(r"okText:\s*['\"](OK|Yes|Confirm|Continue|Reject|Send back)['\"]", source)
-    assert "'Approve \"' + label + '\"'" in source or "'Approve \"' + (item.dataset.label" in source
+    assert "tr('Approve \"{action}\"', {action: item.dataset.label" in source
 
 
 def test_the_waiting_count_in_the_header_follows_the_queue(tmp_path):
